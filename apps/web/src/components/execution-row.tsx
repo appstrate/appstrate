@@ -38,39 +38,39 @@ export function ExecutionRow({
   return (
     <Link
       className={cn(
-        "flex items-center gap-2 px-3 py-3 sm:py-2 text-sm hover:bg-muted/50 transition-colors",
+        "hover:bg-muted/50 flex items-center gap-2 px-3 py-3 text-sm transition-colors sm:py-2",
       )}
       to={`/flows/${execution.packageId}/executions/${execution.id}`}
       state={{ executionNumber: execution.executionNumber }}
     >
-      <div className="flex flex-1 items-center gap-2 min-w-0">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         {execution.executionNumber != null && (
-          <span className="text-muted-foreground font-mono text-xs shrink-0">
+          <span className="text-muted-foreground shrink-0 font-mono text-xs">
             #{execution.executionNumber}
           </span>
         )}
-        {flowName && <span className="font-medium truncate">{flowName}</span>}
+        {flowName && <span className="truncate font-medium">{flowName}</span>}
         <Badge status={execution.status} compact unread={isUnread} />
 
         {/* Trigger: icon only on mobile, icon + text on desktop */}
         {execution.scheduleId ? (
-          <span className="inline-flex items-center gap-1 text-muted-foreground text-xs min-w-0">
+          <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs">
             <Calendar size={12} className="shrink-0" />
             <span className="truncate">{scheduleName || execution.scheduleId}</span>
           </span>
         ) : userName ? (
-          <span className="inline-flex items-center gap-1 text-muted-foreground text-xs min-w-0">
+          <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs">
             <User size={12} className="shrink-0" />
             <span className="truncate">{userName}</span>
           </span>
         ) : null}
 
         {execution.proxyLabel && (
-          <Shield size={12} className="text-muted-foreground shrink-0 hidden sm:block" />
+          <Shield size={12} className="text-muted-foreground hidden shrink-0 sm:block" />
         )}
-        <div className="ml-auto flex items-center gap-2 shrink-0">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           {duration && (
-            <span className="text-muted-foreground text-xs font-mono hidden sm:inline">
+            <span className="text-muted-foreground hidden font-mono text-xs sm:inline">
               {duration}
             </span>
           )}

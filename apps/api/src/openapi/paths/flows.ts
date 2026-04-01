@@ -44,7 +44,12 @@ export const flowsPaths = {
       description: "Save flow configuration values. Validated against manifest config schema.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -89,7 +94,12 @@ export const flowsPaths = {
         "Returns the proxy configuration for a flow (override ID and resolution status).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -123,7 +133,12 @@ export const flowsPaths = {
         'Set a proxy override for this flow. Pass a proxy ID, "none" to disable proxying, or null to use org default.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -170,7 +185,12 @@ export const flowsPaths = {
       description: "Returns accumulated memories for a flow (org-scoped, shared across all users).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -205,7 +225,12 @@ export const flowsPaths = {
       description: "Delete all accumulated memories for a flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -240,7 +265,12 @@ export const flowsPaths = {
       description: "Delete a specific memory by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
         { name: "memoryId", in: "path", required: true, schema: { type: "integer" } },
       ],
@@ -276,7 +306,12 @@ export const flowsPaths = {
       description: "Returns the LLM model override for a flow (null if using org default).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -309,7 +344,12 @@ export const flowsPaths = {
         "Set a model override for this flow. Pass a model ID or null to revert to org default.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -356,7 +396,12 @@ export const flowsPaths = {
       description: "Set the skill references for a user flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -414,7 +459,12 @@ export const flowsPaths = {
       description: "Set the tool references for a user flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -473,7 +523,12 @@ export const flowsPaths = {
         "Returns the per-provider connection profile overrides for a flow. Each key is a provider ID mapped to a profile ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -509,7 +564,12 @@ export const flowsPaths = {
       description: "Override the connection profile used for a specific provider in this flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -553,7 +613,12 @@ export const flowsPaths = {
         "Remove the connection profile override for a specific provider, reverting to the default profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -598,7 +663,12 @@ export const flowsPaths = {
         "Set or clear the org-level connection profile for this flow. Pass a profile ID to set, or null to clear.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {

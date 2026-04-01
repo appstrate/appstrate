@@ -55,7 +55,7 @@ export function VersionSelect({
   if (isLoading) return <Spinner />;
   if (!available || available.length === 0) {
     return (
-      <span className="inline-block rounded bg-muted px-2 py-0.5 text-xs font-mono text-muted-foreground">
+      <span className="bg-muted text-muted-foreground inline-block rounded px-2 py-0.5 font-mono text-xs">
         *
       </span>
     );
@@ -125,7 +125,7 @@ export function ResourceSection({
   };
 
   const uploadButton = (
-    <label className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted transition-colors cursor-pointer normal-case tracking-normal">
+    <label className="border-border text-foreground hover:bg-muted inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium tracking-normal normal-case transition-colors">
       {upload.isPending ? <Spinner /> : t("editor.importZip")}
       <input
         type="file"
@@ -141,13 +141,13 @@ export function ResourceSection({
   return (
     <SectionCard title={title} headerRight={uploadButton}>
       {isLoading ? (
-        <div className="flex items-center justify-center py-6 text-muted-foreground">
+        <div className="text-muted-foreground flex items-center justify-center py-6">
           <Spinner />
         </div>
       ) : !items || items.length === 0 ? (
         <>
-          <p className="text-xs text-muted-foreground">{emptyLabel}</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-muted-foreground text-xs">{emptyLabel}</p>
+          <p className="text-muted-foreground text-xs">
             <Link to="/skills">{t("editor.goToPackages")}</Link>
           </p>
         </>
@@ -162,20 +162,20 @@ export function ResourceSection({
               <label
                 key={item.id}
                 className={cn(
-                  "flex items-center gap-2.5 rounded-md border border-border px-3 py-2 cursor-pointer transition-colors hover:bg-muted/50",
+                  "border-border hover:bg-muted/50 flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 transition-colors",
                   isSelected && "border-primary bg-primary/5",
                 )}
               >
                 <Checkbox checked={isSelected} onCheckedChange={() => toggle(item.id)} />
-                <div className="flex flex-col min-w-0 flex-1">
-                  <span className="text-sm font-medium truncate flex items-center gap-1.5">
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="flex items-center gap-1.5 truncate text-sm font-medium">
                     {item.name || item.id}
                     {isBuiltIn && (
-                      <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <ShieldCheck className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
                     )}
                   </span>
                   {item.description && (
-                    <span className="text-xs text-muted-foreground truncate">
+                    <span className="text-muted-foreground truncate text-xs">
                       {item.description}
                     </span>
                   )}
@@ -183,7 +183,7 @@ export function ResourceSection({
                 {isSelected && (
                   <div className="ml-auto shrink-0">
                     {isBuiltIn ? (
-                      <span className="inline-block rounded bg-muted px-2 py-0.5 text-xs font-mono text-muted-foreground">
+                      <span className="bg-muted text-muted-foreground inline-block rounded px-2 py-0.5 font-mono text-xs">
                         {t("editor.builtIn")}
                       </span>
                     ) : (

@@ -8,7 +8,7 @@ export function LegalFooter() {
   if (!legalUrls) return null;
 
   return (
-    <div className="text-balance text-center text-xs text-muted-foreground [&_a]:underline [&_a]:underline-offset-4 hover:[&_a]:text-primary">
+    <div className="text-muted-foreground hover:[&_a]:text-primary text-center text-xs text-balance [&_a]:underline [&_a]:underline-offset-4">
       {t("login.termsNotice")}{" "}
       {legalUrls.terms && (
         <a href={legalUrls.terms} target="_blank" rel="noopener noreferrer">

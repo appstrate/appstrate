@@ -1,5 +1,9 @@
 # ── Stage 1: Install dependencies ──────────────────────────────────
-FROM oven/bun:1-alpine AS deps
+FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.9-alpine AS deps
+
+LABEL org.opencontainers.image.source="https://github.com/appstrate/appstrate"
+LABEL org.opencontainers.image.description="Appstrate — Open-source platform for executing one-shot AI flows in ephemeral Docker containers"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 WORKDIR /app
 
@@ -18,7 +22,7 @@ COPY runtime-pi/sidecar/package.json runtime-pi/sidecar/
 RUN bun install --frozen-lockfile
 
 # ── Stage 2: Build ────────────────────────────────────────────────
-FROM oven/bun:1-alpine AS build
+FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.9-alpine AS build
 
 WORKDIR /app
 
@@ -36,7 +40,7 @@ COPY . .
 RUN bun run build
 
 # ── Stage 3: Production image ─────────────────────────────────────
-FROM oven/bun:1-alpine
+FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.9-alpine
 
 WORKDIR /app
 
@@ -77,12 +81,19 @@ COPY --from=build /app/packages/env/package.json ./packages/env/
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 
 # Create mount points for runtime volumes (data + storage)
-RUN mkdir -p data storage
+RUN mkdir -p data storage && chown -R bun:bun data storage
 
 # Root package.json needed for workspace resolution
 COPY --from=build /app/package.json ./
 COPY --from=build /app/system-packages ./system-packages
 
+USER bun
+
 EXPOSE 3000
+
+ENV NODE_ENV=production
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD wget -q -O /dev/null http://localhost:3000/ || exit 1
 
 CMD ["bun", "apps/api/src/index.ts"]

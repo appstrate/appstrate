@@ -92,13 +92,13 @@ export function DashboardPage() {
       {/* Upcoming schedules */}
       {upcomingSchedules.length > 0 && (
         <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-medium text-muted-foreground">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-muted-foreground text-sm font-medium">
               {t("dashboard.upcomingSchedules")}
             </h2>
             <Link
               to="/schedules"
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="text-muted-foreground hover:text-foreground text-xs transition-colors"
             >
               {t("dashboard.seeAll")}
             </Link>
@@ -118,22 +118,22 @@ export function DashboardPage() {
       {/* Recent flows (horizontal scroll) */}
       {recentFlowIds.length > 0 && (
         <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-medium text-muted-foreground">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-muted-foreground text-sm font-medium">
               {t("dashboard.recentFlows")}
             </h2>
             <Link
               to="/flows"
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="text-muted-foreground hover:text-foreground text-xs transition-colors"
             >
               {t("dashboard.seeAll")}
             </Link>
           </div>
-          <div className="flex gap-3 overflow-x-auto pb-2 items-stretch">
+          <div className="flex items-stretch gap-3 overflow-x-auto pb-2">
             {recentFlowIds.map((flowId) => {
               const flow = flowMap.get(flowId);
               return (
-                <div key={flowId} className="min-w-[260px] max-w-[300px] shrink-0 flex">
+                <div key={flowId} className="flex max-w-[300px] min-w-[260px] shrink-0">
                   <PackageCard
                     id={flowId}
                     displayName={flow?.displayName ?? flowId}
@@ -154,13 +154,13 @@ export function DashboardPage() {
 
       {/* Recent executions */}
       <section>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-medium text-muted-foreground">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-muted-foreground text-sm font-medium">
             {t("dashboard.recentExecutions")}
           </h2>
           <Link
             to="/executions"
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            className="text-muted-foreground hover:text-foreground text-xs transition-colors"
           >
             {t("dashboard.seeAll")}
           </Link>

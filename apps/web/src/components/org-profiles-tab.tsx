@@ -28,7 +28,7 @@ export function OrgProfilesTab() {
   return (
     <>
       {/* Create form */}
-      <div className="flex gap-2 mb-4">
+      <div className="mb-4 flex gap-2">
         <Input
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
@@ -42,7 +42,7 @@ export function OrgProfilesTab() {
           onClick={handleCreate}
           disabled={!newName.trim() || createMutation.isPending}
         >
-          <Plus className="size-4 mr-1" />
+          <Plus className="mr-1 size-4" />
           {t("orgProfiles.create")}
         </Button>
       </div>
@@ -59,11 +59,11 @@ export function OrgProfilesTab() {
             <Link
               key={profile.id}
               to={`/org-profiles/${profile.id}`}
-              className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 hover:bg-accent/50 transition-colors"
+              className="border-border bg-card hover:bg-accent/50 flex items-center gap-3 rounded-lg border p-3 transition-colors"
             >
-              <Building2 className="size-4 text-muted-foreground shrink-0" />
+              <Building2 className="text-muted-foreground size-4 shrink-0" />
               <span className="font-medium">{profile.name}</span>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-muted-foreground text-xs">
                 {t("orgProfiles.bindingCount", { count: profile.bindingCount })}
               </span>
             </Link>

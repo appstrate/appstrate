@@ -6,7 +6,10 @@ import { createMockOAuthServer, type MockOAuthServer } from "../../helpers/oauth
 import { oauthStates, providerCredentials, userProviderConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
-import { initiateConnection, handleCallback } from "../../../src/services/connection-manager/oauth.ts";
+import {
+  initiateConnection,
+  handleCallback,
+} from "../../../src/services/connection-manager/oauth.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 
 // ─── Mock OAuth Server ───────────────────────────────────────
@@ -90,8 +93,6 @@ describe("OAuth2 flows", () => {
   const PROVIDER_ID = "@testorg/test-oauth-provider";
   const CLIENT_ID = "test-client-id-12345";
   const CLIENT_SECRET = "test-client-secret-67890";
-  const REDIRECT_URI = "http://localhost:3000/api/connections/callback";
-
   beforeEach(async () => {
     await truncateAll();
     mockServer.clearRequests();
@@ -170,10 +171,7 @@ describe("OAuth2 flows", () => {
     it("stores state in the oauth_states table", async () => {
       const result = await initiateConnection(PROVIDER_ID, orgId, actor, profileId);
 
-      const rows = await db
-        .select()
-        .from(oauthStates)
-        .where(eq(oauthStates.state, result.state));
+      const rows = await db.select().from(oauthStates).where(eq(oauthStates.state, result.state));
 
       expect(rows).toHaveLength(1);
       const row = rows[0]!;
@@ -236,9 +234,7 @@ describe("OAuth2 flows", () => {
       await handleCallback("the-auth-code", state);
 
       // Find the POST /token request
-      const tokenReq = mockServer.requests.find(
-        (r) => r.method === "POST" && r.path === "/token",
-      );
+      const tokenReq = mockServer.requests.find((r) => r.method === "POST" && r.path === "/token");
       expect(tokenReq).toBeDefined();
 
       const body = new URLSearchParams(tokenReq!.body);
@@ -279,18 +275,15 @@ describe("OAuth2 flows", () => {
       const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId);
       await handleCallback("mock-code", state);
 
-      const rows = await db
-        .select()
-        .from(oauthStates)
-        .where(eq(oauthStates.state, state));
+      const rows = await db.select().from(oauthStates).where(eq(oauthStates.state, state));
 
       expect(rows).toHaveLength(0);
     });
 
     it("throws on invalid state", async () => {
-      await expect(
-        handleCallback("mock-code", "nonexistent-state-value"),
-      ).rejects.toThrow("Invalid or expired OAuth state");
+      await expect(handleCallback("mock-code", "nonexistent-state-value")).rejects.toThrow(
+        "Invalid or expired OAuth state",
+      );
     });
 
     it("throws on expired state", async () => {
@@ -302,9 +295,7 @@ describe("OAuth2 flows", () => {
         .set({ expiresAt: new Date(Date.now() - 60_000) })
         .where(eq(oauthStates.state, state));
 
-      await expect(
-        handleCallback("mock-code", state),
-      ).rejects.toThrow(/[Ii]nvalid|[Ee]xpired/);
+      await expect(handleCallback("mock-code", state)).rejects.toThrow(/[Ii]nvalid|[Ee]xpired/);
     });
 
     it("throws when token exchange returns an error status", async () => {
@@ -313,9 +304,7 @@ describe("OAuth2 flows", () => {
 
       const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId);
 
-      await expect(
-        handleCallback("bad-code", state),
-      ).rejects.toThrow("Token exchange failed");
+      await expect(handleCallback("bad-code", state)).rejects.toThrow("Token exchange failed");
     });
 
     it("throws when token response has no access_token", async () => {
@@ -323,9 +312,7 @@ describe("OAuth2 flows", () => {
 
       const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId);
 
-      await expect(
-        handleCallback("mock-code", state),
-      ).rejects.toThrow("No access_token");
+      await expect(handleCallback("mock-code", state)).rejects.toThrow("No access_token");
     });
 
     it("handles token response without refresh_token", async () => {
@@ -366,18 +353,13 @@ describe("OAuth2 flows", () => {
       const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId);
 
       // Read the code_verifier stored in DB
-      const [stateRow] = await db
-        .select()
-        .from(oauthStates)
-        .where(eq(oauthStates.state, state));
+      const [stateRow] = await db.select().from(oauthStates).where(eq(oauthStates.state, state));
       const storedVerifier = stateRow!.codeVerifier;
 
       mockServer.clearRequests();
       await handleCallback("mock-code", state);
 
-      const tokenReq = mockServer.requests.find(
-        (r) => r.method === "POST" && r.path === "/token",
-      );
+      const tokenReq = mockServer.requests.find((r) => r.method === "POST" && r.path === "/token");
       const body = new URLSearchParams(tokenReq!.body);
       expect(body.get("code_verifier")).toBe(storedVerifier);
     });
@@ -390,12 +372,7 @@ describe("OAuth2 flows", () => {
         clientSecret: CLIENT_SECRET,
       });
 
-      const { authUrl, state } = await initiateConnection(
-        noPkceProvider,
-        orgId,
-        actor,
-        profileId,
-      );
+      const { authUrl, state } = await initiateConnection(noPkceProvider, orgId, actor, profileId);
 
       // Auth URL should not have code_challenge
       const url = new URL(authUrl);
@@ -406,9 +383,7 @@ describe("OAuth2 flows", () => {
       mockServer.clearRequests();
       await handleCallback("mock-code", state);
 
-      const tokenReq = mockServer.requests.find(
-        (r) => r.method === "POST" && r.path === "/token",
-      );
+      const tokenReq = mockServer.requests.find((r) => r.method === "POST" && r.path === "/token");
       const body = new URLSearchParams(tokenReq!.body);
       expect(body.get("code_verifier")).toBeNull();
     });
@@ -432,9 +407,7 @@ describe("OAuth2 flows", () => {
       mockServer.clearRequests();
       await handleCallback("mock-code", state);
 
-      const tokenReq = mockServer.requests.find(
-        (r) => r.method === "POST" && r.path === "/token",
-      );
+      const tokenReq = mockServer.requests.find((r) => r.method === "POST" && r.path === "/token");
       expect(tokenReq).toBeDefined();
 
       // Should have Authorization: Basic header

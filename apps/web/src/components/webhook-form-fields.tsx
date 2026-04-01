@@ -35,7 +35,7 @@ export function WebhookFormFields({
               />
               <Label
                 htmlFor={`${idPrefix}event-${event}`}
-                className="font-mono font-normal cursor-pointer"
+                className="cursor-pointer font-mono font-normal"
               >
                 {event}
               </Label>
@@ -52,7 +52,7 @@ export function WebhookFormFields({
         >
           <div className="flex items-center gap-2">
             <RadioGroupItem value="full" id={`${idPrefix}payloadMode-full`} />
-            <Label htmlFor={`${idPrefix}payloadMode-full`} className="font-normal cursor-pointer">
+            <Label htmlFor={`${idPrefix}payloadMode-full`} className="cursor-pointer font-normal">
               {t("webhooks.payloadModeFull")}
             </Label>
           </div>
@@ -60,7 +60,7 @@ export function WebhookFormFields({
             <RadioGroupItem value="summary" id={`${idPrefix}payloadMode-summary`} />
             <Label
               htmlFor={`${idPrefix}payloadMode-summary`}
-              className="font-normal cursor-pointer"
+              className="cursor-pointer font-normal"
             >
               {t("webhooks.payloadModeSummary")}
             </Label>

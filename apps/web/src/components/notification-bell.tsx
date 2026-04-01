@@ -43,7 +43,7 @@ function NotificationContent({
         <div className="flex items-center gap-2">
           <h4 className="text-sm font-semibold">{t("notifications.title")}</h4>
           {unread > 0 && (
-            <span className="flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-destructive text-destructive-foreground text-xs font-medium">
+            <span className="bg-destructive text-destructive-foreground flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-medium">
               {unread}
             </span>
           )}
@@ -52,7 +52,7 @@ function NotificationContent({
           <Button
             variant="ghost"
             size="sm"
-            className="h-auto px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+            className="text-muted-foreground hover:text-foreground h-auto px-2 py-1 text-xs"
             onClick={markAllRead}
           >
             <CheckCheck size={14} className="mr-1.5" />
@@ -64,28 +64,28 @@ function NotificationContent({
 
       {/* Notification list */}
       {unreadExecutions.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-10 px-4">
+        <div className="flex flex-col items-center justify-center px-4 py-10">
           <Bell size={32} className="text-muted-foreground/30 mb-3" />
-          <p className="text-sm text-muted-foreground">{t("notifications.empty")}</p>
+          <p className="text-muted-foreground text-sm">{t("notifications.empty")}</p>
         </div>
       ) : (
-        <div className="max-h-[60vh] sm:max-h-96 overflow-y-auto">
+        <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
           {unreadExecutions.map((execution) => (
             <Link
               key={execution.id}
               to={`/flows/${execution.packageId}/executions/${execution.id}`}
               onClick={() => onItemClick(execution.id)}
-              className="flex gap-3 px-4 py-3 hover:bg-muted/50 transition-colors group"
+              className="hover:bg-muted/50 group flex gap-3 px-4 py-3 transition-colors"
             >
-              <Circle size={8} className="mt-1.5 shrink-0 fill-destructive text-destructive" />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2 mb-0.5">
-                  <span className="text-sm font-medium truncate">
+              <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="mb-0.5 flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-medium">
                     {flowNameMap.get(execution.packageId) ?? execution.packageId}
                   </span>
                   <Badge status={execution.status} />
                 </div>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-muted-foreground text-xs">
                   {execution.startedAt ? formatDateField(execution.startedAt) : ""}
                 </p>
               </div>
@@ -100,7 +100,7 @@ function NotificationContent({
         <Link
           to="/executions"
           onClick={onClose}
-          className="flex items-center justify-center rounded-md py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+          className="text-muted-foreground hover:text-foreground hover:bg-muted/50 flex items-center justify-center rounded-md py-2 text-xs font-medium transition-colors"
         >
           {t("notifications.viewAll")}
         </Link>
@@ -138,14 +138,14 @@ export function NotificationBell() {
     <button
       type="button"
       className={cn(
-        "relative inline-flex items-center justify-center size-8 shrink-0 rounded-md bg-transparent border-none p-0 cursor-pointer text-muted-foreground hover:text-foreground hover:bg-accent transition-colors",
+        "text-muted-foreground hover:text-foreground hover:bg-accent relative inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0 transition-colors",
         hasRunning && unread === 0 && "text-primary animate-pulse",
       )}
       aria-label={t("notifications.ariaLabel")}
     >
       <Bell size={18} />
       {unread > 0 && (
-        <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[0.6rem] font-medium leading-none">
+        <span className="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
           {unread > 99 ? "99+" : unread}
         </span>
       )}
@@ -165,7 +165,7 @@ export function NotificationBell() {
     return (
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>{triggerButton}</SheetTrigger>
-        <SheetContent side="bottom" className="p-0 rounded-t-xl [&>button:last-child]:hidden">
+        <SheetContent side="bottom" className="rounded-t-xl p-0 [&>button:last-child]:hidden">
           <NotificationContent {...contentProps} />
         </SheetContent>
       </Sheet>

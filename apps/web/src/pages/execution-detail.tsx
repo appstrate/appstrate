@@ -181,29 +181,29 @@ export function ExecutionDetailPage() {
         ]}
       />
 
-      <div className="flex items-center gap-2 flex-wrap mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <Badge status={displayStatus} />
         <span
           className={cn(
-            "text-xs text-muted-foreground font-mono rounded bg-muted px-1.5 py-0.5",
+            "text-muted-foreground bg-muted rounded px-1.5 py-0.5 font-mono text-xs",
             !execution.packageVersion && "italic",
           )}
         >
           {execution.packageVersion ? `v${execution.packageVersion}` : t("exec.draft")}
         </span>
         {userName ? (
-          <span className="text-sm text-muted-foreground">
+          <span className="text-muted-foreground text-sm">
             {t("exec.user", { name: userName })}
           </span>
         ) : null}
         {execution.proxyLabel && (
-          <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+          <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
             <Shield size={12} />
             {t("exec.proxy", { label: execution.proxyLabel })}
           </span>
         )}
-        <span className="text-xs text-muted-foreground">{date}</span>
-        {duration && <span className="text-xs text-muted-foreground">{duration}</span>}
+        <span className="text-muted-foreground text-xs">{date}</span>
+        {duration && <span className="text-muted-foreground text-xs">{duration}</span>}
       </div>
 
       {flow && (
@@ -220,12 +220,12 @@ export function ExecutionDetailPage() {
       )}
 
       {displayStatus === "failed" && execution.error && (
-        <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive mb-4">
+        <div className="bg-destructive/10 text-destructive mb-4 rounded-md px-4 py-3 text-sm">
           {execution.error}
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-4 mb-4">
+      <div className="mb-4 flex items-center justify-between gap-4">
         <Tabs
           value={activeTab}
           onValueChange={(v) => setActiveTab(v as "logs" | "result" | "state" | "usage")}
@@ -235,7 +235,7 @@ export function ExecutionDetailPage() {
             <TabsTrigger value="logs">
               {t("exec.tabLogs")}
               {allLogs.length > 0 && (
-                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
+                <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
                   {allLogs.length}
                 </span>
               )}
@@ -272,7 +272,7 @@ export function ExecutionDetailPage() {
           )}
 
           {(resultSubTab === "report" || !hasOutput) && finalReport && (
-            <div className="overflow-x-auto rounded-lg border border-border bg-muted/30 p-6 prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground prose-td:text-foreground prose-th:text-foreground">
+            <div className="border-border bg-muted/30 prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground prose-td:text-foreground prose-th:text-foreground overflow-x-auto rounded-lg border p-6">
               <Markdown>{finalReport}</Markdown>
             </div>
           )}
@@ -306,34 +306,34 @@ export function ExecutionDetailPage() {
           return (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {execution.modelLabel != null && (
-                <div className="rounded-lg border border-border bg-muted/30 p-4">
-                  <p className="text-xs text-muted-foreground mb-1">{t("exec.usageModel")}</p>
+                <div className="border-border bg-muted/30 rounded-lg border p-4">
+                  <p className="text-muted-foreground mb-1 text-xs">{t("exec.usageModel")}</p>
                   <p className="text-sm font-medium">{execution.modelLabel}</p>
                 </div>
               )}
               {execution.cost != null && (
-                <div className="rounded-lg border border-border bg-muted/30 p-4">
-                  <p className="text-xs text-muted-foreground mb-1">{t("exec.usageCost")}</p>
+                <div className="border-border bg-muted/30 rounded-lg border p-4">
+                  <p className="text-muted-foreground mb-1 text-xs">{t("exec.usageCost")}</p>
                   <p className="text-sm font-medium">${execution.cost.toFixed(4)}</p>
                 </div>
               )}
               {usage?.input_tokens != null && (
-                <div className="rounded-lg border border-border bg-muted/30 p-4">
-                  <p className="text-xs text-muted-foreground mb-1">{t("exec.usageInputTokens")}</p>
+                <div className="border-border bg-muted/30 rounded-lg border p-4">
+                  <p className="text-muted-foreground mb-1 text-xs">{t("exec.usageInputTokens")}</p>
                   <p className="text-sm font-medium">{usage.input_tokens.toLocaleString()}</p>
                 </div>
               )}
               {usage?.output_tokens != null && (
-                <div className="rounded-lg border border-border bg-muted/30 p-4">
-                  <p className="text-xs text-muted-foreground mb-1">
+                <div className="border-border bg-muted/30 rounded-lg border p-4">
+                  <p className="text-muted-foreground mb-1 text-xs">
                     {t("exec.usageOutputTokens")}
                   </p>
                   <p className="text-sm font-medium">{usage.output_tokens.toLocaleString()}</p>
                 </div>
               )}
               {usage?.cache_creation_input_tokens != null && (
-                <div className="rounded-lg border border-border bg-muted/30 p-4">
-                  <p className="text-xs text-muted-foreground mb-1">
+                <div className="border-border bg-muted/30 rounded-lg border p-4">
+                  <p className="text-muted-foreground mb-1 text-xs">
                     {t("exec.usageCacheCreation")}
                   </p>
                   <p className="text-sm font-medium">
@@ -342,8 +342,8 @@ export function ExecutionDetailPage() {
                 </div>
               )}
               {usage?.cache_read_input_tokens != null && (
-                <div className="rounded-lg border border-border bg-muted/30 p-4">
-                  <p className="text-xs text-muted-foreground mb-1">{t("exec.usageCacheRead")}</p>
+                <div className="border-border bg-muted/30 rounded-lg border p-4">
+                  <p className="text-muted-foreground mb-1 text-xs">{t("exec.usageCacheRead")}</p>
                   <p className="text-sm font-medium">
                     {usage.cache_read_input_tokens.toLocaleString()}
                   </p>

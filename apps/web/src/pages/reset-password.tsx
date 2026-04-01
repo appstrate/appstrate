@@ -24,13 +24,13 @@ export function ResetPasswordPage() {
     return (
       <AuthLayout>
         <div className="flex flex-col items-center gap-6 text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
-            <AlertCircle className="h-8 w-8 text-destructive" />
+          <div className="bg-destructive/10 flex h-16 w-16 items-center justify-center rounded-full">
+            <AlertCircle className="text-destructive h-8 w-8" />
           </div>
-          <p className="text-sm text-muted-foreground">{t("resetPassword.invalidToken")}</p>
+          <p className="text-muted-foreground text-sm">{t("resetPassword.invalidToken")}</p>
           <Link
             to="/forgot-password"
-            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-primary"
+            className="text-muted-foreground hover:text-primary text-sm underline underline-offset-4"
           >
             {t("resetPassword.requestNew")}
           </Link>
@@ -86,11 +86,11 @@ export function ResetPasswordPage() {
       <div className="flex flex-col gap-6">
         <div className="flex flex-col items-center gap-2">
           <h1 className="text-xl font-bold">{t("resetPassword.title")}</h1>
-          <p className="text-center text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-center text-sm">
             {t("resetPassword.description")}
           </p>
         </div>
-        <form onSubmit={handleSubmit} className="mx-auto w-full max-w-sm flex flex-col gap-4">
+        <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-sm flex-col gap-4">
           <div className="grid gap-2">
             <Label htmlFor="password">{t("resetPassword.newPassword")}</Label>
             <Input
@@ -118,14 +118,14 @@ export function ResetPasswordPage() {
               required
             />
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p className="text-destructive text-sm">{error}</p>}
           <Button type="submit" className="w-full" disabled={state === "submitting"}>
             {state === "submitting" ? t("loading") : t("resetPassword.submit")}
           </Button>
         </form>
         <Link
           to="/login"
-          className="text-center text-sm text-muted-foreground underline underline-offset-4 hover:text-primary"
+          className="text-muted-foreground hover:text-primary text-center text-sm underline underline-offset-4"
         >
           {t("resetPassword.backToLogin")}
         </Link>

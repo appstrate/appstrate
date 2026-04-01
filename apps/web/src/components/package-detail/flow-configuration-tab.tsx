@@ -53,7 +53,7 @@ function ConfigSection({
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+    <div className="border-border bg-card space-y-3 rounded-lg border p-4">
       <h3 className="text-sm font-medium">{t("editor.configTitle")}</h3>
       <InputFields
         schema={wrapper}
@@ -84,7 +84,7 @@ function ModelSection({ packageId }: { packageId: string }) {
   const orgDefaultModel = orgModels.find((m) => m.isDefault && m.enabled);
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+    <div className="border-border bg-card space-y-3 rounded-lg border p-4">
       <h3 className="text-sm font-medium">{t("models.tabTitle", { ns: "settings" })}</h3>
       <Select
         value={flowModelId ?? "__inherit__"}
@@ -131,7 +131,7 @@ function ProxySection({ packageId }: { packageId: string }) {
   const orgDefaultProxy = orgProxies.find((p) => p.isDefault && p.enabled);
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+    <div className="border-border bg-card space-y-3 rounded-lg border p-4">
       <h3 className="text-sm font-medium">{t("detail.configSectionProxy")}</h3>
       <Select
         value={flowProxyId ?? "__inherit__"}
@@ -171,9 +171,9 @@ function OrgProfileSection({ packageId }: { packageId: string }) {
   const currentOrgProfileId = detail?.flowOrgProfileId;
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+    <div className="border-border bg-card space-y-3 rounded-lg border p-4">
       <h3 className="text-sm font-medium">{t("detail.configSectionOrgProfile")}</h3>
-      <p className="text-xs text-muted-foreground">{t("detail.configOrgProfileHint")}</p>
+      <p className="text-muted-foreground text-xs">{t("detail.configOrgProfileHint")}</p>
       <Select
         value={currentOrgProfileId ?? "__none__"}
         onValueChange={(v) => setFlowOrgProfile.mutate(v === "__none__" ? null : v)}
@@ -220,7 +220,7 @@ export function FlowConfigurationTab({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <ModelSection packageId={packageId} />
         <ProxySection packageId={packageId} />
         <OrgProfileSection packageId={packageId} />

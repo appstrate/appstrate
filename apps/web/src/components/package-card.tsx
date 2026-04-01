@@ -67,28 +67,28 @@ export function PackageCard({
 
   return (
     <div
-      className="flex flex-col w-full rounded-lg border border-border bg-card p-4 transition-colors hover:border-foreground/20 hover:bg-accent/50 h-full cursor-pointer"
+      className="border-border bg-card hover:border-foreground/20 hover:bg-accent/50 flex h-full w-full cursor-pointer flex-col rounded-lg border p-4 transition-colors"
       onClick={handleCardClick}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
           {iconUrl && <ProviderIcon src={iconUrl} className="h-5 w-5" />}
-          <h2 className="text-sm font-medium text-foreground truncate">{displayName}</h2>
+          <h2 className="text-foreground truncate text-sm font-medium">{displayName}</h2>
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex shrink-0 items-center gap-1.5">
           {source === "system" && (
             <span title={t("list.badgeBuiltIn")}>
-              <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+              <ShieldCheck className="text-muted-foreground h-4 w-4" />
             </span>
           )}
           {autoInstalled && (
-            <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium uppercase">
+            <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[0.65rem] font-medium uppercase">
               {t("list.badgeAutoInstalled")}
             </span>
           )}
           {statusBadge}
           {!!unreadCount && unreadCount > 0 && (
-            <span className="flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[0.6rem] font-medium leading-none">
+            <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
               {unreadCount > 99 ? "99+" : unreadCount}
             </span>
           )}
@@ -101,22 +101,22 @@ export function PackageCard({
                 packageId={id}
                 variant="ghost"
                 size="icon"
-                className="size-7 text-muted-foreground hover:text-primary"
+                className="text-muted-foreground hover:text-primary size-7"
               />
             </div>
           )}
         </div>
       </div>
-      <p className="mt-1 text-xs text-muted-foreground line-clamp-2 flex-1">{description || ""}</p>
+      <p className="text-muted-foreground mt-1 line-clamp-2 flex-1 text-xs">{description || ""}</p>
       <ScrollArea className="mt-2 w-full">
         <div className="flex gap-1">
           {resolvedProviders.map((p) => (
             <span
               key={p.id}
-              className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border shrink-0 inline-flex items-center gap-1"
+              className="bg-background text-muted-foreground border-border inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[0.7rem]"
             >
               {p.iconUrl && (
-                <ProviderIcon src={p.iconUrl} className="h-3 w-3 !p-0 !bg-transparent" />
+                <ProviderIcon src={p.iconUrl} className="h-3 w-3 !bg-transparent !p-0" />
               )}
               {p.displayName}
             </span>
@@ -124,13 +124,13 @@ export function PackageCard({
           {keywords?.map((kw) => (
             <span
               key={kw}
-              className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border shrink-0"
+              className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]"
             >
               {kw}
             </span>
           ))}
           {type !== "flow" && usedByFlows !== undefined && usedByFlows > 0 && (
-            <span className="text-[0.7rem] px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border shrink-0">
+            <span className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]">
               {t("list.usedByFlows", { count: usedByFlows, ns: "flows" })}
             </span>
           )}
@@ -139,7 +139,7 @@ export function PackageCard({
       </ScrollArea>
       {actions && (
         <div
-          className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-2"
+          className="border-border mt-3 flex items-center justify-between gap-2 border-t pt-3"
           onClick={(e) => e.stopPropagation()}
         >
           {actions}

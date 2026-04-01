@@ -49,40 +49,40 @@ export function OnboardingDoneStep() {
     >
       <div className="flex flex-col gap-4">
         {/* Summary cards */}
-        <div className="rounded-lg border border-border bg-card p-4">
+        <div className="border-border bg-card rounded-lg border p-4">
           <div className="flex items-center gap-3">
-            <CheckCircle2 size={20} className="text-green-500 shrink-0" />
+            <CheckCircle2 size={20} className="shrink-0 text-green-500" />
             <div className="flex-1">
               <h3 className="text-sm font-semibold">{t("onboarding.summaryOrg")}</h3>
-              <span className="text-sm text-muted-foreground">{currentOrg?.name}</span>
+              <span className="text-muted-foreground text-sm">{currentOrg?.name}</span>
             </div>
           </div>
         </div>
 
         {features.billing && billing && (
-          <div className="rounded-lg border border-border bg-card p-4">
+          <div className="border-border bg-card rounded-lg border p-4">
             <div className="flex items-center gap-3">
-              <CheckCircle2 size={20} className="text-green-500 shrink-0" />
+              <CheckCircle2 size={20} className="shrink-0 text-green-500" />
               <div className="flex-1">
                 <h3 className="text-sm font-semibold">{t("onboarding.summaryPlan")}</h3>
-                <span className="text-sm text-muted-foreground">{billing.plan.name}</span>
+                <span className="text-muted-foreground text-sm">{billing.plan.name}</span>
               </div>
             </div>
           </div>
         )}
 
         {features.models && (
-          <div className="rounded-lg border border-border bg-card p-4">
+          <div className="border-border bg-card rounded-lg border p-4">
             <div className="flex items-center gap-3">
               <CheckCircle2
                 size={20}
                 className={
-                  defaultModel ? "text-green-500 shrink-0" : "text-muted-foreground shrink-0"
+                  defaultModel ? "shrink-0 text-green-500" : "text-muted-foreground shrink-0"
                 }
               />
               <div className="flex-1">
                 <h3 className="text-sm font-semibold">{t("onboarding.summaryModel")}</h3>
-                <span className="text-sm text-muted-foreground">
+                <span className="text-muted-foreground text-sm">
                   {defaultModel ? defaultModel.label : t("onboarding.summaryModelNone")}
                 </span>
               </div>
@@ -90,19 +90,19 @@ export function OnboardingDoneStep() {
           </div>
         )}
 
-        <div className="rounded-lg border border-border bg-card p-4">
+        <div className="border-border bg-card rounded-lg border p-4">
           <div className="flex items-center gap-3">
             <CheckCircle2
               size={20}
               className={
                 configuredProviders.length > 0
-                  ? "text-green-500 shrink-0"
+                  ? "shrink-0 text-green-500"
                   : "text-muted-foreground shrink-0"
               }
             />
             <div className="flex-1">
               <h3 className="text-sm font-semibold">{t("onboarding.summaryProviders")}</h3>
-              <span className="text-sm text-muted-foreground">
+              <span className="text-muted-foreground text-sm">
                 {configuredProviders.length > 0
                   ? t("onboarding.summaryProvidersCount", { count: configuredProviders.length })
                   : t("onboarding.summaryProvidersNone")}
@@ -111,17 +111,17 @@ export function OnboardingDoneStep() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-border bg-card p-4">
+        <div className="border-border bg-card rounded-lg border p-4">
           <div className="flex items-center gap-3">
             <CheckCircle2
               size={20}
               className={
-                invitationCount > 0 ? "text-green-500 shrink-0" : "text-muted-foreground shrink-0"
+                invitationCount > 0 ? "shrink-0 text-green-500" : "text-muted-foreground shrink-0"
               }
             />
             <div className="flex-1">
               <h3 className="text-sm font-semibold">{t("onboarding.summaryMembers")}</h3>
-              <span className="text-sm text-muted-foreground">
+              <span className="text-muted-foreground text-sm">
                 {invitationCount > 0
                   ? t("onboarding.summaryMembersCount", { count: invitationCount })
                   : t("onboarding.summaryMembersNone")}

@@ -37,7 +37,7 @@ export function FlowProvidersSection({
   const flowOrgProfileName = detail.flowOrgProfileName;
 
   return (
-    <div className="space-y-2 mb-4">
+    <div className="mb-4 space-y-2">
       {detail.dependencies.providers.map((svc) => (
         <ProviderConnectionCard
           key={svc.id}

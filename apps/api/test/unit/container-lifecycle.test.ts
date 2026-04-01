@@ -1,9 +1,8 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, mock } from "bun:test";
 import type { ContainerOrchestrator } from "../../src/services/orchestrator/interface.ts";
-import type { WorkloadHandle, IsolationBoundary } from "../../src/services/orchestrator/types.ts";
+import type { WorkloadHandle } from "../../src/services/orchestrator/types.ts";
 import { runContainerLifecycle } from "../../src/services/adapters/container-lifecycle.ts";
 import type { ExecutionMessage } from "../../src/services/adapters/types.ts";
-import { TimeoutError } from "../../src/services/adapters/types.ts";
 
 function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): ContainerOrchestrator {
   return {

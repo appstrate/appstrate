@@ -30,11 +30,11 @@ function bumpVersion(version: string, type: BumpType): string {
   const [major, minor, patch] = version.split(".").map(Number);
   switch (type) {
     case "patch":
-      return `${major}.${minor}.${patch + 1}`;
+      return `${major}.${minor}.${patch! + 1}`;
     case "minor":
-      return `${major}.${minor + 1}.0`;
+      return `${major}.${minor! + 1}.0`;
     case "major":
-      return `${major + 1}.0.0`;
+      return `${major! + 1}.0.0`;
   }
 }
 
@@ -145,7 +145,7 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
                     }`}
                   >
                     <div className="font-medium">{opt.label}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
+                    <div className="text-muted-foreground mt-0.5 text-xs">
                       {latestVersion} &rarr; {bumped}
                     </div>
                   </button>
@@ -156,13 +156,13 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
         )}
 
         {isBlocked && draftVersion && latestVersion && (
-          <p className="text-sm text-warning">{t("version.mustBeHigher")}</p>
+          <p className="text-warning text-sm">{t("version.mustBeHigher")}</p>
         )}
         {!draftVersion && (
-          <p className="text-sm text-warning">{t("version.noVersionInManifest")}</p>
+          <p className="text-warning text-sm">{t("version.noVersionInManifest")}</p>
         )}
         {errors.root?.message && (
-          <div className="text-sm text-destructive">{errors.root.message}</div>
+          <div className="text-destructive text-sm">{errors.root.message}</div>
         )}
       </div>
     </Modal>

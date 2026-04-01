@@ -82,7 +82,7 @@ export function OnboardingMembersStep() {
     >
       <div className="flex flex-col gap-4">
         {/* Invite form — fixed above scroll */}
-        <form onSubmit={handleInvite} className="flex gap-2 items-start">
+        <form onSubmit={handleInvite} className="flex items-start gap-2">
           <div className="flex-1">
             <div className="flex gap-2">
               <Input
@@ -111,7 +111,7 @@ export function OnboardingMembersStep() {
                 </SelectContent>
               </Select>
             </div>
-            {error && <p className="text-sm text-destructive mt-1">{error}</p>}
+            {error && <p className="text-destructive mt-1 text-sm">{error}</p>}
           </div>
           <Button type="submit" disabled={addMemberMutation.isPending}>
             {addMemberMutation.isPending ? <Spinner /> : t("onboarding.invite")}
@@ -120,15 +120,15 @@ export function OnboardingMembersStep() {
 
         {/* Pending invitations — scrollable */}
         {invitations.length > 0 && (
-          <div className="flex flex-col gap-2 max-h-[30vh] overflow-y-auto">
-            <div className="text-sm font-medium text-muted-foreground">
+          <div className="flex max-h-[30vh] flex-col gap-2 overflow-y-auto">
+            <div className="text-muted-foreground text-sm font-medium">
               {t("onboarding.pendingInvitations")}
             </div>
             {invitations.map((inv) => (
-              <div key={inv.id} className="rounded-lg border border-border bg-card p-3">
+              <div key={inv.id} className="border-border bg-card rounded-lg border p-3">
                 <div className="flex items-center gap-3">
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium block truncate">{inv.email}</span>
+                  <div className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{inv.email}</span>
                   </div>
                   <CopyLinkButton token={inv.token} />
                   <Badge variant="pending">{t(roleI18nKey(inv.role))}</Badge>

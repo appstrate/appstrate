@@ -41,13 +41,13 @@ export function ScheduleCard({ schedule, flowName }: ScheduleCardProps) {
   return (
     <Link
       to={`/schedules/${schedule.id}`}
-      className="block rounded-lg border border-border bg-card hover:bg-accent/50 transition-colors"
+      className="border-border bg-card hover:bg-accent/50 block rounded-lg border transition-colors"
     >
       <div className="flex items-center gap-2 p-3">
-        <span className="font-medium truncate">{schedule.name || schedule.id}</span>
+        <span className="truncate font-medium">{schedule.name || schedule.id}</span>
         {statusBadge}
         {unreadCount > 0 && (
-          <span className="flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[0.6rem] font-medium leading-none">
+          <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
@@ -56,7 +56,7 @@ export function ScheduleCard({ schedule, flowName }: ScheduleCardProps) {
           profileType={schedule.profileType}
           profileName={schedule.profileName}
           profileOwnerName={schedule.profileOwnerName}
-          className="ml-auto text-xs text-muted-foreground"
+          className="text-muted-foreground ml-auto text-xs"
         />
       </div>
 
@@ -67,7 +67,7 @@ export function ScheduleCard({ schedule, flowName }: ScheduleCardProps) {
           flowName={flowName}
           scheduleName={schedule.name || schedule.id}
           nextRunAt={schedule.nextRunAt}
-          className="border-t border-dashed border-border"
+          className="border-border border-t border-dashed"
         />
       )}
     </Link>

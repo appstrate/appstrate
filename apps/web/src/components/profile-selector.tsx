@@ -34,11 +34,11 @@ export function ProfileSelector({ showAllOption, value, onChange, label }: Profi
 
   return (
     <div className="flex items-center gap-2">
-      <Label className="text-xs text-muted-foreground shrink-0">
+      <Label className="text-muted-foreground shrink-0 text-xs">
         {label ?? t("profiles.selectorLabel")}
       </Label>
       <Select value={currentValue} onValueChange={handleChange}>
-        <SelectTrigger className="w-[180px] h-8 text-xs">
+        <SelectTrigger className="h-8 w-[180px] text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

@@ -53,7 +53,7 @@ export function UnsavedChangesModal({ blocker, onSaveDraft }: UnsavedChangesModa
         </>
       }
     >
-      <p className="text-sm text-muted-foreground">{t("unsaved.message")}</p>
+      <p className="text-muted-foreground text-sm">{t("unsaved.message")}</p>
     </Modal>
   );
 }

@@ -18,16 +18,14 @@ function pm(entries: Record<string, string>): ProviderProfileMap {
 describe("token-resolver", () => {
   let userId: string;
   let orgId: string;
-  let orgSlug: string;
   let profileId: string;
 
   beforeEach(async () => {
     await truncateAll();
-    const { cookie, ...user } = await createTestUser();
+    const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
     const { org } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
-    orgSlug = org.slug;
 
     // Create a default connection profile for this user
     const profile = await seedConnectionProfile({ userId, name: "Default", isDefault: true });

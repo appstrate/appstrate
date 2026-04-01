@@ -34,7 +34,12 @@ export const schedulesPaths = {
       description: "List all cron schedules configured for a specific flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -63,7 +68,12 @@ export const schedulesPaths = {
       description: "Create a cron schedule for a flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {

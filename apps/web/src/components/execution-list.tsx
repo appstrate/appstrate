@@ -76,7 +76,7 @@ export function ExecutionList({
 
   if (isLoading && page === 0) {
     return (
-      <div className="rounded-md border border-border p-8 text-center text-sm text-muted-foreground">
+      <div className="border-border text-muted-foreground rounded-md border p-8 text-center text-sm">
         {t("loading", { ns: "common" })}
       </div>
     );
@@ -101,7 +101,7 @@ export function ExecutionList({
 
   return (
     <div className="space-y-2">
-      <div className="rounded-md border border-border">
+      <div className="border-border rounded-md border">
         {page === 0 && firstPageBanner}
         {executions.map((exec) => (
           <ExecutionRow
@@ -116,7 +116,7 @@ export function ExecutionList({
 
       {paginated && totalPages > 1 && (
         <div className="flex items-center justify-end gap-4 pt-1">
-          <span className="text-sm text-muted-foreground">
+          <span className="text-muted-foreground text-sm">
             {t("pagination.pageOf", {
               page: page + 1,
               total: totalPages,

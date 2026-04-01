@@ -99,15 +99,15 @@ export function ProviderConnectionCard({
 
   return (
     <>
-      <div className="flex items-center gap-2 py-2.5 px-3 rounded-lg border border-border bg-card">
+      <div className="border-border bg-card flex items-center gap-2 rounded-lg border px-3 py-2.5">
         {/* Provider icon + name */}
-        <div className="flex items-center gap-2 min-w-0 shrink-0">
+        <div className="flex min-w-0 shrink-0 items-center gap-2">
           {iconUrl ? (
             <ProviderIcon src={iconUrl} className="size-5 shrink-0" />
           ) : (
-            <Plug className="size-4 text-muted-foreground shrink-0" />
+            <Plug className="text-muted-foreground size-4 shrink-0" />
           )}
-          <span className="text-sm font-medium truncate">{displayName}</span>
+          <span className="truncate text-sm font-medium">{displayName}</span>
         </div>
 
         <div className="flex-1" />
@@ -116,12 +116,12 @@ export function ProviderConnectionCard({
           /* ─── Org-bound mode: show binding info ──────────── */
           <>
             {isBoundButDisconnected ? (
-              <span className="inline-flex items-center gap-1 text-xs text-destructive shrink-0">
+              <span className="text-destructive inline-flex shrink-0 items-center gap-1 text-xs">
                 <AlertTriangle className="size-3" />
                 {t("providerCard.boundDisconnected")}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 text-xs text-primary shrink-0">
+              <span className="text-primary inline-flex shrink-0 items-center gap-1 text-xs">
                 <Building2 className="size-3" />
                 {binding?.boundByUserName
                   ? `${binding.boundByUserName} — ${binding.sourceProfileName}`
@@ -136,7 +136,7 @@ export function ProviderConnectionCard({
                 onClick={handleUnbind}
                 disabled={isPending}
               >
-                <Unlink className="size-3 mr-1" />
+                <Unlink className="mr-1 size-3" />
                 {t("providerCard.unbind")}
               </Button>
             )}
@@ -145,12 +145,12 @@ export function ProviderConnectionCard({
           /* ─── User-managed mode: profile selector + connect/disconnect ── */
           <>
             {isConnected ? (
-              <span className="inline-flex items-center gap-1 text-xs text-success shrink-0">
+              <span className="text-success inline-flex shrink-0 items-center gap-1 text-xs">
                 <CheckCircle2 className="size-3" />
                 {t("providers.connected")}
               </span>
             ) : readOnly ? (
-              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+              <span className="text-muted-foreground inline-flex shrink-0 items-center gap-1 text-xs">
                 <AlertTriangle className="size-3" />
                 {t("services.notConnected")}
               </span>
@@ -173,7 +173,7 @@ export function ProviderConnectionCard({
             )}
 
             {!readOnly && (
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className="flex shrink-0 items-center gap-1.5">
                 {!isConnected && (
                   <Button
                     variant="outline"
@@ -204,7 +204,7 @@ export function ProviderConnectionCard({
                     onClick={doBind}
                     disabled={isPending || !effectiveProfileId}
                   >
-                    <Building2 className="size-3 mr-1" />
+                    <Building2 className="mr-1 size-3" />
                     {orgProfileName
                       ? t("providerCard.bindTo", { name: orgProfileName })
                       : t("providerCard.bind")}

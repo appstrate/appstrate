@@ -17,7 +17,7 @@ function InfoRow({ label, value }: { label: string; value: string | null | undef
   if (!value) return null;
   return (
     <div className="flex items-start gap-3 py-2">
-      <span className="text-sm text-muted-foreground shrink-0 w-28">{label}</span>
+      <span className="text-muted-foreground w-28 shrink-0 text-sm">{label}</span>
       <span className="text-sm font-medium break-all">{value}</span>
     </div>
   );
@@ -46,7 +46,7 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
         }
       >
         {/* Identity */}
-        <div className="space-y-0 divide-y divide-border">
+        <div className="divide-border space-y-0 divide-y">
           <InfoRow label="ID" value={endUser.id} />
           <InfoRow label={t("applications.endUserName")} value={endUser.name} />
           <InfoRow label={t("applications.endUserEmail")} value={endUser.email} />
@@ -66,11 +66,11 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
         {/* Metadata */}
         {hasMetadata && (
           <>
-            <div className="text-sm font-medium text-muted-foreground mt-4 mb-2">
+            <div className="text-muted-foreground mt-4 mb-2 text-sm font-medium">
               {t("applications.metadata")}
             </div>
-            <div className="rounded-md border border-border bg-muted/50 px-3 py-2">
-              <pre className="text-xs font-mono whitespace-pre-wrap break-all">
+            <div className="border-border bg-muted/50 rounded-md border px-3 py-2">
+              <pre className="font-mono text-xs break-all whitespace-pre-wrap">
                 {JSON.stringify(metadata, null, 2)}
               </pre>
             </div>
@@ -78,7 +78,7 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
         )}
 
         {/* Actions */}
-        <div className="mt-4 pt-4 border-t border-border">
+        <div className="border-border mt-4 border-t pt-4">
           <Button
             variant="destructive"
             size="sm"

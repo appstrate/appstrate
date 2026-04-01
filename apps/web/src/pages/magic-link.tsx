@@ -51,9 +51,9 @@ export function MagicLinkPage() {
       <div className="flex flex-col gap-6">
         <div className="flex flex-col items-center gap-2">
           <h1 className="text-xl font-bold">{t("magicLink.title")}</h1>
-          <p className="text-center text-sm text-muted-foreground">{t("magicLink.description")}</p>
+          <p className="text-muted-foreground text-center text-sm">{t("magicLink.description")}</p>
         </div>
-        <form onSubmit={handleSubmit} className="mx-auto w-full max-w-sm flex flex-col gap-4">
+        <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-sm flex-col gap-4">
           <div className="grid gap-2">
             <Label htmlFor="email">{t("login.email")}</Label>
             <Input
@@ -66,14 +66,14 @@ export function MagicLinkPage() {
               required
             />
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p className="text-destructive text-sm">{error}</p>}
           <Button type="submit" className="w-full" disabled={state === "submitting"}>
             {state === "submitting" ? t("loading") : t("magicLink.submit")}
           </Button>
         </form>
         <Link
           to="/login"
-          className="text-center text-sm text-muted-foreground underline underline-offset-4 hover:text-primary"
+          className="text-muted-foreground hover:text-primary text-center text-sm underline underline-offset-4"
         >
           {t("magicLink.backToLogin")}
         </Link>

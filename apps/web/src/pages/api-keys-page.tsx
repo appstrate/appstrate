@@ -76,11 +76,11 @@ export function ApiKeysPage() {
           {apiKeys.map((key) => {
             const expired = isExpired(key.expiresAt);
             return (
-              <div key={key.id} className="rounded-lg border border-border bg-card p-5">
-                <div className="flex items-center gap-3 mb-3">
+              <div key={key.id} className="border-border bg-card rounded-lg border p-5">
+                <div className="mb-3 flex items-center gap-3">
                   <div className="flex-1">
                     <h3 className="text-[0.95rem] font-semibold">{key.name}</h3>
-                    <div className="flex flex-wrap gap-1.5 mt-1">
+                    <div className="mt-1 flex flex-wrap gap-1.5">
                       <Badge variant="secondary" className="opacity-60">
                         {key.keyPrefix}...
                       </Badge>
@@ -93,9 +93,9 @@ export function ApiKeysPage() {
                   </div>
                   {/* Scope badges */}
                   {availableScopes && key.scopes.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-2">
+                    <div className="mt-2 flex flex-wrap gap-1">
                       {key.scopes.length === availableScopes.length ? (
-                        <Badge variant="outline" className="text-[0.65rem] px-1.5 py-0">
+                        <Badge variant="outline" className="px-1.5 py-0 text-[0.65rem]">
                           {t("settings:apiKeys.fullAccess")}
                         </Badge>
                       ) : (
@@ -103,7 +103,7 @@ export function ApiKeysPage() {
                           <Badge
                             key={resource}
                             variant="outline"
-                            className="text-[0.65rem] px-1.5 py-0"
+                            className="px-1.5 py-0 text-[0.65rem]"
                           >
                             {resource}
                           </Badge>
@@ -112,24 +112,24 @@ export function ApiKeysPage() {
                     </div>
                   )}
                 </div>
-                <div className="flex flex-col gap-1 mt-3">
-                  <span className="text-sm text-muted-foreground">
+                <div className="mt-3 flex flex-col gap-1">
+                  <span className="text-muted-foreground text-sm">
                     {key.expiresAt
                       ? t("settings:apiKeys.expiresOn", { date: formatDate(key.expiresAt) })
                       : t("settings:apiKeys.neverExpires")}
                   </span>
                   {key.lastUsedAt && (
-                    <span className="text-sm text-muted-foreground">
+                    <span className="text-muted-foreground text-sm">
                       {t("settings:apiKeys.lastUsed", { date: formatDate(key.lastUsedAt) })}
                     </span>
                   )}
                   {key.createdByName && (
-                    <span className="text-sm text-muted-foreground">
+                    <span className="text-muted-foreground text-sm">
                       {t("settings:apiKeys.createdByLabel", { name: key.createdByName })}
                     </span>
                   )}
                 </div>
-                <div className="mt-3 pt-3 border-t border-border flex gap-2 justify-end">
+                <div className="border-border mt-3 flex justify-end gap-2 border-t pt-3">
                   <Button variant="destructive" size="sm" onClick={() => handleRevoke(key)}>
                     {t("settings:apiKeys.revoke")}
                   </Button>

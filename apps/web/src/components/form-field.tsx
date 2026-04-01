@@ -107,12 +107,12 @@ export function FormField({
       </Label>
       {renderInput()}
       {description && (
-        <p id={hintId} className="text-sm text-muted-foreground">
+        <p id={hintId} className="text-muted-foreground text-sm">
           {description}
         </p>
       )}
       {error && (
-        <p id={errorId} className="text-sm text-destructive">
+        <p id={errorId} className="text-destructive text-sm">
           {error}
         </p>
       )}

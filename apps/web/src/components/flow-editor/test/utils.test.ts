@@ -159,7 +159,7 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
 
     const result = fieldsToSchema(fields, "output");
     expect(result).not.toBeNull();
-    expect(result!.schema.properties.summary.type).toBe("string");
+    expect(result!.schema.properties.summary!.type).toBe("string");
     expect(result!.schema.required).toEqual(["summary"]);
   });
 
@@ -175,8 +175,8 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
     expect(fields[0]!.enumValues).toBe("fast, slow");
 
     const result = fieldsToSchema(fields, "config");
-    expect(result!.schema.properties.mode.default).toBe("fast");
-    expect(result!.schema.properties.mode.enum).toEqual(["fast", "slow"]);
+    expect(result!.schema.properties.mode!.default).toBe("fast");
+    expect(result!.schema.properties.mode!.enum).toEqual(["fast", "slow"]);
   });
 
   it("roundtrips input schema with placeholder via uiHints", () => {
@@ -221,13 +221,13 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
     expect(fields[0]!.maxFiles).toBe("5");
 
     const result = fieldsToSchema(fields, "input");
-    const docProp = result!.schema.properties.doc;
+    const docProp = result!.schema.properties.doc!;
     const docItems =
       typeof docProp.items === "object" && !Array.isArray(docProp.items) ? docProp.items : null;
     expect(docProp.type).toBe("array");
     expect(docItems?.format).toBe("uri");
     expect(docItems?.contentMediaType).toBe("application/octet-stream");
-    expect(result!.schema.properties.doc.maxItems).toBe(5);
+    expect(result!.schema.properties.doc!.maxItems).toBe(5);
     expect(result!.fileConstraints?.doc?.accept).toBe(".pdf");
     expect(result!.fileConstraints?.doc?.maxSize).toBe(10485760);
   });

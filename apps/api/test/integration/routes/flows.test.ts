@@ -1,12 +1,8 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq, and } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
-import { db, truncateAll } from "../../helpers/db.ts";
-import {
-  createTestContext,
-  authHeaders,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { truncateAll } from "../../helpers/db.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedFlow, seedExecution, seedConnectionProfile } from "../../helpers/seed.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { executions } from "@appstrate/db/schema";
@@ -28,7 +24,7 @@ describe("Flows API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.flows).toBeArray();
       expect(body.flows).toHaveLength(0);
     });
@@ -41,7 +37,7 @@ describe("Flows API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.flows.length).toBeGreaterThanOrEqual(1);
       const flow = body.flows.find((f: { id: string }) => f.id === "@myorg/test-flow");
       expect(flow).toBeDefined();
@@ -57,7 +53,7 @@ describe("Flows API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       const leaked = body.flows.find((f: { id: string }) => f.id === "@otherorg/secret-flow");
       expect(leaked).toBeUndefined();
     });
@@ -77,7 +73,7 @@ describe("Flows API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.flow).toBeDefined();
       expect(body.flow.id).toBe("@myorg/detail-flow");
     });
@@ -130,7 +126,7 @@ describe("Flows API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.config.key).toBe("value");
       expect(body.validation.valid).toBe(true);
     });
@@ -164,7 +160,7 @@ describe("Flows API", () => {
         headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
       });
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       const flow = body.flows.find((f: { id: string }) => f.id === "@myorg/counted-flow");
       expect(flow).toBeDefined();
       expect(flow.runningExecutions).toBe(1);

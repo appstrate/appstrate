@@ -64,26 +64,26 @@ export function ConnectionSummaryModal({
           return (
             <div
               key={svc.id}
-              className="flex items-center gap-2 py-2 px-3 rounded-md border border-border bg-muted/30"
+              className="border-border bg-muted/30 flex items-center gap-2 rounded-md border px-3 py-2"
             >
-              <div className="flex items-center gap-2 min-w-0 shrink-0">
+              <div className="flex min-w-0 shrink-0 items-center gap-2">
                 {iconUrl ? (
                   <ProviderIcon src={iconUrl} className="size-4 shrink-0" />
                 ) : (
-                  <Plug className="size-3.5 text-muted-foreground shrink-0" />
+                  <Plug className="text-muted-foreground size-3.5 shrink-0" />
                 )}
-                <span className="text-sm font-medium truncate">{displayName}</span>
+                <span className="truncate text-sm font-medium">{displayName}</span>
               </div>
 
               <div className="flex-1" />
 
               {!isConnected ? (
-                <span className="inline-flex items-center gap-1 text-xs text-destructive">
+                <span className="text-destructive inline-flex items-center gap-1 text-xs">
                   <AlertTriangle className="size-3" />
                   {t("run.notConnected")}
                 </span>
               ) : isOrg ? (
-                <span className="inline-flex items-center gap-1 text-xs text-primary">
+                <span className="text-primary inline-flex items-center gap-1 text-xs">
                   <Building2 className="size-3" />
                   {orgProfileName ?? t("providers.connected", { ns: "settings" })}
                   {svc.profileOwnerName && svc.profileName && (
@@ -93,7 +93,7 @@ export function ConnectionSummaryModal({
                   )}
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
                   <User className="size-3" />
                   {svc.profileOwnerName && svc.profileName
                     ? `${svc.profileOwnerName} — ${svc.profileName}`
@@ -102,9 +102,9 @@ export function ConnectionSummaryModal({
               )}
 
               {isConnected && svc.status === "needs_reconnection" ? (
-                <AlertCircle className="size-3.5 text-amber-500 shrink-0" />
+                <AlertCircle className="size-3.5 shrink-0 text-amber-500" />
               ) : isConnected ? (
-                <CheckCircle2 className="size-3.5 text-success shrink-0" />
+                <CheckCircle2 className="text-success size-3.5 shrink-0" />
               ) : null}
             </div>
           );

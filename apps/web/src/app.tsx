@@ -106,7 +106,7 @@ function OrgGate({ children }: { children: React.ReactNode }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex min-h-screen items-center justify-center">
         <Spinner />
       </div>
     );
@@ -120,7 +120,7 @@ function OrgGate({ children }: { children: React.ReactNode }) {
   // Orgs exist but none selected yet (auto-select happening)
   if (!currentOrg) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex min-h-screen items-center justify-center">
         <Spinner />
       </div>
     );
@@ -157,7 +157,7 @@ export function App() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex min-h-screen items-center justify-center">
         <Spinner />
       </div>
     );

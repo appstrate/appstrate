@@ -152,7 +152,7 @@ function ProviderKeyFormBody({
       title={title}
       actions={
         <>
-          <div className="flex items-center gap-2 mr-auto">
+          <div className="mr-auto flex items-center gap-2">
             <Button
               type="button"
               variant="outline"
@@ -217,7 +217,7 @@ function ProviderKeyFormBody({
             className={cn(showError("label") && "border-destructive")}
           />
           {showError("label") && errors.label?.message && (
-            <div className="text-sm text-destructive">{errors.label.message}</div>
+            <div className="text-destructive text-sm">{errors.label.message}</div>
           )}
         </div>
 
@@ -245,7 +245,7 @@ function ProviderKeyFormBody({
                 </SelectContent>
               </Select>
               {showError("api") && errors.api?.message && (
-                <div className="text-sm text-destructive">{errors.api.message}</div>
+                <div className="text-destructive text-sm">{errors.api.message}</div>
               )}
             </div>
             <div className="space-y-2">
@@ -270,7 +270,7 @@ function ProviderKeyFormBody({
                 className={cn(showError("baseUrl") && "border-destructive")}
               />
               {showError("baseUrl") && errors.baseUrl?.message && (
-                <div className="text-sm text-destructive">{errors.baseUrl.message}</div>
+                <div className="text-destructive text-sm">{errors.baseUrl.message}</div>
               )}
             </div>
           </>
@@ -294,12 +294,12 @@ function ProviderKeyFormBody({
               className={cn(showError("apiKey") && "border-destructive")}
             />
             {providerKey && (
-              <div className="text-sm text-muted-foreground">
+              <div className="text-muted-foreground text-sm">
                 {t("providerKeys.form.apiKeyHint")}
               </div>
             )}
             {showError("apiKey") && errors.apiKey?.message && (
-              <div className="text-sm text-destructive">{errors.apiKey.message}</div>
+              <div className="text-destructive text-sm">{errors.apiKey.message}</div>
             )}
           </div>
         )}

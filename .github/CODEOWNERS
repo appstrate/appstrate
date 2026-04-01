@@ -1,0 +1,26 @@
+# Appstrate Platform — Code Ownership
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default
+* @appstrate/maintainers
+
+# Backend API
+apps/api/ @appstrate/maintainers
+
+# Frontend
+apps/web/ @appstrate/maintainers
+
+# Shared packages
+packages/db/ @appstrate/maintainers
+packages/env/ @appstrate/maintainers
+packages/connect/ @appstrate/maintainers
+packages/emails/ @appstrate/maintainers
+packages/shared-types/ @appstrate/maintainers
+
+# Runtime (Docker containers)
+runtime-pi/ @appstrate/maintainers
+
+# Infrastructure
+Dockerfile @appstrate/maintainers
+docker-compose*.yml @appstrate/maintainers
+.github/ @appstrate/maintainers

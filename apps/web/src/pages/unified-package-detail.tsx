@@ -443,7 +443,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type === "flow" && <ModelRequiredAlert />}
 
       {!isOwned && (
-        <div className="flex items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 mb-4 text-sm">
+        <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm">
           <span className="text-blue-400">{t("ownership.readOnly")}</span>
           {forkedFrom && (
             <span className="text-muted-foreground">
@@ -459,7 +459,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         </div>
       )}
       {isOwned && forkedFrom && (
-        <div className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/30 px-4 py-3 mb-4 text-sm">
+        <div className="border-border/50 bg-muted/30 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
           <span className="text-muted-foreground">
             {t("ownership.forkedFrom")}
             <Link
@@ -473,7 +473,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       )}
 
       {type === "flow" && hasMissingRequiredConfig && (
-        <div className="flex items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 mb-4 text-sm">
+        <div className="border-warning/30 bg-warning/5 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
           <span className="text-warning text-base leading-none">⚠</span>
           <span className="text-warning">{t("detail.configAlert")}</span>
         </div>
@@ -517,8 +517,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type === "flow" && tab === "api" && <FlowApiTab packageId={packageId} />}
 
       {type !== "flow" && tab === "content" && pkgDetail && (
-        <div className="rounded-lg border border-border bg-card p-4">
-          <pre className="whitespace-pre-wrap text-xs font-mono text-muted-foreground bg-muted/50 rounded-md p-3 overflow-x-auto">
+        <div className="border-border bg-card rounded-lg border p-4">
+          <pre className="text-muted-foreground bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
             {isHistoricalVersion && versionDetail?.content != null
               ? versionDetail.content
               : pkgDetail.content}
@@ -527,7 +527,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       )}
 
       {type === "provider" && tab === "configuration" && providerConfig && (
-        <div className="rounded-lg border border-border bg-card p-4">
+        <div className="border-border bg-card rounded-lg border p-4">
           <ProviderCredentialsForm
             provider={providerConfig}
             callbackUrl={callbackUrl}
@@ -537,9 +537,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       )}
 
       {type !== "flow" && tab === "usedBy" && pkgDetail && (
-        <div className="rounded-lg border border-border bg-card p-4">
+        <div className="border-border bg-card rounded-lg border p-4">
           {pkgDetail.flows.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">
+            <p className="text-muted-foreground py-4 text-center text-sm">
               {t("packages.noFlows")}
             </p>
           ) : (
@@ -548,7 +548,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 <Link
                   key={f.id}
                   to={`/flows/${f.id}`}
-                  className="inline-flex items-center rounded-md border border-border px-2.5 py-1 text-sm hover:border-primary transition-colors no-underline text-foreground"
+                  className="border-border hover:border-primary text-foreground inline-flex items-center rounded-md border px-2.5 py-1 text-sm no-underline transition-colors"
                 >
                   {f.displayName || f.id}
                 </Link>
@@ -592,12 +592,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               />
             )}
           {!hasManifestChanges && !hasContentChanges && (
-            <p className="text-sm text-muted-foreground py-4 text-center">{t("version.noDiff")}</p>
+            <p className="text-muted-foreground py-4 text-center text-sm">{t("version.noDiff")}</p>
           )}
         </>
       )}
       {tab === "changes" && hasDraftChanges && !isVersionView && !latestVersionForDiff && (
-        <p className="text-sm text-muted-foreground py-4 text-center">
+        <p className="text-muted-foreground py-4 text-center text-sm">
           {t("version.noVersionYet")}
         </p>
       )}

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { describe, it, expect, afterAll } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 
@@ -12,7 +12,7 @@ describe("GET /health", () => {
   it("returns 200 with healthy or degraded status", async () => {
     const res = await app.request("/health");
     expect(res.status).toBe(200);
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     // Without boot(), system packages aren't loaded → "degraded" is expected
     expect(body.status).toBe("degraded"); // Without boot(), no system packages → degraded
     expect(body.checks.database.status).toBe("healthy");
@@ -35,7 +35,7 @@ describe("GET /health", () => {
 
   it("response body contains all required top-level fields", async () => {
     const res = await app.request("/health");
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
 
     // Top-level fields
     expect(body).toHaveProperty("status");
@@ -52,7 +52,7 @@ describe("GET /health", () => {
 
   it("checks object contains database and flows sub-checks", async () => {
     const res = await app.request("/health");
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
 
     // Database check structure
     expect(body.checks).toHaveProperty("database");
@@ -77,13 +77,13 @@ describe("GET /health", () => {
 
   it("uptime_ms increases across sequential requests", async () => {
     const res1 = await app.request("/health");
-    const body1 = await res1.json() as any;
+    const body1 = (await res1.json()) as any;
 
     // Small delay to ensure uptime difference is measurable
     await Bun.sleep(10);
 
     const res2 = await app.request("/health");
-    const body2 = await res2.json() as any;
+    const body2 = (await res2.json()) as any;
 
     expect(body2.uptime_ms).toBeGreaterThan(body1.uptime_ms);
   });

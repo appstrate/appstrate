@@ -74,7 +74,7 @@ export function CustomCredentialsModal({
         return (
           <div key={key} className="space-y-2">
             <Label htmlFor={`cred-${key}`}>
-              {prop.description || key}
+              {prop?.description || key}
               {isRequired && " *"}
             </Label>
             <div className="flex items-center gap-1">
@@ -102,7 +102,7 @@ export function CustomCredentialsModal({
           </div>
         );
       })}
-      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
+      <div className="border-border mt-4 flex justify-end gap-2 border-t pt-4">
         <Button variant="outline" onClick={handleClose}>
           {t("btn.cancel")}
         </Button>

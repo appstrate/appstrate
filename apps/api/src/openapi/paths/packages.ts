@@ -244,7 +244,12 @@ export const packagesPaths = {
         "Download a specific version of a package as a ZIP file. Supports exact version, dist-tag, or semver range resolution. Rate-limited to 50 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
         {
           name: "version",
@@ -395,7 +400,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -443,7 +448,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -491,7 +496,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -557,7 +562,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -615,7 +620,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -676,7 +681,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -713,7 +718,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -753,7 +758,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -821,7 +826,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -977,7 +982,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1025,7 +1030,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1073,7 +1078,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1139,7 +1144,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1197,7 +1202,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1258,7 +1263,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1295,7 +1300,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1334,7 +1339,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1402,7 +1407,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1522,7 +1527,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1566,7 +1571,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1630,7 +1635,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1666,7 +1671,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1713,7 +1718,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1761,7 +1766,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1827,7 +1832,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1878,7 +1883,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -1933,7 +1938,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -2190,7 +2195,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -2238,7 +2243,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -2286,7 +2291,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -2352,7 +2357,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -2410,7 +2415,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -2471,7 +2476,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -2508,7 +2513,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -2548,7 +2553,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {
@@ -2612,7 +2617,7 @@ export const packagesPaths = {
           name: "scope",
           in: "path",
           required: true,
-          schema: { type: "string" },
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
           description: "Package scope (e.g. @my-org)",
         },
         {

@@ -103,12 +103,12 @@ function SortableFieldCard({
     <div
       ref={setNodeRef}
       style={style}
-      className="border border-border rounded-md p-2.5 mb-2 bg-card [&[style*='transform']]:shadow-lg [&[style*='transform']]:z-10"
+      className="border-border bg-card mb-2 rounded-md border p-2.5 [&[style*='transform']]:z-10 [&[style*='transform']]:shadow-lg"
     >
       <div className="flex items-center gap-2">
         {!readOnly && (
           <span
-            className="cursor-grab text-muted-foreground select-none text-base leading-none hover:text-foreground active:cursor-grabbing"
+            className="text-muted-foreground hover:text-foreground cursor-grab text-base leading-none select-none active:cursor-grabbing"
             {...attributes}
             {...listeners}
           >
@@ -121,7 +121,7 @@ function SortableFieldCard({
           value={field.key}
           onChange={(e) => onUpdate(index, { key: toLiveSlug(e.target.value) })}
           onBlur={() => onUpdate(index, { key: toSlug(field.key) })}
-          className="w-[120px] min-w-0 shrink-0 h-7 text-xs font-mono"
+          className="h-7 w-[120px] min-w-0 shrink-0 font-mono text-xs"
           disabled={readOnly}
         />
         <Select
@@ -147,7 +147,7 @@ function SortableFieldCard({
           placeholder={t("editor.fieldDesc")}
           value={field.description}
           onChange={(e) => onUpdate(index, { description: e.target.value })}
-          className="flex-1 min-w-0 h-7 text-xs"
+          className="h-7 min-w-0 flex-1 text-xs"
           disabled={readOnly}
         />
         <div className="flex items-center gap-1.5">
@@ -159,7 +159,7 @@ function SortableFieldCard({
           />
           <Label
             htmlFor={`field-req-${index}`}
-            className="text-xs text-muted-foreground whitespace-nowrap font-normal cursor-pointer"
+            className="text-muted-foreground cursor-pointer text-xs font-normal whitespace-nowrap"
           >
             {t("editor.fieldReq")}
           </Label>
@@ -174,7 +174,7 @@ function SortableFieldCard({
             />
             <Label
               htmlFor={`field-file-${index}`}
-              className="text-xs text-muted-foreground whitespace-nowrap font-normal cursor-pointer"
+              className="text-muted-foreground cursor-pointer text-xs font-normal whitespace-nowrap"
             >
               {t("editor.fieldIsFile")}
             </Label>
@@ -185,7 +185,7 @@ function SortableFieldCard({
             type="button"
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            className="text-muted-foreground hover:text-destructive h-7 w-7"
             onClick={() => onRemove(index)}
           >
             &times;
@@ -193,7 +193,7 @@ function SortableFieldCard({
         )}
       </div>
       {showDetails && (
-        <div className="flex gap-2 mt-2 flex-wrap">
+        <div className="mt-2 flex flex-wrap gap-2">
           {isFile ? (
             <>
               <Input
@@ -201,7 +201,7 @@ function SortableFieldCard({
                 placeholder={t("editor.fieldAccept")}
                 value={field.accept ?? ""}
                 onChange={(e) => onUpdate(index, { accept: e.target.value })}
-                className="flex-1 min-w-[100px] h-7 text-xs"
+                className="h-7 min-w-[100px] flex-1 text-xs"
                 disabled={readOnly}
               />
               <Input
@@ -209,7 +209,7 @@ function SortableFieldCard({
                 placeholder={t("editor.fieldMaxSize")}
                 value={field.maxSize ?? ""}
                 onChange={(e) => onUpdate(index, { maxSize: e.target.value })}
-                className="flex-1 min-w-[100px] h-7 text-xs"
+                className="h-7 min-w-[100px] flex-1 text-xs"
                 disabled={readOnly}
               />
               <div className="flex items-center gap-1.5">
@@ -221,7 +221,7 @@ function SortableFieldCard({
                 />
                 <Label
                   htmlFor={`field-multiple-${index}`}
-                  className="text-xs text-muted-foreground whitespace-nowrap font-normal cursor-pointer"
+                  className="text-muted-foreground cursor-pointer text-xs font-normal whitespace-nowrap"
                 >
                   {t("editor.fieldMultiple")}
                 </Label>
@@ -232,7 +232,7 @@ function SortableFieldCard({
                   placeholder={t("editor.fieldMaxFiles")}
                   value={field.maxFiles ?? ""}
                   onChange={(e) => onUpdate(index, { maxFiles: e.target.value })}
-                  className="flex-1 min-w-[100px] h-7 text-xs"
+                  className="h-7 min-w-[100px] flex-1 text-xs"
                   disabled={readOnly}
                 />
               )}
@@ -245,7 +245,7 @@ function SortableFieldCard({
                   placeholder={t("editor.fieldDefault")}
                   value={field.default ?? ""}
                   onChange={(e) => onUpdate(index, { default: e.target.value })}
-                  className="flex-1 min-w-[100px] h-7 text-xs"
+                  className="h-7 min-w-[100px] flex-1 text-xs"
                   disabled={readOnly}
                 />
               )}
@@ -255,7 +255,7 @@ function SortableFieldCard({
                   placeholder={t("editor.fieldPlaceholder")}
                   value={field.placeholder ?? ""}
                   onChange={(e) => onUpdate(index, { placeholder: e.target.value })}
-                  className="flex-1 min-w-[100px] h-7 text-xs"
+                  className="h-7 min-w-[100px] flex-1 text-xs"
                   disabled={readOnly}
                 />
               )}
@@ -265,7 +265,7 @@ function SortableFieldCard({
                   placeholder={t("editor.fieldEnum")}
                   value={field.enumValues ?? ""}
                   onChange={(e) => onUpdate(index, { enumValues: e.target.value })}
-                  className="flex-1 min-w-[100px] h-7 text-xs"
+                  className="h-7 min-w-[100px] flex-1 text-xs"
                   disabled={readOnly}
                 />
               )}
@@ -326,7 +326,7 @@ export function SchemaSection({ title, mode, fields, onChange, readOnly }: Schem
           type="button"
           variant="outline"
           size="sm"
-          className="border-dashed text-muted-foreground hover:text-foreground"
+          className="text-muted-foreground hover:text-foreground border-dashed"
           onClick={add}
         >
           {t("editor.addField")}

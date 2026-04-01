@@ -17,7 +17,7 @@ export function AppBreadcrumbSwitcher() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="inline-flex items-center gap-1 p-0 text-sm text-muted-foreground hover:text-foreground transition-colors">
+      <DropdownMenuTrigger className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 p-0 text-sm transition-colors">
         {currentApp?.name ?? t("switcher.noApp")}
         <ChevronsUpDown className="size-3 opacity-50" />
       </DropdownMenuTrigger>
@@ -32,10 +32,10 @@ export function AppBreadcrumbSwitcher() {
                 if (!isActive) setCurrentApplicationId(app.id);
               }}
             >
-              <span className="truncate flex items-center gap-1.5">
+              <span className="flex items-center gap-1.5 truncate">
                 {app.name}
                 {app.isDefault && (
-                  <Star size={12} className="text-amber-500 fill-amber-500 shrink-0" />
+                  <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
                 )}
               </span>
               {isActive && <Check size={14} strokeWidth={2.5} className="shrink-0" />}

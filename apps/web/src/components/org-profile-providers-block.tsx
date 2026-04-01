@@ -32,25 +32,25 @@ export function OrgProfileProvidersBlock({
     providerIds.some((pid) => !bindings.find((b) => b.providerId === pid && b.connected));
 
   return (
-    <div className="rounded-lg border border-border bg-card mb-4">
+    <div className="border-border bg-card mb-4 rounded-lg border">
       {hasUnboundProviders && (
-        <div className="flex items-start gap-2 px-4 py-3 bg-warning/10 border-b border-warning/30">
-          <AlertTriangle className="size-4 shrink-0 mt-0.5 text-warning" />
-          <p className="text-xs text-warning">{t("schedule.providersNotBoundWarning")}</p>
+        <div className="bg-warning/10 border-warning/30 flex items-start gap-2 border-b px-4 py-3">
+          <AlertTriangle className="text-warning mt-0.5 size-4 shrink-0" />
+          <p className="text-warning text-xs">{t("schedule.providersNotBoundWarning")}</p>
         </div>
       )}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-        <Building2 className="size-4 text-muted-foreground" />
+      <div className="border-border flex items-center gap-2 border-b px-4 py-3">
+        <Building2 className="text-muted-foreground size-4" />
         <span className="text-sm font-medium">{orgProfileName}</span>
-        <UIBadge variant="outline" className="text-[10px] px-1 py-0">
+        <UIBadge variant="outline" className="px-1 py-0 text-[10px]">
           {t("providerCard.orgBadge", { ns: "settings" })}
         </UIBadge>
-        <span className="text-xs text-muted-foreground ml-auto">
+        <span className="text-muted-foreground ml-auto text-xs">
           {t("detail.orgProvidersHint")}
         </span>
       </div>
 
-      <div className="p-2 space-y-2">
+      <div className="space-y-2 p-2">
         {providerIds.map((providerId) => (
           <ProviderConnectionCard
             key={providerId}

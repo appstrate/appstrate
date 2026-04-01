@@ -65,9 +65,9 @@ export function InputFields({
                 </Label>
               </div>
               {field.description && (
-                <p className="text-sm text-muted-foreground">{field.description}</p>
+                <p className="text-muted-foreground text-sm">{field.description}</p>
               )}
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && <p className="text-destructive text-sm">{error}</p>}
             </div>
           );
         }
@@ -88,9 +88,9 @@ export function InputFields({
                 className={cn("font-mono text-xs", error && "border-destructive")}
               />
               {field.description && (
-                <p className="text-sm text-muted-foreground">{field.description}</p>
+                <p className="text-muted-foreground text-sm">{field.description}</p>
               )}
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && <p className="text-destructive text-sm">{error}</p>}
             </div>
           );
         }

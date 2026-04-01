@@ -64,7 +64,7 @@ export function CombinedProfileSelect({
         {hasOrgProfiles && (
           <SelectGroup>
             <div
-              className="px-2 py-1.5 text-xs font-medium text-muted-foreground flex items-center gap-1"
+              className="text-muted-foreground flex items-center gap-1 px-2 py-1.5 text-xs font-medium"
               role="presentation"
             >
               <Building2 className="size-3" />

@@ -92,11 +92,11 @@ export function RegisterForm({
           className="h-11"
         />
       </Link>
-      <div className="text-center text-sm text-muted-foreground">
+      <div className="text-muted-foreground text-center text-sm">
         {switchAuthSlot ?? (
           <>
             {t("login.hasAccount")}{" "}
-            <Link to="/login" className="underline underline-offset-4 hover:text-primary">
+            <Link to="/login" className="hover:text-primary underline underline-offset-4">
               {t("login.login")}
             </Link>
           </>
@@ -132,7 +132,7 @@ export function RegisterForm({
               })}
             />
             {showError("displayName") && (
-              <div className="text-sm text-destructive">{errors.displayName?.message}</div>
+              <div className="text-destructive text-sm">{errors.displayName?.message}</div>
             )}
           </div>
           <div className="grid gap-2">
@@ -146,7 +146,7 @@ export function RegisterForm({
               aria-invalid={showError("email") ? true : undefined}
               className={cn(
                 showError("email") && "border-destructive",
-                fixedEmail && "opacity-60 cursor-not-allowed",
+                fixedEmail && "cursor-not-allowed opacity-60",
               )}
               {...(fixedEmail
                 ? { value: fixedEmail }
@@ -159,7 +159,7 @@ export function RegisterForm({
                   }))}
             />
             {showError("email") && (
-              <div className="text-sm text-destructive">{errors.email?.message}</div>
+              <div className="text-destructive text-sm">{errors.email?.message}</div>
             )}
           </div>
           <div className="grid gap-2">
@@ -180,18 +180,18 @@ export function RegisterForm({
               })}
             />
             {showError("password") && (
-              <div className="text-sm text-destructive">{errors.password?.message}</div>
+              <div className="text-destructive text-sm">{errors.password?.message}</div>
             )}
           </div>
-          {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
+          {errors.root && <p className="text-destructive text-sm">{errors.root.message}</p>}
         </div>
         <Button size="lg" className="w-full" type="submit" disabled={isSubmitting}>
           {isSubmitting ? t("loading") : t("login.signup")}
         </Button>
         {hasSocialAuth && (
           <>
-            <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
-              <span className="relative z-10 bg-background px-2 text-muted-foreground">
+            <div className="after:border-border relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t">
+              <span className="bg-background text-muted-foreground relative z-10 px-2">
                 {t("login.or")}
               </span>
             </div>

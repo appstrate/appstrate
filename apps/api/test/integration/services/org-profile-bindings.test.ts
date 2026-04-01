@@ -18,7 +18,7 @@ describe("org-profile-bindings", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    const { id, cookie } = await createTestUser({ name: "Test User" });
+    const { id } = await createTestUser({ name: "Test User" });
     userId = id;
     const { org } = await createTestOrg(userId);
     orgId = org.id;

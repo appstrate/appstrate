@@ -46,9 +46,9 @@ export function NavApp() {
           <DropdownMenuTrigger asChild>
             <button
               aria-label={t("switcher.appAriaLabel")}
-              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+              className="text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-colors"
             >
-              <span className="truncate max-w-20">{currentApp.name}</span>
+              <span className="max-w-20 truncate">{currentApp.name}</span>
               <ChevronsUpDown className="size-3 shrink-0 opacity-50" />
             </button>
           </DropdownMenuTrigger>
@@ -58,7 +58,7 @@ export function NavApp() {
             side={isMobile ? "bottom" : "right"}
             sideOffset={4}
           >
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
+            <DropdownMenuLabel className="text-muted-foreground text-xs">
               {t("switcher.appAriaLabel")}
             </DropdownMenuLabel>
             {(applications ?? []).map((app) => {
@@ -71,10 +71,10 @@ export function NavApp() {
                     if (!isActive) setCurrentApplicationId(app.id);
                   }}
                 >
-                  <span className="truncate flex items-center gap-1.5">
+                  <span className="flex items-center gap-1.5 truncate">
                     {app.name}
                     {app.isDefault && (
-                      <Star size={12} className="text-amber-500 fill-amber-500 shrink-0" />
+                      <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
                     )}
                   </span>
                   {isActive && <Check size={14} strokeWidth={2.5} className="shrink-0" />}
@@ -83,7 +83,7 @@ export function NavApp() {
             })}
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <Link to="/applications" className="flex items-center gap-2 text-primary">
+              <Link to="/applications" className="text-primary flex items-center gap-2">
                 <Settings size={14} />
                 {t("switcher.manageApps")}
               </Link>

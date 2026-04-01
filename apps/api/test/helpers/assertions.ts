@@ -6,7 +6,7 @@
  */
 import { expect } from "bun:test";
 import { db } from "./db.ts";
-import { eq, and, sql, type SQL } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 
 /**
@@ -58,7 +58,11 @@ export async function getDbRow<T extends PgTable>(
   table: T,
   where: SQL,
 ): Promise<T["$inferSelect"]> {
-  const rows = await db.select().from(table as any).where(where).limit(1);
+  const rows = await db
+    .select()
+    .from(table as any)
+    .where(where)
+    .limit(1);
   expect(rows.length).toBeGreaterThan(0);
   return rows[0] as T["$inferSelect"];
 }

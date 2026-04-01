@@ -20,7 +20,6 @@ import { ApiError, unauthorized } from "../../src/lib/errors.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "../../src/lib/permissions.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
-import { logger } from "../../src/lib/logger.ts";
 import { loadCloud } from "../../src/lib/cloud-loader.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../../src/services/model-registry.ts";

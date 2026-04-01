@@ -1,7 +1,26 @@
 {
   "name": "appstrate",
+  "description": "Open-source platform for executing one-shot AI flows in ephemeral Docker containers",
+  "homepage": "https://github.com/appstrate/appstrate",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/appstrate/appstrate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/appstrate/appstrate/issues"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "flows",
+    "docker",
+    "automation",
+    "llm"
+  ],
   "license": "Apache-2.0",
   "devDependencies": {
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
     "@eslint/js": "^10.0.1",
     "@mariozechner/pi-ai": "^0.52.12",
     "@readme/openapi-parser": "^5.5.0",
@@ -14,30 +33,49 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.0",
     "globals": "^17.4.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "prettier": "^3.8.1",
+    "prettier-plugin-tailwindcss": "^0.7.2",
     "turbo": "^2",
     "typescript-eslint": "^8.55.0"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
+  "engines": {
+    "bun": ">=1.3.9"
+  },
   "packageManager": "bun@1.3.9",
   "private": true,
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
+    "test": "bun test",
+    "test:unit": "bun test apps/api/test/unit/",
+    "test:watch": "bun test --watch apps/api/test/unit/",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix && prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
     "format": "prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
     "format:check": "prettier --check \"apps/*/src/**\" \"packages/*/src/**\"",
     "check": "turbo typecheck && eslint . && prettier --check \"apps/*/src/**\" \"packages/*/src/**\" && bun scripts/verify-openapi.ts && bun scripts/build-system-packages.ts --check",
-    "build-runtime": "docker build -t appstrate-pi ./runtime-pi",
-    "build-sidecar": "docker build -t appstrate-sidecar ./runtime-pi/sidecar",
-    "db:generate": "set -a && . ./.env && cd packages/db && bunx drizzle-kit generate",
-    "db:migrate": "set -a && . ./.env && cd packages/db && bunx drizzle-kit migrate",
-    "docker:dev": "docker compose up -d",
+    "build-runtime": "docker build --platform linux/amd64 -t appstrate-pi ./runtime-pi",
+    "build-sidecar": "docker build --platform linux/amd64 -t appstrate-sidecar ./runtime-pi/sidecar",
+    "db:generate": "cd packages/db && bunx drizzle-kit generate",
+    "db:migrate": "cd packages/db && bunx drizzle-kit migrate",
+    "setup": "bun scripts/setup.ts",
+    "docker:dev": "docker compose -f docker-compose.dev.yml up -d",
+    "docker:dev:down": "docker compose -f docker-compose.dev.yml down",
+    "docker:dev:logs": "docker compose -f docker-compose.dev.yml logs -f",
     "docker:prod": "docker compose --profile prod up -d",
-    "verify:openapi": "bun scripts/verify-openapi.ts"
+    "docker:prod:down": "docker compose --profile prod down",
+    "docker:prod:logs": "docker compose --profile prod logs -f",
+    "docker:clean": "docker compose down -v && docker compose -f docker-compose.dev.yml down -v",
+    "test:integration": "bun test apps/api/test/integration/",
+    "db:studio": "cd packages/db && bunx drizzle-kit studio",
+    "verify:openapi": "bun scripts/verify-openapi.ts",
+    "clean": "rm -rf node_modules/.cache .turbo apps/*/dist apps/web/.vite packages/*/dist coverage",
+    "prepare": "husky"
   },
   "workspaces": [
     "apps/*",
@@ -45,6 +83,10 @@
     "runtime-pi",
     "runtime-pi/sidecar"
   ],
+  "lint-staged": {
+    "*.{ts,tsx}": "eslint --fix",
+    "*.{ts,tsx,json,md,yml,yaml}": "prettier --write"
+  },
   "dependencies": {
     "@appstrate/core": "2.9.8"
   }

@@ -132,15 +132,15 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
 
     return (
       <Modal open={open} onClose={handleClose} title={t("apiKeys.created")} className="sm:max-w-lg">
-        <p className="text-sm text-warning bg-warning/10 rounded-md px-3 py-2">
+        <p className="text-warning bg-warning/10 rounded-md px-3 py-2 text-sm">
           {t("apiKeys.createdWarning")}
         </p>
-        <div className="flex items-center gap-2 mt-3 rounded-md border border-border bg-muted/50 px-3 py-2">
-          <code className="flex-1 text-xs font-mono text-foreground break-all">{createdKey}</code>
+        <div className="border-border bg-muted/50 mt-3 flex items-center gap-2 rounded-md border px-3 py-2">
+          <code className="text-foreground flex-1 font-mono text-xs break-all">{createdKey}</code>
           <Button
             variant="ghost"
             size="sm"
-            className="text-xs text-primary hover:underline shrink-0"
+            className="text-primary shrink-0 text-xs hover:underline"
             onClick={handleCopy}
           >
             {copied ? t("btn.copied") : t("btn.copy")}
@@ -148,8 +148,8 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
         </div>
 
         {/* Scopes granted */}
-        <div className="mt-4 pt-3 border-t border-border">
-          <p className="text-xs font-medium text-muted-foreground mb-2">
+        <div className="border-border mt-4 border-t pt-3">
+          <p className="text-muted-foreground mb-2 text-xs font-medium">
             {t("apiKeys.scopesGranted")}
           </p>
           {isFullAccess ? (
@@ -157,7 +157,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
           ) : (
             <div className="flex flex-wrap gap-1">
               {summary.map((g) => (
-                <Badge key={g.resource} variant="secondary" className="text-[0.65rem] px-1.5 py-0">
+                <Badge key={g.resource} variant="secondary" className="px-1.5 py-0 text-[0.65rem]">
                   {g.resource}
                   {!g.full && (
                     <span className="ml-0.5 opacity-60">
@@ -170,7 +170,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
           )}
         </div>
 
-        <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
+        <div className="border-border mt-4 flex justify-end gap-2 border-t pt-4">
           <Button onClick={handleClose}>{t("btn.done")}</Button>
         </div>
       </Modal>
@@ -249,7 +249,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
           </div>
         )}
 
-        {errors.root?.message && <p className="text-sm text-destructive">{errors.root.message}</p>}
+        {errors.root?.message && <p className="text-destructive text-sm">{errors.root.message}</p>}
       </form>
     </Modal>
   );

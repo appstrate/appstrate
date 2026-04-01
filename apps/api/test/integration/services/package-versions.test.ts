@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { truncateAll, db } from "../../helpers/db.ts";
+import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser } from "../../helpers/auth.ts";
 import { createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
@@ -13,9 +13,6 @@ import {
   getMatchingDistTags,
   getVersionCount,
 } from "../../../src/services/package-versions.ts";
-import { packageDistTags } from "@appstrate/db/schema";
-import { eq, and } from "drizzle-orm";
-
 describe("package-versions service", () => {
   let userId: string;
   let orgId: string;
@@ -115,8 +112,16 @@ describe("package-versions service", () => {
         createdBy: userId,
       };
 
-      const v1 = await createPackageVersion({ ...base, version: "1.0.0", manifest: { ...base.manifest, version: "1.0.0" } });
-      const v2 = await createPackageVersion({ ...base, version: "2.0.0", manifest: { ...base.manifest, version: "2.0.0" } });
+      await createPackageVersion({
+        ...base,
+        version: "1.0.0",
+        manifest: { ...base.manifest, version: "1.0.0" },
+      });
+      const v2 = await createPackageVersion({
+        ...base,
+        version: "2.0.0",
+        manifest: { ...base.manifest, version: "2.0.0" },
+      });
 
       const latestId = await getLatestVersionId(pkg.id);
       expect(latestId).toBe(v2!.id);
@@ -137,9 +142,21 @@ describe("package-versions service", () => {
         createdBy: userId,
       };
 
-      await createPackageVersion({ ...base, version: "1.0.0", manifest: { ...base.manifest, version: "1.0.0" } });
-      await createPackageVersion({ ...base, version: "2.0.0", manifest: { ...base.manifest, version: "2.0.0" } });
-      await createPackageVersion({ ...base, version: "3.0.0", manifest: { ...base.manifest, version: "3.0.0" } });
+      await createPackageVersion({
+        ...base,
+        version: "1.0.0",
+        manifest: { ...base.manifest, version: "1.0.0" },
+      });
+      await createPackageVersion({
+        ...base,
+        version: "2.0.0",
+        manifest: { ...base.manifest, version: "2.0.0" },
+      });
+      await createPackageVersion({
+        ...base,
+        version: "3.0.0",
+        manifest: { ...base.manifest, version: "3.0.0" },
+      });
 
       const versions = await listPackageVersions(pkg.id);
 
@@ -247,8 +264,16 @@ describe("package-versions service", () => {
         createdBy: userId,
       };
 
-      const v1 = await createPackageVersion({ ...base, version: "1.0.0", manifest: { ...base.manifest, version: "1.0.0" } });
-      const v2 = await createPackageVersion({ ...base, version: "2.0.0", manifest: { ...base.manifest, version: "2.0.0" } });
+      const v1 = await createPackageVersion({
+        ...base,
+        version: "1.0.0",
+        manifest: { ...base.manifest, version: "1.0.0" },
+      });
+      const v2 = await createPackageVersion({
+        ...base,
+        version: "2.0.0",
+        manifest: { ...base.manifest, version: "2.0.0" },
+      });
 
       // latest should point to v2
       expect(await getLatestVersionId(pkg.id)).toBe(v2!.id);
@@ -350,8 +375,16 @@ describe("package-versions service", () => {
         createdBy: userId,
       };
 
-      const v1 = await createPackageVersion({ ...base, version: "1.0.0", manifest: { ...base.manifest, version: "1.0.0" } });
-      const v2 = await createPackageVersion({ ...base, version: "2.0.0", manifest: { ...base.manifest, version: "2.0.0" } });
+      const v1 = await createPackageVersion({
+        ...base,
+        version: "1.0.0",
+        manifest: { ...base.manifest, version: "1.0.0" },
+      });
+      const v2 = await createPackageVersion({
+        ...base,
+        version: "2.0.0",
+        manifest: { ...base.manifest, version: "2.0.0" },
+      });
 
       await addDistTag(pkg.id, "stable", v1!.id);
 

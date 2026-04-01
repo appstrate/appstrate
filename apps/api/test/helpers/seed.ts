@@ -12,7 +12,6 @@ import {
   applications,
   endUsers,
   webhooks,
-  webhookDeliveries,
   packageSchedules,
   apiKeys,
   orgProxies,

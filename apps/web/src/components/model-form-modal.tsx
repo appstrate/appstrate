@@ -159,7 +159,7 @@ function OpenRouterCombobox({
           <CommandInput placeholder={placeholder} value={search} onValueChange={onSearchChange} />
           <CommandList>
             {isLoading && (
-              <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+              <div className="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
                 <Spinner className="size-3" />
                 {searchingText}
               </div>
@@ -180,12 +180,12 @@ function OpenRouterCombobox({
                     <Check
                       className={cn("mr-2 h-4 w-4", value === m.id ? "opacity-100" : "opacity-0")}
                     />
-                    <div className="flex-1 min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="truncate font-medium">{m.name}</div>
-                      <div className="truncate text-xs text-muted-foreground">{m.id}</div>
+                      <div className="text-muted-foreground truncate text-xs">{m.id}</div>
                     </div>
                     {m.contextWindow && (
-                      <span className="ml-2 shrink-0 text-xs text-muted-foreground">
+                      <span className="text-muted-foreground ml-2 shrink-0 text-xs">
                         {Math.round(m.contextWindow / 1000)}k
                       </span>
                     )}
@@ -477,7 +477,7 @@ function ModelFormBody({
               className={cn(showError("label") && "border-destructive")}
             />
             {showError("label") && errors.label?.message && (
-              <div className="text-sm text-destructive">{errors.label.message}</div>
+              <div className="text-destructive text-sm">{errors.label.message}</div>
             )}
           </div>
         )}
@@ -488,15 +488,15 @@ function ModelFormBody({
             <Label>{t("providerKeys.form.apiKey")}</Label>
             {selectedKey ? (
               <div className="flex gap-2">
-                <div className="flex-1 flex items-center gap-2 h-9 rounded-md border border-input bg-muted px-3 text-sm">
-                  <KeyRound className="size-3.5 text-muted-foreground shrink-0" />
+                <div className="border-input bg-muted flex h-9 flex-1 items-center gap-2 rounded-md border px-3 text-sm">
+                  <KeyRound className="text-muted-foreground size-3.5 shrink-0" />
                   <span className="truncate">{selectedKey.label}</span>
                 </div>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="shrink-0 h-9 w-9"
+                  className="h-9 w-9 shrink-0"
                   onClick={() => {
                     setValue("providerKeyId", "");
                     setValue("inlineApiKey", "");
@@ -538,12 +538,12 @@ function ModelFormBody({
               </div>
             )}
             {!selectedKey && inlineApiKey.trim() && (
-              <div className="text-sm text-muted-foreground">
+              <div className="text-muted-foreground text-sm">
                 {t("models.form.createProviderKeyHint")}
               </div>
             )}
             {showError("providerKeyId") && errors.providerKeyId?.message && (
-              <div className="text-sm text-destructive">{errors.providerKeyId.message}</div>
+              <div className="text-destructive text-sm">{errors.providerKeyId.message}</div>
             )}
           </div>
         )}
@@ -576,7 +576,7 @@ function ModelFormBody({
                   </SelectContent>
                 </Select>
                 {showError("api") && errors.api?.message && (
-                  <div className="text-sm text-destructive">{errors.api.message}</div>
+                  <div className="text-destructive text-sm">{errors.api.message}</div>
                 )}
               </div>
             )}
@@ -602,9 +602,9 @@ function ModelFormBody({
                 aria-invalid={showError("baseUrl") ? true : undefined}
                 className={cn(showError("baseUrl") && "border-destructive")}
               />
-              <div className="text-sm text-muted-foreground">{t("models.form.baseUrlHint")}</div>
+              <div className="text-muted-foreground text-sm">{t("models.form.baseUrlHint")}</div>
               {showError("baseUrl") && errors.baseUrl?.message && (
-                <div className="text-sm text-destructive">{errors.baseUrl.message}</div>
+                <div className="text-destructive text-sm">{errors.baseUrl.message}</div>
               )}
             </div>
 
@@ -625,7 +625,7 @@ function ModelFormBody({
                 className={cn(showError("modelId") && "border-destructive")}
               />
               {showError("modelId") && errors.modelId?.message && (
-                <div className="text-sm text-destructive">{errors.modelId.message}</div>
+                <div className="text-destructive text-sm">{errors.modelId.message}</div>
               )}
             </div>
           </>
@@ -633,8 +633,8 @@ function ModelFormBody({
 
         {/* Capabilities — visible for custom provider/model only (preset + OpenRouter auto-fill from source of truth) */}
         {isCustom && (
-          <div className="border-t pt-4 mt-2 space-y-4">
-            <Label className="text-sm font-medium text-muted-foreground">
+          <div className="mt-2 space-y-4 border-t pt-4">
+            <Label className="text-muted-foreground text-sm font-medium">
               {t("models.form.capabilities")}
             </Label>
             <div className="space-y-2">
@@ -646,7 +646,7 @@ function ModelFormBody({
                     checked={inputText}
                     onCheckedChange={(checked) => setValue("inputText", Boolean(checked))}
                   />
-                  <Label htmlFor="mdl-input-text" className="font-normal cursor-pointer">
+                  <Label htmlFor="mdl-input-text" className="cursor-pointer font-normal">
                     {t("models.form.inputText")}
                   </Label>
                 </div>
@@ -656,7 +656,7 @@ function ModelFormBody({
                     checked={inputImage}
                     onCheckedChange={(checked) => setValue("inputImage", Boolean(checked))}
                   />
-                  <Label htmlFor="mdl-input-image" className="font-normal cursor-pointer">
+                  <Label htmlFor="mdl-input-image" className="cursor-pointer font-normal">
                     {t("models.form.inputImage")}
                   </Label>
                 </div>
@@ -688,11 +688,11 @@ function ModelFormBody({
                 checked={reasoning}
                 onCheckedChange={(checked) => setValue("reasoning", Boolean(checked))}
               />
-              <Label htmlFor="mdl-reasoning" className="font-normal cursor-pointer">
+              <Label htmlFor="mdl-reasoning" className="cursor-pointer font-normal">
                 {t("models.form.reasoning")}
               </Label>
             </div>
-            <div className="text-sm text-muted-foreground">{t("models.form.capabilitiesHint")}</div>
+            <div className="text-muted-foreground text-sm">{t("models.form.capabilitiesHint")}</div>
           </div>
         )}
       </form>

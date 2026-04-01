@@ -1,0 +1,23 @@
+# Auto-detect text files and normalize line endings
+* text=auto eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+
+# Lock files — generated, exclude from diffs and language stats
+bun.lock linguist-generated=true
+bun.lock -diff
+
+# Vendor / generated
+apps/web/src/components/ui/** linguist-vendored=true

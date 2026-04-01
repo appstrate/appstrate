@@ -363,7 +363,7 @@ export function ProviderEditorInner({
             </div>
 
             <div className="flex gap-3">
-              <div className="space-y-1 flex-1">
+              <div className="flex-1 space-y-1">
                 <Label htmlFor="pe-iconUrl">{t("providers.form.iconUrl")}</Label>
                 <Input
                   id="pe-iconUrl"
@@ -373,7 +373,7 @@ export function ProviderEditorInner({
                   placeholder="https://..."
                 />
               </div>
-              <div className="space-y-1 flex-1">
+              <div className="flex-1 space-y-1">
                 <Label htmlFor="pe-docsUrl">{t("providers.form.docsUrl")}</Label>
                 <Input
                   id="pe-docsUrl"
@@ -405,7 +405,7 @@ export function ProviderEditorInner({
           {/* OAuth2 */}
           {fields.authMode === "oauth2" && (
             <>
-              <div className="text-sm font-medium text-muted-foreground">
+              <div className="text-muted-foreground text-sm font-medium">
                 {t("providers.form.sectionOAuth2")}
               </div>
 
@@ -473,13 +473,13 @@ export function ProviderEditorInner({
                   onChange={(e) => setField("defaultScopes", e.target.value)}
                   rows={3}
                 />
-                <div className="text-sm text-muted-foreground">
+                <div className="text-muted-foreground text-sm">
                   {t("providers.form.scopesHint")}
                 </div>
               </div>
 
               <div className="flex gap-3">
-                <div className="space-y-1 flex-1">
+                <div className="flex-1 space-y-1">
                   <Label htmlFor="pe-scopeSep">{t("providers.form.scopeSeparator")}</Label>
                   <Select
                     value={fields.scopeSeparator}
@@ -495,7 +495,7 @@ export function ProviderEditorInner({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1 flex-1">
+                <div className="flex-1 space-y-1">
                   <Label htmlFor="pe-tokenAuthMethod">{t("providers.form.tokenAuthMethod")}</Label>
                   <Select
                     value={fields.tokenAuthMethod}
@@ -514,7 +514,7 @@ export function ProviderEditorInner({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex-1 flex items-end gap-2">
+                <div className="flex flex-1 items-end gap-2">
                   <Checkbox
                     id="pe-pkce"
                     checked={fields.pkceEnabled}
@@ -522,7 +522,7 @@ export function ProviderEditorInner({
                   />
                   <Label
                     htmlFor="pe-pkce"
-                    className="text-sm text-muted-foreground font-normal cursor-pointer"
+                    className="text-muted-foreground cursor-pointer text-sm font-normal"
                   >
                     {t("providers.form.pkceEnabled")}
                   </Label>
@@ -530,14 +530,14 @@ export function ProviderEditorInner({
               </div>
 
               {/* Available scopes editor */}
-              <div className="text-sm font-medium text-muted-foreground mt-2">
+              <div className="text-muted-foreground mt-2 text-sm font-medium">
                 {t("providers.form.sectionAvailableScopes")}
               </div>
-              <div className="text-xs text-muted-foreground">
+              <div className="text-muted-foreground text-xs">
                 {t("providers.form.availableScopesHint")}
               </div>
               {availableScopes.map((scope, idx) => (
-                <div key={idx} className="border border-border rounded-md p-2.5 bg-card">
+                <div key={idx} className="border-border bg-card rounded-md border p-2.5">
                   <div className="flex items-center gap-2">
                     <Input
                       type="text"
@@ -545,10 +545,10 @@ export function ProviderEditorInner({
                       value={scope.value}
                       onChange={(e) => {
                         const next = [...availableScopes];
-                        next[idx] = { ...next[idx], value: e.target.value };
+                        next[idx] = { ...next[idx]!, value: e.target.value };
                         setAvailableScopes(next);
                       }}
-                      className="flex-[2] min-w-0"
+                      className="min-w-0 flex-[2]"
                     />
                     <Input
                       type="text"
@@ -556,7 +556,7 @@ export function ProviderEditorInner({
                       value={scope.label}
                       onChange={(e) => {
                         const next = [...availableScopes];
-                        next[idx] = { ...next[idx], label: e.target.value };
+                        next[idx] = { ...next[idx]!, label: e.target.value };
                         setAvailableScopes(next);
                       }}
                       className="flex-1"
@@ -579,7 +579,7 @@ export function ProviderEditorInner({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="border-dashed text-xs text-muted-foreground hover:text-foreground hover:border-primary"
+                className="text-muted-foreground hover:text-foreground hover:border-primary border-dashed text-xs"
                 onClick={() => setAvailableScopes([...availableScopes, { value: "", label: "" }])}
               >
                 {t("providers.form.addAvailableScope")}
@@ -590,7 +590,7 @@ export function ProviderEditorInner({
           {/* OAuth1 */}
           {fields.authMode === "oauth1" && (
             <>
-              <div className="text-sm font-medium text-muted-foreground">
+              <div className="text-muted-foreground text-sm font-medium">
                 {t("providers.form.sectionOAuth1")}
               </div>
 
@@ -655,7 +655,7 @@ export function ProviderEditorInner({
           {/* API Key */}
           {fields.authMode === "api_key" && (
             <>
-              <div className="text-sm font-medium text-muted-foreground">
+              <div className="text-muted-foreground text-sm font-medium">
                 {t("providers.form.sectionApiKey")}
               </div>
 
@@ -710,7 +710,7 @@ export function ProviderEditorInner({
 
           {/* Basic — no extra fields */}
           {fields.authMode === "basic" && (
-            <div className="text-sm text-muted-foreground py-4">
+            <div className="text-muted-foreground py-4 text-sm">
               {t("providers.authMode.basic")} —{" "}
               {t("providers.form.secretUnchanged", {
                 defaultValue: "No additional configuration needed.",
@@ -733,12 +733,12 @@ export function ProviderEditorInner({
                 />
                 <Label
                   htmlFor="pe-allow-all-uris"
-                  className="text-sm text-muted-foreground font-normal cursor-pointer"
+                  className="text-muted-foreground cursor-pointer text-sm font-normal"
                 >
                   {t("providers.form.allowAllUris")}
                 </Label>
               </div>
-              <div className="text-sm text-muted-foreground">
+              <div className="text-muted-foreground text-sm">
                 {t("providers.form.allowAllUrisHint")}
               </div>
             </div>
@@ -753,7 +753,7 @@ export function ProviderEditorInner({
                   rows={5}
                   placeholder="https://api.example.com/*"
                 />
-                <div className="text-sm text-muted-foreground">
+                <div className="text-muted-foreground text-sm">
                   {t("providers.form.authorizedUrisHint")}
                 </div>
               </div>

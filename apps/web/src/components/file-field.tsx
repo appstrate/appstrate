@@ -115,11 +115,11 @@ export function FileField({
         {label}
         {required && " *"}
       </Label>
-      {description && <p className="text-sm text-muted-foreground">{description}</p>}
+      {description && <p className="text-muted-foreground text-sm">{description}</p>}
       {files.length === 0 ? (
         <div
           className={cn(
-            "flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center text-sm text-muted-foreground transition-colors hover:border-muted-foreground/50",
+            "text-muted-foreground hover:border-muted-foreground/50 flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center text-sm transition-colors",
             dragOver && "border-primary bg-primary/5",
           )}
           onClick={() => inputRef.current?.click()}
@@ -145,12 +145,12 @@ export function FileField({
                 className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
               >
                 <span className="truncate font-medium">{f.name}</span>
-                <span className="ml-2 shrink-0 text-muted-foreground">{formatSize(f.size)}</span>
+                <span className="text-muted-foreground ml-2 shrink-0">{formatSize(f.size)}</span>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="ml-2 h-7 w-7 shrink-0 text-muted-foreground"
+                  className="text-muted-foreground ml-2 h-7 w-7 shrink-0"
                   onClick={() => removeFile(i)}
                 >
                   <X className="h-4 w-4" />
@@ -170,7 +170,7 @@ export function FileField({
           )}
         </>
       )}
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-destructive text-sm">{error}</p>}
       <input
         ref={inputRef}
         type="file"

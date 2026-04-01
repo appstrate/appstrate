@@ -17,7 +17,7 @@ export function ProviderIcon({ src, alt = "", className }: ProviderIconProps) {
       src={src}
       alt={alt}
       className={cn(
-        "shrink-0 rounded object-contain bg-muted/50 dark:bg-muted/50 p-1",
+        "bg-muted/50 dark:bg-muted/50 shrink-0 rounded object-contain p-1",
         "drop-shadow-[0_0_0.5px_rgba(0,0,0,0.5)] dark:drop-shadow-[0_0_0.5px_rgba(255,255,255,0.6)]",
         className,
       )}

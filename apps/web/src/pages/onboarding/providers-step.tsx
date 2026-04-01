@@ -89,7 +89,7 @@ export function OnboardingProvidersStep() {
           <Spinner />
         </div>
       ) : providers.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-8">
+        <p className="text-muted-foreground py-8 text-center text-sm">
           {t("onboarding.noProviders")}
         </p>
       ) : (
@@ -100,16 +100,16 @@ export function OnboardingProvidersStep() {
             const isConnecting = connectingProvider === provider.id;
 
             return (
-              <div key={provider.id} className="rounded-lg border border-border bg-card p-4">
+              <div key={provider.id} className="border-border bg-card rounded-lg border p-4">
                 <div className="flex items-center gap-3">
                   {provider.iconUrl && <ProviderIcon src={provider.iconUrl} className="size-8" />}
-                  <div className="flex-1 min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-semibold truncate">{provider.displayName}</h3>
+                      <h3 className="truncate text-sm font-semibold">{provider.displayName}</h3>
                       <ProviderConfigBadge enabled={provider.enabled} />
                     </div>
                     {provider.categories && provider.categories.length > 0 && (
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-muted-foreground text-xs">
                         {provider.categories.join(", ")}
                       </span>
                     )}

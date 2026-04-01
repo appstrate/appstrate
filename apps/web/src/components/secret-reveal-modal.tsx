@@ -27,21 +27,21 @@ export function SecretRevealModal({ open, onClose, title, secret }: Props) {
 
   return (
     <Modal open={open} onClose={handleClose} title={title}>
-      <p className="text-sm text-warning bg-warning/10 rounded-md px-3 py-2">
+      <p className="text-warning bg-warning/10 rounded-md px-3 py-2 text-sm">
         {t("settings:webhooks.secretWarning")}
       </p>
-      <div className="flex items-center gap-2 mt-3 rounded-md border border-border bg-muted/50 px-3 py-2">
-        <code className="flex-1 text-xs font-mono text-foreground break-all">{secret}</code>
+      <div className="border-border bg-muted/50 mt-3 flex items-center gap-2 rounded-md border px-3 py-2">
+        <code className="text-foreground flex-1 font-mono text-xs break-all">{secret}</code>
         <Button
           variant="ghost"
           size="sm"
-          className="text-xs text-primary hover:underline shrink-0"
+          className="text-primary shrink-0 text-xs hover:underline"
           onClick={handleCopy}
         >
           {copied ? t("common:btn.copied") : t("common:btn.copy")}
         </Button>
       </div>
-      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
+      <div className="border-border mt-4 flex justify-end gap-2 border-t pt-4">
         <Button onClick={handleClose}>{t("common:btn.done")}</Button>
       </div>
     </Modal>

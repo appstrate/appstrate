@@ -117,7 +117,7 @@ export function InviteAcceptPage() {
               <span>App</span>strate
             </h1>
           </div>
-          <p className="text-sm text-destructive text-center">{serverError}</p>
+          <p className="text-destructive text-center text-sm">{serverError}</p>
           <Button className="w-full" onClick={() => navigate("/")}>
             {t("invite.goHome")}
           </Button>
@@ -134,17 +134,17 @@ export function InviteAcceptPage() {
         <h1 className="text-xl font-bold">
           <span>App</span>strate
         </h1>
-        <p className="text-center text-sm text-muted-foreground">
+        <p className="text-muted-foreground text-center text-sm">
           {t("invite.description", {
             inviter: info.inviterName,
             org: info.orgName,
           })}
         </p>
       </div>
-      <div className="rounded-lg border bg-muted/50 p-4">
-        <div className="text-xs text-muted-foreground">{t("invite.emailLabel")}</div>
+      <div className="bg-muted/50 rounded-lg border p-4">
+        <div className="text-muted-foreground text-xs">{t("invite.emailLabel")}</div>
         <div className="text-sm font-medium">{info.email}</div>
-        <div className="text-xs text-muted-foreground mt-2">{t("invite.roleLabel")}</div>
+        <div className="text-muted-foreground mt-2 text-xs">{t("invite.roleLabel")}</div>
         <div className="text-sm font-medium">{t(roleI18nKey(info.role))}</div>
       </div>
     </div>
@@ -159,7 +159,7 @@ export function InviteAcceptPage() {
         <AuthLayout>
           <div className="flex flex-col gap-6">
             {inviteBanner}
-            <p className="text-sm text-destructive text-center">
+            <p className="text-destructive text-center text-sm">
               {t("invite.emailMismatch", {
                 userEmail: user.email,
                 inviteEmail: info.email,
@@ -188,7 +188,7 @@ export function InviteAcceptPage() {
       <AuthLayout>
         <div className="flex flex-col gap-6">
           {inviteBanner}
-          {serverError && <p className="text-sm text-destructive">{serverError}</p>}
+          {serverError && <p className="text-destructive text-sm">{serverError}</p>}
           <Button className="w-full" onClick={handleAcceptAuthenticated} disabled={accepting}>
             {accepting ? <Spinner /> : t("invite.joinOrg", { org: info.orgName })}
           </Button>
@@ -199,11 +199,11 @@ export function InviteAcceptPage() {
 
   // Unauthenticated: register or login mode
   const switchToLogin = (
-    <span className="text-center text-sm text-muted-foreground">
+    <span className="text-muted-foreground text-center text-sm">
       {t("invite.hasAccount")}{" "}
       <button
         type="button"
-        className="underline underline-offset-4 hover:text-primary"
+        className="hover:text-primary underline underline-offset-4"
         onClick={() => {
           setServerError(null);
           setMode("login");
@@ -215,11 +215,11 @@ export function InviteAcceptPage() {
   );
 
   const switchToRegister = (
-    <span className="text-center text-sm text-muted-foreground">
+    <span className="text-muted-foreground text-center text-sm">
       {t("invite.noAccount")}{" "}
       <button
         type="button"
-        className="underline underline-offset-4 hover:text-primary"
+        className="hover:text-primary underline underline-offset-4"
         onClick={() => {
           setServerError(null);
           setMode("register");
@@ -234,7 +234,7 @@ export function InviteAcceptPage() {
     <AuthLayout>
       <div className="flex flex-col gap-6">
         {inviteBanner}
-        {serverError && <p className="text-sm text-destructive">{serverError}</p>}
+        {serverError && <p className="text-destructive text-sm">{serverError}</p>}
         {mode === "register" ? (
           <RegisterForm
             fixedEmail={info.email}

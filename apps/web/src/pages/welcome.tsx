@@ -60,7 +60,7 @@ export function WelcomePage() {
           <h1 className="text-xl font-bold">
             <span>App</span>strate
           </h1>
-          <p className="text-center text-sm text-muted-foreground">{t("welcome.subtitle")}</p>
+          <p className="text-muted-foreground text-center text-sm">{t("welcome.subtitle")}</p>
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -78,7 +78,7 @@ export function WelcomePage() {
               />
             </div>
 
-            {serverError && <p className="text-sm text-destructive">{serverError}</p>}
+            {serverError && <p className="text-destructive text-sm">{serverError}</p>}
 
             <Button className="w-full" type="submit" disabled={loading}>
               {loading ? <Spinner /> : t("welcome.save")}

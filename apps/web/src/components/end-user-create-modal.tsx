@@ -100,7 +100,7 @@ export function EndUserCreateModal({ open, onClose, applicationId }: Props) {
             {...register("externalId")}
           />
         </div>
-        {errors.root?.message && <p className="text-sm text-destructive">{errors.root.message}</p>}
+        {errors.root?.message && <p className="text-destructive text-sm">{errors.root.message}</p>}
       </form>
     </Modal>
   );

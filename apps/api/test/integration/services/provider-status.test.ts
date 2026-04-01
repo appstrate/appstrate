@@ -14,7 +14,7 @@ describe("resolveProviderStatuses", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    const { id, cookie } = await createTestUser({ name: "Alice" });
+    const { id } = await createTestUser({ name: "Alice" });
     userId = id;
     const { org } = await createTestOrg(userId);
     orgId = org.id;

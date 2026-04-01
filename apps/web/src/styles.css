@@ -113,18 +113,18 @@
   input,
   select,
   textarea {
-    @apply w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm;
+    @apply border-input w-full rounded-md border bg-transparent px-3 py-2 text-sm;
   }
   input:focus,
   select:focus,
   textarea:focus {
-    @apply outline-none ring-1 ring-ring;
+    @apply ring-ring ring-1 outline-none;
   }
   textarea {
-    @apply resize-y min-h-[80px];
+    @apply min-h-[80px] resize-y;
   }
   label {
-    @apply block text-sm text-muted-foreground mb-1;
+    @apply text-muted-foreground mb-1 block text-sm;
   }
 
   /* Base button styling for unstyled buttons */
@@ -133,7 +133,7 @@
     @apply text-muted-foreground hover:text-foreground hover:bg-accent;
   }
   button:disabled {
-    @apply opacity-50 pointer-events-none;
+    @apply pointer-events-none opacity-50;
   }
 
   /* Checkbox reset — don't apply full-width input styles */

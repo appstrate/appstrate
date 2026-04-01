@@ -83,10 +83,10 @@ export function ApplicationCreateModal({ open, onClose }: Props) {
             })}
           />
           {showError("name") && (
-            <div className="text-sm text-destructive">{errors.name?.message}</div>
+            <div className="text-destructive text-sm">{errors.name?.message}</div>
           )}
         </div>
-        {errors.root?.message && <p className="text-sm text-destructive">{errors.root.message}</p>}
+        {errors.root?.message && <p className="text-destructive text-sm">{errors.root.message}</p>}
       </form>
     </Modal>
   );

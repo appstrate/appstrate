@@ -121,17 +121,17 @@ export function ForkPackageModal({ open, onClose, packageId, defaultName, type }
             autoFocus
           />
           {name.length > 0 && !SLUG_REGEX.test(name) && (
-            <p className="text-sm text-destructive">{t("fork.invalidName")}</p>
+            <p className="text-destructive text-sm">{t("fork.invalidName")}</p>
           )}
         </div>
-        <p className="text-sm text-muted-foreground mt-3">
+        <p className="text-muted-foreground mt-3 text-sm">
           {t("fork.prefix")}{" "}
           <code className="text-foreground">
             @{orgSlug}/{name || "..."}
           </code>
         </p>
         {errors.root?.message && (
-          <p className="text-sm text-destructive mt-2">{errors.root.message}</p>
+          <p className="text-destructive mt-2 text-sm">{errors.root.message}</p>
         )}
       </form>
     </Modal>

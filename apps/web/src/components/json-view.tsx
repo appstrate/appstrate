@@ -51,7 +51,7 @@ function CopyButton({ text }: { text: string }) {
     <Button
       variant="ghost"
       size="icon"
-      className={cn("h-7 w-7 text-muted-foreground", copied && "text-success")}
+      className={cn("text-muted-foreground h-7 w-7", copied && "text-success")}
       onClick={handleCopy}
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
@@ -64,10 +64,10 @@ export function JsonView({ data }: JsonViewProps) {
 
   return (
     <div className="relative">
-      <div className="absolute right-2 top-2 z-10">
+      <div className="absolute top-2 right-2 z-10">
         <CopyButton text={jsonString} />
       </div>
-      <div className="font-mono text-sm overflow-auto max-h-[500px]">
+      <div className="max-h-[500px] overflow-auto font-mono text-sm">
         <JsonViewLite
           data={data as Record<string, unknown>}
           shouldExpandNode={allExpanded}

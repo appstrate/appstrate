@@ -16,7 +16,7 @@ export function GoogleSignInButton({
   return (
     <Button
       variant="outline"
-      className="w-full text-foreground"
+      className="text-foreground w-full"
       type="button"
       disabled={loading}
       onClick={async () => {

@@ -187,9 +187,9 @@ function ScheduleParams({
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-lg border border-border bg-muted/30 p-4">
-          <p className="text-xs text-muted-foreground mb-1">{t("schedule.paramProfile")}</p>
-          <p className="text-sm font-medium inline-flex items-center gap-1.5">
+        <div className="border-border bg-muted/30 rounded-lg border p-4">
+          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramProfile")}</p>
+          <p className="inline-flex items-center gap-1.5 text-sm font-medium">
             <ProfileLabel
               profileType={schedule.profileType}
               profileName={schedule.profileName}
@@ -197,39 +197,39 @@ function ScheduleParams({
               iconSize="size-3.5"
             />
             {schedule.profileType && (
-              <UIBadge variant="outline" className="text-[10px] px-1 py-0">
+              <UIBadge variant="outline" className="px-1 py-0 text-[10px]">
                 {schedule.profileType}
               </UIBadge>
             )}
           </p>
         </div>
 
-        <div className="rounded-lg border border-border bg-muted/30 p-4">
-          <p className="text-xs text-muted-foreground mb-1">{t("schedule.paramFlow")}</p>
+        <div className="border-border bg-muted/30 rounded-lg border p-4">
+          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramFlow")}</p>
           <Link to={`/flows/${schedule.packageId}`} className="text-sm font-medium hover:underline">
             {flowDisplayName}
           </Link>
         </div>
 
-        <div className="rounded-lg border border-border bg-muted/30 p-4">
-          <p className="text-xs text-muted-foreground mb-1">{t("schedule.paramCron")}</p>
-          <p className="text-sm font-mono">{schedule.cronExpression}</p>
+        <div className="border-border bg-muted/30 rounded-lg border p-4">
+          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramCron")}</p>
+          <p className="font-mono text-sm">{schedule.cronExpression}</p>
         </div>
 
-        <div className="rounded-lg border border-border bg-muted/30 p-4">
-          <p className="text-xs text-muted-foreground mb-1">{t("schedule.paramTimezone")}</p>
+        <div className="border-border bg-muted/30 rounded-lg border p-4">
+          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramTimezone")}</p>
           <p className="text-sm font-medium">{schedule.timezone ?? "UTC"}</p>
         </div>
 
-        <div className="rounded-lg border border-border bg-muted/30 p-4">
-          <p className="text-xs text-muted-foreground mb-1">{t("schedule.paramNextRun")}</p>
+        <div className="border-border bg-muted/30 rounded-lg border p-4">
+          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramNextRun")}</p>
           <p className="text-sm font-medium">
             {schedule.nextRunAt ? formatDateField(schedule.nextRunAt) : "-"}
           </p>
         </div>
 
-        <div className="rounded-lg border border-border bg-muted/30 p-4">
-          <p className="text-xs text-muted-foreground mb-1">{t("schedule.paramLastRun")}</p>
+        <div className="border-border bg-muted/30 rounded-lg border p-4">
+          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramLastRun")}</p>
           <p className="text-sm font-medium">
             {schedule.lastRunAt ? formatDateField(schedule.lastRunAt) : "-"}
           </p>
@@ -239,7 +239,7 @@ function ScheduleParams({
       {/* Input data */}
       {input && Object.keys(input).length > 0 && (
         <div className="mt-6">
-          <h3 className="text-sm font-medium text-muted-foreground mb-3">
+          <h3 className="text-muted-foreground mb-3 text-sm font-medium">
             {t("schedule.tabInput")}
           </h3>
           <JsonView data={input} />
@@ -282,20 +282,20 @@ function ScheduleProviders({
 
   // User profile schedule — show provider cards directly
   return (
-    <div className="rounded-lg border border-border bg-card">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+    <div className="border-border bg-card rounded-lg border">
+      <div className="border-border flex items-center gap-2 border-b px-4 py-3">
         <ProfileLabel
           profileType={schedule.profileType}
           profileName={schedule.profileName}
           profileOwnerName={schedule.profileOwnerName}
           iconSize="size-4"
-          className="text-sm font-medium text-muted-foreground"
+          className="text-muted-foreground text-sm font-medium"
         />
-        <UIBadge variant="outline" className="text-[10px] px-1 py-0">
+        <UIBadge variant="outline" className="px-1 py-0 text-[10px]">
           {schedule.profileType}
         </UIBadge>
       </div>
-      <div className="p-2 space-y-2">
+      <div className="space-y-2 p-2">
         {flowProviders.map((providerId) => (
           <ProviderConnectionCard
             key={providerId}
@@ -371,7 +371,7 @@ function ScheduleHistory({
       fixedScheduleName={schedule.name}
       firstPageBanner={previewRow}
       emptyState={
-        <div className="rounded-md border border-border">
+        <div className="border-border rounded-md border">
           {previewRow}
           <div className="p-6">
             <EmptyState message={t("schedule.noExecutions")} icon={Clock} compact />

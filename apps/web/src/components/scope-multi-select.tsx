@@ -124,12 +124,12 @@ export function ScopeMultiSelect({ available, selected, onChange }: ScopeMultiSe
       {!noneSelected && (
         <div className="flex flex-wrap gap-1">
           {allSelected ? (
-            <span className="text-xs text-muted-foreground">{t("apiKeys.fullAccess")}</span>
+            <span className="text-muted-foreground text-xs">{t("apiKeys.fullAccess")}</span>
           ) : (
             groups
               .filter((g) => g.selectedCount > 0)
               .map((g) => (
-                <Badge key={g.resource} variant="secondary" className="text-[0.65rem] px-1.5 py-0">
+                <Badge key={g.resource} variant="secondary" className="px-1.5 py-0 text-[0.65rem]">
                   {g.resource}
                   {g.selectedCount < g.scopes.length && (
                     <span className="ml-0.5 opacity-60">

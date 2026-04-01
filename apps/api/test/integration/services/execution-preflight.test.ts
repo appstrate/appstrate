@@ -9,10 +9,7 @@ import { resolveManifestProviders } from "../../../src/lib/manifest-utils.ts";
 import { getPackageConfig } from "../../../src/services/state/index.ts";
 import { validateFlowReadiness } from "../../../src/services/flow-readiness.ts";
 import { getPackage } from "../../../src/services/flow-service.ts";
-import {
-  setUserFlowProviderOverride,
-  getDefaultProfileId,
-} from "../../../src/services/connection-profiles.ts";
+import { getDefaultProfileId } from "../../../src/services/connection-profiles.ts";
 import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../../../src/types/index.ts";
@@ -28,7 +25,7 @@ describe("execution preflight — provider profile resolution", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    const { id, cookie } = await createTestUser();
+    const { id } = await createTestUser();
     userId = id;
     const { org } = await createTestOrg(userId);
     orgId = org.id;

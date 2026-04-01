@@ -14,9 +14,9 @@ interface State {
 function ErrorFallback({ error, onRetry }: { error: Error | null; onRetry: () => void }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
+    <div className="text-muted-foreground flex flex-col items-center justify-center py-16 text-center">
       <p>{t("error.unexpected")}</p>
-      <p className="text-sm text-muted-foreground mt-2">{error?.message || t("error.unknown")}</p>
+      <p className="text-muted-foreground mt-2 text-sm">{error?.message || t("error.unknown")}</p>
       <Button className="mt-4" onClick={onRetry}>
         {t("btn.retry")}
       </Button>
@@ -25,17 +25,17 @@ function ErrorFallback({ error, onRetry }: { error: Error | null; onRetry: () =>
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false, error: null };
+  override state: State = { hasError: false, error: null };
 
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
-  componentDidCatch(_error: Error, _info: ErrorInfo) {
+  override componentDidCatch(_error: Error, _info: ErrorInfo) {
     // Errors are already surfaced via getDerivedStateFromError → ErrorFallback
   }
 
-  render() {
+  override render() {
     if (this.state.hasError) {
       return (
         <ErrorFallback

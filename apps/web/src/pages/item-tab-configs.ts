@@ -46,6 +46,6 @@ export const ITEM_TAB_CONFIGS: ItemTabConfig[] = [
   },
 ];
 
-export const skillTabConfig = ITEM_TAB_CONFIGS[0];
-export const toolTabConfig = ITEM_TAB_CONFIGS[1];
-export const providerTabConfig = ITEM_TAB_CONFIGS[2];
+export const skillTabConfig: ItemTabConfig = ITEM_TAB_CONFIGS[0]!;
+export const toolTabConfig: ItemTabConfig = ITEM_TAB_CONFIGS[1]!;
+export const providerTabConfig: ItemTabConfig = ITEM_TAB_CONFIGS[2]!;

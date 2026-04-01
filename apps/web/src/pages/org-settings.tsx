@@ -324,10 +324,10 @@ export function OrgSettingsPage() {
       {tab === "general" && (
         <>
           {/* Organisation info */}
-          <div className="text-sm font-medium text-muted-foreground mb-4">
+          <div className="text-muted-foreground mb-4 text-sm font-medium">
             {t("orgSettings.orgTitle")}
           </div>
-          <div className="rounded-lg border border-border bg-card p-5 mb-4">
+          <div className="border-border bg-card mb-4 rounded-lg border p-5">
             <div className="flex items-center gap-3">
               <div className="flex-1">
                 {editingName ? (
@@ -349,7 +349,7 @@ export function OrgSettingsPage() {
                 ) : (
                   <>
                     <h3 className="text-[0.95rem] font-semibold">{currentOrg.name}</h3>
-                    <span className="text-sm text-muted-foreground">{currentOrg.slug}</span>
+                    <span className="text-muted-foreground text-sm">{currentOrg.slug}</span>
                   </>
                 )}
               </div>
@@ -370,14 +370,14 @@ export function OrgSettingsPage() {
           {/* Danger zone */}
           {isOwner && (
             <>
-              <div className="text-sm font-medium text-muted-foreground mb-4 mt-8">
+              <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
                 {t("orgSettings.dangerZone")}
               </div>
-              <div className="rounded-lg border border-destructive bg-card p-5">
+              <div className="border-destructive bg-card rounded-lg border p-5">
                 <div className="flex items-center gap-3">
                   <div className="flex-1">
                     <h3 className="text-sm font-semibold">{t("orgSettings.deleteOrg")}</h3>
-                    <span className="text-sm text-muted-foreground">
+                    <span className="text-muted-foreground text-sm">
                       {t("orgSettings.deleteOrgDesc")}
                     </span>
                   </div>
@@ -401,7 +401,7 @@ export function OrgSettingsPage() {
           {isAdmin && (
             <form
               onSubmit={inviteForm.handleSubmit(handleInvite)}
-              className="flex gap-2 mb-4 items-start"
+              className="mb-4 flex items-start gap-2"
             >
               <div className="flex-1">
                 <div className="flex gap-2">
@@ -429,7 +429,7 @@ export function OrgSettingsPage() {
                   </Select>
                 </div>
                 {inviteForm.formState.errors.root && (
-                  <p className="text-sm text-destructive mt-1">
+                  <p className="text-destructive mt-1 text-sm">
                     {inviteForm.formState.errors.root.message}
                   </p>
                 )}
@@ -447,12 +447,12 @@ export function OrgSettingsPage() {
               const isMemberOwner = member.role === "owner";
 
               return (
-                <div key={member.userId} className="rounded-lg border border-border bg-card p-5">
+                <div key={member.userId} className="border-border bg-card rounded-lg border p-5">
                   <div className="flex items-center gap-3">
                     <div className="flex-1">
                       <h3 className="text-sm font-semibold">{label}</h3>
                       {member.email && (
-                        <span className="text-sm text-muted-foreground">{member.email}</span>
+                        <span className="text-muted-foreground text-sm">{member.email}</span>
                       )}
                     </div>
                     <Badge
@@ -464,7 +464,7 @@ export function OrgSettingsPage() {
                     </Badge>
                   </div>
                   {!isMemberOwner && (
-                    <div className="mt-3 pt-3 border-t border-border flex gap-2">
+                    <div className="border-border mt-3 flex gap-2 border-t pt-3">
                       {isOwner && (
                         <Select
                           value={member.role}
@@ -504,22 +504,22 @@ export function OrgSettingsPage() {
           {/* Pending invitations */}
           {invitations.length > 0 && (
             <>
-              <div className="text-sm font-medium text-muted-foreground mb-4 mt-6">
+              <div className="text-muted-foreground mt-6 mb-4 text-sm font-medium">
                 {t("orgSettings.pendingInvitations")}
               </div>
               <div className="flex flex-col gap-3">
                 {invitations.map((inv) => (
-                  <div key={inv.id} className="rounded-lg border border-border bg-card p-5">
+                  <div key={inv.id} className="border-border bg-card rounded-lg border p-5">
                     <div className="flex items-center gap-3">
                       <div className="flex-1">
                         <h3 className="text-sm font-semibold">{inv.email}</h3>
-                        <span className="text-sm text-muted-foreground">
+                        <span className="text-muted-foreground text-sm">
                           {t(roleI18nKey(inv.role))}
                         </span>
                       </div>
                       <Badge variant="pending">{t("orgSettings.invited")}</Badge>
                     </div>
-                    <div className="mt-3 pt-3 border-t border-border flex gap-2">
+                    <div className="border-border mt-3 flex gap-2 border-t pt-3">
                       {isOwner && (
                         <Select
                           value={inv.role}
@@ -800,7 +800,7 @@ function ProxiesTab({
 
   return (
     <>
-      <div className="flex items-center justify-end gap-2 mb-4">
+      <div className="mb-4 flex items-center justify-end gap-2">
         <Button onClick={onCreate}>{t("proxies.add")}</Button>
       </div>
 
@@ -809,12 +809,12 @@ function ProxiesTab({
           {proxies.map((p) => {
             const isBuiltIn = p.source === "built-in";
             return (
-              <div key={p.id} className="rounded-lg border border-border bg-card p-5">
-                <div className="flex items-center gap-3 mb-3">
+              <div key={p.id} className="border-border bg-card rounded-lg border p-5">
+                <div className="mb-3 flex items-center gap-3">
                   <div className="flex-1">
                     <h3 className="text-[0.95rem] font-semibold">{p.label}</h3>
-                    <span className="text-sm text-muted-foreground">{p.urlPrefix}</span>
-                    <div className="flex flex-wrap gap-1.5 mt-1">
+                    <span className="text-muted-foreground text-sm">{p.urlPrefix}</span>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
                       {p.isDefault && <Badge variant="success">{t("proxies.default")}</Badge>}
                       {isBuiltIn && (
                         <Badge variant="secondary" className="opacity-60">
@@ -829,7 +829,7 @@ function ProxiesTab({
                     </div>
                   </div>
                 </div>
-                <div className="mt-3 pt-3 border-t border-border flex gap-2 items-center justify-end">
+                <div className="border-border mt-3 flex items-center justify-end gap-2 border-t pt-3">
                   <Button
                     variant="outline"
                     size="sm"
@@ -903,7 +903,7 @@ function ProviderKeysSection({
 
   return (
     <div className="mb-8">
-      <div className="flex items-center justify-end gap-2 mb-4">
+      <div className="mb-4 flex items-center justify-end gap-2">
         <Button onClick={onCreate}>{t("providerKeys.add")}</Button>
       </div>
 
@@ -913,15 +913,15 @@ function ProviderKeysSection({
             const provider = findProviderByApiAndBaseUrl(pk.api, pk.baseUrl);
             const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
             return (
-              <div key={pk.id} className="rounded-lg border border-border bg-card p-5">
-                <div className="flex items-center gap-3 mb-3">
+              <div key={pk.id} className="border-border bg-card rounded-lg border p-5">
+                <div className="mb-3 flex items-center gap-3">
                   {ProviderIcon && <ProviderIcon className="size-5" />}
                   <div className="flex-1">
                     <h3 className="text-[0.95rem] font-semibold">{pk.label}</h3>
-                    <span className="text-sm text-muted-foreground">{pk.api}</span>
+                    <span className="text-muted-foreground text-sm">{pk.api}</span>
                   </div>
                 </div>
-                <div className="mt-3 pt-3 border-t border-border flex gap-2 items-center justify-end">
+                <div className="border-border mt-3 flex items-center justify-end gap-2 border-t pt-3">
                   <Button
                     variant="outline"
                     size="sm"
@@ -948,7 +948,7 @@ function ProviderKeysSection({
                     </>
                   )}
                   {pk.source === "built-in" && (
-                    <span className="text-xs text-muted-foreground">{t("models.builtIn")}</span>
+                    <span className="text-muted-foreground text-xs">{t("models.builtIn")}</span>
                   )}
                 </div>
               </div>
@@ -997,7 +997,7 @@ function ModelsTab({
 
   return (
     <>
-      <div className="flex items-center justify-end gap-2 mb-4">
+      <div className="mb-4 flex items-center justify-end gap-2">
         <Button onClick={onCreate}>{t("models.add")}</Button>
       </div>
 
@@ -1008,15 +1008,15 @@ function ModelsTab({
             const provider = findProviderByApiAndBaseUrl(m.api, m.baseUrl);
             const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
             return (
-              <div key={m.id} className="rounded-lg border border-border bg-card p-5">
-                <div className="flex items-center gap-3 mb-3">
+              <div key={m.id} className="border-border bg-card rounded-lg border p-5">
+                <div className="mb-3 flex items-center gap-3">
                   {ProviderIcon && <ProviderIcon className="size-5" />}
                   <div className="flex-1">
                     <h3 className="text-[0.95rem] font-semibold">{m.label}</h3>
-                    <span className="text-sm text-muted-foreground">
+                    <span className="text-muted-foreground text-sm">
                       {m.api} / {m.modelId}
                     </span>
-                    <div className="flex flex-wrap gap-1.5 mt-1">
+                    <div className="mt-1 flex flex-wrap gap-1.5">
                       {m.isDefault && <Badge variant="success">{t("models.default")}</Badge>}
                       {isBuiltIn && (
                         <Badge variant="secondary" className="opacity-60">
@@ -1031,7 +1031,7 @@ function ModelsTab({
                     </div>
                   </div>
                 </div>
-                <div className="mt-3 pt-3 border-t border-border flex gap-2 items-center justify-end">
+                <div className="border-border mt-3 flex items-center justify-end gap-2 border-t pt-3">
                   <Button
                     variant="outline"
                     size="sm"
@@ -1155,13 +1155,13 @@ function BillingTab() {
   return (
     <>
       {/* Current plan */}
-      <div className="rounded-lg border border-border bg-card p-5 mb-4">
-        <div className="flex items-center justify-between mb-4">
+      <div className="border-border bg-card mb-4 rounded-lg border p-5">
+        <div className="mb-4 flex items-center justify-between">
           <div>
             <h3 className="text-[0.95rem] font-semibold">
               {t("billing.currentPlan")}: {billing.plan.name}
             </h3>
-            <p className="text-sm text-muted-foreground mt-1">{statusLabel}</p>
+            <p className="text-muted-foreground mt-1 text-sm">{statusLabel}</p>
           </div>
           {hasSubscription ? (
             <Button
@@ -1181,11 +1181,11 @@ function BillingTab() {
 
         {/* Usage bar */}
         <div className="mb-2">
-          <div className="flex items-center justify-between text-sm mb-1">
+          <div className="mb-1 flex items-center justify-between text-sm">
             <span className="text-muted-foreground">{t("billing.usage")}</span>
             <span className="font-medium">
               {billing.usagePercent}%
-              <span className="ml-2 text-xs text-muted-foreground font-normal">
+              <span className="text-muted-foreground ml-2 text-xs font-normal">
                 (
                 {t("billing.creditsCount", {
                   used: billing.creditsUsed,
@@ -1195,7 +1195,7 @@ function BillingTab() {
               </span>
             </span>
           </div>
-          <div className="h-2 rounded-full bg-muted overflow-hidden">
+          <div className="bg-muted h-2 overflow-hidden rounded-full">
             <div
               className={`h-full rounded-full transition-all ${getUsageBarColor(billing.usagePercent)}`}
               style={{ width: `${Math.min(billing.usagePercent, 100)}%` }}
@@ -1206,7 +1206,7 @@ function BillingTab() {
 
       {/* Warning banners */}
       {billing.status === "past_due" && (
-        <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 mb-4 text-sm">
+        <div className="mb-4 rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 text-sm">
           <p className="font-medium text-yellow-600 dark:text-yellow-400">
             {t("billing.pastDueWarning")}
           </p>
@@ -1215,7 +1215,7 @@ function BillingTab() {
       )}
 
       {billing.status === "canceling" && billing.periodEnd && (
-        <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 mb-4 text-sm">
+        <div className="mb-4 rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 text-sm">
           <p className="font-medium text-yellow-600 dark:text-yellow-400">
             {t("billing.cancelingWarning", {
               date: formatBillingDate(billing.periodEnd),
@@ -1226,8 +1226,8 @@ function BillingTab() {
 
       {/* Available plans */}
       {billing.plans.length > 0 && (
-        <div className="rounded-lg border border-border bg-card p-5 mb-4">
-          <h3 className="text-[0.95rem] font-semibold mb-3">{t("billing.upgradePlans")}</h3>
+        <div className="border-border bg-card mb-4 rounded-lg border p-5">
+          <h3 className="mb-3 text-[0.95rem] font-semibold">{t("billing.upgradePlans")}</h3>
           <PlanGrid
             plans={billing.plans}
             currentPlanId={billing.plan.id}

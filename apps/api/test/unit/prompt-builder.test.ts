@@ -153,7 +153,11 @@ describe("buildEnrichedPrompt — user input", () => {
           type: "object",
           properties: {
             text: { type: "string" },
-            document: { type: "string", format: "uri", contentMediaType: "application/octet-stream" },
+            document: {
+              type: "string",
+              format: "uri",
+              contentMediaType: "application/octet-stream",
+            },
           },
         },
       },
@@ -259,9 +263,7 @@ describe("buildEnrichedPrompt — memories", () => {
 
   it("includes memories regardless of available tools", () => {
     const ctx = baseContext({
-      memories: [
-        { id: 1, content: "Some memory", createdAt: "2025-01-15" },
-      ],
+      memories: [{ id: 1, content: "Some memory", createdAt: "2025-01-15" }],
       availableTools: [],
     });
     const prompt = buildEnrichedPrompt(ctx);
@@ -377,6 +379,8 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     expect(prompt).toContain("X-Target");
     expect(prompt).toContain("Gmail");
     expect(prompt).toContain("@test/gmail");
+    // Auth line must show the correct credential placeholder
+    expect(prompt).toContain("Authorization: Bearer {{access_token}}");
   });
 
   it("omits provider section when no connected providers", () => {
@@ -433,6 +437,25 @@ describe("buildEnrichedPrompt — provider documentation", () => {
 
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("all public URLs");
+  });
+
+  it("shows correct auth placeholder for api_key providers", () => {
+    const ctx = baseContext({
+      tokens: { "@test/stripe": "tok" },
+      providers: [
+        {
+          id: "@test/stripe",
+          displayName: "Stripe",
+          authMode: "api_key",
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer ",
+          authorizedUris: ["https://api.stripe.com/*"],
+        },
+      ],
+    });
+
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("Authorization: Bearer {{api_key}}");
   });
 
   it("shows credential variables for credentialSchema providers", () => {

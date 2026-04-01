@@ -84,7 +84,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       {/* URL (read-only) */}
       <div className="space-y-2">
         <Label>{t("settings:webhooks.urlLabel")}</Label>
-        <div className="font-mono text-sm bg-muted rounded px-3 py-2 break-all">{webhook.url}</div>
+        <div className="bg-muted rounded px-3 py-2 font-mono text-sm break-all">{webhook.url}</div>
       </div>
 
       <WebhookFormFields
@@ -113,9 +113,9 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       </Button>
 
       {/* Secret section */}
-      <div className="space-y-2 pt-4 border-t border-border">
+      <div className="border-border space-y-2 border-t pt-4">
         <Label>{t("settings:webhooks.secret")}</Label>
-        <div className="font-mono text-sm bg-muted rounded px-3 py-2">whsec_****...</div>
+        <div className="bg-muted rounded px-3 py-2 font-mono text-sm">whsec_****...</div>
         <Button
           variant="outline"
           size="sm"
@@ -142,7 +142,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
           </>
         }
       >
-        <p className="text-sm text-muted-foreground">{t("settings:webhooks.rotateConfirm")}</p>
+        <p className="text-muted-foreground text-sm">{t("settings:webhooks.rotateConfirm")}</p>
       </Modal>
 
       {/* Rotated secret display */}
@@ -156,15 +156,15 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       )}
 
       {/* Test */}
-      <div className="pt-4 border-t border-border">
+      <div className="border-border border-t pt-4">
         <Button variant="outline" size="sm" onClick={handleTest} disabled={testMutation.isPending}>
           {testMutation.isPending ? <Spinner /> : t("settings:webhooks.sendTest")}
         </Button>
       </div>
 
       {/* Danger zone */}
-      <div className="pt-4 border-t border-border space-y-3">
-        <h3 className="text-sm font-semibold text-destructive">
+      <div className="border-border space-y-3 border-t pt-4">
+        <h3 className="text-destructive text-sm font-semibold">
           {t("settings:webhooks.dangerZone")}
         </h3>
         <Button
@@ -197,7 +197,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
           </>
         }
       >
-        <p className="text-sm text-muted-foreground">{t("settings:webhooks.deleteConfirm")}</p>
+        <p className="text-muted-foreground text-sm">{t("settings:webhooks.deleteConfirm")}</p>
       </Modal>
     </div>
   );

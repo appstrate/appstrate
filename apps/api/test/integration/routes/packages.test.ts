@@ -1,14 +1,10 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import {
-  createTestContext,
-  authHeaders,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedFlow, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
-import { packages, packageVersions } from "@appstrate/db/schema";
+import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 
 const app = getTestApp();
@@ -20,7 +16,6 @@ describe("Packages API", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "pkgorg" });
   });
-
 
   // ═══════════════════════════════════════════════
   // GET /api/packages/flows — list flows
@@ -51,9 +46,7 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const flow = body.flows.find(
-        (f: { id: string }) => f.id === "@pkgorg/list-flow",
-      );
+      const flow = body.flows.find((f: { id: string }) => f.id === "@pkgorg/list-flow");
       expect(flow).toBeDefined();
     });
 
@@ -71,9 +64,7 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const leaked = body.flows.find(
-        (f: { id: string }) => f.id === "@otherorg/secret-flow",
-      );
+      const leaked = body.flows.find((f: { id: string }) => f.id === "@otherorg/secret-flow");
       expect(leaked).toBeUndefined();
     });
 
@@ -119,9 +110,7 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const skill = body.skills.find(
-        (s: { id: string }) => s.id === "@pkgorg/my-skill",
-      );
+      const skill = body.skills.find((s: { id: string }) => s.id === "@pkgorg/my-skill");
       expect(skill).toBeDefined();
     });
 
@@ -154,10 +143,9 @@ describe("Packages API", () => {
     });
 
     it("returns 404 for non-existent package", async () => {
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/does-not-exist",
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/packages/flows/@pkgorg/does-not-exist", {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(404);
     });
@@ -170,18 +158,15 @@ describe("Packages API", () => {
         createdBy: otherCtx.user.id,
       });
 
-      const res = await app.request(
-        "/api/packages/flows/@alien/private-flow",
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/packages/flows/@alien/private-flow", {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(404);
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/detail-flow",
-      );
+      const res = await app.request("/api/packages/flows/@pkgorg/detail-flow");
       expect(res.status).toBe(401);
     });
   });
@@ -206,10 +191,9 @@ describe("Packages API", () => {
         draftContent: "# Detail Skill",
       });
 
-      const res = await app.request(
-        "/api/packages/skills/@pkgorg/detail-skill",
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/packages/skills/@pkgorg/detail-skill", {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
@@ -218,10 +202,9 @@ describe("Packages API", () => {
     });
 
     it("returns 404 for non-existent skill", async () => {
-      const res = await app.request(
-        "/api/packages/skills/@pkgorg/nope",
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/packages/skills/@pkgorg/nope", {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(404);
     });
@@ -358,25 +341,22 @@ describe("Packages API", () => {
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/update-flow",
-        {
-          method: "PUT",
-          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-          body: JSON.stringify({
-            manifest: {
-              name: "@pkgorg/update-flow",
-              version: "0.2.0",
-              type: "flow",
-              schemaVersion: "1.0",
-              displayName: "Update Flow",
-              description: "Updated flow",
-            },
-            content: "Updated prompt content.",
-            lockVersion: flow.lockVersion,
-          }),
-        },
-      );
+      const res = await app.request("/api/packages/flows/@pkgorg/update-flow", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@pkgorg/update-flow",
+            version: "0.2.0",
+            type: "flow",
+            schemaVersion: "1.0",
+            displayName: "Update Flow",
+            description: "Updated flow",
+          },
+          content: "Updated prompt content.",
+          lockVersion: flow.lockVersion,
+        }),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
@@ -391,48 +371,42 @@ describe("Packages API", () => {
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/no-lock-flow",
-        {
-          method: "PUT",
-          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-          body: JSON.stringify({
-            manifest: {
-              name: "@pkgorg/no-lock-flow",
-              version: "0.2.0",
-              type: "flow",
-              schemaVersion: "1.0",
-              displayName: "No Lock Flow",
-              description: "No lockVersion",
-            },
-            content: "content",
-          }),
-        },
-      );
+      const res = await app.request("/api/packages/flows/@pkgorg/no-lock-flow", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@pkgorg/no-lock-flow",
+            version: "0.2.0",
+            type: "flow",
+            schemaVersion: "1.0",
+            displayName: "No Lock Flow",
+            description: "No lockVersion",
+          },
+          content: "content",
+        }),
+      });
 
       expect(res.status).toBe(400);
     });
 
     it("returns 404 for non-existent flow", async () => {
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/ghost-flow",
-        {
-          method: "PUT",
-          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-          body: JSON.stringify({
-            manifest: {
-              name: "@pkgorg/ghost-flow",
-              version: "0.1.0",
-              type: "flow",
-              schemaVersion: "1.0",
-              displayName: "Ghost Flow",
-              description: "Ghost",
-            },
-            content: "ghost",
-            lockVersion: 1,
-          }),
-        },
-      );
+      const res = await app.request("/api/packages/flows/@pkgorg/ghost-flow", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@pkgorg/ghost-flow",
+            version: "0.1.0",
+            type: "flow",
+            schemaVersion: "1.0",
+            displayName: "Ghost Flow",
+            description: "Ghost",
+          },
+          content: "ghost",
+          lockVersion: 1,
+        }),
+      });
 
       expect(res.status).toBe(404);
     });
@@ -445,25 +419,22 @@ describe("Packages API", () => {
         createdBy: otherCtx.user.id,
       });
 
-      const res = await app.request(
-        "/api/packages/flows/@foreignorg/their-flow",
-        {
-          method: "PUT",
-          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-          body: JSON.stringify({
-            manifest: {
-              name: "@foreignorg/their-flow",
-              version: "0.2.0",
-              type: "flow",
-              schemaVersion: "1.0",
-              displayName: "Hijack Flow",
-              description: "Hijack",
-            },
-            content: "hijack",
-            lockVersion: 1,
-          }),
-        },
-      );
+      const res = await app.request("/api/packages/flows/@foreignorg/their-flow", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@foreignorg/their-flow",
+            version: "0.2.0",
+            type: "flow",
+            schemaVersion: "1.0",
+            displayName: "Hijack Flow",
+            description: "Hijack",
+          },
+          content: "hijack",
+          lockVersion: 1,
+        }),
+      });
 
       expect(res.status).toBe(403);
     });
@@ -481,13 +452,10 @@ describe("Packages API", () => {
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/delete-me",
-        {
-          method: "DELETE",
-          headers: authHeaders(ctx),
-        },
-      );
+      const res = await app.request("/api/packages/flows/@pkgorg/delete-me", {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(204);
       await assertDbMissing(packages, eq(packages.id, "@pkgorg/delete-me"));
@@ -501,22 +469,16 @@ describe("Packages API", () => {
         createdBy: otherCtx.user.id,
       });
 
-      const res = await app.request(
-        "/api/packages/flows/@otherdelorg/their-flow",
-        {
-          method: "DELETE",
-          headers: authHeaders(ctx),
-        },
-      );
+      const res = await app.request("/api/packages/flows/@otherdelorg/their-flow", {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(403);
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/delete-me",
-        { method: "DELETE" },
-      );
+      const res = await app.request("/api/packages/flows/@pkgorg/delete-me", { method: "DELETE" });
 
       expect(res.status).toBe(401);
     });
@@ -534,10 +496,9 @@ describe("Packages API", () => {
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/no-ver-flow/versions",
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/packages/flows/@pkgorg/no-ver-flow/versions", {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
@@ -561,10 +522,9 @@ describe("Packages API", () => {
         version: "0.2.0",
       });
 
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/versioned-flow/versions",
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/packages/flows/@pkgorg/versioned-flow/versions", {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
@@ -573,18 +533,15 @@ describe("Packages API", () => {
     });
 
     it("returns 404 for non-existent package", async () => {
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/no-such-flow/versions",
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/packages/flows/@pkgorg/no-such-flow/versions", {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(404);
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/versioned-flow/versions",
-      );
+      const res = await app.request("/api/packages/flows/@pkgorg/versioned-flow/versions");
 
       expect(res.status).toBe(401);
     });
@@ -615,10 +572,9 @@ describe("Packages API", () => {
         version: "1.0.0",
       });
 
-      const res = await app.request(
-        "/api/packages/skills/@pkgorg/versioned-skill/versions",
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/packages/skills/@pkgorg/versioned-skill/versions", {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
@@ -646,10 +602,7 @@ describe("Packages API", () => {
 
     it("returns 400 for non-zip file extension", async () => {
       const formData = new FormData();
-      formData.append(
-        "file",
-        new File([new Uint8Array([1, 2, 3])], "package.txt"),
-      );
+      formData.append("file", new File([new Uint8Array([1, 2, 3])], "package.txt"));
 
       const res = await app.request("/api/packages/import", {
         method: "POST",
@@ -663,10 +616,7 @@ describe("Packages API", () => {
     it("returns 400 for invalid zip content", async () => {
       const formData = new FormData();
       // Use non-zero bytes — Hono's test FormData parser drops filename on all-zero content (Bun bug)
-      formData.append(
-        "file",
-        new File([new Uint8Array([1, 2, 3, 4])], "bad-package.zip"),
-      );
+      formData.append("file", new File([new Uint8Array([1, 2, 3, 4])], "bad-package.zip"));
 
       const res = await app.request("/api/packages/import", {
         method: "POST",
@@ -679,10 +629,7 @@ describe("Packages API", () => {
 
     it("returns 401 without authentication", async () => {
       const formData = new FormData();
-      formData.append(
-        "file",
-        new File([new Uint8Array([1])], "import.zip"),
-      );
+      formData.append("file", new File([new Uint8Array([1])], "import.zip"));
 
       const res = await app.request("/api/packages/import", {
         method: "POST",
@@ -718,12 +665,8 @@ describe("Packages API", () => {
       });
       expect(res1.status).toBe(200);
       const body1 = (await res1.json()) as any;
-      const myFlow = body1.flows.find(
-        (f: { id: string }) => f.id === "@pkgorg/my-flow",
-      );
-      const theirFlow = body1.flows.find(
-        (f: { id: string }) => f.id === "@isolatedorg/their-flow",
-      );
+      const myFlow = body1.flows.find((f: { id: string }) => f.id === "@pkgorg/my-flow");
+      const theirFlow = body1.flows.find((f: { id: string }) => f.id === "@isolatedorg/their-flow");
       expect(myFlow).toBeDefined();
       expect(theirFlow).toBeUndefined();
 
@@ -739,9 +682,7 @@ describe("Packages API", () => {
       const theirFlow2 = body2.flows.find(
         (f: { id: string }) => f.id === "@isolatedorg/their-flow",
       );
-      const myFlow2 = body2.flows.find(
-        (f: { id: string }) => f.id === "@pkgorg/my-flow",
-      );
+      const myFlow2 = body2.flows.find((f: { id: string }) => f.id === "@pkgorg/my-flow");
       expect(theirFlow2).toBeDefined();
       expect(myFlow2).toBeUndefined();
     });
@@ -761,10 +702,9 @@ describe("Packages API", () => {
         },
       });
 
-      const res = await app.request(
-        "/api/packages/skills/@crossorg/secret-skill",
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/packages/skills/@crossorg/secret-skill", {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(404);
     });
@@ -782,10 +722,9 @@ describe("Packages API", () => {
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/info-flow/versions/info",
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/packages/flows/@pkgorg/info-flow/versions/info", {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
@@ -794,10 +733,9 @@ describe("Packages API", () => {
     });
 
     it("returns 404 for non-existent flow", async () => {
-      const res = await app.request(
-        "/api/packages/flows/@pkgorg/ghost/versions/info",
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/packages/flows/@pkgorg/ghost/versions/info", {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(404);
     });

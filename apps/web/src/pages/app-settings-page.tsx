@@ -72,7 +72,7 @@ export function AppSettingsPage() {
         }
       />
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 max-w-xl">
+      <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-6">
         <div className="space-y-2">
           <Label htmlFor="app-name">{t("applications.nameLabel")}</Label>
           <Input
@@ -82,13 +82,13 @@ export function AppSettingsPage() {
             placeholder={t("applications.namePlaceholder")}
           />
           {showError("name") && (
-            <p className="text-sm text-destructive">{t("validation.required", { ns: "common" })}</p>
+            <p className="text-destructive text-sm">{t("validation.required", { ns: "common" })}</p>
           )}
         </div>
 
         <div className="space-y-2">
           <Label>{t("applications.redirectDomains")}</Label>
-          <p className="text-sm text-muted-foreground">{t("applications.redirectDomainsHint")}</p>
+          <p className="text-muted-foreground text-sm">{t("applications.redirectDomainsHint")}</p>
           <div className="flex flex-col gap-2">
             {activeDomains.map((domain, index) => (
               <div key={index} className="flex items-center gap-2">
@@ -133,14 +133,14 @@ export function AppSettingsPage() {
 
       {!application.isDefault && (
         <>
-          <div className="text-sm font-medium text-muted-foreground mb-4 mt-8">
+          <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
             {t("applications.dangerZone")}
           </div>
-          <div className="rounded-lg border border-destructive bg-card p-5 max-w-xl">
+          <div className="border-destructive bg-card max-w-xl rounded-lg border p-5">
             <div className="flex items-center gap-3">
               <div className="flex-1">
                 <h3 className="text-sm font-semibold">{t("applications.deleteTitle")}</h3>
-                <span className="text-sm text-muted-foreground">
+                <span className="text-muted-foreground text-sm">
                   {t("applications.deleteDesc")}
                 </span>
               </div>

@@ -18,7 +18,7 @@ describe("flow provider overrides", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    const { id: userId, cookie } = await createTestUser();
+    const { id: userId } = await createTestUser();
     const { org } = await createTestOrg(userId);
     orgId = org.id;
     actor = { type: "member", id: userId };

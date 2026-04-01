@@ -19,14 +19,14 @@ export function SidebarBilling() {
   if (!billing) return null;
 
   const tooltipContent = (
-    <div className="space-y-2 min-w-36">
+    <div className="min-w-36 space-y-2">
       <div className="flex items-center justify-between text-xs">
         <span className="text-muted-foreground">{t("nav.credits")}</span>
         <span className="font-medium">
           {billing.creditsUsed.toLocaleString()} / {billing.creditQuota.toLocaleString()}
         </span>
       </div>
-      <div className="h-1.5 rounded-full bg-border overflow-hidden">
+      <div className="bg-border h-1.5 overflow-hidden rounded-full">
         <div
           className={`h-full rounded-full transition-all ${getUsageBarColor(billing.usagePercent)}`}
           style={{ width: `${Math.min(billing.usagePercent, 100)}%` }}
@@ -53,7 +53,7 @@ export function SidebarBilling() {
             </Link>
           </SidebarMenuButton>
           <span
-            className={`pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2 ring-sidebar ${getUsageBarColor(billing.usagePercent)}`}
+            className={`ring-sidebar pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2 ${getUsageBarColor(billing.usagePercent)}`}
           />
         </SidebarMenuItem>
       </SidebarMenu>
@@ -62,19 +62,19 @@ export function SidebarBilling() {
       <div className="group-data-[collapsible=icon]:hidden">
         <Link
           to="/org-settings#billing"
-          className="block rounded-md px-2 py-2 hover:bg-sidebar-accent transition-colors"
+          className="hover:bg-sidebar-accent block rounded-md px-2 py-2 transition-colors"
         >
-          <div className="flex items-center justify-between text-xs mb-1.5">
-            <span className="flex items-center gap-1.5 text-sidebar-foreground/70">
+          <div className="mb-1.5 flex items-center justify-between text-xs">
+            <span className="text-sidebar-foreground/70 flex items-center gap-1.5">
               <Coins size={13} />
               {t("nav.credits")}
             </span>
-            <span className="font-medium text-sidebar-foreground">
+            <span className="text-sidebar-foreground font-medium">
               {billing.creditsUsed.toLocaleString()} / {billing.creditQuota.toLocaleString()}
             </span>
           </div>
           <div
-            className="h-1.5 rounded-full bg-sidebar-border overflow-hidden"
+            className="bg-sidebar-border h-1.5 overflow-hidden rounded-full"
             role="progressbar"
             aria-valuenow={Math.min(billing.usagePercent, 100)}
             aria-valuemin={0}

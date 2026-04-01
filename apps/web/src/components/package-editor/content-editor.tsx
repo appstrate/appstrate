@@ -16,7 +16,7 @@ export function ContentEditor({ value, onChange, language, height = "500px" }: C
   }, []);
 
   return (
-    <div className="rounded-lg border border-border overflow-hidden my-4">
+    <div className="border-border my-4 overflow-hidden rounded-lg border">
       <Editor
         height={height}
         language={language}

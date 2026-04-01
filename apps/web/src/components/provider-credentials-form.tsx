@@ -100,9 +100,9 @@ export function ProviderCredentialsForm({
       <div className="space-y-4">
         {/* Setup Guide */}
         {guide?.steps && guide.steps.length > 0 && (
-          <div className="rounded-lg bg-muted/50 p-4">
-            <h4 className="font-medium text-sm mb-2">{t("providers.form.setupGuide")}</h4>
-            <ol className="list-decimal pl-4 space-y-2 text-sm text-muted-foreground">
+          <div className="bg-muted/50 rounded-lg p-4">
+            <h4 className="mb-2 text-sm font-medium">{t("providers.form.setupGuide")}</h4>
+            <ol className="text-muted-foreground list-decimal space-y-2 pl-4 text-sm">
               {guide.steps.map((step, i) => (
                 <li key={i}>
                   <span className="text-foreground">{step.label}</span>
@@ -111,7 +111,7 @@ export function ProviderCredentialsForm({
                       href={step.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-primary text-xs hover:underline ml-2"
+                      className="text-primary ml-2 inline-flex items-center gap-1 text-xs hover:underline"
                     >
                       <ExternalLink size={12} />
                     </a>
@@ -124,12 +124,12 @@ export function ProviderCredentialsForm({
 
         {/* Callback URL — only relevant for OAuth providers */}
         {callbackUrl && (provider.authMode === "oauth2" || provider.authMode === "oauth1") && (
-          <div className="rounded-lg bg-muted/50 p-4">
-            <Label className="text-xs text-muted-foreground">
+          <div className="bg-muted/50 rounded-lg p-4">
+            <Label className="text-muted-foreground text-xs">
               {t("providers.form.callbackUrl")}
             </Label>
-            <div className="flex items-center gap-2 mt-1">
-              <code className="flex-1 rounded bg-background px-2 py-1 text-xs font-mono text-foreground border border-border overflow-x-auto">
+            <div className="mt-1 flex items-center gap-2">
+              <code className="bg-background text-foreground border-border flex-1 overflow-x-auto rounded border px-2 py-1 font-mono text-xs">
                 {callbackUrl}
               </code>
               <Button
@@ -143,7 +143,7 @@ export function ProviderCredentialsForm({
               </Button>
             </div>
             {resolvedCallbackHint && (
-              <p className="text-sm text-muted-foreground mt-1">{resolvedCallbackHint}</p>
+              <p className="text-muted-foreground mt-1 text-sm">{resolvedCallbackHint}</p>
             )}
           </div>
         )}
@@ -189,7 +189,7 @@ export function ProviderCredentialsForm({
         )}
       </div>
 
-      <div className="flex items-center mt-4 pt-4 border-t border-border">
+      <div className="border-border mt-4 flex items-center border-t pt-4">
         <div className="flex-1">{footer}</div>
         {hasSchemaFields ? (
           <Button type="submit" disabled={mutation.isPending || !allRequiredFilled}>

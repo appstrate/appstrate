@@ -61,7 +61,7 @@ export function NavUser() {
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
               <Avatar className="h-8 w-8 rounded-lg">
-                <AvatarFallback className="rounded-lg bg-sidebar-primary text-sidebar-primary-foreground text-sm font-medium">
+                <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground rounded-lg text-sm font-medium">
                   {initials}
                 </AvatarFallback>
               </Avatar>
@@ -81,7 +81,7 @@ export function NavUser() {
             <DropdownMenuLabel className="p-0 font-normal">
               <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                 <Avatar className="h-8 w-8 rounded-lg">
-                  <AvatarFallback className="rounded-lg bg-sidebar-primary text-sidebar-primary-foreground text-sm font-medium">
+                  <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground rounded-lg text-sm font-medium">
                     {initials}
                   </AvatarFallback>
                 </Avatar>
@@ -116,7 +116,7 @@ export function NavUser() {
                       <Check
                         size={14}
                         strokeWidth={2.5}
-                        className="ml-auto text-primary shrink-0"
+                        className="text-primary ml-auto shrink-0"
                       />
                     )}
                   </DropdownMenuItem>

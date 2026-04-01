@@ -80,7 +80,7 @@ export function OrgProfileDetailPage() {
         actions={
           <>
             <Button variant="outline" size="sm" onClick={openRename}>
-              <Pencil className="size-3.5 mr-1.5" />
+              <Pencil className="mr-1.5 size-3.5" />
               {t("orgProfiles.rename")}
             </Button>
             <Button
@@ -90,7 +90,7 @@ export function OrgProfileDetailPage() {
               onClick={() => setDeleteOpen(true)}
               disabled={deleteMutation.isPending}
             >
-              <Trash2 className="size-3.5 mr-1.5" />
+              <Trash2 className="mr-1.5 size-3.5" />
               {t("orgProfiles.deleteBtn")}
             </Button>
           </>
@@ -98,8 +98,8 @@ export function OrgProfileDetailPage() {
       />
 
       {/* ─── Providers ──────────────────────────────────── */}
-      <section className="space-y-3 mb-8">
-        <h3 className="text-sm font-medium text-muted-foreground">{t("orgProfiles.bindings")}</h3>
+      <section className="mb-8 space-y-3">
+        <h3 className="text-muted-foreground text-sm font-medium">{t("orgProfiles.bindings")}</h3>
 
         {enabledProviders.length === 0 ? (
           <EmptyState message={t("orgProfiles.noBindings")} icon={FolderOpen} compact />
@@ -118,8 +118,8 @@ export function OrgProfileDetailPage() {
       </section>
 
       {/* ─── Flows liés ───────────────────────────────────── */}
-      <section className="space-y-3 mb-8">
-        <h3 className="text-sm font-medium text-muted-foreground">
+      <section className="mb-8 space-y-3">
+        <h3 className="text-muted-foreground text-sm font-medium">
           {t("orgProfiles.linkedFlows")}
         </h3>
 
@@ -150,7 +150,7 @@ export function OrgProfileDetailPage() {
 
       {/* ─── Schedules liés ──────────────────────────────── */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium text-muted-foreground">
+        <h3 className="text-muted-foreground text-sm font-medium">
           {t("orgProfiles.linkedSchedules")}
         </h3>
 
@@ -213,7 +213,7 @@ export function OrgProfileDetailPage() {
           </>
         }
       >
-        <p className="text-sm text-muted-foreground">
+        <p className="text-muted-foreground text-sm">
           {t("orgProfiles.deleteConfirm", { name: profile.name })}
         </p>
       </Modal>

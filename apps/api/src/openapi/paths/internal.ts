@@ -46,7 +46,12 @@ export const internalPaths = {
       description: "Container-to-host only. Auth via Bearer execution token.",
       security: [{ bearerExecToken: [] }],
       parameters: [
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {

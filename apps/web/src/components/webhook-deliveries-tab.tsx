@@ -47,18 +47,18 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
       {deliveries.map((d) => {
         const variant = deliveryStatusVariant(d);
         return (
-          <div key={d.id} className="rounded-lg border border-border bg-card p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="font-mono text-xs text-muted-foreground truncate">{d.eventId}</span>
+          <div key={d.id} className="border-border bg-card rounded-lg border p-3">
+            <div className="mb-1 flex items-center gap-2">
+              <span className="text-muted-foreground truncate font-mono text-xs">{d.eventId}</span>
               <span className="font-mono text-sm">{d.eventType}</span>
             </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="text-muted-foreground flex items-center gap-2 text-xs">
               <Badge variant={variant}>{deliveryStatusLabel(d)}</Badge>
               {d.latency != null && <span>{d.latency}ms</span>}
               <span>{t("settings:webhooks.deliveryAttempt", { attempt: d.attempt })}</span>
               <span>{formatRelativeTime(d.createdAt, t)}</span>
             </div>
-            {d.error && <p className="mt-1 text-xs text-destructive">{d.error}</p>}
+            {d.error && <p className="text-destructive mt-1 text-xs">{d.error}</p>}
           </div>
         );
       })}

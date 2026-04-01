@@ -116,18 +116,18 @@ export function MetadataSection({ value, onChange, isEdit }: MetadataSectionProp
       </div>
       <div className="space-y-2">
         <Label>{t("editor.metaKeywords")}</Label>
-        <div className="flex flex-wrap gap-1.5 mb-2">
+        <div className="mb-2 flex flex-wrap gap-1.5">
           {value.keywords.map((keyword) => (
             <span
               key={keyword}
-              className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-0.5 text-xs text-muted-foreground"
+              className="border-border bg-background text-muted-foreground inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs"
             >
               {keyword}
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-auto w-auto p-0 text-muted-foreground hover:text-destructive text-sm leading-none"
+                className="text-muted-foreground hover:text-destructive h-auto w-auto p-0 text-sm leading-none"
                 onClick={() => removeKeyword(keyword)}
               >
                 &times;

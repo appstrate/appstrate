@@ -12,7 +12,7 @@ export function PromptEditor({ value, onChange }: PromptEditorProps) {
   return (
     <>
       <ContentEditor value={value} onChange={onChange} language="markdown" />
-      <div className="text-xs text-muted-foreground mt-1">{t("editor.promptHint")}</div>
+      <div className="text-muted-foreground mt-1 text-xs">{t("editor.promptHint")}</div>
     </>
   );
 }

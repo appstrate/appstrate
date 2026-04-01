@@ -7,8 +7,8 @@ interface SectionCardProps {
 
 export function SectionCard({ title, headerRight, children }: SectionCardProps) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card mb-4">
-      <div className="bg-background px-4 py-3 text-xs font-semibold uppercase tracking-wide text-foreground border-b border-border flex items-center justify-between">
+    <div className="border-border bg-card mb-4 overflow-hidden rounded-lg border">
+      <div className="bg-background text-foreground border-border flex items-center justify-between border-b px-4 py-3 text-xs font-semibold tracking-wide uppercase">
         {title}
         {headerRight}
       </div>

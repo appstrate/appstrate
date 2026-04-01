@@ -23,7 +23,7 @@ function OrgAvatar({ name, className }: { name: string; className?: string }) {
   return (
     <div
       className={cn(
-        "flex items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground font-medium",
+        "bg-sidebar-primary text-sidebar-primary-foreground flex items-center justify-center rounded-lg font-medium",
         className,
       )}
     >
@@ -72,7 +72,7 @@ export function OrgSwitcher() {
             side={isMobile ? "bottom" : "right"}
             sideOffset={4}
           >
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
+            <DropdownMenuLabel className="text-muted-foreground text-xs">
               {t("switcher.orgAriaLabel")}
             </DropdownMenuLabel>
             {orgs.map((org) => {
@@ -86,7 +86,7 @@ export function OrgSwitcher() {
                   }}
                 >
                   <OrgAvatar name={org.name} className="size-6 rounded-md text-xs" />
-                  <span className="truncate flex-1">{org.name}</span>
+                  <span className="flex-1 truncate">{org.name}</span>
                   {isActive && <Check size={14} strokeWidth={2.5} className="shrink-0" />}
                 </DropdownMenuItem>
               );
@@ -96,7 +96,7 @@ export function OrgSwitcher() {
               <Link
                 to="/onboarding/create"
                 state={{ fromSwitcher: true }}
-                className="flex items-center gap-2 text-primary"
+                className="text-primary flex items-center gap-2"
               >
                 <Plus size={14} />
                 {t("switcher.createOrg")}

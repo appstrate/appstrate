@@ -52,11 +52,11 @@ export function ApplicationsPage() {
       ) : (
         <div className="flex flex-col gap-3">
           {applications.map((app) => (
-            <div key={app.id} className="rounded-lg border border-border bg-card p-5">
+            <div key={app.id} className="border-border bg-card rounded-lg border p-5">
               <div className="flex items-center gap-3">
                 <div className="flex-1">
                   <h3 className="text-[0.95rem] font-semibold">{app.name}</h3>
-                  <span className="text-sm text-muted-foreground">
+                  <span className="text-muted-foreground text-sm">
                     {t("applications.createdAt", {
                       date: new Date(app.createdAt).toLocaleDateString(i18n.language, {
                         day: "numeric",

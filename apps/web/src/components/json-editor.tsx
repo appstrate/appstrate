@@ -72,7 +72,7 @@ export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
         }}
       />
       {parseError && (
-        <div className="text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-3 py-2">
+        <div className="text-destructive bg-destructive/10 border-destructive/30 rounded-md border px-3 py-2 text-sm">
           {parseError}
         </div>
       )}

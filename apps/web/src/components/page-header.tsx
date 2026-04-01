@@ -51,7 +51,7 @@ export function PageHeader({ title, emoji, breadcrumbs, actions, children }: Pag
           {emoji && <span className="mr-2">{emoji}</span>}
           {title}
         </h2>
-        {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
       </div>
       {children}
     </div>

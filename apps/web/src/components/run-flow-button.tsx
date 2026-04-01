@@ -144,7 +144,7 @@ export function RunFlowButton({
         >
           {isPending ? <Spinner /> : t("detail.run")}
           {hasDisconnected && !isPending && (
-            <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-warning" />
+            <span className="bg-warning absolute -top-1 -right-1 size-2.5 rounded-full" />
           )}
         </Button>
       ) : (
@@ -158,7 +158,7 @@ export function RunFlowButton({
         >
           {isPending ? <Spinner /> : <Play size={14} />}
           {hasDisconnected && !isPending && (
-            <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-warning" />
+            <span className="bg-warning absolute -top-1 -right-1 size-2.5 rounded-full" />
           )}
         </Button>
       )}

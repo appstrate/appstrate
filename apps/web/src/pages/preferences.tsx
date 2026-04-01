@@ -99,7 +99,7 @@ function GeneralTab() {
 
   return (
     <>
-      <div className="text-sm font-medium text-muted-foreground mb-4">
+      <div className="text-muted-foreground mb-4 text-sm font-medium">
         {t("preferences.account")}
       </div>
       <EmailChangeForm />
@@ -122,8 +122,8 @@ function AppearanceTab({
 
   return (
     <>
-      <div className="text-sm font-medium text-muted-foreground mb-4">{t("preferences.theme")}</div>
-      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+      <div className="text-muted-foreground mb-4 text-sm font-medium">{t("preferences.theme")}</div>
+      <div className="border-border bg-card mb-4 rounded-lg border p-5">
         <div className="flex items-center gap-3">
           <div className="flex-1">
             <Select value={theme} onValueChange={(v) => setTheme(v as "light" | "dark" | "system")}>
@@ -140,10 +140,10 @@ function AppearanceTab({
         </div>
       </div>
 
-      <div className="text-sm font-medium text-muted-foreground mb-4">
+      <div className="text-muted-foreground mb-4 text-sm font-medium">
         {t("preferences.language")}
       </div>
-      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+      <div className="border-border bg-card mb-4 rounded-lg border p-5">
         <div className="flex items-center gap-3">
           <div className="flex-1">
             <Select value={language} onValueChange={onLanguageChange} disabled={languagePending}>
@@ -217,22 +217,22 @@ function LinkedAccountsSection() {
 
   return (
     <div className="mb-6">
-      <div className="text-sm font-medium text-muted-foreground mb-4">
+      <div className="text-muted-foreground mb-4 text-sm font-medium">
         {t("preferences.linkedAccounts")}
       </div>
-      <p className="text-sm text-muted-foreground mb-4">
+      <p className="text-muted-foreground mb-4 text-sm">
         {t("preferences.linkedAccountsDescription")}
       </p>
       <div className="space-y-3">
         {credentialAccount && (
-          <div className="flex items-center justify-between rounded-lg border border-border bg-card p-4">
+          <div className="border-border bg-card flex items-center justify-between rounded-lg border p-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
+              <div className="bg-muted flex h-8 w-8 items-center justify-center rounded-full">
                 <Mail size={16} />
               </div>
               <span className="text-sm font-medium">{t("preferences.emailPassword")}</span>
             </div>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-muted-foreground text-xs">
               {t("preferences.linkedVia", { provider: "Email" })}
             </span>
           </div>
@@ -242,13 +242,13 @@ function LinkedAccountsSection() {
           return provider.account ? (
             <div
               key={provider.id}
-              className="flex items-center justify-between rounded-lg border border-border bg-card p-4"
+              className="border-border bg-card flex items-center justify-between rounded-lg border p-4"
             >
               <div className="flex items-center gap-3">
                 <Icon className="h-5 w-5" />
                 <div>
                   <span className="text-sm font-medium">{provider.name}</span>
-                  <div className="text-xs text-muted-foreground">{provider.account.accountId}</div>
+                  <div className="text-muted-foreground text-xs">{provider.account.accountId}</div>
                 </div>
               </div>
               <Button
@@ -274,11 +274,11 @@ function LinkedAccountsSection() {
           ) : (
             <div
               key={provider.id}
-              className="flex items-center justify-between rounded-lg border border-border border-dashed bg-card p-4"
+              className="border-border bg-card flex items-center justify-between rounded-lg border border-dashed p-4"
             >
               <div className="flex items-center gap-3">
                 <Icon className="h-5 w-5" />
-                <span className="text-sm font-medium text-muted-foreground">{provider.name}</span>
+                <span className="text-muted-foreground text-sm font-medium">{provider.name}</span>
               </div>
               <Button
                 variant="outline"
@@ -309,7 +309,7 @@ function SecurityTab() {
   return (
     <>
       <LinkedAccountsSection />
-      <div className="text-sm font-medium text-muted-foreground mb-4">
+      <div className="text-muted-foreground mb-4 text-sm font-medium">
         {t("preferences.changePassword")}
       </div>
       <PasswordChangeForm />
@@ -355,7 +355,7 @@ function EmailVerificationBadge() {
         type="button"
         onClick={handleResend}
         disabled={resendState !== "idle"}
-        className="text-xs text-primary underline underline-offset-2 hover:no-underline disabled:opacity-50 disabled:no-underline"
+        className="text-primary text-xs underline underline-offset-2 hover:no-underline disabled:no-underline disabled:opacity-50"
       >
         {resendState === "sending"
           ? t("preferences.resendingVerification")
@@ -416,7 +416,7 @@ function EmailChangeForm() {
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5 mb-4">
+    <div className="border-border bg-card mb-4 rounded-lg border p-5">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
         <div className="space-y-2">
           <Label>{t("preferences.email")}</Label>
@@ -427,10 +427,10 @@ function EmailChangeForm() {
           <Label>{t("preferences.newEmail")}</Label>
           <Input type="email" {...register("newEmail")} placeholder={user?.email ?? ""} />
         </div>
-        {errors.root && <div className="text-sm text-destructive">{errors.root.message}</div>}
-        {success && <div className="text-sm text-success">{success}</div>}
+        {errors.root && <div className="text-destructive text-sm">{errors.root.message}</div>}
+        {success && <div className="text-success text-sm">{success}</div>}
         {verificationPendingEmail && (
-          <div className="text-sm text-muted-foreground rounded-md bg-muted px-3 py-2">
+          <div className="text-muted-foreground bg-muted rounded-md px-3 py-2 text-sm">
             <Trans
               ns="settings"
               i18nKey="preferences.emailChangeVerificationSent"
@@ -471,7 +471,7 @@ function DisplayNameForm() {
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5 mb-4">
+    <div className="border-border bg-card mb-4 rounded-lg border p-5">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
         <div className="space-y-2">
           <Label>{t("preferences.displayName")}</Label>
@@ -485,7 +485,7 @@ function DisplayNameForm() {
             maxLength={100}
           />
         </div>
-        {success && <div className="text-sm text-success">{success}</div>}
+        {success && <div className="text-success text-sm">{success}</div>}
         <Button type="submit" disabled={!canSubmit}>
           {updateDisplayName.isPending
             ? t("preferences.savingDisplayName")
@@ -535,7 +535,7 @@ function PasswordChangeForm() {
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5 mb-4">
+    <div className="border-border bg-card mb-4 rounded-lg border p-5">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
         <div className="space-y-2">
           <Label>{t("preferences.currentPassword")}</Label>
@@ -549,7 +549,7 @@ function PasswordChangeForm() {
             className={cn(showError("currentPassword") && "border-destructive")}
           />
           {showError("currentPassword") && (
-            <div className="text-sm text-destructive">{errors.currentPassword?.message}</div>
+            <div className="text-destructive text-sm">{errors.currentPassword?.message}</div>
           )}
         </div>
         <div className="space-y-2">
@@ -569,7 +569,7 @@ function PasswordChangeForm() {
             className={cn(showError("newPassword") && "border-destructive")}
           />
           {showError("newPassword") && (
-            <div className="text-sm text-destructive">{errors.newPassword?.message}</div>
+            <div className="text-destructive text-sm">{errors.newPassword?.message}</div>
           )}
         </div>
         <div className="space-y-2">
@@ -586,11 +586,11 @@ function PasswordChangeForm() {
             className={cn(showError("confirmPassword") && "border-destructive")}
           />
           {showError("confirmPassword") && (
-            <div className="text-sm text-destructive">{errors.confirmPassword?.message}</div>
+            <div className="text-destructive text-sm">{errors.confirmPassword?.message}</div>
           )}
         </div>
-        {errors.root && <div className="text-sm text-destructive">{errors.root.message}</div>}
-        {success && <div className="text-sm text-success">{success}</div>}
+        {errors.root && <div className="text-destructive text-sm">{errors.root.message}</div>}
+        {success && <div className="text-success text-sm">{success}</div>}
         <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? t("preferences.changingPassword") : t("preferences.changePassword")}
         </Button>
@@ -659,16 +659,16 @@ function ConnectorsTab() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4">
-        <div className="text-sm font-medium text-muted-foreground">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="text-muted-foreground text-sm font-medium">
           {t("connectors.myConnections")}
         </div>
         <ProfileSelector showAllOption value={filterProfileId} onChange={setFilterProfileId} />
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+      <div className="border-border bg-card mb-4 rounded-lg border p-5">
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             {t("connectors.description")}{" "}
             <Link to="/providers" className="text-primary text-sm no-underline hover:underline">
               {t("connectors.connectMore")}
@@ -704,9 +704,9 @@ function ConnectorsTab() {
             const expanded = expandedProviders.has(pg.providerId);
 
             return (
-              <div key={pg.providerId} className="rounded-lg border border-border bg-card p-5">
+              <div key={pg.providerId} className="border-border bg-card rounded-lg border p-5">
                 <div
-                  className="flex items-center justify-between cursor-pointer"
+                  className="flex cursor-pointer items-center justify-between"
                   onClick={() => toggleExpand(pg.providerId)}
                 >
                   <div className="flex items-center gap-3">
@@ -719,14 +719,14 @@ function ConnectorsTab() {
                     )}
                     <div className="flex-1">
                       <h3 className="text-[0.95rem] font-semibold">{pg.displayName}</h3>
-                      <span className="text-sm text-muted-foreground">
+                      <span className="text-muted-foreground text-sm">
                         {t("connectors.connectionCount", { count: pg.totalConnections })}
                       </span>
                     </div>
                   </div>
                   <span
                     className={cn(
-                      "text-xs text-muted-foreground transition-transform duration-200",
+                      "text-muted-foreground text-xs transition-transform duration-200",
                       expanded && "rotate-90",
                     )}
                   >
@@ -735,13 +735,13 @@ function ConnectorsTab() {
                 </div>
 
                 {expanded && (
-                  <div className="mt-3 pt-3 border-t border-border flex flex-col gap-3">
+                  <div className="border-border mt-3 flex flex-col gap-3 border-t pt-3">
                     {pg.orgs.map((og) => (
                       <div key={og.orgId}>
-                        <div className="text-xs font-medium text-muted-foreground mb-2">
+                        <div className="text-muted-foreground mb-2 text-xs font-medium">
                           {og.orgName}
                         </div>
-                        <div className="flex flex-col gap-2 pl-3 border-l-2 border-border">
+                        <div className="border-border flex flex-col gap-2 border-l-2 pl-3">
                           {og.connections.map((conn) => (
                             <div
                               key={conn.connectionId}
@@ -751,12 +751,12 @@ function ConnectorsTab() {
                                 <span>
                                   {conn.profile.name}
                                   {conn.profile.isDefault && (
-                                    <span className="ml-1.5 inline-flex items-center rounded-full border border-border bg-background px-2 py-px text-[0.7rem] text-muted-foreground">
+                                    <span className="border-border bg-background text-muted-foreground ml-1.5 inline-flex items-center rounded-full border px-2 py-px text-[0.7rem]">
                                       {t("profiles.default")}
                                     </span>
                                   )}
                                 </span>
-                                <span className="text-xs text-muted-foreground">
+                                <span className="text-muted-foreground text-xs">
                                   {conn.scopesGranted.length > 0 &&
                                     `${conn.scopesGranted.join(", ")} \u00b7 `}
                                   {conn.connectedAt && formatDateField(conn.connectedAt)}
@@ -852,9 +852,9 @@ function ProfilesTab() {
 
   return (
     <>
-      <div className="text-sm font-medium text-muted-foreground mb-4">{t("profiles.title")}</div>
+      <div className="text-muted-foreground mb-4 text-sm font-medium">{t("profiles.title")}</div>
 
-      <div className="rounded-lg border border-border bg-card p-5 mb-4">
+      <div className="border-border bg-card mb-4 rounded-lg border p-5">
         <div className="flex items-center gap-2 py-1">
           <Input
             type="text"
@@ -874,8 +874,8 @@ function ProfilesTab() {
       {profiles && profiles.length > 0 && (
         <div className="flex flex-col gap-3">
           {profiles.map((profile) => (
-            <div key={profile.id} className="rounded-lg border border-border bg-card p-5">
-              <div className="flex items-center gap-3 mb-3">
+            <div key={profile.id} className="border-border bg-card rounded-lg border p-5">
+              <div className="mb-3 flex items-center gap-3">
                 <div className="flex-1">
                   {editingId === profile.id ? (
                     <div className="flex items-center gap-2">
@@ -917,12 +917,12 @@ function ProfilesTab() {
                       <h3 className="text-[0.95rem] font-semibold">
                         {profile.name}
                         {profile.isDefault && (
-                          <span className="ml-1.5 inline-flex items-center rounded-full border border-border bg-background px-2 py-px text-[0.7rem] text-muted-foreground">
+                          <span className="border-border bg-background text-muted-foreground ml-1.5 inline-flex items-center rounded-full border px-2 py-px text-[0.7rem]">
                             {t("profiles.default")}
                           </span>
                         )}
                       </h3>
-                      <span className="text-sm text-muted-foreground">
+                      <span className="text-muted-foreground text-sm">
                         {t("profiles.connections", { count: profile.connectionCount })}
                       </span>
                     </>

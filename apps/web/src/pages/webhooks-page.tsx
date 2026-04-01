@@ -105,12 +105,12 @@ export function WebhooksPage() {
             <Link
               key={wh.id}
               to={`/webhooks/${wh.id}`}
-              className="block rounded-lg border border-border bg-card p-4 hover:bg-accent/50 transition-colors"
+              className="border-border bg-card hover:bg-accent/50 block rounded-lg border p-4 transition-colors"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-mono text-sm truncate">{wh.url}</span>
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="truncate font-mono text-sm">{wh.url}</span>
                     <Badge variant={wh.active ? "success" : "secondary"}>
                       {wh.active ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
                     </Badge>
@@ -122,8 +122,8 @@ export function WebhooksPage() {
                           : t("settings:webhooks.scopeBadgeApp")}
                     </Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground font-mono">{wh.events.join(", ")}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
+                  <p className="text-muted-foreground font-mono text-xs">{wh.events.join(", ")}</p>
+                  <p className="text-muted-foreground mt-1 text-xs">
                     {wh.packageId || t("settings:webhooks.allFlows")}
                     {" · "}
                     {t("settings:webhooks.payloadMode")}:{" "}

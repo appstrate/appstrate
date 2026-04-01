@@ -26,7 +26,7 @@ const BreadcrumbList = React.forwardRef<HTMLOListElement, React.ComponentPropsWi
           <ol
             ref={ref}
             className={cn(
-              "flex flex-nowrap items-center gap-1.5 text-sm text-muted-foreground sm:gap-2.5",
+              "text-muted-foreground flex flex-nowrap items-center gap-1.5 text-sm sm:gap-2.5",
               className,
             )}
             {...props}
@@ -34,9 +34,9 @@ const BreadcrumbList = React.forwardRef<HTMLOListElement, React.ComponentPropsWi
         </ScrollAreaPrimitive.Viewport>
         <ScrollAreaPrimitive.ScrollAreaScrollbar
           orientation="horizontal"
-          className="flex h-1.5 touch-none select-none flex-col border-t border-t-transparent transition-colors"
+          className="flex h-1.5 touch-none flex-col border-t border-t-transparent transition-colors select-none"
         >
-          <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-border" />
+          <ScrollAreaPrimitive.ScrollAreaThumb className="bg-border relative flex-1 rounded-full" />
         </ScrollAreaPrimitive.ScrollAreaScrollbar>
       </ScrollAreaPrimitive.Root>
     );
@@ -48,7 +48,7 @@ const BreadcrumbItem = React.forwardRef<HTMLLIElement, React.ComponentPropsWitho
   ({ className, ...props }, ref) => (
     <li
       ref={ref}
-      className={cn("inline-flex items-center gap-1.5 shrink-0", className)}
+      className={cn("inline-flex shrink-0 items-center gap-1.5", className)}
       {...props}
     />
   ),
@@ -66,7 +66,7 @@ const BreadcrumbLink = React.forwardRef<
   return (
     <Comp
       ref={ref}
-      className={cn("whitespace-nowrap transition-colors hover:text-foreground", className)}
+      className={cn("hover:text-foreground whitespace-nowrap transition-colors", className)}
       {...props}
     />
   );
@@ -80,7 +80,7 @@ const BreadcrumbPage = React.forwardRef<HTMLSpanElement, React.ComponentPropsWit
       role="link"
       aria-disabled="true"
       aria-current="page"
-      className={cn("whitespace-nowrap font-normal text-foreground", className)}
+      className={cn("text-foreground font-normal whitespace-nowrap", className)}
       {...props}
     />
   ),
@@ -91,7 +91,7 @@ const BreadcrumbSeparator = ({ children, className, ...props }: React.ComponentP
   <li
     role="presentation"
     aria-hidden="true"
-    className={cn("[&>svg]:w-3.5 [&>svg]:h-3.5 shrink-0", className)}
+    className={cn("shrink-0 [&>svg]:h-3.5 [&>svg]:w-3.5", className)}
     {...props}
   >
     {children ?? <ChevronRight />}

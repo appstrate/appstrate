@@ -78,7 +78,7 @@ export function NavOrg() {
               tooltip={t("nav.executions")}
             >
               <Link to="/executions">
-                <span className="flex size-4 items-center justify-center shrink-0">
+                <span className="flex size-4 shrink-0 items-center justify-center">
                   {hasRunning ? (
                     <Loader2 size={16} className="animate-spin" />
                   ) : (
@@ -91,11 +91,11 @@ export function NavOrg() {
             {unread > 0 && (
               <>
                 <SidebarMenuBadge>
-                  <span className="flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[0.6rem] font-medium leading-none">
+                  <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
                     {unread > 99 ? "99+" : unread}
                   </span>
                 </SidebarMenuBadge>
-                <span className="pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2 ring-sidebar bg-destructive hidden group-data-[collapsible=icon]:block" />
+                <span className="ring-sidebar bg-destructive pointer-events-none absolute top-1 right-1 hidden size-2 rounded-full ring-2 group-data-[collapsible=icon]:block" />
               </>
             )}
           </SidebarMenuItem>

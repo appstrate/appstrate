@@ -17,7 +17,7 @@ function suggestOrgDefaults(
   user: { email: string; name?: string },
   language: string,
 ): { name: string; slug: string } {
-  const displayName = user.name || user.email.split("@")[0];
+  const displayName = user.name || user.email.split("@")[0]!;
   const name =
     language === "fr" ? `Organisation de ${displayName}` : `${displayName}'s Organization`;
   return { name, slug: toSlug(displayName) };
@@ -137,7 +137,7 @@ export function OnboardingCreateStep() {
               className={cn(showError("name") && "border-destructive")}
             />
             {showError("name") && (
-              <div className="text-sm text-destructive">{errors.name?.message}</div>
+              <div className="text-destructive text-sm">{errors.name?.message}</div>
             )}
           </div>
 
@@ -165,13 +165,13 @@ export function OnboardingCreateStep() {
               aria-invalid={showError("slug") ? true : undefined}
               className={cn(showError("slug") && "border-destructive")}
             />
-            <div className="text-sm text-muted-foreground">{t("createOrg.slugHint")}</div>
+            <div className="text-muted-foreground text-sm">{t("createOrg.slugHint")}</div>
             {showError("slug") && (
-              <div className="text-sm text-destructive">{errors.slug?.message}</div>
+              <div className="text-destructive text-sm">{errors.slug?.message}</div>
             )}
           </div>
 
-          {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
+          {errors.root && <p className="text-destructive text-sm">{errors.root.message}</p>}
         </div>
       </form>
     </OnboardingLayout>

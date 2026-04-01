@@ -35,7 +35,7 @@ export function VersionBanners({
       <Alert className="mb-3">
         <AlertDescription>
           {t("version.viewingHistorical", { version: versionDetail.version })}{" "}
-          <Link to={latestUrl} className="underline font-medium">
+          <Link to={latestUrl} className="font-medium underline">
             {linkLabel}
           </Link>
         </AlertDescription>

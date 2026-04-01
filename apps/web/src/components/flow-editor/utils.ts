@@ -49,7 +49,7 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): FlowEd
 export function getManifestName(m: Record<string, unknown>): { scope: string; id: string } {
   const raw = (m.name as string) || "";
   const match = raw.match(/^@([^/]+)\/(.*)$/);
-  return match ? { scope: match[1], id: match[2] } : { scope: "", id: raw };
+  return match ? { scope: match[1]!, id: match[2]! } : { scope: "", id: raw };
 }
 
 /** Extract MetadataState from a manifest object. Includes timeout if present (flows only). */
@@ -202,7 +202,7 @@ export function schemaToFields(
   const requiredSet = new Set(schema.required || []);
   const keys = getOrderedKeys(schema, wrapper?.propertyOrder);
   return keys.map((key) => {
-    const prop = schema.properties[key];
+    const prop = schema.properties[key]!;
     const fileField = isFileField(prop);
     const isInputFile = mode === "input" && fileField;
     const constraints = wrapper?.fileConstraints?.[key];

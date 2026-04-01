@@ -55,12 +55,12 @@ export function OnboardingModelStep() {
             const provider = findProviderByApiAndBaseUrl(m.api, m.baseUrl);
             const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
             return (
-              <div key={m.id} className="rounded-lg border border-border bg-card p-4">
+              <div key={m.id} className="border-border bg-card rounded-lg border p-4">
                 <div className="flex items-center gap-3">
                   {ProviderIcon && <ProviderIcon className="size-5" />}
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-semibold truncate">{m.label}</h3>
-                    <span className="text-sm text-muted-foreground">{m.modelId}</span>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="truncate text-sm font-semibold">{m.label}</h3>
+                    <span className="text-muted-foreground text-sm">{m.modelId}</span>
                   </div>
                   {m.isDefault && <Badge variant="success">{t("models.default")}</Badge>}
                 </div>

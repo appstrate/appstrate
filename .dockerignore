@@ -1,12 +1,53 @@
 node_modules
 .git
+.turbo
+.bun
+.DS_Store
+.eslintcache
+
+# Markdown (except important ones)
 *.md
 !flows/**/*.md
 !apps/api/src/**/*.md
+!system-packages/**/*.md
+
+# Environment
 .env
 .env.*
 !.env.example
-.turbo
-apps/web/node_modules
-apps/api/node_modules
-packages/shared-types/node_modules
+
+# Test and coverage
+**/test/
+**/tests/
+**/coverage/
+
+# Logs
+*.log
+
+# Lint and format configs
+.prettier*
+.eslint*
+
+# Documentation and configs (not needed in images)
+docs/
+scripts/
+.github/
+.husky/
+CLAUDE.md
+CONTRIBUTING.md
+CHANGELOG.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+TRADEMARK.md
+turbo.json
+bunfig.toml
+commitlint.config.ts
+eslint.config.mjs
+.editorconfig
+.prettierrc
+.gitattributes
+storage/
+
+# Docker files (not needed inside images)
+Dockerfile*
+docker-compose*

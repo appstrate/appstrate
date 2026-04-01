@@ -133,10 +133,10 @@ export function WebhookCreateModal({ open, onClose }: Props) {
             <div className="flex items-start gap-2">
               <RadioGroupItem value="organization" id="scope-org" className="mt-0.5" />
               <div>
-                <Label htmlFor="scope-org" className="font-normal cursor-pointer">
+                <Label htmlFor="scope-org" className="cursor-pointer font-normal">
                   {t("settings:webhooks.scopeOrganization")}
                 </Label>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-muted-foreground text-xs">
                   {t("settings:webhooks.scopeOrganizationDesc")}
                 </p>
               </div>
@@ -144,10 +144,10 @@ export function WebhookCreateModal({ open, onClose }: Props) {
             <div className="flex items-start gap-2">
               <RadioGroupItem value="application" id="scope-app" className="mt-0.5" />
               <div>
-                <Label htmlFor="scope-app" className="font-normal cursor-pointer">
+                <Label htmlFor="scope-app" className="cursor-pointer font-normal">
                   {t("settings:webhooks.scopeApplication")}
                 </Label>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-muted-foreground text-xs">
                   {t("settings:webhooks.scopeApplicationDesc")}
                 </p>
               </div>
@@ -187,9 +187,9 @@ export function WebhookCreateModal({ open, onClose }: Props) {
             autoFocus
           />
           {errors.url ? (
-            <p className="text-xs text-destructive">{t("settings:webhooks.urlHint")}</p>
+            <p className="text-destructive text-xs">{t("settings:webhooks.urlHint")}</p>
           ) : (
-            <p className="text-xs text-muted-foreground">{t("settings:webhooks.urlHint")}</p>
+            <p className="text-muted-foreground text-xs">{t("settings:webhooks.urlHint")}</p>
           )}
         </div>
 
@@ -201,7 +201,7 @@ export function WebhookCreateModal({ open, onClose }: Props) {
           idPrefix="create-"
         />
 
-        {errors.root?.message && <p className="text-sm text-destructive">{errors.root.message}</p>}
+        {errors.root?.message && <p className="text-destructive text-sm">{errors.root.message}</p>}
       </form>
     </Modal>
   );

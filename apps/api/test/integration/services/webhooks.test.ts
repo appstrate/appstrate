@@ -1,12 +1,10 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedWebhook } from "../../helpers/seed.ts";
 import {
   createWebhook,
   listWebhooks,
   getWebhook,
-  updateWebhook,
   deleteWebhook,
   rotateSecret,
   listDeliveries,
@@ -14,7 +12,6 @@ import {
   validateEvents,
 } from "../../../src/services/webhooks.ts";
 import { webhookDeliveries } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
 
 describe("webhooks service", () => {
   let userId: string;
@@ -118,10 +115,13 @@ describe("webhooks service", () => {
   describe("listWebhooks", () => {
     it("returns all webhooks for an org", async () => {
       await createWebhook(orgId, appWebhookParams({ url: "https://example.com/hook1" }));
-      await createWebhook(orgId, appWebhookParams({
-        url: "https://example.com/hook2",
-        events: ["execution.failed"],
-      }));
+      await createWebhook(
+        orgId,
+        appWebhookParams({
+          url: "https://example.com/hook2",
+          events: ["execution.failed"],
+        }),
+      );
 
       const list = await listWebhooks(orgId);
       expect(list).toHaveLength(2);
@@ -146,7 +146,9 @@ describe("webhooks service", () => {
 
     it("does not include webhooks from other orgs", async () => {
       const otherUser = await createTestUser({ email: "other@test.com" });
-      const { org: otherOrg, defaultAppId: otherAppId } = await createTestOrg(otherUser.id, { slug: "otherorg" });
+      const { org: otherOrg, defaultAppId: otherAppId } = await createTestOrg(otherUser.id, {
+        slug: "otherorg",
+      });
 
       await createWebhook(orgId, appWebhookParams({ url: "https://example.com/mine" }));
       await createWebhook(otherOrg.id, {
@@ -173,7 +175,10 @@ describe("webhooks service", () => {
 
   describe("getWebhook", () => {
     it("returns a single webhook by ID", async () => {
-      const created = await createWebhook(orgId, appWebhookParams({ url: "https://example.com/single" }));
+      const created = await createWebhook(
+        orgId,
+        appWebhookParams({ url: "https://example.com/single" }),
+      );
 
       const wh = await getWebhook(orgId, created.id);
       expect(wh.id).toBe(created.id);
@@ -189,7 +194,10 @@ describe("webhooks service", () => {
 
   describe("deleteWebhook", () => {
     it("deletes a webhook", async () => {
-      const created = await createWebhook(orgId, appWebhookParams({ url: "https://example.com/deleteme" }));
+      const created = await createWebhook(
+        orgId,
+        appWebhookParams({ url: "https://example.com/deleteme" }),
+      );
 
       await deleteWebhook(orgId, created.id);
 
@@ -201,7 +209,10 @@ describe("webhooks service", () => {
 
   describe("rotateSecret", () => {
     it("returns a new secret different from the original", async () => {
-      const created = await createWebhook(orgId, appWebhookParams({ url: "https://example.com/rotate" }));
+      const created = await createWebhook(
+        orgId,
+        appWebhookParams({ url: "https://example.com/rotate" }),
+      );
 
       const { secret: newSecret } = await rotateSecret(orgId, created.id);
 
@@ -215,7 +226,10 @@ describe("webhooks service", () => {
 
   describe("webhook delivery records", () => {
     it("listDeliveries returns deliveries for a webhook", async () => {
-      const created = await createWebhook(orgId, appWebhookParams({ url: "https://example.com/deliveries" }));
+      const created = await createWebhook(
+        orgId,
+        appWebhookParams({ url: "https://example.com/deliveries" }),
+      );
 
       // Insert delivery records directly into DB
       await db.insert(webhookDeliveries).values([
@@ -249,7 +263,10 @@ describe("webhooks service", () => {
     });
 
     it("listDeliveries returns empty array when no deliveries exist", async () => {
-      const created = await createWebhook(orgId, appWebhookParams({ url: "https://example.com/empty-deliveries" }));
+      const created = await createWebhook(
+        orgId,
+        appWebhookParams({ url: "https://example.com/empty-deliveries" }),
+      );
 
       const deliveries = await listDeliveries(orgId, created.id);
       expect(deliveries).toHaveLength(0);
@@ -262,7 +279,12 @@ describe("webhooks service", () => {
     it("builds a valid event envelope in full mode", () => {
       const { eventId, payload } = buildEventEnvelope({
         eventType: "execution.completed",
-        execution: { id: "exec_123", status: "success", result: "output data", input: "input data" },
+        execution: {
+          id: "exec_123",
+          status: "success",
+          result: "output data",
+          input: "input data",
+        },
         payloadMode: "full",
       });
 

@@ -178,9 +178,9 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
       {/* --- File upload --- */}
       <div
         className={cn(
-          "rounded-lg border-2 border-dashed border-border p-8 text-center cursor-pointer transition-colors hover:border-primary/50",
+          "border-border hover:border-primary/50 cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors",
           dragOver && "border-primary bg-primary/5",
-          hasUrl && "opacity-50 pointer-events-none",
+          hasUrl && "pointer-events-none opacity-50",
         )}
         onDragOver={(e) => {
           e.preventDefault();
@@ -201,11 +201,11 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
           }}
         />
         {file ? (
-          <p className="text-sm font-medium text-foreground">{file.name}</p>
+          <p className="text-foreground text-sm font-medium">{file.name}</p>
         ) : (
           <>
-            <p className="text-sm text-foreground">{t("import.dropText")}</p>
-            <p className="text-xs text-muted-foreground mt-1">{t("import.dropHint")}</p>
+            <p className="text-foreground text-sm">{t("import.dropText")}</p>
+            <p className="text-muted-foreground mt-1 text-xs">{t("import.dropHint")}</p>
           </>
         )}
       </div>
@@ -213,22 +213,22 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
       {/* --- Separator --- */}
       <div className="relative my-4">
         <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-border" />
+          <div className="border-border w-full border-t" />
         </div>
         <div className="relative flex justify-center text-xs">
-          <span className="bg-popover px-2 text-muted-foreground">{t("import.or")}</span>
+          <span className="bg-popover text-muted-foreground px-2">{t("import.or")}</span>
         </div>
       </div>
 
       {/* --- URL input --- */}
       <div>
-        <label className="text-sm font-medium text-foreground">{t("import.urlLabel")}</label>
+        <label className="text-foreground text-sm font-medium">{t("import.urlLabel")}</label>
         <input
           type="url"
           value={githubUrl}
           onChange={(e) => handleUrlChange(e.target.value)}
           placeholder={t("import.urlPlaceholder")}
-          className="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          className="border-input bg-background placeholder:text-muted-foreground focus:ring-ring mt-1.5 w-full rounded-md border px-3 py-2 text-sm focus:ring-2 focus:outline-none"
           disabled={isPending}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -240,14 +240,14 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
       </div>
 
       {/* --- Errors & confirmations --- */}
-      {errorMessage && <p className="text-sm text-destructive mt-3">{errorMessage}</p>}
+      {errorMessage && <p className="text-destructive mt-3 text-sm">{errorMessage}</p>}
       {confirmOverwrite && (
-        <p className="text-sm text-destructive mt-3">
+        <p className="text-destructive mt-3 text-sm">
           {t("import.confirmOverwrite", { draftVersion: confirmOverwrite.draftVersion ?? "?" })}
         </p>
       )}
       {confirmIntegrity && (
-        <p className="text-sm text-destructive mt-3">
+        <p className="text-destructive mt-3 text-sm">
           {t("import.confirmIntegrity", { version: confirmIntegrity.version })}
         </p>
       )}

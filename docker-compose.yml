@@ -1,10 +1,12 @@
-# Appstrate — Docker Compose
+# Appstrate — Docker Compose (Self-Hosting / Production)
 #
 # Self-hosting:  docker compose up -d
 # Upgrade:       docker compose pull && docker compose up -d
+# Cleanup:       docker compose down -v   (removes containers AND data)
 #
-# For local development, copy docker-compose.override.example.yml
-# to docker-compose.override.yml (auto-merged by Compose).
+# For local development, use docker-compose.dev.yml instead:
+#   bun run setup              (recommended — runs everything automatically)
+#   docker compose -f docker-compose.dev.yml up -d   (manual)
 #
 # Required .env variables:
 #   POSTGRES_PASSWORD, BETTER_AUTH_SECRET, CONNECTION_ENCRYPTION_KEY,
@@ -18,11 +20,20 @@
 
 name: appstrate
 
+networks:
+  appstrate-data:
+    driver: bridge
+    internal: true
+  appstrate-public:
+    driver: bridge
+
 services:
   appstrate-postgres:
-    image: postgres:16-alpine
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    image: postgres:16.8-alpine
+    networks:
+      - appstrate-data
+    # ports:
+    #   - "${POSTGRES_PORT:-5432}:5432"  # Uncomment to expose PostgreSQL to the host
     restart: unless-stopped
     mem_limit: 1g
     command:
@@ -54,10 +65,12 @@ services:
       retries: 5
 
   appstrate-redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
+    networks:
+      - appstrate-data
     command: redis-server --maxmemory-policy noeviction
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    # ports:
+    #   - "${REDIS_PORT:-6379}:6379"  # Uncomment to expose Redis to the host
     restart: unless-stopped
     mem_limit: 256m
     volumes:
@@ -69,7 +82,9 @@ services:
       retries: 5
 
   appstrate-minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-03-12T18-04-18Z
+    networks:
+      - appstrate-data
     command: server /data --console-address ":9001"
     ports:
       - "${MINIO_PORT:-9000}:9000"
@@ -88,7 +103,9 @@ services:
       retries: 5
 
   appstrate-minio-init:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-03-12T17-29-24Z
+    networks:
+      - appstrate-data
     restart: "no"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-appstrate}
@@ -106,6 +123,8 @@ services:
 
   appstrate-migrate:
     image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-latest}
+    networks:
+      - appstrate-data
     restart: "no"
     command: ["bun", "packages/db/src/migrate.ts"]
     environment:
@@ -114,8 +133,9 @@ services:
       appstrate-postgres:
         condition: service_healthy
 
-  # Pull-only services: ensure runtime images are present before appstrate starts.
-  # These exit immediately — they only trigger `docker compose pull`.
+  # Pre-pull runtime images so they're available when the first flow executes.
+  # Without this, the first execution would block on a slow image pull.
+  # These containers exit immediately after pulling.
   appstrate-pi:
     image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
     entrypoint: ["true"]
@@ -128,6 +148,9 @@ services:
 
   appstrate:
     image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-latest}
+    networks:
+      - appstrate-data
+      - appstrate-public
     ports:
       - "${PORT:-3000}:3000"
     restart: unless-stopped
@@ -149,10 +172,17 @@ services:
       - EXECUTION_ADAPTER=${EXECUTION_ADAPTER:-pi}
       - DOCKER_SOCKET=/var/run/docker.sock
       - SIDECAR_POOL_SIZE=${SIDECAR_POOL_SIZE:-2}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
       - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
       - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     depends_on:
       appstrate-migrate:
         condition: service_completed_successfully

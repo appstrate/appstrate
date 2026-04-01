@@ -49,7 +49,7 @@ import type { PackageFormState } from "../lib/package-type-modules";
 import { getPackageTypeModule } from "../lib/package-type-modules";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 
-const PACKAGE_SCHEMAS: Record<string, object> = {
+const PACKAGE_SCHEMAS: Record<string, object | undefined> = {
   flow: flowSchema,
   skill: skillSchema,
   tool: toolSchema,
@@ -310,7 +310,7 @@ function FlowEditorInner({
             setSchemaFields(manifestToSchemaFields(manifest));
             setActiveTab("general");
           }}
-          schema={{ uri: AFPS_SCHEMA_URLS.flow, schema: PACKAGE_SCHEMAS.flow }}
+          schema={{ uri: AFPS_SCHEMA_URLS.flow, schema: PACKAGE_SCHEMAS.flow! }}
         />
       )}
 
@@ -463,7 +463,7 @@ function PackageEditorInner({
             }));
             setActiveTab("general");
           }}
-          schema={{ uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type] }}
+          schema={{ uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type]! }}
         />
       )}
 
@@ -506,7 +506,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
 
   if (isEdit && isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+      <div className="text-muted-foreground flex flex-col items-center justify-center py-16">
         <Spinner />
       </div>
     );

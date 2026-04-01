@@ -20,7 +20,7 @@ export function ProviderConfigureButton({
       <Button
         variant="ghost"
         size="sm"
-        className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+        className="text-muted-foreground hover:text-foreground h-7 px-2 text-xs"
         onClick={() => setOpen(true)}
       >
         <Settings size={14} className="mr-1" />

@@ -83,7 +83,7 @@ function ProxyFormBody({
             })}
           />
           {showError("label") && (
-            <div className="text-sm text-destructive">{errors.label?.message}</div>
+            <div className="text-destructive text-sm">{errors.label?.message}</div>
           )}
         </div>
         <div className="space-y-2">
@@ -102,10 +102,10 @@ function ProxyFormBody({
             })}
           />
           {proxy && (
-            <div className="text-sm text-muted-foreground">{t("proxies.modal.urlHint")}</div>
+            <div className="text-muted-foreground text-sm">{t("proxies.modal.urlHint")}</div>
           )}
           {showError("url") && (
-            <div className="text-sm text-destructive">{errors.url?.message}</div>
+            <div className="text-destructive text-sm">{errors.url?.message}</div>
           )}
         </div>
       </form>

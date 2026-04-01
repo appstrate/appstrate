@@ -65,11 +65,11 @@ export function SharedHeader({
           <>
             {detail.source === "system" && (
               <span title={t("packages.sourceBuiltIn", { ns: "settings" })}>
-                <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                <ShieldCheck className="text-muted-foreground h-4 w-4" />
               </span>
             )}
             {isHistoricalVersion && (
-              <span className="text-[0.65rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
+              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[0.65rem] font-medium">
                 {t("version.readOnly")}
               </span>
             )}
@@ -87,9 +87,9 @@ export function SharedHeader({
           </>
         }
       >
-        <code className="text-xs text-muted-foreground mt-1 block">{detail.id}</code>
+        <code className="text-muted-foreground mt-1 block text-xs">{detail.id}</code>
         {detail.description && (
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-muted-foreground mt-1 text-sm">
             <InlineMarkdown>{detail.description}</InlineMarkdown>
           </p>
         )}

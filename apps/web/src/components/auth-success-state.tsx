@@ -18,16 +18,16 @@ export function AuthSuccessState({
 }: AuthSuccessStateProps) {
   return (
     <div className="flex flex-col items-center gap-6 text-center">
-      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-        <Icon className="h-8 w-8 text-primary" />
+      <div className="bg-primary/10 flex h-16 w-16 items-center justify-center rounded-full">
+        <Icon className="text-primary h-8 w-8" />
       </div>
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold">{title}</h1>
-        {description && <p className="text-sm text-muted-foreground">{description}</p>}
+        {description && <p className="text-muted-foreground text-sm">{description}</p>}
       </div>
       <Link
         to={backTo}
-        className="text-sm text-muted-foreground underline underline-offset-4 hover:text-primary"
+        className="text-muted-foreground hover:text-primary text-sm underline underline-offset-4"
       >
         {backLabel}
       </Link>

@@ -174,7 +174,7 @@ describe("RBAC — Permission enforcement", () => {
 
   describe("schedules:write (member-accessible)", () => {
     it("member can access schedule creation endpoint", async () => {
-      const flow = await seedPackage({
+      await seedPackage({
         id: `@rbac-test/test-flow`,
         orgId: owner.orgId,
       });
@@ -190,7 +190,7 @@ describe("RBAC — Permission enforcement", () => {
       if (res.status === 403) {
         const body = (await res.json()) as Record<string, unknown>;
         // If 403, it should NOT be a permission error — just ownership
-        expect((body.detail as string)).not.toContain("schedules:write");
+        expect(body.detail as string).not.toContain("schedules:write");
       }
     });
 
@@ -258,7 +258,7 @@ describe("RBAC — Permission enforcement", () => {
       expect(body.code).toBe("forbidden");
       expect(body.status).toBe(403);
       expect(typeof body.detail).toBe("string");
-      expect((body.detail as string)).toContain("models:write");
+      expect(body.detail as string).toContain("models:write");
     });
   });
 

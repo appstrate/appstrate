@@ -92,7 +92,7 @@ export function EditorShell({
       <PageHeader title={title} emoji={emojiMap[type]} breadcrumbs={breadcrumbs} />
 
       {error && (
-        <div className="mb-4 rounded-md bg-destructive/15 text-destructive text-sm px-3 py-2">
+        <div className="bg-destructive/15 text-destructive mb-4 rounded-md px-3 py-2 text-sm">
           {error}
         </div>
       )}
@@ -110,7 +110,7 @@ export function EditorShell({
       {children}
 
       {!hideSubmitBar && (
-        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
+        <div className="border-border mt-6 flex justify-end gap-2 border-t pt-4">
           <Button variant="outline" type="button" onClick={onCancel}>
             {t("btn.cancel")}
           </Button>

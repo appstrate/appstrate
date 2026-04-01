@@ -76,7 +76,12 @@ export const providersPaths = {
       description: "Update a custom provider configuration. Built-in providers cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -108,7 +113,12 @@ export const providersPaths = {
         "Delete a custom provider. Built-in providers cannot be deleted. Cannot delete if used by flows.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -132,7 +142,12 @@ export const providersPaths = {
       description: "Remove admin credentials for a provider.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -162,7 +177,12 @@ export const providersPaths = {
       description: "Set OAuth client credentials for a provider.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {

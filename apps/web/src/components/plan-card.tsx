@@ -36,26 +36,26 @@ export function PlanCard({
       disabled={!isUpgrade || disabled}
     >
       {isCurrent && (
-        <div className="absolute top-3 right-3 rounded-full bg-primary p-0.5">
+        <div className="bg-primary absolute top-3 right-3 rounded-full p-0.5">
           <Check size={12} className="text-primary-foreground" strokeWidth={3} />
         </div>
       )}
 
-      <div className={cn("rounded-lg p-2 mb-3", isCurrent ? "bg-primary/10" : "bg-muted")}>
+      <div className={cn("mb-3 rounded-lg p-2", isCurrent ? "bg-primary/10" : "bg-muted")}>
         <Icon size={18} className={isCurrent ? "text-primary" : "text-muted-foreground"} />
       </div>
 
       <div className="font-semibold">{plan.name}</div>
-      {descKey && <p className="text-xs text-muted-foreground mt-0.5">{t(descKey)}</p>}
+      {descKey && <p className="text-muted-foreground mt-0.5 text-xs">{t(descKey)}</p>}
 
-      <div className="mt-auto pt-3 flex flex-col gap-0.5">
+      <div className="mt-auto flex flex-col gap-0.5 pt-3">
         <span className="text-xl font-bold">
           {plan.price === 0 ? t("onboarding.planFreePrice") : `$${plan.price}`}
           {plan.price > 0 && (
-            <span className="text-sm font-normal text-muted-foreground">/{t("billing.month")}</span>
+            <span className="text-muted-foreground text-sm font-normal">/{t("billing.month")}</span>
           )}
         </span>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-muted-foreground text-xs">
           {t("onboarding.planCredits", {
             count: plan.creditQuota.toLocaleString(),
           })}

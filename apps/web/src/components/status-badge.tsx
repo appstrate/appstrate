@@ -44,7 +44,7 @@ export function Badge({
   const variant = statusVariantMap[status] || "pending";
   const icon = statusIconMap[status];
   const dot = unread && (
-    <span className="absolute -top-1 -right-1 size-2 rounded-full bg-destructive" />
+    <span className="bg-destructive absolute -top-1 -right-1 size-2 rounded-full" />
   );
 
   if (!compact) {
@@ -68,7 +68,7 @@ export function Badge({
         {icon}
       </span>
       {/* Desktop: full badge */}
-      <UIBadge variant={variant} className="gap-1 hidden sm:inline-flex">
+      <UIBadge variant={variant} className="hidden gap-1 sm:inline-flex">
         {icon}
         {t(`status.${status}`, status)}
       </UIBadge>

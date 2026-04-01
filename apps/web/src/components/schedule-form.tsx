@@ -162,8 +162,8 @@ export function ScheduleForm({
   if (blockedMessage) {
     return (
       <div className="space-y-6">
-        <p className="text-sm text-muted-foreground">{blockedMessage}</p>
-        <div className="flex justify-end gap-2 pt-4 border-t border-border">
+        <p className="text-muted-foreground text-sm">{blockedMessage}</p>
+        <div className="border-border flex justify-end gap-2 border-t pt-4">
           <Button variant="outline" onClick={onCancel}>
             {t("btn.cancel")}
           </Button>
@@ -260,9 +260,9 @@ export function ScheduleForm({
             aria-invalid={showError("cronExpression") ? true : undefined}
             className={cn(showError("cronExpression") && "border-destructive")}
           />
-          <p className="text-sm text-muted-foreground">{t("schedule.cronHint")}</p>
+          <p className="text-muted-foreground text-sm">{t("schedule.cronHint")}</p>
           {showError("cronExpression") && errors.cronExpression?.message && (
-            <p className="text-sm text-destructive">{errors.cronExpression.message}</p>
+            <p className="text-destructive text-sm">{errors.cronExpression.message}</p>
           )}
         </div>
       </div>
@@ -293,7 +293,7 @@ export function ScheduleForm({
               checked={enabled}
               onCheckedChange={(checked) => setValue("enabled", Boolean(checked))}
             />
-            <Label htmlFor="schedule-enabled" className="font-normal cursor-pointer">
+            <Label htmlFor="schedule-enabled" className="cursor-pointer font-normal">
               {t("schedule.enabled")}
             </Label>
           </div>
@@ -314,9 +314,9 @@ export function ScheduleForm({
       )}
 
       {/* Footer */}
-      <div className="flex justify-end gap-2 pt-4 border-t border-border">
+      <div className="border-border flex justify-end gap-2 border-t pt-4">
         {isEdit && onDelete && (
-          <div className="flex gap-2 mr-auto">
+          <div className="mr-auto flex gap-2">
             {confirmDelete ? (
               <>
                 <Button type="button" variant="destructive" size="sm" onClick={onDelete}>

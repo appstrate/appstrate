@@ -65,7 +65,7 @@ export function EndUsersPage() {
       <div className="relative mb-4">
         <Search
           size={16}
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+          className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2"
         />
         <Input
           type="text"
@@ -93,23 +93,23 @@ export function EndUsersPage() {
               key={user.id}
               type="button"
               onClick={() => setSelectedUser(user)}
-              className="rounded-lg border border-border bg-card p-5 hover:border-primary/30 transition-colors text-left w-full"
+              className="border-border bg-card hover:border-primary/30 w-full rounded-lg border p-5 text-left transition-colors"
             >
               <div className="flex items-center gap-3">
-                <div className="flex-1 min-w-0">
+                <div className="min-w-0 flex-1">
                   <h3 className="text-sm font-semibold">
                     {user.name || user.email || t("applications.anonymousUser")}
                   </h3>
                   {user.email && (
-                    <span className="text-sm text-muted-foreground">{user.email}</span>
+                    <span className="text-muted-foreground text-sm">{user.email}</span>
                   )}
                   {user.externalId && (
-                    <p className="text-xs text-muted-foreground mt-0.5">
+                    <p className="text-muted-foreground mt-0.5 text-xs">
                       {t("applications.endUserExternalId")}: {user.externalId}
                     </p>
                   )}
                 </div>
-                <span className="text-xs text-muted-foreground font-mono shrink-0">
+                <span className="text-muted-foreground shrink-0 font-mono text-xs">
                   {user.id.length > 16 ? `${user.id.slice(0, 16)}...` : user.id}
                 </span>
               </div>

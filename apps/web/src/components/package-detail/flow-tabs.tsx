@@ -120,10 +120,10 @@ export function FlowMemoriesTab({ packageId }: { packageId: string }) {
           {memories.map((mem) => (
             <div
               key={mem.id}
-              className="flex items-center gap-3 rounded-md border border-border px-3 py-2"
+              className="border-border flex items-center gap-3 rounded-md border px-3 py-2"
             >
-              <span className="flex-1 text-sm text-foreground truncate">{mem.content}</span>
-              <span className="text-xs text-muted-foreground whitespace-nowrap">
+              <span className="text-foreground flex-1 truncate text-sm">{mem.content}</span>
+              <span className="text-muted-foreground text-xs whitespace-nowrap">
                 {mem.createdAt ? formatDateField(mem.createdAt) : ""}
               </span>
               <Button
@@ -216,7 +216,7 @@ function buildCurlMultipartExample(params: CurlParams): string {
 
   // Remove trailing backslash from the last line
   const last = lines.length - 1;
-  lines[last] = lines[last].replace(/ \\$/, "");
+  lines[last] = lines[last]!.replace(/ \\$/, "");
 
   return lines.join("\n");
 }
@@ -279,16 +279,16 @@ export function FlowApiTab({ packageId }: { packageId: string }) {
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5 space-y-5">
-      <h3 className="text-sm font-medium text-foreground">{t("api.title")}</h3>
+    <div className="border-border bg-card space-y-5 rounded-lg border p-5">
+      <h3 className="text-foreground text-sm font-medium">{t("api.title")}</h3>
 
       {/* API Key section */}
       {keysLoading ? (
-        <div className="text-sm text-muted-foreground">{t("loading", { ns: "common" })}</div>
+        <div className="text-muted-foreground text-sm">{t("loading", { ns: "common" })}</div>
       ) : !firstKey && !rawKey ? (
-        <div className="rounded-md border border-warning/30 bg-warning/5 px-4 py-3">
-          <p className="text-sm text-warning">{t("api.noKey")}</p>
-          <p className="text-xs text-muted-foreground mt-1">{t("api.noKeyHint")}</p>
+        <div className="border-warning/30 bg-warning/5 rounded-md border px-4 py-3">
+          <p className="text-warning text-sm">{t("api.noKey")}</p>
+          <p className="text-muted-foreground mt-1 text-xs">{t("api.noKeyHint")}</p>
           <Button size="sm" className="mt-2" onClick={() => setCreateModalOpen(true)}>
             {t("api.createKey")}
           </Button>
@@ -298,21 +298,21 @@ export function FlowApiTab({ packageId }: { packageId: string }) {
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground shrink-0">{t("api.selectKey")} :</span>
             {rawKey ? (
-              <code className="rounded bg-emerald-500/10 text-emerald-400 px-2 py-0.5 text-xs font-mono truncate">
+              <code className="truncate rounded bg-emerald-500/10 px-2 py-0.5 font-mono text-xs text-emerald-400">
                 {rawKey.slice(0, 12)}
                 {"•".repeat(20)}
               </code>
             ) : firstKey ? (
-              <code className="rounded bg-muted/50 px-2 py-0.5 text-xs font-mono text-foreground truncate">
+              <code className="bg-muted/50 text-foreground truncate rounded px-2 py-0.5 font-mono text-xs">
                 {firstKey.keyPrefix}
                 {"•".repeat(44)}
               </code>
             ) : null}
             {!rawKey && (
-              <span className="text-xs text-muted-foreground shrink-0">{t("api.keyMasked")}</span>
+              <span className="text-muted-foreground shrink-0 text-xs">{t("api.keyMasked")}</span>
             )}
           </div>
-          <Link to="/org-settings#api-keys" className="text-xs text-primary hover:underline">
+          <Link to="/org-settings#api-keys" className="text-primary text-xs hover:underline">
             {t("api.manageKeys")}
           </Link>
         </div>
@@ -328,21 +328,21 @@ export function FlowApiTab({ packageId }: { packageId: string }) {
       {/* curl example — JSON (hidden when files are required) */}
       {!hasRequiredFile && (
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <div className="mb-2 flex items-center justify-between">
+            <h4 className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
               {t("api.curlTitle")}
-              {curlMultipart && <span className="normal-case tracking-normal ml-1">— JSON</span>}
+              {curlMultipart && <span className="ml-1 tracking-normal normal-case">— JSON</span>}
             </h4>
             <Button
               variant="ghost"
               size="sm"
-              className="text-xs h-7"
+              className="h-7 text-xs"
               onClick={() => handleCopy(curlExample)}
             >
               {copied ? t("api.copied") : t("api.copy")}
             </Button>
           </div>
-          <pre className="whitespace-pre-wrap text-xs font-mono text-foreground bg-muted/50 rounded-md p-4 overflow-x-auto border border-border">
+          <pre className="text-foreground bg-muted/50 border-border overflow-x-auto rounded-md border p-4 font-mono text-xs whitespace-pre-wrap">
             {curlExample}
           </pre>
         </div>
@@ -351,21 +351,21 @@ export function FlowApiTab({ packageId }: { packageId: string }) {
       {/* curl example — multipart (when flow has file inputs) */}
       {curlMultipart && (
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <div className="mb-2 flex items-center justify-between">
+            <h4 className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
               {t("api.curlTitle")}
-              <span className="normal-case tracking-normal ml-1">— multipart/form-data</span>
+              <span className="ml-1 tracking-normal normal-case">— multipart/form-data</span>
             </h4>
             <Button
               variant="ghost"
               size="sm"
-              className="text-xs h-7"
+              className="h-7 text-xs"
               onClick={() => handleCopy(curlMultipart)}
             >
               {copied ? t("api.copied") : t("api.copy")}
             </Button>
           </div>
-          <pre className="whitespace-pre-wrap text-xs font-mono text-foreground bg-muted/50 rounded-md p-4 overflow-x-auto border border-border">
+          <pre className="text-foreground bg-muted/50 border-border overflow-x-auto rounded-md border p-4 font-mono text-xs whitespace-pre-wrap">
             {curlMultipart}
           </pre>
         </div>
@@ -373,13 +373,13 @@ export function FlowApiTab({ packageId }: { packageId: string }) {
 
       {/* Response example */}
       <div>
-        <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+        <h4 className="text-muted-foreground mb-2 text-xs font-medium tracking-wider uppercase">
           {t("api.responseTitle")}
         </h4>
-        <pre className="whitespace-pre-wrap text-xs font-mono text-foreground bg-muted/50 rounded-md p-4 overflow-x-auto border border-border">
+        <pre className="text-foreground bg-muted/50 border-border overflow-x-auto rounded-md border p-4 font-mono text-xs whitespace-pre-wrap">
           {JSON.stringify({ executionId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" }, null, 2)}
         </pre>
-        <p className="text-xs text-muted-foreground mt-2">{t("api.responseHint")}</p>
+        <p className="text-muted-foreground mt-2 text-xs">{t("api.responseHint")}</p>
       </div>
 
       {/* Docs link */}
@@ -387,7 +387,7 @@ export function FlowApiTab({ packageId }: { packageId: string }) {
         href="/api/docs"
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+        className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
       >
         {t("api.docsLink")} &rarr;
       </a>

@@ -20,8 +20,6 @@ Use the [feature request template](https://github.com/appstrate/appstrate/issues
 
 - [Bun](https://bun.sh/) (v1.3+)
 - [Docker](https://docs.docker.com/get-docker/) (with Compose v2)
-- PostgreSQL 16 (via Docker Compose)
-- Redis 7+ (via Docker Compose)
 
 ### Development Setup
 
@@ -30,31 +28,37 @@ Use the [feature request template](https://github.com/appstrate/appstrate/issues
 git clone https://github.com/<your-username>/appstrate.git
 cd appstrate
 
-# 2. Start infrastructure
-cp docker-compose.override.example.yml docker-compose.override.yml
-docker compose up -d
+# 2. Install dependencies
+bun install
 
-# 3. Configure environment
-cp .env.example .env
-# Edit .env — set BETTER_AUTH_SECRET, CONNECTION_ENCRYPTION_KEY, EXECUTION_TOKEN_SECRET
+# 3. One-command setup (copies .env, starts Docker infra, migrates DB, builds frontend)
+bun run setup
 
-# 4. Run migrations
-bun run db:migrate
+# 4. Start platform
+bun run dev         # → http://localhost:3000
+```
 
-# 5. Build and start
-bun run build
-bun run dev         # API on :3000
+The `.env.example` ships with dev-ready defaults — no manual secret generation needed. For production, regenerate all secrets (see comments in `.env`).
+
+**If you modify `runtime-pi/` or `runtime-pi/sidecar/`**, rebuild the Docker images:
+
+```sh
+bun run build-runtime    # agent image
+bun run build-sidecar    # sidecar proxy image
 ```
 
 ### Useful Commands
 
-| Command | Description |
-|---|---|
-| `bun run dev` | Start API + web (turbo) |
-| `bun run check` | TypeScript + ESLint + Prettier + OpenAPI validation |
-| `bun test` | All tests (~1000) — requires Docker |
-| `bun test apps/api/test/unit/` | Unit tests only (fast, no DB) |
-| `bun run verify:openapi` | OpenAPI spec validation |
+| Command                        | Description                                         |
+| ------------------------------ | --------------------------------------------------- |
+| `bun run setup`                | One-command dev bootstrap (first time)              |
+| `bun run dev`                  | Start API + web (turbo, hot-reload)                 |
+| `bun run check`                | TypeScript + ESLint + Prettier + OpenAPI validation |
+| `bun test`                     | All tests (~1000) — requires Docker                 |
+| `bun test apps/api/test/unit/` | Unit tests only (fast, no DB)                       |
+| `bun run build`                | Build frontend + shared packages                    |
+| `bun run db:migrate`           | Apply database migrations                           |
+| `bun run verify:openapi`       | OpenAPI spec validation                             |
 
 ### Branch Naming
 

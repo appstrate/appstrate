@@ -11,7 +11,12 @@ export const executionsPaths = {
         { $ref: "#/components/parameters/AppstrateUser" },
         { $ref: "#/components/parameters/AppstrateVersion" },
         { $ref: "#/components/parameters/IdempotencyKey" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
         {
           name: "version",
@@ -107,7 +112,12 @@ export const executionsPaths = {
       description: "List executions for a specific flow (org-scoped, default limit 50).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
         {
           name: "limit",
@@ -153,7 +163,12 @@ export const executionsPaths = {
       description: "Delete all completed executions for a flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {

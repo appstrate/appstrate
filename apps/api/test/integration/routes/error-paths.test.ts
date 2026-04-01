@@ -149,7 +149,7 @@ describe("403 — cross-org access prevention", () => {
 
   it("user from org A cannot access org B resources", async () => {
     // Create a flow in org B
-    const flow = await seedPackage({ id: "@orgb/secret-flow", orgId: ctxB.orgId });
+    await seedPackage({ id: "@orgb/secret-flow", orgId: ctxB.orgId });
 
     // User A tries to access org B's flows by using org B's ID
     const res = await app.request("/api/flows", {

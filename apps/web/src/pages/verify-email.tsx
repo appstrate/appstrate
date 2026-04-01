@@ -31,19 +31,19 @@ export function VerifyEmailPage() {
   return (
     <AuthLayout>
       <div className="flex flex-col items-center gap-6 text-center">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-          <Mail className="h-8 w-8 text-primary" />
+        <div className="bg-primary/10 flex h-16 w-16 items-center justify-center rounded-full">
+          <Mail className="text-primary h-8 w-8" />
         </div>
         <div className="flex flex-col gap-2">
           <h1 className="text-2xl font-semibold">{t("verifyEmail.title")}</h1>
           {error && (
-            <div className="flex items-center justify-center gap-2 text-sm text-destructive">
+            <div className="text-destructive flex items-center justify-center gap-2 text-sm">
               <AlertCircle size={16} />
               <span>{t("preferences.verificationLinkExpired")}</span>
             </div>
           )}
           {!error && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-muted-foreground text-sm">
               <Trans
                 ns="settings"
                 i18nKey="verifyEmail.description"
@@ -65,7 +65,7 @@ export function VerifyEmailPage() {
         {user ? (
           <button
             onClick={() => void logout()}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground underline underline-offset-4 hover:text-primary"
+            className="text-muted-foreground hover:text-primary flex items-center gap-1.5 text-sm underline underline-offset-4"
           >
             <LogOut size={14} />
             {t("userMenu.logout", { ns: "common" })}
@@ -73,7 +73,7 @@ export function VerifyEmailPage() {
         ) : (
           <Link
             to="/login"
-            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-primary"
+            className="text-muted-foreground hover:text-primary text-sm underline underline-offset-4"
           >
             {t("verifyEmail.backToLogin")}
           </Link>

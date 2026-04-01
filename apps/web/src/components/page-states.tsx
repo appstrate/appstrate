@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 export function LoadingState() {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+    <div className="text-muted-foreground flex flex-col items-center justify-center py-16">
       <Spinner className="h-6 w-6" />
     </div>
   );
@@ -14,7 +14,7 @@ export function LoadingState() {
 export function ErrorState({ message }: { message?: string }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+    <div className="text-muted-foreground flex flex-col items-center justify-center py-16">
       <p>{t("error.generic")}</p>
       {message && <p className="mt-1 text-sm">{message}</p>}
     </div>
@@ -37,7 +37,7 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center text-muted-foreground",
+        "text-muted-foreground flex flex-col items-center justify-center",
         compact ? "py-8" : "py-16",
       )}
     >

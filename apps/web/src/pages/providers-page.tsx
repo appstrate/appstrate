@@ -42,7 +42,7 @@ export function ProvidersPage() {
 
         actions.set(
           p.id,
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="ml-auto flex items-center gap-2">
             <ProviderConnectButton provider={p} />
             {configButton}
           </div>,
@@ -62,7 +62,7 @@ export function ProvidersPage() {
   const allProviders = providersData?.providers ?? [];
 
   const filterToggle = (
-    <div className="flex items-center gap-3 mt-2">
+    <div className="mt-2 flex items-center gap-3">
       <Tabs value={showAll ? "all" : "enabled"} onValueChange={(v) => setShowAll(v === "all")}>
         <TabsList>
           <TabsTrigger value="enabled">{t("providers.filterEnabled")}</TabsTrigger>
@@ -101,9 +101,9 @@ export function ProvidersPage() {
         onClose={() => setConfigurePickerOpen(false)}
         title={t("providers.configureProvider")}
       >
-        <p className="text-sm text-muted-foreground mb-4">{t("providers.selectProvider")}</p>
+        <p className="text-muted-foreground mb-4 text-sm">{t("providers.selectProvider")}</p>
         {allProviders.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">
+          <p className="text-muted-foreground py-4 text-center text-sm">
             {t("providers.allConfigured")}
           </p>
         ) : (
@@ -112,20 +112,20 @@ export function ProvidersPage() {
               <button
                 key={p.id}
                 type="button"
-                className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
+                className="hover:bg-muted/50 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors"
                 onClick={() => {
                   setConfigurePickerOpen(false);
                   setConfigureProvider(p);
                 }}
               >
                 {p.iconUrl ? (
-                  <ProviderIcon src={p.iconUrl} className="w-6 h-6" />
+                  <ProviderIcon src={p.iconUrl} className="h-6 w-6" />
                 ) : (
-                  <div className="w-6 h-6 rounded bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground">
+                  <div className="bg-muted text-muted-foreground flex h-6 w-6 items-center justify-center rounded text-xs font-medium">
                     {p.displayName.charAt(0).toUpperCase()}
                   </div>
                 )}
-                <div className="flex-1 min-w-0">
+                <div className="min-w-0 flex-1">
                   <span className="text-sm font-medium">{p.displayName}</span>
                 </div>
                 <ProviderConfigBadge enabled={p.enabled} />
@@ -133,10 +133,10 @@ export function ProvidersPage() {
             ))}
           </div>
         )}
-        <div className="mt-4 pt-3 border-t border-border">
+        <div className="border-border mt-4 border-t pt-3">
           <Link
             to="/providers/new"
-            className="flex items-center justify-center gap-2 w-full rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors no-underline"
+            className="text-muted-foreground hover:text-foreground hover:bg-muted/50 flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium no-underline transition-colors"
           >
             <span className="text-lg leading-none">+</span>
             {t("providers.newProvider")}

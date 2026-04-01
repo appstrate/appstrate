@@ -9,17 +9,27 @@ export default tseslint.config(
   { ignores: ["**/dist", "**/node_modules", "apps/web/src/components/ui"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ["**/src/**/*.{ts,tsx}"],
+    files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts"],
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.node,
     },
     rules: {
       "@typescript-eslint/no-unused-vars": [
-        "warn",
+        "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
       "preserve-caught-error": "off",
+    },
+  },
+  {
+    files: ["**/test/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-require-imports": "off",
+      "@typescript-eslint/no-extra-non-null-assertion": "warn",
+      "@typescript-eslint/no-unused-vars": "warn",
+      "prefer-const": "warn",
     },
   },
   {

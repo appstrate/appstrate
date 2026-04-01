@@ -112,10 +112,10 @@ export function OnboardingLayout({
   const { steps, index: currentIndex, total: totalSteps } = useOnboardingNav(step);
 
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-background p-6 md:p-10">
+    <div className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
       <div className="w-full max-w-lg">
         {/* Logo */}
-        <div className="flex justify-center mb-6">
+        <div className="mb-6 flex justify-center">
           <img
             src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
             alt="Appstrate"
@@ -124,9 +124,9 @@ export function OnboardingLayout({
         </div>
 
         {/* Progress bar */}
-        <div className="flex items-center gap-2 mb-8">
+        <div className="mb-8 flex items-center gap-2">
           {steps.map((s, i) => (
-            <div key={s.key} className="flex-1 flex items-center gap-2">
+            <div key={s.key} className="flex flex-1 items-center gap-2">
               <div
                 className={cn(
                   "h-1.5 w-full rounded-full transition-colors",
@@ -138,21 +138,21 @@ export function OnboardingLayout({
         </div>
 
         {/* Step label */}
-        <div className="text-sm text-muted-foreground mb-1">
+        <div className="text-muted-foreground mb-1 text-sm">
           {t("onboarding.stepLabel", { current: currentIndex + 1, total: totalSteps })}
         </div>
 
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-xl font-bold">{title}</h1>
-          {subtitle && <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>}
+          {subtitle && <p className="text-muted-foreground mt-1 text-sm">{subtitle}</p>}
         </div>
 
         {/* Content */}
         <div className="mb-6 max-h-[40vh] overflow-y-auto">{children}</div>
 
         {/* Footer navigation */}
-        <div className="flex items-center gap-2 pt-4 border-t border-border">
+        <div className="border-border flex items-center gap-2 border-t pt-4">
           {onBack ? (
             <Button variant="ghost" size="sm" onClick={onBack}>
               <ArrowLeft size={16} className="mr-1" />
