@@ -57,6 +57,7 @@
   "error.prefix": "Erreur : {{message}}",
   "error.popupBlocked": "Popup bloqué par le navigateur. Autorisez les popups pour ce site.",
   "error.oauthTimeout": "Timeout de connexion OAuth",
+  "error.downloadFailed": "Échec du téléchargement.",
   "loading": "Chargement...",
   "admin": "admin",
   "status.success": "succès",

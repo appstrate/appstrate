@@ -56,13 +56,14 @@ import { ProviderKeyFormModal } from "../components/provider-key-form-modal";
 import { PROVIDER_ICONS } from "../components/icons";
 import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
 
+import { ConfirmModal } from "../components/confirm-modal";
 import { CopyLinkButton } from "../components/copy-link-button";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
 import { useBilling, useCheckout, usePortal, getUsageBarColor } from "../hooks/use-billing";
 import { PlanGrid } from "../components/plan-card";
-import { toast } from "../hooks/use-toast";
+import { toast } from "sonner";
 import type {
   OrganizationMember,
   OrgRole,
@@ -93,6 +94,11 @@ export function OrgSettingsPage() {
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
   const [modelsSubTab, setModelsSubTab] = useState<"models-list" | "provider-keys">("models-list");
+  const [confirmState, setConfirmState] = useState<{
+    type: "removeMember" | "deleteOrg" | "deleteModel" | "deleteProviderKey" | "deleteProxy";
+    label: string;
+    id?: string;
+  } | null>(null);
 
   // Members — invite form
   const inviteForm = useForm<{ email: string; role: "member" | "admin" }>({
@@ -159,7 +165,7 @@ export function OrgSettingsPage() {
       setEditingName(false);
     },
     onError: (err: Error) => {
-      alert(t("error.prefix", { message: err.message }));
+      toast.error(t("error.prefix", { message: err.message }));
     },
   });
 
@@ -189,7 +195,7 @@ export function OrgSettingsPage() {
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
     },
     onError: (err: Error) => {
-      alert(t("error.prefix", { message: err.message }));
+      toast.error(t("error.prefix", { message: err.message }));
     },
   });
 
@@ -210,7 +216,7 @@ export function OrgSettingsPage() {
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
     },
     onError: (err: Error) => {
-      alert(t("error.prefix", { message: err.message }));
+      toast.error(t("error.prefix", { message: err.message }));
     },
   });
 
@@ -224,7 +230,7 @@ export function OrgSettingsPage() {
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
     },
     onError: (err: Error) => {
-      alert(t("error.prefix", { message: err.message }));
+      toast.error(t("error.prefix", { message: err.message }));
     },
   });
 
@@ -239,7 +245,7 @@ export function OrgSettingsPage() {
       queryClient.invalidateQueries({ queryKey: ["org-members", orgId] });
     },
     onError: (err: Error) => {
-      alert(t("error.prefix", { message: err.message }));
+      toast.error(t("error.prefix", { message: err.message }));
     },
   });
 
@@ -254,7 +260,7 @@ export function OrgSettingsPage() {
       window.location.reload();
     },
     onError: (err: Error) => {
-      alert(t("error.prefix", { message: err.message }));
+      toast.error(t("error.prefix", { message: err.message }));
     },
   });
 
@@ -294,8 +300,7 @@ export function OrgSettingsPage() {
 
   const handleRemove = (member: OrganizationMember) => {
     const label = member.displayName || member.email || member.userId;
-    if (!confirm(t("orgSettings.removeMember", { name: label }))) return;
-    removeMemberMutation.mutate(member.userId);
+    setConfirmState({ type: "removeMember", label, id: member.userId });
   };
 
   const handleRoleChange = (userId: string, role: OrgRole) => {
@@ -394,11 +399,7 @@ export function OrgSettingsPage() {
                   <Button
                     variant="destructive"
                     disabled={deleteOrgMutation.isPending}
-                    onClick={() => {
-                      if (confirm(t("orgSettings.deleteConfirm", { name: currentOrg.name }))) {
-                        deleteOrgMutation.mutate();
-                      }
-                    }}
+                    onClick={() => setConfirmState({ type: "deleteOrg", label: currentOrg.name })}
                   >
                     {deleteOrgMutation.isPending ? t("orgSettings.deleting") : t("btn.delete")}
                   </Button>
@@ -601,8 +602,7 @@ export function OrgSettingsPage() {
                 setModelModalOpen(true);
               }}
               onDelete={(m) => {
-                if (!confirm(t("models.deleteConfirm", { label: m.label }))) return;
-                deleteModelMutation.mutate(m.id);
+                setConfirmState({ type: "deleteModel", label: m.label, id: m.id });
               }}
               onSetDefault={(m) => setDefaultModelMutation.mutate(m.id)}
               onRemoveDefault={() => setDefaultModelMutation.mutate(null)}
@@ -623,8 +623,7 @@ export function OrgSettingsPage() {
                 setPkModalOpen(true);
               }}
               onDelete={(pk) => {
-                if (!confirm(t("providerKeys.deleteConfirm", { label: pk.label }))) return;
-                deletePkMutation.mutate(pk.id);
+                setConfirmState({ type: "deleteProviderKey", label: pk.label, id: pk.id });
               }}
             />
           )}
@@ -645,8 +644,7 @@ export function OrgSettingsPage() {
             setProxyModalOpen(true);
           }}
           onDelete={(p) => {
-            if (!confirm(t("proxies.deleteConfirm", { label: p.label }))) return;
-            deleteProxyMutation.mutate(p.id);
+            setConfirmState({ type: "deleteProxy", label: p.label, id: p.id });
           }}
           onSetDefault={(p) => setDefaultProxyMutation.mutate(p.id)}
           onRemoveDefault={() => setDefaultProxyMutation.mutate(null)}
@@ -698,6 +696,55 @@ export function OrgSettingsPage() {
                 onSuccess: () => setPkModalOpen(false),
               },
             );
+          }
+        }}
+      />
+
+      <ConfirmModal
+        open={!!confirmState}
+        onClose={() => setConfirmState(null)}
+        title={
+          confirmState?.type === "deleteOrg"
+            ? t("orgSettings.deleteOrg")
+            : t("btn.confirm", { ns: "common" })
+        }
+        description={
+          confirmState?.type === "deleteOrg"
+            ? t("orgSettings.deleteConfirm", { name: confirmState.label })
+            : confirmState?.type === "removeMember"
+              ? t("orgSettings.removeMember", { name: confirmState?.label })
+              : confirmState?.type === "deleteModel"
+                ? t("models.deleteConfirm", { label: confirmState?.label })
+                : confirmState?.type === "deleteProviderKey"
+                  ? t("providerKeys.deleteConfirm", { label: confirmState?.label })
+                  : t("proxies.deleteConfirm", { label: confirmState?.label })
+        }
+        isPending={
+          removeMemberMutation.isPending ||
+          deleteOrgMutation.isPending ||
+          deleteModelMutation.isPending ||
+          deletePkMutation.isPending ||
+          deleteProxyMutation.isPending
+        }
+        onConfirm={() => {
+          if (!confirmState) return;
+          const close = () => setConfirmState(null);
+          switch (confirmState.type) {
+            case "removeMember":
+              removeMemberMutation.mutate(confirmState.id!, { onSuccess: close });
+              break;
+            case "deleteOrg":
+              deleteOrgMutation.mutate();
+              break;
+            case "deleteModel":
+              deleteModelMutation.mutate(confirmState.id!, { onSuccess: close });
+              break;
+            case "deleteProviderKey":
+              deletePkMutation.mutate(confirmState.id!, { onSuccess: close });
+              break;
+            case "deleteProxy":
+              deleteProxyMutation.mutate(confirmState.id!, { onSuccess: close });
+              break;
           }
         }}
       />
@@ -1087,10 +1134,7 @@ function BillingTab() {
           window.location.href = url;
         },
         onError: (err: Error) => {
-          toast({
-            title: t("error.prefix", { ns: "common", message: err.message }),
-            variant: "destructive",
-          });
+          toast.error(t("error.prefix", { ns: "common", message: err.message }));
         },
       },
     );
@@ -1102,10 +1146,7 @@ function BillingTab() {
         window.location.href = url;
       },
       onError: (err: Error) => {
-        toast({
-          title: t("error.prefix", { ns: "common", message: err.message }),
-          variant: "destructive",
-        });
+        toast.error(t("error.prefix", { ns: "common", message: err.message }));
       },
     });
   };

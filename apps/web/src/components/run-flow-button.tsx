@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Play } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import { InputModal } from "./input-modal";
@@ -118,7 +119,7 @@ export function RunFlowButton({
         }
       }
     } catch {
-      // Fetch errors are silent — user can retry
+      toast.error(t("error.generic", { ns: "common" }));
     } finally {
       setFetching(false);
     }

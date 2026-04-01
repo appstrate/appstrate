@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { AppWindow, Plus, ShieldAlert, X } from "lucide-react";
+import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -34,6 +35,7 @@ export function AppSettingsPage() {
 
   const domains = application?.settings?.allowedRedirectDomains ?? [];
   const [editedDomains, setEditedDomains] = useState<string[] | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const activeDomains = editedDomains ?? domains;
 
   const { register, handleSubmit, showError } = useAppForm<SettingsFormData>({
@@ -53,13 +55,6 @@ export function AppSettingsPage() {
     updateMutation.mutate({
       id: appId,
       data: { name: data.name.trim(), settings: { allowedRedirectDomains: activeDomains } },
-    });
-  };
-
-  const handleDelete = () => {
-    if (!confirm(t("applications.deleteConfirm", { name: application.name }))) return;
-    deleteMutation.mutate(appId, {
-      onSuccess: () => navigate("/applications"),
     });
   };
 
@@ -155,7 +150,7 @@ export function AppSettingsPage() {
               <Button
                 variant="destructive"
                 disabled={deleteMutation.isPending}
-                onClick={handleDelete}
+                onClick={() => setConfirmOpen(true)}
               >
                 {deleteMutation.isPending ? t("applications.deleting") : t("btn.delete")}
               </Button>
@@ -163,6 +158,22 @@ export function AppSettingsPage() {
           </div>
         </>
       )}
+
+      <ConfirmModal
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        title={t("btn.confirm", { ns: "common" })}
+        description={t("applications.deleteConfirm", { name: application.name })}
+        isPending={deleteMutation.isPending}
+        onConfirm={() => {
+          deleteMutation.mutate(appId, {
+            onSuccess: () => {
+              setConfirmOpen(false);
+              navigate("/applications");
+            },
+          });
+        }}
+      />
     </>
   );
 }

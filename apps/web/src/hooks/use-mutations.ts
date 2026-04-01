@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import i18n from "../i18n";
 import { api, apiFetch, uploadFormData } from "../api";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
@@ -16,7 +17,7 @@ function buildQs(params: Record<string, string | undefined>): string {
 }
 
 export function onMutationError(err: Error) {
-  alert(i18n.t("error.prefix", { message: err.message }));
+  toast.error(i18n.t("error.prefix", { message: err.message }));
 }
 
 export function useSaveConfig(packageId: string) {
@@ -187,6 +188,7 @@ export function useImportPackage() {
       qc.invalidateQueries({ queryKey: ["packages"] });
       navigate(`/${data.type}s/${data.packageId}`);
     },
+    onError: onMutationError,
   });
 }
 
@@ -206,6 +208,7 @@ export function useImportFromGithub() {
       qc.invalidateQueries({ queryKey: ["packages"] });
       navigate(`/${data.type}s/${data.packageId}`);
     },
+    onError: onMutationError,
   });
 }
 

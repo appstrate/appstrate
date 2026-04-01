@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge as UIBadge } from "@/components/ui/badge";
@@ -48,6 +49,7 @@ export function ScheduleDetailPage() {
   const needsSetup = hasProviders && schedule?.readiness?.status !== "ready";
   const defaultTab = needsSetup ? "providers" : "executions";
   const [activeTab, setActiveTab] = useTabWithHash(tabs, defaultTab);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
@@ -56,79 +58,89 @@ export function ScheduleDetailPage() {
     updateSchedule.mutate({ id: schedule.id, enabled: !schedule.enabled });
   };
 
-  const handleDelete = () => {
-    if (confirm(t("schedule.deleteConfirm"))) {
-      deleteSchedule.mutate(schedule.id, {
-        onSuccess: () => navigate("/schedules"),
-      });
-    }
-  };
-
   return (
-    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
-      <PageHeader
-        title={schedule.name || schedule.id}
-        emoji="📅"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("schedule.breadcrumbList"), href: "/schedules" },
-          { label: schedule.name || schedule.id },
-        ]}
-        actions={
-          <>
-            <LiveScheduleStatusBadge schedule={schedule} />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon">
-                  <MoreHorizontal size={16} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => navigate(`/schedules/${id}/edit`)}>
-                  <Pencil size={14} />
-                  {t("schedule.edit")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={handleToggle} disabled={updateSchedule.isPending}>
-                  {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
-                  {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={handleDelete}
-                  disabled={deleteSchedule.isPending}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 size={14} />
-                  {t("schedule.delete")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </>
-        }
-      >
-        <TabsList className="mt-3">
-          <TabsTrigger value="executions">{t("schedule.tabExecutions")}</TabsTrigger>
-          {hasProviders && (
-            <TabsTrigger value="providers">{t("schedule.tabProviders")}</TabsTrigger>
-          )}
-          <TabsTrigger value="details">{t("schedule.tabDetails")}</TabsTrigger>
-        </TabsList>
-      </PageHeader>
+    <>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+        <PageHeader
+          title={schedule.name || schedule.id}
+          emoji="📅"
+          breadcrumbs={[
+            { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+            { label: t("schedule.breadcrumbList"), href: "/schedules" },
+            { label: schedule.name || schedule.id },
+          ]}
+          actions={
+            <>
+              <LiveScheduleStatusBadge schedule={schedule} />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon">
+                    <MoreHorizontal size={16} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => navigate(`/schedules/${id}/edit`)}>
+                    <Pencil size={14} />
+                    {t("schedule.edit")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleToggle} disabled={updateSchedule.isPending}>
+                    {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
+                    {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() => setConfirmOpen(true)}
+                    disabled={deleteSchedule.isPending}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 size={14} />
+                    {t("schedule.delete")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          }
+        >
+          <TabsList className="mt-3">
+            <TabsTrigger value="executions">{t("schedule.tabExecutions")}</TabsTrigger>
+            {hasProviders && (
+              <TabsTrigger value="providers">{t("schedule.tabProviders")}</TabsTrigger>
+            )}
+            <TabsTrigger value="details">{t("schedule.tabDetails")}</TabsTrigger>
+          </TabsList>
+        </PageHeader>
 
-      <TabsContent value="executions">
-        <ScheduleHistory schedule={schedule} />
-      </TabsContent>
-
-      {hasProviders && (
-        <TabsContent value="providers">
-          <ScheduleProviders schedule={schedule} />
+        <TabsContent value="executions">
+          <ScheduleHistory schedule={schedule} />
         </TabsContent>
-      )}
 
-      <TabsContent value="details">
-        <ScheduleParams schedule={schedule} />
-      </TabsContent>
-    </Tabs>
+        {hasProviders && (
+          <TabsContent value="providers">
+            <ScheduleProviders schedule={schedule} />
+          </TabsContent>
+        )}
+
+        <TabsContent value="details">
+          <ScheduleParams schedule={schedule} />
+        </TabsContent>
+      </Tabs>
+
+      <ConfirmModal
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        title={t("btn.confirm", { ns: "common" })}
+        description={t("schedule.deleteConfirm")}
+        isPending={deleteSchedule.isPending}
+        onConfirm={() => {
+          deleteSchedule.mutate(schedule.id, {
+            onSuccess: () => {
+              setConfirmOpen(false);
+              navigate("/schedules");
+            },
+          });
+        }}
+      />
+    </>
   );
 }
 

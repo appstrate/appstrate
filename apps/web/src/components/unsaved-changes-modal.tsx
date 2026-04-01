@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import type { UnsavedBlocker } from "../hooks/use-unsaved-changes";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ export function UnsavedChangesModal({ blocker, onSaveDraft }: UnsavedChangesModa
       await onSaveDraft();
       blocker.proceed();
     } catch {
+      toast.error(t("error.generic"));
       blocker.reset();
     } finally {
       setIsSaving(false);
