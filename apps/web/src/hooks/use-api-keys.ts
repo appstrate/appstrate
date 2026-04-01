@@ -17,12 +17,21 @@ export function useApiKeys() {
   });
 }
 
+export function useAvailableScopes() {
+  const orgId = useCurrentOrgId();
+  return useQuery({
+    queryKey: ["api-keys/available-scopes", orgId],
+    queryFn: () => api<{ scopes: string[] }>("/api-keys/available-scopes").then((d) => d.scopes),
+    enabled: !!orgId,
+  });
+}
+
 export function useCreateApiKey() {
   const qc = useQueryClient();
   const appId = useCurrentApplicationId();
   return useMutation({
-    mutationFn: async (data: { name: string; expiresAt: string | null }) => {
-      return api<{ id: string; key: string; keyPrefix: string }>("/api-keys", {
+    mutationFn: async (data: { name: string; expiresAt: string | null; scopes?: string[] }) => {
+      return api<{ id: string; key: string; keyPrefix: string; scopes: string[] }>("/api-keys", {
         method: "POST",
         body: JSON.stringify({ ...data, applicationId: appId }),
       });

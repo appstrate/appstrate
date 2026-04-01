@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { AppBreadcrumbSwitcher } from "../components/app-breadcrumb-switcher";
-import { useApiKeys, useRevokeApiKey } from "../hooks/use-api-keys";
+import { useApiKeys, useAvailableScopes, useRevokeApiKey } from "../hooks/use-api-keys";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
@@ -31,6 +31,7 @@ export function ApiKeysPage() {
   const { isAdmin } = usePermissions();
   const appId = useCurrentApplicationId();
   const { data: apiKeys, isLoading, error } = useApiKeys();
+  const { data: availableScopes } = useAvailableScopes();
   const revokeApiKeyMutation = useRevokeApiKey();
   const [createOpen, setCreateOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<{ id: string; label: string } | null>(null);
@@ -90,6 +91,26 @@ export function ApiKeysPage() {
                       )}
                     </div>
                   </div>
+                  {/* Scope badges */}
+                  {availableScopes && key.scopes.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {key.scopes.length === availableScopes.length ? (
+                        <Badge variant="outline" className="text-[0.65rem] px-1.5 py-0">
+                          {t("settings:apiKeys.fullAccess")}
+                        </Badge>
+                      ) : (
+                        [...new Set(key.scopes.map((s) => s.split(":")[0]!))].map((resource) => (
+                          <Badge
+                            key={resource}
+                            variant="outline"
+                            className="text-[0.65rem] px-1.5 py-0"
+                          >
+                            {resource}
+                          </Badge>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex flex-col gap-1 mt-3">
                   <span className="text-sm text-muted-foreground">
