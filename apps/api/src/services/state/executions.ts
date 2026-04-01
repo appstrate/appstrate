@@ -47,6 +47,44 @@ export async function createExecution(
   });
 }
 
+/**
+ * Create an execution record that is immediately failed (preflight error).
+ * Single INSERT with status=failed — triggers one pg_notify for realtime.
+ */
+export async function createFailedExecution(
+  id: string,
+  packageId: string,
+  actor: Actor | null,
+  orgId: string,
+  error: string,
+  scheduleId?: string,
+  connectionProfileId?: string,
+): Promise<void> {
+  const [maxRow] = await db
+    .select({ maxNum: max(executions.executionNumber) })
+    .from(executions)
+    .where(and(eq(executions.packageId, packageId), eq(executions.orgId, orgId)));
+  const executionNumber = (maxRow?.maxNum ?? 0) + 1;
+  const now = new Date();
+
+  await db.insert(executions).values({
+    id,
+    packageId,
+    ...(actor ? actorInsert(actor) : { userId: null, endUserId: null }),
+    orgId,
+    status: "failed",
+    input: null,
+    error,
+    startedAt: now,
+    completedAt: now,
+    duration: 0,
+    notifiedAt: now,
+    connectionProfileId,
+    scheduleId,
+    executionNumber,
+  });
+}
+
 export async function updateExecution(
   id: string,
   updates: {
