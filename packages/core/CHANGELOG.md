@@ -5,6 +5,18 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.0] — 2026-04-02
+
+### Changed
+
+- **BREAKING**: Rename `flow` to `agent` across all exports:
+  - `packageTypeEnum`: `"flow"` value replaced by `"agent"`
+  - `PACKAGE_TYPES`: `["flow", ...]` becomes `["agent", ...]`
+  - `AFPS_SCHEMA_URLS`: `flow` key replaced by `agent`
+  - `flowManifestSchema` renamed to `agentManifestSchema`
+  - `FlowManifest` type renamed to `AgentManifest`
+- Updated `system-packages`, `zip`, `form`, `schemas` modules for flow-to-agent rename
+
 ## [2.9.8] — 2026-03-21
 
 ### Added

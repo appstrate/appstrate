@@ -1070,9 +1070,6 @@ export function createPackagesRouter() {
     const { manifest, content, files, type: packageType } = parsed;
     const packageId = manifest.name as string;
 
-    const scopeErr = checkScopeMatch(c, packageId);
-    if (scopeErr) throw scopeErr;
-
     // System packages are immutable
     if (isSystemPackage(packageId)) {
       throw new ApiError({
