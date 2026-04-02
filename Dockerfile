@@ -31,6 +31,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
+COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
 COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modules
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
@@ -48,6 +49,7 @@ WORKDIR /app
 # Runtime dependencies (root hoisted + workspace-specific)
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
+COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
 COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modules
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
@@ -56,6 +58,11 @@ COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types
 # API source (Bun runs TypeScript directly)
 COPY --from=build /app/apps/api/src ./apps/api/src
 COPY --from=build /app/apps/api/package.json ./apps/api/
+
+# Core package (validation, storage, utilities — used by API + all packages at runtime)
+COPY --from=build /app/packages/core/src ./packages/core/src
+COPY --from=build /app/packages/core/schema ./packages/core/schema
+COPY --from=build /app/packages/core/package.json ./packages/core/
 
 # Shared types (used by API at runtime)
 COPY --from=build /app/packages/shared-types/src ./packages/shared-types/src
