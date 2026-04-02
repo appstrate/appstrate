@@ -92,10 +92,6 @@
             "items": {
               "type": "string"
             }
-          },
-          "connectionMode": {
-            "type": "string",
-            "enum": ["user", "admin"]
           }
         },
         "additionalProperties": {}
