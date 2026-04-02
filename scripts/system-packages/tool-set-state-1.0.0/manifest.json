@@ -4,12 +4,12 @@
   "version": "1.0.0",
   "type": "tool",
   "displayName": "Set State",
-  "description": "Persist state for the next execution run.",
+  "description": "Persist state for the next run.",
   "schemaVersion": "1.0",
   "entrypoint": "set-state.ts",
   "tool": {
     "name": "set_state",
-    "description": "Persist a JSON object for the next execution run. Only the last call is kept.",
+    "description": "Persist a JSON object for the next run. Only the last call is kept.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -18,9 +18,7 @@
           "description": "State object to persist for the next run"
         }
       },
-      "required": [
-        "state"
-      ]
+      "required": ["state"]
     }
   }
 }

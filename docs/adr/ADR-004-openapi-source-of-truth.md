@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Appstrate exposes 181 API endpoints across multiple route domains (flows, executions, connections, webhooks, organizations, etc.). We need a reliable way to:
+Appstrate exposes 181 API endpoints across multiple route domains (agents, runs, connections, webhooks, organizations, etc.). We need a reliable way to:
 
 - Document all endpoints with request/response schemas, auth requirements, and error codes
 - Keep documentation in sync with the actual implementation

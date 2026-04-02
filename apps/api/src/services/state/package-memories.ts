@@ -4,7 +4,7 @@ import { eq, and, asc, count } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packageMemories } from "@appstrate/db/schema";
 
-// --- Package Memories (org-scoped, accumulate across executions) ---
+// --- Package Memories (org-scoped, accumulate across runs) ---
 
 export const MAX_MEMORY_CONTENT = 2000;
 export const MAX_MEMORIES_PER_PACKAGE = 100;

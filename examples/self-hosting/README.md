@@ -6,7 +6,7 @@ Minimal Docker Compose setup for self-hosting Appstrate with PostgreSQL, Redis, 
 
 - Docker Engine 24+ with Compose V2
 - At least 4 GB of available RAM
-- Docker socket accessible at `/var/run/docker.sock` (required for flow execution)
+- Docker socket accessible at `/var/run/docker.sock` (required for agent runs)
 
 ## Quick Start
 
@@ -52,15 +52,15 @@ Minimal Docker Compose setup for self-hosting Appstrate with PostgreSQL, Redis, 
             [Postgres] [Redis] [MinIO]
               :5432     :6379   :9000
 
-            + Docker socket (flow execution)
+            + Docker socket (agent runs)
               -> Pi agent containers
               -> Sidecar proxy containers
 ```
 
 - **Appstrate** -- the main platform (API + web UI)
-- **PostgreSQL 16** -- primary database (users, flows, executions, connections)
+- **PostgreSQL 16** -- primary database (users, agents, runs, connections)
 - **Redis 7** -- scheduling (BullMQ), rate limiting, cancel signaling, OAuth PKCE state
-- **MinIO** -- S3-compatible object storage (flow packages, execution artifacts)
+- **MinIO** -- S3-compatible object storage (agent packages, run artifacts)
 
 ## Upgrading
 
@@ -90,7 +90,7 @@ See `.env.example` for all available environment variables. Key settings:
 
 ## LLM Provider Setup
 
-Appstrate needs at least one LLM provider to execute flows. Configure it via the `SYSTEM_PROVIDER_KEYS` environment variable:
+Appstrate needs at least one LLM provider to run agents. Configure it via the `SYSTEM_PROVIDER_KEYS` environment variable:
 
 ```bash
 SYSTEM_PROVIDER_KEYS='[{"id":"anthropic","label":"Anthropic","api":"anthropic-messages","baseUrl":"https://api.anthropic.com","apiKey":"sk-ant-...","models":[{"modelId":"claude-sonnet-4-6","label":"Claude Sonnet 4.6","isDefault":true}]}]'

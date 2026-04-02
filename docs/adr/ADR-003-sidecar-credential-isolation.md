@@ -36,7 +36,7 @@ A **sidecar pool** (`sidecar-pool.ts`) pre-warms containers at startup to avoid 
 - Zero-trust agent isolation: agents never see raw credentials (tokens, API keys, OAuth secrets)
 - Credential rotation happens without restarting agents (sidecar fetches fresh credentials per request)
 - URI allowlists enforced at the proxy layer, preventing agents from calling unauthorized endpoints
-- Sidecar pool eliminates container startup latency for most executions
+- Sidecar pool eliminates container startup latency for most runs
 - Response pass-through preserves upstream HTTP status codes and content types
 - Large responses are truncated (>50KB) with `X-Truncated: true` header to protect agent context windows
 

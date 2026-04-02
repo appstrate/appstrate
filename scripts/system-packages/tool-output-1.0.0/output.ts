@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Output Tool — Return data as part of the execution result.
+ * Output Tool — Return data as part of the run result.
  *
  * Each call is deep-merged into the final output. If an output schema
  * is defined, the merged result is validated against it.
  *
- * When OUTPUT_SCHEMA is set (JSON Schema from the flow manifest), the tool
+ * When OUTPUT_SCHEMA is set (JSON Schema from the agent manifest), the tool
  * parameter schema is derived from it so the LLM gets native constrained
  * decoding. `required` is stripped to allow incremental deep-merge calls.
  */
@@ -48,7 +48,7 @@ export default function (pi: ExtensionAPI) {
     name: "output",
     label: "Output",
     description:
-      "MANDATORY — call at least once before finishing. Returns data as the execution result. " +
+      "MANDATORY — call at least once before finishing. Returns data as the run result. " +
       "Each call is deep-merged into the final output. Call with {} if you have no structured data to return.",
     parameters: Type.Object({
       data: buildDataSchema(),

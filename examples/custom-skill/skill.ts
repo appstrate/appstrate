@@ -2,7 +2,7 @@
  * Minimal Appstrate skill extension for the Pi Coding Agent SDK.
  *
  * This file exports an extension factory that registers a "word_count" tool.
- * The agent can call this tool during flow execution.
+ * The agent can call this tool during agent runs.
  *
  * Extension import: @mariozechner/pi-coding-agent (NOT "pi-agent")
  * Execute signature: (_toolCallId, params, signal) -- params is the SECOND argument

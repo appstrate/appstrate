@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Appstrate is multi-tenant: each organization has its own flows, connections, executions, and settings. We need to ensure strict data isolation between organizations. Two approaches were evaluated:
+Appstrate is multi-tenant: each organization has its own agents, connections, runs, and settings. We need to ensure strict data isolation between organizations. Two approaches were evaluated:
 
 1. **PostgreSQL Row-Level Security (RLS)**: Database-enforced policies that filter rows based on a session variable (e.g., `current_setting('app.org_id')`). Every query is automatically filtered by the database, regardless of application code.
 

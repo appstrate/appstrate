@@ -4,7 +4,7 @@ Demonstrates how to create a minimal Appstrate skill that extends the Pi Coding 
 
 ## What is a Skill?
 
-A skill is a package that adds capabilities to the AI agent during flow execution. Skills are defined by a `SKILL.md` file (with YAML frontmatter) and one or more TypeScript extension files. At runtime, skills are injected into the agent container at `.pi/skills/{id}/`.
+A skill is a package that adds capabilities to the AI agent during agent runs. Skills are defined by a `SKILL.md` file (with YAML frontmatter) and one or more TypeScript extension files. At runtime, skills are injected into the agent container at `.pi/skills/{id}/`.
 
 ## File Structure
 

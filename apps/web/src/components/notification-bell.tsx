@@ -115,7 +115,7 @@ export function NotificationBell() {
   const { t } = useTranslation(["common", "agents"]);
   const { data: count } = useUnreadCount();
   const { data: agents } = useAgents();
-  const { data: executionsData } = useAllRuns(0, 50);
+  const { data: runsData } = useAllRuns(0, 50);
   const markRead = useMarkRead();
   const markAllRead = useMarkAllRead();
   const [open, setOpen] = useState(false);
@@ -128,8 +128,7 @@ export function NotificationBell() {
     for (const f of agents) agentNameMap.set(f.id, f.displayName);
   }
 
-  const unreadRuns =
-    executionsData?.runs.filter((e) => e.notifiedAt != null && e.readAt == null) ?? [];
+  const unreadRuns = runsData?.runs.filter((e) => e.notifiedAt != null && e.readAt == null) ?? [];
 
   const handleClick = (runId: string) => {
     markRead.mutate(runId);

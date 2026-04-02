@@ -43,7 +43,7 @@ bun run dev
 - **French UI text** via i18next (`fr` default, `en`), English code/comments
 - **Conventional Commits**: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`
 - **Zod 4** for all request body/query validation (NOT Zod 3). Use `z.url()` not `z.string().url()`
-- **AJV** only for dynamic manifest schemas (flow config/input/output from user-defined manifests)
+- **AJV** only for dynamic manifest schemas (agent config/input/output from user-defined manifests)
 - **bun:test** with `it()` -- NOT `test()`, NOT vitest/jest
 - **File naming**: `*.test.ts` -- NOT `*.spec.ts`
 
@@ -72,7 +72,7 @@ appstrate/
 │   ├── shared-types/         # @appstrate/shared-types -- Drizzle InferSelectModel re-exports
 │   └── connect/              # @appstrate/connect -- OAuth2/PKCE, API key, credential encryption
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK + sidecar proxy
-└── system-packages/          # System package ZIPs (providers, skills, tools, flows)
+└── system-packages/          # System package ZIPs (providers, skills, tools, agents)
 ```
 
 ### Stack
@@ -115,12 +115,12 @@ appstrate/
 - Auth: Better Auth cookie sessions + `X-Org-Id` header for org context
 - API key auth (`ask_*` prefix) tried first, then cookie fallback
 - Request pipeline: error handler -> Request-Id -> CORS -> health -> auth -> org context -> routes
-- Route guards: `requireAdmin()`, `requireOwner()`, `requireFlow()`, `requireMutableFlow()`
+- Route guards: `requireAdmin()`, `requireOwner()`, `requireAgent()`, `requireMutableAgent()`
 - Rate limiting: Redis-backed, keyed by `method:path:identity`
 
 ### Frontend Patterns
 
-- i18next: `fr` (default) + `en`, namespaces: `common`, `flows`, `settings`
+- i18next: `fr` (default) + `en`, namespaces: `common`, `agents`, `settings`
 - API helpers in `api.ts`: `api<T>(path)` prepends `/api`, injects `X-Org-Id`, `credentials: "include"`
 - React Query keys: org-scoped `[entity, orgId, id?]`
 - Feature gating: `useAppConfig()` reads `window.__APP_CONFIG__` (injected at boot)
@@ -162,7 +162,7 @@ bun test packages/core/           # Core library tests (367+, no DB)
 | `app.ts`        | `getTestApp()` -- full Hono app replica (no boot/Docker)     |
 | `auth.ts`       | `createTestUser()`, `createTestOrg()`, `createTestContext()` |
 | `db.ts`         | `truncateAll()` -- DELETE FROM all tables in FK-safe order   |
-| `seed.ts`       | 15+ factories: `seedPackage()`, `seedExecution()`, etc.      |
+| `seed.ts`       | 15+ factories: `seedPackage()`, `seedRun()`, etc.            |
 | `assertions.ts` | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`      |
 | `redis.ts`      | `getRedis()`, `flushRedis()`                                 |
 

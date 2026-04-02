@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "tool",
   "displayName": "Output",
-  "description": "Return data as the execution result.",
+  "description": "Return data as the run result.",
   "schemaVersion": "1.0",
   "entrypoint": "output.ts",
   "tool": {
@@ -18,9 +18,7 @@
           "description": "JSON object to merge into the output"
         }
       },
-      "required": [
-        "data"
-      ]
+      "required": ["data"]
     }
   }
 }

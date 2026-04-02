@@ -4,12 +4,12 @@
   "version": "1.0.0",
   "type": "tool",
   "displayName": "Report",
-  "description": "Generate a markdown report as part of the execution result.",
+  "description": "Generate a markdown report as part of the run result.",
   "schemaVersion": "1.0",
   "entrypoint": "report.ts",
   "tool": {
     "name": "report",
-    "description": "MANDATORY — call at least once. Appends markdown content to the execution report.",
+    "description": "MANDATORY — call at least once. Appends markdown content to the run report.",
     "inputSchema": {
       "type": "object",
       "properties": {
