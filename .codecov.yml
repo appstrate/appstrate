@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+# Codecov configuration — https://docs.codecov.io/docs/codecov-yaml
+
+coverage:
+  status:
+    project:
+      default:
+        target: 75%
+        threshold: 2%
+    patch:
+      default:
+        target: 50%
+
+ignore:
+  - "apps/web/**"
+  - "test/**"
+  - "scripts/**"
+  - "packages/db/src/schema/**"
+  - "packages/shared-types/**"
+
+comment:
+  layout: "condensed_header, condensed_files, condensed_footer"
+  require_changes: true

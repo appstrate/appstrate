@@ -56,12 +56,12 @@ jobs:
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
 
       - name: Run all tests with coverage
-        run: bun test --coverage
+        run: bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage
 
-      - name: Upload coverage report
+      - name: Upload coverage to Codecov
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24 # v5.4.3
         with:
-          name: coverage-report
-          path: coverage/
-          retention-days: 7
+          files: coverage/report.lcov
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
