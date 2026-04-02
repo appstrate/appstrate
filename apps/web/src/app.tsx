@@ -142,9 +142,12 @@ function useExternalRedirect(isAuthenticated: boolean) {
     if (!redirect) return;
 
     try {
-      const origin = new URL(redirect).origin;
-      if (trustedOrigins.includes(origin)) {
-        window.location.assign(redirect);
+      const url = new URL(redirect);
+      if (
+        (url.protocol === "https:" || url.protocol === "http:") &&
+        trustedOrigins.includes(url.origin)
+      ) {
+        window.location.assign(url.href);
       }
     } catch {
       // Invalid URL -- ignore
