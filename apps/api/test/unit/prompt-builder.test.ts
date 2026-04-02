@@ -277,19 +277,19 @@ describe("buildEnrichedPrompt — memories", () => {
 // ─── Execution history API ──────────────────────────────────
 
 describe("buildEnrichedPrompt — execution history", () => {
-  it("includes execution history API when executionApi provided", () => {
+  it("includes run history API when executionApi provided", () => {
     const ctx = baseContext({
       executionApi: { url: "http://platform:3000", token: "exec_token_123" },
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Execution History");
+    expect(prompt).toContain("## Run History");
     expect(prompt).toContain("$SIDECAR_URL/execution-history");
   });
 
-  it("omits execution history when no executionApi", () => {
+  it("omits run history when no executionApi", () => {
     const ctx = baseContext({ executionApi: undefined });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("## Execution History");
+    expect(prompt).not.toContain("## Run History");
   });
 });
 
