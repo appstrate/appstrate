@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Types
 export type {
   Actor,

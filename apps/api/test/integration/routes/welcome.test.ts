@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -24,7 +26,7 @@ describe("Welcome API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.ok).toBe(true);
     });
 
@@ -41,7 +43,7 @@ describe("Welcome API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.ok).toBe(true);
     });
 

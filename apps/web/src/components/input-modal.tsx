@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
 import { Modal } from "./modal";
@@ -12,12 +14,12 @@ import {
   type SchemaWrapper,
   type JSONSchemaObject,
 } from "@appstrate/core/form";
-import type { FlowDetail } from "@appstrate/shared-types";
+import type { AgentDetail } from "@appstrate/shared-types";
 
 interface InputModalProps {
   open: boolean;
   onClose: () => void;
-  flow: FlowDetail;
+  agent: AgentDetail;
   onSubmit: (input: Record<string, unknown>, files?: Record<string, File[]>) => void;
   isPending?: boolean;
   initialValues?: Record<string, unknown>;
@@ -26,12 +28,12 @@ interface InputModalProps {
 export function InputModal({
   open,
   onClose,
-  flow,
+  agent,
   onSubmit,
   isPending,
   initialValues,
 }: InputModalProps) {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
 
   const guardedClose = () => {
     if (!isPending) onClose();
@@ -41,12 +43,12 @@ export function InputModal({
     <Modal
       open={open}
       onClose={guardedClose}
-      title={t("input.title", { name: flow.displayName })}
+      title={t("input.title", { name: agent.displayName })}
       actions={null}
     >
       {open && (
         <InputModalForm
-          flow={flow}
+          agent={agent}
           onClose={guardedClose}
           onSubmit={onSubmit}
           isPending={isPending}
@@ -65,20 +67,20 @@ type InputFormData = {
 };
 
 function InputModalForm({
-  flow,
+  agent,
   onClose,
   onSubmit,
   isPending,
   initialValues,
 }: {
-  flow: FlowDetail;
+  agent: AgentDetail;
   onClose: () => void;
   onSubmit: (input: Record<string, unknown>, files?: Record<string, File[]>) => void;
   isPending?: boolean;
   initialValues?: Record<string, unknown>;
 }) {
-  const { t } = useTranslation(["flows", "common"]);
-  const wrapper: SchemaWrapper = flow.input ?? { schema: EMPTY_SCHEMA };
+  const { t } = useTranslation(["agents", "common"]);
+  const wrapper: SchemaWrapper = agent.input ?? { schema: EMPTY_SCHEMA };
   const schema = wrapper.schema;
 
   const {

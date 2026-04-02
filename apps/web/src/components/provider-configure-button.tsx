@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Settings } from "lucide-react";
@@ -12,7 +14,7 @@ export function ProviderConfigureButton({
   provider: ProviderConfig;
   callbackUrl?: string;
 }) {
-  const { t } = useTranslation("flows");
+  const { t } = useTranslation("agents");
   const [open, setOpen] = useState(false);
 
   return (

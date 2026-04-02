@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, mock } from "bun:test";
 import type { ContainerOrchestrator } from "../../src/services/orchestrator/interface.ts";
 import type { WorkloadHandle } from "../../src/services/orchestrator/types.ts";
 import { runContainerLifecycle } from "../../src/services/adapters/container-lifecycle.ts";
-import type { ExecutionMessage } from "../../src/services/adapters/types.ts";
+import type { RunMessage } from "../../src/services/adapters/types.ts";
 
 function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): ContainerOrchestrator {
   return {
@@ -15,11 +17,9 @@ function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): Con
     ),
     removeIsolationBoundary: mock(() => Promise.resolve()),
     createSidecar: mock(() =>
-      Promise.resolve({ id: "sidecar-1", executionId: "exec-1", role: "sidecar" }),
+      Promise.resolve({ id: "sidecar-1", runId: "exec-1", role: "sidecar" }),
     ),
-    createWorkload: mock(() =>
-      Promise.resolve({ id: "agent-1", executionId: "exec-1", role: "agent" }),
-    ),
+    createWorkload: mock(() => Promise.resolve({ id: "agent-1", runId: "exec-1", role: "agent" })),
     startWorkload: mock(() => Promise.resolve()),
     stopWorkload: mock(() => Promise.resolve()),
     removeWorkload: mock(() => Promise.resolve()),
@@ -27,7 +27,7 @@ function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): Con
     streamLogs: mock(async function* () {
       yield '{"type": "text_delta", "text": "hello"}';
     }),
-    stopByExecutionId: mock(() => Promise.resolve("stopped" as const)),
+    stopByRunId: mock(() => Promise.resolve("stopped" as const)),
     ...overrides,
   };
 }
@@ -35,14 +35,14 @@ function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): Con
 function createHandle(overrides?: Partial<WorkloadHandle>): WorkloadHandle {
   return {
     id: "container-1",
-    executionId: "exec-1",
+    runId: "exec-1",
     role: "agent",
     ...overrides,
   };
 }
 
-async function collectMessages(gen: AsyncGenerator<ExecutionMessage>): Promise<ExecutionMessage[]> {
-  const messages: ExecutionMessage[] = [];
+async function collectMessages(gen: AsyncGenerator<RunMessage>): Promise<RunMessage[]> {
+  const messages: RunMessage[] = [];
   for await (const msg of gen) {
     messages.push(msg);
   }
@@ -59,7 +59,7 @@ describe("runContainerLifecycle", () => {
         orchestrator,
         handle,
         adapterName: "pi",
-        executionId: "exec-1",
+        runId: "exec-1",
         timeout: 30,
         processLogs: async function* (logs) {
           for await (const line of logs) {
@@ -72,7 +72,7 @@ describe("runContainerLifecycle", () => {
     expect(messages[0]!.type).toBe("progress");
     expect(messages[0]!.message).toContain("container started");
     expect(messages[0]!.data?.adapter).toBe("pi");
-    expect(messages[0]!.data?.executionId).toBe("exec-1");
+    expect(messages[0]!.data?.runId).toBe("exec-1");
   });
 
   it("calls startWorkload on the orchestrator", async () => {
@@ -84,7 +84,7 @@ describe("runContainerLifecycle", () => {
         orchestrator,
         handle,
         adapterName: "pi",
-        executionId: "exec-1",
+        runId: "exec-1",
         timeout: 30,
         processLogs: async function* () {},
       }),
@@ -107,7 +107,7 @@ describe("runContainerLifecycle", () => {
         orchestrator,
         handle,
         adapterName: "pi",
-        executionId: "exec-1",
+        runId: "exec-1",
         timeout: 30,
         processLogs: async function* (logs) {
           for await (const line of logs) {
@@ -135,7 +135,7 @@ describe("runContainerLifecycle", () => {
         orchestrator,
         handle,
         adapterName: "pi",
-        executionId: "exec-1",
+        runId: "exec-1",
         timeout: 30,
         processLogs: async function* () {},
       }),
@@ -156,7 +156,7 @@ describe("runContainerLifecycle", () => {
           orchestrator,
           handle,
           adapterName: "pi",
-          executionId: "exec-1",
+          runId: "exec-1",
           timeout: 30,
           processLogs: async function* () {},
         }),
@@ -180,7 +180,7 @@ describe("runContainerLifecycle", () => {
         orchestrator,
         handle,
         adapterName: "pi",
-        executionId: "exec-1",
+        runId: "exec-1",
         timeout: 30,
         processLogs: async function* () {
           yield { type: "output" as const, data: { done: true } };
@@ -203,7 +203,7 @@ describe("runContainerLifecycle", () => {
           orchestrator,
           handle,
           adapterName: "pi",
-          executionId: "exec-1",
+          runId: "exec-1",
           timeout: 30,
           processLogs: async function* () {},
         }),
@@ -231,7 +231,7 @@ describe("runContainerLifecycle", () => {
           orchestrator,
           handle,
           adapterName: "pi",
-          executionId: "exec-1",
+          runId: "exec-1",
           timeout: 30,
           signal: controller.signal,
           processLogs: async function* (logs) {
@@ -259,7 +259,7 @@ describe("runContainerLifecycle", () => {
           orchestrator,
           handle,
           adapterName: "pi",
-          executionId: "exec-1",
+          runId: "exec-1",
           timeout: 30,
           processLogs: async function* () {
             yield { type: "error" as const, message: "OOM killed" };

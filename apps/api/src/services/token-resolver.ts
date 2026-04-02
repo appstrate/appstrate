@@ -1,12 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
- * Token resolution — resolves provider tokens for execution.
- * Shared by executions.ts and scheduler.ts.
+ * Token resolution — resolves provider tokens for a run.
+ * Shared by runs.ts and scheduler.ts.
  */
 
 import { getCredentials } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import { logger } from "../lib/logger.ts";
-import type { FlowProviderRequirement, ProviderProfileMap } from "../types/index.ts";
+import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 
 /**
  * Sentinel value for providers that have credentials but no standard token field
@@ -25,7 +27,7 @@ const CONNECTED_SENTINEL = "__connected__";
  * as connected.
  */
 export async function buildProviderTokens(
-  providers: FlowProviderRequirement[],
+  providers: AgentProviderRequirement[],
   providerProfiles: ProviderProfileMap,
   orgId: string,
 ): Promise<Record<string, string>> {

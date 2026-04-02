@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm, Controller } from "react-hook-form";
@@ -31,7 +33,7 @@ function computeExpiresAt(expiresIn: string): string | null {
   return new Date(Date.now() + parseInt(expiresIn, 10) * 24 * 60 * 60 * 1000).toISOString();
 }
 
-/** Build compact resource summary from scopes (e.g. ["flows", "executions (2/3)"]). */
+/** Build compact resource summary from scopes (e.g. ["agents", "runs (2/3)"]). */
 function buildResourceSummary(
   scopes: string[],
   allScopes: string[],

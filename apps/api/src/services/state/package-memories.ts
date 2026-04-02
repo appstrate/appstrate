@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { eq, and, asc, count } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packageMemories } from "@appstrate/db/schema";
 
-// --- Package Memories (org-scoped, accumulate across executions) ---
+// --- Package Memories (org-scoped, accumulate across runs) ---
 
 export const MAX_MEMORY_CONTENT = 2000;
 export const MAX_MEMORIES_PER_PACKAGE = 100;
@@ -19,7 +21,7 @@ export async function addPackageMemories(
   packageId: string,
   orgId: string,
   contents: string[],
-  executionId: string,
+  runId: string,
 ): Promise<number> {
   // Count existing memories
   const [row] = await db
@@ -33,7 +35,7 @@ export async function addPackageMemories(
   const toInsert = contents
     .slice(0, available)
     .map((c) => c.slice(0, MAX_MEMORY_CONTENT))
-    .map((content) => ({ packageId, orgId, content, executionId }));
+    .map((content) => ({ packageId, orgId, content, runId }));
 
   if (toInsert.length === 0) return 0;
 

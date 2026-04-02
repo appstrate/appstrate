@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { zipArtifact, unzipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
@@ -11,7 +13,7 @@ import { PACKAGE_ITEMS_BUCKET } from "./config.ts";
 
 /** Upload a package item's full normalized files to Storage. Returns SHA256 SRI integrity hash. */
 export async function uploadPackageFiles(
-  type: "flows" | "skills" | "tools" | "providers",
+  type: "agents" | "skills" | "tools" | "providers",
   orgId: string,
   itemId: string,
   normalizedFiles: Record<string, Uint8Array>,
@@ -36,7 +38,7 @@ export const SYSTEM_STORAGE_NAMESPACE = "_system";
  *  Tries org-scoped path first, falls back to global _system/ namespace for system packages.
  *  When expectedIntegrity is provided, verifies SHA256 SRI hash before unzipping. */
 export async function downloadPackageFiles(
-  type: "flows" | "skills" | "tools" | "providers",
+  type: "agents" | "skills" | "tools" | "providers",
   orgId: string,
   itemId: string,
   expectedIntegrity?: string | null,
@@ -65,7 +67,7 @@ export async function downloadPackageFiles(
 
 /** Delete a package item's files from Storage. */
 export async function deletePackageFiles(
-  type: "flows" | "skills" | "tools" | "providers",
+  type: "agents" | "skills" | "tools" | "providers",
   orgId: string,
   itemId: string,
 ): Promise<void> {

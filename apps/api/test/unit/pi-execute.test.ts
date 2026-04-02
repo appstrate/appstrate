@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * PiAdapter.execute() unit tests.
  *
  * Uses a mock ContainerOrchestrator injected via constructor DI to test
- * the full execution pipeline without Docker.
+ * the full run pipeline without Docker.
  */
 import { describe, it, expect, mock } from "bun:test";
 import { PiAdapter } from "../../src/services/adapters/pi.ts";
@@ -13,7 +15,7 @@ import type {
   WorkloadSpec,
   SidecarConfig,
 } from "../../src/services/orchestrator/types.ts";
-import type { ExecutionMessage, PromptContext } from "../../src/services/adapters/types.ts";
+import type { RunMessage, PromptContext } from "../../src/services/adapters/types.ts";
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -24,21 +26,21 @@ function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): Con
     cleanupOrphans: mock(() => Promise.resolve({ workloads: 0, isolationBoundaries: 0 })),
     ensureImages: mock(() => Promise.resolve()),
     createIsolationBoundary: mock(
-      (executionId: string): Promise<IsolationBoundary> =>
-        Promise.resolve({ id: `net-${executionId}`, name: `appstrate-exec-${executionId}` }),
+      (runId: string): Promise<IsolationBoundary> =>
+        Promise.resolve({ id: `net-${runId}`, name: `appstrate-exec-${runId}` }),
     ),
     removeIsolationBoundary: mock(() => Promise.resolve()),
     createSidecar: mock(
       (
-        _executionId: string,
+        _runId: string,
         _boundary: IsolationBoundary,
         _config: SidecarConfig,
       ): Promise<WorkloadHandle> =>
-        Promise.resolve({ id: "sidecar-001", executionId: _executionId, role: "sidecar" }),
+        Promise.resolve({ id: "sidecar-001", runId: _runId, role: "sidecar" }),
     ),
     createWorkload: mock(
       (spec: WorkloadSpec, _boundary: IsolationBoundary): Promise<WorkloadHandle> =>
-        Promise.resolve({ id: "agent-001", executionId: spec.executionId, role: "agent" }),
+        Promise.resolve({ id: "agent-001", runId: spec.runId, role: "agent" }),
     ),
     startWorkload: mock(() => Promise.resolve()),
     stopWorkload: mock(() => Promise.resolve()),
@@ -48,7 +50,7 @@ function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): Con
       yield JSON.stringify({ type: "text_delta", text: "Working..." });
       yield JSON.stringify({ type: "output", data: { result: "Done" } });
     }),
-    stopByExecutionId: mock(() => Promise.resolve("stopped" as const)),
+    stopByRunId: mock(() => Promise.resolve("stopped" as const)),
     ...overrides,
   };
 }
@@ -73,8 +75,8 @@ function basePromptContext(overrides?: Partial<PromptContext>): PromptContext {
   };
 }
 
-async function collectMessages(gen: AsyncGenerator<ExecutionMessage>): Promise<ExecutionMessage[]> {
-  const messages: ExecutionMessage[] = [];
+async function collectMessages(gen: AsyncGenerator<RunMessage>): Promise<RunMessage[]> {
+  const messages: RunMessage[] = [];
   for await (const msg of gen) messages.push(msg);
   return messages;
 }
@@ -173,11 +175,11 @@ describe("PiAdapter.execute()", () => {
     expect(spec.env.MODEL_API_KEY).toBeUndefined();
   });
 
-  it("injects flow package and input files into agent workload", async () => {
+  it("injects agent package and input files into agent workload", async () => {
     const orchestrator = createMockOrchestrator();
     const adapter = new PiAdapter(orchestrator);
 
-    const flowPackage = Buffer.from("fake-zip-content");
+    const agentPackage = Buffer.from("fake-zip-content");
     const inputFiles = [
       {
         fieldName: "doc",
@@ -189,7 +191,7 @@ describe("PiAdapter.execute()", () => {
     ];
 
     await collectMessages(
-      adapter.execute("exec-005", basePromptContext(), 30, flowPackage, undefined, inputFiles),
+      adapter.execute("exec-005", basePromptContext(), 30, agentPackage, undefined, inputFiles),
     );
 
     const workloadCall = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]!;
@@ -198,7 +200,7 @@ describe("PiAdapter.execute()", () => {
     expect(spec.files).toBeDefined();
     expect(spec.files!.targetDir).toBe("/workspace");
     expect(spec.files!.items).toHaveLength(2);
-    expect(spec.files!.items[0]!.name).toBe("flow-package.afps");
+    expect(spec.files!.items[0]!.name).toBe("agent-package.afps");
     expect(spec.files!.items[1]!.name).toBe("documents/report.pdf");
   });
 

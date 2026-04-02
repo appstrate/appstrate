@@ -1,6 +1,6 @@
 {
   "name": "appstrate",
-  "description": "Open-source platform for executing one-shot AI flows in ephemeral Docker containers",
+  "description": "[⚡️] Open-source Agent as a Service platform",
   "homepage": "https://github.com/appstrate/appstrate",
   "repository": {
     "type": "git",
@@ -12,7 +12,6 @@
   "keywords": [
     "ai",
     "agents",
-    "flows",
     "docker",
     "automation",
     "llm"
@@ -89,6 +88,7 @@
     "*.{ts,tsx,json,md,yml,yaml}": "prettier --write"
   },
   "dependencies": {
+    "@afps-spec/schema": "^1.1.0",
     "@appstrate/core": "workspace:*"
   }
 }

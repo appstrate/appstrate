@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 

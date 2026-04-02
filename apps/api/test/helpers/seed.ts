@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Entity factories for seeding test data.
  *
@@ -7,8 +9,8 @@
 import { db } from "./db.ts";
 import {
   packages,
-  executions,
-  executionLogs,
+  runs,
+  runLogs,
   applications,
   endUsers,
   webhooks,
@@ -23,7 +25,7 @@ import {
 } from "@appstrate/db/schema";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
-// ─── Packages / Flows ─────────────────────────────────────
+// ─── Packages / Agents ───────────────────────────────────
 
 type PackageInsert = Partial<InferInsertModel<typeof packages>> & {
   orgId: string | null;
@@ -33,20 +35,20 @@ export async function seedPackage(
   overrides: PackageInsert,
 ): Promise<InferSelectModel<typeof packages>> {
   const orgSlug = overrides.id?.split("/")[0]?.replace("@", "") ?? "testorg";
-  const name = overrides.id?.split("/")[1] ?? `flow-${crypto.randomUUID().slice(0, 8)}`;
+  const name = overrides.id?.split("/")[1] ?? `agent-${crypto.randomUUID().slice(0, 8)}`;
   const id = overrides.id ?? `@${orgSlug}/${name}`;
 
   const [pkg] = await db
     .insert(packages)
     .values({
       id,
-      type: "flow",
+      type: "agent",
       source: "local",
       draftManifest: {
         name: `@${orgSlug}/${name}`,
         version: "0.1.0",
-        type: "flow",
-        description: "Test flow",
+        type: "agent",
+        description: "Test agent",
       },
       draftContent: "Test prompt content",
       ...overrides,
@@ -55,8 +57,8 @@ export async function seedPackage(
   return pkg!;
 }
 
-/** Alias for seedPackage — the default type is already "flow". */
-export const seedFlow = seedPackage;
+/** Alias for seedPackage — the default type is already "agent". */
+export const seedAgent = seedPackage;
 
 // ─── Package Versions ─────────────────────────────────────
 
@@ -73,46 +75,44 @@ export async function seedPackageVersion(
       version: "0.1.0",
       integrity: "sha256-test",
       artifactSize: 1024,
-      manifest: { name: overrides.packageId, version: "0.1.0", type: "flow" },
+      manifest: { name: overrides.packageId, version: "0.1.0", type: "agent" },
       ...overrides,
     })
     .returning();
   return version!;
 }
 
-// ─── Executions ───────────────────────────────────────────
+// ─── Runs ─────────────────────────────────────────────────
 
-type ExecutionInsert = Partial<InferInsertModel<typeof executions>> & {
+type RunInsert = Partial<InferInsertModel<typeof runs>> & {
   packageId: string;
   orgId: string;
 };
 
-export async function seedExecution(
-  overrides: ExecutionInsert,
-): Promise<InferSelectModel<typeof executions>> {
-  const [exec] = await db
-    .insert(executions)
+export async function seedRun(overrides: RunInsert): Promise<InferSelectModel<typeof runs>> {
+  const [run] = await db
+    .insert(runs)
     .values({
       id: `exec_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
       status: "pending",
       ...overrides,
     })
     .returning();
-  return exec!;
+  return run!;
 }
 
-// ─── Execution Logs ───────────────────────────────────────
+// ─── Run Logs ─────────────────────────────────────────────
 
-type ExecutionLogInsert = Partial<InferInsertModel<typeof executionLogs>> & {
-  executionId: string;
+type RunLogInsert = Partial<InferInsertModel<typeof runLogs>> & {
+  runId: string;
   orgId: string;
 };
 
-export async function seedExecutionLog(
-  overrides: ExecutionLogInsert,
-): Promise<InferSelectModel<typeof executionLogs>> {
+export async function seedRunLog(
+  overrides: RunLogInsert,
+): Promise<InferSelectModel<typeof runLogs>> {
   const [log] = await db
-    .insert(executionLogs)
+    .insert(runLogs)
     .values({
       type: "progress",
       level: "info",
@@ -176,7 +176,7 @@ export async function seedWebhook(
     .insert(webhooks)
     .values({
       url: "https://example.com/webhook",
-      events: ["execution.completed"],
+      events: ["run.completed"],
       secret: crypto.randomUUID(),
       ...overrides,
     } as InferInsertModel<typeof webhooks>)

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Hono } from "hono";
 import { sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -23,9 +25,9 @@ healthRouter.get("/health", async (c) => {
   }
 
   // System packages check
-  const systemFlowCount = getSystemPackagesByType("flow").length;
-  checks.flows = {
-    status: systemFlowCount > 0 ? "healthy" : "degraded",
+  const systemAgentCount = getSystemPackagesByType("agent").length;
+  checks.agents = {
+    status: systemAgentCount > 0 ? "healthy" : "degraded",
   };
 
   const hasUnhealthy = Object.values(checks).some((c) => c.status === "unhealthy");

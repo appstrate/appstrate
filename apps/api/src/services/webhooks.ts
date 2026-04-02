@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Webhooks service — CRUD, signing (Standard Webhooks), and BullMQ delivery.
  */
@@ -23,11 +25,11 @@ import { prefixedId } from "../lib/ids.ts";
 // ---------------------------------------------------------------------------
 
 export const webhookEventSchema = z.enum([
-  "execution.started",
-  "execution.completed",
-  "execution.failed",
-  "execution.timeout",
-  "execution.cancelled",
+  "run.started",
+  "run.completed",
+  "run.failed",
+  "run.timeout",
+  "run.cancelled",
 ]);
 
 export type WebhookEventType = z.infer<typeof webhookEventSchema>;
@@ -364,13 +366,13 @@ export async function listDeliveries(
 
 export function buildEventEnvelope(params: {
   eventType: string;
-  execution: Record<string, unknown>;
+  run: Record<string, unknown>;
   payloadMode: "full" | "summary";
 }): { eventId: string; payload: Record<string, unknown> } {
   const eventId = prefixedId("evt");
   const now = Math.floor(Date.now() / 1000);
 
-  const execObj: Record<string, unknown> = { ...params.execution, object: "execution" };
+  const execObj: Record<string, unknown> = { ...params.run, object: "run" };
 
   // Summary mode: strip result and input
   if (params.payloadMode === "summary") {
@@ -421,17 +423,17 @@ function getDeliveryQueue(): Queue<DeliveryJobData> {
 }
 
 /**
- * Dispatch webhook events for an execution status change.
- * Called from the execution pipeline after status transitions.
+ * Dispatch webhook events for a run status change.
+ * Called from the run pipeline after status transitions.
  *
  * Matches webhooks in two scopes:
- * - "organization": fires for ALL executions in the org (dashboard + API)
- * - "application": fires only for executions via a specific application's API key
+ * - "organization": fires for ALL runs in the org (dashboard + API)
+ * - "application": fires only for runs via a specific application's API key
  */
 export async function dispatchWebhookEvents(
   orgId: string,
   eventType: WebhookEventType,
-  execution: Record<string, unknown>,
+  run: Record<string, unknown>,
   applicationId?: string | null,
 ): Promise<void> {
   // Build OR condition: org-scoped webhooks always match; app-scoped only if applicationId present
@@ -456,11 +458,11 @@ export async function dispatchWebhookEvents(
 
   for (const wh of rows) {
     if (!wh.events?.includes(eventType)) continue;
-    if (wh.packageId && wh.packageId !== execution.packageId) continue;
+    if (wh.packageId && wh.packageId !== run.packageId) continue;
 
     const { eventId, payload } = buildEventEnvelope({
       eventType,
-      execution,
+      run,
       payloadMode: wh.payloadMode as "full" | "summary",
     });
 

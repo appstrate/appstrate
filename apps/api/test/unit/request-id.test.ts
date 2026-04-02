@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
 import type { AppEnv } from "../../src/types/index.ts";
@@ -18,7 +20,7 @@ describe("requestId middleware", () => {
 
   it("stores requestId in context", async () => {
     const res = await app.request("/test");
-    const json = await res.json() as any;
+    const json = (await res.json()) as any;
     expect(json.requestId).toBeTruthy();
     expect(json.requestId.startsWith("req_")).toBe(true);
   });
@@ -34,7 +36,7 @@ describe("requestId middleware", () => {
   it("Request-Id header matches context requestId", async () => {
     const res = await app.request("/test");
     const header = res.headers.get("Request-Id");
-    const json = await res.json() as any;
+    const json = (await res.json()) as any;
     expect(header).toBe(json.requestId);
   });
 });

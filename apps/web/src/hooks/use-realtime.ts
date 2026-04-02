@@ -1,11 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useEffect, useRef } from "react";
 import { getCurrentOrgId } from "./use-org";
 
 /**
- * Subscribe to execution status changes + log inserts for a single execution via SSE.
+ * Subscribe to run status changes + log inserts for a single run via SSE.
  */
-export function useExecutionRealtime(
-  executionId: string | null | undefined,
+export function useRunRealtime(
+  runId: string | null | undefined,
   onStatusChange?: (payload: Record<string, unknown>) => void,
 ) {
   const onStatusRef = useRef(onStatusChange);
@@ -14,16 +16,16 @@ export function useExecutionRealtime(
   });
 
   useEffect(() => {
-    if (!executionId) return;
+    if (!runId) return;
     const orgId = getCurrentOrgId();
     if (!orgId) return;
 
     const es = new EventSource(
-      `/api/realtime/executions/${executionId}?orgId=${encodeURIComponent(orgId)}&verbose=true`,
+      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&verbose=true`,
       { withCredentials: true },
     );
 
-    es.addEventListener("execution_update", (e) => {
+    es.addEventListener("run_update", (e) => {
       try {
         const data = JSON.parse(e.data);
         onStatusRef.current?.(data);
@@ -35,14 +37,14 @@ export function useExecutionRealtime(
     return () => {
       es.close();
     };
-  }, [executionId]);
+  }, [runId]);
 }
 
 /**
- * Subscribe to execution_logs INSERTs via SSE.
+ * Subscribe to run_logs INSERTs via SSE.
  */
-export function useExecutionLogsRealtime(
-  executionId: string | null | undefined,
+export function useRunLogsRealtime(
+  runId: string | null | undefined,
   onNewLog: (log: Record<string, unknown>) => void,
 ) {
   const onNewLogRef = useRef(onNewLog);
@@ -51,16 +53,16 @@ export function useExecutionLogsRealtime(
   });
 
   useEffect(() => {
-    if (!executionId) return;
+    if (!runId) return;
     const orgId = getCurrentOrgId();
     if (!orgId) return;
 
     const es = new EventSource(
-      `/api/realtime/executions/${executionId}?orgId=${encodeURIComponent(orgId)}&verbose=true`,
+      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&verbose=true`,
       { withCredentials: true },
     );
 
-    es.addEventListener("execution_log", (e) => {
+    es.addEventListener("run_log", (e) => {
       try {
         const data = JSON.parse(e.data);
         onNewLogRef.current(data);
@@ -72,5 +74,5 @@ export function useExecutionLogsRealtime(
     return () => {
       es.close();
     };
-  }, [executionId]);
+  }, [runId]);
 }

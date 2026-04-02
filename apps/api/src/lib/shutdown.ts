@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { closeDb } from "@appstrate/db/client";
 import { closeRedis } from "./redis.ts";
 import { logger } from "./logger.ts";
@@ -7,7 +9,7 @@ import {
   getInFlightCount,
   waitForInFlight,
   stopCancelSubscriber,
-} from "../services/execution-tracker.ts";
+} from "../services/run-tracker.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
@@ -30,7 +32,7 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
 
     const inFlight = getInFlightCount();
     if (inFlight > 0) {
-      logger.info("Waiting for in-flight executions", {
+      logger.info("Waiting for in-flight runs", {
         count: inFlight,
         timeoutMs: SHUTDOWN_TIMEOUT_MS,
       });

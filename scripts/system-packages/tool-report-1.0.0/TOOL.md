@@ -1,6 +1,6 @@
 ## Report
 
-You MUST call the `report` tool at least once before the execution ends. This is how you produce a markdown report for the user.
+You MUST call the `report` tool at least once before the run ends. This is how you produce a markdown report for the user.
 
 Each call appends content to the final report (separated by newlines). Use markdown formatting — headings, lists, tables, code blocks — to structure the report clearly.
 

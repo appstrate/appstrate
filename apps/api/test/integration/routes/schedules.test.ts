@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedFlow, seedSchedule, seedConnectionProfile, seedExecution } from "../../helpers/seed.ts";
+import { seedAgent, seedSchedule, seedConnectionProfile, seedRun } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -17,8 +19,7 @@ describe("Schedules API", () => {
     profileId = profile.id;
   });
 
-
-  function flowId(name: string) {
+  function agentId(name: string) {
     return `@${ctx.org.slug}/${name}`;
   }
 
@@ -29,16 +30,16 @@ describe("Schedules API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body).toBeArray();
       expect(body).toHaveLength(0);
     });
 
     it("returns schedules for the org", async () => {
-      const fid = flowId("sched-flow");
-      const flow = await seedFlow({ id: fid, orgId: ctx.orgId });
+      const fid = agentId("sched-agent");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
       await seedSchedule({
-        packageId: flow.id,
+        packageId: agent.id,
         orgId: ctx.orgId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
@@ -50,13 +51,13 @@ describe("Schedules API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.length).toBeGreaterThanOrEqual(1);
       expect(body[0].name).toBe("Hourly");
     });
   });
 
-  describe("POST /api/flows/:scope/:name/schedules — input validation", () => {
+  describe("POST /api/agents/:scope/:name/schedules — input validation", () => {
     const inputSchema = {
       type: "object",
       properties: {
@@ -66,17 +67,17 @@ describe("Schedules API", () => {
       required: ["email"],
     };
 
-    async function seedFlowWithInput() {
-      const fid = flowId("input-sched");
-      return seedFlow({
+    async function seedAgentWithInput() {
+      const fid = agentId("input-sched");
+      return seedAgent({
         id: fid,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
           name: fid,
           version: "0.1.0",
-          type: "flow",
-          description: "Flow with required input",
+          type: "agent",
+          description: "Agent with required input",
           input: { schema: inputSchema },
         },
         draftContent: "Process {{email}}",
@@ -84,10 +85,10 @@ describe("Schedules API", () => {
     }
 
     it("returns 400 when required input field is missing", async () => {
-      await seedFlowWithInput();
-      const fid = flowId("input-sched");
+      await seedAgentWithInput();
+      const fid = agentId("input-sched");
 
-      const res = await app.request(`/api/flows/${fid}/schedules`, {
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -98,15 +99,15 @@ describe("Schedules API", () => {
       });
 
       expect(res.status).toBe(400);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.detail).toContain("email");
     });
 
     it("returns 400 when input is omitted and schema has required fields", async () => {
-      await seedFlowWithInput();
-      const fid = flowId("input-sched");
+      await seedAgentWithInput();
+      const fid = agentId("input-sched");
 
-      const res = await app.request(`/api/flows/${fid}/schedules`, {
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -119,10 +120,10 @@ describe("Schedules API", () => {
     });
 
     it("returns 400 when required field is empty string", async () => {
-      await seedFlowWithInput();
-      const fid = flowId("input-sched");
+      await seedAgentWithInput();
+      const fid = agentId("input-sched");
 
-      const res = await app.request(`/api/flows/${fid}/schedules`, {
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -136,10 +137,10 @@ describe("Schedules API", () => {
     });
 
     it("creates schedule when required input is provided", async () => {
-      await seedFlowWithInput();
-      const fid = flowId("input-sched");
+      await seedAgentWithInput();
+      const fid = agentId("input-sched");
 
-      const res = await app.request(`/api/flows/${fid}/schedules`, {
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -153,12 +154,12 @@ describe("Schedules API", () => {
     });
   });
 
-  describe("POST /api/flows/:scope/:name/schedules", () => {
-    it("creates a schedule for a flow", async () => {
-      const fid = flowId("cron-flow");
-      await seedFlow({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+  describe("POST /api/agents/:scope/:name/schedules", () => {
+    it("creates a schedule for an agent", async () => {
+      const fid = agentId("cron-agent");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
 
-      const res = await app.request(`/api/flows/${fid}/schedules`, {
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -170,17 +171,17 @@ describe("Schedules API", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.cronExpression).toBe("0 9 * * 1-5");
       expect(body.name).toBe("Weekday 9am");
       expect(body.timezone).toBe("Europe/Paris");
     });
 
     it("rejects invalid cron expression", async () => {
-      const fid = flowId("bad-cron");
-      await seedFlow({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      const fid = agentId("bad-cron");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
 
-      const res = await app.request(`/api/flows/${fid}/schedules`, {
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ connectionProfileId: profileId, cronExpression: "not-valid-cron" }),
@@ -192,10 +193,10 @@ describe("Schedules API", () => {
 
   describe("PUT /api/schedules/:id", () => {
     it("updates schedule name and cron", async () => {
-      const fid = flowId("upd-flow");
-      const flow = await seedFlow({ id: fid, orgId: ctx.orgId });
+      const fid = agentId("upd-agent");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
       const schedule = await seedSchedule({
-        packageId: flow.id,
+        packageId: agent.id,
         orgId: ctx.orgId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
@@ -209,7 +210,7 @@ describe("Schedules API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.name).toBe("New Name");
       expect(body.cronExpression).toBe("0 12 * * *");
     });
@@ -217,10 +218,10 @@ describe("Schedules API", () => {
 
   describe("DELETE /api/schedules/:id", () => {
     it("deletes a schedule", async () => {
-      const fid = flowId("del-flow");
-      const flow = await seedFlow({ id: fid, orgId: ctx.orgId });
+      const fid = agentId("del-agent");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
       const schedule = await seedSchedule({
-        packageId: flow.id,
+        packageId: agent.id,
         orgId: ctx.orgId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
@@ -237,10 +238,10 @@ describe("Schedules API", () => {
 
   describe("GET /api/schedules/:id", () => {
     it("returns a single schedule by id", async () => {
-      const fid = flowId("get-sched");
-      const flow = await seedFlow({ id: fid, orgId: ctx.orgId });
+      const fid = agentId("get-sched");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
       const schedule = await seedSchedule({
-        packageId: flow.id,
+        packageId: agent.id,
         orgId: ctx.orgId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
@@ -272,10 +273,10 @@ describe("Schedules API", () => {
         userId: otherCtx.user.id,
         name: "Other",
       });
-      const fid = `@${otherCtx.org.slug}/other-flow`;
-      const flow = await seedFlow({ id: fid, orgId: otherCtx.orgId });
+      const fid = `@${otherCtx.org.slug}/other-agent`;
+      const agent = await seedAgent({ id: fid, orgId: otherCtx.orgId });
       const schedule = await seedSchedule({
-        packageId: flow.id,
+        packageId: agent.id,
         orgId: otherCtx.orgId,
         connectionProfileId: otherProfile.id,
         cronExpression: "0 * * * *",
@@ -288,56 +289,56 @@ describe("Schedules API", () => {
     });
   });
 
-  describe("GET /api/schedules/:id/executions", () => {
-    it("returns executions for a schedule", async () => {
-      const fid = flowId("exec-sched");
-      const flow = await seedFlow({ id: fid, orgId: ctx.orgId });
+  describe("GET /api/schedules/:id/runs", () => {
+    it("returns runs for a schedule", async () => {
+      const fid = agentId("exec-sched");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
       const schedule = await seedSchedule({
-        packageId: flow.id,
+        packageId: agent.id,
         orgId: ctx.orgId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
       });
 
-      // Seed an execution linked to this schedule
-      await seedExecution({
-        packageId: flow.id,
+      // Seed a run linked to this schedule
+      await seedRun({
+        packageId: agent.id,
         orgId: ctx.orgId,
         userId: ctx.user.id,
         scheduleId: schedule.id,
         status: "success",
       });
 
-      const res = await app.request(`/api/schedules/${schedule.id}/executions`, {
+      const res = await app.request(`/api/schedules/${schedule.id}/runs`, {
         headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.executions).toBeArray();
-      expect(body.executions.length).toBeGreaterThanOrEqual(1);
-      expect(body.executions[0].scheduleId).toBe(schedule.id);
+      expect(body.runs).toBeArray();
+      expect(body.runs.length).toBeGreaterThanOrEqual(1);
+      expect(body.runs[0].scheduleId).toBe(schedule.id);
       expect(body.total).toBeGreaterThanOrEqual(1);
     });
 
-    it("returns empty array when no executions exist", async () => {
-      const fid = flowId("empty-exec");
-      const flow = await seedFlow({ id: fid, orgId: ctx.orgId });
+    it("returns empty array when no runs exist", async () => {
+      const fid = agentId("empty-exec");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
       const schedule = await seedSchedule({
-        packageId: flow.id,
+        packageId: agent.id,
         orgId: ctx.orgId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
       });
 
-      const res = await app.request(`/api/schedules/${schedule.id}/executions`, {
+      const res = await app.request(`/api/schedules/${schedule.id}/runs`, {
         headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.executions).toBeArray();
-      expect(body.executions).toHaveLength(0);
+      expect(body.runs).toBeArray();
+      expect(body.runs).toHaveLength(0);
       expect(body.total).toBe(0);
     });
   });
@@ -345,10 +346,10 @@ describe("Schedules API", () => {
   describe("Org profile support", () => {
     it("creates a schedule with an org profile", async () => {
       const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org Profile" });
-      const fid = flowId("org-sched");
-      await seedFlow({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      const fid = agentId("org-sched");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
 
-      const res = await app.request(`/api/flows/${fid}/schedules`, {
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -365,10 +366,10 @@ describe("Schedules API", () => {
 
     it("updates a schedule to use an org profile", async () => {
       const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org Profile" });
-      const fid = flowId("org-upd");
-      const flow = await seedFlow({ id: fid, orgId: ctx.orgId });
+      const fid = agentId("org-upd");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
       const schedule = await seedSchedule({
-        packageId: flow.id,
+        packageId: agent.id,
         orgId: ctx.orgId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
@@ -389,10 +390,10 @@ describe("Schedules API", () => {
         orgId: otherCtx.orgId,
         name: "Other Org Profile",
       });
-      const fid = flowId("foreign-org");
-      await seedFlow({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      const fid = agentId("foreign-org");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
 
-      const res = await app.request(`/api/flows/${fid}/schedules`, {
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({

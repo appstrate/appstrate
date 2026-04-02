@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePermissions } from "../hooks/use-permissions";
-import { useFlows, usePackageDetail } from "../hooks/use-packages";
+import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useCreateSchedule } from "../hooks/use-schedules";
 import { ScheduleForm } from "../components/schedule-form";
 import { PageHeader } from "../components/page-header";
@@ -10,22 +12,22 @@ import { LoadingState } from "../components/page-states";
 import { isFileField } from "@appstrate/core/form";
 
 export function ScheduleCreatePage() {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const { isMember } = usePermissions();
   const navigate = useNavigate();
 
-  const { data: flows, isLoading: flowsLoading } = useFlows();
-  const [selectedFlowId, setSelectedFlowId] = useState<string>("");
+  const { data: agents, isLoading: agentsLoading } = useAgents();
+  const [selectedAgentId, setSelectedAgentId] = useState<string>("");
 
-  // Auto-select first flow when flows load
-  const effectiveFlowId = selectedFlowId || flows?.[0]?.id || "";
-  const { data: flowDetail } = usePackageDetail("flow", effectiveFlowId || undefined);
-  const createSchedule = useCreateSchedule(effectiveFlowId);
+  // Auto-select first agent when agents load
+  const effectiveAgentId = selectedAgentId || agents?.[0]?.id || "";
+  const { data: agentDetail } = usePackageDetail("agent", effectiveAgentId || undefined);
+  const createSchedule = useCreateSchedule(effectiveAgentId);
 
   if (!isMember) return null;
-  if (flowsLoading) return <LoadingState />;
+  if (agentsLoading) return <LoadingState />;
 
-  const inputSchema = flowDetail?.input?.schema;
+  const inputSchema = agentDetail?.input?.schema;
   const hasFileInputs =
     inputSchema?.properties && Object.values(inputSchema.properties).some(isFileField);
 
@@ -41,11 +43,11 @@ export function ScheduleCreatePage() {
       />
 
       <ScheduleForm
-        key={effectiveFlowId}
+        key={effectiveAgentId}
         mode="create"
-        flows={flows?.map((f) => ({ id: f.id, displayName: f.displayName })) ?? []}
-        selectedFlowId={effectiveFlowId}
-        onFlowChange={setSelectedFlowId}
+        agents={agents?.map((f) => ({ id: f.id, displayName: f.displayName })) ?? []}
+        selectedAgentId={effectiveAgentId}
+        onAgentChange={setSelectedAgentId}
         inputSchema={inputSchema}
         blockedMessage={hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
         isPending={createSchedule.isPending}

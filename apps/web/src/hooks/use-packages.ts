@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -9,8 +11,8 @@ import { useCurrentOrgId } from "./use-org";
 import type {
   OrgPackageItem,
   OrgPackageItemDetail,
-  FlowListItem,
-  FlowDetail,
+  AgentListItem,
+  AgentDetail,
   PackageType,
   VersionListItem,
   VersionDetailResponse,
@@ -19,14 +21,14 @@ import type {
 // --- Packages — config-driven factory ---
 
 const PACKAGE_CONFIG = {
-  flow: { path: "flows", listKey: "flows", detailKey: "flow" },
+  agent: { path: "agents", listKey: "agents", detailKey: "agent" },
   skill: { path: "skills", listKey: "skills", detailKey: "skill" },
   tool: { path: "tools", listKey: "tools", detailKey: "tool" },
   provider: { path: "providers", listKey: "providers", detailKey: "provider" },
 } as const;
 
 type PackageDetailMap = {
-  flow: FlowDetail;
+  agent: AgentDetail;
   skill: OrgPackageItemDetail;
   tool: OrgPackageItemDetail;
   provider: OrgPackageItemDetail;
@@ -98,15 +100,15 @@ export {
   PACKAGE_CONFIG,
 };
 
-// --- Flows ---
+// --- Agents ---
 
-export function useFlows() {
+export function useAgents() {
   const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["flows", orgId],
+    queryKey: ["agents", orgId],
     queryFn: async () => {
-      const data = await api<{ flows: FlowListItem[] }>("/flows");
-      return data.flows;
+      const data = await api<{ agents: AgentListItem[] }>("/agents");
+      return data.agents;
     },
   });
 }
@@ -190,7 +192,7 @@ export function useCreateVersion(type: PackageType, packageId: string) {
       qc.invalidateQueries({ queryKey: ["package-versions"] });
       qc.invalidateQueries({ queryKey: ["version-detail"] });
       qc.invalidateQueries({ queryKey: ["version-info"] });
-      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["agents"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
     },
   });
@@ -205,7 +207,7 @@ export function useDeleteVersion(type: PackageType, packageId: string) {
       qc.invalidateQueries({ queryKey: ["package-versions"] });
       qc.invalidateQueries({ queryKey: ["version-detail"] });
       qc.invalidateQueries({ queryKey: ["version-info"] });
-      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["agents"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
     },
   });
@@ -220,7 +222,7 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
         { method: "POST" },
       ),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["agents"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
     },
   });
@@ -254,7 +256,7 @@ export function useForkPackage() {
       );
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["agents"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
     },
   });

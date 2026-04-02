@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { PromptContext } from "./types.ts";
 import {
   getCredentialFieldName,
@@ -24,7 +26,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
 
   sections.push("### Environment");
   sections.push(
-    "- **Ephemeral container**: This container is destroyed when your execution ends. " +
+    "- **Ephemeral container**: This container is destroyed when your run ends. " +
       "Any files you create, modifications you make, or data you store on the filesystem will be permanently lost. " +
       "Do NOT rely on the filesystem for persistence.",
   );
@@ -43,7 +45,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   sections.push(
     "- **Workspace**: `/workspace` is your working directory. " +
       "Uploaded documents are available at `/workspace/documents/`. " +
-      "You may use the filesystem for temporary processing during this execution only.\n",
+      "You may use the filesystem for temporary processing during this run only.\n",
   );
 
   // Available tools
@@ -226,8 +228,8 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   if (ctx.previousState) {
     sections.push("## Previous State\n");
     sections.push(
-      "This flow supports stateful execution across runs. " +
-        "Your most recent execution left the following state:\n",
+      "This agent supports stateful operation across runs. " +
+        "Your most recent run left the following state:\n",
     );
     sections.push("```json");
     sections.push(JSON.stringify(ctx.previousState, null, 2));
@@ -242,8 +244,8 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   if (ctx.memories && ctx.memories.length > 0) {
     sections.push("## Memory\n");
     sections.push(
-      "This flow has accumulated the following memories from previous executions. " +
-        "These are shared across all users running this flow:\n",
+      "This agent has accumulated the following memories from previous runs. " +
+        "These are shared across all users running this agent:\n",
     );
     for (const mem of ctx.memories) {
       const date = mem.createdAt ? ` (${mem.createdAt})` : "";
@@ -256,24 +258,22 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     );
   }
 
-  // --- Execution History API ---
-  if (ctx.executionApi) {
-    sections.push("## Execution History\n");
+  // --- Run History API ---
+  if (ctx.runApi) {
+    sections.push("## Run History\n");
     sections.push(
-      "You can access data from previous executions beyond just the latest state. " +
-        "This is useful for trend analysis, auditing past results, or recovering from failures.\n",
+      "You can access data from previous runs beyond just the latest state. " +
+        "This is useful for trend analysis, auditing past runs, or recovering from failures.\n",
     );
     sections.push("```bash");
-    sections.push('curl -s "$SIDECAR_URL/execution-history?limit=10&fields=state"');
+    sections.push('curl -s "$SIDECAR_URL/run-history?limit=10&fields=state"');
     sections.push("```\n");
     sections.push("Query parameters:");
-    sections.push("- `limit` (1-50, default 10): Number of past executions to return");
+    sections.push("- `limit` (1-50, default 10): Number of past runs to return");
     sections.push(
       "- `fields` (comma-separated: `state`, `result`; default: `state`): Which data fields to include\n",
     );
-    sections.push(
-      "Returns `{ executions: [{ id, status, date, duration, ...selected_fields }] }`\n",
-    );
+    sections.push("Returns `{ runs: [{ id, status, date, duration, ...selected_fields }] }`\n");
   }
 
   // Append raw prompt at the end, without any interpolation

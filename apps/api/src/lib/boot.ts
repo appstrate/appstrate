@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { and, eq, lt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { oauthStates, packages, packageVersions } from "@appstrate/db/schema";
@@ -16,10 +18,10 @@ import {
   SYSTEM_STORAGE_NAMESPACE,
   storageFolderForType,
 } from "../services/package-items/index.ts";
-import { markOrphanExecutionsFailed } from "../services/state/index.ts";
+import { markOrphanRunsFailed } from "../services/state/index.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
 import { initWebhookWorker } from "../services/webhooks.ts";
-import { initCancelSubscriber } from "../services/execution-tracker.ts";
+import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 
@@ -62,15 +64,15 @@ export async function boot(): Promise<void> {
     }),
   ]);
 
-  // Sequential cleanup: orphan executions must be marked before container cleanup,
+  // Sequential cleanup: orphan runs must be marked before container cleanup,
   // and containers must be cleaned before sidecar pool init.
   try {
-    const { count, executionIds } = await markOrphanExecutionsFailed();
+    const { count, runIds } = await markOrphanRunsFailed();
     if (count > 0) {
-      logger.info("Marked orphaned executions as failed", { count, executionIds });
+      logger.info("Marked orphaned runs as failed", { count, runIds });
     }
   } catch (err) {
-    logger.warn("Could not clean orphaned executions", {
+    logger.warn("Could not clean orphaned runs", {
       error: err instanceof Error ? err.message : String(err),
     });
   }

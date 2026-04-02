@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Manifest } from "@appstrate/core/validation";
-import type { FlowProviderRequirement } from "../types/index.ts";
+import type { AgentProviderRequirement } from "../types/index.ts";
 import { asRecord } from "./safe-json.ts";
 
 /** Extract skill, tool, and provider IDs from a manifest's dependencies section. */
@@ -15,8 +17,8 @@ export function extractDepsFromManifest(manifest: Partial<Manifest>) {
   };
 }
 
-/** Merge dependencies.providers + providersConfiguration into FlowProviderRequirement[]. */
-export function resolveManifestProviders(manifest: Partial<Manifest>): FlowProviderRequirement[] {
+/** Merge dependencies.providers + providersConfiguration into AgentProviderRequirement[]. */
+export function resolveManifestProviders(manifest: Partial<Manifest>): AgentProviderRequirement[] {
   const dependencies = asRecord(manifest.dependencies);
   const providersRecord = asRecord(dependencies.providers) as Record<string, string>;
   const config = asRecord((manifest as Record<string, unknown>).providersConfiguration) as Record<

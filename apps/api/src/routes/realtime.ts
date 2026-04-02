@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { eq, and } from "drizzle-orm";
@@ -11,11 +13,11 @@ import { validateApiKey } from "../services/api-keys.ts";
 
 /** Strip large user-content fields from SSE payloads for non-verbose consumers. */
 function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
-  if (evt.event === "execution_update") {
+  if (evt.event === "run_update") {
     const { result: _result, ...rest } = evt.data;
     return rest;
   }
-  if (evt.event === "execution_log") {
+  if (evt.event === "run_log") {
     const { data: _data, ...rest } = evt.data;
     return rest;
   }
@@ -77,7 +79,7 @@ async function validateSSEAuth(c: {
 function openRealtimeStream(
   c: Parameters<typeof streamSSE>[0],
   subId: string,
-  filter: { executionId?: string; packageId?: string; orgId: string; isAdmin: boolean },
+  filter: { runId?: string; packageId?: string; orgId: string; isAdmin: boolean },
   verbose: boolean,
 ) {
   return streamSSE(c, async (stream) => {
@@ -137,20 +139,20 @@ function openRealtimeStream(
 export function createRealtimeRouter() {
   const router = new Hono();
 
-  // GET /api/realtime/executions/:id — stream execution status + log changes
-  router.get("/executions/:id", async (c) => {
+  // GET /api/realtime/runs/:id — stream run status + log changes
+  router.get("/runs/:id", async (c) => {
     const validated = await validateSSEAuth(c);
     if (!validated) throw unauthorized("Invalid session or org");
 
-    const executionId = c.req.param("id");
-    const subId = `exec-${executionId}-${crypto.randomUUID().slice(0, 8)}`;
+    const runId = c.req.param("id");
+    const subId = `run-${runId}-${crypto.randomUUID().slice(0, 8)}`;
     const verbose = c.req.query("verbose") === "true";
 
     return openRealtimeStream(
       c,
       subId,
       {
-        executionId,
+        runId,
         orgId: validated.orgId,
         isAdmin: true,
       },
@@ -158,13 +160,13 @@ export function createRealtimeRouter() {
     );
   });
 
-  // GET /api/realtime/flows/:packageId/executions — stream execution changes for a flow
-  router.get("/flows/:packageId/executions", async (c) => {
+  // GET /api/realtime/agents/:packageId/runs — stream run changes for an agent
+  router.get("/agents/:packageId/runs", async (c) => {
     const validated = await validateSSEAuth(c);
     if (!validated) throw unauthorized("Invalid session or org");
 
     const packageId = c.req.param("packageId");
-    const subId = `flow-${packageId}-${crypto.randomUUID().slice(0, 8)}`;
+    const subId = `agent-${packageId}-${crypto.randomUUID().slice(0, 8)}`;
     const verbose = c.req.query("verbose") === "true";
 
     return openRealtimeStream(
@@ -179,12 +181,12 @@ export function createRealtimeRouter() {
     );
   });
 
-  // GET /api/realtime/executions — stream all execution changes (for flow list)
-  router.get("/executions", async (c) => {
+  // GET /api/realtime/runs — stream all run changes (for agent list)
+  router.get("/runs", async (c) => {
     const validated = await validateSSEAuth(c);
     if (!validated) throw unauthorized("Invalid session or org");
 
-    const subId = `all-exec-${crypto.randomUUID().slice(0, 8)}`;
+    const subId = `all-run-${crypto.randomUUID().slice(0, 8)}`;
     const verbose = c.req.query("verbose") === "true";
 
     return openRealtimeStream(

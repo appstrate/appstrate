@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Hono } from "hono";
 import type { AppEnv } from "../../src/types/index.ts";
@@ -236,7 +238,7 @@ describe("rateLimitByBearer", () => {
     expect(res.status).toBe(429);
   });
 
-  it("extracts execution ID from token for keying", async () => {
+  it("extracts run ID from token for keying", async () => {
     const app = createApp();
     app.use("/internal", rateLimitByBearer(1));
     app.get("/internal", (c) => c.json({ ok: true }));

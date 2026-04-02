@@ -1,0 +1,724 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { z } from "zod";
+import { Hono } from "hono";
+import { logger } from "../lib/logger.ts";
+import type { LoadedPackage, AppEnv } from "../types/index.ts";
+import {
+  createRun,
+  updateRun,
+  appendRunLog,
+  getRun,
+  getRunFull,
+  getRunningRunsForPackage,
+  getRunningRunCountForOrg,
+  deletePackageRuns,
+  listPackageRuns,
+  listScheduleRuns,
+  listRunLogs,
+  addPackageMemories,
+  getPackageConfig,
+} from "../services/state/index.ts";
+import {
+  resolveActorProfileContext,
+  getAgentOrgProfile,
+  resolveProviderProfiles,
+} from "../services/connection-profiles.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { validateAgentReadiness } from "../services/agent-readiness.ts";
+import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
+import type { TokenUsage } from "../services/adapters/index.ts";
+import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
+import { buildRunContext, ModelNotConfiguredError } from "../services/env-builder.ts";
+import { getVersionDetail } from "../services/package-versions.ts";
+import { validateOutput } from "../services/schema.ts";
+import { parseRequestInput } from "../services/input-parser.ts";
+import { asJSONSchemaObject } from "@appstrate/core/form";
+import { trackRun, untrackRun, abortRun } from "../services/run-tracker.ts";
+import { rateLimit } from "../middleware/rate-limit.ts";
+import { idempotency } from "../middleware/idempotency.ts";
+import { ApiError, notFound, forbidden, conflict } from "../lib/errors.ts";
+import { requireAgent } from "../middleware/guards.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
+import { getOrchestrator } from "../services/orchestrator/index.ts";
+import { getCloudModule } from "../lib/cloud-loader.ts";
+import { dispatchWebhookEvents } from "../services/webhooks.ts";
+import { getActor } from "../lib/actor.ts";
+
+function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
+  total.input_tokens += addition.input_tokens;
+  total.output_tokens += addition.output_tokens;
+  total.cache_creation_input_tokens =
+    (total.cache_creation_input_tokens ?? 0) + (addition.cache_creation_input_tokens ?? 0);
+  total.cache_read_input_tokens =
+    (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
+}
+
+/** Fire-and-forget webhook dispatch after run status change. */
+function dispatchWebhooks(
+  orgId: string,
+  status: string,
+  runId: string,
+  packageId: string,
+  extra?: Record<string, unknown>,
+  applicationId?: string | null,
+): void {
+  const eventType = `run.${status}` as Parameters<typeof dispatchWebhookEvents>[1];
+  dispatchWebhookEvents(
+    orgId,
+    eventType,
+    { id: runId, packageId, status, ...extra },
+    applicationId,
+  ).catch((err) => {
+    logger.warn("Webhook dispatch failed", {
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
+// --- Background run (decoupled from client) ---
+
+export async function executeAgentInBackground(
+  runId: string,
+  orgId: string,
+  agent: LoadedPackage,
+  promptContext: PromptContext,
+  agentPackage?: Buffer | null,
+  inputFiles?: UploadedFile[],
+  applicationId?: string | null,
+) {
+  const startTime = Date.now();
+  const controller = trackRun(runId);
+  const { signal } = controller;
+
+  const cloud = getCloudModule();
+  let accumulatedCost = 0;
+
+  try {
+    // Update status to running
+    await updateRun(runId, { status: "running" });
+    dispatchWebhooks(orgId, "started", runId, agent.id, undefined, applicationId);
+
+    // Execute via adapter
+    const adapter = new PiAdapter();
+
+    const timeout = (agent.manifest.timeout as number | undefined) ?? 300;
+    const structuredOutput: Record<string, unknown> = {};
+    let state: Record<string, unknown> | null = null;
+    const memories: string[] = [];
+    let reportContent = "";
+    let lastAdapterError: string | null = null;
+    const accumulated: TokenUsage = { input_tokens: 0, output_tokens: 0 };
+
+    try {
+      for await (const msg of adapter.execute(
+        runId,
+        promptContext,
+        timeout,
+        agentPackage ?? undefined,
+        signal,
+        inputFiles,
+      )) {
+        if (msg.usage) accumulateUsage(accumulated, msg.usage);
+        if (msg.cost != null) accumulatedCost += msg.cost;
+
+        switch (msg.type) {
+          case "progress":
+            await appendRunLog(
+              runId,
+              orgId,
+              "progress",
+              "progress",
+              msg.message ?? null,
+              msg.data ?? null,
+              msg.level ?? "debug",
+            );
+            break;
+
+          case "error":
+            lastAdapterError = msg.message ?? null;
+            await appendRunLog(
+              runId,
+              orgId,
+              "system",
+              "adapter_error",
+              msg.message ?? null,
+              msg.data ?? null,
+              "error",
+            );
+            break;
+
+          case "output":
+            if (msg.data) Object.assign(structuredOutput, msg.data);
+            await appendRunLog(runId, orgId, "result", "output", null, msg.data ?? null, "info");
+            break;
+
+          case "set_state":
+            if (msg.data) state = msg.data;
+            break;
+
+          case "add_memory":
+            if (msg.content) memories.push(msg.content);
+            break;
+
+          case "report":
+            if (msg.content) {
+              reportContent += (reportContent ? "\n\n" : "") + msg.content;
+            }
+            await appendRunLog(
+              runId,
+              orgId,
+              "result",
+              "report",
+              null,
+              { content: msg.content } as Record<string, unknown>,
+              "info",
+            );
+            break;
+        }
+      }
+    } catch (err) {
+      if (signal.aborted) {
+        // Cancelled by user — cancel route already wrote DB status
+        return;
+      }
+      if (err instanceof TimeoutError) {
+        const duration = Date.now() - startTime;
+        const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
+        await updateRun(runId, {
+          status: "timeout",
+          error: `Run timed out after ${timeout}s`,
+          completedAt: new Date().toISOString(),
+          duration,
+          notifiedAt: new Date().toISOString(),
+          ...(totalTokens > 0
+            ? {
+                tokensUsed: totalTokens,
+                tokenUsage: { ...accumulated } as Record<string, unknown>,
+              }
+            : {}),
+        });
+        await appendRunLog(
+          runId,
+          orgId,
+          "system",
+          "run_completed",
+          null,
+          {
+            runId,
+            status: "timeout",
+          },
+          "error",
+        );
+        dispatchWebhooks(orgId, "timeout", runId, agent.id, { duration }, applicationId);
+        return;
+      }
+      throw err;
+    }
+
+    // Determine outcome: fail only on adapter error or zero tokens (LLM unreachable).
+    // An agent without the output tool succeeds even without structured output.
+    const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
+    const error =
+      lastAdapterError ??
+      (totalTokens === 0
+        ? promptContext.proxyUrl
+          ? "The AI agent could not reach the LLM API — the configured proxy may be unreachable or rejecting connections"
+          : "The AI agent could not reach the LLM API — check that the API key is valid and the provider is accessible"
+        : null);
+
+    if (signal.aborted) return;
+
+    const duration = Date.now() - startTime;
+
+    if (error) {
+      await updateRun(runId, {
+        status: "failed",
+        error,
+        completedAt: new Date().toISOString(),
+        duration,
+        notifiedAt: new Date().toISOString(),
+      });
+      await appendRunLog(
+        runId,
+        orgId,
+        "system",
+        "run_completed",
+        null,
+        { runId, status: "failed", error },
+        "error",
+      );
+      dispatchWebhooks(orgId, "failed", runId, agent.id, { error, duration }, applicationId);
+    } else {
+      // --- Success path (with or without structured output) ---
+
+      // Validate output against schema (if any output was produced)
+      const hasOutput = Object.keys(structuredOutput).length > 0;
+      if (hasOutput) {
+        const outputSchema = agent.manifest.output?.schema;
+        if (outputSchema) {
+          const outputValidation = validateOutput(
+            structuredOutput,
+            asJSONSchemaObject(outputSchema),
+          );
+          if (!outputValidation.valid) {
+            await appendRunLog(
+              runId,
+              orgId,
+              "system",
+              "output_validation",
+              null,
+              { valid: false, errors: outputValidation.errors },
+              "warn",
+            );
+            logger.warn("Output validation failed", {
+              runId,
+              errors: outputValidation.errors,
+            });
+          }
+        }
+      }
+
+      const hasReport = reportContent.length > 0;
+      const result: Record<string, unknown> = {
+        ...(hasOutput ? { output: structuredOutput } : {}),
+        ...(hasReport ? { report: reportContent } : {}),
+      };
+
+      if (memories.length > 0) {
+        await addPackageMemories(agent.id, orgId, memories, runId);
+      }
+
+      if (cloud && accumulatedCost > 0) {
+        try {
+          await cloud.cloudHooks.recordUsage(orgId, runId, accumulatedCost);
+        } catch (err) {
+          logger.error("Failed to record usage — manual reconciliation needed", {
+            err: err instanceof Error ? err.message : String(err),
+            orgId,
+            runId,
+            accumulatedCost,
+          });
+        }
+      }
+
+      await updateRun(runId, {
+        status: "success",
+        result,
+        ...(state ? { state } : {}),
+        completedAt: new Date().toISOString(),
+        duration,
+        notifiedAt: new Date().toISOString(),
+        tokensUsed: totalTokens > 0 ? totalTokens : undefined,
+        ...(totalTokens > 0 ? { tokenUsage: { ...accumulated } as Record<string, unknown> } : {}),
+        cost: accumulatedCost > 0 ? accumulatedCost : null,
+      });
+
+      if (hasOutput) {
+        await appendRunLog(runId, orgId, "result", "result", null, result, "info");
+      }
+      await appendRunLog(
+        runId,
+        orgId,
+        "system",
+        "run_completed",
+        null,
+        { runId, status: "success" },
+        "info",
+      );
+      dispatchWebhooks(orgId, "completed", runId, agent.id, { result, duration }, applicationId);
+    }
+  } catch (err) {
+    // If aborted (cancelled), the cancel route already wrote DB status
+    if (signal.aborted) return;
+
+    const duration = Date.now() - startTime;
+    const errorMessage = err instanceof Error ? err.message : "Unknown error";
+    await updateRun(runId, {
+      status: "failed",
+      error: errorMessage,
+      completedAt: new Date().toISOString(),
+      duration,
+      notifiedAt: new Date().toISOString(),
+    });
+    await appendRunLog(
+      runId,
+      orgId,
+      "system",
+      "run_completed",
+      null,
+      {
+        runId,
+        status: "failed",
+        error: errorMessage,
+      },
+      "error",
+    );
+    dispatchWebhooks(
+      orgId,
+      "failed",
+      runId,
+      agent.id,
+      { error: errorMessage, duration },
+      applicationId,
+    );
+  } finally {
+    untrackRun(runId);
+  }
+}
+
+// --- Router ---
+
+export function createRunsRouter() {
+  const router = new Hono<AppEnv>();
+
+  // POST /api/agents/:scope/:name/run — execute an agent (fire-and-forget, returns JSON)
+  router.post(
+    "/agents/:scope{@[^/]+}/:name/run",
+    rateLimit(20),
+    idempotency(),
+    requireAgent(),
+    requirePermission("agents", "run"),
+    async (c) => {
+      const agent = c.get("agent");
+      const orgId = c.get("orgId");
+      const actor = getActor(c);
+      const packageId = agent.id;
+      // Version override from query param (e.g. ?version=1.2.0 or ?version=latest)
+      const versionOverride = c.req.query("version");
+
+      // If a specific version is requested, resolve and override agent data
+      let effectiveAgent = agent;
+      let overrideVersionId: number | undefined;
+      if (versionOverride && agent.source !== "system") {
+        const versionDetail = await getVersionDetail(agent.id, versionOverride);
+        if (!versionDetail) {
+          throw notFound(`Version '${versionOverride}' not found`);
+        }
+        overrideVersionId = versionDetail.id;
+        // Override manifest and content — version manifest replaces draft entirely
+        effectiveAgent = {
+          ...agent,
+          manifest: versionDetail.manifest as typeof agent.manifest,
+          prompt: versionDetail.textContent ?? agent.prompt,
+        };
+      }
+
+      // Resolve org profile and actor profile context in parallel
+      const [agentOrgProfile, { defaultUserProfileId, userProviderOverrides }] = await Promise.all([
+        getAgentOrgProfile(orgId, packageId),
+        resolveActorProfileContext(actor, packageId),
+      ]);
+      const agentOrgProfileId = agentOrgProfile?.id ?? null;
+
+      // Resolve provider profiles, config, and validate agent readiness (inlined preflight)
+      const manifestProviders = resolveManifestProviders(effectiveAgent.manifest);
+
+      const [providerProfiles, packageConfig, inputResult] = await Promise.all([
+        resolveProviderProfiles(
+          manifestProviders,
+          defaultUserProfileId,
+          userProviderOverrides,
+          agentOrgProfileId,
+          orgId,
+        ),
+        getPackageConfig(orgId, packageId),
+        parseRequestInput(
+          c,
+          effectiveAgent.manifest.input?.schema
+            ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
+            : undefined,
+          effectiveAgent.manifest.input?.fileConstraints,
+        ),
+      ]);
+
+      await validateAgentReadiness({
+        agent: effectiveAgent,
+        providerProfiles,
+        orgId,
+        config: packageConfig.config,
+      });
+
+      const config = packageConfig.config;
+      const preflightModelId = packageConfig.modelId;
+      const preflightProxyId = packageConfig.proxyId;
+
+      const {
+        input: parsedInput,
+        uploadedFiles,
+        modelId: modelIdOverride,
+        proxyId: proxyIdOverride,
+      } = inputResult;
+
+      const runId = `exec_${crypto.randomUUID()}`;
+
+      // Build file metadata for prompt context (no URLs — files injected directly into container)
+      const fileRefs = uploadedFiles?.map((f) => ({
+        fieldName: f.fieldName,
+        name: f.name,
+        type: f.type,
+        size: f.size,
+      }));
+
+      // Build run context (tokens, config, state, providers, package, version)
+      let promptContext: PromptContext;
+      let agentPackage: Buffer | null;
+      let packageVersionId: number | null;
+      let proxyLabel: string | null;
+      let modelLabel: string | null;
+      try {
+        ({
+          promptContext,
+          agentPackage: agentPackage,
+          packageVersionId,
+          proxyLabel,
+          modelLabel,
+        } = await buildRunContext({
+          runId,
+          agent: effectiveAgent,
+          providerProfiles,
+          orgId,
+          actor,
+          input: parsedInput,
+          files: fileRefs,
+          config,
+          modelId: modelIdOverride ?? preflightModelId,
+          proxyId: proxyIdOverride ?? preflightProxyId,
+          overrideVersionId,
+        }));
+      } catch (err) {
+        if (err instanceof ModelNotConfiguredError) {
+          throw new ApiError({
+            status: 400,
+            code: "model_not_configured",
+            title: "Bad Request",
+            detail: err.message,
+          });
+        }
+        throw err;
+      }
+
+      // Pre-run quota check (Cloud only — reject before creating the run record)
+      const cloud = getCloudModule();
+      if (cloud) {
+        try {
+          const runningCount = await getRunningRunCountForOrg(orgId);
+          await cloud.cloudHooks.checkQuota(orgId, runningCount);
+        } catch (err) {
+          if (err instanceof cloud.QuotaExceededError) {
+            throw new ApiError({
+              status: 402,
+              code: "quota_exceeded",
+              title: "Payment Required",
+              detail: err.message,
+            });
+          }
+          throw err;
+        }
+      }
+
+      // Extract just the profileId map (strip source field)
+      const profileIdMap = Object.fromEntries(
+        Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
+      );
+
+      // Create run record
+      await createRun(
+        runId,
+        packageId,
+        actor,
+        orgId,
+        parsedInput ?? null,
+        undefined,
+        packageVersionId ?? undefined,
+        defaultUserProfileId ?? undefined,
+        proxyLabel ?? undefined,
+        modelLabel ?? undefined,
+        c.get("applicationId") ?? null,
+        profileIdMap,
+      );
+
+      // Fire-and-forget background run
+      executeAgentInBackground(
+        runId,
+        orgId,
+        effectiveAgent,
+        promptContext,
+        agentPackage,
+        uploadedFiles,
+        c.get("applicationId") ?? null,
+      ).catch((err) => {
+        logger.error("Unhandled error in background run", {
+          runId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+
+      return c.json({ runId });
+    },
+  );
+
+  // GET /api/agents/:scope/:name/runs — list runs for an agent
+  router.get("/agents/:scope{@[^/]+}/:name/runs", requireAgent(), async (c) => {
+    const agent = c.get("agent");
+    const orgId = c.get("orgId");
+    const limit = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .catch(50)
+      .parse(c.req.query("limit") ?? 50);
+    const offset = z.coerce
+      .number()
+      .int()
+      .min(0)
+      .catch(0)
+      .parse(c.req.query("offset") ?? 0);
+    const endUser = c.get("endUser");
+    const result = await listPackageRuns(agent.id, orgId, {
+      limit,
+      offset,
+      endUserId: endUser?.id,
+    });
+    return c.json(result);
+  });
+
+  // GET /api/schedules/:id/runs — list runs for a schedule
+  router.get("/schedules/:id/runs", async (c) => {
+    const scheduleId = c.req.param("id");
+    const orgId = c.get("orgId");
+    const limit = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .catch(20)
+      .parse(c.req.query("limit") ?? 20);
+    const offset = z.coerce
+      .number()
+      .int()
+      .min(0)
+      .catch(0)
+      .parse(c.req.query("offset") ?? 0);
+    const result = await listScheduleRuns(scheduleId, orgId, { limit, offset });
+    return c.json(result);
+  });
+
+  // GET /api/runs/:id — get a single run
+  router.get("/runs/:id", async (c) => {
+    const runId = c.req.param("id");
+    const orgId = c.get("orgId");
+    const row = await getRunFull(runId);
+    if (!row || row.orgId !== orgId) {
+      throw notFound("Run not found");
+    }
+    // End-user scoping: end-users can only see their own runs
+    const endUser = c.get("endUser");
+    if (endUser && row.endUserId !== endUser.id) {
+      throw notFound("Run not found");
+    }
+    return c.json(row);
+  });
+
+  // GET /api/runs/:id/logs — get run logs
+  router.get("/runs/:id/logs", async (c) => {
+    const runId = c.req.param("id");
+    const orgId = c.get("orgId");
+    const exec = await getRun(runId);
+    if (!exec || exec.orgId !== orgId) {
+      throw notFound("Run not found");
+    }
+    // End-user scoping: end-users can only see their own run logs
+    const endUser = c.get("endUser");
+    if (endUser && exec.endUserId !== endUser.id) {
+      throw notFound("Run not found");
+    }
+    const logs = await listRunLogs(runId, orgId);
+
+    return c.json(logs);
+  });
+
+  // POST /api/runs/:id/cancel — cancel a running/pending run
+  router.post("/runs/:id/cancel", requirePermission("runs", "cancel"), async (c) => {
+    const runId = c.req.param("id")!;
+    const orgId = c.get("orgId");
+
+    const run = await getRun(runId);
+    if (!run) {
+      throw notFound("Run not found");
+    }
+
+    // Verify ownership (same org)
+    if (run.orgId !== orgId) {
+      throw forbidden("Not authorized");
+    }
+
+    // Verify cancellable
+    if (run.status !== "pending" && run.status !== "running") {
+      throw conflict("not_cancellable", "This run cannot be cancelled");
+    }
+
+    // Update DB
+    const now = new Date().toISOString();
+    await updateRun(runId, {
+      status: "cancelled",
+      error: "Cancelled by user",
+      completedAt: now,
+      notifiedAt: now,
+    });
+
+    // Log the cancellation
+    await appendRunLog(
+      runId,
+      orgId,
+      "system",
+      "run_completed",
+      null,
+      {
+        runId,
+        status: "cancelled",
+      },
+      "info",
+    );
+
+    // Abort in-flight fetch calls immediately, then stop the container as backup
+    abortRun(runId);
+    getOrchestrator()
+      .stopByRunId(runId)
+      .catch(() => {});
+
+    dispatchWebhooks(
+      orgId,
+      "cancelled",
+      runId,
+      run.packageId,
+      undefined,
+      c.get("applicationId") ?? null,
+    );
+
+    return c.json({ ok: true });
+  });
+
+  // DELETE /api/agents/:scope/:name/runs — delete all runs for an agent
+  router.delete(
+    "/agents/:scope{@[^/]+}/:name/runs",
+    requireAgent(),
+    requirePermission("runs", "delete"),
+    async (c) => {
+      const agent = c.get("agent");
+      const orgId = c.get("orgId");
+
+      const running = await getRunningRunsForPackage(agent.id);
+      if (running > 0) {
+        throw conflict("run_in_progress", `${running} run(s) still running`);
+      }
+
+      const deleted = await deletePackageRuns(agent.id, orgId);
+      return c.json({ deleted });
+    },
+  );
+
+  return router;
+}

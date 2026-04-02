@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -24,7 +26,7 @@ interface Props {
 type FormData = { name: string };
 
 export function ForkPackageModal({ open, onClose, packageId, defaultName, type }: Props) {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
   const { currentOrg } = useOrg();
   const forkMutation = useForkPackage();

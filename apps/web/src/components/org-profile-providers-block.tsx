@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useTranslation } from "react-i18next";
 import { Building2, AlertTriangle } from "lucide-react";
 import { Badge as UIBadge } from "@/components/ui/badge";
@@ -22,7 +24,7 @@ export function OrgProfileProvidersBlock({
   orgProfileName,
   providerIds,
 }: OrgProfileProvidersBlockProps) {
-  const { t } = useTranslation(["flows"]);
+  const { t } = useTranslation(["agents"]);
   const { data: bindings } = useOrgProfileBindings(orgProfileId);
 
   if (providerIds.length === 0) return null;

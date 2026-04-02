@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type {
   WorkloadHandle,
   WorkloadSpec,
@@ -20,8 +22,8 @@ export interface ContainerOrchestrator {
   /** Ensure images are locally available (pull if missing/outdated). No-op when not applicable. */
   ensureImages(images: string[]): Promise<void>;
 
-  /** Create an isolated environment for an execution. Docker: bridge network. K8s: namespace. */
-  createIsolationBoundary(executionId: string): Promise<IsolationBoundary>;
+  /** Create an isolated environment for a run. Docker: bridge network. K8s: namespace. */
+  createIsolationBoundary(runId: string): Promise<IsolationBoundary>;
 
   /** Remove an isolated environment. Idempotent. */
   removeIsolationBoundary(boundary: IsolationBoundary): Promise<void>;
@@ -32,7 +34,7 @@ export interface ContainerOrchestrator {
    * ExtraHosts, port mapping, health check.
    */
   createSidecar(
-    executionId: string,
+    runId: string,
     boundary: IsolationBoundary,
     config: SidecarConfig,
   ): Promise<WorkloadHandle>;
@@ -55,6 +57,6 @@ export interface ContainerOrchestrator {
   /** Stream logs from a running workload. Format-agnostic (text line by line). */
   streamLogs(handle: WorkloadHandle, signal?: AbortSignal): AsyncGenerator<string>;
 
-  /** Stop ALL workloads for an execution by ID. For cancel. */
-  stopByExecutionId(executionId: string, timeoutSeconds?: number): Promise<StopResult>;
+  /** Stop ALL workloads for a run by ID. For cancel. */
+  stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult>;
 }

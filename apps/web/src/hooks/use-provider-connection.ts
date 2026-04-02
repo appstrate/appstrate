@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import {
   useConnect,
   useConnectApiKey,
@@ -10,8 +12,8 @@ import {
   useOrgProfileBindings,
   useBindOrgProvider,
   useUnbindOrgProvider,
-  useFlowProviderProfiles,
-  useSetFlowProviderProfile,
+  useAgentProviderProfiles,
+  useSetAgentProviderProfile,
 } from "./use-connection-profiles";
 import { isProviderConnectedInProfile } from "../lib/provider-status";
 
@@ -37,8 +39,8 @@ export function useProviderConnection({
   const hasMultipleProfiles = (userProfiles?.length ?? 0) > 1;
 
   // Per-provider profile override (persisted via API when packageId is provided)
-  const { data: providerOverrides } = useFlowProviderProfiles(packageId);
-  const setProviderProfile = useSetFlowProviderProfile(packageId ?? "");
+  const { data: providerOverrides } = useAgentProviderProfiles(packageId);
+  const setProviderProfile = useSetAgentProviderProfile(packageId ?? "");
   const overrideProfileId = providerOverrides?.[providerId];
   const effectiveProfileId = overrideProfileId ?? defaultProfile?.id ?? null;
 

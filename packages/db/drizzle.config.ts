@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { defineConfig } from "drizzle-kit";
 import { resolve, dirname } from "node:path";
 import { existsSync, readFileSync } from "node:fs";

@@ -1,0 +1,15 @@
+# Appstrate
+
+> Open-source platform for running autonomous AI agents in sandboxed Docker containers.
+
+## Docs
+
+- [Getting Started](https://github.com/appstrate/appstrate#quick-start): Setup and run locally
+- [Contributing](https://github.com/appstrate/appstrate/blob/main/CONTRIBUTING.md): Development guide
+- [Security](https://github.com/appstrate/appstrate/blob/main/SECURITY.md): Security model
+- [AGENTS.md](https://github.com/appstrate/appstrate/blob/main/AGENTS.md): AI agent instructions
+
+## API
+
+- [OpenAPI Spec](https://appstrate.dev/api/openapi.json): REST API (181 endpoints)
+- [Interactive Docs](https://appstrate.dev/api/docs): Swagger UI

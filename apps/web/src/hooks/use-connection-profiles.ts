@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
@@ -171,35 +173,35 @@ export function useUnbindOrgProvider() {
   });
 }
 
-// ─── Flow Org Profile Override ───────────────────────────
+// ─── Agent Org Profile Override ───────────────────────────
 
-export function useSetFlowOrgProfile(packageId: string) {
+export function useSetAgentOrgProfile(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (orgProfileId: string | null) => {
-      return api(`/flows/${packageId}/org-profile`, {
+      return api(`/agents/${packageId}/org-profile`, {
         method: "PUT",
         body: JSON.stringify({ orgProfileId }),
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
-      qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
+      qc.invalidateQueries({ queryKey: ["packages", "agent"] });
+      qc.invalidateQueries({ queryKey: ["agent-provider-profiles"] });
     },
     onError: onMutationError,
   });
 }
 
-// ─── Org Profile Linked Flows ────────────────────────────
+// ─── Org Profile Linked Agents ────────────────────────────
 
-export function useOrgProfileFlows(profileId: string | undefined) {
+export function useOrgProfileAgents(profileId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["org-profile-flows", orgId, profileId],
+    queryKey: ["org-profile-agents", orgId, profileId],
     queryFn: () =>
-      api<{ flows: { id: string; displayName: string }[] }>(
-        `/connection-profiles/org/${profileId}/flows`,
-      ).then((r) => r.flows),
+      api<{ agents: { id: string; displayName: string }[] }>(
+        `/connection-profiles/org/${profileId}/agents`,
+      ).then((r) => r.agents),
     enabled: !!profileId,
     staleTime: 30_000,
   });
@@ -207,12 +209,12 @@ export function useOrgProfileFlows(profileId: string | undefined) {
 
 // ─── Per-Provider Profile Overrides ──────────────────────
 
-export function useFlowProviderProfiles(packageId: string | undefined) {
+export function useAgentProviderProfiles(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["flow-provider-profiles", orgId, packageId],
+    queryKey: ["agent-provider-profiles", orgId, packageId],
     queryFn: () =>
-      api<{ overrides: Record<string, string> }>(`/flows/${packageId}/provider-profiles`).then(
+      api<{ overrides: Record<string, string> }>(`/agents/${packageId}/provider-profiles`).then(
         (r) => r.overrides,
       ),
     enabled: !!packageId,
@@ -220,18 +222,18 @@ export function useFlowProviderProfiles(packageId: string | undefined) {
   });
 }
 
-export function useSetFlowProviderProfile(packageId: string) {
+export function useSetAgentProviderProfile(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ providerId, profileId }: { providerId: string; profileId: string }) => {
-      return api(`/flows/${packageId}/provider-profiles`, {
+      return api(`/agents/${packageId}/provider-profiles`, {
         method: "PUT",
         body: JSON.stringify({ providerId, profileId }),
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow-provider-profiles"] });
-      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
+      qc.invalidateQueries({ queryKey: ["agent-provider-profiles"] });
+      qc.invalidateQueries({ queryKey: ["packages", "agent"] });
     },
     onError: onMutationError,
   });

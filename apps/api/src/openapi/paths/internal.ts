@@ -1,16 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export const internalPaths = {
-  "/internal/execution-history": {
+  "/internal/run-history": {
     get: {
-      operationId: "getExecutionHistory",
+      operationId: "getRunHistory",
       tags: ["Internal"],
-      summary: "Fetch execution history",
-      description: "Container-to-host only. Auth via Bearer execution token.",
+      summary: "Fetch run history",
+      description: "Container-to-host only. Auth via Bearer run token.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         {
           name: "limit",
           in: "query",
-          description: "Max number of executions to return (1-50, default 10)",
+          description: "Max number of runs to return (1-50, default 10)",
           schema: { type: "integer", default: 10 },
         },
         {
@@ -22,13 +24,13 @@ export const internalPaths = {
       ],
       responses: {
         "200": {
-          description: "Execution history",
+          description: "Run history",
           content: {
             "application/json": {
               schema: {
                 type: "object",
                 properties: {
-                  executions: { type: "array", items: { type: "object" } },
+                  runs: { type: "array", items: { type: "object" } },
                 },
               },
             },
@@ -43,7 +45,7 @@ export const internalPaths = {
       operationId: "getProviderCredentials",
       tags: ["Internal"],
       summary: "Fetch provider credentials",
-      description: "Container-to-host only. Auth via Bearer execution token.",
+      description: "Container-to-host only. Auth via Bearer run token.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         {
@@ -70,8 +72,8 @@ export const internalPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { description: "Execution not running" },
-        "404": { description: "Flow, provider, or binding not found" },
+        "403": { description: "Run not running" },
+        "404": { description: "Agent, provider, or binding not found" },
       },
     },
   },

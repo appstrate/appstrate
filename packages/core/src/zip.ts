@@ -7,7 +7,7 @@ import {
   extractSkillMeta,
   validateToolSource,
   type Manifest,
-  type FlowManifest,
+  type AgentManifest,
   type ToolManifest,
   type PackageType,
   type ProviderManifest,
@@ -108,14 +108,14 @@ export function stripWrapperPrefix(files: Record<string, Uint8Array>): Record<st
 }
 
 // ─────────────────────────────────────────────
-// Unified package ZIP parser — handles flow, skill, tool
+// Unified package ZIP parser — handles agent, skill, tool
 // ─────────────────────────────────────────────
 
 /** Result of parsing an AFPS package ZIP file. */
 export interface ParsedPackageZip {
   /** The validated manifest from manifest.json. */
-  manifest: Manifest | FlowManifest | ProviderManifest;
-  /** The primary content (prompt.md for flows, SKILL.md for skills, source for tools, etc.). */
+  manifest: Manifest | AgentManifest | ProviderManifest;
+  /** The primary content (prompt.md for agents, SKILL.md for skills, source for tools, etc.). */
   content: string;
   /** All files in the ZIP archive (path to content). */
   files: Record<string, Uint8Array>;
@@ -145,14 +145,14 @@ const DEFAULT_MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 /**
  * Parse and validate an AFPS package ZIP file.
  * Decompresses the ZIP, validates the manifest, and extracts the primary content
- * based on package type (prompt.md for flows, SKILL.md for skills, entrypoint for tools).
+ * based on package type (prompt.md for agents, SKILL.md for skills, entrypoint for tools).
  * Includes zip bomb protection and wrapper folder stripping.
  * @param zipBuffer - The raw ZIP file as a Uint8Array
  * @param maxSize - Maximum compressed size in bytes (defaults to 10 MB)
  * @returns Parsed package with manifest, content, files, and type
  * @throws PackageZipError for size limits, invalid ZIP, missing/invalid manifest, or missing content
  * @example
- * const zip = await readFile("my-flow.afps");
+ * const zip = await readFile("my-agent.afps");
  * const { manifest, content, type } = parsePackageZip(new Uint8Array(zip));
  */
 export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): ParsedPackageZip {
@@ -216,11 +216,11 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
   let content: string;
 
   switch (type) {
-    case "flow": {
+    case "agent": {
       const promptRaw = files["prompt.md"];
       const promptMd = promptRaw ? new TextDecoder().decode(promptRaw) : undefined;
       if (!promptMd || promptMd.trim().length === 0) {
-        throw new PackageZipError("MISSING_CONTENT", "Flow package must contain prompt.md");
+        throw new PackageZipError("MISSING_CONTENT", "Agent package must contain prompt.md");
       }
       content = promptMd;
       break;
@@ -267,7 +267,9 @@ export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): Parsed
       content = providerRaw ? new TextDecoder().decode(providerRaw) : manifestText;
       break;
     }
+    default:
+      throw new PackageZipError("INVALID_MANIFEST", `Unsupported package type: "${type}"`);
   }
 
-  return { manifest, content, files, type };
+  return { manifest, content, files, type: type as PackageType };
 }

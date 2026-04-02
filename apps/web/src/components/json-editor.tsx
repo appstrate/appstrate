@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -11,7 +13,7 @@ interface JsonEditorProps {
 }
 
 export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const { resolvedTheme } = useTheme();
 
   const initialJson = useMemo(() => {

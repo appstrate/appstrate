@@ -1,15 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { PromptContext } from "./adapters/types.ts";
-import type { LoadedPackage, FlowProviderRequirement } from "../types/index.ts";
+import type { LoadedPackage, AgentProviderRequirement } from "../types/index.ts";
 import type { FileReference } from "./adapters/types.ts";
 import { getProvider } from "@appstrate/connect";
 import type { Db } from "@appstrate/db/client";
 import { db } from "@appstrate/db/client";
 import { getEnv } from "@appstrate/env";
-import { signExecutionToken } from "../lib/execution-token.ts";
+import { signRunToken } from "../lib/run-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";
-import { getPackageConfig, getLastExecutionState, getPackageMemories } from "./state/index.ts";
+import { getPackageConfig, getLastRunState, getPackageMemories } from "./state/index.ts";
 import type { Actor } from "../lib/actor.ts";
-import { buildFlowPackage } from "./package-storage.ts";
+import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
@@ -31,7 +33,7 @@ export class ModelNotConfiguredError extends Error {
 export async function resolveProviderDefs(
   database: Db,
   orgId: string,
-  providers: FlowProviderRequirement[],
+  providers: AgentProviderRequirement[],
 ): Promise<NonNullable<PromptContext["providers"]>> {
   const uniqueProviders = [...new Set(providers.map((s) => s.id))];
   const defs = await Promise.all(uniqueProviders.map((p) => getProvider(database, orgId, p)));
@@ -55,24 +57,24 @@ export async function resolveProviderDefs(
 }
 
 /**
- * Build the execution API descriptor for container-to-host calls.
- * Token is HMAC-signed to prevent forgery from leaked executionIds.
+ * Build the run API descriptor for container-to-host calls.
+ * Token is HMAC-signed to prevent forgery from leaked runIds.
  */
-export function buildExecutionApi(executionId: string): { url: string; token: string } {
+export function buildRunApi(runId: string): { url: string; token: string } {
   const apiEnv = getEnv();
   const url = apiEnv.PLATFORM_API_URL ?? `http://host.docker.internal:${apiEnv.PORT}`;
-  return { url, token: signExecutionToken(executionId) };
+  return { url, token: signRunToken(runId) };
 }
 
 /**
- * Builds a structured PromptContext from flow data.
+ * Builds a structured PromptContext from agent data.
  */
 export function buildPromptContext(params: {
-  flow: LoadedPackage;
+  agent: LoadedPackage;
   tokens: Record<string, string>;
   config: Record<string, unknown>;
   previousState: Record<string, unknown> | null;
-  executionApi?: { url: string; token: string };
+  runApi?: { url: string; token: string };
   input?: Record<string, unknown>;
   files?: FileReference[];
   providers?: PromptContext["providers"];
@@ -82,22 +84,22 @@ export function buildPromptContext(params: {
   llmConfig: PromptContext["llmConfig"];
 }): PromptContext {
   return {
-    rawPrompt: params.flow.prompt,
+    rawPrompt: params.agent.prompt,
     tokens: params.tokens,
     config: params.config,
     previousState: params.previousState,
-    executionApi: params.executionApi,
+    runApi: params.runApi,
     input: params.input ?? {},
     files: params.files,
     schemas: {
-      input: params.flow.manifest.input?.schema
-        ? asJSONSchemaObject(params.flow.manifest.input.schema)
+      input: params.agent.manifest.input?.schema
+        ? asJSONSchemaObject(params.agent.manifest.input.schema)
         : undefined,
-      config: params.flow.manifest.config?.schema
-        ? asJSONSchemaObject(params.flow.manifest.config.schema)
+      config: params.agent.manifest.config?.schema
+        ? asJSONSchemaObject(params.agent.manifest.config.schema)
         : undefined,
-      output: params.flow.manifest.output?.schema
-        ? asJSONSchemaObject(params.flow.manifest.output.schema)
+      output: params.agent.manifest.output?.schema
+        ? asJSONSchemaObject(params.agent.manifest.output.schema)
         : undefined,
     },
     providers: params.providers ?? [],
@@ -105,13 +107,13 @@ export function buildPromptContext(params: {
     llmModel: params.llmConfig?.modelId ?? "unknown",
     llmConfig: params.llmConfig,
     proxyUrl: params.proxyUrl,
-    timeout: (params.flow.manifest.timeout as number | undefined) ?? 300,
-    availableTools: params.flow.tools.map((e) => ({
+    timeout: (params.agent.manifest.timeout as number | undefined) ?? 300,
+    availableTools: params.agent.tools.map((e) => ({
       id: e.id,
       name: e.name,
       description: e.description,
     })),
-    availableSkills: params.flow.skills.map((s) => ({
+    availableSkills: params.agent.skills.map((s) => ({
       id: s.id,
       name: s.name,
       description: s.description,
@@ -121,40 +123,40 @@ export function buildPromptContext(params: {
 }
 
 /**
- * Load all independent execution data in parallel: tokens, config, state,
- * provider definitions, flow package, latest version, and memories.
+ * Load all independent run data in parallel: tokens, config, state,
+ * provider definitions, agent package, latest version, and memories.
  */
-async function loadExecutionData(params: {
-  flow: LoadedPackage;
+async function loadRunData(params: {
+  agent: LoadedPackage;
   providerProfiles: ProviderProfileMap;
   orgId: string;
   actor: Actor | null;
-  manifestProviders: FlowProviderRequirement[];
+  manifestProviders: AgentProviderRequirement[];
   skipConfigFetch: boolean;
   overrideVersionId?: number;
 }) {
-  const { flow, providerProfiles, orgId, actor, manifestProviders, skipConfigFetch } = params;
+  const { agent, providerProfiles, orgId, actor, manifestProviders, skipConfigFetch } = params;
 
   const [
     tokens,
     configFull,
     previousState,
     providerDefs,
-    flowPackageResult,
+    agentPackageResult,
     latestVersion,
     memories,
   ] = await Promise.all([
     buildProviderTokens(manifestProviders, providerProfiles, orgId),
-    skipConfigFetch ? null : getPackageConfig(orgId, flow.id),
-    getLastExecutionState(flow.id, actor, orgId),
+    skipConfigFetch ? null : getPackageConfig(orgId, agent.id),
+    getLastRunState(agent.id, actor, orgId),
     resolveProviderDefs(db, orgId, manifestProviders),
-    buildFlowPackage(flow, orgId),
+    buildAgentPackage(agent, orgId),
     params.overrideVersionId
       ? Promise.resolve(params.overrideVersionId)
-      : flow.source !== "system"
-        ? getLatestVersionWithManifest(flow.id).catch(() => null)
+      : agent.source !== "system"
+        ? getLatestVersionWithManifest(agent.id).catch(() => null)
         : null,
-    getPackageMemories(flow.id, orgId),
+    getPackageMemories(agent.id, orgId),
   ]);
 
   return {
@@ -162,7 +164,7 @@ async function loadExecutionData(params: {
     configFull,
     previousState,
     providerDefs,
-    flowPackageResult,
+    agentPackageResult,
     latestVersion,
     memories,
   };
@@ -170,20 +172,20 @@ async function loadExecutionData(params: {
 
 /**
  * Resolve model and proxy with cascade logic:
- * request override → flow column → org/system default.
+ * request override → agent column → org/system default.
  * Throws ModelNotConfiguredError if no model is found.
  */
 async function resolveModelAndProxy(params: {
   orgId: string;
-  flowId: string;
+  agentId: string;
   effectiveModelId: string | null;
   effectiveProxyId: string | null;
 }) {
-  const { orgId, flowId, effectiveModelId, effectiveProxyId } = params;
+  const { orgId, agentId, effectiveModelId, effectiveProxyId } = params;
 
   const [proxyResult, modelResult] = await Promise.all([
-    resolveProxy(orgId, flowId, effectiveProxyId),
-    resolveModel(orgId, flowId, effectiveModelId),
+    resolveProxy(orgId, agentId, effectiveProxyId),
+    resolveModel(orgId, agentId, effectiveModelId),
   ]);
 
   if (!modelResult) {
@@ -211,17 +213,17 @@ async function resolveModelAndProxy(params: {
 /**
  * Resolve the package version ID from the latest version result.
  * Explicit override is trusted; otherwise only associate the latest version
- * if its manifest matches the live flow (dirty check).
+ * if its manifest matches the live agent (dirty check).
  */
 function resolvePackageVersionId(
   latestVersion: number | { id: number; manifest: Record<string, unknown> } | null,
-  flowManifest: Record<string, unknown>,
+  agentManifest: Record<string, unknown>,
 ): number | null {
   if (typeof latestVersion === "number") {
     return latestVersion;
   }
   if (latestVersion) {
-    const liveKey = JSON.stringify(flowManifest);
+    const liveKey = JSON.stringify(agentManifest);
     const versionKey = JSON.stringify(latestVersion.manifest);
     return liveKey === versionKey ? latestVersion.id : null;
   }
@@ -229,12 +231,12 @@ function resolvePackageVersionId(
 }
 
 /**
- * Build the full execution context (tokens, config, state, providers, package, version).
- * Shared by executions.ts and scheduler.ts.
+ * Build the full run context (tokens, config, state, providers, package, version).
+ * Shared by runs.ts and scheduler.ts.
  */
-export async function buildExecutionContext(params: {
-  executionId: string;
-  flow: LoadedPackage;
+export async function buildRunContext(params: {
+  runId: string;
+  agent: LoadedPackage;
   providerProfiles: ProviderProfileMap;
   orgId: string;
   actor: Actor | null;
@@ -246,13 +248,13 @@ export async function buildExecutionContext(params: {
   overrideVersionId?: number;
 }): Promise<{
   promptContext: PromptContext;
-  flowPackage: Buffer | null;
+  agentPackage: Buffer | null;
   packageVersionId: number | null;
   proxyLabel: string | null;
   modelLabel: string | null;
 }> {
-  const { executionId, flow, providerProfiles, orgId, actor, input, files } = params;
-  const manifestProviders = resolveManifestProviders(flow.manifest);
+  const { runId, agent, providerProfiles, orgId, actor, input, files } = params;
+  const manifestProviders = resolveManifestProviders(agent.manifest);
 
   // Skip getPackageConfig when all values are already provided by the caller (from preflight)
   const skipConfigFetch =
@@ -264,11 +266,11 @@ export async function buildExecutionContext(params: {
     configFull,
     previousState,
     providerDefs,
-    flowPackageResult,
+    agentPackageResult,
     latestVersion,
     memories,
-  } = await loadExecutionData({
-    flow,
+  } = await loadRunData({
+    agent,
     providerProfiles,
     orgId,
     actor,
@@ -278,8 +280,8 @@ export async function buildExecutionContext(params: {
   });
 
   const config = params.config ?? configFull?.config ?? {};
-  const flowPackage = flowPackageResult.zip;
-  const { toolDocs } = flowPackageResult;
+  const agentPackage = agentPackageResult.zip;
+  const { toolDocs } = agentPackageResult;
 
   // Step 2: resolve model and proxy with cascade
   const effectiveModelId = params.modelId ?? configFull?.modelId ?? null;
@@ -287,21 +289,21 @@ export async function buildExecutionContext(params: {
 
   const { proxyUrl, proxyLabel, modelLabel, llmConfig } = await resolveModelAndProxy({
     orgId,
-    flowId: flow.id,
+    agentId: agent.id,
     effectiveModelId,
     effectiveProxyId,
   });
 
   // Step 3: resolve version ID
-  const packageVersionId = resolvePackageVersionId(latestVersion, flow.manifest);
+  const packageVersionId = resolvePackageVersionId(latestVersion, agent.manifest);
 
   // Step 4: assemble prompt context
   const promptContext = buildPromptContext({
-    flow,
+    agent,
     tokens,
     config,
     previousState,
-    executionApi: buildExecutionApi(executionId),
+    runApi: buildRunApi(runId),
     input,
     files,
     providers: providerDefs,
@@ -315,5 +317,5 @@ export async function buildExecutionContext(params: {
     llmConfig,
   });
 
-  return { promptContext, flowPackage, packageVersionId, proxyLabel, modelLabel };
+  return { promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel };
 }

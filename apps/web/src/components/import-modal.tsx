@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
@@ -19,7 +21,7 @@ const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 type FormData = { file: File | null; githubUrl: string };
 
 export function ImportModal({ open, onClose }: ImportModalProps) {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const [dragOver, setDragOver] = useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = useState<{
     packageId: string;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -17,7 +19,7 @@ import { ProviderIcon } from "../components/provider-icon";
 import type { ProviderConfig } from "@appstrate/shared-types";
 
 export function ProvidersPage() {
-  const { t } = useTranslation(["settings", "flows"]);
+  const { t } = useTranslation(["settings", "agents"]);
   const [showAll, setShowAll] = useState(false);
   const [profileId, setProfileId] = useState<string | null>(null);
   const { data: providersData } = useProviders();

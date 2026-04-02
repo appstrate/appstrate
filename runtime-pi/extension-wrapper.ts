@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import { emit as defaultEmit } from "./lib/emit.ts";
 
@@ -28,16 +30,11 @@ export function wrapExtensionFactory(
 
         const toolName = config.name || "unknown";
 
-        config.execute = async (
-          toolCallId: string,
-          params: unknown,
-          signal: unknown,
-        ) => {
+        config.execute = async (toolCallId: string, params: unknown, signal: unknown) => {
           try {
             return await originalExecute(toolCallId, params, signal);
           } catch (err) {
-            const message =
-              err instanceof Error ? err.message : String(err);
+            const message = err instanceof Error ? err.message : String(err);
             emitFn({
               type: "error",
               message: `[extension-wrapper] Extension '${extensionId}' tool '${toolName}': ${message}`,

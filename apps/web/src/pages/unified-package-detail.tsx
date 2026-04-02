@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useParams, Link, Navigate } from "react-router-dom";
@@ -10,7 +12,7 @@ import {
   usePackageDownload,
   useDeletePackage,
 } from "../hooks/use-packages";
-import type { FlowDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
+import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePackageOwnership } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
@@ -19,7 +21,7 @@ import { useDeleteProviderCredentials } from "../hooks/use-mutations";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
-import { useFlowDetailUI } from "../stores/flow-detail-ui-store";
+import { useAgentDetailUI } from "../stores/agent-detail-ui-store";
 import { AlertTriangle } from "lucide-react";
 
 // Shared components
@@ -34,25 +36,25 @@ import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ProviderCredentialsForm } from "../components/provider-credentials-form";
 import { ProviderConnectButton } from "../components/provider-connect-button";
-// Flow-specific components
-import { FlowActions } from "../components/package-detail/flow-actions";
+// Agent-specific components
+import { AgentActions } from "../components/package-detail/agent-actions";
 import {
-  FlowConnectorsTab,
-  FlowExecutionsTab,
-  FlowSchedulesTab,
-  FlowMemoriesTab,
-  FlowApiTab,
-} from "../components/package-detail/flow-tabs";
-import { FlowModals } from "../components/package-detail/flow-modals";
-import { FlowConfigurationTab } from "../components/package-detail/flow-configuration-tab";
-import { RunFlowButton } from "../components/run-flow-button";
-import { useFlowReadiness } from "../hooks/use-flow-readiness";
-import { useModels, useFlowModel } from "../hooks/use-models";
+  AgentConnectorsTab,
+  AgentRunsTab,
+  AgentSchedulesTab,
+  AgentMemoriesTab,
+  AgentApiTab,
+} from "../components/package-detail/agent-tabs";
+import { AgentModals } from "../components/package-detail/agent-modals";
+import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
+import { RunAgentButton } from "../components/run-agent-button";
+import { useAgentReadiness } from "../hooks/use-agent-readiness";
+import { useModels, useAgentModel } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 
 type DetailTab =
   | "connectors"
-  | "executions"
+  | "runs"
   | "configuration"
   | "schedules"
   | "memories"
@@ -64,9 +66,9 @@ type DetailTab =
 
 const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} };
 
-// ─── Flow Run Button (inline, no wrapper) ────────────────────────────
+// ─── Agent Run Button (inline, no wrapper) ────────────────────────────
 
-function FlowRunButtonInline({
+function AgentRunButtonInline({
   packageId,
   resolvedVersion,
   configSchemaOverride,
@@ -75,11 +77,11 @@ function FlowRunButtonInline({
   resolvedVersion: string | undefined;
   configSchemaOverride?: JSONSchemaObject;
 }) {
-  const { t } = useTranslation("flows");
-  const { data: detail } = usePackageDetail("flow", packageId);
+  const { t } = useTranslation("agents");
+  const { data: detail } = usePackageDetail("agent", packageId);
   const { data: models } = useModels();
-  const { data: flowModel } = useFlowModel(packageId);
-  const readiness = useFlowReadiness(detail, flowModel?.modelId, models, configSchemaOverride);
+  const { data: agentModel } = useAgentModel(packageId);
+  const readiness = useAgentReadiness(detail, agentModel?.modelId, models, configSchemaOverride);
 
   if (!detail) return null;
 
@@ -100,7 +102,7 @@ function FlowRunButtonInline({
             : undefined;
 
   return (
-    <RunFlowButton
+    <RunAgentButton
       packageId={packageId}
       detail={detail}
       version={resolvedVersion}
@@ -112,7 +114,7 @@ function FlowRunButtonInline({
 }
 
 function ModelRequiredAlert() {
-  const { t } = useTranslation(["settings", "flows"]);
+  const { t } = useTranslation(["settings", "agents"]);
   const { data: models } = useModels();
 
   const hasAnyModel = models?.some((m) => m.isDefault && m.enabled);
@@ -132,7 +134,7 @@ function ModelRequiredAlert() {
 // ─── Main Page ──────────────────────────────────────────────────────
 
 export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
-  const { t } = useTranslation(["flows", "settings", "common"]);
+  const { t } = useTranslation(["agents", "settings", "common"]);
   const {
     scope,
     name,
@@ -142,7 +144,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { isOwned } = usePackageOwnership(packageId);
   const { isAdmin } = usePermissions();
   const isVersionView = !!versionParam;
-  const resetUI = useFlowDetailUI((s) => s.reset);
+  const resetUI = useAgentDetailUI((s) => s.reset);
 
   // Reset modal state when leaving the page or switching packages
   useEffect(() => {
@@ -165,16 +167,16 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const callbackUrl = type === "provider" ? providersQuery.data?.callbackUrl : undefined;
 
   // Type-narrowed aliases for type-specific branches
-  const flowDetail = type === "flow" ? (detail as FlowDetail | undefined) : undefined;
-  const pkgDetail = type !== "flow" ? (detail as OrgPackageItemDetail | undefined) : undefined;
+  const agentDetail = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
+  const pkgDetail = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
 
-  const displayName = flowDetail?.displayName ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
-  const source = flowDetail?.source ?? pkgDetail?.source;
-  const version = flowDetail?.version ?? pkgDetail?.version;
-  const versionCount = flowDetail?.versionCount ?? pkgDetail?.versionCount;
+  const displayName = agentDetail?.displayName ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
+  const source = agentDetail?.source ?? pkgDetail?.source;
+  const version = agentDetail?.version ?? pkgDetail?.version;
+  const versionCount = agentDetail?.versionCount ?? pkgDetail?.versionCount;
   const hasUnpublishedChanges =
-    flowDetail?.hasUnpublishedChanges ?? pkgDetail?.hasUnpublishedChanges;
-  const forkedFrom = flowDetail?.forkedFrom ?? pkgDetail?.forkedFrom ?? null;
+    agentDetail?.hasUnpublishedChanges ?? pkgDetail?.hasUnpublishedChanges;
+  const forkedFrom = agentDetail?.forkedFrom ?? pkgDetail?.forkedFrom ?? null;
 
   const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
     type,
@@ -201,7 +203,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // ── State ──
   const allValidTabs: DetailTab[] = [
     "connectors",
-    "executions",
+    "runs",
     "configuration",
     "schedules",
     "memories",
@@ -212,21 +214,21 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     "usedBy",
   ];
   // Configuration tab visibility (uses draft schema — version-aware override applied after loading)
-  const draftConfigSchema = flowDetail?.config?.schema;
+  const draftConfigSchema = agentDetail?.config?.schema;
   const hasDraftConfigSchema = !!(
     draftConfigSchema?.properties && Object.keys(draftConfigSchema.properties).length > 0
   );
   const hasModelsAvailable = !!orgModels && orgModels.length > 0;
   const hasProxiesAvailable = !!orgProxies && orgProxies.length > 0;
   const hasMissingRequiredConfig =
-    type === "flow" &&
+    type === "agent" &&
     hasDraftConfigSchema &&
     draftConfigSchema?.required?.some((key) => {
-      const val = flowDetail?.config?.current?.[key];
+      const val = agentDetail?.config?.current?.[key];
       return val === undefined || val === null || val === "";
     });
   const defaultTab: DetailTab =
-    type === "flow" ? "executions" : type === "provider" ? "configuration" : "content";
+    type === "agent" ? "runs" : type === "provider" ? "configuration" : "content";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   // Reset tab if it becomes invalid (e.g. #changes when draft is published)
   useEffect(() => {
@@ -268,14 +270,14 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   })();
   const effectiveConfigSchema = isHistoricalVersion
     ? (versionConfigSchema ?? EMPTY_CONFIG_SCHEMA)
-    : flowDetail?.config?.schema;
+    : agentDetail?.config?.schema;
   const hasEffectiveConfigSchema = !!(
     effectiveConfigSchema?.properties && Object.keys(effectiveConfigSchema.properties).length > 0
   );
   // Override showConfigTab for historical versions with their own config schema
   const effectiveShowConfigTab =
     isAdmin &&
-    type === "flow" &&
+    type === "agent" &&
     (hasEffectiveConfigSchema || hasModelsAvailable || hasProxiesAvailable);
 
   const downloadVersion = (isHistoricalVersion ? versionDetail?.version : version) ?? undefined;
@@ -284,7 +286,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const unifiedForHeader = {
     id: packageId,
     displayName,
-    description: type === "flow" ? flowDetail!.description : (pkgDetail?.description ?? ""),
+    description: type === "agent" ? agentDetail!.description : (pkgDetail?.description ?? ""),
     source: source ?? ("local" as const),
     type,
     version,
@@ -293,9 +295,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   };
 
   // ── Diff tab logic ──
-  const currentManifest = type === "flow" ? flowDetail?.manifest : pkgDetail?.manifest;
-  const currentContent = flowDetail?.prompt ?? pkgDetail?.content;
-  const contentLabel = type === "flow" ? t("version.diffPrompt") : t("packages.content");
+  const currentManifest = type === "agent" ? agentDetail?.manifest : pkgDetail?.manifest;
+  const currentContent = agentDetail?.prompt ?? pkgDetail?.content;
+  const contentLabel = type === "agent" ? t("version.diffPrompt") : t("packages.content");
 
   const hasManifestChanges =
     JSON.stringify(currentManifest ?? {}) !== JSON.stringify(latestVersionForDiff?.manifest ?? {});
@@ -316,8 +318,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // Determine available tabs based on type
 
-  const flowTabs: Array<{ id: DetailTab; label: string }> = [
-    { id: "executions", label: t("detail.tabExecutions") },
+  const agentTabs: Array<{ id: DetailTab; label: string }> = [
+    { id: "runs", label: t("detail.tabRuns") },
     {
       id: "connectors",
       label: t("detail.tabConnectors"),
@@ -349,7 +351,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     { id: "usedBy", label: t("packages.usedBy") },
   ];
 
-  const tabDefs = type === "flow" ? flowTabs : pkgTabs;
+  const tabDefs = type === "agent" ? agentTabs : pkgTabs;
 
   const resolvedVersion = isHistoricalVersion ? versionDetail?.version : undefined;
 
@@ -362,8 +364,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         hasDraftChanges={hasDraftChanges}
         isHistoricalVersion={isHistoricalVersion}
         actionsLeft={
-          type === "flow" ? (
-            <FlowRunButtonInline
+          type === "agent" ? (
+            <AgentRunButtonInline
               packageId={packageId}
               resolvedVersion={resolvedVersion}
               configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
@@ -371,11 +373,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           ) : undefined
         }
         actionsRight={
-          type === "flow" ? (
-            <FlowActions
+          type === "agent" ? (
+            <AgentActions
               packageId={packageId}
               manifest={
-                (isHistoricalVersion ? versionDetail?.manifest : flowDetail?.manifest) as
+                (isHistoricalVersion ? versionDetail?.manifest : agentDetail?.manifest) as
                   | Record<string, unknown>
                   | undefined
               }
@@ -412,7 +414,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                     description: t("providers.deleteCredentialsConfirm", { ns: "settings" }),
                   });
                 }}
-                canDeletePackage={!!pkgDetail && pkgDetail.flows.length === 0}
+                canDeletePackage={!!pkgDetail && pkgDetail.agents.length === 0}
                 onDeletePackage={() => {
                   if (!pkgDetail) return;
                   const nameStr = pkgDetail.name || pkgDetail.id;
@@ -440,7 +442,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         latestVersion={version}
       />
 
-      {type === "flow" && <ModelRequiredAlert />}
+      {type === "agent" && <ModelRequiredAlert />}
 
       {!isOwned && (
         <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm">
@@ -472,7 +474,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         </div>
       )}
 
-      {type === "flow" && hasMissingRequiredConfig && (
+      {type === "agent" && hasMissingRequiredConfig && (
         <div className="border-warning/30 bg-warning/5 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
           <span className="text-warning text-base leading-none">⚠</span>
           <span className="text-warning">{t("detail.configAlert")}</span>
@@ -495,28 +497,28 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       </Tabs>
 
       {/* Tab content */}
-      {type === "flow" && tab === "configuration" && (
-        <FlowConfigurationTab
+      {type === "agent" && tab === "configuration" && (
+        <AgentConfigurationTab
           packageId={packageId}
           configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
           isHistorical={isHistoricalVersion}
         />
       )}
-      {type === "flow" && tab === "connectors" && (
-        <FlowConnectorsTab packageId={packageId} detail={flowDetail} />
+      {type === "agent" && tab === "connectors" && (
+        <AgentConnectorsTab packageId={packageId} detail={agentDetail} />
       )}
-      {type === "flow" && tab === "executions" && (
-        <FlowExecutionsTab
+      {type === "agent" && tab === "runs" && (
+        <AgentRunsTab
           packageId={packageId}
           resolvedVersion={resolvedVersion}
           configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
         />
       )}
-      {type === "flow" && tab === "schedules" && <FlowSchedulesTab packageId={packageId} />}
-      {type === "flow" && tab === "memories" && <FlowMemoriesTab packageId={packageId} />}
-      {type === "flow" && tab === "api" && <FlowApiTab packageId={packageId} />}
+      {type === "agent" && tab === "schedules" && <AgentSchedulesTab packageId={packageId} />}
+      {type === "agent" && tab === "memories" && <AgentMemoriesTab packageId={packageId} />}
+      {type === "agent" && tab === "api" && <AgentApiTab packageId={packageId} />}
 
-      {type !== "flow" && tab === "content" && pkgDetail && (
+      {type !== "agent" && tab === "content" && pkgDetail && (
         <div className="border-border bg-card rounded-lg border p-4">
           <pre className="text-muted-foreground bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
             {isHistoricalVersion && versionDetail?.content != null
@@ -536,18 +538,18 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         </div>
       )}
 
-      {type !== "flow" && tab === "usedBy" && pkgDetail && (
+      {type !== "agent" && tab === "usedBy" && pkgDetail && (
         <div className="border-border bg-card rounded-lg border p-4">
-          {pkgDetail.flows.length === 0 ? (
+          {pkgDetail.agents.length === 0 ? (
             <p className="text-muted-foreground py-4 text-center text-sm">
-              {t("packages.noFlows")}
+              {t("packages.noAgents")}
             </p>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {pkgDetail.flows.map((f) => (
+              {pkgDetail.agents.map((f) => (
                 <Link
                   key={f.id}
-                  to={`/flows/${f.id}`}
+                  to={`/agents/${f.id}`}
                   className="border-border hover:border-primary text-foreground inline-flex items-center rounded-md border px-2.5 py-1 text-sm no-underline transition-colors"
                 >
                   {f.displayName || f.id}
@@ -588,7 +590,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               <DraftDiffView
                 original={latestVersionForDiff.content}
                 modified={currentContent}
-                language={type === "flow" ? "markdown" : undefined}
+                language={type === "agent" ? "markdown" : undefined}
               />
             )}
           {!hasManifestChanges && !hasContentChanges && (
@@ -617,8 +619,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         type={type}
       />
 
-      {/* Flow modals */}
-      {type === "flow" && <FlowModals packageId={packageId} />}
+      {/* Agent modals */}
+      {type === "agent" && <AgentModals packageId={packageId} />}
 
       <ConfirmModal
         open={!!confirmAction}

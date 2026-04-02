@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Verify OpenAPI spec: completeness, structural validity, and best practices.
  *
@@ -27,36 +29,36 @@ const expectedEndpoints = [
   "POST /api/auth/sign-out",
   "GET /api/auth/get-session",
 
-  // Flows (runtime — flows.ts + user-flows.ts junction endpoints)
-  "GET /api/flows",
-  "PUT /api/flows/{scope}/{name}/config",
-  "GET /api/flows/{scope}/{name}/memories",
-  "DELETE /api/flows/{scope}/{name}/memories",
-  "DELETE /api/flows/{scope}/{name}/memories/{memoryId}",
-  "PUT /api/flows/{scope}/{name}/skills",
-  "PUT /api/flows/{scope}/{name}/tools",
-  "GET /api/flows/{scope}/{name}/model",
-  "PUT /api/flows/{scope}/{name}/model",
+  // Agents (runtime — agents.ts + user-agents.ts junction endpoints)
+  "GET /api/agents",
+  "PUT /api/agents/{scope}/{name}/config",
+  "GET /api/agents/{scope}/{name}/memories",
+  "DELETE /api/agents/{scope}/{name}/memories",
+  "DELETE /api/agents/{scope}/{name}/memories/{memoryId}",
+  "PUT /api/agents/{scope}/{name}/skills",
+  "PUT /api/agents/{scope}/{name}/tools",
+  "GET /api/agents/{scope}/{name}/model",
+  "PUT /api/agents/{scope}/{name}/model",
 
-  // Executions
-  "POST /api/flows/{scope}/{name}/run",
-  "GET /api/flows/{scope}/{name}/executions",
-  "DELETE /api/flows/{scope}/{name}/executions",
-  "GET /api/executions/{id}",
-  "GET /api/executions/{id}/logs",
-  "POST /api/executions/{id}/cancel",
+  // Runs
+  "POST /api/agents/{scope}/{name}/run",
+  "GET /api/agents/{scope}/{name}/runs",
+  "DELETE /api/agents/{scope}/{name}/runs",
+  "GET /api/runs/{id}",
+  "GET /api/runs/{id}/logs",
+  "POST /api/runs/{id}/cancel",
 
   // Realtime (SSE)
-  "GET /api/realtime/executions",
-  "GET /api/realtime/executions/{id}",
-  "GET /api/realtime/flows/{packageId}/executions",
+  "GET /api/realtime/runs",
+  "GET /api/realtime/runs/{id}",
+  "GET /api/realtime/agents/{packageId}/runs",
 
   // Schedules
   "GET /api/schedules",
   "GET /api/schedules/{id}",
-  "GET /api/schedules/{id}/executions",
-  "GET /api/flows/{scope}/{name}/schedules",
-  "POST /api/flows/{scope}/{name}/schedules",
+  "GET /api/schedules/{id}/runs",
+  "GET /api/agents/{scope}/{name}/schedules",
+  "POST /api/agents/{scope}/{name}/schedules",
   "PUT /api/schedules/{id}",
   "DELETE /api/schedules/{id}",
 
@@ -89,7 +91,7 @@ const expectedEndpoints = [
   "POST /api/connection-profiles/org",
   "PUT /api/connection-profiles/org/{id}",
   "DELETE /api/connection-profiles/org/{id}",
-  "GET /api/connection-profiles/org/{id}/flows",
+  "GET /api/connection-profiles/org/{id}/agents",
   "GET /api/connection-profiles/org/{id}/bindings",
   "POST /api/connection-profiles/org/{id}/bind",
   "DELETE /api/connection-profiles/org/{id}/bind/{providerScope}/{providerName}",
@@ -97,17 +99,17 @@ const expectedEndpoints = [
   "DELETE /api/connection-profiles/{id}",
   "GET /api/connection-profiles/{id}/connections",
 
-  // Flow Provider Profiles
-  "GET /api/flows/{scope}/{name}/provider-profiles",
-  "PUT /api/flows/{scope}/{name}/provider-profiles",
-  "DELETE /api/flows/{scope}/{name}/provider-profiles",
+  // Agent Provider Profiles
+  "GET /api/agents/{scope}/{name}/provider-profiles",
+  "PUT /api/agents/{scope}/{name}/provider-profiles",
+  "DELETE /api/agents/{scope}/{name}/provider-profiles",
 
-  // Flow Org Profile
-  "PUT /api/flows/{scope}/{name}/org-profile",
+  // Agent Org Profile
+  "PUT /api/agents/{scope}/{name}/org-profile",
 
-  // Flow Proxy
-  "GET /api/flows/{scope}/{name}/proxy",
-  "PUT /api/flows/{scope}/{name}/proxy",
+  // Agent Proxy
+  "GET /api/agents/{scope}/{name}/proxy",
+  "PUT /api/agents/{scope}/{name}/proxy",
 
   // Provider Keys
   "GET /api/provider-keys",
@@ -180,17 +182,17 @@ const expectedEndpoints = [
   "DELETE /api/packages/providers/{scope}/{name}/versions/{version}",
   "GET /api/packages/providers/{scope}/{name}/versions/{version}",
 
-  // Packages — Flows
-  "POST /api/packages/flows",
-  "GET /api/packages/flows/{scope}/{name}",
-  "PUT /api/packages/flows/{scope}/{name}",
-  "DELETE /api/packages/flows/{scope}/{name}",
-  "GET /api/packages/flows/{scope}/{name}/versions",
-  "GET /api/packages/flows/{scope}/{name}/versions/info",
-  "POST /api/packages/flows/{scope}/{name}/versions",
-  "POST /api/packages/flows/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/flows/{scope}/{name}/versions/{version}",
-  "GET /api/packages/flows/{scope}/{name}/versions/{version}",
+  // Packages — Agents
+  "POST /api/packages/agents",
+  "GET /api/packages/agents/{scope}/{name}",
+  "PUT /api/packages/agents/{scope}/{name}",
+  "DELETE /api/packages/agents/{scope}/{name}",
+  "GET /api/packages/agents/{scope}/{name}/versions",
+  "GET /api/packages/agents/{scope}/{name}/versions/info",
+  "POST /api/packages/agents/{scope}/{name}/versions",
+  "POST /api/packages/agents/{scope}/{name}/versions/{version}/restore",
+  "DELETE /api/packages/agents/{scope}/{name}/versions/{version}",
+  "GET /api/packages/agents/{scope}/{name}/versions/{version}",
 
   // Organizations
   "GET /api/orgs",
@@ -217,7 +219,7 @@ const expectedEndpoints = [
   "POST /api/welcome/setup",
 
   // Internal
-  "GET /internal/execution-history",
+  "GET /internal/run-history",
   "GET /internal/credentials/{scope}/{name}",
 
   // Meta
@@ -226,10 +228,10 @@ const expectedEndpoints = [
 
   // Notifications
   "GET /api/notifications/unread-count",
-  "GET /api/notifications/unread-counts-by-flow",
-  "PUT /api/notifications/read/{executionId}",
+  "GET /api/notifications/unread-counts-by-agent",
+  "PUT /api/notifications/read/{runId}",
   "PUT /api/notifications/read-all",
-  "GET /api/executions",
+  "GET /api/runs",
 
   // Packages
   "POST /api/packages/import",

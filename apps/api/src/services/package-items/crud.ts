@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
@@ -163,7 +165,7 @@ export async function updateOrgItem(
   return rows[0] ?? null;
 }
 
-/** List all items of a type in the org with usedByFlows count. */
+/** List all items of a type in the org with usedByAgents count. */
 export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
   const orgFilter = orgOrSystemFilter(orgId);
 
@@ -202,7 +204,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
       createdBy: row.createdBy,
       createdAt: toISORequired(row.createdAt),
       updatedAt: toISORequired(row.updatedAt),
-      usedByFlows: countMap.get(row.id) ?? 0,
+      usedByAgents: countMap.get(row.id) ?? 0,
       version: typeof m.version === "string" ? m.version : null,
       autoInstalled: row.autoInstalled,
       forkedFrom: row.forkedFrom ?? null,
@@ -210,7 +212,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
   });
 }
 
-/** Get a single item with content and list of flows referencing it. */
+/** Get a single item with content and list of agents referencing it. */
 export async function getOrgItem(orgId: string, itemId: string, cfg: PackageTypeConfig) {
   const orgFilter = orgOrSystemFilter(orgId);
 
@@ -241,7 +243,7 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     manifest: asRecord(data.draftManifest),
     lockVersion: data.lockVersion,
     forkedFrom: data.forkedFrom ?? null,
-    flows: dependents,
+    agents: dependents,
   };
 }
 

@@ -1,20 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq, and, sql } from "drizzle-orm";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg, addOrgMember } from "../../helpers/auth.ts";
-import { seedConnectionProfile, seedFlow } from "../../helpers/seed.ts";
+import { seedConnectionProfile, seedAgent } from "../../helpers/seed.ts";
 import { assertDbHas, assertDbMissing, assertDbCount, getDbRow } from "../../helpers/assertions.ts";
 import {
   orgProfileProviderBindings,
   connectionProfiles,
   packageConfigs,
-  userFlowProviderProfiles,
+  userAgentProviderProfiles,
 } from "@appstrate/db/schema";
 import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
-import { setFlowOverride } from "../../../src/services/state/package-config.ts";
-import {
-  setUserFlowProviderOverride,
-} from "../../../src/services/connection-profiles.ts";
+import { setAgentOverride } from "../../../src/services/state/package-config.ts";
+import { setUserAgentProviderOverride } from "../../../src/services/connection-profiles.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 
 describe("Cascade Deletion", () => {
@@ -47,9 +47,7 @@ describe("Cascade Deletion", () => {
       );
 
       // Delete the source (user) profile
-      await db
-        .delete(connectionProfiles)
-        .where(eq(connectionProfiles.id, userProfile.id));
+      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, userProfile.id));
 
       // Bindings should be gone via FK CASCADE on sourceProfileId
       await assertDbMissing(
@@ -58,28 +56,26 @@ describe("Cascade Deletion", () => {
       );
     });
 
-    it("removes user_flow_provider_profiles referencing it via FK CASCADE", async () => {
+    it("removes user_agent_provider_profiles referencing it via FK CASCADE", async () => {
       const userProfile = await seedConnectionProfile({ userId, name: "Alt Profile" });
 
-      const flow = await seedFlow({ id: "@testorg/cascade-flow", orgId, createdBy: userId });
+      const agent = await seedAgent({ id: "@testorg/cascade-agent", orgId, createdBy: userId });
 
-      await setUserFlowProviderOverride(actor, flow.id, "@test/gmail", userProfile.id);
+      await setUserAgentProviderOverride(actor, agent.id, "@test/gmail", userProfile.id);
 
       // Verify override exists
       await assertDbHas(
-        userFlowProviderProfiles,
-        eq(userFlowProviderProfiles.profileId, userProfile.id),
+        userAgentProviderProfiles,
+        eq(userAgentProviderProfiles.profileId, userProfile.id),
       );
 
       // Delete the profile
-      await db
-        .delete(connectionProfiles)
-        .where(eq(connectionProfiles.id, userProfile.id));
+      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, userProfile.id));
 
       // Override should be gone via FK CASCADE on profileId
       await assertDbMissing(
-        userFlowProviderProfiles,
-        eq(userFlowProviderProfiles.profileId, userProfile.id),
+        userAgentProviderProfiles,
+        eq(userAgentProviderProfiles.profileId, userProfile.id),
       );
     });
   });
@@ -88,27 +84,25 @@ describe("Cascade Deletion", () => {
     it("nullifies package_configs.orgProfileId via FK SET NULL", async () => {
       const orgProfile = await seedConnectionProfile({ orgId, name: "Org Profile" });
 
-      const flow = await seedFlow({ id: "@testorg/org-flow", orgId, createdBy: userId });
+      const agent = await seedAgent({ id: "@testorg/org-agent", orgId, createdBy: userId });
 
-      // Set org profile on the flow config
-      await setFlowOverride(orgId, flow.id, "orgProfileId", orgProfile.id);
+      // Set org profile on the agent config
+      await setAgentOverride(orgId, agent.id, "orgProfileId", orgProfile.id);
 
       // Verify orgProfileId is set
       const configBefore = await getDbRow(
         packageConfigs,
-        and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, flow.id))!,
+        and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, agent.id))!,
       );
       expect(configBefore.orgProfileId).toBe(orgProfile.id);
 
       // Delete the org profile
-      await db
-        .delete(connectionProfiles)
-        .where(eq(connectionProfiles.id, orgProfile.id));
+      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, orgProfile.id));
 
       // orgProfileId should be nullified (SET NULL)
       const configAfter = await getDbRow(
         packageConfigs,
-        and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, flow.id))!,
+        and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, agent.id))!,
       );
       expect(configAfter.orgProfileId).toBeNull();
     });
@@ -128,9 +122,7 @@ describe("Cascade Deletion", () => {
       );
 
       // Delete the org profile
-      await db
-        .delete(connectionProfiles)
-        .where(eq(connectionProfiles.id, orgProfile.id));
+      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, orgProfile.id));
 
       // All bindings should be gone via FK CASCADE on orgProfileId
       await assertDbMissing(
@@ -148,43 +140,36 @@ describe("Cascade Deletion", () => {
       await bindOrgProfileProvider(orgProfile2.id, "@test/gmail", userProfile.id, userId);
 
       // Delete profile 1
-      await db
-        .delete(connectionProfiles)
-        .where(eq(connectionProfiles.id, orgProfile1.id));
+      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, orgProfile1.id));
 
       // Profile 2 and its binding should still exist
-      await assertDbHas(
-        connectionProfiles,
-        eq(connectionProfiles.id, orgProfile2.id),
-      );
+      await assertDbHas(connectionProfiles, eq(connectionProfiles.id, orgProfile2.id));
       await assertDbHas(
         orgProfileProviderBindings,
         eq(orgProfileProviderBindings.orgProfileId, orgProfile2.id),
       );
     });
 
-    it("nullifies orgProfileId on multiple flows that referenced the deleted profile", async () => {
+    it("nullifies orgProfileId on multiple agents that referenced the deleted profile", async () => {
       const orgProfile = await seedConnectionProfile({ orgId, name: "Shared Org Profile" });
 
-      const flow1 = await seedFlow({ id: "@testorg/flow-a", orgId, createdBy: userId });
-      const flow2 = await seedFlow({ id: "@testorg/flow-b", orgId, createdBy: userId });
+      const agent1 = await seedAgent({ id: "@testorg/agent-a", orgId, createdBy: userId });
+      const agent2 = await seedAgent({ id: "@testorg/agent-b", orgId, createdBy: userId });
 
-      await setFlowOverride(orgId, flow1.id, "orgProfileId", orgProfile.id);
-      await setFlowOverride(orgId, flow2.id, "orgProfileId", orgProfile.id);
+      await setAgentOverride(orgId, agent1.id, "orgProfileId", orgProfile.id);
+      await setAgentOverride(orgId, agent2.id, "orgProfileId", orgProfile.id);
 
       // Delete the org profile
-      await db
-        .delete(connectionProfiles)
-        .where(eq(connectionProfiles.id, orgProfile.id));
+      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, orgProfile.id));
 
-      // Both flows should have orgProfileId nullified
+      // Both agents should have orgProfileId nullified
       const config1 = await getDbRow(
         packageConfigs,
-        and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, flow1.id))!,
+        and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, agent1.id))!,
       );
       const config2 = await getDbRow(
         packageConfigs,
-        and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, flow2.id))!,
+        and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, agent2.id))!,
       );
       expect(config1.orgProfileId).toBeNull();
       expect(config2.orgProfileId).toBeNull();
@@ -209,10 +194,7 @@ describe("Cascade Deletion", () => {
       await bindOrgProfileProvider(orgProfile.id, "@test/gmail", memberProfile.id, member.id);
 
       // Verify setup
-      await assertDbHas(
-        connectionProfiles,
-        eq(connectionProfiles.id, memberProfile.id),
-      );
+      await assertDbHas(connectionProfiles, eq(connectionProfiles.id, memberProfile.id));
       await assertDbHas(
         orgProfileProviderBindings,
         eq(orgProfileProviderBindings.sourceProfileId, memberProfile.id),
@@ -224,10 +206,7 @@ describe("Cascade Deletion", () => {
       await db.execute(sql`DELETE FROM "user" WHERE id = ${member.id}`);
 
       // Member profile should be gone
-      await assertDbMissing(
-        connectionProfiles,
-        eq(connectionProfiles.id, memberProfile.id),
-      );
+      await assertDbMissing(connectionProfiles, eq(connectionProfiles.id, memberProfile.id));
 
       // Binding should be gone (sourceProfileId cascade from deleted profile)
       await assertDbMissing(
@@ -236,10 +215,7 @@ describe("Cascade Deletion", () => {
       );
 
       // Org profile should still exist (it belongs to org, not user)
-      await assertDbHas(
-        connectionProfiles,
-        eq(connectionProfiles.id, orgProfile.id),
-      );
+      await assertDbHas(connectionProfiles, eq(connectionProfiles.id, orgProfile.id));
     });
   });
 });

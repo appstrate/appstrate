@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { FormField } from "./form-field";
 import { FileField } from "./file-field";
 import { Label } from "@/components/ui/label";

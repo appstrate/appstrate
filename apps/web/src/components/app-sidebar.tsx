@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { ComponentProps } from "react";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { NavOrg } from "@/components/nav-org";

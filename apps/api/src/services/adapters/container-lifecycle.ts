@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { logger } from "../../lib/logger.ts";
-import type { ExecutionMessage } from "./types.ts";
+import type { RunMessage } from "./types.ts";
 import { TimeoutError } from "./types.ts";
 import type { ContainerOrchestrator, WorkloadHandle } from "../orchestrator/index.ts";
 
@@ -7,13 +9,13 @@ export interface ContainerLifecycleOptions {
   orchestrator: ContainerOrchestrator;
   handle: WorkloadHandle;
   adapterName: string;
-  executionId: string;
+  runId: string;
   timeout: number;
   extraData?: Record<string, unknown>;
   signal?: AbortSignal;
   /** Extra workload handles to stop on timeout (e.g. sidecar). */
   stopOnTimeout?: WorkloadHandle[];
-  processLogs: (logs: AsyncGenerator<string>) => AsyncGenerator<ExecutionMessage>;
+  processLogs: (logs: AsyncGenerator<string>) => AsyncGenerator<RunMessage>;
 }
 
 /**
@@ -22,13 +24,13 @@ export interface ContainerLifecycleOptions {
  */
 export async function* runContainerLifecycle(
   options: ContainerLifecycleOptions,
-): AsyncGenerator<ExecutionMessage> {
-  const { orchestrator, handle, adapterName, executionId, timeout, extraData, signal } = options;
+): AsyncGenerator<RunMessage> {
+  const { orchestrator, handle, adapterName, runId, timeout, extraData, signal } = options;
 
   yield {
     type: "progress",
     message: `container started`,
-    data: { adapter: adapterName, executionId, workloadId: handle.id, ...extraData },
+    data: { adapter: adapterName, runId, workloadId: handle.id, ...extraData },
   };
 
   await orchestrator.startWorkload(handle);
@@ -56,13 +58,13 @@ export async function* runContainerLifecycle(
 
     // Skip waitForExit if cancelled — workload will be killed by stopWorkload
     if (signal?.aborted) {
-      throw new Error("Execution cancelled");
+      throw new Error("Run cancelled");
     }
 
     const exitCode = await orchestrator.waitForExit(handle);
 
     if (timedOut) {
-      throw new TimeoutError(`Execution timed out after ${timeout}s`);
+      throw new TimeoutError(`Run timed out after ${timeout}s`);
     }
 
     if (exitCode !== 0 && !hasOutput) {

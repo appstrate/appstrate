@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { createTransport, type Transporter } from "nodemailer";
 import { getEnv } from "@appstrate/env";
 import { renderEmail, type EmailType, type EmailPropsMap } from "@appstrate/emails";

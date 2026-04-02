@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * API versioning middleware — resolves and validates the effective API version.
  *

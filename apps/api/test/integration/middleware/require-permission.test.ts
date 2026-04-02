@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Integration tests for the RBAC permission system.
  *
@@ -175,10 +177,10 @@ describe("RBAC — Permission enforcement", () => {
   describe("schedules:write (member-accessible)", () => {
     it("member can access schedule creation endpoint", async () => {
       await seedPackage({
-        id: `@rbac-test/test-flow`,
+        id: `@rbac-test/test-agent`,
         orgId: owner.orgId,
       });
-      const res = await app.request(`/api/flows/@rbac-test/test-flow/schedules`, {
+      const res = await app.request(`/api/agents/@rbac-test/test-agent/schedules`, {
         method: "POST",
         headers: authHeaders(member, { "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -195,8 +197,8 @@ describe("RBAC — Permission enforcement", () => {
     });
 
     it("viewer gets 403 on schedule creation", async () => {
-      await seedPackage({ id: `@rbac-test/test-flow`, orgId: owner.orgId });
-      const res = await app.request(`/api/flows/@rbac-test/test-flow/schedules`, {
+      await seedPackage({ id: `@rbac-test/test-agent`, orgId: owner.orgId });
+      const res = await app.request(`/api/agents/@rbac-test/test-agent/schedules`, {
         method: "POST",
         headers: authHeaders(viewer, { "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -265,8 +267,8 @@ describe("RBAC — Permission enforcement", () => {
   // ─── Read routes accessible to all ─────────────────────────
 
   describe("read routes accessible to all roles", () => {
-    it("viewer can list flows", async () => {
-      const res = await app.request("/api/flows", {
+    it("viewer can list agents", async () => {
+      const res = await app.request("/api/agents", {
         headers: authHeaders(viewer),
       });
       expect(res.status).toBe(200);

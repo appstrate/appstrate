@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -13,7 +15,6 @@ describe("Provider Keys API", () => {
     ctx = await createTestContext();
   });
 
-
   describe("GET /api/provider-keys", () => {
     it("returns list of provider keys", async () => {
       const res = await app.request("/api/provider-keys", {
@@ -21,7 +22,7 @@ describe("Provider Keys API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.keys).toBeArray();
       // May include system provider keys loaded at boot — just verify shape
     });
@@ -30,7 +31,6 @@ describe("Provider Keys API", () => {
       const res = await app.request("/api/provider-keys");
       expect(res.status).toBe(401);
     });
-
   });
 
   describe("POST /api/provider-keys", () => {
@@ -47,11 +47,10 @@ describe("Provider Keys API", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.id).toBeDefined();
       expect(typeof body.id).toBe("string");
     });
-
   });
 
   describe("PUT /api/provider-keys/:id", () => {
@@ -68,7 +67,7 @@ describe("Provider Keys API", () => {
         }),
       });
       expect(createRes.status).toBe(201);
-      const { id } = await createRes.json() as any;
+      const { id } = (await createRes.json()) as any;
 
       // Update the label
       const res = await app.request(`/api/provider-keys/${id}`, {
@@ -78,7 +77,7 @@ describe("Provider Keys API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.id).toBe(id);
     });
   });
@@ -97,7 +96,7 @@ describe("Provider Keys API", () => {
         }),
       });
       expect(createRes.status).toBe(201);
-      const { id } = await createRes.json() as any;
+      const { id } = (await createRes.json()) as any;
 
       // Delete it
       const res = await app.request(`/api/provider-keys/${id}`, {
@@ -111,7 +110,7 @@ describe("Provider Keys API", () => {
       const listRes = await app.request("/api/provider-keys", {
         headers: authHeaders(ctx),
       });
-      const body = await listRes.json() as any;
+      const body = (await listRes.json()) as any;
       const found = body.keys.find((k: { id: string }) => k.id === id);
       expect(found).toBeUndefined();
     });

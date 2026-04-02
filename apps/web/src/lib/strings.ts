@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export function toSlug(value: string): string {
   return value
     .toLowerCase()

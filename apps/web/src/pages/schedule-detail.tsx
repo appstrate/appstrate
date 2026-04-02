@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -16,23 +18,23 @@ import {
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { JsonView } from "../components/json-view";
-import { ExecutionList } from "../components/execution-list";
-import { NextExecutionPreview } from "../components/next-execution-preview";
-import { usePaginatedExecutions } from "../hooks/use-paginated-executions";
+import { RunList } from "../components/run-list";
+import { NextRunPreview } from "../components/next-run-preview";
+import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { ProviderConnectionCard } from "../components/provider-connection-card";
 import { OrgProfileProvidersBlock } from "../components/org-profile-providers-block";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { ProfileLabel } from "../components/profile-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
-import { usePackageDetail, useFlows } from "../hooks/use-packages";
+import { usePackageDetail, useAgents } from "../hooks/use-packages";
 import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";
 import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { formatDateField } from "../lib/markdown";
 import { MoreHorizontal, Pencil, Trash2, Play, Pause, Calendar, Clock } from "lucide-react";
 
 export function ScheduleDetailPage() {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const { isMember } = usePermissions();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -41,15 +43,15 @@ export function ScheduleDetailPage() {
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
-  const { data: flowDetail } = usePackageDetail("flow", schedule?.packageId);
-  const hasProviders = (flowDetail?.dependencies?.providers?.length ?? 0) > 0;
+  const { data: agentDetail } = usePackageDetail("agent", schedule?.packageId);
+  const hasProviders = (agentDetail?.dependencies?.providers?.length ?? 0) > 0;
 
   const tabs = hasProviders
-    ? (["executions", "providers", "details"] as const)
-    : (["executions", "details"] as const);
+    ? (["runs", "providers", "details"] as const)
+    : (["runs", "details"] as const);
 
   const needsSetup = hasProviders && schedule?.readiness?.status !== "ready";
-  const defaultTab = needsSetup ? "providers" : "executions";
+  const defaultTab = needsSetup ? "providers" : "runs";
   const [activeTab, setActiveTab] = useTabWithHash(tabs, defaultTab);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -106,7 +108,7 @@ export function ScheduleDetailPage() {
           }
         >
           <TabsList className="mt-3">
-            <TabsTrigger value="executions">{t("schedule.tabExecutions")}</TabsTrigger>
+            <TabsTrigger value="runs">{t("schedule.tabRuns")}</TabsTrigger>
             {hasProviders && (
               <TabsTrigger value="providers">{t("schedule.tabProviders")}</TabsTrigger>
             )}
@@ -114,7 +116,7 @@ export function ScheduleDetailPage() {
           </TabsList>
         </PageHeader>
 
-        <TabsContent value="executions">
+        <TabsContent value="runs">
           <ScheduleHistory schedule={schedule} />
         </TabsContent>
 
@@ -178,10 +180,10 @@ function ScheduleParams({
 }: {
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
-  const { t } = useTranslation(["flows"]);
-  const { data: flows } = useFlows();
-  const flowDisplayName =
-    flows?.find((f) => f.id === schedule.packageId)?.displayName ?? schedule.packageId;
+  const { t } = useTranslation(["agents"]);
+  const { data: agents } = useAgents();
+  const agentDisplayName =
+    agents?.find((f) => f.id === schedule.packageId)?.displayName ?? schedule.packageId;
   const input = schedule.input as Record<string, unknown> | null;
 
   return (
@@ -205,9 +207,12 @@ function ScheduleParams({
         </div>
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramFlow")}</p>
-          <Link to={`/flows/${schedule.packageId}`} className="text-sm font-medium hover:underline">
-            {flowDisplayName}
+          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramAgent")}</p>
+          <Link
+            to={`/agents/${schedule.packageId}`}
+            className="text-sm font-medium hover:underline"
+          >
+            {agentDisplayName}
           </Link>
         </div>
 
@@ -256,8 +261,8 @@ function ScheduleProviders({
 }: {
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
-  const { t } = useTranslation(["flows"]);
-  const { flowProviders } = useScheduleProviderReadiness(schedule);
+  const { t } = useTranslation(["agents"]);
+  const { agentProviders } = useScheduleProviderReadiness(schedule);
   const { data: userProfiles } = useConnectionProfiles();
 
   const isOrgProfile = schedule.profileType === "org";
@@ -266,7 +271,7 @@ function ScheduleProviders({
   // For user profile schedules, only the profile owner can connect/disconnect
   const isProfileOwner = userProfiles?.some((p) => p.id === schedule.connectionProfileId) ?? false;
 
-  if (flowProviders.length === 0) {
+  if (agentProviders.length === 0) {
     return <EmptyState message={t("schedule.noProviders")} icon={Calendar} compact />;
   }
 
@@ -275,7 +280,7 @@ function ScheduleProviders({
       <OrgProfileProvidersBlock
         orgProfileId={orgProfileId}
         orgProfileName={schedule.profileName ?? "-"}
-        providerIds={flowProviders}
+        providerIds={agentProviders}
       />
     );
   }
@@ -296,7 +301,7 @@ function ScheduleProviders({
         </UIBadge>
       </div>
       <div className="space-y-2 p-2">
-        {flowProviders.map((providerId) => (
+        {agentProviders.map((providerId) => (
           <ProviderConnectionCard
             key={providerId}
             providerId={providerId}
@@ -316,23 +321,23 @@ function ScheduleHistory({
 }: {
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
-  const { t } = useTranslation(["flows"]);
-  const { data: flows } = useFlows();
-  const flowName =
-    flows?.find((f) => f.id === schedule.packageId)?.displayName ?? schedule.packageId;
+  const { t } = useTranslation(["agents"]);
+  const { data: agents } = useAgents();
+  const agentName =
+    agents?.find((f) => f.id === schedule.packageId)?.displayName ?? schedule.packageId;
 
   const isActive = schedule.enabled && schedule.readiness.status === "ready";
 
-  // Use the same hook as ExecutionList so React Query deduplicates the fetch.
-  // We only need the first execution for the "next run" preview row.
-  const { data } = usePaginatedExecutions({
+  // Use the same hook as RunList so React Query deduplicates the fetch.
+  // We only need the first run for the "next run" preview row.
+  const { data } = usePaginatedRuns({
     scheduleId: schedule.id,
     limit: 20,
     offset: 0,
   });
-  const firstExec = data?.executions?.[0];
+  const firstExec = data?.runs?.[0];
 
-  // Show the fake "next execution" row only if the last execution started > 30s ago.
+  // Show the fake "next run" row only if the last run started > 30s ago.
   const lastStartedAt = firstExec?.startedAt;
   const [showNext, setShowNext] = useState(true);
 
@@ -355,26 +360,26 @@ function ScheduleHistory({
 
   const previewRow =
     isActive && showNext && schedule.nextRunAt ? (
-      <NextExecutionPreview
-        executionNumber={(firstExec?.executionNumber ?? 0) + 1}
-        flowName={flowName}
+      <NextRunPreview
+        runNumber={(firstExec?.runNumber ?? 0) + 1}
+        agentName={agentName}
         scheduleName={schedule.name || schedule.id}
         nextRunAt={schedule.nextRunAt}
       />
     ) : null;
 
   return (
-    <ExecutionList
+    <RunList
       scheduleId={schedule.id}
       pageSize={12}
-      fixedFlowName={flowName}
+      fixedAgentName={agentName}
       fixedScheduleName={schedule.name}
       firstPageBanner={previewRow}
       emptyState={
         <div className="border-border rounded-md border">
           {previewRow}
           <div className="p-6">
-            <EmptyState message={t("schedule.noExecutions")} icon={Clock} compact />
+            <EmptyState message={t("schedule.noRuns")} icon={Clock} compact />
           </div>
         </div>
       }

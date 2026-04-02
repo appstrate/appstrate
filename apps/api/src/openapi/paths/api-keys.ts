@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export const apiKeysPaths = {
   "/api/api-keys/available-scopes": {
     get: {
@@ -97,7 +99,7 @@ export const apiKeysPaths = {
                   type: "array",
                   items: { type: "string" },
                   description:
-                    "Permission scopes for the key (e.g. `flows:read`, `flows:run`). Omit or pass empty array for full role access. Invalid or unauthorized scopes are silently filtered.",
+                    "Permission scopes for the key (e.g. `agents:read`, `agents:run`). Omit or pass empty array for full role access. Invalid or unauthorized scopes are silently filtered.",
                 },
               },
             },

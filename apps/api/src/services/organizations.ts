@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { db } from "@appstrate/db/client";
 import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -6,8 +8,8 @@ import {
   organizationMembers,
   profiles,
   user,
-  executions,
-  executionLogs,
+  runs,
+  runLogs,
   packageSchedules,
   packageConfigs,
   packages,
@@ -239,21 +241,21 @@ export function slugify(name: string): string {
 }
 
 export async function deleteOrganization(orgId: string): Promise<void> {
-  // Check for running executions
+  // Check for running runs
   const runningResult = await db
     .select({ runningCount: count() })
-    .from(executions)
-    .where(and(eq(executions.orgId, orgId), inArray(executions.status, ["pending", "running"])));
+    .from(runs)
+    .where(and(eq(runs.orgId, orgId), inArray(runs.status, ["pending", "running"])));
 
   if ((runningResult[0]?.runningCount ?? 0) > 0) {
-    throw new Error("Cannot delete organization: executions are in progress");
+    throw new Error("Cannot delete organization: runs are in progress");
   }
 
   // Delete in FK-safe order within a transaction
   await db.transaction(async (tx) => {
-    // execution_logs → executions (cascade exists, but org_id FK needs manual delete)
-    await tx.delete(executionLogs).where(eq(executionLogs.orgId, orgId));
-    await tx.delete(executions).where(eq(executions.orgId, orgId));
+    // run_logs → runs (cascade exists, but org_id FK needs manual delete)
+    await tx.delete(runLogs).where(eq(runLogs.orgId, orgId));
+    await tx.delete(runs).where(eq(runs.orgId, orgId));
     // orgProfileProviderBindings cascade through connectionProfiles → orgId
     await tx.delete(packageSchedules).where(eq(packageSchedules.orgId, orgId));
     await tx.delete(packageConfigs).where(eq(packageConfigs.orgId, orgId));

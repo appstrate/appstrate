@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Dispatch, SetStateAction } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
@@ -11,11 +13,11 @@ export function toggleEvent(event: string, setter: Dispatch<SetStateAction<strin
 }
 
 export const WEBHOOK_EVENTS = [
-  "execution.started",
-  "execution.completed",
-  "execution.failed",
-  "execution.timeout",
-  "execution.cancelled",
+  "run.started",
+  "run.completed",
+  "run.failed",
+  "run.timeout",
+  "run.cancelled",
 ] as const;
 
 export function useWebhooks(filters?: { scope?: string; applicationId?: string }) {

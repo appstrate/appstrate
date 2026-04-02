@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Users, KeyRound, Settings, Check, Star, ChevronsUpDown } from "lucide-react";

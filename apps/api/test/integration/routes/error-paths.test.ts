@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Systematic error-path tests for all routes.
  *
@@ -21,7 +23,7 @@ const app = getTestApp();
 
 describe("401 — unauthenticated requests", () => {
   const authRequiredRoutes = [
-    { method: "GET", path: "/api/flows" },
+    { method: "GET", path: "/api/agents" },
     { method: "GET", path: "/api/api-keys" },
     { method: "POST", path: "/api/api-keys" },
     { method: "GET", path: "/api/providers" },
@@ -61,7 +63,7 @@ describe("400 — missing X-Org-Id header on org-scoped routes", () => {
   });
 
   const orgScopedRoutes = [
-    { method: "GET", path: "/api/flows" },
+    { method: "GET", path: "/api/agents" },
     { method: "GET", path: "/api/api-keys" },
     { method: "GET", path: "/api/providers" },
     { method: "GET", path: "/api/applications" },
@@ -96,8 +98,8 @@ describe("404 — non-existent resources", () => {
     ctx = await createTestContext({ orgSlug: "testorg" });
   });
 
-  it("GET /api/flows/@testorg/nonexistent/config returns 404", async () => {
-    const res = await app.request("/api/flows/@testorg/nonexistent/config", {
+  it("GET /api/agents/@testorg/nonexistent/config returns 404", async () => {
+    const res = await app.request("/api/agents/@testorg/nonexistent/config", {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(404);
@@ -148,11 +150,11 @@ describe("403 — cross-org access prevention", () => {
   });
 
   it("user from org A cannot access org B resources", async () => {
-    // Create a flow in org B
-    await seedPackage({ id: "@orgb/secret-flow", orgId: ctxB.orgId });
+    // Create an agent in org B
+    await seedPackage({ id: "@orgb/secret-agent", orgId: ctxB.orgId });
 
-    // User A tries to access org B's flows by using org B's ID
-    const res = await app.request("/api/flows", {
+    // User A tries to access org B's agents by using org B's ID
+    const res = await app.request("/api/agents", {
       headers: {
         Cookie: ctxA.cookie,
         "X-Org-Id": ctxB.orgId,
@@ -163,10 +165,10 @@ describe("403 — cross-org access prevention", () => {
   });
 
   it("user cannot modify another org's packages", async () => {
-    await seedPackage({ id: "@orgb/their-flow", orgId: ctxB.orgId });
+    await seedPackage({ id: "@orgb/their-agent", orgId: ctxB.orgId });
 
-    // User A tries to update org B's flow config
-    const res = await app.request("/api/flows/@orgb/their-flow/config", {
+    // User A tries to update org B's agent config
+    const res = await app.request("/api/agents/@orgb/their-agent/config", {
       method: "PUT",
       headers: {
         ...authHeaders(ctxA),
@@ -174,7 +176,7 @@ describe("403 — cross-org access prevention", () => {
       },
       body: JSON.stringify({}),
     });
-    // Should be 403 or 404 (can't see other org's flows)
+    // Should be 403 or 404 (can't see other org's agents)
     expect([403, 404]).toContain(res.status);
   });
 });
@@ -221,7 +223,7 @@ describe("400 — validation errors", () => {
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({
         url: "not-a-valid-url",
-        events: ["execution.completed"],
+        events: ["run.completed"],
       }),
     });
     expect(res.status).toBe(400);
@@ -241,13 +243,13 @@ describe("400 — validation errors", () => {
 
 describe("RFC 9457 — problem detail format on errors", () => {
   it("returns application/problem+json content type", async () => {
-    const res = await app.request("/api/flows"); // no auth
+    const res = await app.request("/api/agents"); // no auth
     expect(res.status).toBe(401);
     expect(res.headers.get("Content-Type")).toContain("application/problem+json");
   });
 
   it("includes all required RFC 9457 fields", async () => {
-    const res = await app.request("/api/flows"); // no auth
+    const res = await app.request("/api/agents"); // no auth
     const body = (await res.json()) as any;
 
     expect(body).toHaveProperty("type");
@@ -260,14 +262,14 @@ describe("RFC 9457 — problem detail format on errors", () => {
   });
 
   it("includes Request-Id header matching body", async () => {
-    const res = await app.request("/api/flows");
+    const res = await app.request("/api/agents");
     const body = (await res.json()) as any;
     const headerReqId = res.headers.get("Request-Id");
     expect(headerReqId).toBe(body.requestId);
   });
 
   it("type URI follows kebab-case convention", async () => {
-    const res = await app.request("/api/flows");
+    const res = await app.request("/api/agents");
     const body = (await res.json()) as any;
     expect(body.type).toMatch(/^https:\/\/docs\.appstrate\.dev\/errors\/[a-z-]+$/);
   });

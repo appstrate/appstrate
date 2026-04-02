@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Generate Appstrate JSON Schema files from @afps-spec/schema Zod definitions.
  *
@@ -11,7 +13,7 @@ import { toJSONSchema } from "zod/v4/core";
 import { resolve, dirname } from "node:path";
 import { writeFile, mkdir, rm } from "node:fs/promises";
 import {
-  flowManifestSchema,
+  agentManifestSchema,
   skillManifestSchema,
   toolManifestSchema,
   providerManifestSchema,
@@ -26,10 +28,10 @@ const OUTPUT_DIR = resolve(dirname(import.meta.filename!), "../schema");
 // No Appstrate-specific extensions for now — all types use AFPS schemas directly
 const appstrateSchemas = [
   {
-    filename: "flow.schema.json",
-    title: "Appstrate Flow Manifest",
-    description: "Appstrate flow manifest — extends AFPS flow.",
-    schema: flowManifestSchema,
+    filename: "agent.schema.json",
+    title: "Appstrate Agent Manifest",
+    description: "Appstrate agent manifest — extends AFPS agent.",
+    schema: agentManifestSchema,
   },
   {
     filename: "skill.schema.json",

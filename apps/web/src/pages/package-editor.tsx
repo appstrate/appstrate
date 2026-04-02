@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -15,12 +17,12 @@ import { api } from "../api";
 import { useUnsavedChanges } from "../hooks/use-unsaved-changes";
 import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 
-// Flow editor components
-import { MetadataSection } from "../components/flow-editor/metadata-section";
-import { SchemaSection } from "../components/flow-editor/schema-section";
-import { ResourceSection } from "../components/flow-editor/resource-section";
-import { PromptEditor } from "../components/flow-editor/prompt-editor";
-import { ProviderPicker } from "../components/flow-editor/provider-picker";
+// Agent editor components
+import { MetadataSection } from "../components/agent-editor/metadata-section";
+import { SchemaSection } from "../components/agent-editor/schema-section";
+import { ResourceSection } from "../components/agent-editor/resource-section";
+import { PromptEditor } from "../components/agent-editor/prompt-editor";
+import { ProviderPicker } from "../components/agent-editor/provider-picker";
 import { JsonEditor } from "../components/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
 import { ProviderEditorInner } from "../components/provider-editor/provider-editor-inner";
@@ -28,8 +30,8 @@ import { Spinner } from "../components/spinner";
 import { EditorShell } from "../components/editor-shell";
 import { useProviders } from "../hooks/use-providers";
 
-import type { FlowEditorState } from "../components/flow-editor/types";
-import type { MetadataState } from "../components/flow-editor/metadata-section";
+import type { AgentEditorState } from "../components/agent-editor/types";
+import type { MetadataState } from "../components/agent-editor/metadata-section";
 import {
   defaultEditorState,
   getManifestName,
@@ -42,15 +44,15 @@ import {
   setResourceEntries,
   toResourceEntry,
   fieldsToSchema,
-} from "../components/flow-editor/utils";
-import type { SchemaField } from "../components/flow-editor/schema-section";
-import { flowSchema, skillSchema, toolSchema } from "@appstrate/core/schemas";
+} from "../components/agent-editor/utils";
+import type { SchemaField } from "../components/agent-editor/schema-section";
+import { agentSchema, skillSchema, toolSchema } from "@appstrate/core/schemas";
 import type { PackageFormState } from "../lib/package-type-modules";
 import { getPackageTypeModule } from "../lib/package-type-modules";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 
 const PACKAGE_SCHEMAS: Record<string, object | undefined> = {
-  flow: flowSchema,
+  agent: agentSchema,
   skill: skillSchema,
   tool: toolSchema,
 };
@@ -65,26 +67,26 @@ type GenericEditorTab =
   | "content"
   | "json";
 
-// ─── Flow Editor Inner Form ─────────────────────────────────────────
+// ─── Agent Editor Inner Form ────────────────────────────────────────
 
-function FlowEditorInner({
+function AgentEditorInner({
   initialState,
   detail,
   packageId,
   isEdit,
 }: {
-  initialState: FlowEditorState;
+  initialState: AgentEditorState;
   detail: { dependencies: { skills: unknown[]; tools: unknown[] }; lockVersion?: number } | null;
   packageId: string | undefined;
   isEdit: boolean;
 }) {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const createFlow = useCreatePackage("flow");
-  const updateFlow = useUpdatePackage("flow", packageId || "");
+  const createAgent = useCreatePackage("agent");
+  const updateAgent = useUpdatePackage("agent", packageId || "");
 
-  const [state, setState] = useState<FlowEditorState>(initialState);
+  const [state, setState] = useState<AgentEditorState>(initialState);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
   const [jsonEditorKey, setJsonEditorKey] = useState(0);
@@ -125,7 +127,7 @@ function FlowEditorInner({
 
   const saveDraft = useCallback(async () => {
     if (!isEdit || !detail || !packageId) return;
-    await api(`/packages/flows/${packageId}`, {
+    await api(`/packages/agents/${packageId}`, {
       method: "PUT",
       body: JSON.stringify({
         manifest: state.manifest,
@@ -134,7 +136,7 @@ function FlowEditorInner({
       }),
     });
     qc.invalidateQueries({ queryKey: ["packages"] });
-    qc.invalidateQueries({ queryKey: ["flows"] });
+    qc.invalidateQueries({ queryKey: ["agents"] });
   }, [state, isEdit, detail, packageId, qc]);
 
   // Sync resolved skill/tool metadata from server (names, descriptions)
@@ -180,18 +182,18 @@ function FlowEditorInner({
     allowNavigation();
     const body = { manifest: state.manifest, content: state.prompt };
     if (isEdit && detail) {
-      updateFlow.mutate(
+      updateAgent.mutate(
         { ...body, lockVersion: detail.lockVersion! },
         { onError: (err) => setError(err.message) },
       );
     } else {
-      createFlow.mutate(body, { onError: (err) => setError(err.message) });
+      createAgent.mutate(body, { onError: (err) => setError(err.message) });
     }
   };
 
-  const isPending = createFlow.isPending || updateFlow.isPending;
+  const isPending = createAgent.isPending || updateAgent.isPending;
 
-  const flowTabs: Array<{ id: GenericEditorTab; label: string }> = [
+  const agentTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
     { id: "prompt", label: t("editor.tabPrompt") },
     { id: "providers", label: t("editor.tabServices") },
@@ -203,11 +205,11 @@ function FlowEditorInner({
 
   return (
     <EditorShell
-      type="flow"
+      type="agent"
       packageId={packageId}
       isEdit={isEdit}
       displayName={(state.manifest.displayName as string) || packageId}
-      tabs={flowTabs}
+      tabs={agentTabs}
       activeTab={activeTab}
       onTabChange={(v) => {
         if (v === "json") setJsonEditorKey((k) => k + 1);
@@ -216,7 +218,7 @@ function FlowEditorInner({
       error={error}
       isPending={isPending}
       onSubmit={handleSubmit}
-      onCancel={() => navigate(isEdit ? `/flows/${packageId}` : "/")}
+      onCancel={() => navigate(isEdit ? `/agents/${packageId}` : "/")}
       hideSubmitBar={activeTab === "json"}
     >
       {activeTab === "general" && (
@@ -310,7 +312,7 @@ function FlowEditorInner({
             setSchemaFields(manifestToSchemaFields(manifest));
             setActiveTab("general");
           }}
-          schema={{ uri: AFPS_SCHEMA_URLS.flow, schema: PACKAGE_SCHEMAS.flow! }}
+          schema={{ uri: AFPS_SCHEMA_URLS.agent, schema: PACKAGE_SCHEMAS.agent! }}
         />
       )}
 
@@ -332,7 +334,7 @@ function PackageEditorInner({
   packageId: string | undefined;
   isEdit: boolean;
 }) {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const createPkg = useCreatePackage(type);
@@ -484,22 +486,22 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   const isEdit = !!scope;
 
   // Load detail for editing
-  const flowQuery = usePackageDetail("flow", type === "flow" && isEdit ? packageId : undefined);
+  const agentQuery = usePackageDetail("agent", type === "agent" && isEdit ? packageId : undefined);
   const pkgQuery = usePackageDetail(
     type,
-    type !== "flow" && type !== "provider" && isEdit ? packageId : undefined,
+    type !== "agent" && type !== "provider" && isEdit ? packageId : undefined,
   );
   const providersQuery = useProviders();
 
   const isLoading =
-    type === "flow"
-      ? flowQuery.isLoading
+    type === "agent"
+      ? agentQuery.isLoading
       : type === "provider"
         ? providersQuery.isLoading
         : pkgQuery.isLoading;
   const detail =
-    type === "flow"
-      ? flowQuery.data
+    type === "agent"
+      ? agentQuery.data
       : type === "provider"
         ? providersQuery.data?.providers.find((p) => p.id === packageId)
         : pkgQuery.data;
@@ -513,7 +515,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   }
 
   if (isEdit && !detail) {
-    return <Navigate to="/flows" replace />;
+    return <Navigate to="/agents" replace />;
   }
 
   if (isEdit && detail && (detail as { source?: string }).source === "system") {
@@ -526,22 +528,22 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     return null;
   }
 
-  // Flow editor
-  if (type === "flow") {
-    const flowDetail = flowQuery.data;
-    const initialState: FlowEditorState =
-      isEdit && flowDetail
+  // Agent editor
+  if (type === "agent") {
+    const agentDetail = agentQuery.data;
+    const initialState: AgentEditorState =
+      isEdit && agentDetail
         ? {
-            manifest: (flowDetail.manifest ?? {}) as Record<string, unknown>,
-            prompt: flowDetail.prompt || "",
+            manifest: (agentDetail.manifest ?? {}) as Record<string, unknown>,
+            prompt: agentDetail.prompt || "",
           }
         : defaultEditorState(currentOrg?.slug, user?.email);
 
     return (
-      <FlowEditorInner
+      <AgentEditorInner
         key={packageId ?? "new"}
         initialState={initialState}
-        detail={flowDetail ?? null}
+        detail={agentDetail ?? null}
         packageId={packageId}
         isEdit={isEdit}
       />
@@ -565,7 +567,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     );
   }
 
-  // Skill/Tool editor (flow/provider returned early above — pkgQuery is always OrgPackageItemDetail here)
+  // Skill/Tool editor (agent/provider returned early above — pkgQuery is always OrgPackageItemDetail here)
   const module = getPackageTypeModule(type);
   const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
 

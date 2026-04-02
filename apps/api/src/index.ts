@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
@@ -11,10 +13,10 @@ import { ensureDefaultProfile } from "./services/connection-profiles.ts";
 import { requireOrgContext } from "./middleware/org-context.ts";
 import { requestId } from "./middleware/request-id.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
-import { createFlowsRouter } from "./routes/flows.ts";
-import { createExecutionsRouter } from "./routes/executions.ts";
+import { createAgentsRouter } from "./routes/agents.ts";
+import { createRunsRouter } from "./routes/runs.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
-import { createUserFlowsRouter } from "./routes/user-flows.ts";
+import { createUserAgentsRouter } from "./routes/user-agents.ts";
 import { createProvidersRouter } from "./routes/providers.ts";
 import { createApiKeysRouter } from "./routes/api-keys.ts";
 import { createProxiesRouter } from "./routes/proxies.ts";
@@ -253,18 +255,18 @@ process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());
 
 // Routes
-const userFlowsRouter = createUserFlowsRouter();
-const flowsRouter = createFlowsRouter();
-const executionsRouter = createExecutionsRouter();
+const userAgentsRouter = createUserAgentsRouter();
+const agentsRouter = createAgentsRouter();
+const runsRouter = createRunsRouter();
 const schedulesRouter = createSchedulesRouter();
 
 // Organization routes (no org context needed — self-managed auth)
 app.route("/api/orgs", orgsRouter);
 
-app.route("/api/flows", userFlowsRouter); // Must be before flowsRouter (import/delete routes)
-app.route("/api/flows", flowsRouter);
-app.route("/api", createNotificationsRouter()); // Must be before executionsRouter (GET /api/executions vs /api/executions/:id)
-app.route("/api", executionsRouter);
+app.route("/api/agents", userAgentsRouter); // Must be before agentsRouter (import/delete routes)
+app.route("/api/agents", agentsRouter);
+app.route("/api", createNotificationsRouter()); // Must be before runsRouter (GET /api/runs vs /api/runs/:id)
+app.route("/api", runsRouter);
 app.route("/api", schedulesRouter);
 app.route("/api/packages", createPackagesRouter());
 app.route("/api/end-users", createEndUsersRouter());
@@ -286,7 +288,7 @@ app.route("/invite", invitationsRouter);
 // Welcome route (authenticated, cookie-based — org context not required)
 app.route("/api", welcomeRouter);
 
-// Internal routes (container-to-host, auth via execution token — no JWT)
+// Internal routes (container-to-host, auth via run token — no JWT)
 const internalRouter = createInternalRouter();
 app.route("/internal", internalRouter);
 

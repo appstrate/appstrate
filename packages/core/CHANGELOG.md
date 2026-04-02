@@ -33,8 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Remove unused exports and defensive fallbacks
-- Remove `connectionMode` from flow schema
-- Remove `x-outputRetries` from flow manifest schema
+- Remove `connectionMode` from agent schema
+- Remove `x-outputRetries` from agent manifest schema
 
 ## [2.8.4] — 2026-02-20
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { pgTable, text, timestamp, boolean, integer, uuid, index } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations.ts";
 import { applications } from "./applications.ts";
@@ -14,7 +16,7 @@ export const webhooks = pgTable(
       onDelete: "cascade",
     }),
     url: text("url").notNull(),
-    events: text("events").array().notNull(), // ["execution.completed", "execution.failed"]
+    events: text("events").array().notNull(), // ["run.completed", "run.failed"]
     packageId: text("package_id"), // null = all packages
     payloadMode: text("payload_mode").notNull().default("full"), // "full" | "summary"
     active: boolean("active").notNull().default(true),
@@ -40,7 +42,7 @@ export const webhookDeliveries = pgTable(
       .notNull()
       .references(() => webhooks.id, { onDelete: "cascade" }),
     eventId: text("event_id").notNull(), // evt_ prefix
-    eventType: text("event_type").notNull(), // "execution.completed" etc.
+    eventType: text("event_type").notNull(), // "run.completed" etc.
     status: text("status").notNull().default("pending"), // "pending" | "success" | "failed"
     statusCode: integer("status_code"), // HTTP response code
     latency: integer("latency"), // ms

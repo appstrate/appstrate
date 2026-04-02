@@ -1,8 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestUser, createTestContext, addOrgMember, authHeaders } from "../../helpers/auth.ts";
+import {
+  createTestUser,
+  createTestContext,
+  addOrgMember,
+  authHeaders,
+} from "../../helpers/auth.ts";
 import { assertDbHas } from "../../helpers/assertions.ts";
 import { organizations, orgInvitations, organizationMembers } from "@appstrate/db/schema";
 import { CURRENT_API_VERSION } from "../../../src/lib/api-versions.ts";
@@ -24,7 +31,7 @@ describe("Organizations API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.organizations).toBeArray();
       expect(body.organizations.length).toBeGreaterThanOrEqual(1);
       const org = body.organizations.find((o: { id: string }) => o.id === ctx.orgId);
@@ -41,7 +48,7 @@ describe("Organizations API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.organizations).toBeArray();
       expect(body.organizations).toHaveLength(0);
     });
@@ -66,7 +73,7 @@ describe("Organizations API", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.name).toBe("New Org");
       expect(body.slug).toBe("new-org");
       expect(body.role).toBe("owner");
@@ -89,7 +96,7 @@ describe("Organizations API", () => {
       });
 
       expect(res.status).toBe(400);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.code).toBe("slug_taken");
     });
 
@@ -106,7 +113,7 @@ describe("Organizations API", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
 
       const settings = await getOrgSettings(body.id);
       expect(settings.apiVersion).toBe(CURRENT_API_VERSION);
@@ -137,7 +144,7 @@ describe("Organizations API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.id).toBe(ctx.orgId);
       expect(body.members).toBeArray();
       expect(body.members).toHaveLength(1); // owner
@@ -153,7 +160,7 @@ describe("Organizations API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.members).toHaveLength(2);
     });
 
@@ -187,10 +194,7 @@ describe("Organizations API", () => {
       expect(body.role).toBe("member");
 
       // Verify membership in DB
-      await assertDbHas(
-        organizationMembers,
-        eq(organizationMembers.userId, member.id),
-      );
+      await assertDbHas(organizationMembers, eq(organizationMembers.userId, member.id));
     });
 
     it("creates invitation for non-existing user", async () => {
@@ -208,10 +212,7 @@ describe("Organizations API", () => {
       expect(body.role).toBe("admin");
 
       // Verify invitation in DB
-      await assertDbHas(
-        orgInvitations,
-        eq(orgInvitations.email, "newuser@test.com"),
-      );
+      await assertDbHas(orgInvitations, eq(orgInvitations.email, "newuser@test.com"));
     });
 
     it("rejects invalid email", async () => {

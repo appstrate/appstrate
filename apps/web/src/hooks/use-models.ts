@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
@@ -132,27 +134,27 @@ export function useOpenRouterModels(search: string | undefined) {
   });
 }
 
-export function useFlowModel(packageId: string | undefined) {
+export function useAgentModel(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["flow-model", orgId, packageId],
-    queryFn: () => api<{ modelId: string | null }>(`/flows/${packageId}/model`),
+    queryKey: ["agent-model", orgId, packageId],
+    queryFn: () => api<{ modelId: string | null }>(`/agents/${packageId}/model`),
     enabled: !!orgId && !!packageId,
   });
 }
 
-export function useSetFlowModel(packageId: string) {
+export function useSetAgentModel(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (modelId: string | null) => {
-      return api(`/flows/${packageId}/model`, {
+      return api(`/agents/${packageId}/model`, {
         method: "PUT",
         body: JSON.stringify({ modelId }),
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow-model"] });
-      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
+      qc.invalidateQueries({ queryKey: ["agent-model"] });
+      qc.invalidateQueries({ queryKey: ["packages", "agent"] });
     },
   });
 }

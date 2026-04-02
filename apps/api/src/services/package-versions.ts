@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
@@ -171,7 +173,7 @@ export async function getLatestVersionId(packageId: string): Promise<number | nu
   return row?.id ?? null;
 }
 
-/** Get the latest version ID + manifest for dirty-check at execution time. */
+/** Get the latest version ID + manifest for dirty-check at run time. */
 export async function getLatestVersionWithManifest(
   packageId: string,
 ): Promise<{ id: number; manifest: Record<string, unknown> } | null> {
@@ -625,15 +627,15 @@ export async function createVersionFromDraft(params: {
       "manifest.json": new TextEncoder().encode(JSON.stringify(finalManifest, null, 2)),
     };
     zipBuffer = Buffer.from(zipArtifact(entries, 6));
-  } else if (pkg.type === "flow") {
-    const storedFiles = await downloadPackageFiles("flows", orgId, packageId);
+  } else if (pkg.type === "agent") {
+    const storedFiles = await downloadPackageFiles("agents", orgId, packageId);
     if (storedFiles) {
       const entries: Record<string, Uint8Array> = { ...storedFiles };
       entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
       entries["prompt.md"] = new TextEncoder().encode(content);
       zipBuffer = Buffer.from(zipArtifact(entries, 6));
     } else {
-      // Locally-created flows have no stored files — minimal ZIP is correct
+      // Locally-created agents have no stored files — minimal ZIP is correct
       zipBuffer = buildMinimalZip(finalManifest, content);
     }
   } else {

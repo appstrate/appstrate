@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, test } from "bun:test";
 import {
   parsePackageZip,
@@ -19,13 +21,13 @@ function makeZip(entries: Record<string, string>): Uint8Array {
   return zipArtifact(encoded);
 }
 
-function validFlowManifest() {
+function validAgentManifest() {
   return JSON.stringify({
-    name: "@test/my-flow",
+    name: "@test/my-agent",
     version: "1.0.0",
-    type: "flow",
+    type: "agent",
     schemaVersion: "1.0",
-    displayName: "My Flow",
+    displayName: "My Agent",
     author: "test",
   });
 }
@@ -89,15 +91,15 @@ export default function(pi) {
 // ─────────────────────────────────────────────
 
 describe("parsePackageZip", () => {
-  test("valid flow ZIP", () => {
+  test("valid agent ZIP", () => {
     const zip = makeZip({
-      "manifest.json": validFlowManifest(),
+      "manifest.json": validAgentManifest(),
       "prompt.md": "# My prompt\nDo something useful.",
     });
     const result = parsePackageZip(zip);
-    expect(result.type).toBe("flow");
+    expect(result.type).toBe("agent");
     expect(result.content).toContain("My prompt");
-    expect(result.manifest.name).toBe("@test/my-flow");
+    expect(result.manifest.name).toBe("@test/my-agent");
   });
 
   test("valid skill ZIP", () => {
@@ -143,7 +145,7 @@ describe("parsePackageZip", () => {
   });
 
   test("ZIP too large", () => {
-    const zip = makeZip({ "manifest.json": validFlowManifest(), "prompt.md": "x" });
+    const zip = makeZip({ "manifest.json": validAgentManifest(), "prompt.md": "x" });
     expect(() => parsePackageZip(zip, 1)).toThrow(PackageZipError);
     try {
       parsePackageZip(zip, 1);
@@ -185,8 +187,8 @@ describe("parsePackageZip", () => {
     }
   });
 
-  test("flow missing prompt.md", () => {
-    const zip = makeZip({ "manifest.json": validFlowManifest() });
+  test("agent missing prompt.md", () => {
+    const zip = makeZip({ "manifest.json": validAgentManifest() });
     expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
     try {
       parsePackageZip(zip);
@@ -220,7 +222,7 @@ describe("parsePackageZip", () => {
     const manifest = {
       name: "@test/raw-roundtrip",
       version: "1.0.0",
-      type: "flow" as const,
+      type: "agent" as const,
       schemaVersion: "1.0",
       displayName: "Raw Roundtrip Test",
       author: "test",
@@ -382,7 +384,7 @@ describe("zip bomb protection", () => {
     const bigContent = new Uint8Array(51 * 1024 * 1024); // 51 MB
     bigContent.fill(65); // 'A'
     const entries = {
-      "manifest.json": new TextEncoder().encode(validFlowManifest()),
+      "manifest.json": new TextEncoder().encode(validAgentManifest()),
       "prompt.md": new TextEncoder().encode("# Prompt"),
       "big.bin": bigContent,
     };
@@ -428,13 +430,13 @@ describe("tool entrypoint detection", () => {
 // ─────────────────────────────────────────────
 
 describe("wrapper folder stripping (parsePackageZip)", () => {
-  test("wrapped flow ZIP", () => {
+  test("wrapped agent ZIP", () => {
     const zip = makeZip({
-      "my-flow/manifest.json": validFlowManifest(),
-      "my-flow/prompt.md": "# My prompt\nDo something useful.",
+      "my-agent/manifest.json": validAgentManifest(),
+      "my-agent/prompt.md": "# My prompt\nDo something useful.",
     });
     const result = parsePackageZip(zip);
-    expect(result.type).toBe("flow");
+    expect(result.type).toBe("agent");
     expect(result.content).toContain("My prompt");
   });
 
@@ -469,7 +471,7 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
 
   test("mixed top-level entries (root + folder) — no stripping", () => {
     const zip = makeZip({
-      "folder/manifest.json": validFlowManifest(),
+      "folder/manifest.json": validAgentManifest(),
       "stray-file.txt": "hello",
     });
     expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
@@ -482,7 +484,7 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
 
   test("multiple top-level folders — no stripping", () => {
     const zip = makeZip({
-      "folder-a/manifest.json": validFlowManifest(),
+      "folder-a/manifest.json": validAgentManifest(),
       "folder-b/prompt.md": "# Prompt",
     });
     expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
@@ -519,7 +521,7 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
 
   test("returned files have stripped keys", () => {
     const zip = makeZip({
-      "wrapper/manifest.json": validFlowManifest(),
+      "wrapper/manifest.json": validAgentManifest(),
       "wrapper/prompt.md": "# Prompt",
     });
     const result = parsePackageZip(zip);
@@ -531,7 +533,7 @@ describe("wrapper folder stripping (parsePackageZip)", () => {
 
   test("double wrapper (two levels) — not stripped to root", () => {
     const zip = makeZip({
-      "a/b/manifest.json": validFlowManifest(),
+      "a/b/manifest.json": validAgentManifest(),
       "a/b/prompt.md": "# Prompt",
     });
     // Strips "a/" → files become "b/manifest.json", "b/prompt.md" → manifest not at root

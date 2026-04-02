@@ -6,6 +6,19 @@ Thank you for your interest in contributing to Appstrate! This guide covers ever
 
 All participants are expected to follow our [Code of Conduct](./CODE_OF_CONDUCT.md).
 
+## Ways to Contribute
+
+There are many ways to contribute beyond writing code:
+
+- **Bug reports** — File issues with reproduction steps (see below)
+- **Documentation improvements** — Fix typos, clarify guides, add examples
+- **Translations** — Help translate the UI between French and English (i18next, `apps/web/src/locales/`)
+- **Bug triage and issue labeling** — Help categorize and reproduce reported issues
+- **Community support** — Answer questions in [GitHub Discussions](https://github.com/appstrate/appstrate/discussions)
+- **Design feedback and UI/UX improvements** — Suggest usability improvements, report confusing workflows, propose UI enhancements
+- **Feature requests** — Describe problems and propose solutions (see below)
+- **Code contributions** — Bug fixes, new features, refactoring, tests
+
 ## Reporting Bugs
 
 Use the [bug report template](https://github.com/appstrate/appstrate/issues/new?template=bug_report.yml) on GitHub. Include steps to reproduce, expected vs. actual behavior, and your environment details (OS, Bun version, Docker version).
@@ -73,7 +86,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
 feat: add webhook retry configuration
-fix: prevent duplicate cron executions
+fix: prevent duplicate cron runs
 docs: update API overview table
 refactor: extract credential validation into service
 ```
@@ -120,6 +133,21 @@ git config commit.gpgsign true
 ## Contributor License Agreement (CLA)
 
 By submitting a pull request, you agree to the [CLA](https://cla-assistant.io/appstrate/appstrate). The CLA Assistant bot will guide you through the process on your first PR.
+
+## Response Times
+
+We aim to provide timely feedback on all contributions:
+
+- **Issue acknowledgment**: Within 5 business days
+- **Bug triage**: Within 10 business days
+- **PR first review**: Within 10 business days
+- **Security reports**: Within 48 hours (see [SECURITY.md](SECURITY.md))
+
+These are goals, not guarantees. We appreciate your patience as the project grows.
+
+## Recognition
+
+All contributors are recognized in our release notes. Significant contributions may be highlighted in the project's changelog. We value every contribution — code, documentation, bug reports, and community support.
 
 ## License
 

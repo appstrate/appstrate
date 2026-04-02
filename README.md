@@ -3,28 +3,54 @@
 [![CI](https://github.com/appstrate/appstrate/actions/workflows/test.yml/badge.svg)](https://github.com/appstrate/appstrate/actions/workflows/test.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![Docker Image](https://img.shields.io/badge/Docker-ghcr.io%2Fappstrate%2Fappstrate-blue)](https://github.com/appstrate/appstrate/pkgs/container/appstrate)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/appstrate/appstrate/badge)](https://scorecard.dev/viewer/?uri=github.com/appstrate/appstrate)
+[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
-An open-source platform for executing one-shot AI flows in ephemeral Docker containers. Users sign up, connect OAuth/API key services (Gmail, ClickUp, etc.), click "Run", and the AI agent processes their data autonomously inside a temporary container.
+An open-source platform for running autonomous AI agents in sandboxed Docker containers. Each agent receives its full context (prompt, config, input, credentials) and runs to completion without human interaction — then returns structured results. Connect OAuth/API key services, click "Run" or schedule via cron, and let the AI handle the rest.
 
-![Flows](.github/assets/screenshot-flows.png)
+![Agents](.github/assets/screenshot-agents.png)
 
-![Execution Result](.github/assets/screenshot-execution.png)
+![Run Result](.github/assets/screenshot-run.png)
+
+## Concepts
+
+Appstrate uses the [AFPS](https://github.com/appstrate/afps-spec) (Agent Format Packaging Standard) packaging model. Everything is a **package** with a manifest, a version, and a scope.
+
+```
+                ┌───────────────────────────────┐
+  Goal          │  Agent                        │  "What should the AI accomplish?"
+                │  prompt.md + manifest.json    │  Runs autonomously in a container.
+                ├───────────────────────────────┤
+  Capability    │  Skill (declarative)          │  Reusable instructions (SKILL.md).
+                │  Tool  (executable)           │  TypeScript code the agent can call.
+                ├───────────────────────────────┤
+  Connection    │  Provider                     │  OAuth2, API key, or custom auth
+                │                               │  for external services.
+                └───────────────────────────────┘
+```
+
+- An **agent** is the primary unit. It declares a goal (`prompt.md`), its dependencies (skills, tools, providers), and input/output/config schemas. Each run creates a fresh Docker container, injects the prompt and credentials via a sidecar proxy, and produces a structured result.
+- A **skill** adds knowledge — reusable instructions the agent follows during a run (compatible with the [Agent Skills](https://agentskills.io/) format).
+- A **tool** adds capability — executable TypeScript code the agent can invoke at runtime.
+- A **provider** adds connectivity — authentication metadata for external services (Gmail, ClickUp, Stripe, etc.). Users connect once; credentials are encrypted and injected via the sidecar.
+
+Agents are **prompt-driven**: the AI coding agent inside the container interprets the goal and writes its own execution code. Change the prompt, change the behavior — no node graphs, no pre-scripted steps.
 
 ## Features
 
-- **One-shot AI flows** — Each execution runs in an isolated Docker container with a Pi Coding Agent
+- **Autonomous AI agents** — Each run executes in an isolated Docker container with a Pi Coding Agent
 - **OAuth2 + API key connections** — Connect external services (OAuth2/PKCE, OAuth 1.0a, API key, basic auth, custom credentials)
-- **Ephemeral execution** — Containers are created, run, and destroyed per execution
+- **Sandboxed runs** — Containers are created, run, and destroyed per run
 - **Sidecar isolation** — Credential injection via a sidecar proxy (agent never sees raw credentials)
-- **Cron scheduling** — Schedule flows with cron expressions, distributed lock prevents duplicates
-- **Package import** — Import flows, skills, extensions, and providers from ZIP/AFPS files
+- **Cron scheduling** — Schedule agents with cron expressions, distributed lock prevents duplicates
+- **Package import** — Import agents, skills, extensions, and providers from ZIP/AFPS files
 - **Skills & extensions** — Extend agent capabilities with SKILL.md instructions and TypeScript tool extensions
-- **Realtime** — SSE-based execution monitoring with LISTEN/NOTIFY
+- **Realtime** — SSE-based run monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member)
 - **API keys** — Programmatic access via `ask_*` prefixed API keys
 - **OpenAPI documentation** — 181 endpoints documented at `/api/openapi.json` + Swagger UI at `/api/docs`
-- **Connection profiles** — Share connection sets across flows
-- **Proxy system** — Org-level and flow-level outbound HTTP proxy support
+- **Connection profiles** — Share connection sets across agents
+- **Proxy system** — Org-level and agent-level outbound HTTP proxy support
 
 ## Quick Start
 
@@ -74,7 +100,7 @@ appstrate/
 │   │   ├── routes/           # Route handlers (one file per domain)
 │   │   ├── services/         # Business logic, Docker, adapters, scheduler, marketplace
 │   │   ├── openapi/          # OpenAPI 3.1 spec (181 endpoints)
-│   │   └── middleware/       # Auth, rate-limit, guards (requireAdmin, requireFlow)
+│   │   └── middleware/       # Auth, rate-limit, guards (requireAdmin, requireAgent)
 │   │
 │   └── web/src/              # React 19 SPA (Vite + React Query v5 + Zustand)
 │       ├── pages/            # Route pages (React Router v7)
@@ -88,7 +114,7 @@ appstrate/
 │   ├── shared-types/         # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 │   └── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
 │
-├── system-packages/           # System package ZIPs (providers, skills, extensions, flows — loaded at boot)
+├── system-packages/           # System package ZIPs (providers, skills, extensions, agents — loaded at boot)
 │
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK
 │   ├── entrypoint.ts         # SDK session → JSON lines on stdout
@@ -103,33 +129,33 @@ appstrate/
 
 The API is organized into 25 route domains with 181 documented endpoints:
 
-| Domain                  | Description                                               |
-| ----------------------- | --------------------------------------------------------- |
-| **Auth**                | Better Auth email/password + cookie sessions              |
-| **Flows**               | Flow CRUD, config, skills/extensions binding, versions    |
-| **Executions**          | Run flows, list executions, logs, cancel                  |
-| **Realtime**            | SSE streams for execution monitoring                      |
-| **Schedules**           | Cron-based flow scheduling                                |
-| **Connections**         | OAuth2/API key service connections                        |
-| **Connection Profiles** | Shared connection sets across flows                       |
-| **Providers**           | Provider package configuration (OAuth2, API key, custom)  |
-| **Provider Keys**       | Org-level LLM provider API key management                 |
-| **Proxies**             | Org-level and flow-level HTTP proxy config                |
-| **API Keys**            | Programmatic access tokens (`ask_*`)                      |
-| **Packages**            | Organization skills/extensions CRUD, import, publish      |
-| **Notifications**       | Execution notification management                         |
-| **Organizations**       | Org CRUD, members, invitations                            |
-| **Profile**             | User profile management                                   |
-| **Invitations**         | Magic link invitation acceptance                          |
-| **Share**               | Public share tokens for one-time execution                |
-| **Welcome**             | Post-invite profile setup                                 |
-| **Internal**            | Container-to-host routes (credentials, execution history) |
-| **Meta**                | OpenAPI spec + Swagger UI                                 |
-| **Models**              | Org-level LLM model configuration and testing             |
-| **Health**              | Health check                                              |
-| **Applications**        | Developer application management (API key scoping)        |
-| **End-Users**           | External end-user management for headless API             |
-| **Webhooks**            | Execution event webhooks with HMAC signing                |
+| Domain                  | Description                                              |
+| ----------------------- | -------------------------------------------------------- |
+| **Auth**                | Better Auth email/password + cookie sessions             |
+| **Agents**              | Agent CRUD, config, skills/extensions binding, versions  |
+| **Runs**                | Run agents, list runs, logs, cancel                      |
+| **Realtime**            | SSE streams for run monitoring                           |
+| **Schedules**           | Cron-based agent scheduling                              |
+| **Connections**         | OAuth2/API key service connections                       |
+| **Connection Profiles** | Shared connection sets across agents                     |
+| **Providers**           | Provider package configuration (OAuth2, API key, custom) |
+| **Provider Keys**       | Org-level LLM provider API key management                |
+| **Proxies**             | Org-level and agent-level HTTP proxy config              |
+| **API Keys**            | Programmatic access tokens (`ask_*`)                     |
+| **Packages**            | Organization skills/extensions CRUD, import, publish     |
+| **Notifications**       | Run notification management                              |
+| **Organizations**       | Org CRUD, members, invitations                           |
+| **Profile**             | User profile management                                  |
+| **Invitations**         | Magic link invitation acceptance                         |
+| **Share**               | Public share tokens for one-time run                     |
+| **Welcome**             | Post-invite profile setup                                |
+| **Internal**            | Container-to-host routes (credentials, run history)      |
+| **Meta**                | OpenAPI spec + Swagger UI                                |
+| **Models**              | Org-level LLM model configuration and testing            |
+| **Health**              | Health check                                             |
+| **Applications**        | Developer application management (API key scoping)       |
+| **End-Users**           | External end-user management for headless API            |
+| **Webhooks**            | Run event webhooks with HMAC signing                     |
 
 ### API Documentation
 
@@ -143,8 +169,8 @@ The API is organized into 25 route domains with 181 documented endpoints:
 Browser (React SPA)              Platform (Bun + Hono :3000)
     |                                |
     |-- Login/Signup --------------->|-- Better Auth (cookie session)
-    |-- POST /api/flows/:id/run --->|
-    |                                |-- Validate → Create execution → Fire-and-forget
+    |-- POST /api/agents/:id/run ->|
+    |                                |-- Validate → Create run → Fire-and-forget
     |<-- SSE (realtime) ------------|-- LISTEN/NOTIFY → SSE stream
     |                                |
     |   Docker network (isolated):   |
@@ -171,7 +197,7 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 | `REDIS_URL`                 | Yes      | —                                             | Redis connection string                                            |
 | `S3_BUCKET`                 | Yes      | —                                             | S3 bucket name for storage                                         |
 | `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                                       |
-| `EXECUTION_TOKEN_SECRET`    | No       | —                                             | Execution token signing secret                                     |
+| `RUN_TOKEN_SECRET`          | No       | —                                             | Run token signing secret                                           |
 | `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                     |
 | `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins (comma-separated)                                     |
 | `PORT`                      | No       | `3000`                                        | Server port                                                        |
@@ -181,7 +207,7 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 | `SYSTEM_PROXIES`            | No       | `[]`                                          | JSON array of system proxy definitions                             |
 | `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy for sidecar containers                         |
 | `LOG_LEVEL`                 | No       | `info`                                        | `debug` \| `info` \| `warn` \| `error`                             |
-| `EXECUTION_ADAPTER`         | No       | `pi`                                          | Adapter type for flow execution                                    |
+| `RUN_ADAPTER`               | No       | `pi`                                          | Adapter type for agent run                                         |
 | `SIDECAR_POOL_SIZE`         | No       | `2`                                           | Pre-warmed sidecar containers (0 = disabled)                       |
 | `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2)                                  |
 | `PI_IMAGE`                  | No       | `appstrate-pi:latest`                         | Docker image for the Pi agent runtime                              |
@@ -246,7 +272,7 @@ Yes. `docker compose up -d` with the provided `docker-compose.yml` pulls images 
 Any provider compatible with the Pi Coding Agent SDK. Configure via `SYSTEM_PROVIDER_KEYS` or the org-level model settings UI.
 
 **How is this different from workflow automation tools?**
-Appstrate runs autonomous AI agents in isolated containers, not predefined step-by-step workflows. Each flow is prompt-driven — the agent decides how to process data.
+Appstrate runs autonomous AI agents in isolated containers, not predefined step-by-step workflows. Each agent is prompt-driven — the agent decides how to process data.
 
 **Is this production-ready?**
 The platform is actively used in production. See [SECURITY.md](./SECURITY.md) for the threat model and defense layers, and [CHANGELOG.md](./CHANGELOG.md) for release history.

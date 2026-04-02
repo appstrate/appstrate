@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Webhooks API — CRUD + test ping + secret rotation + delivery history.
  */
@@ -22,11 +24,11 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { getApplication } from "../services/applications.ts";
 
 const webhookEventsEnum = z.enum([
-  "execution.started",
-  "execution.completed",
-  "execution.failed",
-  "execution.timeout",
-  "execution.cancelled",
+  "run.started",
+  "run.completed",
+  "run.failed",
+  "run.timeout",
+  "run.cancelled",
 ]);
 
 const webhookScopeEnum = z.enum(["organization", "application"]);
@@ -127,7 +129,7 @@ export function createWebhooksRouter() {
 
     const { eventId, payload } = buildEventEnvelope({
       eventType: "test.ping",
-      execution: { id: "exec_test", packageId: "test", status: "success" },
+      run: { id: "exec_test", packageId: "test", status: "success" },
       payloadMode:
         wh.payloadMode === "full" || wh.payloadMode === "summary" ? wh.payloadMode : "full",
     });

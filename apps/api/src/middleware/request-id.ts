@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Request-Id middleware — generates a unique `req_` prefixed ID for every request.
  * Sets the `Request-Id` response header and stores `requestId` in Hono context.

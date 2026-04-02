@@ -9,9 +9,9 @@
  * `@appstrate/core/schemas` instead of maintaining local copies.
  */
 
-import flowSchema from "../schema/flow.schema.json";
+import agentSchema from "../schema/agent.schema.json";
 import skillSchema from "../schema/skill.schema.json";
 import toolSchema from "../schema/tool.schema.json";
 import providerSchema from "../schema/provider.schema.json";
 
-export { flowSchema, skillSchema, toolSchema, providerSchema };
+export { agentSchema, skillSchema, toolSchema, providerSchema };

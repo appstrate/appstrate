@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Tests for schedule readiness with org profiles.
  *
@@ -45,7 +47,7 @@ import {
   resolveScheduleProfileArgs,
   getProfileByIdUnsafe,
 } from "../../../src/services/connection-profiles.ts";
-import type { FlowProviderRequirement } from "../../../src/types/index.ts";
+import type { AgentProviderRequirement } from "../../../src/types/index.ts";
 
 describe("scheduler org-profile readiness", () => {
   let userId: string;
@@ -102,19 +104,19 @@ describe("scheduler org-profile readiness", () => {
     const orgProfile = await seedConnectionProfile({ orgId, name: "Org Prod" });
     await bindOrgProfileProvider(orgProfile.id, providerId, userProfileId, userId);
 
-    const flow = await seedPackage({
+    const agent = await seedPackage({
       orgId,
-      id: `@${orgSlug}/flow-org-bound`,
+      id: `@${orgSlug}/agent-org-bound`,
       draftManifest: {
-        name: `@${orgSlug}/flow-org-bound`,
+        name: `@${orgSlug}/agent-org-bound`,
         version: "0.1.0",
-        type: "flow",
-        description: "Flow with bound provider",
+        type: "agent",
+        description: "Agent with bound provider",
         dependencies: { providers: { [providerId]: "*" } },
       },
     });
 
-    await createSchedule(flow.id, orgProfile.id, orgId, {
+    await createSchedule(agent.id, orgProfile.id, orgId, {
       name: "Org Bound Schedule",
       cronExpression: "0 * * * *",
     });
@@ -134,19 +136,19 @@ describe("scheduler org-profile readiness", () => {
 
     const orgProfile = await seedConnectionProfile({ orgId, name: "Org Empty" });
 
-    const flow = await seedPackage({
+    const agent = await seedPackage({
       orgId,
-      id: `@${orgSlug}/flow-org-unbound`,
+      id: `@${orgSlug}/agent-org-unbound`,
       draftManifest: {
-        name: `@${orgSlug}/flow-org-unbound`,
+        name: `@${orgSlug}/agent-org-unbound`,
         version: "0.1.0",
-        type: "flow",
-        description: "Flow with unbound provider",
+        type: "agent",
+        description: "Agent with unbound provider",
         dependencies: { providers: { [providerId]: "*" } },
       },
     });
 
-    await createSchedule(flow.id, orgProfile.id, orgId, {
+    await createSchedule(agent.id, orgProfile.id, orgId, {
       name: "Org Unbound Schedule",
       cronExpression: "0 * * * *",
     });
@@ -161,11 +163,11 @@ describe("scheduler org-profile readiness", () => {
     expect(s.readiness.missingProviders).toEqual([providerId]);
   });
 
-  // ── Execution-path resolution (triggerScheduledExecution parity) ──
+  // ── Run-path resolution (triggerScheduledRun parity) ──
 
-  it("resolves providers via org bindings without flowOrgProfileId (execution path)", async () => {
+  it("resolves providers via org bindings without agentOrgProfileId (run path)", async () => {
     // This is the exact scenario that caused the production bug:
-    // schedule uses org profile, no flowOrgProfileId in package_configs,
+    // schedule uses org profile, no agentOrgProfileId in package_configs,
     // providers connected only via org profile bindings.
     const providerId = "@system/org-exec-path";
     await seedProviderPackage(providerId);
@@ -174,20 +176,20 @@ describe("scheduler org-profile readiness", () => {
     const orgProfile = await seedConnectionProfile({ orgId, name: "Org Exec" });
     await bindOrgProfileProvider(orgProfile.id, providerId, userProfileId, userId);
 
-    // Simulate what triggerScheduledExecution does:
+    // Simulate what triggerScheduledRun does:
     // 1. Load profile
     const profile = await getProfileByIdUnsafe(orgProfile.id);
     expect(profile).not.toBeNull();
 
-    // 2. Resolve args with NO flowOrgProfileId (not configured in package_configs)
+    // 2. Resolve args with NO agentOrgProfileId (not configured in package_configs)
     const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
       profile!,
       orgProfile.id,
-      null, // no flowOrgProfileId — the production bug scenario
+      null, // no agentOrgProfileId — the production bug scenario
     );
 
     // 3. Resolve provider profiles
-    const providers: FlowProviderRequirement[] = [{ id: providerId }];
+    const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const providerProfiles = await resolveProviderProfiles(
       providers,
       defaultUserProfileId,
@@ -202,7 +204,7 @@ describe("scheduler org-profile readiness", () => {
     expect(providerProfiles[providerId]!.profileId).toBe(userProfileId);
   });
 
-  it("omits provider when org profile has no binding and no user fallback (execution path)", async () => {
+  it("omits provider when org profile has no binding and no user fallback (run path)", async () => {
     const providerId = "@system/org-exec-missing";
     await seedProviderPackage(providerId);
 
@@ -216,7 +218,7 @@ describe("scheduler org-profile readiness", () => {
       null,
     );
 
-    const providers: FlowProviderRequirement[] = [{ id: providerId }];
+    const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const providerProfiles = await resolveProviderProfiles(
       providers,
       defaultUserProfileId,

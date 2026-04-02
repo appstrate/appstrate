@@ -1,12 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
 import {
   _deriveKeyPlaceholderForTesting as deriveKeyPlaceholder,
   _processPiLogsForTesting as processPiLogs,
 } from "../../src/services/adapters/pi.ts";
-import type { ExecutionMessage } from "../../src/services/adapters/types.ts";
+import type { RunMessage } from "../../src/services/adapters/types.ts";
 
-async function collectMessages(gen: AsyncGenerator<ExecutionMessage>): Promise<ExecutionMessage[]> {
-  const messages: ExecutionMessage[] = [];
+async function collectMessages(gen: AsyncGenerator<RunMessage>): Promise<RunMessage[]> {
+  const messages: RunMessage[] = [];
   for await (const msg of gen) {
     messages.push(msg);
   }

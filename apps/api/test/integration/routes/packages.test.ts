@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedFlow, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedAgent, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
 import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -18,58 +20,58 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
-  // GET /api/packages/flows — list flows
+  // GET /api/packages/agents — list agents
   // ═══════════════════════════════════════════════
 
-  describe("GET /api/packages/flows", () => {
-    it("returns empty list when no flows exist", async () => {
-      const res = await app.request("/api/packages/flows", {
+  describe("GET /api/packages/agents", () => {
+    it("returns empty list when no agents exist", async () => {
+      const res = await app.request("/api/packages/agents", {
         headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.flows).toBeArray();
-      expect(body.flows).toHaveLength(0);
+      expect(body.agents).toBeArray();
+      expect(body.agents).toHaveLength(0);
     });
 
-    it("returns flows owned by the org", async () => {
-      await seedFlow({
-        id: "@pkgorg/list-flow",
+    it("returns agents owned by the org", async () => {
+      await seedAgent({
+        id: "@pkgorg/list-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request("/api/packages/flows", {
+      const res = await app.request("/api/packages/agents", {
         headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const flow = body.flows.find((f: { id: string }) => f.id === "@pkgorg/list-flow");
-      expect(flow).toBeDefined();
+      const agent = body.agents.find((f: { id: string }) => f.id === "@pkgorg/list-agent");
+      expect(agent).toBeDefined();
     });
 
-    it("does not leak flows from other orgs", async () => {
+    it("does not leak agents from other orgs", async () => {
       const otherCtx = await createTestContext({ orgSlug: "otherorg" });
-      await seedFlow({
-        id: "@otherorg/secret-flow",
+      await seedAgent({
+        id: "@otherorg/secret-agent",
         orgId: otherCtx.orgId,
         createdBy: otherCtx.user.id,
       });
 
-      const res = await app.request("/api/packages/flows", {
+      const res = await app.request("/api/packages/agents", {
         headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const leaked = body.flows.find((f: { id: string }) => f.id === "@otherorg/secret-flow");
+      const leaked = body.agents.find((f: { id: string }) => f.id === "@otherorg/secret-agent");
       expect(leaked).toBeUndefined();
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/packages/flows");
+      const res = await app.request("/api/packages/agents");
       expect(res.status).toBe(401);
     });
   });
@@ -121,29 +123,29 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
-  // GET /api/packages/flows/:scope/:name — flow detail
+  // GET /api/packages/agents/:scope/:name — agent detail
   // ═══════════════════════════════════════════════
 
-  describe("GET /api/packages/flows/:scope/:name", () => {
-    it("returns flow detail with version count", async () => {
-      await seedFlow({
-        id: "@pkgorg/detail-flow",
+  describe("GET /api/packages/agents/:scope/:name", () => {
+    it("returns agent detail with version count", async () => {
+      await seedAgent({
+        id: "@pkgorg/detail-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request("/api/packages/flows/@pkgorg/detail-flow", {
+      const res = await app.request("/api/packages/agents/@pkgorg/detail-agent", {
         headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.flow).toBeDefined();
-      expect(body.flow.id).toBe("@pkgorg/detail-flow");
+      expect(body.agent).toBeDefined();
+      expect(body.agent.id).toBe("@pkgorg/detail-agent");
     });
 
     it("returns 404 for non-existent package", async () => {
-      const res = await app.request("/api/packages/flows/@pkgorg/does-not-exist", {
+      const res = await app.request("/api/packages/agents/@pkgorg/does-not-exist", {
         headers: authHeaders(ctx),
       });
 
@@ -152,13 +154,13 @@ describe("Packages API", () => {
 
     it("returns 404 for package from another org", async () => {
       const otherCtx = await createTestContext({ orgSlug: "alien" });
-      await seedFlow({
-        id: "@alien/private-flow",
+      await seedAgent({
+        id: "@alien/private-agent",
         orgId: otherCtx.orgId,
         createdBy: otherCtx.user.id,
       });
 
-      const res = await app.request("/api/packages/flows/@alien/private-flow", {
+      const res = await app.request("/api/packages/agents/@alien/private-agent", {
         headers: authHeaders(ctx),
       });
 
@@ -166,7 +168,7 @@ describe("Packages API", () => {
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/packages/flows/@pkgorg/detail-flow");
+      const res = await app.request("/api/packages/agents/@pkgorg/detail-agent");
       expect(res.status).toBe(401);
     });
   });
@@ -211,22 +213,22 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
-  // POST /api/packages/flows — create flow (admin only)
+  // POST /api/packages/agents — create agent (admin only)
   // ═══════════════════════════════════════════════
 
-  describe("POST /api/packages/flows", () => {
-    it("creates a flow with valid manifest and content", async () => {
-      const res = await app.request("/api/packages/flows", {
+  describe("POST /api/packages/agents", () => {
+    it("creates an agent with valid manifest and content", async () => {
+      const res = await app.request("/api/packages/agents", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           manifest: {
-            name: `@pkgorg/new-flow`,
+            name: `@pkgorg/new-agent`,
             version: "0.1.0",
-            type: "flow",
+            type: "agent",
             schemaVersion: "1.0",
-            displayName: "New Flow",
-            description: "A brand new flow",
+            displayName: "New Agent",
+            description: "A brand new agent",
           },
           content: "You are a helpful assistant.",
         }),
@@ -234,21 +236,21 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      expect(body.packageId).toBe("@pkgorg/new-flow");
+      expect(body.packageId).toBe("@pkgorg/new-agent");
       expect(body.lockVersion).toBeNumber();
 
-      await assertDbHas(packages, eq(packages.id, "@pkgorg/new-flow"));
+      await assertDbHas(packages, eq(packages.id, "@pkgorg/new-agent"));
     });
 
     it("returns 400 when content is empty", async () => {
-      const res = await app.request("/api/packages/flows", {
+      const res = await app.request("/api/packages/agents", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           manifest: {
             name: `@pkgorg/empty-content`,
             version: "0.1.0",
-            type: "flow",
+            type: "agent",
             schemaVersion: "1.0",
             displayName: "Empty Content",
             description: "Empty content test",
@@ -261,22 +263,22 @@ describe("Packages API", () => {
     });
 
     it("returns 400 for duplicate package name", async () => {
-      await seedFlow({
-        id: "@pkgorg/dup-flow",
+      await seedAgent({
+        id: "@pkgorg/dup-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request("/api/packages/flows", {
+      const res = await app.request("/api/packages/agents", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           manifest: {
-            name: "@pkgorg/dup-flow",
+            name: "@pkgorg/dup-agent",
             version: "0.1.0",
-            type: "flow",
+            type: "agent",
             schemaVersion: "1.0",
-            displayName: "Dup Flow",
+            displayName: "Dup Agent",
             description: "Duplicate",
           },
           content: "duplicate prompt",
@@ -289,16 +291,16 @@ describe("Packages API", () => {
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/packages/flows", {
+      const res = await app.request("/api/packages/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           manifest: {
-            name: "@pkgorg/unauth-flow",
+            name: "@pkgorg/unauth-agent",
             version: "0.1.0",
-            type: "flow",
+            type: "agent",
             schemaVersion: "1.0",
-            displayName: "Unauth Flow",
+            displayName: "Unauth Agent",
             description: "No auth",
           },
           content: "no auth prompt",
@@ -309,16 +311,16 @@ describe("Packages API", () => {
     });
 
     it("returns 403 when scope does not match org", async () => {
-      const res = await app.request("/api/packages/flows", {
+      const res = await app.request("/api/packages/agents", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           manifest: {
-            name: "@wrongorg/mismatched-flow",
+            name: "@wrongorg/mismatched-agent",
             version: "0.1.0",
-            type: "flow",
+            type: "agent",
             schemaVersion: "1.0",
-            displayName: "Mismatched Flow",
+            displayName: "Mismatched Agent",
             description: "Wrong scope",
           },
           content: "wrong scope prompt",
@@ -330,57 +332,57 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
-  // PUT /api/packages/flows/:scope/:name — update flow (admin only)
+  // PUT /api/packages/agents/:scope/:name — update agent (admin only)
   // ═══════════════════════════════════════════════
 
-  describe("PUT /api/packages/flows/:scope/:name", () => {
-    it("updates a flow with valid manifest and lockVersion", async () => {
-      const flow = await seedFlow({
-        id: "@pkgorg/update-flow",
+  describe("PUT /api/packages/agents/:scope/:name", () => {
+    it("updates an agent with valid manifest and lockVersion", async () => {
+      const agent = await seedAgent({
+        id: "@pkgorg/update-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request("/api/packages/flows/@pkgorg/update-flow", {
+      const res = await app.request("/api/packages/agents/@pkgorg/update-agent", {
         method: "PUT",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           manifest: {
-            name: "@pkgorg/update-flow",
+            name: "@pkgorg/update-agent",
             version: "0.2.0",
-            type: "flow",
+            type: "agent",
             schemaVersion: "1.0",
-            displayName: "Update Flow",
-            description: "Updated flow",
+            displayName: "Update Agent",
+            description: "Updated agent",
           },
           content: "Updated prompt content.",
-          lockVersion: flow.lockVersion,
+          lockVersion: agent.lockVersion,
         }),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.packageId).toBe("@pkgorg/update-flow");
-      expect(body.lockVersion).toBeGreaterThan(flow.lockVersion!);
+      expect(body.packageId).toBe("@pkgorg/update-agent");
+      expect(body.lockVersion).toBeGreaterThan(agent.lockVersion!);
     });
 
     it("returns 400 when lockVersion is missing", async () => {
-      await seedFlow({
-        id: "@pkgorg/no-lock-flow",
+      await seedAgent({
+        id: "@pkgorg/no-lock-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request("/api/packages/flows/@pkgorg/no-lock-flow", {
+      const res = await app.request("/api/packages/agents/@pkgorg/no-lock-agent", {
         method: "PUT",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           manifest: {
-            name: "@pkgorg/no-lock-flow",
+            name: "@pkgorg/no-lock-agent",
             version: "0.2.0",
-            type: "flow",
+            type: "agent",
             schemaVersion: "1.0",
-            displayName: "No Lock Flow",
+            displayName: "No Lock Agent",
             description: "No lockVersion",
           },
           content: "content",
@@ -390,17 +392,17 @@ describe("Packages API", () => {
       expect(res.status).toBe(400);
     });
 
-    it("returns 404 for non-existent flow", async () => {
-      const res = await app.request("/api/packages/flows/@pkgorg/ghost-flow", {
+    it("returns 404 for non-existent agent", async () => {
+      const res = await app.request("/api/packages/agents/@pkgorg/ghost-agent", {
         method: "PUT",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           manifest: {
-            name: "@pkgorg/ghost-flow",
+            name: "@pkgorg/ghost-agent",
             version: "0.1.0",
-            type: "flow",
+            type: "agent",
             schemaVersion: "1.0",
-            displayName: "Ghost Flow",
+            displayName: "Ghost Agent",
             description: "Ghost",
           },
           content: "ghost",
@@ -413,22 +415,22 @@ describe("Packages API", () => {
 
     it("returns 403 when trying to update package from another org", async () => {
       const otherCtx = await createTestContext({ orgSlug: "foreignorg" });
-      await seedFlow({
-        id: "@foreignorg/their-flow",
+      await seedAgent({
+        id: "@foreignorg/their-agent",
         orgId: otherCtx.orgId,
         createdBy: otherCtx.user.id,
       });
 
-      const res = await app.request("/api/packages/flows/@foreignorg/their-flow", {
+      const res = await app.request("/api/packages/agents/@foreignorg/their-agent", {
         method: "PUT",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           manifest: {
-            name: "@foreignorg/their-flow",
+            name: "@foreignorg/their-agent",
             version: "0.2.0",
-            type: "flow",
+            type: "agent",
             schemaVersion: "1.0",
-            displayName: "Hijack Flow",
+            displayName: "Hijack Agent",
             description: "Hijack",
           },
           content: "hijack",
@@ -441,18 +443,18 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
-  // DELETE /api/packages/flows/:scope/:name — delete flow (admin only)
+  // DELETE /api/packages/agents/:scope/:name — delete agent (admin only)
   // ═══════════════════════════════════════════════
 
-  describe("DELETE /api/packages/flows/:scope/:name", () => {
-    it("deletes a flow", async () => {
-      await seedFlow({
+  describe("DELETE /api/packages/agents/:scope/:name", () => {
+    it("deletes an agent", async () => {
+      await seedAgent({
         id: "@pkgorg/delete-me",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request("/api/packages/flows/@pkgorg/delete-me", {
+      const res = await app.request("/api/packages/agents/@pkgorg/delete-me", {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
@@ -463,13 +465,13 @@ describe("Packages API", () => {
 
     it("returns 403 when trying to delete package from another org", async () => {
       const otherCtx = await createTestContext({ orgSlug: "otherdelorg" });
-      await seedFlow({
-        id: "@otherdelorg/their-flow",
+      await seedAgent({
+        id: "@otherdelorg/their-agent",
         orgId: otherCtx.orgId,
         createdBy: otherCtx.user.id,
       });
 
-      const res = await app.request("/api/packages/flows/@otherdelorg/their-flow", {
+      const res = await app.request("/api/packages/agents/@otherdelorg/their-agent", {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
@@ -478,25 +480,25 @@ describe("Packages API", () => {
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/packages/flows/@pkgorg/delete-me", { method: "DELETE" });
+      const res = await app.request("/api/packages/agents/@pkgorg/delete-me", { method: "DELETE" });
 
       expect(res.status).toBe(401);
     });
   });
 
   // ═══════════════════════════════════════════════
-  // GET /api/packages/flows/:scope/:name/versions — list versions
+  // GET /api/packages/agents/:scope/:name/versions — list versions
   // ═══════════════════════════════════════════════
 
-  describe("GET /api/packages/flows/:scope/:name/versions", () => {
-    it("returns empty versions list for a flow with no versions", async () => {
-      await seedFlow({
-        id: "@pkgorg/no-ver-flow",
+  describe("GET /api/packages/agents/:scope/:name/versions", () => {
+    it("returns empty versions list for an agent with no versions", async () => {
+      await seedAgent({
+        id: "@pkgorg/no-ver-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request("/api/packages/flows/@pkgorg/no-ver-flow/versions", {
+      const res = await app.request("/api/packages/agents/@pkgorg/no-ver-agent/versions", {
         headers: authHeaders(ctx),
       });
 
@@ -507,22 +509,22 @@ describe("Packages API", () => {
     });
 
     it("returns seeded versions", async () => {
-      await seedFlow({
-        id: "@pkgorg/versioned-flow",
+      await seedAgent({
+        id: "@pkgorg/versioned-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
 
       await seedPackageVersion({
-        packageId: "@pkgorg/versioned-flow",
+        packageId: "@pkgorg/versioned-agent",
         version: "0.1.0",
       });
       await seedPackageVersion({
-        packageId: "@pkgorg/versioned-flow",
+        packageId: "@pkgorg/versioned-agent",
         version: "0.2.0",
       });
 
-      const res = await app.request("/api/packages/flows/@pkgorg/versioned-flow/versions", {
+      const res = await app.request("/api/packages/agents/@pkgorg/versioned-agent/versions", {
         headers: authHeaders(ctx),
       });
 
@@ -533,7 +535,7 @@ describe("Packages API", () => {
     });
 
     it("returns 404 for non-existent package", async () => {
-      const res = await app.request("/api/packages/flows/@pkgorg/no-such-flow/versions", {
+      const res = await app.request("/api/packages/agents/@pkgorg/no-such-agent/versions", {
         headers: authHeaders(ctx),
       });
 
@@ -541,7 +543,7 @@ describe("Packages API", () => {
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/packages/flows/@pkgorg/versioned-flow/versions");
+      const res = await app.request("/api/packages/agents/@pkgorg/versioned-agent/versions");
 
       expect(res.status).toBe(401);
     });
@@ -648,30 +650,32 @@ describe("Packages API", () => {
     it("isolates packages across organizations", async () => {
       const otherCtx = await createTestContext({ orgSlug: "isolatedorg" });
 
-      await seedFlow({
-        id: "@pkgorg/my-flow",
+      await seedAgent({
+        id: "@pkgorg/my-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await seedFlow({
-        id: "@isolatedorg/their-flow",
+      await seedAgent({
+        id: "@isolatedorg/their-agent",
         orgId: otherCtx.orgId,
         createdBy: otherCtx.user.id,
       });
 
-      // User from pkgorg should only see their own flows
-      const res1 = await app.request("/api/packages/flows", {
+      // User from pkgorg should only see their own agents
+      const res1 = await app.request("/api/packages/agents", {
         headers: authHeaders(ctx),
       });
       expect(res1.status).toBe(200);
       const body1 = (await res1.json()) as any;
-      const myFlow = body1.flows.find((f: { id: string }) => f.id === "@pkgorg/my-flow");
-      const theirFlow = body1.flows.find((f: { id: string }) => f.id === "@isolatedorg/their-flow");
-      expect(myFlow).toBeDefined();
-      expect(theirFlow).toBeUndefined();
+      const myAgent = body1.agents.find((f: { id: string }) => f.id === "@pkgorg/my-agent");
+      const theirAgent = body1.agents.find(
+        (f: { id: string }) => f.id === "@isolatedorg/their-agent",
+      );
+      expect(myAgent).toBeDefined();
+      expect(theirAgent).toBeUndefined();
 
-      // User from isolatedorg should only see their own flows
-      const res2 = await app.request("/api/packages/flows", {
+      // User from isolatedorg should only see their own agents
+      const res2 = await app.request("/api/packages/agents", {
         headers: {
           Cookie: otherCtx.cookie,
           "X-Org-Id": otherCtx.orgId,
@@ -679,12 +683,12 @@ describe("Packages API", () => {
       });
       expect(res2.status).toBe(200);
       const body2 = (await res2.json()) as any;
-      const theirFlow2 = body2.flows.find(
-        (f: { id: string }) => f.id === "@isolatedorg/their-flow",
+      const theirAgent2 = body2.agents.find(
+        (f: { id: string }) => f.id === "@isolatedorg/their-agent",
       );
-      const myFlow2 = body2.flows.find((f: { id: string }) => f.id === "@pkgorg/my-flow");
-      expect(theirFlow2).toBeDefined();
-      expect(myFlow2).toBeUndefined();
+      const myAgent2 = body2.agents.find((f: { id: string }) => f.id === "@pkgorg/my-agent");
+      expect(theirAgent2).toBeDefined();
+      expect(myAgent2).toBeUndefined();
     });
 
     it("prevents cross-org package detail access", async () => {
@@ -714,15 +718,15 @@ describe("Packages API", () => {
   // Version info endpoint
   // ═══════════════════════════════════════════════
 
-  describe("GET /api/packages/flows/:scope/:name/versions/info", () => {
-    it("returns version info for a flow", async () => {
-      await seedFlow({
-        id: "@pkgorg/info-flow",
+  describe("GET /api/packages/agents/:scope/:name/versions/info", () => {
+    it("returns version info for an agent", async () => {
+      await seedAgent({
+        id: "@pkgorg/info-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
 
-      const res = await app.request("/api/packages/flows/@pkgorg/info-flow/versions/info", {
+      const res = await app.request("/api/packages/agents/@pkgorg/info-agent/versions/info", {
         headers: authHeaders(ctx),
       });
 
@@ -732,8 +736,8 @@ describe("Packages API", () => {
       expect(body).toBeDefined();
     });
 
-    it("returns 404 for non-existent flow", async () => {
-      const res = await app.request("/api/packages/flows/@pkgorg/ghost/versions/info", {
+    it("returns 404 for non-existent agent", async () => {
+      const res = await app.request("/api/packages/agents/@pkgorg/ghost/versions/info", {
         headers: authHeaders(ctx),
       });
 

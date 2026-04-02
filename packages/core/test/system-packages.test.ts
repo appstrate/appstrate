@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -32,13 +34,13 @@ function providerManifest(name: string, version = "1.0.0") {
   });
 }
 
-function flowManifest(name: string, version = "1.0.0") {
+function agentManifest(name: string, version = "1.0.0") {
   return JSON.stringify({
     name,
     version,
-    type: "flow",
+    type: "agent",
     schemaVersion: "1.0",
-    displayName: "Test Flow",
+    displayName: "Test Agent",
     author: "test",
   });
 }
@@ -112,16 +114,16 @@ describe("loadSystemPackages", () => {
     expect(entry.version).toBe("1.0.0");
   });
 
-  test("loads flow ZIPs", async () => {
+  test("loads agent ZIPs", async () => {
     const zip = makeZip({
-      "manifest.json": flowManifest("@test/my-flow"),
+      "manifest.json": agentManifest("@test/my-agent"),
       "prompt.md": "# Test prompt",
     });
-    await writeFile(join(testDir, "my-flow-1.0.0.afps"), zip);
+    await writeFile(join(testDir, "my-agent-1.0.0.afps"), zip);
 
     const result = await loadSystemPackages(testDir);
     expect(result.packages).toHaveLength(1);
-    expect(result.packages[0]!.type).toBe("flow");
+    expect(result.packages[0]!.type).toBe("agent");
   });
 
   test("loads skill ZIPs", async () => {

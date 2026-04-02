@@ -1,27 +1,29 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { isOwnedByOrg } from "@appstrate/core/naming";
-import { getPackage } from "../services/flow-service.ts";
-import { getRunningExecutionsForPackage } from "../services/state/index.ts";
+import { getPackage } from "../services/agent-service.ts";
+import { getRunningRunsForPackage } from "../services/state/index.ts";
 import { ApiError, forbidden, conflict, invalidRequest } from "../lib/errors.ts";
 
-/** Middleware: load a flow by route param and set it on context, or 404. */
-export function requireFlow() {
+/** Middleware: load an agent by route param and set it on context, or 404. */
+export function requireAgent() {
   return async (c: Context<AppEnv>, next: Next) => {
     const scope = c.req.param("scope");
     const name = c.req.param("name");
     const packageId = `${scope}/${name}`;
     const orgId = c.get("orgId");
-    const flow = await getPackage(packageId, orgId);
-    if (!flow) {
+    const agent = await getPackage(packageId, orgId);
+    if (!agent) {
       throw new ApiError({
         status: 404,
-        code: "flow_not_found",
-        title: "Flow Not Found",
-        detail: `Flow '${packageId}' not found`,
+        code: "agent_not_found",
+        title: "Agent Not Found",
+        detail: `Agent '${packageId}' not found`,
       });
     }
-    c.set("flow", flow);
+    c.set("agent", agent);
     return next();
   };
 }
@@ -60,16 +62,16 @@ export function checkScopeMatch(c: Context<AppEnv>, packageId: string): ApiError
   return null;
 }
 
-/** Middleware: reject if flow is system (403) or has running executions (409). */
-export function requireMutableFlow() {
+/** Middleware: reject if agent is system (403) or has running runs (409). */
+export function requireMutableAgent() {
   return async (c: Context<AppEnv>, next: Next) => {
-    const flow = c.get("flow");
-    if (flow.source === "system") {
-      throw forbidden("Cannot modify a system flow");
+    const agent = c.get("agent");
+    if (agent.source === "system") {
+      throw forbidden("Cannot modify a system agent");
     }
-    const running = await getRunningExecutionsForPackage(flow.id);
+    const running = await getRunningRunsForPackage(agent.id);
     if (running > 0) {
-      throw conflict("flow_in_use", `${running} execution(s) running for this flow`);
+      throw conflict("agent_in_use", `${running} run(s) running for this agent`);
     }
     return next();
   };

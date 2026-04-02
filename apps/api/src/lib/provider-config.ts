@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { ProviderConfig } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { ProviderSetupGuide } from "@appstrate/core/validation";

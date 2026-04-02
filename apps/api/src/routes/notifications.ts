@@ -1,14 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { z } from "zod";
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getActor } from "../lib/actor.ts";
 import {
   getUnreadNotificationCount,
-  getUnreadCountsByFlow,
+  getUnreadCountsByAgent,
   markNotificationRead,
   markAllNotificationsRead,
-  listUserExecutions,
-  listOrgExecutions,
+  listUserRuns,
+  listOrgRuns,
 } from "../services/state/index.ts";
 
 export function createNotificationsRouter() {
@@ -22,20 +24,20 @@ export function createNotificationsRouter() {
     return c.json({ count });
   });
 
-  // GET /api/notifications/unread-counts-by-flow
-  router.get("/notifications/unread-counts-by-flow", async (c) => {
+  // GET /api/notifications/unread-counts-by-agent
+  router.get("/notifications/unread-counts-by-agent", async (c) => {
     const actor = getActor(c);
     const orgId = c.get("orgId");
-    const counts = await getUnreadCountsByFlow(actor.id, orgId);
+    const counts = await getUnreadCountsByAgent(actor.id, orgId);
     return c.json({ counts });
   });
 
-  // PUT /api/notifications/read/:executionId
-  router.put("/notifications/read/:executionId", async (c) => {
+  // PUT /api/notifications/read/:runId
+  router.put("/notifications/read/:runId", async (c) => {
     const actor = getActor(c);
     const orgId = c.get("orgId");
-    const executionId = c.req.param("executionId");
-    const ok = await markNotificationRead(executionId, actor.id, orgId);
+    const runId = c.req.param("runId");
+    const ok = await markNotificationRead(runId, actor.id, orgId);
     return c.json({ ok });
   });
 
@@ -47,8 +49,8 @@ export function createNotificationsRouter() {
     return c.json({ updated });
   });
 
-  // GET /api/executions (org executions, optionally filtered by ?user=me)
-  router.get("/executions", async (c) => {
+  // GET /api/runs (org runs, optionally filtered by ?user=me)
+  router.get("/runs", async (c) => {
     const actor = getActor(c);
     const orgId = c.get("orgId");
     const limit = z.coerce
@@ -67,11 +69,11 @@ export function createNotificationsRouter() {
     const userFilter = c.req.query("user");
     const endUser = c.get("endUser");
 
-    // End-users always see only their own executions
+    // End-users always see only their own runs
     const result =
       userFilter === "me" || endUser
-        ? await listUserExecutions(actor.id, orgId, { limit, offset })
-        : await listOrgExecutions(orgId, { limit, offset });
+        ? await listUserRuns(actor.id, orgId, { limit, offset })
+        : await listOrgRuns(orgId, { limit, offset });
     return c.json(result);
   });
 

@@ -16,7 +16,7 @@ Database and authentication layer for the Appstrate platform.
 
 ```typescript
 import { db } from "@appstrate/db/client";
-import { packages, executions } from "@appstrate/db/schema";
+import { packages, runs } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 
 const rows = await db.select().from(packages).where(eq(packages.orgId, orgId));

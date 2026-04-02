@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { eq, and, or, isNotNull, isNull, count, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { executions } from "@appstrate/db/schema";
-import { listExecutionsWithFilter } from "./executions.ts";
+import { runs } from "@appstrate/db/schema";
+import { listRunsWithFilter } from "./runs.ts";
 
 // --- Notifications ---
 
@@ -13,92 +15,92 @@ import { listExecutionsWithFilter } from "./executions.ts";
  * We use OR to match either column, since the caller passes the correct actor ID.
  */
 function actorOwnershipFilter(actorId: string): SQL {
-  return or(eq(executions.userId, actorId), eq(executions.endUserId, actorId))!;
+  return or(eq(runs.userId, actorId), eq(runs.endUserId, actorId))!;
 }
 
 export async function markNotificationRead(
-  executionId: string,
+  runId: string,
   actorId: string,
   orgId: string,
 ): Promise<boolean> {
   const updated = await db
-    .update(executions)
+    .update(runs)
     .set({ readAt: new Date() })
     .where(
       and(
-        eq(executions.id, executionId),
-        eq(executions.orgId, orgId),
-        isNotNull(executions.notifiedAt),
+        eq(runs.id, runId),
+        eq(runs.orgId, orgId),
+        isNotNull(runs.notifiedAt),
         actorOrOrgFilter(actorId),
       ),
     )
-    .returning({ id: executions.id });
+    .returning({ id: runs.id });
   return updated.length > 0;
 }
 
 /**
- * Filter: actor-owned OR schedule-triggered org-level executions (no actor).
- * Org-level executions come from schedules bound to org profiles — they have
+ * Filter: actor-owned OR schedule-triggered org-level runs (no actor).
+ * Org-level runs come from schedules bound to org profiles — they have
  * no userId/endUserId but do have a scheduleId. All org members can see them.
  */
 function actorOrOrgFilter(actorId: string): SQL {
   return or(
     actorOwnershipFilter(actorId),
-    and(isNull(executions.userId), isNull(executions.endUserId), isNotNull(executions.scheduleId)),
+    and(isNull(runs.userId), isNull(runs.endUserId), isNotNull(runs.scheduleId)),
   )!;
 }
 
 export async function markAllNotificationsRead(actorId: string, orgId: string): Promise<number> {
   const updated = await db
-    .update(executions)
+    .update(runs)
     .set({ readAt: new Date() })
     .where(
       and(
         actorOrOrgFilter(actorId),
-        eq(executions.orgId, orgId),
-        isNotNull(executions.notifiedAt),
-        isNull(executions.readAt),
+        eq(runs.orgId, orgId),
+        isNotNull(runs.notifiedAt),
+        isNull(runs.readAt),
       ),
     )
-    .returning({ id: executions.id });
+    .returning({ id: runs.id });
   return updated.length;
 }
 
 export async function getUnreadNotificationCount(actorId: string, orgId: string): Promise<number> {
   const [row] = await db
     .select({ count: count() })
-    .from(executions)
+    .from(runs)
     .where(
       and(
         actorOrOrgFilter(actorId),
-        eq(executions.orgId, orgId),
-        isNotNull(executions.notifiedAt),
-        isNull(executions.readAt),
+        eq(runs.orgId, orgId),
+        isNotNull(runs.notifiedAt),
+        isNull(runs.readAt),
       ),
     );
   return row?.count ?? 0;
 }
 
-export async function getUnreadCountsByFlow(
+export async function getUnreadCountsByAgent(
   actorId: string,
   orgId: string,
 ): Promise<Record<string, number>> {
   const rows = await db
     .select({
-      packageId: executions.packageId,
+      packageId: runs.packageId,
       count: count(),
     })
-    .from(executions)
+    .from(runs)
     .where(
       and(
         actorOrOrgFilter(actorId),
-        eq(executions.orgId, orgId),
-        isNotNull(executions.notifiedAt),
-        isNull(executions.readAt),
-        isNotNull(executions.packageId),
+        eq(runs.orgId, orgId),
+        isNotNull(runs.notifiedAt),
+        isNull(runs.readAt),
+        isNotNull(runs.packageId),
       ),
     )
-    .groupBy(executions.packageId);
+    .groupBy(runs.packageId);
 
   const result: Record<string, number> = {};
   for (const row of rows) {
@@ -107,23 +109,19 @@ export async function getUnreadCountsByFlow(
   return result;
 }
 
-export async function listOrgExecutions(
+export async function listOrgRuns(
   orgId: string,
   options: { limit?: number; offset?: number } = {},
 ) {
   const { limit = 20, offset = 0 } = options;
-  return listExecutionsWithFilter(eq(executions.orgId, orgId), limit, offset);
+  return listRunsWithFilter(eq(runs.orgId, orgId), limit, offset);
 }
 
-export async function listUserExecutions(
+export async function listUserRuns(
   actorId: string,
   orgId: string,
   options: { limit?: number; offset?: number } = {},
 ) {
   const { limit = 20, offset = 0 } = options;
-  return listExecutionsWithFilter(
-    and(actorOrOrgFilter(actorId), eq(executions.orgId, orgId))!,
-    limit,
-    offset,
-  );
+  return listRunsWithFilter(and(actorOrOrgFilter(actorId), eq(runs.orgId, orgId))!, limit, offset);
 }

@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
- * Report Tool — Generate a markdown report as part of the execution result.
+ * Report Tool — Generate a markdown report as part of the run result.
  *
  * Each call appends content to the final report (separated by double
  * newlines). The platform renders the accumulated markdown in a dedicated
@@ -18,7 +20,7 @@ export default function (pi: ExtensionAPI) {
     name: "report",
     label: "Report",
     description:
-      "MANDATORY — call at least once before finishing. Appends markdown content to the execution report. " +
+      "MANDATORY — call at least once before finishing. Appends markdown content to the run report. " +
       "Each call appends to the report (separated by newlines). Use markdown formatting for structure.",
     parameters: Type.Object({
       content: Type.String({ description: "Markdown content to append to the report" }),

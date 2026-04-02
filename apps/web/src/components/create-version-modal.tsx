@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
 import type { PackageType } from "@appstrate/core/validation";
@@ -48,7 +50,7 @@ interface CreateVersionModalProps {
 type FormData = { selectedBump: BumpType };
 
 export function CreateVersionModal({ open, onClose, type, packageId }: CreateVersionModalProps) {
-  const { t } = useTranslation("flows");
+  const { t } = useTranslation("agents");
   const { data: versionInfo } = useVersionInfo(type, packageId);
   const createVersion = useCreateVersion(type, packageId);
 

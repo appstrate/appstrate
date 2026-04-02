@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useCallback } from "react";
 import { useStore } from "zustand";
 import { useQuery, useQueryClient } from "@tanstack/react-query";

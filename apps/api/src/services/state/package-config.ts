@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packageConfigs } from "@appstrate/db/schema";
@@ -54,7 +56,7 @@ export async function setPackageConfig(
     });
 }
 
-export async function setFlowOverride(
+export async function setAgentOverride(
   orgId: string,
   packageId: string,
   field: "modelId" | "proxyId" | "orgProfileId",

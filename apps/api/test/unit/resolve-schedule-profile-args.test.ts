@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
 import { resolveScheduleProfileArgs } from "../../src/services/connection-profiles.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
@@ -37,22 +39,22 @@ describe("resolveScheduleProfileArgs", () => {
     });
   });
 
-  it("passes user profile with flowOrgProfileId as org fallback", () => {
+  it("passes user profile with agentOrgProfileId as org fallback", () => {
     const profile = makeProfile({ userId: "user-1" });
-    const result = resolveScheduleProfileArgs(profile, "user-profile-id", "flow-org-profile-id");
+    const result = resolveScheduleProfileArgs(profile, "user-profile-id", "agent-org-profile-id");
 
     expect(result).toEqual({
       defaultUserProfileId: "user-profile-id",
-      orgProfileId: "flow-org-profile-id",
+      orgProfileId: "agent-org-profile-id",
     });
   });
 
-  it("org profile ignores flowOrgProfileId — schedule's own org profile takes priority", () => {
+  it("org profile ignores agentOrgProfileId — schedule's own org profile takes priority", () => {
     const profile = makeProfile({ orgId: "org-1" });
     const result = resolveScheduleProfileArgs(
       profile,
       "schedule-org-profile",
-      "flow-org-profile-id",
+      "agent-org-profile-id",
     );
 
     expect(result).toEqual({
@@ -71,7 +73,7 @@ describe("resolveScheduleProfileArgs", () => {
     });
   });
 
-  it("handles null flowOrgProfileId for user profile", () => {
+  it("handles null agentOrgProfileId for user profile", () => {
     const profile = makeProfile({ userId: "user-1" });
     const result = resolveScheduleProfileArgs(profile, "user-profile-id", null);
 

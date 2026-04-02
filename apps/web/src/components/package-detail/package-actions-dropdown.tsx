@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -37,13 +39,13 @@ interface PackageActionsDropdownProps {
   onDownload?: (version: string) => void;
   onCreateVersion?: () => void;
   onFork?: () => void;
-  // Flow-specific
-  runningExecutions?: number;
-  hasExecutions?: boolean;
+  // Agent-specific
+  runningRuns?: number;
+  hasRuns?: boolean;
   hasMemories?: boolean;
   hasFileInput?: boolean;
-  onDeleteFlow?: () => void;
-  onDeleteExecutions?: () => void;
+  onDeleteAgent?: () => void;
+  onDeleteRuns?: () => void;
   onAddSchedule?: () => void;
   onDeleteMemories?: () => void;
   // Provider-specific
@@ -66,12 +68,12 @@ export function PackageActionsDropdown({
   onDownload,
   onCreateVersion,
   onFork,
-  runningExecutions = 0,
-  hasExecutions,
+  runningRuns = 0,
+  hasRuns,
   hasMemories,
   hasFileInput,
-  onDeleteFlow,
-  onDeleteExecutions,
+  onDeleteAgent,
+  onDeleteRuns,
   onAddSchedule,
   onDeleteMemories,
   hasCredentials,
@@ -79,15 +81,15 @@ export function PackageActionsDropdown({
   canDeletePackage,
   onDeletePackage,
 }: PackageActionsDropdownProps) {
-  const { t } = useTranslation(["flows", "common", "settings"]);
+  const { t } = useTranslation(["agents", "common", "settings"]);
   const navigate = useNavigate();
   const { isAdmin, isMember } = usePermissions();
   const [definitionOpen, setDefinitionOpen] = useState(false);
 
-  const isFlow = type === "flow";
+  const isAgent = type === "agent";
   const isMutable = isAdmin && !isBuiltIn && !isHistoricalVersion && isOwned;
 
-  if (!isFlow && !manifest) return null;
+  if (!isAgent && !manifest) return null;
 
   return (
     <>
@@ -141,8 +143,8 @@ export function PackageActionsDropdown({
             </DropdownMenuItem>
           )}
 
-          {/* ── Flow secondary actions ── */}
-          {isFlow && (
+          {/* ── Agent secondary actions ── */}
+          {isAgent && (
             <>
               <DropdownMenuSeparator />
               {isMember && !hasFileInput && onAddSchedule && (
@@ -151,14 +153,14 @@ export function PackageActionsDropdown({
                   {t("schedule.titleNew")}
                 </DropdownMenuItem>
               )}
-              {isAdmin && hasExecutions && onDeleteExecutions && (
+              {isAdmin && hasRuns && onDeleteRuns && (
                 <DropdownMenuItem
-                  onSelect={onDeleteExecutions}
-                  disabled={runningExecutions > 0}
+                  onSelect={onDeleteRuns}
+                  disabled={runningRuns > 0}
                   className="text-destructive focus:text-destructive"
                 >
                   <Trash2 size={14} />
-                  {t("detail.clearExec")}
+                  {t("detail.clearRuns")}
                 </DropdownMenuItem>
               )}
               {isAdmin && hasMemories && onDeleteMemories && (
@@ -191,17 +193,17 @@ export function PackageActionsDropdown({
           {isAdmin && !isBuiltIn && isOwned && (
             <>
               <DropdownMenuSeparator />
-              {isFlow && onDeleteFlow && (
+              {isAgent && onDeleteAgent && (
                 <DropdownMenuItem
-                  onSelect={onDeleteFlow}
-                  disabled={runningExecutions > 0}
+                  onSelect={onDeleteAgent}
+                  disabled={runningRuns > 0}
                   className="text-destructive focus:text-destructive"
                 >
                   <Trash2 size={14} />
                   {t("btn.delete")}
                 </DropdownMenuItem>
               )}
-              {!isFlow && canDeletePackage && onDeletePackage && (
+              {!isAgent && canDeletePackage && onDeletePackage && (
                 <DropdownMenuItem
                   onSelect={onDeletePackage}
                   className="text-destructive focus:text-destructive"

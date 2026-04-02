@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";

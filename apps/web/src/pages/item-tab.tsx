@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -9,7 +11,7 @@ import type { ItemTabConfig } from "./item-tab-configs";
 import { packageNewPath } from "../lib/package-paths";
 
 const emojiMap: Record<PackageType, string> = {
-  flow: "⚡",
+  agent: "⚡",
   skill: "🧠",
   tool: "🔧",
   provider: "🔌",
@@ -36,7 +38,7 @@ export function ItemTab({
   emptyExtraActions?: ReactNode;
   title?: string;
 }) {
-  const { t } = useTranslation(["settings", "flows", "common"]);
+  const { t } = useTranslation(["settings", "agents", "common"]);
   const { data: rawItems, isLoading } = config.useData();
   const [importOpen, setImportOpen] = useState(false);
 
@@ -49,7 +51,7 @@ export function ItemTab({
     description: item.description,
     type: config.type,
     source: item.source,
-    usedByFlows: item.usedByFlows,
+    usedByAgents: item.usedByAgents,
     statusBadge: badgeMap?.get(item.id),
     actions: actionsMap?.get(item.id),
     iconUrl: iconMap?.get(item.id),
@@ -72,7 +74,7 @@ export function ItemTab({
               {t("nav.import", { ns: "common" })}
             </Button>
             <Link to={packageNewPath(config.type)}>
-              <Button>{t("list.createItem", { ns: "flows", type: typeLabel })}</Button>
+              <Button>{t("list.createItem", { ns: "agents", type: typeLabel })}</Button>
             </Link>
           </>
         }

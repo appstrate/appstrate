@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, test, expect, afterEach } from "bun:test";
 import { z } from "zod";
 import { createEnvGetter } from "../src/env.ts";

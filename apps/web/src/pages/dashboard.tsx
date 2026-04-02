@@ -1,45 +1,47 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../hooks/use-auth";
-import { useFlows } from "../hooks/use-packages";
-import { useUnreadCountsByFlow } from "../hooks/use-notifications";
+import { useAgents } from "../hooks/use-packages";
+import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { useAllSchedules } from "../hooks/use-schedules";
-import { usePaginatedExecutions } from "../hooks/use-paginated-executions";
+import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
 import { ScheduleCard } from "../components/schedule-card";
-import { ExecutionList } from "../components/execution-list";
+import { RunList } from "../components/run-list";
 
 export function DashboardPage() {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const { profile, user } = useAuth();
   const {
-    data: execData,
-    isLoading: execLoading,
-    error: execError,
-  } = usePaginatedExecutions({
+    data: runsData,
+    isLoading: runsLoading,
+    error: runsError,
+  } = usePaginatedRuns({
     limit: 15,
     offset: 0,
   });
-  const { data: flows, isLoading: flowsLoading, error: flowsError } = useFlows();
-  const { data: unreadCounts } = useUnreadCountsByFlow();
+  const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents();
+  const { data: unreadCounts } = useUnreadCountsByAgent();
   const { data: schedules } = useAllSchedules();
 
-  const isLoading = execLoading || flowsLoading;
-  const error = execError || flowsError;
+  const isLoading = runsLoading || agentsLoading;
+  const error = runsError || agentsError;
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
-  const executions = execData?.executions ?? [];
+  const runs = runsData?.runs ?? [];
 
-  // No executions → redirect to flows page
-  if (executions.length === 0) {
-    return <Navigate to="/flows" replace />;
+  // No runs → redirect to agents page
+  if (runs.length === 0) {
+    return <Navigate to="/agents" replace />;
   }
 
-  // Build flow lookup map
-  const flowMap = new Map<
+  // Build agent lookup map
+  const agentMap = new Map<
     string,
     {
       displayName: string;
@@ -47,33 +49,33 @@ export function DashboardPage() {
       source?: string;
       keywords?: string[];
       providerIds?: string[];
-      runningExecutions?: number;
+      runningRuns?: number;
     }
   >();
-  if (flows) {
-    for (const f of flows) {
-      flowMap.set(f.id, {
+  if (agents) {
+    for (const f of agents) {
+      agentMap.set(f.id, {
         displayName: f.displayName,
         description: f.description,
         source: f.source,
         keywords: f.keywords,
         providerIds: f.dependencies.providers,
-        runningExecutions: f.runningExecutions,
+        runningRuns: f.runningRuns,
       });
     }
   }
 
-  // Deduplicate executions by packageId (keep first = most recent), limit to 8
-  // Only include flows that still exist (flowMap lookup)
-  const recentFlowIds: string[] = [];
+  // Deduplicate runs by packageId (keep first = most recent), limit to 8
+  // Only include agents that still exist (agentMap lookup)
+  const recentAgentIds: string[] = [];
   const seen = new Set<string>();
-  for (const exec of executions) {
+  for (const exec of runs) {
     if (!exec.packageId || seen.has(exec.packageId)) continue;
     seen.add(exec.packageId);
-    if (flowMap.has(exec.packageId)) {
-      recentFlowIds.push(exec.packageId);
+    if (agentMap.has(exec.packageId)) {
+      recentAgentIds.push(exec.packageId);
     }
-    if (recentFlowIds.length >= 8) break;
+    if (recentAgentIds.length >= 8) break;
   }
 
   // Upcoming schedules: active, with nextRunAt, sorted by soonest first
@@ -108,42 +110,42 @@ export function DashboardPage() {
               <ScheduleCard
                 key={sched.id}
                 schedule={sched}
-                flowName={flowMap.get(sched.packageId)?.displayName}
+                agentName={agentMap.get(sched.packageId)?.displayName}
               />
             ))}
           </div>
         </section>
       )}
 
-      {/* Recent flows (horizontal scroll) */}
-      {recentFlowIds.length > 0 && (
+      {/* Recent agents (horizontal scroll) */}
+      {recentAgentIds.length > 0 && (
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-muted-foreground text-sm font-medium">
-              {t("dashboard.recentFlows")}
+              {t("dashboard.recentAgents")}
             </h2>
             <Link
-              to="/flows"
+              to="/agents"
               className="text-muted-foreground hover:text-foreground text-xs transition-colors"
             >
               {t("dashboard.seeAll")}
             </Link>
           </div>
           <div className="flex items-stretch gap-3 overflow-x-auto pb-2">
-            {recentFlowIds.map((flowId) => {
-              const flow = flowMap.get(flowId);
+            {recentAgentIds.map((agentId) => {
+              const agent = agentMap.get(agentId);
               return (
-                <div key={flowId} className="flex max-w-[300px] min-w-[260px] shrink-0">
+                <div key={agentId} className="flex max-w-[300px] min-w-[260px] shrink-0">
                   <PackageCard
-                    id={flowId}
-                    displayName={flow?.displayName ?? flowId}
-                    description={flow?.description}
-                    type="flow"
-                    source={flow?.source as "system" | "local" | undefined}
-                    runningExecutions={flow?.runningExecutions}
-                    keywords={flow?.keywords}
-                    providerIds={flow?.providerIds}
-                    unreadCount={unreadCounts?.[flowId]}
+                    id={agentId}
+                    displayName={agent?.displayName ?? agentId}
+                    description={agent?.description}
+                    type="agent"
+                    source={agent?.source as "system" | "local" | undefined}
+                    runningRuns={agent?.runningRuns}
+                    keywords={agent?.keywords}
+                    providerIds={agent?.providerIds}
+                    unreadCount={unreadCounts?.[agentId]}
                   />
                 </div>
               );
@@ -152,20 +154,18 @@ export function DashboardPage() {
         </section>
       )}
 
-      {/* Recent executions */}
+      {/* Recent runs */}
       <section>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-muted-foreground text-sm font-medium">
-            {t("dashboard.recentExecutions")}
-          </h2>
+          <h2 className="text-muted-foreground text-sm font-medium">{t("dashboard.recentRuns")}</h2>
           <Link
-            to="/executions"
+            to="/runs"
             className="text-muted-foreground hover:text-foreground text-xs transition-colors"
           >
             {t("dashboard.seeAll")}
           </Link>
         </div>
-        <ExecutionList pageSize={7} paginated={false} />
+        <RunList pageSize={7} paginated={false} />
       </section>
     </div>
   );

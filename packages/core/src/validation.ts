@@ -4,7 +4,7 @@
 import { z } from "zod";
 import { SLUG_PATTERN } from "./naming.ts";
 import {
-  flowManifestSchema as afpsFlowManifestSchema,
+  agentManifestSchema as afpsAgentManifestSchema,
   skillManifestSchema as afpsSkillManifestSchema,
   toolManifestSchema as afpsToolManifestSchema,
   providerManifestSchema as afpsProviderManifestSchema,
@@ -20,15 +20,15 @@ import {
 export const scopedNameRegex = new RegExp(`^@${SLUG_PATTERN}\\/${SLUG_PATTERN}$`);
 
 /** Zod enum for the four supported AFPS package types. */
-export const packageTypeEnum = z.enum(["flow", "skill", "tool", "provider"]);
-/** Union type of supported package types: "flow" | "skill" | "tool" | "provider". */
+export const packageTypeEnum = z.enum(["agent", "skill", "tool", "provider"]);
+/** Union type of supported package types: "agent" | "skill" | "tool" | "provider". */
 export type PackageType = z.infer<typeof packageTypeEnum>;
 /** Array of all valid package type strings. */
 export const PACKAGE_TYPES = packageTypeEnum.options;
 
 /** AFPS JSON Schema URLs by package type — for the `$schema` field in manifest.json. */
 export const AFPS_SCHEMA_URLS: Record<PackageType, string> = {
-  flow: "https://afps.appstrate.dev/schema/v1/flow.schema.json",
+  agent: "https://afps.appstrate.dev/schema/v1/agent.schema.json",
   skill: "https://afps.appstrate.dev/schema/v1/skill.schema.json",
   tool: "https://afps.appstrate.dev/schema/v1/tool.schema.json",
   provider: "https://afps.appstrate.dev/schema/v1/provider.schema.json",
@@ -57,11 +57,11 @@ export const manifestSchema = z.looseObject({
 export type Manifest = z.infer<typeof manifestSchema>;
 
 // ─────────────────────────────────────────────
-// Flow manifest schema — extends AFPS with core enhancements
+// Agent manifest schema — extends AFPS with core enhancements
 // ─────────────────────────────────────────────
 
-/** Zod schema for flow manifests — extends AFPS with relaxed optional metadata for local drafts. */
-export const flowManifestSchema = afpsFlowManifestSchema.extend({
+/** Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts. */
+export const agentManifestSchema = afpsAgentManifestSchema.extend({
   // All standard fields (name, version, schemaVersion, dependencies,
   // displayName, providersConfiguration, input/output/config, timeout) inherited from AFPS.
   // Override metadata fields with .catch(undefined) for tolerant local editing.
@@ -73,8 +73,8 @@ export const flowManifestSchema = afpsFlowManifestSchema.extend({
   repository: z.string().optional(),
 });
 
-/** Inferred type from the flow manifest schema. */
-export type FlowManifest = z.infer<typeof flowManifestSchema>;
+/** Inferred type from the agent manifest schema. */
+export type AgentManifest = z.infer<typeof agentManifestSchema>;
 
 // ─────────────────────────────────────────────
 // Skill manifest schema — extends AFPS with core enhancements
@@ -274,14 +274,14 @@ export type ValidateManifestResult =
   | {
       valid: true;
       errors: [];
-      manifest: Manifest | FlowManifest | SkillManifest | ToolManifest | ProviderManifest;
+      manifest: Manifest | AgentManifest | SkillManifest | ToolManifest | ProviderManifest;
     }
   | { valid: false; errors: string[]; manifest?: undefined };
 
 function parseWithSchema(
   schema:
     | typeof manifestSchema
-    | typeof flowManifestSchema
+    | typeof agentManifestSchema
     | typeof skillManifestSchema
     | typeof toolManifestSchema
     | typeof providerManifestSchema,
@@ -297,7 +297,7 @@ function parseWithSchema(
 
 /**
  * Validate a raw manifest object by dispatching to the appropriate type-specific schema.
- * Determines the schema from the `type` field (flow, skill, tool, provider) and validates accordingly.
+ * Determines the schema from the `type` field (agent, skill, tool, provider) and validates accordingly.
  * @param raw - The raw manifest object to validate (typically parsed from JSON)
  * @returns Validation result with parsed manifest on success, or error messages on failure
  */
@@ -305,8 +305,8 @@ export function validateManifest(raw: unknown): ValidateManifestResult {
   if (raw && typeof raw === "object" && "type" in raw) {
     const type = (raw as Record<string, unknown>).type;
     const schema =
-      type === "flow"
-        ? flowManifestSchema
+      type === "agent"
+        ? agentManifestSchema
         : type === "skill"
           ? skillManifestSchema
           : type === "provider"
@@ -341,7 +341,7 @@ export function extractSkillMeta(content: string): {
   warnings: string[];
 } {
   const warnings: string[] = [];
-  const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
+  const fmMatch = content.match(/^---[^\S\n]*\n([\s\S]*?)\n---/);
   if (!fmMatch) {
     warnings.push("No YAML frontmatter detected (expected --- ... --- block)");
     return { name: "", description: "", warnings };
@@ -372,7 +372,13 @@ export interface ToolSourceValidationResult {
 }
 
 function stripLineComments(source: string): string {
-  return source.replace(/\/\/.*$/gm, "");
+  return source
+    .split("\n")
+    .map((line) => {
+      const idx = line.indexOf("//");
+      return idx === -1 ? line : line.slice(0, idx);
+    })
+    .join("\n");
 }
 
 function countParams(paramStr: string): number {
@@ -439,7 +445,7 @@ export function validateToolSource(source: string): ToolSourceValidationResult {
   }
 
   // Check for empty tool name in registerTool({ name: "" })
-  if (/registerTool\s*\(\s*\{[^}]*name\s*:\s*["']\s*["']/.test(source)) {
+  if (/registerTool\s*\(\s*\{[^}]{0,200}name\s*:\s*["']\s*["']/.test(source)) {
     errors.push(
       "Tool `name` must not be empty in `registerTool()`. " +
         'Example: pi.registerTool({ name: "my_tool", ... })',
@@ -447,7 +453,7 @@ export function validateToolSource(source: string): ToolSourceValidationResult {
   }
 
   const cleaned = stripLineComments(source);
-  const executeMatches = [...cleaned.matchAll(/execute\s*\(([^)]*)\)/g)];
+  const executeMatches = [...cleaned.matchAll(/execute\s*\(([^)]{0,500})\)/g)];
   for (const match of executeMatches) {
     const paramStr = match[1]!;
     const paramCount = countParams(paramStr);

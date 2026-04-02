@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { getEnv } from "@appstrate/env";
 import type { ContainerOrchestrator } from "./interface.ts";
 import type {
@@ -21,7 +23,7 @@ import {
 class DockerWorkloadHandle implements WorkloadHandle {
   constructor(
     readonly id: string,
-    readonly executionId: string,
+    readonly runId: string,
     readonly role: string,
   ) {}
 }
@@ -59,8 +61,8 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     return { workloads: containers, isolationBoundaries: networks };
   }
 
-  async createIsolationBoundary(executionId: string): Promise<IsolationBoundary> {
-    const name = `appstrate-exec-${executionId}`;
+  async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
+    const name = `appstrate-exec-${runId}`;
     const id = await docker.createNetwork(name, { internal: true });
     return { id, name };
   }
@@ -70,7 +72,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   }
 
   async createSidecar(
-    executionId: string,
+    runId: string,
     boundary: IsolationBoundary,
     config: SidecarConfig,
   ): Promise<WorkloadHandle> {
@@ -83,7 +85,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
         : config.platformApiUrl;
 
     const resolvedConfig = {
-      executionToken: config.executionToken,
+      runToken: config.runToken,
       platformApiUrl: resolvedPlatformApiUrl,
       proxyUrl: config.proxyUrl,
       llm: config.llm,
@@ -91,7 +93,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
 
     // 1. Try pool (fast path ~50-130ms)
     const pooled = await sidecarPool.acquireSidecar(
-      executionId,
+      runId,
       boundary.id,
       resolvedConfig,
       platformNetwork,
@@ -101,13 +103,13 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       if (this.egressNetworkId) {
         await docker.connectContainerToNetwork(this.egressNetworkId, pooled);
       }
-      return new DockerWorkloadHandle(pooled, executionId, "sidecar");
+      return new DockerWorkloadHandle(pooled, runId, "sidecar");
     }
 
     // 2. Fallback: fresh creation (~500-1500ms)
     const sidecarEnv: Record<string, string> = { PORT: "8080" };
-    if (resolvedConfig.executionToken) {
-      sidecarEnv.EXECUTION_TOKEN = resolvedConfig.executionToken;
+    if (resolvedConfig.runToken) {
+      sidecarEnv.RUN_TOKEN = resolvedConfig.runToken;
       sidecarEnv.PLATFORM_API_URL = resolvedConfig.platformApiUrl;
     }
     if (resolvedConfig.proxyUrl) {
@@ -120,8 +122,8 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     }
 
     // Create sidecar on egress network (primary) so it has DNS + internet.
-    // Then connect to execution network (internal) with "sidecar" alias for agent DNS.
-    const containerId = await docker.createContainer(executionId, sidecarEnv, {
+    // Then connect to run network (internal) with "sidecar" alias for agent DNS.
+    const containerId = await docker.createContainer(runId, sidecarEnv, {
       image: getSidecarImage(),
       adapterName: "sidecar",
       memory: SIDECAR_MEMORY_BYTES,
@@ -132,7 +134,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       exposedPorts: SIDECAR_EXPOSED_PORTS,
     });
 
-    // Connect to execution network (agent reaches sidecar via "sidecar" DNS alias)
+    // Connect to run network (agent reaches sidecar via "sidecar" DNS alias)
     await docker.connectContainerToNetwork(boundary.id, containerId, ["sidecar"]);
 
     if (platformNetwork) {
@@ -141,11 +143,11 @@ export class DockerOrchestrator implements ContainerOrchestrator {
 
     await startSidecarAndHealthCheck(containerId);
 
-    return new DockerWorkloadHandle(containerId, executionId, "sidecar");
+    return new DockerWorkloadHandle(containerId, runId, "sidecar");
   }
 
   async createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle> {
-    const containerId = await docker.createContainer(spec.executionId, spec.env, {
+    const containerId = await docker.createContainer(spec.runId, spec.env, {
       image: spec.image,
       adapterName: spec.role,
       memory: spec.resources.memoryBytes,
@@ -159,7 +161,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       await docker.injectFiles(containerId, spec.files.items, spec.files.targetDir);
     }
 
-    return new DockerWorkloadHandle(containerId, spec.executionId, spec.role);
+    return new DockerWorkloadHandle(containerId, spec.runId, spec.role);
   }
 
   async startWorkload(handle: WorkloadHandle): Promise<void> {
@@ -182,7 +184,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     yield* docker.streamLogs(handle.id, signal);
   }
 
-  async stopByExecutionId(executionId: string, timeoutSeconds?: number): Promise<StopResult> {
-    return docker.stopContainersByExecution(executionId, timeoutSeconds);
+  async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
+    return docker.stopContainersByRun(runId, timeoutSeconds);
   }
 }

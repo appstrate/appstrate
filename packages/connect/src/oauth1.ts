@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * OAuth 1.0a (3-legged) flow implementation.
  * Uses HMAC-SHA1 signing per RFC 5849 — no external dependencies.

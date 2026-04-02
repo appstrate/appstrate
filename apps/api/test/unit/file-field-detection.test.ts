@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Tests that file field detection and validation use standard JSON Schema
  * conventions (format:"uri" + contentMediaType) and never rely on type:"file".
@@ -150,15 +152,35 @@ describe("validateFileInputs — reads from fileConstraints", () => {
   });
 
   it("accepts when required file is present", () => {
-    const files = [{ fieldName: "doc", name: "test.pdf", type: "application/pdf", size: 100, buffer: Buffer.from("") }];
+    const files = [
+      {
+        fieldName: "doc",
+        name: "test.pdf",
+        type: "application/pdf",
+        size: 100,
+        buffer: Buffer.from(""),
+      },
+    ];
     const result = validateFileInputs(files, schemaWithSingleFile);
     expect(result.valid).toBe(true);
   });
 
   it("rejects multiple files for single-file field", () => {
     const files = [
-      { fieldName: "doc", name: "a.pdf", type: "application/pdf", size: 100, buffer: Buffer.from("") },
-      { fieldName: "doc", name: "b.pdf", type: "application/pdf", size: 100, buffer: Buffer.from("") },
+      {
+        fieldName: "doc",
+        name: "a.pdf",
+        type: "application/pdf",
+        size: 100,
+        buffer: Buffer.from(""),
+      },
+      {
+        fieldName: "doc",
+        name: "b.pdf",
+        type: "application/pdf",
+        size: 100,
+        buffer: Buffer.from(""),
+      },
     ];
     const result = validateFileInputs(files, schemaWithSingleFile);
     expect(result.valid).toBe(false);
@@ -167,9 +189,27 @@ describe("validateFileInputs — reads from fileConstraints", () => {
 
   it("enforces maxItems from schema as maxFiles for array fields", () => {
     const files = [
-      { fieldName: "docs", name: "a.pdf", type: "application/pdf", size: 100, buffer: Buffer.from("") },
-      { fieldName: "docs", name: "b.pdf", type: "application/pdf", size: 100, buffer: Buffer.from("") },
-      { fieldName: "docs", name: "c.pdf", type: "application/pdf", size: 100, buffer: Buffer.from("") },
+      {
+        fieldName: "docs",
+        name: "a.pdf",
+        type: "application/pdf",
+        size: 100,
+        buffer: Buffer.from(""),
+      },
+      {
+        fieldName: "docs",
+        name: "b.pdf",
+        type: "application/pdf",
+        size: 100,
+        buffer: Buffer.from(""),
+      },
+      {
+        fieldName: "docs",
+        name: "c.pdf",
+        type: "application/pdf",
+        size: 100,
+        buffer: Buffer.from(""),
+      },
     ];
     const result = validateFileInputs(files, schemaWithMultipleFiles);
     expect(result.valid).toBe(false);
@@ -177,7 +217,15 @@ describe("validateFileInputs — reads from fileConstraints", () => {
   });
 
   it("reads accept constraint from fileConstraints param", () => {
-    const files = [{ fieldName: "doc", name: "test.txt", type: "text/plain", size: 100, buffer: Buffer.from("") }];
+    const files = [
+      {
+        fieldName: "doc",
+        name: "test.txt",
+        type: "text/plain",
+        size: 100,
+        buffer: Buffer.from(""),
+      },
+    ];
     const result = validateFileInputs(files, schemaWithSingleFile, {
       doc: { accept: ".pdf,.docx" },
     });
@@ -186,7 +234,15 @@ describe("validateFileInputs — reads from fileConstraints", () => {
   });
 
   it("reads maxSize constraint from fileConstraints param", () => {
-    const files = [{ fieldName: "doc", name: "big.pdf", type: "application/pdf", size: 20_000_000, buffer: Buffer.from("") }];
+    const files = [
+      {
+        fieldName: "doc",
+        name: "big.pdf",
+        type: "application/pdf",
+        size: 20_000_000,
+        buffer: Buffer.from(""),
+      },
+    ];
     const result = validateFileInputs(files, schemaWithSingleFile, {
       doc: { maxSize: 10_485_760 },
     });
@@ -195,7 +251,15 @@ describe("validateFileInputs — reads from fileConstraints", () => {
   });
 
   it("passes when fileConstraints are absent (no restrictions)", () => {
-    const files = [{ fieldName: "doc", name: "anything.xyz", type: "application/xyz", size: 999_999_999, buffer: Buffer.from("") }];
+    const files = [
+      {
+        fieldName: "doc",
+        name: "anything.xyz",
+        type: "application/xyz",
+        size: 999_999_999,
+        buffer: Buffer.from(""),
+      },
+    ];
     const result = validateFileInputs(files, schemaWithSingleFile);
     expect(result.valid).toBe(true);
   });

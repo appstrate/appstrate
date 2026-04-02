@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import Ajv from "ajv";
 import {
   isFileField,
@@ -7,7 +9,7 @@ import {
 } from "@appstrate/core/form";
 import type { UploadedFile } from "./adapters/types.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
-import { normalizeConfigForValidation } from "../lib/flow-readiness.ts";
+import { normalizeConfigForValidation } from "../lib/agent-readiness-utils.ts";
 
 // --- AJV runtime validation ---
 
@@ -207,7 +209,7 @@ export function validateOutput(
   return { valid: false, errors };
 }
 
-export function validateFlowContent(
+export function validateAgentContent(
   prompt: string,
   skills: { id: string; name?: string; description: string; content: string }[],
 ): { valid: boolean; errors: string[] } {

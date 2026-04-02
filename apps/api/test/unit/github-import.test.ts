@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, it } from "bun:test";
 
 import { GithubImportError, parseGithubUrl } from "../../src/services/github-import";
@@ -22,12 +24,14 @@ describe("parseGithubUrl", () => {
     });
 
     it("parses URL with tree/branch/path", () => {
-      const result = parseGithubUrl("https://github.com/acme/my-repo/tree/main/src/flows/my-flow");
+      const result = parseGithubUrl(
+        "https://github.com/acme/my-repo/tree/main/src/agents/my-agent",
+      );
       expect(result).toEqual({
         owner: "acme",
         repo: "my-repo",
         ref: "main",
-        path: "src/flows/my-flow",
+        path: "src/agents/my-agent",
       });
     });
 
@@ -51,9 +55,7 @@ describe("parseGithubUrl", () => {
 
   describe("blob URLs", () => {
     it("parses blob URL with branch and file path", () => {
-      const result = parseGithubUrl(
-        "https://github.com/acme/my-repo/blob/main/src/index.ts",
-      );
+      const result = parseGithubUrl("https://github.com/acme/my-repo/blob/main/src/index.ts");
       expect(result).toEqual({
         owner: "acme",
         repo: "my-repo",
@@ -66,9 +68,7 @@ describe("parseGithubUrl", () => {
   describe("ref variations", () => {
     it("parses URL with feature branch containing slashes in ref segment", () => {
       // Note: the parser treats segment[3] as the ref, so only the first segment after tree/ is the ref
-      const result = parseGithubUrl(
-        "https://github.com/acme/my-repo/tree/v1.0.0/src",
-      );
+      const result = parseGithubUrl("https://github.com/acme/my-repo/tree/v1.0.0/src");
       expect(result).toEqual({
         owner: "acme",
         repo: "my-repo",
@@ -83,9 +83,7 @@ describe("parseGithubUrl", () => {
     });
 
     it("parses URL with commit SHA ref", () => {
-      const result = parseGithubUrl(
-        "https://github.com/acme/my-repo/tree/abc1234/src",
-      );
+      const result = parseGithubUrl("https://github.com/acme/my-repo/tree/abc1234/src");
       expect(result).toEqual({
         owner: "acme",
         repo: "my-repo",

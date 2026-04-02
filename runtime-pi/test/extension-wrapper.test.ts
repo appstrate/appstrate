@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { wrapExtensionFactory } from "../extension-wrapper.ts";
 
@@ -42,7 +44,9 @@ describe("wrapExtensionFactory", () => {
 
   it("passes through a correct 3-param execute and its return value", async () => {
     const expected = { content: [{ type: "text", text: "ok" }] };
-    const factory = makeFactory(async (_id: string, _params: unknown, _signal: unknown) => expected);
+    const factory = makeFactory(
+      async (_id: string, _params: unknown, _signal: unknown) => expected,
+    );
 
     const wrapped = wrapExtensionFactory(factory as any, "ext-1", emitSpy);
     const pi = createMockPi();
@@ -124,12 +128,9 @@ describe("wrapExtensionFactory", () => {
   });
 
   it("includes tool name in error result", async () => {
-    const factory = makeFactory(
-      async () => {
-        throw new Error("fail");
-      },
-      "my_special_tool",
-    );
+    const factory = makeFactory(async () => {
+      throw new Error("fail");
+    }, "my_special_tool");
 
     const wrapped = wrapExtensionFactory(factory as any, "ext-name", emitSpy);
     const pi = createMockPi();

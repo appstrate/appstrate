@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Add Memory Tool — Save a discovery or learning as a long-term memory.
  *
- * Memories persist across all executions and are shared across
- * all users of this flow. Use this for insights worth remembering.
+ * Memories persist across all runs and are shared across
+ * all users of this agent. Use this for insights worth remembering.
  */
 
 import { Type } from "@mariozechner/pi-ai";
@@ -17,8 +19,8 @@ export default function (pi: ExtensionAPI) {
     name: "add_memory",
     label: "Add Memory",
     description:
-      "Save a discovery or learning as a long-term memory. Memories persist across all executions and are shared " +
-      "across all users of this flow. Use this for insights worth remembering " +
+      "Save a discovery or learning as a long-term memory. Memories persist across all runs and are shared " +
+      "across all users of this agent. Use this for insights worth remembering " +
       "(e.g. 'Gmail API paginates at 100 results', 'User prefers CSV format').",
     parameters: Type.Object({
       content: Type.String({ description: "Memory text to save (max 2000 characters)" }),

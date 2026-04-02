@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -124,7 +126,7 @@ export function WebhooksPage() {
                   </div>
                   <p className="text-muted-foreground font-mono text-xs">{wh.events.join(", ")}</p>
                   <p className="text-muted-foreground mt-1 text-xs">
-                    {wh.packageId || t("settings:webhooks.allFlows")}
+                    {wh.packageId || t("settings:webhooks.allAgents")}
                     {" · "}
                     {t("settings:webhooks.payloadMode")}:{" "}
                     {wh.payloadMode === "full"

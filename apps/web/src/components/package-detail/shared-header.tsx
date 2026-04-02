@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
@@ -7,7 +9,7 @@ import { InlineMarkdown } from "../markdown";
 import { PageHeader } from "../page-header";
 
 const emojiMap: Record<PackageType, string> = {
-  flow: "⚡",
+  agent: "⚡",
   skill: "🧠",
   tool: "🔧",
   provider: "🔌",
@@ -41,11 +43,11 @@ export function SharedHeader({
   actionsLeft?: React.ReactNode;
   actionsRight?: React.ReactNode;
 }) {
-  const { t } = useTranslation(["flows", "settings", "common"]);
+  const { t } = useTranslation(["agents", "settings", "common"]);
 
   const breadcrumbPath = packageListPath(detail.type);
   const breadcrumbLabel =
-    detail.type === "flow"
+    detail.type === "agent"
       ? t("detail.breadcrumb")
       : t(`packages.type.${detail.type}s`, { ns: "settings" });
 

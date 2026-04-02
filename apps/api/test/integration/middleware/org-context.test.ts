@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -19,8 +21,8 @@ describe("org-context middleware", () => {
   });
 
   it("sets orgId when valid X-Org-Id header provided", async () => {
-    // Use a route that requires org context (e.g., flows list)
-    const res = await app.request("/api/flows", {
+    // Use a route that requires org context (e.g., agents list)
+    const res = await app.request("/api/agents", {
       headers: authHeaders(ctx),
     });
     // Should not get a 400 about missing X-Org-Id
@@ -28,7 +30,7 @@ describe("org-context middleware", () => {
   });
 
   it("returns 400 when X-Org-Id header is missing", async () => {
-    const res = await app.request("/api/flows", {
+    const res = await app.request("/api/agents", {
       headers: { Cookie: ctx.cookie },
     });
     expect(res.status).toBe(400);
@@ -41,7 +43,7 @@ describe("org-context middleware", () => {
     // Create a different user who is NOT a member of ctx.org
     const otherUser = await createTestUser();
 
-    const res = await app.request("/api/flows", {
+    const res = await app.request("/api/agents", {
       headers: {
         Cookie: otherUser.cookie,
         "X-Org-Id": ctx.orgId,
@@ -54,7 +56,7 @@ describe("org-context middleware", () => {
   });
 
   it("returns 403 with non-existent org ID", async () => {
-    const res = await app.request("/api/flows", {
+    const res = await app.request("/api/agents", {
       headers: {
         Cookie: ctx.cookie,
         "X-Org-Id": "00000000-0000-0000-0000-000000000000",
@@ -80,7 +82,7 @@ describe("org-context middleware", () => {
   });
 
   it("returns 401 without any authentication", async () => {
-    const res = await app.request("/api/flows");
+    const res = await app.request("/api/agents");
     expect(res.status).toBe(401);
   });
 });

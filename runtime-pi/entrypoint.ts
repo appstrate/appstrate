@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
@@ -93,22 +95,22 @@ async function loadExtensionsFromDir(dir: string, label: string) {
 }
 
 /**
- * Load tools declared in the flow manifest from the extracted flow package.
+ * Load tools declared in the agent manifest from the extracted agent package.
  * Reads manifest.json to get tool IDs, then loads each from tools/{toolId}/.
  * Also installs TOOL.md to .pi/tools/{toolId}/TOOL.md.
  */
-async function loadToolsFromFlowPackage(packageDir: string, label: string) {
-  const flowManifestPath = path.join(packageDir, "manifest.json");
-  if (!(await exists(flowManifestPath))) return;
+async function loadToolsFromAgentPackage(packageDir: string, label: string) {
+  const agentManifestPath = path.join(packageDir, "manifest.json");
+  if (!(await exists(agentManifestPath))) return;
 
-  let flowManifest: Record<string, unknown>;
+  let agentManifest: Record<string, unknown>;
   try {
-    flowManifest = JSON.parse(await fs.readFile(flowManifestPath, "utf-8"));
+    agentManifest = JSON.parse(await fs.readFile(agentManifestPath, "utf-8"));
   } catch {
     return;
   }
 
-  const deps = (flowManifest.dependencies ?? {}) as Record<string, unknown>;
+  const deps = (agentManifest.dependencies ?? {}) as Record<string, unknown>;
   const toolDeps = (deps.tools ?? {}) as Record<string, string>;
   const toolIds = Object.keys(toolDeps);
 
@@ -141,15 +143,15 @@ async function loadToolsFromFlowPackage(packageDir: string, label: string) {
   }
 }
 
-// --- 2a. Phase A: git init + extract flow package in parallel ---
+// --- 2a. Phase A: git init + extract agent package in parallel ---
 
-const packagePath = path.join(WORKSPACE, "flow-package.afps");
+const packagePath = path.join(WORKSPACE, "agent-package.afps");
 const hasPackage = await exists(packagePath);
 
 await Promise.all([
   initGitWorkspace(),
   hasPackage
-    ? run(["unzip", "-qo", packagePath, "-d", `${WORKSPACE}/.flow-package`])
+    ? run(["unzip", "-qo", packagePath, "-d", `${WORKSPACE}/.agent-package`])
     : Promise.resolve(),
 ]);
 
@@ -159,7 +161,7 @@ if (hasPackage) {
   try {
     // Install skills and provider docs in parallel
     const installDir = async (folder: string) => {
-      const src = path.join(WORKSPACE, ".flow-package", folder);
+      const src = path.join(WORKSPACE, ".agent-package", folder);
       if (await exists(src)) {
         const dest = path.join(WORKSPACE, ".pi", folder);
         await fs.mkdir(dest, { recursive: true });
@@ -168,17 +170,17 @@ if (hasPackage) {
     };
     await Promise.all([installDir("skills"), installDir("providers")]);
 
-    // Load flow-package tools (reads manifest to know which tools to load)
-    await loadToolsFromFlowPackage(path.join(WORKSPACE, ".flow-package"), "flow-package");
+    // Load agent-package tools (reads manifest to know which tools to load)
+    await loadToolsFromAgentPackage(path.join(WORKSPACE, ".agent-package"), "agent-package");
 
     // Cleanup extracted package (fire-and-forget)
-    run(["rm", "-rf", `${WORKSPACE}/.flow-package`, packagePath]).catch(() => {});
+    run(["rm", "-rf", `${WORKSPACE}/.agent-package`, packagePath]).catch(() => {});
   } catch (err) {
-    emit({ type: "error", message: `Failed to process flow package: ${err}` });
+    emit({ type: "error", message: `Failed to process agent package: ${err}` });
   }
 }
 
-// Load runtime built-in extensions (skip any already loaded from flow package)
+// Load runtime built-in extensions (skip any already loaded from agent package)
 await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
 // --- 3. Setup auth + model ---
@@ -221,17 +223,19 @@ const model: Model<Api> = {
   provider,
   baseUrl: process.env.MODEL_BASE_URL || "",
   reasoning: process.env.MODEL_REASONING === "true",
-  input: process.env.MODEL_INPUT ? JSON.parse(process.env.MODEL_INPUT) as string[] : ["text"],
-  cost: process.env.MODEL_COST ? JSON.parse(process.env.MODEL_COST) : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  input: process.env.MODEL_INPUT ? (JSON.parse(process.env.MODEL_INPUT) as string[]) : ["text"],
+  cost: process.env.MODEL_COST
+    ? JSON.parse(process.env.MODEL_COST)
+    : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   contextWindow: Number(process.env.MODEL_CONTEXT_WINDOW) || 128000,
   maxTokens: Number(process.env.MODEL_MAX_TOKENS) || 16384,
 };
 
 // --- 4. Build resource loader ---
 
-const systemPrompt = process.env.FLOW_PROMPT;
+const systemPrompt = process.env.AGENT_PROMPT;
 if (!systemPrompt) {
-  die("FLOW_PROMPT environment variable is required");
+  die("AGENT_PROMPT environment variable is required");
 }
 
 const resourceLoader = new DefaultResourceLoader({
@@ -345,7 +349,7 @@ try {
 
       default:
         break;
-}
+    }
   });
 
   // --- 7. Run the prompt ---

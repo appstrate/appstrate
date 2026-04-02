@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { RenderedEmail, SupportedLocale } from "../types.ts";
 import { escapeHtml } from "./layout.ts";
 

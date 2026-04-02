@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Idempotency middleware — ensures POST requests with the same `Idempotency-Key`
  * produce the same response without re-executing.

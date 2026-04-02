@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 // @appstrate/core/form — Pure JSON Schema form utilities
 // ---------------------------------------------------------------------------
-// Transforms JSON Schema (as used in AFPS flow manifests) into form field
+// Transforms JSON Schema (as used in AFPS agent manifests) into form field
 // descriptors, initializes values, builds typed payloads, and validates
 // client-side. No React, no DOM — pure functions only.
 // ---------------------------------------------------------------------------

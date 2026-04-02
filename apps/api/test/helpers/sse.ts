@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * SSE (Server-Sent Events) stream parsing helpers for integration tests.
  *
@@ -16,9 +18,7 @@ export interface SSEEvent {
  * Reads chunks from the stream, splits by double-newline delimiters,
  * and extracts `event:` and `data:` fields from each SSE frame.
  */
-export async function* parseSSEStream(
-  body: ReadableStream<Uint8Array>,
-): AsyncGenerator<SSEEvent> {
+export async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGenerator<SSEEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -128,9 +128,7 @@ export async function collectSSEEvents(
   }
 
   if (result === "timeout" && events.length < count) {
-    throw new Error(
-      `SSE timeout: collected ${events.length}/${count} events in ${timeoutMs}ms`,
-    );
+    throw new Error(`SSE timeout: collected ${events.length}/${count} events in ${timeoutMs}ms`);
   }
 
   return events;

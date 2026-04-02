@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgProxies } from "@appstrate/db/schema";
@@ -139,12 +141,12 @@ export async function resolveProxy(
   packageId: string,
   proxyId: string | null,
 ): Promise<{ url: string; label: string } | null> {
-  // 1. Explicit override (flow column or per-execution)
+  // 1. Explicit override (agent column or per-run)
   if (proxyId === "none") return null;
   if (proxyId) {
     const result = await loadProxy(orgId, proxyId);
     if (result) return result;
-    logger.warn("Flow proxy override not found, falling through to org default", {
+    logger.warn("Agent proxy override not found, falling through to org default", {
       packageId,
       proxyId,
     });

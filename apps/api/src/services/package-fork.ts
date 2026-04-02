@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
 
 import { zipArtifact } from "@appstrate/core/zip";
@@ -7,7 +9,7 @@ import {
   createOrgItem,
   uploadPackageFiles,
   type PackageTypeConfig,
-  FLOW_CONFIG,
+  AGENT_CONFIG,
   SKILL_CONFIG,
   TOOL_CONFIG,
   PROVIDER_CONFIG,
@@ -21,7 +23,7 @@ import { eq } from "drizzle-orm";
 import { asRecord } from "../lib/safe-json.ts";
 
 const TYPE_TO_CONFIG: Record<string, PackageTypeConfig> = {
-  flow: FLOW_CONFIG,
+  agent: AGENT_CONFIG,
   skill: SKILL_CONFIG,
   tool: TOOL_CONFIG,
   provider: PROVIDER_CONFIG,

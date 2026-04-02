@@ -1,20 +1,27 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, mock } from "bun:test";
 import { createApp, type AppDeps } from "../app.ts";
 import type { CredentialsResponse, LlmProxyConfig } from "../helpers.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
-    config: { platformApiUrl: "http://mock:3000", executionToken: "tok", proxyUrl: "" },
-    fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
-      credentials: { access_token: "test-123" },
-      authorizedUris: ["https://api.example.com/*"],
-      allowAllUris: false,
-    })),
+    config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
+    fetchCredentials: mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "test-123" },
+        authorizedUris: ["https://api.example.com/*"],
+        allowAllUris: false,
+      }),
+    ),
     cookieJar: new Map(),
-    fetchFn: mock(async () => new Response('{"ok":true}', {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    })),
+    fetchFn: mock(
+      async () =>
+        new Response('{"ok":true}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ),
     isReady: () => true,
     ...overrides,
   };
@@ -34,7 +41,7 @@ describe("GET /health", () => {
     const app = createApp(makeDeps({ isReady: () => false }));
     const res = await app.request("/health");
     expect(res.status).toBe(503);
-    const body = await res.json() as { status: string; proxy: string };
+    const body = (await res.json()) as { status: string; proxy: string };
     expect(body.status).toBe("degraded");
   });
 
@@ -48,16 +55,16 @@ describe("GET /health", () => {
 // --- POST /configure ---
 
 describe("POST /configure", () => {
-  it("updates executionToken", async () => {
+  it("updates run token", async () => {
     const deps = makeDeps();
     const app = createApp(deps);
     const res = await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "new-tok" }),
+      body: JSON.stringify({ runToken: "new-tok" }),
       headers: { "Content-Type": "application/json" },
     });
     expect(res.status).toBe(200);
-    expect(deps.config.executionToken).toBe("new-tok");
+    expect(deps.config.runToken).toBe("new-tok");
   });
 
   it("updates platformApiUrl", async () => {
@@ -89,7 +96,7 @@ describe("POST /configure", () => {
     const app = createApp(deps);
     await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "x" }),
+      body: JSON.stringify({ runToken: "x" }),
       headers: { "Content-Type": "application/json" },
     });
     expect(deps.cookieJar.size).toBe(0);
@@ -98,14 +105,14 @@ describe("POST /configure", () => {
   it("partial update keeps other fields", async () => {
     const deps = makeDeps();
     deps.config.platformApiUrl = "http://original:3000";
-    deps.config.executionToken = "orig-tok";
+    deps.config.runToken = "orig-tok";
     const app = createApp(deps);
     await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "new-tok" }),
+      body: JSON.stringify({ runToken: "new-tok" }),
       headers: { "Content-Type": "application/json" },
     });
-    expect(deps.config.executionToken).toBe("new-tok");
+    expect(deps.config.runToken).toBe("new-tok");
     expect(deps.config.platformApiUrl).toBe("http://original:3000");
   });
 
@@ -113,7 +120,7 @@ describe("POST /configure", () => {
     const app = createApp(makeDeps({ configSecret: "secret-123" }));
     const res = await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "new-tok" }),
+      body: JSON.stringify({ runToken: "new-tok" }),
       headers: { "Content-Type": "application/json" },
     });
     expect(res.status).toBe(403);
@@ -124,14 +131,14 @@ describe("POST /configure", () => {
     const app = createApp(deps);
     const res = await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "new-tok" }),
+      body: JSON.stringify({ runToken: "new-tok" }),
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer secret-123",
       },
     });
     expect(res.status).toBe(200);
-    expect(deps.config.executionToken).toBe("new-tok");
+    expect(deps.config.runToken).toBe("new-tok");
   });
 
   it("rejects second configure call (one-time)", async () => {
@@ -139,7 +146,7 @@ describe("POST /configure", () => {
     // First call succeeds
     const res1 = await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "tok1" }),
+      body: JSON.stringify({ runToken: "tok1" }),
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer secret-123",
@@ -149,7 +156,7 @@ describe("POST /configure", () => {
     // Second call rejected
     const res2 = await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "tok2" }),
+      body: JSON.stringify({ runToken: "tok2" }),
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer secret-123",
@@ -162,59 +169,70 @@ describe("POST /configure", () => {
     const app = createApp(makeDeps({ preConfigured: true }));
     const res = await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "new-tok" }),
+      body: JSON.stringify({ runToken: "new-tok" }),
       headers: { "Content-Type": "application/json" },
     });
     expect(res.status).toBe(403);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBe("Already configured");
   });
 });
 
-// --- GET /execution-history ---
+// --- GET /run-history ---
 
-describe("GET /execution-history", () => {
+describe("GET /run-history", () => {
   it("proxies to platform API", async () => {
-    const fetchFn = mock(async () => new Response('{"entries":[]}', {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response('{"entries":[]}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
     const app = createApp(makeDeps({ fetchFn }));
-    const res = await app.request("/execution-history");
+    const res = await app.request("/run-history");
     expect(res.status).toBe(200);
     expect(fetchFn).toHaveBeenCalledTimes(1);
     const url = (fetchFn.mock.calls[0] as [string])[0];
-    expect(url).toBe("http://mock:3000/internal/execution-history");
+    expect(url).toBe("http://mock:3000/internal/run-history");
   });
 
   it("forwards query string", async () => {
-    const fetchFn = mock(async () => new Response("[]", {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response("[]", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
     const app = createApp(makeDeps({ fetchFn }));
-    await app.request("/execution-history?limit=10&offset=0");
+    await app.request("/run-history?limit=10&offset=0");
     const url = (fetchFn.mock.calls[0] as [string])[0];
     expect(url).toContain("?limit=10&offset=0");
   });
 
   it("sends auth header", async () => {
-    const fetchFn = mock(async () => new Response("[]", {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response("[]", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
     const app = createApp(makeDeps({ fetchFn }));
-    await app.request("/execution-history");
+    await app.request("/run-history");
     const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
     expect((opts.headers as Record<string, string>).Authorization).toBe("Bearer tok");
   });
 
   it("returns 502 on fetch failure", async () => {
-    const fetchFn = mock(async () => { throw new Error("connection refused"); });
+    const fetchFn = mock(async () => {
+      throw new Error("connection refused");
+    });
     const app = createApp(makeDeps({ fetchFn }));
-    const res = await app.request("/execution-history");
+    const res = await app.request("/run-history");
     expect(res.status).toBe(502);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBeDefined();
   });
 });
@@ -229,7 +247,7 @@ describe("ALL /proxy — validation", () => {
       headers: { "X-Target": "https://api.example.com/v1" },
     });
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("X-Provider");
   });
 
@@ -240,7 +258,7 @@ describe("ALL /proxy — validation", () => {
       headers: { "X-Provider": "gmail" },
     });
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("X-Target");
   });
 
@@ -251,25 +269,27 @@ describe("ALL /proxy — validation", () => {
       headers: { "X-Provider": "../etc/passwd", "X-Target": "https://api.example.com/v1" },
     });
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("Invalid X-Provider");
   });
 
   it("returns 502 when credential fetch fails", async () => {
-    const fetchCredentials = mock(async () => { throw new Error("not found"); });
+    const fetchCredentials = mock(async () => {
+      throw new Error("not found");
+    });
     const app = createApp(makeDeps({ fetchCredentials }));
     const res = await app.request("/proxy", {
       method: "GET",
       headers: { "X-Provider": "gmail", "X-Target": "https://api.example.com/v1" },
     });
     expect(res.status).toBe(502);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("not found");
   });
 
   it("returns 502 with platform detail when provider is unknown", async () => {
     const fetchCredentials = mock(async () => {
-      throw new Error("Provider '@appstrate/gmail' is not required by this flow");
+      throw new Error("Provider '@appstrate/gmail' is not required by this agent");
     });
     const app = createApp(makeDeps({ fetchCredentials }));
     const res = await app.request("/proxy", {
@@ -277,8 +297,8 @@ describe("ALL /proxy — validation", () => {
       headers: { "X-Provider": "@appstrate/gmail", "X-Target": "https://api.example.com/v1" },
     });
     expect(res.status).toBe(502);
-    const body = await res.json() as { error: string };
-    expect(body.error).toContain("is not required by this flow");
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("is not required by this agent");
   });
 
   it("returns 400 for unresolved placeholders in URL", async () => {
@@ -291,7 +311,7 @@ describe("ALL /proxy — validation", () => {
       },
     });
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("Unresolved placeholders in URL");
   });
 
@@ -305,16 +325,18 @@ describe("ALL /proxy — validation", () => {
       },
     });
     expect(res.status).toBe(403);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("not authorized");
   });
 
   it("returns 403 when allowAllUris but URL targets blocked host", async () => {
-    const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
-      credentials: { access_token: "t" },
-      authorizedUris: null,
-      allowAllUris: true,
-    }));
+    const fetchCredentials = mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "t" },
+        authorizedUris: null,
+        allowAllUris: true,
+      }),
+    );
     const app = createApp(makeDeps({ fetchCredentials }));
     const res = await app.request("/proxy", {
       method: "GET",
@@ -327,11 +349,13 @@ describe("ALL /proxy — validation", () => {
   });
 
   it("returns 403 when no authorizedUris and URL targets blocked host", async () => {
-    const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
-      credentials: { access_token: "t" },
-      authorizedUris: null,
-      allowAllUris: false,
-    }));
+    const fetchCredentials = mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "t" },
+        authorizedUris: null,
+        allowAllUris: false,
+      }),
+    );
     const app = createApp(makeDeps({ fetchCredentials }));
     const res = await app.request("/proxy", {
       method: "GET",
@@ -344,35 +368,39 @@ describe("ALL /proxy — validation", () => {
   });
 
   it("returns 400 for unresolved placeholders in headers", async () => {
-    const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
-      credentials: {},
-      authorizedUris: ["https://api.example.com/*"],
-      allowAllUris: false,
-    }));
+    const fetchCredentials = mock(
+      async (): Promise<CredentialsResponse> => ({
+        credentials: {},
+        authorizedUris: ["https://api.example.com/*"],
+        allowAllUris: false,
+      }),
+    );
     const app = createApp(makeDeps({ fetchCredentials }));
     const res = await app.request("/proxy", {
       method: "GET",
       headers: {
         "X-Provider": "gmail",
         "X-Target": "https://api.example.com/v1",
-        "Authorization": "Bearer {{missing_token}}",
+        Authorization: "Bearer {{missing_token}}",
       },
     });
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("Unresolved placeholders in header");
   });
-
 });
 
 // --- ALL /proxy — forwarding ---
 
 describe("ALL /proxy — forwarding", () => {
   it("forwards GET request to target", async () => {
-    const fetchFn = mock(async () => new Response('{"data":1}', {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response('{"data":1}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
     const app = createApp(makeDeps({ fetchFn }));
     const res = await app.request("/proxy", {
       method: "GET",
@@ -388,10 +416,13 @@ describe("ALL /proxy — forwarding", () => {
   });
 
   it("forwards POST request with body", async () => {
-    const fetchFn = mock(async () => new Response('{"created":true}', {
-      status: 201,
-      headers: { "Content-Type": "application/json" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response('{"created":true}', {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
     const app = createApp(makeDeps({ fetchFn }));
     const res = await app.request("/proxy", {
       method: "POST",
@@ -449,7 +480,7 @@ describe("ALL /proxy — forwarding", () => {
       body: '{"secret":"{{unknown_var}}"}',
     });
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("Unresolved placeholders in body");
   });
 
@@ -472,7 +503,9 @@ describe("ALL /proxy — forwarding", () => {
   it("returns 502 when target request fails", async () => {
     const err = new Error("connection failed");
     (err as unknown as { code: string }).code = "ECONNREFUSED";
-    const fetchFn = mock(async () => { throw err; });
+    const fetchFn = mock(async () => {
+      throw err;
+    });
     const app = createApp(makeDeps({ fetchFn }));
     const res = await app.request("/proxy", {
       method: "GET",
@@ -482,7 +515,7 @@ describe("ALL /proxy — forwarding", () => {
       },
     });
     expect(res.status).toBe(502);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("Upstream request failed");
     expect(body.error).toBeDefined();
     expect(body.error).toContain("api.example.com");
@@ -490,10 +523,13 @@ describe("ALL /proxy — forwarding", () => {
 
   it("truncates response over MAX_RESPONSE_SIZE", async () => {
     const largeBody = "x".repeat(60_000);
-    const fetchFn = mock(async () => new Response(largeBody, {
-      status: 200,
-      headers: { "Content-Type": "text/plain" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response(largeBody, {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    );
     const app = createApp(makeDeps({ fetchFn }));
     const res = await app.request("/proxy", {
       method: "GET",
@@ -510,10 +546,13 @@ describe("ALL /proxy — forwarding", () => {
 
   it("X-Max-Response-Size increases the truncation limit", async () => {
     const largeBody = "x".repeat(100_000);
-    const fetchFn = mock(async () => new Response(largeBody, {
-      status: 200,
-      headers: { "Content-Type": "text/plain" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response(largeBody, {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    );
     const app = createApp(makeDeps({ fetchFn }));
     const res = await app.request("/proxy", {
       method: "GET",
@@ -531,10 +570,13 @@ describe("ALL /proxy — forwarding", () => {
 
   it("X-Max-Response-Size is capped at ABSOLUTE_MAX_RESPONSE_SIZE", async () => {
     const largeBody = "x".repeat(2_000_000);
-    const fetchFn = mock(async () => new Response(largeBody, {
-      status: 200,
-      headers: { "Content-Type": "text/plain" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response(largeBody, {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    );
     const app = createApp(makeDeps({ fetchFn }));
     const res = await app.request("/proxy", {
       method: "GET",
@@ -552,10 +594,13 @@ describe("ALL /proxy — forwarding", () => {
 
   it("invalid X-Max-Response-Size falls back to default", async () => {
     const largeBody = "x".repeat(60_000);
-    const fetchFn = mock(async () => new Response(largeBody, {
-      status: 200,
-      headers: { "Content-Type": "text/plain" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response(largeBody, {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    );
     const app = createApp(makeDeps({ fetchFn }));
     const res = await app.request("/proxy", {
       method: "GET",
@@ -596,10 +641,13 @@ describe("ALL /proxy — forwarding", () => {
   it("injects stored cookies from cookie jar", async () => {
     const deps = makeDeps();
     deps.cookieJar.set("gmail", ["sid=abc123"]);
-    const fetchFn = mock(async () => new Response("ok", {
-      status: 200,
-      headers: { "Content-Type": "text/plain" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response("ok", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    );
     deps.fetchFn = fetchFn;
     const app = createApp(deps);
     await app.request("/proxy", {
@@ -640,14 +688,13 @@ describe("ALL /proxy — forwarding", () => {
       headers: {
         "X-Provider": "gmail",
         "X-Target": "https://api.example.com/v1",
-        "Authorization": "Bearer {{access_token}}",
+        Authorization: "Bearer {{access_token}}",
       },
     });
     const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
     const headers = opts.headers as Record<string, string>;
     expect(headers["authorization"]).toBe("Bearer test-123");
   });
-
 });
 
 // --- ALL /llm/* — LLM reverse proxy ---
@@ -665,13 +712,17 @@ describe("ALL /llm/* — SSRF protection", () => {
     const app = createApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(403);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("blocked network range");
   });
 
   it("returns 403 when baseUrl targets cloud metadata", async () => {
     const deps = makeDeps();
-    deps.config.llm = { baseUrl: "http://169.254.169.254/metadata", apiKey: "key", placeholder: "ph" };
+    deps.config.llm = {
+      baseUrl: "http://169.254.169.254/metadata",
+      apiKey: "key",
+      placeholder: "ph",
+    };
     const app = createApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(403);
@@ -686,10 +737,13 @@ describe("ALL /llm/* — SSRF protection", () => {
   });
 
   it("allows public baseUrl", async () => {
-    const fetchFn = mock(async () => new Response('{"ok":true}', {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response('{"ok":true}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
     const deps = makeDeps({ fetchFn });
     deps.config.llm = { baseUrl: "https://api.anthropic.com", apiKey: "key", placeholder: "ph" };
     const app = createApp(deps);
@@ -703,15 +757,18 @@ describe("ALL /llm/* — basic routing", () => {
     const app = createApp(makeDeps());
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(503);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("not configured");
   });
 
   it("extracts path after /llm and forwards to target", async () => {
-    const fetchFn = mock(async () => new Response('{"id":"msg_1"}', {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response('{"id":"msg_1"}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
     const deps = makeDeps({ fetchFn });
     deps.config.llm = LLM_CONFIG;
     const app = createApp(deps);
@@ -736,21 +793,26 @@ describe("ALL /llm/* — basic routing", () => {
   });
 
   it("returns 502 when target request fails", async () => {
-    const fetchFn = mock(async () => { throw new Error("ECONNREFUSED"); });
+    const fetchFn = mock(async () => {
+      throw new Error("ECONNREFUSED");
+    });
     const deps = makeDeps({ fetchFn });
     deps.config.llm = LLM_CONFIG;
     const app = createApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(502);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBeDefined();
   });
 
   it("forwards upstream error status transparently", async () => {
-    const fetchFn = mock(async () => new Response('{"error":"rate_limited"}', {
-      status: 429,
-      headers: { "Content-Type": "application/json" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response('{"error":"rate_limited"}', {
+          status: 429,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
     const deps = makeDeps({ fetchFn });
     deps.config.llm = LLM_CONFIG;
     const app = createApp(deps);
@@ -785,7 +847,7 @@ describe("ALL /llm/* — placeholder replacement", () => {
     const app = createApp(deps);
     await app.request("/llm/v1/messages", {
       method: "POST",
-      headers: { "Authorization": "Bearer sk-ant-oat01-placeholder" },
+      headers: { Authorization: "Bearer sk-ant-oat01-placeholder" },
     });
     const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
     const headers = opts.headers as Record<string, string>;
@@ -815,7 +877,7 @@ describe("ALL /llm/* — placeholder replacement", () => {
 
 describe("ALL /llm/* — streaming", () => {
   it("streams response body through without buffering", async () => {
-    const chunks = ["data: {\"type\":\"content\"}\n\n", "data: [DONE]\n\n"];
+    const chunks = ['data: {"type":"content"}\n\n', "data: [DONE]\n\n"];
     const stream = new ReadableStream({
       start(controller) {
         for (const chunk of chunks) {
@@ -824,10 +886,13 @@ describe("ALL /llm/* — streaming", () => {
         controller.close();
       },
     });
-    const fetchFn = mock(async () => new Response(stream, {
-      status: 200,
-      headers: { "Content-Type": "text/event-stream" },
-    }));
+    const fetchFn = mock(
+      async () =>
+        new Response(stream, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+    );
     const deps = makeDeps({ fetchFn });
     deps.config.llm = LLM_CONFIG;
     const app = createApp(deps);
@@ -835,7 +900,7 @@ describe("ALL /llm/* — streaming", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/event-stream");
     const text = await res.text();
-    expect(text).toContain("data: {\"type\":\"content\"}");
+    expect(text).toContain('data: {"type":"content"}');
     expect(text).toContain("data: [DONE]");
   });
 });
@@ -852,7 +917,7 @@ describe("POST /configure — llm SSRF protection", () => {
       headers: { "Content-Type": "application/json" },
     });
     expect(res.status).toBe(403);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain("blocked network range");
     expect(deps.config.llm).toBeUndefined();
   });
@@ -878,8 +943,12 @@ describe("POST /configure — llm field", () => {
     const res = await app.request("/configure", {
       method: "POST",
       body: JSON.stringify({
-        executionToken: "tok",
-        llm: { baseUrl: "https://api.openai.com/v1", apiKey: "sk-oai", placeholder: "sk-placeholder" },
+        runToken: "tok",
+        llm: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: "sk-oai",
+          placeholder: "sk-placeholder",
+        },
       }),
       headers: { "Content-Type": "application/json" },
     });

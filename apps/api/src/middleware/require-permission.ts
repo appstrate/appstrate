@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Unified permission middleware.
  *
@@ -16,7 +18,7 @@ import { logger } from "../lib/logger.ts";
 /**
  * Middleware factory: require a specific permission.
  *
- * Usage: `router.post("/path", requirePermission("flows", "write"), handler)`
+ * Usage: `router.post("/path", requirePermission("agents", "write"), handler)`
  */
 export function requirePermission<R extends Resource>(resource: R, action: Action<R>) {
   return async (c: Context<AppEnv>, next: Next) => {

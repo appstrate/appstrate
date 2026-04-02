@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { JsonView as JsonViewLite, allExpanded, defaultStyles } from "react-json-view-lite";
 import "react-json-view-lite/dist/index.css";

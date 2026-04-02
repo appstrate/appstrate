@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 import {
@@ -64,14 +66,14 @@ export async function initSidecarPool(): Promise<void> {
 
 /**
  * Acquire a pre-warmed sidecar from the pool.
- * Configures it with execution-specific credentials and connects to the execution network.
+ * Configures it with run-specific credentials and connects to the run network.
  * Returns the container ID, or null if pool is empty/disabled (caller falls back to fresh creation).
  */
 export async function acquireSidecar(
-  executionId: string,
-  executionNetworkId: string,
+  runId: string,
+  runNetworkId: string,
   sidecarEnv: {
-    executionToken: string;
+    runToken: string;
     platformApiUrl: string;
     proxyUrl?: string;
     llm?: { baseUrl: string; apiKey: string; placeholder: string };
@@ -92,7 +94,7 @@ export async function acquireSidecar(
         Authorization: `Bearer ${entry.configSecret}`,
       },
       body: JSON.stringify({
-        executionToken: sidecarEnv.executionToken,
+        runToken: sidecarEnv.runToken,
         platformApiUrl: sidecarEnv.platformApiUrl,
         proxyUrl: sidecarEnv.proxyUrl || "",
         llm: sidecarEnv.llm,
@@ -104,15 +106,15 @@ export async function acquireSidecar(
       throw new Error(`Configure failed: ${configRes.status}`);
     }
 
-    // Connect to execution network with "sidecar" alias for agent DNS resolution
-    await connectContainerToNetwork(executionNetworkId, entry.containerId, ["sidecar"]);
+    // Connect to run network with "sidecar" alias for agent DNS resolution
+    await connectContainerToNetwork(runNetworkId, entry.containerId, ["sidecar"]);
 
     // Connect to platform network for host access (containerized deployments)
     if (platformNetwork) {
       await connectContainerToNetwork(platformNetwork.networkId, entry.containerId);
     }
 
-    logger.debug("Acquired sidecar from pool", { executionId, containerId: entry.containerId });
+    logger.debug("Acquired sidecar from pool", { runId, containerId: entry.containerId });
 
     // Replenish pool in background (don't await)
     scheduleReplenish();

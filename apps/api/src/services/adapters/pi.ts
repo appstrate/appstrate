@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { logger } from "../../lib/logger.ts";
-import type { ExecutionAdapter, ExecutionMessage, PromptContext, UploadedFile } from "./types.ts";
+import type { RunAdapter, RunMessage, PromptContext, UploadedFile } from "./types.ts";
 import { buildEnrichedPrompt } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { sanitizeStorageKey } from "../file-storage.ts";
@@ -12,7 +14,7 @@ import {
 
 import { getEnv } from "@appstrate/env";
 
-export class PiAdapter implements ExecutionAdapter {
+export class PiAdapter implements RunAdapter {
   private readonly _orchestrator?: ContainerOrchestrator;
 
   constructor(orchestrator?: ContainerOrchestrator) {
@@ -20,13 +22,13 @@ export class PiAdapter implements ExecutionAdapter {
   }
 
   async *execute(
-    executionId: string,
+    runId: string,
     ctx: PromptContext,
     timeout: number,
-    flowPackage?: Buffer,
+    agentPackage?: Buffer,
     signal?: AbortSignal,
     inputFiles?: UploadedFile[],
-  ): AsyncGenerator<ExecutionMessage> {
+  ): AsyncGenerator<RunMessage> {
     const prompt = buildEnrichedPrompt(ctx);
 
     const llmConfig = ctx.llmConfig;
@@ -38,7 +40,7 @@ export class PiAdapter implements ExecutionAdapter {
 
     try {
       // Phase 1: Create isolation boundary
-      boundary = await orchestrator.createIsolationBoundary(executionId);
+      boundary = await orchestrator.createIsolationBoundary(runId);
 
       // Resolve LLM config for sidecar proxy
       const llmApiKey = llmConfig.apiKey;
@@ -46,17 +48,17 @@ export class PiAdapter implements ExecutionAdapter {
 
       // Sidecar config (platform network resolution handled by orchestrator)
       const sidecarConfig = {
-        executionToken: ctx.executionApi?.token ?? "",
-        platformApiUrl: ctx.executionApi?.url ?? "",
+        runToken: ctx.runApi?.token ?? "",
+        platformApiUrl: ctx.runApi?.url ?? "",
         proxyUrl: ctx.proxyUrl ?? undefined,
         llm: llmApiKey
           ? { baseUrl: llmConfig.baseUrl, apiKey: llmApiKey, placeholder: llmPlaceholder }
           : undefined,
       };
 
-      // Build agent env — NO EXECUTION_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
+      // Build agent env — NO RUN_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
       const containerEnv: Record<string, string> = {
-        FLOW_PROMPT: prompt,
+        AGENT_PROMPT: prompt,
         MODEL_API: llmConfig.api,
         MODEL_ID: modelId,
         SIDECAR_URL: "http://sidecar:8080",
@@ -93,7 +95,7 @@ export class PiAdapter implements ExecutionAdapter {
       }
 
       // All outbound HTTP traffic routed through sidecar forward proxy.
-      // The execution network is internal (no NAT) — clients that ignore
+      // The run network is internal (no NAT) — clients that ignore
       // HTTP_PROXY simply get connection failures, which is the desired behavior.
       containerEnv.HTTP_PROXY = "http://sidecar:8081";
       containerEnv.HTTPS_PROXY = "http://sidecar:8081";
@@ -104,8 +106,8 @@ export class PiAdapter implements ExecutionAdapter {
 
       // Prepare files for batch injection into agent
       const filesToInject: Array<{ name: string; content: Buffer }> = [];
-      if (flowPackage) {
-        filesToInject.push({ name: "flow-package.afps", content: flowPackage });
+      if (agentPackage) {
+        filesToInject.push({ name: "agent-package.afps", content: agentPackage });
       }
       if (inputFiles) {
         for (const f of inputFiles) {
@@ -121,10 +123,10 @@ export class PiAdapter implements ExecutionAdapter {
 
       // Phase 2: Setup sidecar + create agent (parallel)
       const [sidecar, agent] = await Promise.all([
-        orchestrator.createSidecar(executionId, boundary, sidecarConfig),
+        orchestrator.createSidecar(runId, boundary, sidecarConfig),
         orchestrator.createWorkload(
           {
-            executionId,
+            runId,
             role: "agent",
             image: getEnv().PI_IMAGE,
             env: containerEnv,
@@ -144,7 +146,7 @@ export class PiAdapter implements ExecutionAdapter {
         orchestrator,
         handle: agent,
         adapterName: "pi",
-        executionId,
+        runId,
         timeout,
         extraData: { api: llmConfig.api, model: modelId },
         signal,
@@ -186,11 +188,11 @@ function deriveKeyPlaceholder(key: string | undefined): string {
   return parts.slice(0, -1).join("-") + "-placeholder";
 }
 
-async function* processPiLogs(logs: AsyncGenerator<string>): AsyncGenerator<ExecutionMessage> {
+async function* processPiLogs(logs: AsyncGenerator<string>): AsyncGenerator<RunMessage> {
   let textBuffer = "";
   let inCodeBlock = false;
 
-  const emitBuffer = (): ExecutionMessage | null => {
+  const emitBuffer = (): RunMessage | null => {
     const text = textBuffer.trim();
     textBuffer = "";
     return text.length > 0 ? { type: "progress", message: text } : null;
@@ -249,7 +251,7 @@ export { processPiLogs as _processPiLogsForTesting };
 export { deriveKeyPlaceholder as _deriveKeyPlaceholderForTesting };
 
 /** @internal Exported for testing */
-export function parsePiStreamLine(line: string): ExecutionMessage | null {
+export function parsePiStreamLine(line: string): RunMessage | null {
   try {
     const obj = JSON.parse(line);
 

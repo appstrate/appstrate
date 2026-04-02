@@ -2,7 +2,7 @@
 
 ## Trademarks
 
-"Appstrate" and "AFPS" (Agent Flow Packaging Standard) are trademarks of Appstrate.
+"Appstrate" and "AFPS" (Agent Format Packaging Standard) are trademarks of Appstrate.
 
 The Appstrate source code is licensed under the Apache License 2.0. The Apache License 2.0 does not grant any rights to use the Appstrate trademarks.
 
@@ -12,7 +12,7 @@ You **may**:
 
 - Use the name "Appstrate" to accurately describe that your product is built on top of Appstrate (e.g., "Built with Appstrate", "Powered by Appstrate")
 - Use the name "Appstrate" in blog posts, tutorials, reviews, and documentation to refer to the project
-- Use the name "AFPS" to refer to the Agent Flow Packaging Standard specification
+- Use the name "AFPS" to refer to the Agent Format Packaging Standard specification
 - Fork the Appstrate project for your own use
 
 ## Restricted Uses

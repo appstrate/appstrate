@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * SSRF protection — blocks requests targeting private/internal networks.
  *

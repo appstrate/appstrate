@@ -1,23 +1,25 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, it, beforeAll, afterAll } from "bun:test";
 import { _resetCacheForTesting } from "@appstrate/env";
-import { signExecutionToken, parseSignedToken } from "../../src/lib/execution-token.ts";
+import { signRunToken, parseSignedToken } from "../../src/lib/run-token.ts";
 
 // Set a known secret via process.env (no mock.module — compatible with same-process runs)
-const originalSecret = process.env.EXECUTION_TOKEN_SECRET;
+const originalSecret = process.env.RUN_TOKEN_SECRET;
 
 beforeAll(() => {
-  process.env.EXECUTION_TOKEN_SECRET = "test-secret-for-hmac-signing-min32chars!!";
+  process.env.RUN_TOKEN_SECRET = "test-secret-for-hmac-signing-min32chars!!";
   _resetCacheForTesting();
 });
 
 afterAll(() => {
-  process.env.EXECUTION_TOKEN_SECRET = originalSecret;
+  process.env.RUN_TOKEN_SECRET = originalSecret;
   _resetCacheForTesting();
 });
 
-describe("signExecutionToken", () => {
-  it("returns executionId.signature format", () => {
-    const token = signExecutionToken("exec_abc-123");
+describe("signRunToken", () => {
+  it("returns runId.signature format", () => {
+    const token = signRunToken("exec_abc-123");
     expect(token).toStartWith("exec_abc-123.");
     const parts = token.split(".");
     expect(parts).toHaveLength(2);
@@ -25,26 +27,26 @@ describe("signExecutionToken", () => {
   });
 
   it("produces deterministic output for same input", () => {
-    const a = signExecutionToken("exec_xyz");
-    const b = signExecutionToken("exec_xyz");
+    const a = signRunToken("exec_xyz");
+    const b = signRunToken("exec_xyz");
     expect(a).toBe(b);
   });
 
-  it("produces different signatures for different executionIds", () => {
-    const a = signExecutionToken("exec_aaa");
-    const b = signExecutionToken("exec_bbb");
+  it("produces different signatures for different runIds", () => {
+    const a = signRunToken("exec_aaa");
+    const b = signRunToken("exec_bbb");
     expect(a).not.toBe(b);
   });
 });
 
 describe("parseSignedToken", () => {
-  it("returns executionId for valid signed token", () => {
-    const token = signExecutionToken("exec_test-id");
+  it("returns runId for valid signed token", () => {
+    const token = signRunToken("exec_test-id");
     const result = parseSignedToken(token);
     expect(result).toBe("exec_test-id");
   });
 
-  it("returns null for unsigned executionId (no dot)", () => {
+  it("returns null for unsigned runId (no dot)", () => {
     expect(parseSignedToken("exec_test-id")).toBeNull();
   });
 
@@ -53,7 +55,7 @@ describe("parseSignedToken", () => {
   });
 
   it("returns null for tampered signature", () => {
-    const token = signExecutionToken("exec_real");
+    const token = signRunToken("exec_real");
     const tampered = token.slice(0, -4) + "0000";
     expect(parseSignedToken(tampered)).toBeNull();
   });
@@ -64,7 +66,7 @@ describe("parseSignedToken", () => {
     expect(parseSignedToken(forged)).toBeNull();
   });
 
-  it("returns null for token with empty executionId", () => {
+  it("returns null for token with empty runId", () => {
     expect(parseSignedToken(".abcdef1234567890")).toBeNull();
   });
 
@@ -72,9 +74,9 @@ describe("parseSignedToken", () => {
     expect(parseSignedToken("exec_id.")).toBeNull();
   });
 
-  it("handles executionId containing underscores and hyphens", () => {
+  it("handles runId containing underscores and hyphens", () => {
     const id = "exec_a1b2c3d4-e5f6-7890-abcd-ef1234567890";
-    const token = signExecutionToken(id);
+    const token = signRunToken(id);
     expect(parseSignedToken(token)).toBe(id);
   });
 });

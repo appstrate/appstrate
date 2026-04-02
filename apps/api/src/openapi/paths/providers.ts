@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export const providersPaths = {
   "/api/providers": {
     get: {
@@ -110,7 +112,7 @@ export const providersPaths = {
       tags: ["Providers"],
       summary: "Delete a provider",
       description:
-        "Delete a custom provider. Built-in providers cannot be deleted. Cannot delete if used by flows.",
+        "Delete a custom provider. Built-in providers cannot be deleted. Cannot delete if used by agents.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -130,7 +132,7 @@ export const providersPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "409": { description: "Provider in use by flows" },
+        "409": { description: "Provider in use by agents" },
       },
     },
   },

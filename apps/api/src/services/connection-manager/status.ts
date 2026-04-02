@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { inArray, and, eq, or, isNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { connectionProfiles, userProviderConnections } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../../lib/user-helpers.ts";
-import type { FlowProviderRequirement, ProviderProfileMap } from "../../types/index.ts";
+import type { AgentProviderRequirement, ProviderProfileMap } from "../../types/index.ts";
 import type { ProviderStatus, ConnectionStatusValue } from "@appstrate/shared-types";
 import { getConnection, validateScopes, listProviders } from "@appstrate/connect";
 import { authModeLabel } from "./helpers.ts";
@@ -131,12 +133,12 @@ async function batchGetConnectionStatuses(
 }
 
 /**
- * Resolve provider statuses for a flow's required providers.
+ * Resolve provider statuses for an agent's required providers.
  * providerProfiles maps each providerId to the profile holding its credentials
  * (already resolved via org profile bindings or user profile direct).
  */
 export async function resolveProviderStatuses(
-  providers: FlowProviderRequirement[],
+  providers: AgentProviderRequirement[],
   providerProfiles: ProviderProfileMap,
   orgId: string,
 ): Promise<ProviderStatus[]> {

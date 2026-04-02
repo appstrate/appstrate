@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
 import { buildEnrichedPrompt } from "../../src/services/adapters/prompt-builder.ts";
 import type { PromptContext } from "../../src/services/adapters/types.ts";
@@ -27,7 +29,7 @@ function contextWithSystemTools(overrides?: Partial<PromptContext>): PromptConte
   return baseContext({
     availableTools: [
       { id: "@appstrate/log", name: "Log", description: "Send progress messages" },
-      { id: "@appstrate/output", name: "Output", description: "Return execution result" },
+      { id: "@appstrate/output", name: "Output", description: "Return run result" },
       { id: "@appstrate/set-state", name: "Set State", description: "Persist state" },
       { id: "@appstrate/add-memory", name: "Add Memory", description: "Save a memory" },
     ],
@@ -272,22 +274,22 @@ describe("buildEnrichedPrompt — memories", () => {
   });
 });
 
-// ─── Execution history API ──────────────────────────────────
+// ─── Run history API ────────────────────────────────────────
 
-describe("buildEnrichedPrompt — execution history", () => {
-  it("includes execution history API when executionApi provided", () => {
+describe("buildEnrichedPrompt — run history", () => {
+  it("includes run history API when runApi provided", () => {
     const ctx = baseContext({
-      executionApi: { url: "http://platform:3000", token: "exec_token_123" },
+      runApi: { url: "http://platform:3000", token: "exec_token_123" },
     });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Execution History");
-    expect(prompt).toContain("$SIDECAR_URL/execution-history");
+    expect(prompt).toContain("## Run History");
+    expect(prompt).toContain("$SIDECAR_URL/run-history");
   });
 
-  it("omits execution history when no executionApi", () => {
-    const ctx = baseContext({ executionApi: undefined });
+  it("omits run history when no runApi", () => {
+    const ctx = baseContext({ runApi: undefined });
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("## Execution History");
+    expect(prompt).not.toContain("## Run History");
   });
 });
 

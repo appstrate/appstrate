@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, afterEach } from "bun:test";
 import { createServer } from "node:http";
 import type { Server as HttpServer, IncomingMessage, ServerResponse } from "node:http";
@@ -20,7 +22,9 @@ function cleanup(): Promise<void[]> {
   return Promise.all(promises);
 }
 
-afterEach(async () => { await cleanup(); });
+afterEach(async () => {
+  await cleanup();
+});
 
 /** Start a simple echo HTTP server on an ephemeral port. Returns port. */
 function startEchoServer(): Promise<{ port: number; server: HttpServer }> {
@@ -31,12 +35,14 @@ function startEchoServer(): Promise<{ port: number; server: HttpServer }> {
       req.on("end", () => {
         const body = Buffer.concat(chunks).toString();
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
-          method: req.method,
-          url: req.url,
-          headers: req.headers,
-          body,
-        }));
+        res.end(
+          JSON.stringify({
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            body,
+          }),
+        );
       });
     });
     servers.push(server);
@@ -50,7 +56,7 @@ function startEchoServer(): Promise<{ port: number; server: HttpServer }> {
 
 function makeProxy(overrides?: Parameters<typeof createForwardProxy>[0]): ForwardProxyResult {
   const result = createForwardProxy({
-    config: { platformApiUrl: "http://mock:3000", executionToken: "tok", proxyUrl: "" },
+    config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
     listenPort: 0,
     listenHost: "127.0.0.1",
     // Allow 127.0.0.1 by default for testing (otherwise echo server is blocked)
@@ -70,27 +76,30 @@ async function httpViaProxy(
   return new Promise((resolve, reject) => {
     const parsed = new URL(targetUrl);
     const { request } = require("node:http");
-    const req = request({
-      hostname: "127.0.0.1",
-      port: proxyPort,
-      path: targetUrl,
-      method,
-      headers: { host: parsed.host },
-    }, (res: IncomingMessage) => {
-      const chunks: Buffer[] = [];
-      res.on("data", (chunk: Buffer) => chunks.push(chunk));
-      res.on("end", () => {
-        const headers: Record<string, string> = {};
-        for (const [k, v] of Object.entries(res.headers)) {
-          if (typeof v === "string") headers[k] = v;
-        }
-        resolve({
-          status: res.statusCode ?? 0,
-          body: Buffer.concat(chunks).toString(),
-          headers,
+    const req = request(
+      {
+        hostname: "127.0.0.1",
+        port: proxyPort,
+        path: targetUrl,
+        method,
+        headers: { host: parsed.host },
+      },
+      (res: IncomingMessage) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          const headers: Record<string, string> = {};
+          for (const [k, v] of Object.entries(res.headers)) {
+            if (typeof v === "string") headers[k] = v;
+          }
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString(),
+            headers,
+          });
         });
-      });
-    });
+      },
+    );
     req.on("error", reject);
     req.end();
   });
@@ -172,7 +181,9 @@ describe("HTTP forwarding", () => {
         socket.write("GET not-a-valid-url HTTP/1.1\r\nHost: invalid\r\n\r\n");
       });
       let data = "";
-      socket.on("data", (chunk) => { data += chunk.toString(); });
+      socket.on("data", (chunk) => {
+        data += chunk.toString();
+      });
       socket.on("end", () => {
         const statusLine = data.split("\r\n")[0] ?? "";
         const statusCode = parseInt(statusLine.split(" ")[1] ?? "0");
@@ -181,7 +192,10 @@ describe("HTTP forwarding", () => {
         resolve({ status: statusCode, body });
       });
       socket.on("error", reject);
-      setTimeout(() => { socket.destroy(); reject(new Error("timeout")); }, 5000);
+      setTimeout(() => {
+        socket.destroy();
+        reject(new Error("timeout"));
+      }, 5000);
     });
     expect(res.status).toBe(400);
   });
@@ -195,21 +209,26 @@ describe("HTTP forwarding", () => {
     // Send a request with a hop-by-hop header
     const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
       const { request } = require("node:http");
-      const req = request({
-        hostname: "127.0.0.1",
-        port,
-        path: `http://127.0.0.1:${echo.port}/headers`,
-        method: "GET",
-        headers: {
-          host: `127.0.0.1:${echo.port}`,
-          "proxy-authorization": "Basic secret",
-          "x-custom": "keep-me",
+      const req = request(
+        {
+          hostname: "127.0.0.1",
+          port,
+          path: `http://127.0.0.1:${echo.port}/headers`,
+          method: "GET",
+          headers: {
+            host: `127.0.0.1:${echo.port}`,
+            "proxy-authorization": "Basic secret",
+            "x-custom": "keep-me",
+          },
         },
-      }, (res: IncomingMessage) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (chunk: Buffer) => chunks.push(chunk));
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() }));
-      });
+        (res: IncomingMessage) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk: Buffer) => chunks.push(chunk));
+          res.on("end", () =>
+            resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() }),
+          );
+        },
+      );
       req.on("error", reject);
       req.end();
     });

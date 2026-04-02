@@ -1,13 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
- * Dependency validation — validates that all required providers are connected before execution.
- * Shared by executions.ts and scheduler.ts.
+ * Dependency validation — validates that all required providers are connected before a run.
+ * Shared by runs.ts and scheduler.ts.
  */
 
 import { getConnectionStatus, validateScopes } from "./connection-manager/index.ts";
 import type { ConnectionStatus } from "./connection-manager/index.ts";
 import { isProviderEnabled } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
-import type { FlowProviderRequirement, ProviderProfileMap } from "../types/index.ts";
+import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { ApiError } from "../lib/errors.ts";
 
 export interface DependencyValidationDeps {
@@ -31,8 +33,8 @@ const defaultDeps: DependencyValidationDeps = {
  * providerProfiles maps providerId → connectionProfileId.
  * Throws ApiError on first unsatisfied dependency.
  */
-export async function validateFlowDependencies(
-  providers: FlowProviderRequirement[],
+export async function validateAgentDependencies(
+  providers: AgentProviderRequirement[],
   providerProfiles: ProviderProfileMap,
   orgId: string,
   deps: DependencyValidationDeps = defaultDeps,

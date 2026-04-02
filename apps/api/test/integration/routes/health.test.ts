@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, afterAll } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -50,7 +52,7 @@ describe("GET /health", () => {
     expect(body.uptime_ms).toBeGreaterThanOrEqual(0);
   });
 
-  it("checks object contains database and flows sub-checks", async () => {
+  it("checks object contains database and agents sub-checks", async () => {
     const res = await app.request("/health");
     const body = (await res.json()) as any;
 
@@ -62,10 +64,10 @@ describe("GET /health", () => {
     expect(typeof body.checks.database.latency_ms).toBe("number");
     expect(body.checks.database.latency_ms).toBeGreaterThanOrEqual(0);
 
-    // Flows check structure
-    expect(body.checks).toHaveProperty("flows");
-    expect(body.checks.flows).toHaveProperty("status");
-    expect(["healthy", "degraded"]).toContain(body.checks.flows.status);
+    // Agents check structure
+    expect(body.checks).toHaveProperty("agents");
+    expect(body.checks.agents).toHaveProperty("status");
+    expect(["healthy", "degraded"]).toContain(body.checks.agents.status);
   });
 
   it("returns HTTP 200 when database is reachable", async () => {

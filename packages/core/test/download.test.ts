@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, test } from "bun:test";
 import {
   computeIntegrity,
@@ -36,12 +38,12 @@ describe("buildDownloadHeaders", () => {
       integrity: "sha256-abc123",
       yanked: false,
       scope: "demo",
-      name: "my-flow",
+      name: "my-agent",
       version: "1.0.0",
     });
     expect(headers["Content-Type"]).toBe("application/afps+zip");
     expect(headers["X-Integrity"]).toBe("sha256-abc123");
-    expect(headers["Content-Disposition"]).toBe('attachment; filename="demo-my-flow-1.0.0.afps"');
+    expect(headers["Content-Disposition"]).toBe('attachment; filename="demo-my-agent-1.0.0.afps"');
     expect(headers["X-Yanked"]).toBeUndefined();
   });
 

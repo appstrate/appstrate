@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -13,7 +15,6 @@ describe("Models API", () => {
     ctx = await createTestContext();
   });
 
-
   /** Helper: create a provider key and return its ID (required for model creation). */
   async function createProviderKey(): Promise<string> {
     const res = await app.request("/api/provider-keys", {
@@ -27,7 +28,7 @@ describe("Models API", () => {
       }),
     });
     expect(res.status).toBe(201);
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     return body.id;
   }
 
@@ -38,7 +39,7 @@ describe("Models API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.models).toBeArray();
     });
 
@@ -46,7 +47,6 @@ describe("Models API", () => {
       const res = await app.request("/api/models");
       expect(res.status).toBe(401);
     });
-
   });
 
   describe("POST /api/models", () => {
@@ -66,11 +66,10 @@ describe("Models API", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.id).toBeDefined();
       expect(typeof body.id).toBe("string");
     });
-
   });
 
   describe("DELETE /api/models/:id", () => {
@@ -90,7 +89,7 @@ describe("Models API", () => {
         }),
       });
       expect(createRes.status).toBe(201);
-      const { id } = await createRes.json() as any;
+      const { id } = (await createRes.json()) as any;
 
       // Delete it
       const res = await app.request(`/api/models/${id}`, {
@@ -119,7 +118,7 @@ describe("Models API", () => {
         }),
       });
       expect(createRes.status).toBe(201);
-      const { id } = await createRes.json() as any;
+      const { id } = (await createRes.json()) as any;
 
       // Set it as default
       const res = await app.request("/api/models/default", {
@@ -129,7 +128,7 @@ describe("Models API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.success).toBe(true);
     });
 
@@ -141,7 +140,7 @@ describe("Models API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.success).toBe(true);
     });
   });

@@ -9,7 +9,7 @@
   "entrypoint": "add-memory.ts",
   "tool": {
     "name": "add_memory",
-    "description": "Save a discovery or learning as a long-term memory. Memories persist across all executions and are shared across all users of this flow.",
+    "description": "Save a discovery or learning as a long-term memory. Memories persist across all runs and are shared across all users of this agent.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -18,9 +18,7 @@
           "description": "Memory text to save (max 2000 characters)"
         }
       },
-      "required": [
-        "content"
-      ]
+      "required": ["content"]
     }
   }
 }

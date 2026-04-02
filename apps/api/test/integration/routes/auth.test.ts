@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -11,13 +13,13 @@ describe("Authentication", () => {
   });
 
   describe("unauthenticated requests", () => {
-    it("returns 401 for /api/flows without session", async () => {
-      const res = await app.request("/api/flows");
+    it("returns 401 for /api/agents without session", async () => {
+      const res = await app.request("/api/agents");
       expect(res.status).toBe(401);
     });
 
     it("returns 401 with invalid cookie", async () => {
-      const res = await app.request("/api/flows", {
+      const res = await app.request("/api/agents", {
         headers: { Cookie: "better-auth.session_token=invalid-token" },
       });
       expect(res.status).toBe(401);
@@ -33,7 +35,7 @@ describe("Authentication", () => {
     it("accepts valid session cookie", async () => {
       const ctx = await createTestContext();
 
-      const res = await app.request("/api/flows", {
+      const res = await app.request("/api/agents", {
         headers: {
           Cookie: ctx.cookie,
           "X-Org-Id": ctx.orgId,
@@ -46,7 +48,7 @@ describe("Authentication", () => {
     it("requires X-Org-Id for org-scoped routes", async () => {
       const testUser = await createTestUser();
 
-      const res = await app.request("/api/flows", {
+      const res = await app.request("/api/agents", {
         headers: { Cookie: testUser.cookie },
       });
 
@@ -59,7 +61,7 @@ describe("Authentication", () => {
       const ctx2 = await createTestContext();
 
       // User 1 tries to access User 2's org
-      const res = await app.request("/api/flows", {
+      const res = await app.request("/api/agents", {
         headers: {
           Cookie: ctx1.cookie,
           "X-Org-Id": ctx2.orgId,
@@ -83,7 +85,7 @@ describe("Authentication", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.user.email).toBe("new@test.com");
       expect(body.user.name).toBe("New User");
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, it, afterEach } from "bun:test";
 import {
   pullImage,
@@ -104,7 +106,7 @@ async function createRawContainer(
       },
       Labels: {
         "appstrate.managed": "true",
-        "appstrate.execution": `test-${uid()}`,
+        "appstrate.run": `test-${uid()}`,
         "appstrate.adapter": "test",
         ...opts.labels,
       },
@@ -132,9 +134,7 @@ describe("pullImage", () => {
   it(
     "throws on non-existent image",
     async () => {
-      await expect(pullImage("nonexistent-image-xxx:99.99.99")).rejects.toThrow(
-        /pull image/,
-      );
+      await expect(pullImage("nonexistent-image-xxx:99.99.99")).rejects.toThrow(/pull image/);
     },
     TIMEOUT,
   );
@@ -146,11 +146,15 @@ describe("createContainer", () => {
   it(
     "creates a container and returns its ID",
     async () => {
-      const executionId = `test-${uid()}`;
-      const id = await createContainer(executionId, {}, {
-        image: IMAGE,
-        adapterName: "test",
-      });
+      const runId = `test-${uid()}`;
+      const id = await createContainer(
+        runId,
+        {},
+        {
+          image: IMAGE,
+          adapterName: "test",
+        },
+      );
       trackContainer(id);
 
       expect(id).toBeString();
@@ -162,19 +166,23 @@ describe("createContainer", () => {
   it(
     "sets custom labels on the container",
     async () => {
-      const executionId = `test-${uid()}`;
-      const id = await createContainer(executionId, {}, {
-        image: IMAGE,
-        adapterName: "test",
-        labels: { "test.custom": "myvalue" },
-      });
+      const runId = `test-${uid()}`;
+      const id = await createContainer(
+        runId,
+        {},
+        {
+          image: IMAGE,
+          adapterName: "test",
+          labels: { "test.custom": "myvalue" },
+        },
+      );
       trackContainer(id);
 
       const res = await fetch(`${DOCKER_URL}/containers/${id}/json`);
       const data = (await res.json()) as any;
       expect(data.Config.Labels["test.custom"]).toBe("myvalue");
       expect(data.Config.Labels["appstrate.managed"]).toBe("true");
-      expect(data.Config.Labels["appstrate.execution"]).toBe(executionId);
+      expect(data.Config.Labels["appstrate.run"]).toBe(runId);
       expect(data.Config.Labels["appstrate.adapter"]).toBe("test");
     },
     TIMEOUT,
@@ -183,9 +191,9 @@ describe("createContainer", () => {
   it(
     "passes environment variables to the container",
     async () => {
-      const executionId = `test-${uid()}`;
+      const runId = `test-${uid()}`;
       const id = await createContainer(
-        executionId,
+        runId,
         { MY_VAR: "hello", OTHER: "world" },
         { image: IMAGE, adapterName: "test" },
       );
@@ -203,10 +211,10 @@ describe("createContainer", () => {
   it(
     "throws on invalid image",
     async () => {
-      const executionId = `test-${uid()}`;
-      await expect(
-        createContainer(executionId, {}, { image: "", adapterName: "test" }),
-      ).rejects.toThrow("Docker create test container failed");
+      const runId = `test-${uid()}`;
+      await expect(createContainer(runId, {}, { image: "", adapterName: "test" })).rejects.toThrow(
+        "Docker create test container failed",
+      );
     },
     TIMEOUT,
   );
@@ -268,7 +276,11 @@ describe("streamLogs", () => {
   it(
     "stops iteration on abort signal",
     async () => {
-      const id = await createRawContainer(["sh", "-c", "while true; do echo tick; sleep 0.1; done"]);
+      const id = await createRawContainer([
+        "sh",
+        "-c",
+        "while true; do echo tick; sleep 0.1; done",
+      ]);
       await startContainer(id);
 
       const controller = new AbortController();
@@ -374,11 +386,7 @@ describe("injectFiles", () => {
       const fileContent = "hello from injected file";
       const id = await createRawContainer(["cat", "/tmp/test.txt"]);
 
-      await injectFiles(
-        id,
-        [{ name: "test.txt", content: Buffer.from(fileContent) }],
-        "/tmp",
-      );
+      await injectFiles(id, [{ name: "test.txt", content: Buffer.from(fileContent) }], "/tmp");
 
       await startContainer(id);
 
@@ -395,9 +403,7 @@ describe("injectFiles", () => {
   it(
     "injects multiple files in a single tar archive",
     async () => {
-      const id = await createRawContainer([
-        "sh", "-c", "cat /tmp/a.txt && cat /tmp/b.txt",
-      ]);
+      const id = await createRawContainer(["sh", "-c", "cat /tmp/a.txt && cat /tmp/b.txt"]);
 
       await injectFiles(
         id,
@@ -528,13 +534,10 @@ describe("getContainerHostPort", () => {
     "returns the mapped host port for a container with port binding",
     async () => {
       // Create container with port binding via raw API
-      const id = await createRawContainer(
-        ["sh", "-c", "nc -l -p 8080 || sleep 10"],
-        {
-          exposedPorts: { "8080/tcp": {} },
-          portBindings: { "8080/tcp": [{ HostPort: "0" }] },
-        },
-      );
+      const id = await createRawContainer(["sh", "-c", "nc -l -p 8080 || sleep 10"], {
+        exposedPorts: { "8080/tcp": {} },
+        portBindings: { "8080/tcp": [{ HostPort: "0" }] },
+      });
       await startContainer(id);
 
       const port = await getContainerHostPort(id, "8080/tcp");
@@ -608,43 +611,36 @@ describe("cleanupOrphanedContainers", () => {
 // ─── Full lifecycle ─────────────────────────────────────────
 
 describe("Full lifecycle", () => {
-  it(
-    "create -> inject -> start -> streamLogs -> waitForExit -> remove",
-    async () => {
-      // Create container with a command that cats an injected file
-      const id = await createRawContainer(
-        ["sh", "/tmp/run.sh"],
-        { env: ["GREETING=world"] },
-      );
+  it("create -> inject -> start -> streamLogs -> waitForExit -> remove", async () => {
+    // Create container with a command that cats an injected file
+    const id = await createRawContainer(["sh", "/tmp/run.sh"], { env: ["GREETING=world"] });
 
-      // Inject a script before starting
-      await injectFiles(
-        id,
-        [{ name: "run.sh", content: Buffer.from('#!/bin/sh\necho "hello $GREETING"') }],
-        "/tmp",
-      );
+    // Inject a script before starting
+    await injectFiles(
+      id,
+      [{ name: "run.sh", content: Buffer.from('#!/bin/sh\necho "hello $GREETING"') }],
+      "/tmp",
+    );
 
-      await startContainer(id);
+    await startContainer(id);
 
-      // Stream logs
-      const lines: string[] = [];
-      for await (const line of streamLogs(id)) {
-        lines.push(line);
-      }
+    // Stream logs
+    const lines: string[] = [];
+    for await (const line of streamLogs(id)) {
+      lines.push(line);
+    }
 
-      // Wait for exit
-      const exitCode = await waitForExit(id);
-      expect(exitCode).toBe(0);
-      expect(lines.join(" ")).toContain("hello world");
+    // Wait for exit
+    const exitCode = await waitForExit(id);
+    expect(exitCode).toBe(0);
+    expect(lines.join(" ")).toContain("hello world");
 
-      // Remove
-      await removeContainer(id);
-      untrackContainer(id);
+    // Remove
+    await removeContainer(id);
+    untrackContainer(id);
 
-      // Verify gone
-      const res = await fetch(`${DOCKER_URL}/containers/${id}/json`);
-      expect(res.status).toBe(404);
-    },
-    30_000,
-  );
+    // Verify gone
+    const res = await fetch(`${DOCKER_URL}/containers/${id}/json`);
+    expect(res.status).toBe(404);
+  }, 30_000);
 });

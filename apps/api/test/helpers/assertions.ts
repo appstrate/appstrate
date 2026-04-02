@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Custom assertion helpers for database state verification.
  *
@@ -13,8 +15,8 @@ import type { PgTable } from "drizzle-orm/pg-core";
  * Assert that at least one row matching the given conditions exists in the table.
  *
  * @example
- * await assertDbHas(executions, eq(executions.id, "exec_123"));
- * await assertDbHas(packages, and(eq(packages.orgId, orgId), eq(packages.type, "flow")));
+ * await assertDbHas(runs, eq(runs.id, "exec_123"));
+ * await assertDbHas(packages, and(eq(packages.orgId, orgId), eq(packages.type, "agent")));
  */
 export async function assertDbHas(table: PgTable, where: SQL): Promise<void> {
   const rows = await db.select().from(table).where(where).limit(1);
@@ -25,7 +27,7 @@ export async function assertDbHas(table: PgTable, where: SQL): Promise<void> {
  * Assert that no rows matching the given conditions exist in the table.
  *
  * @example
- * await assertDbMissing(executions, eq(executions.id, "exec_123"));
+ * await assertDbMissing(runs, eq(runs.id, "exec_123"));
  */
 export async function assertDbMissing(table: PgTable, where: SQL): Promise<void> {
   const rows = await db.select().from(table).where(where).limit(1);
@@ -36,7 +38,7 @@ export async function assertDbMissing(table: PgTable, where: SQL): Promise<void>
  * Assert that exactly `count` rows matching the conditions exist.
  *
  * @example
- * await assertDbCount(executions, eq(executions.orgId, orgId), 3);
+ * await assertDbCount(runs, eq(runs.orgId, orgId), 3);
  */
 export async function assertDbCount(table: PgTable, where: SQL, count: number): Promise<void> {
   const result = await db
@@ -51,7 +53,7 @@ export async function assertDbCount(table: PgTable, where: SQL, count: number): 
  * Throws if no row found (use assertDbMissing for that case).
  *
  * @example
- * const exec = await getDbRow(executions, eq(executions.id, "exec_123"));
+ * const exec = await getDbRow(runs, eq(runs.id, "exec_123"));
  * expect(exec.status).toBe("success");
  */
 export async function getDbRow<T extends PgTable>(

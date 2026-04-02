@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePermissions } from "../hooks/use-permissions";
@@ -9,13 +11,13 @@ import { LoadingState, ErrorState } from "../components/page-states";
 import { isFileField } from "@appstrate/core/form";
 
 export function ScheduleEditPage() {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const { isMember } = usePermissions();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
 
   const { data: schedule, isLoading, error } = useScheduleById(id);
-  const { data: flowDetail } = usePackageDetail("flow", schedule?.packageId || undefined);
+  const { data: agentDetail } = usePackageDetail("agent", schedule?.packageId || undefined);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
@@ -23,7 +25,7 @@ export function ScheduleEditPage() {
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
 
-  const inputSchema = flowDetail?.input?.schema;
+  const inputSchema = agentDetail?.input?.schema;
   const hasFileInputs =
     inputSchema?.properties && Object.values(inputSchema.properties).some(isFileField);
 

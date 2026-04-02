@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -46,7 +48,7 @@ interface LogViewerProps {
 }
 
 export function LogViewer({ entries }: LogViewerProps) {
-  const { t, i18n } = useTranslation("flows");
+  const { t, i18n } = useTranslation("agents");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [showTimestamps, setShowTimestamps] = useState(false);
@@ -200,14 +202,14 @@ export function LogViewer({ entries }: LogViewerProps) {
   );
 }
 
-// --- ExecutionTimeline (public/user view) ---
+// --- RunTimeline (public/user view) ---
 
-interface ExecutionTimelineProps {
+interface RunTimelineProps {
   entries: LogEntry[];
   isRunning?: boolean;
 }
 
-export function ExecutionTimeline({ entries, isRunning }: ExecutionTimelineProps) {
+export function RunTimeline({ entries, isRunning }: RunTimelineProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll on new entries or when loader appears

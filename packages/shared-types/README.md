@@ -4,9 +4,9 @@ Shared TypeScript type definitions used by both frontend (`apps/web`) and backen
 
 ## What it provides
 
-- **DB model re-exports**: `Profile`, `Execution`, `ExecutionLog`, `ConnectionProfile`, `PackageSchedule`
-- **Enums**: `ExecutionStatus`, `OrgRole`
-- **API response types**: `FlowListItem`, `FlowDetail`, `OrgPackageItem`, `AppConfig`, `Features`
+- **DB model re-exports**: `Profile`, `Run`, `RunLog`, `ConnectionProfile`, `PackageSchedule`
+- **Enums**: `RunStatus`, `OrgRole`
+- **API response types**: `AgentListItem`, `AgentDetail`, `OrgPackageItem`, `AppConfig`, `Features`
 - **Provider types**: `ProviderStatus`, `ProviderConfig`, `ConnectionInfo`, `AvailableProvider`
 - **Headless types**: `ApplicationInfo`, `EndUserInfo`, `ApiKeyInfo`, `WebhookInfo`
 - **Utility functions**: `isPromptEmpty()`, `findMissingDependencies()`
@@ -14,7 +14,7 @@ Shared TypeScript type definitions used by both frontend (`apps/web`) and backen
 ## Usage
 
 ```typescript
-import type { FlowDetail, ExecutionStatus } from "@appstrate/shared-types";
+import type { AgentDetail, RunStatus } from "@appstrate/shared-types";
 ```
 
 ## Dependencies

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useTranslation } from "react-i18next";
 import { Building2, User, AlertTriangle, AlertCircle, CheckCircle2, Plug } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -27,7 +29,7 @@ export function ConnectionSummaryModal({
   orgProfileName,
   isPending,
 }: ConnectionSummaryModalProps) {
-  const { t } = useTranslation(["flows", "settings", "common"]);
+  const { t } = useTranslation(["agents", "settings", "common"]);
   const { data: providersData } = useProviders();
 
   const allReady = providers.every((p) => isProviderStatusConnected(p.status));

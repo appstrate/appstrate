@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
- * Set State Tool — Persist state for the next execution run.
+ * Set State Tool — Persist state for the next run.
  *
  * Only the last call is kept. Use this for cursors, timestamps,
  * counters, or any data needed to resume work next time.
@@ -17,7 +19,7 @@ export default function (pi: ExtensionAPI) {
     name: "set_state",
     label: "Set State",
     description:
-      "Persist state for the next execution run. Only the last call is kept — design the state to be self-contained. " +
+      "Persist state for the next run. Only the last call is kept — design the state to be self-contained. " +
       "Use this for cursors, timestamps, counters, or any data needed to resume work next time.",
     parameters: Type.Object({
       state: Type.Unsafe<Record<string, unknown>>({

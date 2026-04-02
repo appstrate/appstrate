@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Test application builder.
  *
@@ -25,10 +27,10 @@ import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 
 // Route imports
-import { createFlowsRouter } from "../../src/routes/flows.ts";
-import { createExecutionsRouter } from "../../src/routes/executions.ts";
+import { createAgentsRouter } from "../../src/routes/agents.ts";
+import { createRunsRouter } from "../../src/routes/runs.ts";
 import { createSchedulesRouter } from "../../src/routes/schedules.ts";
-import { createUserFlowsRouter } from "../../src/routes/user-flows.ts";
+import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
 import { createProvidersRouter } from "../../src/routes/providers.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
@@ -219,16 +221,16 @@ export function getTestApp(): Hono<AppEnv> {
   });
 
   // Mount routes (same order as production)
-  const userFlowsRouter = createUserFlowsRouter();
-  const flowsRouter = createFlowsRouter();
-  const executionsRouter = createExecutionsRouter();
+  const userAgentsRouter = createUserAgentsRouter();
+  const agentsRouter = createAgentsRouter();
+  const runsRouter = createRunsRouter();
   const schedulesRouter = createSchedulesRouter();
 
   app.route("/api/orgs", orgsRouter);
-  app.route("/api/flows", userFlowsRouter);
-  app.route("/api/flows", flowsRouter);
+  app.route("/api/agents", userAgentsRouter);
+  app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());
-  app.route("/api", executionsRouter);
+  app.route("/api", runsRouter);
   app.route("/api", schedulesRouter);
   app.route("/api/packages", createPackagesRouter());
   app.route("/api/end-users", createEndUsersRouter());

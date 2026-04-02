@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, test, expect } from "bun:test";
 import { createLogger } from "../src/logger.ts";
 

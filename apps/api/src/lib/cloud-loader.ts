@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { EmailType, EmailRenderer } from "@appstrate/emails";
 import { registerEmailOverrides } from "@appstrate/emails";
 import { setBeforeSignupHook } from "@appstrate/db/auth";
@@ -18,8 +20,8 @@ export interface CloudModule {
   QuotaExceededError: new (...args: any[]) => Error & { code: "QUOTA_EXCEEDED" };
   publicPaths: string[];
   cloudHooks: {
-    checkQuota(orgId: string, runningExecutionCount: number): Promise<void>;
-    recordUsage(orgId: string, executionId: string, cost: number): Promise<void>;
+    checkQuota(orgId: string, runningRunCount: number): Promise<void>;
+    recordUsage(orgId: string, runId: string, cost: number): Promise<void>;
     onOrgCreated(orgId: string, userEmail: string): Promise<void>;
     onOrgDeleted(orgId: string): Promise<void>;
     onBeforeSignup?(email: string): void;

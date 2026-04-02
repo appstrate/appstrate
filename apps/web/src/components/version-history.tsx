@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
@@ -16,7 +18,7 @@ interface VersionHistoryProps {
 }
 
 export function VersionHistory({ packageId, type, isOwned }: VersionHistoryProps) {
-  const { t } = useTranslation("flows");
+  const { t } = useTranslation("agents");
   const { data: versions } = usePackageVersions(type, packageId);
   const restoreVersion = useRestoreVersion(type, packageId);
   const deleteVersion = useDeleteVersion(type, packageId);

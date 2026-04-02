@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Component, type ReactNode, type ErrorInfo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";

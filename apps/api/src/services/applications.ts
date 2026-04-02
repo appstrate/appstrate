@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { eq, and, desc } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";

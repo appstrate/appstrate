@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import {
@@ -23,17 +25,15 @@ export interface AppDeps {
   config: SidecarConfig;
   fetchCredentials: (providerId: string) => Promise<CredentialsResponse>;
   cookieJar: Map<string, string[]>;
-  fetchFn?: typeof fetch;        // default: global fetch — injectable for tests
-  isReady?: () => boolean;       // default: () => true — controls /health
-  configSecret?: string;         // One-time config secret (from CONFIG_SECRET env var)
-  preConfigured?: boolean;       // true when credentials come via env vars (fresh sidecar)
+  fetchFn?: typeof fetch; // default: global fetch — injectable for tests
+  isReady?: () => boolean; // default: () => true — controls /health
+  configSecret?: string; // One-time config secret (from CONFIG_SECRET env var)
+  preConfigured?: boolean; // true when credentials come via env vars (fresh sidecar)
 }
 
 const CREDENTIAL_PROXY_SKIP = new Set(["x-provider", "x-target", "x-substitute-body"]);
 
-type FetchResult =
-  | { ok: true; response: Response }
-  | { ok: false; errorResponse: Response };
+type FetchResult = { ok: true; response: Response } | { ok: false; errorResponse: Response };
 
 /**
  * Wrapper around fetch that converts network/timeout errors into a 502 JSON response.
@@ -51,7 +51,9 @@ async function fetchOrError(
   } catch (err) {
     const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
     let domain: string | undefined;
-    try { domain = new URL(url).hostname; } catch {}
+    try {
+      domain = new URL(url).hostname;
+    } catch {}
     const suffix = code ? `: ${code}` : "";
     const domainHint = domain ? ` (${domain})` : "";
     return {
@@ -105,12 +107,12 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     const body = await c.req.json<{
-      executionToken?: string;
+      runToken?: string;
       platformApiUrl?: string;
       proxyUrl?: string;
       llm?: LlmProxyConfig;
     }>();
-    if (body.executionToken) config.executionToken = body.executionToken;
+    if (body.runToken) config.runToken = body.runToken;
     if (body.platformApiUrl) config.platformApiUrl = body.platformApiUrl;
     if (body.proxyUrl !== undefined) config.proxyUrl = body.proxyUrl;
     if (body.llm !== undefined) {
@@ -122,18 +124,18 @@ export function createApp(deps: AppDeps): Hono {
 
     configUsed = true;
 
-    // Reset cookie jar for new execution context
+    // Reset cookie jar for new run context
     cookieJar.clear();
     return c.json({ status: "configured" });
   });
 
-  // Execution history proxy
-  app.get("/execution-history", async (c) => {
+  // Run history proxy
+  const runHistoryHandler = async (c: any) => {
     const qs = new URL(c.req.url).search;
-    const url = `${config.platformApiUrl}/internal/execution-history${qs}`;
+    const url = `${config.platformApiUrl}/internal/run-history${qs}`;
 
-    const result = await fetchOrError(c, fetchFn, "Execution history fetch failed", url, {
-      headers: { Authorization: `Bearer ${config.executionToken}` },
+    const result = await fetchOrError(c, fetchFn, "Run history fetch failed", url, {
+      headers: { Authorization: `Bearer ${config.runToken}` },
     });
     if (!result.ok) return result.errorResponse;
 
@@ -141,7 +143,8 @@ export function createApp(deps: AppDeps): Hono {
     return c.body(body, result.response.status, {
       "Content-Type": result.response.headers.get("Content-Type") || "application/json",
     });
-  });
+  };
+  app.get("/run-history", runHistoryHandler);
 
   // LLM reverse proxy — replaces placeholder key with real API key, streams response.
   // The SDK formats all headers (auth, beta, identity) naturally using the placeholder;
@@ -174,9 +177,7 @@ export function createApp(deps: AppDeps): Hono {
 
     // Stream-through request body
     const method = c.req.method;
-    const body = method !== "GET" && method !== "HEAD"
-      ? (c.req.raw.body ?? undefined)
-      : undefined;
+    const body = method !== "GET" && method !== "HEAD" ? (c.req.raw.body ?? undefined) : undefined;
 
     const result = await fetchOrError(c, fetchFn, "LLM request failed", targetUrl, {
       method,
@@ -242,10 +243,7 @@ export function createApp(deps: AppDeps): Hono {
     if (creds.allowAllUris) {
       // Allow all URLs but still block internal/private networks
       if (isBlockedUrl(resolvedUrl)) {
-        return c.json(
-          { error: "URL targets a blocked network range" },
-          403,
-        );
+        return c.json({ error: "URL targets a blocked network range" }, 403);
       }
     } else if (creds.authorizedUris && creds.authorizedUris.length) {
       if (!matchesAuthorizedUri(resolvedUrl, creds.authorizedUris)) {
@@ -259,10 +257,7 @@ export function createApp(deps: AppDeps): Hono {
     } else {
       // No authorizedUris — apply SSRF safety net
       if (isBlockedUrl(resolvedUrl)) {
-        return c.json(
-          { error: "URL targets a blocked network range" },
-          403,
-        );
+        return c.json({ error: "URL targets a blocked network range" }, 403);
       }
     }
 
@@ -273,7 +268,7 @@ export function createApp(deps: AppDeps): Hono {
       forwardedHeaders[key] = substituteVars(value, creds.credentials);
     }
 
-    // Infrastructure proxy (flow-level, transparent)
+    // Infrastructure proxy (agent-level, transparent)
     const resolvedProxy = config.proxyUrl || "";
 
     // 5b. Check for unresolved placeholders in headers
@@ -364,9 +359,10 @@ export function createApp(deps: AppDeps): Hono {
     // 9. Forward upstream response transparently (pass-through proxy)
     const responseText = await targetRes.text();
     const requestedMaxSize = parseInt(c.req.header("x-max-response-size") || "0", 10);
-    const maxSize = requestedMaxSize > 0
-      ? Math.min(requestedMaxSize, ABSOLUTE_MAX_RESPONSE_SIZE)
-      : MAX_RESPONSE_SIZE;
+    const maxSize =
+      requestedMaxSize > 0
+        ? Math.min(requestedMaxSize, ABSOLUTE_MAX_RESPONSE_SIZE)
+        : MAX_RESPONSE_SIZE;
     const truncated = responseText.length > maxSize;
     const text = truncated ? responseText.slice(0, maxSize) : responseText;
 

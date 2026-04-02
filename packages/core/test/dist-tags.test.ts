@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, test } from "bun:test";
 import { DIST_TAG_REGEX, isValidDistTag, isProtectedTag } from "../src/dist-tags.ts";
 

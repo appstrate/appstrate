@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { logger } from "../lib/logger.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { createVersionAndUpload } from "./package-versions.ts";
@@ -33,7 +35,7 @@ async function upsertItem(
 
 /**
  * Run per-type post-install side-effects after a package is saved to the DB.
- * Creates a version in packageVersions for ALL types (flow, skill, tool, provider),
+ * Creates a version in packageVersions for ALL types (agent, skill, tool, provider),
  * handles skill/tool upsert + storage.
  */
 export async function postInstallPackage(params: {
@@ -89,8 +91,8 @@ export async function postInstallPackage(params: {
     await uploadPackageFiles("providers", orgId, packageId, files);
   }
 
-  if (packageType === "flow" && Object.keys(files).length > 0) {
-    await uploadPackageFiles("flows", orgId, packageId, files);
+  if (packageType === "agent" && Object.keys(files).length > 0) {
+    await uploadPackageFiles("agents", orgId, packageId, files);
   }
 
   await createVersion(manifest);

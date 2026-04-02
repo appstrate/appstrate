@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 
 const Collapsible = CollapsiblePrimitive.Root;

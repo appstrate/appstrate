@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Integration tests for scheduler CRUD functions.
  *
@@ -45,15 +47,15 @@ describe("scheduler service", () => {
     const profile = await seedConnectionProfile({ userId, name: "Default" });
     profileId = profile.id;
 
-    // Seed a flow package that schedules will reference
+    // Seed an agent package that schedules will reference
     const pkg = await seedPackage({
       orgId,
-      id: `@${orgSlug}/scheduled-flow`,
+      id: `@${orgSlug}/scheduled-agent`,
       draftManifest: {
-        name: `@${orgSlug}/scheduled-flow`,
+        name: `@${orgSlug}/scheduled-agent`,
         version: "0.1.0",
-        type: "flow",
-        description: "A flow for schedule tests",
+        type: "agent",
+        description: "An agent for schedule tests",
       },
     });
     packageId = pkg.id;
@@ -146,11 +148,11 @@ describe("scheduler service", () => {
       const { org: otherOrg } = await createTestOrg(otherUser.id, { slug: "otherorg" });
       const otherPkg = await seedPackage({
         orgId: otherOrg.id,
-        id: "@otherorg/other-flow",
+        id: "@otherorg/other-agent",
         draftManifest: {
-          name: "@otherorg/other-flow",
+          name: "@otherorg/other-agent",
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "Other",
         },
       });
@@ -182,31 +184,31 @@ describe("scheduler service", () => {
     it("filters by packageId within the org", async () => {
       const pkg2 = await seedPackage({
         orgId,
-        id: `@${orgSlug}/other-flow`,
+        id: `@${orgSlug}/other-agent`,
         draftManifest: {
-          name: `@${orgSlug}/other-flow`,
+          name: `@${orgSlug}/other-agent`,
           version: "0.1.0",
-          type: "flow",
-          description: "Other flow",
+          type: "agent",
+          description: "Other agent",
         },
       });
 
       await createSchedule(packageId, profileId, orgId, {
-        name: "Flow 1 Schedule",
+        name: "Agent 1 Schedule",
         cronExpression: "0 * * * *",
       });
       await createSchedule(pkg2.id, profileId, orgId, {
-        name: "Flow 2 Schedule",
+        name: "Agent 2 Schedule",
         cronExpression: "*/15 * * * *",
       });
 
       const schedules = await listPackageSchedules(packageId, orgId);
       expect(schedules).toHaveLength(1);
-      expect(schedules[0]!.name).toBe("Flow 1 Schedule");
+      expect(schedules[0]!.name).toBe("Agent 1 Schedule");
 
       const schedules2 = await listPackageSchedules(pkg2.id, orgId);
       expect(schedules2).toHaveLength(1);
-      expect(schedules2[0]!.name).toBe("Flow 2 Schedule");
+      expect(schedules2[0]!.name).toBe("Agent 2 Schedule");
     });
 
     it("returns empty array for package with no schedules", async () => {
@@ -392,7 +394,7 @@ describe("scheduler service", () => {
       });
     }
 
-    it("returns profileName and readiness 'ready' when flow has no providers", async () => {
+    it("returns profileName and readiness 'ready' when agent has no providers", async () => {
       await createSchedule(packageId, profileId, orgId, {
         name: "No Providers",
         cronExpression: "0 * * * *",
@@ -416,19 +418,19 @@ describe("scheduler service", () => {
       const providerId = "@system/sched-gmail";
       await seedProviderPackage(providerId);
 
-      const flowWithProvider = await seedPackage({
+      const agentWithProvider = await seedPackage({
         orgId,
-        id: `@${orgSlug}/flow-with-provider`,
+        id: `@${orgSlug}/agent-with-provider`,
         draftManifest: {
-          name: `@${orgSlug}/flow-with-provider`,
+          name: `@${orgSlug}/agent-with-provider`,
           version: "0.1.0",
-          type: "flow",
-          description: "Flow needing a provider",
+          type: "agent",
+          description: "Agent needing a provider",
           dependencies: { providers: { [providerId]: "*" } },
         },
       });
 
-      await createSchedule(flowWithProvider.id, profileId, orgId, {
+      await createSchedule(agentWithProvider.id, profileId, orgId, {
         name: "Missing Connection",
         cronExpression: "0 * * * *",
       });
@@ -447,19 +449,19 @@ describe("scheduler service", () => {
       await seedProviderPackage(providerId);
       await saveConnection(db, profileId, providerId, orgId, { api_key: "k" });
 
-      const flowConnected = await seedPackage({
+      const agentConnected = await seedPackage({
         orgId,
-        id: `@${orgSlug}/flow-connected`,
+        id: `@${orgSlug}/agent-connected`,
         draftManifest: {
-          name: `@${orgSlug}/flow-connected`,
+          name: `@${orgSlug}/agent-connected`,
           version: "0.1.0",
-          type: "flow",
-          description: "Connected flow",
+          type: "agent",
+          description: "Connected agent",
           dependencies: { providers: { [providerId]: "*" } },
         },
       });
 
-      await createSchedule(flowConnected.id, profileId, orgId, {
+      await createSchedule(agentConnected.id, profileId, orgId, {
         name: "Connected Schedule",
         cronExpression: "0 * * * *",
       });

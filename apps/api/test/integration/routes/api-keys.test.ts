@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -19,7 +21,6 @@ describe("API Keys API", () => {
     ctx = await createTestContext({ orgSlug: "testorg" });
   });
 
-
   describe("GET /api/api-keys", () => {
     it("returns empty list when no keys exist", async () => {
       const res = await app.request("/api/api-keys", {
@@ -27,7 +28,7 @@ describe("API Keys API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.apiKeys).toBeArray();
       expect(body.apiKeys).toHaveLength(0);
     });
@@ -48,7 +49,7 @@ describe("API Keys API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.apiKeys).toHaveLength(1);
       expect(body.apiKeys[0].name).toBe("Test Key");
     });
@@ -71,7 +72,7 @@ describe("API Keys API", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.id).toBeDefined();
       expect(body.key).toBeDefined();
       expect(body.keyPrefix).toBeDefined();
@@ -88,11 +89,10 @@ describe("API Keys API", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.key).toStartWith("ask_");
       expect(body.keyPrefix).toStartWith("ask_");
     });
-
   });
 
   describe("DELETE /api/api-keys/:id", () => {
@@ -106,7 +106,7 @@ describe("API Keys API", () => {
           applicationId: ctx.defaultAppId,
         }),
       });
-      const { id } = await createRes.json() as any;
+      const { id } = (await createRes.json()) as any;
 
       // Delete it
       const deleteRes = await app.request(`/api/api-keys/${id}`, {
@@ -127,7 +127,7 @@ describe("API Keys API", () => {
           applicationId: ctx.defaultAppId,
         }),
       });
-      const { id } = await createRes.json() as any;
+      const { id } = (await createRes.json()) as any;
 
       // Delete it
       await app.request(`/api/api-keys/${id}`, {
@@ -139,7 +139,7 @@ describe("API Keys API", () => {
       const listRes = await app.request("/api/api-keys", {
         headers: authHeaders(ctx),
       });
-      const body = await listRes.json() as any;
+      const body = (await listRes.json()) as any;
       const found = body.apiKeys.find((k: { id: string }) => k.id === id);
       expect(found).toBeUndefined();
     });
@@ -153,16 +153,16 @@ describe("API Keys API", () => {
         body: JSON.stringify({
           name: "Scoped Key",
           applicationId: ctx.defaultAppId,
-          scopes: ["flows:read", "flows:run", "executions:read"],
+          scopes: ["agents:read", "agents:run", "runs:read"],
         }),
       });
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
       expect(body.scopes).toBeArray();
-      expect(body.scopes).toContain("flows:read");
-      expect(body.scopes).toContain("flows:run");
-      expect(body.scopes).toContain("executions:read");
+      expect(body.scopes).toContain("agents:read");
+      expect(body.scopes).toContain("agents:run");
+      expect(body.scopes).toContain("runs:read");
     });
 
     it("creates key without scopes (defaults to all API-key-allowed scopes)", async () => {
@@ -179,8 +179,8 @@ describe("API Keys API", () => {
       const body = (await res.json()) as any;
       expect(body.scopes).toBeArray();
       expect(body.scopes.length).toBeGreaterThan(20);
-      expect(body.scopes).toContain("flows:read");
-      expect(body.scopes).toContain("flows:run");
+      expect(body.scopes).toContain("agents:read");
+      expect(body.scopes).toContain("agents:run");
     });
 
     it("filters out session-only scopes (org:*, billing:*)", async () => {
@@ -190,13 +190,13 @@ describe("API Keys API", () => {
         body: JSON.stringify({
           name: "Session Scope Key",
           applicationId: ctx.defaultAppId,
-          scopes: ["flows:read", "org:delete", "billing:manage", "members:invite"],
+          scopes: ["agents:read", "org:delete", "billing:manage", "members:invite"],
         }),
       });
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      expect(body.scopes).toEqual(["flows:read"]);
+      expect(body.scopes).toEqual(["agents:read"]);
     });
 
     it("filters out invalid scope strings", async () => {
@@ -206,13 +206,13 @@ describe("API Keys API", () => {
         body: JSON.stringify({
           name: "Invalid Scope Key",
           applicationId: ctx.defaultAppId,
-          scopes: ["flows:read", "not-a-scope", "invalid:permission"],
+          scopes: ["agents:read", "not-a-scope", "invalid:permission"],
         }),
       });
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      expect(body.scopes).toEqual(["flows:read"]);
+      expect(body.scopes).toEqual(["agents:read"]);
     });
 
     it("scoped key appears in list with scopes", async () => {
@@ -222,7 +222,7 @@ describe("API Keys API", () => {
         body: JSON.stringify({
           name: "Listed Scoped Key",
           applicationId: ctx.defaultAppId,
-          scopes: ["flows:read", "flows:run"],
+          scopes: ["agents:read", "agents:run"],
         }),
       });
 
@@ -230,8 +230,8 @@ describe("API Keys API", () => {
         headers: authHeaders(ctx),
       });
       const body = (await listRes.json()) as any;
-      expect(body.apiKeys[0].scopes).toContain("flows:read");
-      expect(body.apiKeys[0].scopes).toContain("flows:run");
+      expect(body.apiKeys[0].scopes).toContain("agents:read");
+      expect(body.apiKeys[0].scopes).toContain("agents:run");
     });
   });
 
@@ -245,8 +245,8 @@ describe("API Keys API", () => {
       const body = (await res.json()) as any;
       expect(body.scopes).toBeArray();
       expect(body.scopes.length).toBeGreaterThan(20);
-      expect(body.scopes).toContain("flows:read");
-      expect(body.scopes).toContain("flows:write");
+      expect(body.scopes).toContain("agents:read");
+      expect(body.scopes).toContain("agents:write");
       expect(body.scopes).toContain("webhooks:write");
       // Session-only scopes should NOT be present
       expect(body.scopes).not.toContain("org:delete");

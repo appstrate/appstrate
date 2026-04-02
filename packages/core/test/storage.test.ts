@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, test, expect } from "bun:test";
 import { createS3Storage } from "../src/storage-s3.ts";
 

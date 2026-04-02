@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Sidecar pool integration tests.
  *
@@ -26,7 +28,12 @@ const networksToCleanup: string[] = [];
 /** Create a container with a custom Cmd via raw Docker API (createContainer doesn't support Cmd). */
 async function createRawContainer(
   cmd: string[],
-  opts: { networkId?: string; portBindings?: Record<string, Array<{ HostPort: string }>>; exposedPorts?: Record<string, object>; labels?: Record<string, string> } = {},
+  opts: {
+    networkId?: string;
+    portBindings?: Record<string, Array<{ HostPort: string }>>;
+    exposedPorts?: Record<string, object>;
+    labels?: Record<string, string>;
+  } = {},
 ): Promise<string> {
   const res = await fetch(`${DOCKER_URL}/containers/create?name=test-pool-${uid()}`, {
     method: "POST",
@@ -48,14 +55,20 @@ async function createRawContainer(
 }
 
 afterEach(async () => {
-  await Promise.allSettled(containersToCleanup.map((id) =>
-    fetch(`${DOCKER_URL}/containers/${id}?force=true&v=true`, { method: "DELETE" }).catch(() => {}),
-  ));
+  await Promise.allSettled(
+    containersToCleanup.map((id) =>
+      fetch(`${DOCKER_URL}/containers/${id}?force=true&v=true`, { method: "DELETE" }).catch(
+        () => {},
+      ),
+    ),
+  );
   containersToCleanup.length = 0;
 
-  await Promise.allSettled(networksToCleanup.map((id) =>
-    fetch(`${DOCKER_URL}/networks/${id}`, { method: "DELETE" }).catch(() => {}),
-  ));
+  await Promise.allSettled(
+    networksToCleanup.map((id) =>
+      fetch(`${DOCKER_URL}/networks/${id}`, { method: "DELETE" }).catch(() => {}),
+    ),
+  );
   networksToCleanup.length = 0;
 });
 
@@ -92,7 +105,7 @@ describe("sidecar pool infrastructure", () => {
     expect(hostPort!).toBeGreaterThan(0);
   });
 
-  it("connects a pooled container to an execution network with alias", async () => {
+  it("connects a pooled container to a run network with alias", async () => {
     const poolNet = await createNetwork(`test-pool-${uid()}`);
     networksToCleanup.push(poolNet);
 
@@ -104,7 +117,7 @@ describe("sidecar pool infrastructure", () => {
 
     await startContainer(containerId);
 
-    // Connect to execution network with "sidecar" alias (simulates acquireSidecar)
+    // Connect to run network with "sidecar" alias (simulates acquireSidecar)
     await connectContainerToNetwork(execNet, containerId, ["sidecar"]);
 
     // Verify via Docker inspect
@@ -124,12 +137,16 @@ describe("sidecar pool infrastructure", () => {
     // Create 3 containers in parallel (simulating pool replenish)
     const results = await Promise.allSettled(
       Array.from({ length: 3 }, () =>
-        createContainer(uid(), {}, {
-          image: IMAGE,
-          adapterName: "sidecar-pool-test",
-          networkId: netId,
-          labels: { "appstrate.pool": "sidecar", "appstrate.managed": "true" },
-        }),
+        createContainer(
+          uid(),
+          {},
+          {
+            image: IMAGE,
+            adapterName: "sidecar-pool-test",
+            networkId: netId,
+            labels: { "appstrate.pool": "sidecar", "appstrate.managed": "true" },
+          },
+        ),
       ),
     );
 
@@ -145,18 +162,26 @@ describe("sidecar pool infrastructure", () => {
     const netId = await createNetwork(`test-pool-${uid()}`);
 
     // Create 2 containers
-    const c1 = await createContainer(uid(), {}, {
-      image: IMAGE,
-      adapterName: "sidecar-pool-test",
-      networkId: netId,
-      labels: { "appstrate.pool": "sidecar", "appstrate.managed": "true" },
-    });
-    const c2 = await createContainer(uid(), {}, {
-      image: IMAGE,
-      adapterName: "sidecar-pool-test",
-      networkId: netId,
-      labels: { "appstrate.pool": "sidecar", "appstrate.managed": "true" },
-    });
+    const c1 = await createContainer(
+      uid(),
+      {},
+      {
+        image: IMAGE,
+        adapterName: "sidecar-pool-test",
+        networkId: netId,
+        labels: { "appstrate.pool": "sidecar", "appstrate.managed": "true" },
+      },
+    );
+    const c2 = await createContainer(
+      uid(),
+      {},
+      {
+        image: IMAGE,
+        adapterName: "sidecar-pool-test",
+        networkId: netId,
+        labels: { "appstrate.pool": "sidecar", "appstrate.managed": "true" },
+      },
+    );
 
     await startContainer(c1);
     await startContainer(c2);
@@ -182,17 +207,23 @@ describe("sidecar pool infrastructure", () => {
     const netId = await createNetwork(`test-pool-${uid()}`);
     networksToCleanup.push(netId);
 
-    const containerId = await createContainer(uid(), {}, {
-      image: IMAGE,
-      adapterName: "sidecar-pool-test",
-      networkId: netId,
-      labels: { "appstrate.pool": "sidecar", "appstrate.managed": "true" },
-    });
+    const containerId = await createContainer(
+      uid(),
+      {},
+      {
+        image: IMAGE,
+        adapterName: "sidecar-pool-test",
+        networkId: netId,
+        labels: { "appstrate.pool": "sidecar", "appstrate.managed": "true" },
+      },
+    );
     containersToCleanup.push(containerId);
 
     // List containers by label (same filter used by cleanupOrphanedContainers)
     const filters = JSON.stringify({ label: ["appstrate.pool=sidecar"] });
-    const res = await fetch(`${DOCKER_URL}/containers/json?all=true&filters=${encodeURIComponent(filters)}`);
+    const res = await fetch(
+      `${DOCKER_URL}/containers/json?all=true&filters=${encodeURIComponent(filters)}`,
+    );
     const containers = (await res.json()) as Array<{ Id: string }>;
 
     expect(containers.some((c) => c.Id === containerId)).toBe(true);

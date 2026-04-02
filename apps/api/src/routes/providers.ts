@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Hono } from "hono";
 import { z } from "zod";
 import { eq, and, sql } from "drizzle-orm";
@@ -20,7 +22,7 @@ import {
   systemEntityForbidden,
 } from "../lib/errors.ts";
 import { encryptCredentials } from "@appstrate/connect";
-import { listPackages } from "../services/flow-service.ts";
+import { listPackages } from "../services/agent-service.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { isValidVersion } from "@appstrate/core/semver";
@@ -165,11 +167,11 @@ export function createProvidersRouter() {
       .where(and(orgOrSystemFilter(orgId), eq(packages.type, "provider")))
       .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`);
 
-    // Count provider usage across all flows
-    const allFlows = await listPackages(orgId);
+    // Count provider usage across all agents
+    const allAgents = await listPackages(orgId);
     const providerUsage = new Map<string, number>();
-    for (const flow of allFlows) {
-      for (const svc of resolveManifestProviders(flow.manifest)) {
+    for (const agent of allAgents) {
+      for (const svc of resolveManifestProviders(agent.manifest)) {
         providerUsage.set(svc.id, (providerUsage.get(svc.id) ?? 0) + 1);
       }
     }
@@ -192,7 +194,7 @@ export function createProvidersRouter() {
         { id: pkg.id, manifest: pkg.draftManifest, source: pkg.source },
         cred,
       );
-      cfg.usedByFlows = providerUsage.get(pkg.id) ?? 0;
+      cfg.usedByAgents = providerUsage.get(pkg.id) ?? 0;
       return cfg;
     });
 
@@ -506,11 +508,11 @@ export function createProvidersRouter() {
       throw systemEntityForbidden("system provider", providerId, "delete");
     }
 
-    // Block deleting providers that are in use by flows
-    const allFlows = await listPackages(orgId);
+    // Block deleting providers that are in use by agents
+    const allAgents = await listPackages(orgId);
     let usageCount = 0;
-    for (const flow of allFlows) {
-      for (const svc of resolveManifestProviders(flow.manifest)) {
+    for (const agent of allAgents) {
+      for (const svc of resolveManifestProviders(agent.manifest)) {
         if (svc.id === providerId) {
           usageCount++;
           break;
@@ -520,7 +522,7 @@ export function createProvidersRouter() {
     if (usageCount > 0) {
       throw conflict(
         "provider_in_use",
-        `Cannot delete provider '${providerId}': used by ${usageCount} flow(s)`,
+        `Cannot delete provider '${providerId}': used by ${usageCount} agent(s)`,
       );
     }
 

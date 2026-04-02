@@ -15,7 +15,7 @@
 # Optional .env variables:
 #   POSTGRES_USER, MINIO_ROOT_USER, S3_BUCKET (default: appstrate),
 #   S3_REGION (default: us-east-1), APP_URL, TRUSTED_ORIGINS,
-#   SYSTEM_PROVIDER_KEYS, EXECUTION_ADAPTER,
+#   SYSTEM_PROVIDER_KEYS, RUN_ADAPTER,
 #   SIDECAR_POOL_SIZE, APPSTRATE_VERSION, LOG_LEVEL
 
 name: appstrate
@@ -169,7 +169,7 @@ services:
       - S3_ENDPOINT=${S3_ENDPOINT:-http://appstrate-minio:9000}
       - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
       - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
-      - EXECUTION_ADAPTER=${EXECUTION_ADAPTER:-pi}
+      - RUN_ADAPTER=${RUN_ADAPTER:-pi}
       - DOCKER_SOCKET=/var/run/docker.sock
       - SIDECAR_POOL_SIZE=${SIDECAR_POOL_SIZE:-2}
       - LOG_LEVEL=${LOG_LEVEL:-info}

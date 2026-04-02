@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { z } from "zod";
 import type { ModelCost } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
@@ -21,7 +23,7 @@ export const tokenUsageSchema = z.object({
 });
 export type TokenUsage = z.infer<typeof tokenUsageSchema>;
 
-export interface ExecutionMessage {
+export interface RunMessage {
   type: "progress" | "usage" | "error" | "output" | "set_state" | "add_memory" | "report";
   message?: string;
   data?: Record<string, unknown>;
@@ -48,7 +50,7 @@ export interface PromptContext {
   tokens: Record<string, string>;
   config: Record<string, unknown>;
   previousState: Record<string, unknown> | null;
-  executionApi?: { url: string; token: string };
+  runApi?: { url: string; token: string };
   input: Record<string, unknown>;
   files?: FileReference[];
   schemas: {
@@ -90,15 +92,15 @@ export interface PromptContext {
   toolDocs?: Array<{ id: string; content: string }>;
 }
 
-export interface ExecutionAdapter {
+export interface RunAdapter {
   execute(
-    executionId: string,
+    runId: string,
     ctx: PromptContext,
     timeout: number,
-    flowPackage?: Buffer,
+    agentPackage?: Buffer,
     signal?: AbortSignal,
     inputFiles?: UploadedFile[],
-  ): AsyncGenerator<ExecutionMessage>;
+  ): AsyncGenerator<RunMessage>;
 }
 
 export class TimeoutError extends Error {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, AlertTriangle, Unlink, Plug, Building2 } from "lucide-react";
@@ -18,7 +20,7 @@ import type { JSONSchemaObject } from "@appstrate/core/form";
 
 interface ProviderConnectionCardProps {
   providerId: string;
-  /** Flow package ID — enables per-provider profile persistence. */
+  /** Agent package ID — enables per-provider profile persistence. */
   packageId?: string;
   /** Org profile ID — enables the org binding section. */
   orgProfileId?: string;
@@ -38,7 +40,7 @@ export function ProviderConnectionCard({
   readOnly: readOnlyProp,
   viewProfileId,
 }: ProviderConnectionCardProps) {
-  const { t } = useTranslation(["settings", "flows"]);
+  const { t } = useTranslation(["settings", "agents"]);
 
   const {
     userProfiles,

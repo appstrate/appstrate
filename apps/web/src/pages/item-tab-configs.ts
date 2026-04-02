@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { LucideIcon } from "lucide-react";
 import { Plug, Puzzle, Wrench } from "lucide-react";
 import { usePackageList } from "../hooks/use-packages";
@@ -11,7 +13,7 @@ export interface ItemTabConfig {
           name?: string | null;
           description?: string | null;
           source?: "system" | "local";
-          usedByFlows?: number;
+          usedByAgents?: number;
           autoInstalled?: boolean;
         }[]
       | undefined;

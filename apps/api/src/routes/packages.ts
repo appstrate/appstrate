@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Context } from "hono";
@@ -9,7 +11,7 @@ import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
-import { getAllPackageIds } from "../services/flow-service.ts";
+import { getAllPackageIds } from "../services/agent-service.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { getVersionForDownload, replaceVersionContent } from "../services/package-versions.ts";
 import { downloadVersionZip } from "../services/package-storage.ts";
@@ -25,7 +27,7 @@ import {
   downloadPackageFiles,
   SKILL_CONFIG,
   TOOL_CONFIG,
-  FLOW_CONFIG,
+  AGENT_CONFIG,
   PROVIDER_CONFIG,
   PackageAlreadyExistsError,
   type PackageTypeConfig,
@@ -45,11 +47,11 @@ import {
   createVersionAndUpload,
   deletePackageVersion,
 } from "../services/package-versions.ts";
-import { flowDetailHandler } from "./flow-detail-handler.ts";
+import { agentDetailHandler } from "./agent-detail-handler.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireOwnedPackage, checkScopeMatch } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { getRunningExecutionsForPackage } from "../services/state/index.ts";
+import { getRunningRunsForPackage } from "../services/state/index.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import { forkPackage } from "../services/package-fork.ts";
@@ -287,7 +289,7 @@ interface PackageRouteConfig {
     orgId: string;
     manifest: Record<string, unknown>;
   }) => Promise<void>;
-  /** If true, version create/restore require no running executions (flows). */
+  /** If true, version create/restore require no running runs (agents). */
   requireMutableForVersionOps?: boolean;
   /** If true, this type uses JSON body for create (not ZIP upload parsing). */
   jsonBodyCreate?: boolean;
@@ -309,14 +311,14 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     validateContent: validateToolSource,
     storageFileName: (id) => `${parseScopedName(id)?.name ?? id}.ts`,
   },
-  flows: {
-    cfg: FLOW_CONFIG,
+  agents: {
+    cfg: AGENT_CONFIG,
     parseOpts: { requiredFile: null, contentFileExt: null },
-    responseKey: "flow",
+    responseKey: "agent",
     storageFileName: () => "prompt.md",
     jsonBodyCreate: true,
     requireMutableForVersionOps: true,
-    getHandler: flowDetailHandler,
+    getHandler: agentDetailHandler,
   },
   providers: {
     cfg: PROVIDER_CONFIG,
@@ -344,7 +346,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
-    // Flow create uses JSON body with { manifest, content }
+    // Agent create uses JSON body with { manifest, content }
     if (rcfg.jsonBodyCreate) {
       const body = await c.req.json<{
         manifest: Record<string, unknown>;
@@ -393,7 +395,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         validatedManifest as Record<string, unknown>,
       );
 
-      // After-create hook (e.g. flow junction table sync)
+      // After-create hook (e.g. agent junction table sync)
       if (rcfg.afterCreate) {
         await rcfg.afterCreate({ packageId, orgId, manifest: validatedManifest });
       }
@@ -628,7 +630,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       [rcfg.storageFileName(itemId)]: new TextEncoder().encode(content),
     });
 
-    // After-update hook (e.g. flow junction table sync)
+    // After-update hook (e.g. agent junction table sync)
     if (rcfg.afterUpdate) {
       await rcfg.afterUpdate({
         packageId: itemId,
@@ -655,13 +657,13 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
       throw forbidden(`${label} '${itemId}' is a system package and cannot be deleted`);
     }
 
-    // For flows, check running executions
+    // For agents, check running runs
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningExecutionsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId);
       if (running > 0) {
         throw conflict(
-          "flow_in_use",
-          `${running} execution(s) running for this ${label.toLowerCase()}`,
+          "agent_in_use",
+          `${running} run(s) still running for this ${label.toLowerCase()}`,
         );
       }
     }
@@ -758,13 +760,13 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       throw forbidden(`${label} '${itemId}' is a system package`);
     }
 
-    // Mutable check: no running executions for flows
+    // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningExecutionsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId);
       if (running > 0) {
         throw conflict(
-          "flow_in_use",
-          `${running} execution(s) running for this ${label.toLowerCase()}`,
+          "agent_in_use",
+          `${running} run(s) still running for this ${label.toLowerCase()}`,
         );
       }
     }
@@ -813,13 +815,13 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       throw forbidden(`${label} '${itemId}' is a system package`);
     }
 
-    // Mutable check: no running executions for flows
+    // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningExecutionsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId);
       if (running > 0) {
         throw conflict(
-          "flow_in_use",
-          `${running} execution(s) running for this ${label.toLowerCase()}`,
+          "agent_in_use",
+          `${running} run(s) still running for this ${label.toLowerCase()}`,
         );
       }
     }
@@ -871,7 +873,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, detail.content);
     }
 
-    // After-update hook (e.g. flow junction table sync on restore)
+    // After-update hook (e.g. agent junction table sync on restore)
     if (rcfg.afterUpdate) {
       await rcfg.afterUpdate({
         packageId: itemId,
@@ -898,11 +900,11 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningExecutionsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId);
       if (running > 0) {
         throw conflict(
-          "flow_in_use",
-          `${running} execution(s) running for this ${label.toLowerCase()}`,
+          "agent_in_use",
+          `${running} run(s) still running for this ${label.toLowerCase()}`,
         );
       }
     }
@@ -924,9 +926,9 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
 export function createPackagesRouter() {
   const router = new Hono<AppEnv>();
 
-  // --- Package CRUD routes (skills, tools, flows, providers) ---
+  // --- Package CRUD routes (skills, tools, agents, providers) ---
   for (const [path, rcfg] of Object.entries(ROUTE_CONFIGS)) {
-    // Permission resource matches the route path (e.g. "skills", "tools", "flows", "providers")
+    // Permission resource matches the route path (e.g. "skills", "tools", "agents", "providers")
     const resource = path as import("../lib/permissions.ts").Resource;
     const writeGuard = requirePermission(resource, "write");
     const deleteGuard = requirePermission(resource, "delete");
@@ -977,7 +979,7 @@ export function createPackagesRouter() {
   }
 
   // --- Fork route ---
-  router.post("/:scope{@[^/]+}/:name/fork", requirePermission("flows", "write"), async (c) => {
+  router.post("/:scope{@[^/]+}/:name/fork", requirePermission("agents", "write"), async (c) => {
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
     const orgId = c.get("orgId");
     const orgSlug = c.get("orgSlug");
@@ -1206,7 +1208,7 @@ export function createPackagesRouter() {
   }
 
   // POST /api/packages/import — import any package type from ZIP
-  router.post("/import", rateLimit(10), requirePermission("flows", "write"), async (c) => {
+  router.post("/import", rateLimit(10), requirePermission("agents", "write"), async (c) => {
     const formData = await c.req.formData();
     const file = formData.get("file");
     if (!file || !(file instanceof File)) {
@@ -1225,7 +1227,7 @@ export function createPackagesRouter() {
   });
 
   // POST /api/packages/import-github — import a package from a GitHub URL
-  router.post("/import-github", rateLimit(10), requirePermission("flows", "write"), async (c) => {
+  router.post("/import-github", rateLimit(10), requirePermission("agents", "write"), async (c) => {
     const body = await c.req.json();
     const data = parseBody(githubImportSchema, body, "url");
 

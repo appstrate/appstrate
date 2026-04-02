@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -38,9 +40,7 @@ describe("Multi-org profile isolation", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const leaked = body.profiles.find(
-        (p: { id: string }) => p.id === profileB.id,
-      );
+      const leaked = body.profiles.find((p: { id: string }) => p.id === profileB.id);
       expect(leaked).toBeUndefined();
     });
 
@@ -50,25 +50,23 @@ describe("Multi-org profile isolation", () => {
         name: "Beta Secret",
       });
 
-      const res = await app.request(
-        `/api/connection-profiles/org/${profileB.id}/bindings`,
-        { headers: authHeaders(ctxA) },
-      );
+      const res = await app.request(`/api/connection-profiles/org/${profileB.id}/bindings`, {
+        headers: authHeaders(ctxA),
+      });
 
       // Should return 404 because the profile does not belong to org A
       expect(res.status).toBe(404);
     });
 
-    it("org A cannot access org B's profile flows endpoint", async () => {
+    it("org A cannot access org B's profile agents endpoint", async () => {
       const profileB = await seedConnectionProfile({
         orgId: ctxB.orgId,
-        name: "Beta Flows",
+        name: "Beta Agents",
       });
 
-      const res = await app.request(
-        `/api/connection-profiles/org/${profileB.id}/flows`,
-        { headers: authHeaders(ctxA) },
-      );
+      const res = await app.request(`/api/connection-profiles/org/${profileB.id}/agents`, {
+        headers: authHeaders(ctxA),
+      });
 
       expect(res.status).toBe(404);
     });
@@ -79,13 +77,10 @@ describe("Multi-org profile isolation", () => {
         name: "Beta To Delete",
       });
 
-      const res = await app.request(
-        `/api/connection-profiles/org/${profileB.id}`,
-        {
-          method: "DELETE",
-          headers: authHeaders(ctxA),
-        },
-      );
+      const res = await app.request(`/api/connection-profiles/org/${profileB.id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctxA),
+      });
 
       // Should fail — the profile does not belong to org A
       expect([400, 404]).toContain(res.status);
@@ -95,9 +90,7 @@ describe("Multi-org profile isolation", () => {
         headers: authHeaders(ctxB),
       });
       const checkBody = (await checkRes.json()) as any;
-      const stillExists = checkBody.profiles.find(
-        (p: { id: string }) => p.id === profileB.id,
-      );
+      const stillExists = checkBody.profiles.find((p: { id: string }) => p.id === profileB.id);
       expect(stillExists).toBeDefined();
     });
 
@@ -107,14 +100,11 @@ describe("Multi-org profile isolation", () => {
         name: "Beta Original",
       });
 
-      const res = await app.request(
-        `/api/connection-profiles/org/${profileB.id}`,
-        {
-          method: "PUT",
-          headers: { ...authHeaders(ctxA), "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "Hacked" }),
-        },
-      );
+      const res = await app.request(`/api/connection-profiles/org/${profileB.id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctxA), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Hacked" }),
+      });
 
       expect([400, 404]).toContain(res.status);
     });
@@ -133,17 +123,14 @@ describe("Multi-org profile isolation", () => {
         name: "Alpha User",
       });
 
-      const res = await app.request(
-        `/api/connection-profiles/org/${profileB.id}/bind`,
-        {
-          method: "POST",
-          headers: { ...authHeaders(ctxA), "Content-Type": "application/json" },
-          body: JSON.stringify({
-            providerId: "@appstrate/gmail",
-            sourceProfileId: userProfileA.id,
-          }),
-        },
-      );
+      const res = await app.request(`/api/connection-profiles/org/${profileB.id}/bind`, {
+        method: "POST",
+        headers: { ...authHeaders(ctxA), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          providerId: "@appstrate/gmail",
+          sourceProfileId: userProfileA.id,
+        }),
+      });
 
       // Should fail because profileB belongs to org B, not org A
       expect([400, 404]).toContain(res.status);
@@ -177,17 +164,14 @@ describe("Multi-org profile isolation", () => {
         name: "Beta User",
       });
 
-      const res = await app.request(
-        `/api/connection-profiles/org/${orgProfileA.id}/bind`,
-        {
-          method: "POST",
-          headers: { ...authHeaders(ctxA), "Content-Type": "application/json" },
-          body: JSON.stringify({
-            providerId: "@appstrate/gmail",
-            sourceProfileId: userProfileB.id,
-          }),
-        },
-      );
+      const res = await app.request(`/api/connection-profiles/org/${orgProfileA.id}/bind`, {
+        method: "POST",
+        headers: { ...authHeaders(ctxA), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          providerId: "@appstrate/gmail",
+          sourceProfileId: userProfileB.id,
+        }),
+      });
 
       // Should fail because the source profile belongs to a different user
       expect(res.status).toBe(400);
@@ -218,9 +202,7 @@ describe("Multi-org profile isolation", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      const leaked = body.profiles.find(
-        (p: { name: string }) => p.name === "Owner Private",
-      );
+      const leaked = body.profiles.find((p: { name: string }) => p.name === "Owner Private");
       expect(leaked).toBeUndefined();
     });
 
@@ -254,12 +236,8 @@ describe("Multi-org profile isolation", () => {
       const ownerBody = (await ownerRes.json()) as any;
       const memberBody = (await memberRes.json()) as any;
 
-      const ownerSees = ownerBody.profiles.find(
-        (p: { id: string }) => p.id === orgProfile.id,
-      );
-      const memberSees = memberBody.profiles.find(
-        (p: { id: string }) => p.id === orgProfile.id,
-      );
+      const ownerSees = ownerBody.profiles.find((p: { id: string }) => p.id === orgProfile.id);
+      const memberSees = memberBody.profiles.find((p: { id: string }) => p.id === orgProfile.id);
 
       expect(ownerSees).toBeDefined();
       expect(memberSees).toBeDefined();

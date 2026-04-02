@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { parseExpression } from "cron-parser";
 
 /** Validate a cron expression. Returns true if valid. */

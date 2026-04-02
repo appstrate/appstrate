@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { pgTable, text, timestamp, check } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";

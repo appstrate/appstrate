@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * OpenAPI 3.1 specification for the Appstrate API.
  * Assembled from sub-modules — no runtime code generation.
@@ -12,8 +14,8 @@ import { securitySchemes } from "./security-schemes.ts";
 // Path modules
 import { healthPaths } from "./paths/health.ts";
 import { authPaths } from "./paths/auth.ts";
-import { flowsPaths } from "./paths/flows.ts";
-import { executionsPaths } from "./paths/executions.ts";
+import { agentsPaths } from "./paths/agents.ts";
+import { runsPaths } from "./paths/runs.ts";
 import { realtimePaths } from "./paths/realtime.ts";
 import { schedulesPaths } from "./paths/schedules.ts";
 import { connectionsPaths } from "./paths/connections.ts";
@@ -40,8 +42,8 @@ export const openApiSpec = {
   paths: {
     ...healthPaths,
     ...authPaths,
-    ...flowsPaths,
-    ...executionsPaths,
+    ...agentsPaths,
+    ...runsPaths,
     ...realtimePaths,
     ...schedulesPaths,
     ...connectionsPaths,

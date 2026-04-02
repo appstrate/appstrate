@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, test } from "bun:test";
 import {
   normalizeScope,
@@ -74,24 +76,24 @@ describe("parseScopedName", () => {
 });
 
 describe("isOwnedByOrg", () => {
-  test('"@acme/flow" owned by "acme" → true', () => {
-    expect(isOwnedByOrg("@acme/flow", "acme")).toBe(true);
+  test('"@acme/my-agent" owned by "acme" → true', () => {
+    expect(isOwnedByOrg("@acme/my-agent", "acme")).toBe(true);
   });
 
-  test('"@other/flow" owned by "acme" → false', () => {
-    expect(isOwnedByOrg("@other/flow", "acme")).toBe(false);
+  test('"@other/my-agent" owned by "acme" → false', () => {
+    expect(isOwnedByOrg("@other/my-agent", "acme")).toBe(false);
   });
 
   test('"invalid" owned by "acme" → false', () => {
     expect(isOwnedByOrg("invalid", "acme")).toBe(false);
   });
 
-  test('"@acme-labs/flow" owned by "acme" → false (no partial match)', () => {
-    expect(isOwnedByOrg("@acme-labs/flow", "acme")).toBe(false);
+  test('"@acme-labs/my-agent" owned by "acme" → false (no partial match)', () => {
+    expect(isOwnedByOrg("@acme-labs/my-agent", "acme")).toBe(false);
   });
 
-  test('"@acme/flow" owned by "" → false', () => {
-    expect(isOwnedByOrg("@acme/flow", "")).toBe(false);
+  test('"@acme/my-agent" owned by "" → false', () => {
+    expect(isOwnedByOrg("@acme/my-agent", "")).toBe(false);
   });
 });
 

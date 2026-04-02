@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
@@ -6,7 +8,10 @@ import { userProviderConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
 import { authModeLabel } from "../../../src/services/connection-manager/helpers.ts";
-import { saveApiKeyConnection, saveCredentialsConnection } from "../../../src/services/connection-manager/credentials.ts";
+import {
+  saveApiKeyConnection,
+  saveCredentialsConnection,
+} from "../../../src/services/connection-manager/credentials.ts";
 import {
   listActorConnections,
   disconnectProvider,

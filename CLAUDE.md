@@ -1,6 +1,6 @@
 # Appstrate — Developer Guide
 
-Appstrate is an open-source platform for executing one-shot AI flows in ephemeral Docker containers. A user signs up, connects OAuth/API key services (Gmail, ClickUp), clicks "Run", and the AI agent processes their data autonomously inside a temporary container. Flows can also be scheduled via cron, imported from ZIP files, and extended with agent skills.
+Appstrate is an open-source platform for running autonomous AI agents in sandboxed Docker containers. A user signs up, connects OAuth/API key services (Gmail, ClickUp), clicks "Run", and the AI agent processes their data autonomously inside a temporary container. Agents can also be scheduled via cron, imported from ZIP files, and extended with agent skills.
 
 ## Quick Start
 
@@ -75,7 +75,7 @@ appstrate/
 │   ├── stores/               # Zustand stores (auth-store, org-store, profile-store)
 │   ├── lib/                  # Utilities (auth-client, markdown, provider-status, strings)
 │   ├── styles.css            # Tailwind 4 CSS (dark theme, custom @theme inline)
-│   └── i18n.ts               # i18next: fr (default) + en, namespaces: common/flows/settings
+│   └── i18n.ts               # i18next: fr (default) + en, namespaces: common/agents/settings
 │
 ├── packages/db/src/          # @appstrate/db — Drizzle ORM + Better Auth
 │   ├── schema.ts             # Full schema (31 tables, 5 enums, indexes) — barrel re-export from schema/
@@ -92,7 +92,7 @@ appstrate/
 ├── packages/shared-types/    # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 ├── packages/connect/         # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
 │
-├── system-packages/           # System package ZIPs (providers, skills, tools, flows — loaded at boot)
+├── system-packages/           # System package ZIPs (providers, skills, tools, agents — loaded at boot)
 │
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK
 │   ├── entrypoint.ts         # SDK session → JSON lines on stdout
@@ -110,50 +110,50 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |                                |
      |-- Login/Signup --------------->|-- Better Auth (email/password + optional Google social → cookie session)
      |                                |
-     |-- / (Flow List) -------------->|-- GET /api/flows (with runningExecutions count)
-     |-- /flows/:id (Flow Detail) --->|-- GET /api/flows/:id (with services, config, state, skills)
-     |-- PUT /api/flows/:id/config -->|-- schema.ts (AJV validation) → state.ts (Drizzle)
+     |-- / (Agent List) ------------->|-- GET /api/agents (with runningRuns count)
+     |-- /agents/:id (Agent Detail) ->|-- GET /api/agents/:id (with services, config, state, skills)
+     |-- PUT /api/agents/:id/config ->|-- schema.ts (AJV validation) → state.ts (Drizzle)
      |-- POST /api/connections/connect/:prov -->|-- connection-manager.ts → OAuth2 flow / API key storage
      |                                |
-     |-- POST /api/flows/:id/run ---->|
+     |-- POST /api/agents/:id/run --->|
      |                                |-- 1. Validate deps, config, input (AJV)
-     |                                |-- 2. Create execution record (pending, user_id)
-     |                                |-- 3. Fire-and-forget: executeFlowInBackground()
+     |                                |-- 2. Create run record (pending, user_id)
+     |                                |-- 3. Fire-and-forget: executeAgentInBackground()
      |                                |-- 4. Output validation loop (if output schema)
      |<-- SSE (replay + live) --------|-- 5. Subscribe to logs via pub/sub
      |                                |
-     |   Realtime (LISTEN/NOTIFY):    |-- pg_notify triggers on executions + execution_logs
-     |   EventSource → SSE endpoints  |-- useExecutionRealtime() + useExecutionLogsRealtime()
-     |   + useGlobalExecutionSync()   |-- Patches React Query cache directly (no refetch)
+     |   Realtime (LISTEN/NOTIFY):    |-- pg_notify triggers on runs + run_logs
+     |   EventSource → SSE endpoints  |-- useRunRealtime() + useRunLogsRealtime()
+     |   + useGlobalRunSync()         |-- Patches React Query cache directly (no refetch)
      |                                |
-     |   Background Execution:        |-- Runs independently of SSE client
-     |                                |-- Persists logs to execution_logs table
-     |                                |-- Supports concurrent executions per flow
+     |   Background Run:              |-- Runs independently of SSE client
+     |                                |-- Persists logs to run_logs table
+     |                                |-- Supports concurrent runs per agent
      |                                |
      |   Scheduler (BullMQ + Redis):   |-- Distributed cron via BullMQ repeatable jobs
-     |                                |-- Worker processes jobs → triggerScheduledExecution()
+     |                                |-- Worker processes jobs → triggerScheduledRun()
      |                                |-- Exactly-once guaranteed (Redis atomic dequeue)
-     |                                |-- Uses same executeFlowInBackground() path
+     |                                |-- Uses same executeAgentInBackground() path
      |                                |
      |            Sidecar Pool (pre-warmed):  |-- initSidecarPool() at startup
      |            - SIDECAR_POOL_SIZE standby  |-- acquireSidecar() → /configure → attach
      |              appstrate-sidecar-pool net |-- replenish in background after acquire
      |                                        |-- shutdownSidecarPool() on exit
      |                                |
-     |            Docker network: appstrate-exec-{execId} (isolated bridge)
+     |            Docker network: appstrate-exec-{runId} (isolated bridge)
      |            Sidecar + Agent setup run in parallel (Promise.all)
      |            ┌─────────────────────────────────────────────┐
      |            │  Sidecar Container (alias: "sidecar")       │
-     |            │  - EXECUTION_TOKEN, PLATFORM_API_URL        │
+     |            │  - RUN_TOKEN, PLATFORM_API_URL              │
      |            │  - Configured via env vars (fresh) or       │
      |            │    POST /configure (pooled pre-warmed)      │
      |            │  - Proxies /proxy → credential injection    │
-     |            │  - Proxies /execution-history               │
+     |            │  - Proxies /run-history                     │
      |            │  - ExtraHosts → host.docker.internal        │
      |            ├─────────────────────────────────────────────┤
      |            │  Agent Container (Pi Coding Agent, Bun)     │
-     |            │  - FLOW_PROMPT, LLM_*, SIDECAR_URL          │
-     |            │  - NO EXECUTION_TOKEN, NO PLATFORM_API_URL  │
+     |            │  - AGENT_PROMPT, LLM_*, SIDECAR_URL          │
+     |            │  - NO RUN_TOKEN, NO PLATFORM_API_URL        │
      |            │  - NO ExtraHosts (cannot reach host)        │
      |            │  - Files injected before start (parallel)   │
      |            │  - Calls sidecar via curl for API access    │
@@ -172,59 +172,59 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 
 ### Frontend
 
-- **i18n**: `i18next` with `react-i18next`. Default: `fr`, supported: `fr`/`en`. Namespaces: `common`, `flows`, `settings`. Locales in `apps/web/src/locales/{lang}/`.
+- **i18n**: `i18next` with `react-i18next`. Default: `fr`, supported: `fr`/`en`. Namespaces: `common`, `agents`, `settings`. Locales in `apps/web/src/locales/{lang}/`.
 - **Styling**: Tailwind 4 CSS (`@tailwindcss/vite` plugin + `tailwind-merge`). Single `styles.css` with `@import "tailwindcss"` and custom `@theme inline` dark theme variables. All components use Tailwind utility classes.
 - **Auth**: Better Auth React client → `credentials: "include"` on all `apiFetch()` calls. `X-Org-Id` header for org context.
-- **Realtime**: SSE EventSource hooks (`use-realtime.ts`) + `useGlobalExecutionSync` patches React Query cache directly. `useGlobalExecutionSync` deliberately uses `fetch()` + `ReadableStream` (NOT `EventSource`) to avoid Safari aggressive auto-reconnect — do not convert it. `GlobalRealtimeSync` is mounted inside `MainLayout` (not on onboarding/welcome routes) to avoid SSE reconnection loops when org state is settling.
-- **Feature gating**: `useAppConfig()` hook reads `window.__APP_CONFIG__` (injected into HTML at serve time via `<script>` tag, computed once at boot by `buildAppConfig()`). Returns `{ platform, features: { billing, models, providerKeys, googleAuth, emailVerification } }`. No API call — falls back to OSS defaults if undefined. Used to conditionally render routes, nav items, and onboarding steps. Models/provider keys UI hidden in Cloud mode; billing hidden in OSS mode. Google sign-in button and account linking UI hidden when `googleAuth` is false. Email verification flow hidden when `emailVerification` is false.
+- **Realtime**: SSE EventSource hooks (`use-realtime.ts`) + `useGlobalRunSync` patches React Query cache directly. `useGlobalRunSync` deliberately uses `fetch()` + `ReadableStream` (NOT `EventSource`) to avoid Safari aggressive auto-reconnect — do not convert it. `GlobalRealtimeSync` is mounted inside `MainLayout` (not on onboarding/welcome routes) to avoid SSE reconnection loops when org state is settling.
+- **Feature gating**: `useAppConfig()` hook reads `window.__APP_CONFIG__` (injected into HTML at serve time via `<script>` tag, computed once at boot by `buildAppConfig()`). Returns `{ platform, features: { billing, models, providerKeys, googleAuth, emailVerification } }`. No API call — falls back to OSS defaults if undefined. Used to conditionally render routes, nav items, and onboarding steps. Models/provider keys UI hidden in Cloud mode; billing hidden in OSS mode. Google sign-in button and account linking UI hidden when `googleAuth` is false. Email verification hidden when `emailVerification` is false.
 - **API helpers** (`api.ts`): `api<T>(path)` prepends `/api` + JSON parse; `apiFetch<T>(path)` raw path (for `/auth/*`); `uploadFormData<T>(path, formData)` for file uploads — never set `Content-Type` manually (browser sets multipart boundary); `apiBlob(path)` for binary downloads. All inject `X-Org-Id` and `credentials: "include"`.
-- **React Query keys**: Always org-scoped `[entity, orgId, id?]` — e.g. `["flows", orgId]`, `["flow", orgId, packageId]`, `["executions", orgId, packageId]`. Only exception: `["orgs"]` is global. On org switch, `queryClient.removeQueries` wipes all except `["orgs"]`.
+- **React Query keys**: Always org-scoped `[entity, orgId, id?]` — e.g. `["agents", orgId]`, `["agent", orgId, packageId]`, `["runs", orgId, packageId]`. Only exception: `["orgs"]` is global. On org switch, `queryClient.removeQueries` wipes all except `["orgs"]`.
 - **Standard components**: Always use `<Modal>` (`components/modal.tsx`) for dialogs — never build raw overlays. Use `<LoadingState>`, `<ErrorState>`, `<EmptyState>` from `page-states.tsx` for page states. Use `<InputFields>` for JSON Schema-driven forms, `<FileField>` for uploads.
 
 ### Backend
 
 - **Multi-tenant**: All DB queries filter by `orgId`. Admins = org role `admin` or `owner`.
-- **Service layer**: All function-based (no classes). `state.ts` is the central data-access layer (executions, logs, config, flow provider bindings). Drizzle ORM with `import { db } from "../lib/db.ts"` and schema from `@appstrate/db/schema`.
+- **Service layer**: All function-based (no classes). `state.ts` is the central data-access layer (runs, logs, config, agent provider bindings). Drizzle ORM with `import { db } from "../lib/db.ts"` and schema from `@appstrate/db/schema`.
 - **Request pipeline**: error handler → Request-Id → CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie → `Appstrate-User` resolution if present) → org context middleware (`X-Org-Id` → verify membership) → API version middleware (`Appstrate-Version` header) → route handler (per-route: `rateLimit()`, `idempotency()`) → cloud routes (if loaded).
 - **Platform config** (`buildAppConfig()` in `index.ts`): Computed once at boot. Serialized as `window.__APP_CONFIG__` and injected into `index.html` via `<script>` tag at serve time (`app.get("/*")`). Config is static — `useAppConfig()` reads it synchronously. In OSS: models/providerKeys visible, billing hidden. In Cloud: reversed. `googleAuth` and `emailVerification` flags are derived from env var presence (opt-in).
 - **Cloud module** (`lib/cloud-loader.ts`): `loadCloud()` at boot tries `import("@appstrate/cloud")`. If the module is installed (via `bun link` in dev, or git dependency in prod), the platform runs in Cloud mode. If absent, OSS mode. `getCloudModule()` returns the loaded module or `null`.
-- **Cost tracking**: `executions.cost` (doublePrecision) stores the dollar cost per execution. Cost flows: `SYSTEM_PROVIDER_KEYS` cost config → `ModelDefinition.cost` → `ResolvedModel.cost` → `PromptContext.llmConfig.cost` → `MODEL_COST` env var in Pi container → Pi SDK calculates cost → `ExecutionMessage.cost` → accumulated and persisted. DB models (`org_models`) also support optional `cost` (jsonb) for self-hosted cost tracking. OpenRouter models auto-populate cost from pricing API.
-- **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `applicationId` (from API key), `endUser` (set via `Appstrate-User` header — `{ id, applicationId, name?, email? }`), `apiVersion` (resolved by api-version middleware), `flow` (set by `requireFlow()`).
-- **Route guards** (`middleware/guards.ts`): `requireAdmin()` → 403 if not admin/owner; `requireOwner()` → 403 if not owner; `requireFlow(param)` → loads flow + sets `c.set("flow")`, 404 if missing; `requireMutableFlow()` → also checks not system package + no running executions.
+- **Cost tracking**: `runs.cost` (doublePrecision) stores the dollar cost per run. Cost chain: `SYSTEM_PROVIDER_KEYS` cost config → `ModelDefinition.cost` → `ResolvedModel.cost` → `PromptContext.llmConfig.cost` → `MODEL_COST` env var in Pi container → Pi SDK calculates cost → `RunMessage.cost` → accumulated and persisted. DB models (`org_models`) also support optional `cost` (jsonb) for self-hosted cost tracking. OpenRouter models auto-populate cost from pricing API.
+- **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `applicationId` (from API key), `endUser` (set via `Appstrate-User` header — `{ id, applicationId, name?, email? }`), `apiVersion` (resolved by api-version middleware), `agent` (set by `requireAgent()`).
+- **Route guards** (`middleware/guards.ts`): `requireAdmin()` → 403 if not admin/owner; `requireOwner()` → 403 if not owner; `requireAgent(param)` → loads agent + sets `c.set("agent")`, 404 if missing; `requireMutableAgent()` → also checks not system package + no running runs.
 - **Rate limiting**: Redis-backed via `rate-limiter-flexible` (`RateLimiterRedis`). Keyed by `method:path:identity` where identity is `userId` for sessions or `apikey:{apiKeyId}` for API keys. IP-based (`ip:method:path:ip`) for public unauthenticated routes. Returns IETF `RateLimit` structured header (`limit=N, remaining=M, reset=S`) + `RateLimit-Policy` + `Retry-After` headers. Key limits: run (20/min), import (10/min), create (10/min).
-- **Route registration order**: `userFlowsRouter` MUST be registered before `flowsRouter` in `index.ts` — Hono matches in order.
+- **Route registration order**: `userAgentsRouter` MUST be registered before `agentsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: Multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
 - **Package versioning**: Semver-based version system across `package-versions.ts`, `package-version-deps.ts`, and `package-storage.ts`. Key tables: `packageVersions` (version, integrity, manifest snapshot, yanked), `packageDistTags` (named pointers like "latest"), `packageVersionDependencies` (per-version skill/tool deps). Semver enforcement via `@appstrate/core/version-policy` (`validateForwardVersion` — forward-only, no downgrades). "latest" dist-tag auto-managed on non-prerelease publishes. Custom dist-tags via `addDistTag`/`removeDistTag` (protected: "latest" cannot be set/removed manually). Yank support via `yankVersion` (sets `yanked: true`, reassigns affected dist-tags to best stable version). 3-step version resolution: exact match → dist-tag lookup → semver range (`resolveVersionFromCatalog`). Integrity: SHA256 SRI hash computed via `@appstrate/core/integrity`. Per-version dependencies stored via `storeVersionDependencies` (extracted with `@appstrate/core/dependencies`). All versioning columns included in the initial squashed migration.
-- **Providers as packages**: Providers (OAuth/API services) are the 4th package type (`type: "provider"`) alongside flows, skills, and tools. Provider definition lives in `packages.manifest.definition` (JSONB). System providers loaded from ZIP files in `system-packages/` at boot via `system-packages.ts`. Credentials stored in `providerCredentials` table keyed by `(providerId, orgId)`. Routes in `routes/providers.ts` (GET list, POST create, PUT update, DELETE). OAuth/credential logic in `@appstrate/connect` (`packages/connect/src/registry.ts`).
-- **FlowService**: All flows (system + local) stored in DB. System flows loaded from ZIPs at boot and synced to DB with `orgId: null`.
-- **Graceful shutdown**: `execution-tracker.ts` — stop scheduler + sidecar pool → reject new POST → wait in-flight (max 30s) → exit.
+- **Providers as packages**: Providers (OAuth/API services) are the 4th package type (`type: "provider"`) alongside agents, skills, and tools. Provider definition lives in `packages.manifest.definition` (JSONB). System providers loaded from ZIP files in `system-packages/` at boot via `system-packages.ts`. Credentials stored in `providerCredentials` table keyed by `(providerId, orgId)`. Routes in `routes/providers.ts` (GET list, POST create, PUT update, DELETE). OAuth/credential logic in `@appstrate/connect` (`packages/connect/src/registry.ts`).
+- **AgentService**: All agents (system + local) stored in DB. System agents loaded from ZIPs at boot and synced to DB with `orgId: null`.
+- **Graceful shutdown**: `run-tracker.ts` — stop scheduler + sidecar pool → reject new POST → wait in-flight (max 30s) → exit.
 - **Validation (Zod)**: All route request bodies MUST be validated with `parseBody(schema, body)` from `lib/errors.ts`. This helper calls `.safeParse()` and throws `invalidRequest()` on failure. Pattern: define schema in the route file (or service file if reused), call `const data = parseBody(mySchema, body)`. Optional third `param` argument for field-specific errors. Reference implementations: `routes/models.ts`, `routes/webhooks.ts`, `routes/organizations.ts`. Naming: `{concept}Schema` for Zod objects (e.g. `createWebhookSchema`), `{Concept}` for inferred types via `z.infer<>`. For JSONB columns read from DB, use safe narrowing helpers (null/typeof/Array.isArray guards) instead of raw `as` casts. For query parameters, use `z.coerce.number().int().min().max().catch(default).parse()`. The codebase uses **Zod 4** — use `z.url()` (NOT `z.string().url()`), `z.uuid()`, etc. See `docs/architecture/ZOD_SCHEMA_AUDIT.md` for the full audit and patterns.
-- **Validation (AJV)**: `validateConfig()`, `validateInput()`, and `validateOutput()` use AJV for **dynamic** schemas (flow config/input/output defined in manifests). AJV coexists with Zod — use AJV only for schemas that come from user-defined manifest configuration, Zod for everything else. All three share one AJV instance with `coerceTypes: true` (e.g. `"50"` accepted as number). Extra fields always allowed (no `additionalProperties: false`).
+- **Validation (AJV)**: `validateConfig()`, `validateInput()`, and `validateOutput()` use AJV for **dynamic** schemas (agent config/input/output defined in manifests). AJV coexists with Zod — use AJV only for schemas that come from user-defined manifest configuration, Zod for everything else. All three share one AJV instance with `coerceTypes: true` (e.g. `"50"` accepted as number). Extra fields always allowed (no `additionalProperties: false`).
 
 ### Headless Developer Platform
 
-Appstrate exposes a headless API for developers to integrate flows into their own apps. See `docs/specs/HEADLESS_DEVELOPER_PLATFORM.md` for the full spec.
+Appstrate exposes a headless API for developers to integrate agents into their own apps. See `docs/specs/HEADLESS_DEVELOPER_PLATFORM.md` for the full spec.
 
 - **Applications**: Table `applications` (prefix `app_`). Each org has a default application (`isDefault: true`, unique index). API keys are scoped to an application. Routes: `/api/applications` (CRUD, admin-only).
 - **End-users**: Table `end_users` (prefix `eu_`). External users managed via API, belonging to an application. Not Better Auth users — separate table, no password, no dashboard login. Routes: `/api/end-users` (CRUD, admin-only). Fields: `externalId` (unique per app), `metadata` (JSONB, max 50 keys, 40 char key, 500 char value), `email`, `name`. Each end-user gets a default connection profile on creation.
 - **`Appstrate-User` header**: Impersonation header (pattern: Stripe `Stripe-Account`). Value: `eu_` prefixed ID. API key auth only — rejected with `400` on cookie auth. Validates that the end-user belongs to the API key's application. Sets `c.set("endUser")` in context. Full audit log on each impersonation (requestId, apiKeyId, endUserId, applicationId, IP, userAgent).
-- **Webhooks**: Tables `webhooks` (prefix `wh_`) and `webhookDeliveries`. Two scopes: `organization` (fires for ALL executions — dashboard + API) and `application` (fires only for executions via a specific application's API key). `scope` column (`text NOT NULL DEFAULT 'application'`), `applicationId` nullable (required when scope is `application`, null otherwise). Standard Webhooks spec (HMAC-SHA256 signing). BullMQ async delivery with 8-attempt exponential backoff. Event types: `execution.started`, `execution.completed`, `execution.failed`, `execution.timeout`, `execution.cancelled`. Payload modes: `full` (includes result/input) and `summary`. SSRF protection on webhook URLs. Secret rotation with 24h grace period. Routes: `/api/webhooks` (CRUD + test/ping + rotate + deliveries, admin-only). List supports `?scope=` and `?applicationId=` query filters.
+- **Webhooks**: Tables `webhooks` (prefix `wh_`) and `webhookDeliveries`. Two scopes: `organization` (fires for ALL runs — dashboard + API) and `application` (fires only for runs via a specific application's API key). `scope` column (`text NOT NULL DEFAULT 'application'`), `applicationId` nullable (required when scope is `application`, null otherwise). Standard Webhooks spec (HMAC-SHA256 signing). BullMQ async delivery with 8-attempt exponential backoff. Event types: `run.started`, `run.completed`, `run.failed`, `run.timeout`, `run.cancelled`. Payload modes: `full` (includes result/input) and `summary`. SSRF protection on webhook URLs. Secret rotation with 24h grace period. Routes: `/api/webhooks` (CRUD + test/ping + rotate + deliveries, admin-only). List supports `?scope=` and `?applicationId=` query filters.
 - **API versioning**: Date-based (pattern: Stripe). Current: `2026-03-21`. Header `Appstrate-Version` (request override + always in response). Org-level pinning via `settings.apiVersion`. `Sunset` header on deprecated versions. Middleware: `middleware/api-version.ts`.
-- **Idempotency**: Header `Idempotency-Key` on POST routes (end-users, webhooks, flow run). Redis-backed, 24h TTL, SHA-256 body hash for conflict detection. Returns `409` on concurrent, `422` on body mismatch, `Idempotent-Replayed: true` header on cached replay. Middleware: `middleware/idempotency.ts`.
+- **Idempotency**: Header `Idempotency-Key` on POST routes (end-users, webhooks, agent run). Redis-backed, 24h TTL, SHA-256 body hash for conflict detection. Returns `409` on concurrent, `422` on body mismatch, `Idempotent-Replayed: true` header on cached replay. Middleware: `middleware/idempotency.ts`.
 - **Error handling**: RFC 9457 `application/problem+json` on all endpoints (not just headless). `ApiError` class with factory helpers (`invalidRequest`, `unauthorized`, `forbidden`, `notFound`, `conflict`, `gone`, `internalError`, `systemEntityForbidden`). `systemEntityForbidden(type, id, verb?)` for "Cannot modify/delete built-in X" errors. `parseBody(schema, body, param?)` for Zod validation (throws `invalidRequest` on failure). Custom `headers` field on `ApiError` for rate-limit headers. `Request-Id` (`req_` prefix) on all responses.
 - **SSE + API key**: SSE endpoints accept API key via `?token=ask_...` query param (EventSource can't send headers). Cookie auth fallback preserved.
 
 ### Sidecar Protocol (details beyond the architecture diagram)
 
-- **Sidecar pool**: `sidecar-pool.ts` pre-warms sidecar containers at startup on a standby network (pool size configurable via `SIDECAR_POOL_SIZE`, default 2, 0 to disable). `acquireSidecar()` configures a pooled container via `POST /configure` (sets `executionToken`, `platformApiUrl`, `proxyUrl`), then connects it to the execution network. Falls back to fresh creation if pool is empty or configuration fails. Pool replenishes in background after each acquisition.
+- **Sidecar pool**: `sidecar-pool.ts` pre-warms sidecar containers at startup on a standby network (pool size configurable via `SIDECAR_POOL_SIZE`, default 2, 0 to disable). `acquireSidecar()` configures a pooled container via `POST /configure` (sets `runToken`, `platformApiUrl`, `proxyUrl`), then connects it to the run network. Falls back to fresh creation if pool is empty or configuration fails. Pool replenishes in background after each acquisition.
 - **Parallel startup**: `pi.ts` runs sidecar setup (pool acquire or fresh create) in parallel with agent container creation + file injection via `Promise.all`. Files are batch-injected as a single tar archive before `startContainer()`.
 - Agent calls `$SIDECAR_URL/proxy` with `X-Provider`, `X-Target`, optional `X-Proxy`, and optional `X-Substitute-Body` headers for authenticated API requests.
 - Sidecar substitutes `{{variable}}` placeholders in headers/URL/proxy (and request body if `X-Substitute-Body: true`), validates against `authorizedUris` per provider.
-- **Proxy cascade**: Outbound requests route through proxies in priority order: `X-Proxy` header (agent-driven) → `PROXY_URL` env var (infrastructure). Flow-level and org-level proxy config is resolved by the platform before container creation.
+- **Proxy cascade**: Outbound requests route through proxies in priority order: `X-Proxy` header (agent-driven) → `PROXY_URL` env var (infrastructure). Agent-level and org-level proxy config is resolved by the platform before container creation.
 - **Transparent pass-through**: Sidecar forwards upstream responses as-is (HTTP status code + body + Content-Type). Truncation (>50KB) signaled via `X-Truncated: true` header. Sidecar-specific errors (credential fetch, URL validation) return JSON `{ error }` with 4xx/5xx status.
-- **Prompt building**: `buildEnrichedPrompt()` generates sections (User Input, Configuration, Previous State, Execution History API) + appends raw `prompt.md`. No Handlebars.
-- **Output validation**: If `output.schema` exists, it is injected into the agent container via `OUTPUT_SCHEMA` env var for native LLM schema enforcement (constrained decoding). Post-execution, AJV validates the merged result. On mismatch, a warning is logged but the execution still succeeds.
-- **State persistence**: `result.state` → persisted to execution record. Only latest state injected as `## Previous State` next run. Historical executions available via `$SIDECAR_URL/execution-history`.
+- **Prompt building**: `buildEnrichedPrompt()` generates sections (User Input, Configuration, Previous State, Run History API) + appends raw `prompt.md`. No Handlebars.
+- **Output validation**: If `output.schema` exists, it is injected into the agent container via `OUTPUT_SCHEMA` env var for native LLM schema enforcement (constrained decoding). Post-run, AJV validates the merged result. On mismatch, a warning is logged but the run still succeeds.
+- **State persistence**: `result.state` → persisted to run record. Only latest state injected as `## Previous State` next run. Historical runs available via `$SIDECAR_URL/run-history`.
 
 ## Testing
 
@@ -294,15 +294,15 @@ packages/connect/test/     # Provider doc heuristic tests
 
 ```typescript
 // ✅ Good — optional deps parameter with production defaults
-export async function validateFlowDependencies(
-  providers: FlowProviderRequirement[],
+export async function validateAgentDependencies(
+  providers: AgentProviderRequirement[],
   profiles: Record<string, string>,
   orgId: string,
   deps: DependencyValidationDeps = defaultDeps,  // Tests inject mocks here
 ): Promise<void> { ... }
 
 // ✅ Good — constructor injection
-export class PiAdapter implements ExecutionAdapter {
+export class PiAdapter implements RunAdapter {
   constructor(orchestrator?: ContainerOrchestrator) {
     this._orchestrator = orchestrator;  // Tests inject mock, production uses default
   }
@@ -316,20 +316,20 @@ export function wrapExtensionFactory(
 ): ExtensionFactory { ... }
 ```
 
-For testing middleware that calls services (e.g., `requireFlow` calls `getPackage`), use **integration tests with real DB** instead of mocking the service layer.
+For testing middleware that calls services (e.g., `requireAgent` calls `getPackage`), use **integration tests with real DB** instead of mocking the service layer.
 
 ### Test Helpers (`apps/api/test/helpers/`)
 
-| Helper            | Purpose                                                                                                           |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `app.ts`          | `getTestApp()` — full Hono app replica (same middleware chain as production, without boot/Docker/scheduler)       |
-| `auth.ts`         | `createTestUser()`, `createTestOrg()`, `createTestContext()`, `authHeaders()` — real Better Auth sign-up flow     |
-| `db.ts`           | `truncateAll()` — DELETE FROM all 31 tables in FK-safe order                                                      |
-| `seed.ts`         | 15+ factories: `seedPackage()`, `seedExecution()`, `seedApiKey()`, `seedWebhook()`, etc. — insert real DB records |
-| `assertions.ts`   | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`, `getDbRow()` — DB state verification                     |
-| `redis.ts`        | `getRedis()`, `flushRedis()` — test Redis client                                                                  |
-| `sse.ts`          | SSE stream parsing utilities                                                                                      |
-| `oauth-server.ts` | Mock OAuth2 provider for connection tests                                                                         |
+| Helper            | Purpose                                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------------------- |
+| `app.ts`          | `getTestApp()` — full Hono app replica (same middleware chain as production, without boot/Docker/scheduler)   |
+| `auth.ts`         | `createTestUser()`, `createTestOrg()`, `createTestContext()`, `authHeaders()` — real Better Auth sign-up flow |
+| `db.ts`           | `truncateAll()` — DELETE FROM all 31 tables in FK-safe order                                                  |
+| `seed.ts`         | 15+ factories: `seedPackage()`, `seedRun()`, `seedApiKey()`, `seedWebhook()`, etc. — insert real DB records   |
+| `assertions.ts`   | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`, `getDbRow()` — DB state verification                 |
+| `redis.ts`        | `getRedis()`, `flushRedis()` — test Redis client                                                              |
+| `sse.ts`          | SSE stream parsing utilities                                                                                  |
+| `oauth-server.ts` | Mock OAuth2 provider for connection tests                                                                     |
 
 ### Writing New Tests
 
@@ -387,7 +387,7 @@ describe("GET /api/my-resource", () => {
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `flows`, `executions`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `share-links`, `internal`, `welcome`, `meta`, `models`, `applications`, `end-users`, `webhooks`.
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `agents`, `runs`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `share-links`, `internal`, `welcome`, `meta`, `models`, `applications`, `end-users`, `webhooks`.
 
 ## Database
 
@@ -412,14 +412,14 @@ Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Mig
 | `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                                                             |
 | `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins, comma-separated                                                                              |
 | `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Path to Docker socket                                                                                      |
-| `EXECUTION_ADAPTER`         | No       | `pi`                                          | Adapter type for flow execution                                                                            |
+| `RUN_ADAPTER`               | No       | `pi`                                          | Adapter type for agent run                                                                                 |
 | `SIDECAR_POOL_SIZE`         | No       | `2`                                           | Number of pre-warmed sidecar containers (0 = disabled)                                                     |
 | `PI_IMAGE`                  | No       | `appstrate-pi:latest`                         | Docker image for the Pi agent runtime (override for GHCR / custom registries)                              |
 | `SIDECAR_IMAGE`             | No       | `appstrate-sidecar:latest`                    | Docker image for the sidecar proxy (override for GHCR / custom registries)                                 |
 | `S3_BUCKET`                 | Yes      | —                                             | S3 bucket name for storage                                                                                 |
 | `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                                                                               |
 | `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2/other S3-compatible)                                                      |
-| `EXECUTION_TOKEN_SECRET`    | No       | —                                             | Execution token signing secret (if unset, tokens are unsigned)                                             |
+| `RUN_TOKEN_SECRET`          | No       | —                                             | Run token signing secret (if unset, tokens are unsigned)                                                   |
 | `GOOGLE_CLIENT_ID`          | No       | —                                             | Google OAuth client ID (enables Google sign-in when both Google vars are set)                              |
 | `GOOGLE_CLIENT_SECRET`      | No       | —                                             | Google OAuth client secret                                                                                 |
 | `SMTP_HOST`                 | No       | —                                             | SMTP server host (enables email verification when all SMTP vars are set)                                   |
@@ -428,7 +428,7 @@ Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Mig
 | `SMTP_PASS`                 | No       | —                                             | SMTP authentication password                                                                               |
 | `SMTP_FROM`                 | No       | —                                             | Sender email address for verification emails                                                               |
 
-## Flow & Extension Gotchas
+## Agent & Extension Gotchas
 
 - **Reference manifest**: See system package ZIPs in `system-packages/`. Validation: `services/schema.ts`.
 - **JSON Schema `required`**: Use top-level `required: ["field1"]` array — NOT `required: true` on individual properties.
@@ -438,11 +438,11 @@ Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Mig
 - **Extension return type**: `{ content: [{ type: "text", text: "..." }] }` — NOT a plain string.
 - **Skills**: YAML frontmatter (`name`, `description`) in `SKILL.md`. Available in container at `.pi/skills/{id}/SKILL.md`.
 - **Provider auth modes**: `oauth2` (OAuth2/PKCE with token refresh), `oauth1` (OAuth 1.0a with HMAC-SHA1 — uses `requestTokenUrl`/`accessTokenUrl`; `clientId`/`clientSecret` map to consumer key/secret), `api_key` (single key in header), `basic` (username:password Base64), `custom` (multi-field `credentialSchema` rendered as dynamic form), Sidecar injects credentials via `credentialHeaderName`/`credentialHeaderPrefix`. URI restrictions via `authorizedUris` array or `allowAllUris: true`.
-- **Proxy system**: Org-level proxy CRUD via `/api/proxies` (admin-only). System proxies loaded from `SYSTEM_PROXIES` env var at boot. Flow-level override via `GET/PUT /api/flows/:id/proxy`. Cascade: flow override → org default → `PROXY_URL` env var.
-- **Execution lifecycle**: `pending` → `running` → `success` | `failed` | `timeout` | `cancelled`. Status transitions via `updateExecutionStatus()` in `state.ts`. `pg_notify` fires on every status change, pushing realtime updates to SSE subscribers. Concurrent executions per flow are supported — `execution-tracker.ts` tracks all in-flight executions for graceful shutdown.
+- **Proxy system**: Org-level proxy CRUD via `/api/proxies` (admin-only). System proxies loaded from `SYSTEM_PROXIES` env var at boot. Agent-level override via `GET/PUT /api/agents/:id/proxy`. Cascade: agent override → org default → `PROXY_URL` env var.
+- **Run lifecycle**: `pending` → `running` → `success` | `failed` | `timeout` | `cancelled`. Status transitions via `updateRunStatus()` in `state.ts`. `pg_notify` fires on every status change, pushing realtime updates to SSE subscribers. Concurrent runs per agent are supported — `run-tracker.ts` tracks all in-flight runs for graceful shutdown.
 
 ## Known Issues & Technical Debt
 
-1. **No `stream: false` mode**: The execution route always returns SSE. The spec defines a synchronous mode — not yet implemented. `stream?: boolean` in request body is ignored.
+1. **No `stream: false` mode**: The run route always returns SSE. The spec defines a synchronous mode — not yet implemented. `stream?: boolean` in request body is ignored.
 2. **Scheduler**: Redis-backed via BullMQ. Distributed exactly-once cron firing, worker rate limiting (max 5/min). Schedules synced from `packageSchedules` table to BullMQ at boot.
-3. **Orphan cleanup**: On startup, orphaned executions (still `running`/`pending`) are marked `failed` and all containers labeled `appstrate.managed=true` are cleaned up via `cleanupOrphanedContainers()` in `docker.ts`.
+3. **Orphan cleanup**: On startup, orphaned runs (still `running`/`pending`) are marked `failed` and all containers labeled `appstrate.managed=true` are cleaned up via `cleanupOrphanedContainers()` in `docker.ts`.

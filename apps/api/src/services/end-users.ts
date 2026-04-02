@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * End-Users API — CRUD operations for end-users managed via API.
  *
@@ -248,7 +250,7 @@ export async function deleteEndUser(orgId: string, endUserId: string): Promise<v
   // Verify end-user exists and belongs to org
   await getEndUser(orgId, endUserId);
 
-  // Delete end-user — cascades handle profiles, connections, executions
+  // Delete end-user — cascades handle profiles, connections, runs
   await db.delete(endUsers).where(and(eq(endUsers.id, endUserId), eq(endUsers.orgId, orgId)));
 
   logger.info("End-user deleted via API", { endUserId, orgId });

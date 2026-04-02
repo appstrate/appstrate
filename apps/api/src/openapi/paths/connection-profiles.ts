@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export const connectionProfilesPaths = {
   "/api/connection-profiles": {
     get: {
@@ -240,7 +242,7 @@ export const connectionProfilesPaths = {
       tags: ["Connection Profiles"],
       summary: "Delete a connection profile",
       description:
-        "Delete a non-default connection profile. Fails if the profile is the user's default or is bound to a flow provider binding.",
+        "Delete a non-default connection profile. Fails if the profile is the user's default or is bound to an agent provider binding.",
       parameters: [
         {
           name: "id",
@@ -455,20 +457,20 @@ export const connectionProfilesPaths = {
     },
   },
 
-  "/api/connection-profiles/org/{id}/flows": {
+  "/api/connection-profiles/org/{id}/agents": {
     get: {
-      operationId: "listOrgProfileFlows",
+      operationId: "listOrgProfileAgents",
       tags: ["Connection Profiles"],
-      summary: "List flows using an org profile",
+      summary: "List agents using an org profile",
       description:
-        "List all flows that are configured to use a specific org-level connection profile.",
+        "List all agents that are configured to use a specific org-level connection profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
       ],
       responses: {
         "200": {
-          description: "Flow list",
+          description: "Agent list",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -478,7 +480,7 @@ export const connectionProfilesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  flows: {
+                  agents: {
                     type: "array",
                     items: {
                       type: "object",

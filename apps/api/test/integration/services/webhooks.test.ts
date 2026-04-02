@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
@@ -32,7 +34,7 @@ describe("webhooks service", () => {
       scope: "application" as const,
       applicationId: defaultAppId,
       url: "https://example.com/hook",
-      events: ["execution.completed"],
+      events: ["run.completed"],
       ...overrides,
     };
   }
@@ -46,7 +48,7 @@ describe("webhooks service", () => {
       expect(wh.id).toBeDefined();
       expect(wh.id).toStartWith("wh_");
       expect(wh.url).toBe("https://example.com/hook");
-      expect(wh.events).toContain("execution.completed");
+      expect(wh.events).toContain("run.completed");
       expect(wh.active).toBe(true);
       expect(wh.object).toBe("webhook");
       expect(wh.scope).toBe("application");
@@ -57,7 +59,7 @@ describe("webhooks service", () => {
       const wh = await createWebhook(orgId, {
         scope: "organization",
         url: "https://example.com/org-hook",
-        events: ["execution.completed"],
+        events: ["run.completed"],
       });
 
       expect(wh.scope).toBe("organization");
@@ -78,9 +80,9 @@ describe("webhooks service", () => {
     });
 
     it("supports packageId filter", async () => {
-      const wh = await createWebhook(orgId, appWebhookParams({ packageId: "@testorg/my-flow" }));
+      const wh = await createWebhook(orgId, appWebhookParams({ packageId: "@testorg/my-agent" }));
 
-      expect(wh.packageId).toBe("@testorg/my-flow");
+      expect(wh.packageId).toBe("@testorg/my-agent");
     });
 
     it("supports summary payload mode", async () => {
@@ -119,7 +121,7 @@ describe("webhooks service", () => {
         orgId,
         appWebhookParams({
           url: "https://example.com/hook2",
-          events: ["execution.failed"],
+          events: ["run.failed"],
         }),
       );
 
@@ -132,7 +134,7 @@ describe("webhooks service", () => {
       await createWebhook(orgId, {
         scope: "organization",
         url: "https://example.com/org-hook",
-        events: ["execution.completed"],
+        events: ["run.completed"],
       });
 
       const orgOnly = await listWebhooks(orgId, { scope: "organization" });
@@ -155,7 +157,7 @@ describe("webhooks service", () => {
         scope: "application",
         applicationId: otherAppId,
         url: "https://example.com/theirs",
-        events: ["execution.completed"],
+        events: ["run.completed"],
       });
 
       const list = await listWebhooks(orgId);
@@ -236,7 +238,7 @@ describe("webhooks service", () => {
         {
           webhookId: created.id,
           eventId: "evt_test-1",
-          eventType: "execution.completed",
+          eventType: "run.completed",
           status: "success",
           statusCode: 200,
           latency: 150,
@@ -245,7 +247,7 @@ describe("webhooks service", () => {
         {
           webhookId: created.id,
           eventId: "evt_test-2",
-          eventType: "execution.failed",
+          eventType: "run.failed",
           status: "failed",
           statusCode: 500,
           latency: 300,
@@ -278,8 +280,8 @@ describe("webhooks service", () => {
   describe("buildEventEnvelope", () => {
     it("builds a valid event envelope in full mode", () => {
       const { eventId, payload } = buildEventEnvelope({
-        eventType: "execution.completed",
-        execution: {
+        eventType: "run.completed",
+        run: {
           id: "exec_123",
           status: "success",
           result: "output data",
@@ -289,7 +291,7 @@ describe("webhooks service", () => {
       });
 
       expect(eventId).toStartWith("evt_");
-      expect(payload.type).toBe("execution.completed");
+      expect(payload.type).toBe("run.completed");
       expect(payload.object).toBe("event");
       expect(payload.id).toBe(eventId);
 
@@ -300,8 +302,8 @@ describe("webhooks service", () => {
 
     it("strips result and input in summary mode", () => {
       const { payload } = buildEventEnvelope({
-        eventType: "execution.completed",
-        execution: { id: "exec_123", status: "success", result: "output", input: "input" },
+        eventType: "run.completed",
+        run: { id: "exec_123", status: "success", result: "output", input: "input" },
         payloadMode: "summary",
       });
 
@@ -316,8 +318,8 @@ describe("webhooks service", () => {
 
   describe("validateEvents", () => {
     it("accepts valid event types", () => {
-      const result = validateEvents(["execution.completed", "execution.failed"]);
-      expect(result).toEqual(["execution.completed", "execution.failed"]);
+      const result = validateEvents(["run.completed", "run.failed"]);
+      expect(result).toEqual(["run.completed", "run.failed"]);
     });
 
     it("throws for empty array", () => {
