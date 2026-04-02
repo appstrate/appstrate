@@ -24,7 +24,7 @@ import {
   type SchemaWrapper,
 } from "@appstrate/core/form";
 import { useConnectionProfiles, useOrgProfiles } from "../hooks/use-connection-profiles";
-import { CombinedProfileSelect } from "./combined-profile-select";
+import { CombinedProfileSelect, type ForeignProfile } from "./combined-profile-select";
 
 function getCronPresets(t: (key: string) => string) {
   return [
@@ -74,6 +74,8 @@ interface ScheduleFormProps {
   onDelete?: () => void;
   isPending?: boolean;
   blockedMessage?: string;
+  /** Profile owned by another user — shown read-only in the selector */
+  foreignProfile?: ForeignProfile;
 }
 
 interface FormFields {
@@ -96,6 +98,7 @@ export function ScheduleForm({
   onDelete,
   isPending,
   blockedMessage,
+  foreignProfile,
 }: ScheduleFormProps) {
   const { t } = useTranslation(["agents", "common"]);
   const cronPresets = getCronPresets(t);
@@ -196,7 +199,7 @@ export function ScheduleForm({
       )}
 
       {/* Connection profile */}
-      {allProfiles.length > 1 && (
+      {(allProfiles.length > 1 || foreignProfile) && (
         <div className="space-y-3">
           <Label htmlFor="sched-profile">{t("schedule.connectionProfile")}</Label>
           <CombinedProfileSelect
@@ -207,6 +210,7 @@ export function ScheduleForm({
             }}
             triggerClassName="w-full"
             id="sched-profile"
+            foreignProfile={foreignProfile}
           />
         </div>
       )}

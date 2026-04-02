@@ -128,8 +128,8 @@ export function createSchedulesRouter() {
     const body = await c.req.json();
     const data = parseBody(updateScheduleSchema, body);
 
-    // Validate ownership — user can only update schedule to use their own profiles
-    if (data.connectionProfileId) {
+    // Validate ownership — only check when the profile is actually changing
+    if (data.connectionProfileId && data.connectionProfileId !== existing.connectionProfileId) {
       const actor = getActor(c);
       const profile = await getAccessibleProfile(data.connectionProfileId, actor, orgId);
       if (!profile) {
