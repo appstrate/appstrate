@@ -222,7 +222,7 @@ Appstrate exposes a headless API for developers to integrate agents into their o
 - Sidecar substitutes `{{variable}}` placeholders in headers/URL/proxy (and request body if `X-Substitute-Body: true`), validates against `authorizedUris` per provider.
 - **Proxy cascade**: Outbound requests route through proxies in priority order: `X-Proxy` header (agent-driven) → `PROXY_URL` env var (infrastructure). Agent-level and org-level proxy config is resolved by the platform before container creation.
 - **Transparent pass-through**: Sidecar forwards upstream responses as-is (HTTP status code + body + Content-Type). Truncation (>50KB) signaled via `X-Truncated: true` header. Sidecar-specific errors (credential fetch, URL validation) return JSON `{ error }` with 4xx/5xx status.
-- **Prompt building**: `buildEnrichedPrompt()` generates sections (User Input, Configuration, Previous State, Execution History API) + appends raw `prompt.md`. No Handlebars.
+- **Prompt building**: `buildEnrichedPrompt()` generates sections (User Input, Configuration, Previous State, Run History API) + appends raw `prompt.md`. No Handlebars.
 - **Output validation**: If `output.schema` exists, it is injected into the agent container via `OUTPUT_SCHEMA` env var for native LLM schema enforcement (constrained decoding). Post-run, AJV validates the merged result. On mismatch, a warning is logged but the run still succeeds.
 - **State persistence**: `result.state` → persisted to run record. Only latest state injected as `## Previous State` next run. Historical runs available via `$SIDECAR_URL/run-history`.
 

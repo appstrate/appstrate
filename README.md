@@ -8,13 +8,13 @@
 
 An open-source platform for running autonomous AI agents in sandboxed Docker containers. Each agent receives its full context (prompt, config, input, credentials) and runs to completion without human interaction — then returns structured results. Connect OAuth/API key services, click "Run" or schedule via cron, and let the AI handle the rest.
 
-![Agents](.github/assets/screenshot-flows.png)
+![Agents](.github/assets/screenshot-agents.png)
 
-![Run Result](.github/assets/screenshot-execution.png)
+![Run Result](.github/assets/screenshot-run.png)
 
 ## Concepts
 
-Appstrate uses the [AFPS](https://github.com/appstrate/afps-spec) (Agent Flow Packaging Standard) packaging model. Everything is a **package** with a manifest, a version, and a scope.
+Appstrate uses the [AFPS](https://github.com/appstrate/afps-spec) (Agent Format Packaging Standard) packaging model. Everything is a **package** with a manifest, a version, and a scope.
 
 ```
                 ┌───────────────────────────────┐

@@ -152,7 +152,7 @@ const DEFAULT_MAX_SIZE = 10 * 1024 * 1024; // 10 MB
  * @returns Parsed package with manifest, content, files, and type
  * @throws PackageZipError for size limits, invalid ZIP, missing/invalid manifest, or missing content
  * @example
- * const zip = await readFile("my-flow.afps");
+ * const zip = await readFile("my-agent.afps");
  * const { manifest, content, type } = parsePackageZip(new Uint8Array(zip));
  */
 export function parsePackageZip(zipBuffer: Uint8Array, maxSize?: number): ParsedPackageZip {

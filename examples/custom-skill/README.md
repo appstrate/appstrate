@@ -20,7 +20,7 @@ custom-skill/
 
 2. **`skill.ts`** exports an extension factory compatible with the Pi Coding Agent SDK (`@mariozechner/pi-coding-agent`). The `execute` function receives tool call parameters and returns a result.
 
-3. When a flow runs, the platform injects skill files into the agent container. The agent discovers available skills and can call their tools based on the flow prompt context.
+3. When an agent runs, the platform injects skill files into the agent container. The agent discovers available skills and can call their tools based on the agent prompt context.
 
 ## Packaging
 
@@ -33,7 +33,7 @@ custom-skill-1.0.0.zip
   skill.ts
 ```
 
-The `manifest.json` follows the AFPS (Agent Flow Packaging Standard) format:
+The `manifest.json` follows the AFPS (Agent Format Packaging Standard) format:
 
 ```json
 {
@@ -45,7 +45,7 @@ The `manifest.json` follows the AFPS (Agent Flow Packaging Standard) format:
 }
 ```
 
-Import the ZIP from the dashboard (Flows > Import Package) or via the API.
+Import the ZIP from the dashboard (Agents > Import Package) or via the API.
 
 ## Further Reading
 
