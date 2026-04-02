@@ -106,6 +106,7 @@
         "remark-gfm": "^4.0.1",
         "sonner": "^2.0.7",
         "tailwind-merge": "^3.5.0",
+        "zod": "^4.3.6",
         "zustand": "^5.0.11",
       },
       "devDependencies": {
@@ -133,7 +134,7 @@
     },
     "packages/core": {
       "name": "@appstrate/core",
-      "version": "2.9.8",
+      "version": "2.10.3",
       "dependencies": {
         "@afps-spec/schema": "^1.0.4",
         "fflate": "^0.8.0",
