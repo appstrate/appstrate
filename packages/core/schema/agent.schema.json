@@ -117,7 +117,13 @@
                 "properties": {
                   "type": {
                     "type": "string",
-                    "enum": ["string", "number", "boolean", "array", "object"]
+                    "enum": [
+                      "string",
+                      "number",
+                      "boolean",
+                      "array",
+                      "object"
+                    ]
                   },
                   "description": {
                     "type": "string"
@@ -138,7 +144,13 @@
                     "properties": {
                       "type": {
                         "type": "string",
-                        "enum": ["string", "number", "boolean", "array", "object"]
+                        "enum": [
+                          "string",
+                          "number",
+                          "boolean",
+                          "array",
+                          "object"
+                        ]
                       },
                       "description": {
                         "type": "string"
@@ -150,7 +162,9 @@
                         "type": "string"
                       }
                     },
-                    "required": ["type"],
+                    "required": [
+                      "type"
+                    ],
                     "additionalProperties": {}
                   },
                   "maxItems": {
@@ -159,7 +173,9 @@
                     "maximum": 9007199254740991
                   }
                 },
-                "required": ["type"],
+                "required": [
+                  "type"
+                ],
                 "additionalProperties": {}
               }
             },
@@ -170,7 +186,10 @@
               }
             }
           },
-          "required": ["type", "properties"],
+          "required": [
+            "type",
+            "properties"
+          ],
           "additionalProperties": {}
         },
         "fileConstraints": {
@@ -214,7 +233,9 @@
           }
         }
       },
-      "required": ["schema"],
+      "required": [
+        "schema"
+      ],
       "additionalProperties": false
     },
     "output": {
@@ -237,7 +258,13 @@
                 "properties": {
                   "type": {
                     "type": "string",
-                    "enum": ["string", "number", "boolean", "array", "object"]
+                    "enum": [
+                      "string",
+                      "number",
+                      "boolean",
+                      "array",
+                      "object"
+                    ]
                   },
                   "description": {
                     "type": "string"
@@ -258,7 +285,13 @@
                     "properties": {
                       "type": {
                         "type": "string",
-                        "enum": ["string", "number", "boolean", "array", "object"]
+                        "enum": [
+                          "string",
+                          "number",
+                          "boolean",
+                          "array",
+                          "object"
+                        ]
                       },
                       "description": {
                         "type": "string"
@@ -270,7 +303,9 @@
                         "type": "string"
                       }
                     },
-                    "required": ["type"],
+                    "required": [
+                      "type"
+                    ],
                     "additionalProperties": {}
                   },
                   "maxItems": {
@@ -279,7 +314,9 @@
                     "maximum": 9007199254740991
                   }
                 },
-                "required": ["type"],
+                "required": [
+                  "type"
+                ],
                 "additionalProperties": {}
               }
             },
@@ -290,7 +327,10 @@
               }
             }
           },
-          "required": ["type", "properties"],
+          "required": [
+            "type",
+            "properties"
+          ],
           "additionalProperties": {}
         },
         "fileConstraints": {
@@ -334,7 +374,9 @@
           }
         }
       },
-      "required": ["schema"],
+      "required": [
+        "schema"
+      ],
       "additionalProperties": false
     },
     "config": {
@@ -357,7 +399,13 @@
                 "properties": {
                   "type": {
                     "type": "string",
-                    "enum": ["string", "number", "boolean", "array", "object"]
+                    "enum": [
+                      "string",
+                      "number",
+                      "boolean",
+                      "array",
+                      "object"
+                    ]
                   },
                   "description": {
                     "type": "string"
@@ -378,7 +426,13 @@
                     "properties": {
                       "type": {
                         "type": "string",
-                        "enum": ["string", "number", "boolean", "array", "object"]
+                        "enum": [
+                          "string",
+                          "number",
+                          "boolean",
+                          "array",
+                          "object"
+                        ]
                       },
                       "description": {
                         "type": "string"
@@ -390,7 +444,9 @@
                         "type": "string"
                       }
                     },
-                    "required": ["type"],
+                    "required": [
+                      "type"
+                    ],
                     "additionalProperties": {}
                   },
                   "maxItems": {
@@ -399,7 +455,9 @@
                     "maximum": 9007199254740991
                   }
                 },
-                "required": ["type"],
+                "required": [
+                  "type"
+                ],
                 "additionalProperties": {}
               }
             },
@@ -410,7 +468,10 @@
               }
             }
           },
-          "required": ["type", "properties"],
+          "required": [
+            "type",
+            "properties"
+          ],
           "additionalProperties": {}
         },
         "fileConstraints": {
@@ -454,7 +515,9 @@
           }
         }
       },
-      "required": ["schema"],
+      "required": [
+        "schema"
+      ],
       "additionalProperties": false
     },
     "timeout": {
@@ -462,6 +525,13 @@
       "exclusiveMinimum": 0
     }
   },
-  "required": ["name", "version", "type", "displayName", "schemaVersion", "author"],
+  "required": [
+    "name",
+    "version",
+    "type",
+    "displayName",
+    "schemaVersion",
+    "author"
+  ],
   "additionalProperties": {}
 }
