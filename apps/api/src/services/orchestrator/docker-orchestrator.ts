@@ -85,7 +85,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
         : config.platformApiUrl;
 
     const resolvedConfig = {
-      executionToken: config.executionToken,
+      runToken: config.runToken,
       platformApiUrl: resolvedPlatformApiUrl,
       proxyUrl: config.proxyUrl,
       llm: config.llm,
@@ -108,8 +108,8 @@ export class DockerOrchestrator implements ContainerOrchestrator {
 
     // 2. Fallback: fresh creation (~500-1500ms)
     const sidecarEnv: Record<string, string> = { PORT: "8080" };
-    if (resolvedConfig.executionToken) {
-      sidecarEnv.EXECUTION_TOKEN = resolvedConfig.executionToken;
+    if (resolvedConfig.runToken) {
+      sidecarEnv.RUN_TOKEN = resolvedConfig.runToken;
       sidecarEnv.PLATFORM_API_URL = resolvedConfig.platformApiUrl;
     }
     if (resolvedConfig.proxyUrl) {

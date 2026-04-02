@@ -6,7 +6,7 @@ import type { CredentialsResponse, LlmProxyConfig } from "../helpers.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
-    config: { platformApiUrl: "http://mock:3000", executionToken: "tok", proxyUrl: "" },
+    config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
     fetchCredentials: mock(
       async (): Promise<CredentialsResponse> => ({
         credentials: { access_token: "test-123" },
@@ -55,16 +55,16 @@ describe("GET /health", () => {
 // --- POST /configure ---
 
 describe("POST /configure", () => {
-  it("updates executionToken", async () => {
+  it("updates run token", async () => {
     const deps = makeDeps();
     const app = createApp(deps);
     const res = await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "new-tok" }),
+      body: JSON.stringify({ runToken: "new-tok" }),
       headers: { "Content-Type": "application/json" },
     });
     expect(res.status).toBe(200);
-    expect(deps.config.executionToken).toBe("new-tok");
+    expect(deps.config.runToken).toBe("new-tok");
   });
 
   it("updates platformApiUrl", async () => {
@@ -96,7 +96,7 @@ describe("POST /configure", () => {
     const app = createApp(deps);
     await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "x" }),
+      body: JSON.stringify({ runToken: "x" }),
       headers: { "Content-Type": "application/json" },
     });
     expect(deps.cookieJar.size).toBe(0);
@@ -105,14 +105,14 @@ describe("POST /configure", () => {
   it("partial update keeps other fields", async () => {
     const deps = makeDeps();
     deps.config.platformApiUrl = "http://original:3000";
-    deps.config.executionToken = "orig-tok";
+    deps.config.runToken = "orig-tok";
     const app = createApp(deps);
     await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "new-tok" }),
+      body: JSON.stringify({ runToken: "new-tok" }),
       headers: { "Content-Type": "application/json" },
     });
-    expect(deps.config.executionToken).toBe("new-tok");
+    expect(deps.config.runToken).toBe("new-tok");
     expect(deps.config.platformApiUrl).toBe("http://original:3000");
   });
 
@@ -120,7 +120,7 @@ describe("POST /configure", () => {
     const app = createApp(makeDeps({ configSecret: "secret-123" }));
     const res = await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "new-tok" }),
+      body: JSON.stringify({ runToken: "new-tok" }),
       headers: { "Content-Type": "application/json" },
     });
     expect(res.status).toBe(403);
@@ -131,14 +131,14 @@ describe("POST /configure", () => {
     const app = createApp(deps);
     const res = await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "new-tok" }),
+      body: JSON.stringify({ runToken: "new-tok" }),
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer secret-123",
       },
     });
     expect(res.status).toBe(200);
-    expect(deps.config.executionToken).toBe("new-tok");
+    expect(deps.config.runToken).toBe("new-tok");
   });
 
   it("rejects second configure call (one-time)", async () => {
@@ -146,7 +146,7 @@ describe("POST /configure", () => {
     // First call succeeds
     const res1 = await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "tok1" }),
+      body: JSON.stringify({ runToken: "tok1" }),
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer secret-123",
@@ -156,7 +156,7 @@ describe("POST /configure", () => {
     // Second call rejected
     const res2 = await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "tok2" }),
+      body: JSON.stringify({ runToken: "tok2" }),
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer secret-123",
@@ -169,7 +169,7 @@ describe("POST /configure", () => {
     const app = createApp(makeDeps({ preConfigured: true }));
     const res = await app.request("/configure", {
       method: "POST",
-      body: JSON.stringify({ executionToken: "new-tok" }),
+      body: JSON.stringify({ runToken: "new-tok" }),
       headers: { "Content-Type": "application/json" },
     });
     expect(res.status).toBe(403);
@@ -178,7 +178,7 @@ describe("POST /configure", () => {
   });
 });
 
-// --- GET /run-history (+ /execution-history backwards compat) ---
+// --- GET /run-history ---
 
 describe("GET /run-history", () => {
   it("proxies to platform API", async () => {
@@ -234,22 +234,6 @@ describe("GET /run-history", () => {
     expect(res.status).toBe(502);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBeDefined();
-  });
-
-  it("supports legacy /execution-history path", async () => {
-    const fetchFn = mock(
-      async () =>
-        new Response('{"entries":[]}', {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const app = createApp(makeDeps({ fetchFn }));
-    const res = await app.request("/execution-history");
-    expect(res.status).toBe(200);
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    const url = (fetchFn.mock.calls[0] as [string])[0];
-    expect(url).toBe("http://mock:3000/internal/run-history");
   });
 });
 
@@ -959,7 +943,7 @@ describe("POST /configure — llm field", () => {
     const res = await app.request("/configure", {
       method: "POST",
       body: JSON.stringify({
-        executionToken: "tok",
+        runToken: "tok",
         llm: {
           baseUrl: "https://api.openai.com/v1",
           apiKey: "sk-oai",

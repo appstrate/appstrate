@@ -4,8 +4,7 @@
 import { z } from "zod";
 import { SLUG_PATTERN } from "./naming.ts";
 import {
-  // TODO: rename to agentManifestSchema after @afps-spec/schema is republished
-  flowManifestSchema as afpsAgentManifestSchema,
+  agentManifestSchema as afpsAgentManifestSchema,
   skillManifestSchema as afpsSkillManifestSchema,
   toolManifestSchema as afpsToolManifestSchema,
   providerManifestSchema as afpsProviderManifestSchema,

@@ -124,14 +124,14 @@ Each run creates an isolated, ephemeral environment with two containers and a de
                     [host.docker.internal]
                          |
     ╔════════════════════╧════════════════════════╗
-    ║  Docker Network: appstrate-exec-{execId}    ║
+    ║  Docker Network: appstrate-exec-{runId}      ║
     ║  (custom bridge, per-run, ephemeral)         ║
     ║                                             ║
     ║  ┌───────────────────────┐                  ║
     ║  │   Sidecar Container   │                  ║
     ║  │   alias: "sidecar"    │                  ║
     ║  │                       │                  ║
-    ║  │ - EXECUTION_TOKEN  ✓  │ ← host access    ║
+    ║  │ - RUN_TOKEN        ✓  │ ← host access    ║
     ║  │ - PLATFORM_API_URL ✓  │ ← ExtraHosts     ║
     ║  │ - Fetches credentials │                  ║
     ║  │ - Validates URLs      │                  ║
@@ -143,7 +143,7 @@ Each run creates an isolated, ephemeral environment with two containers and a de
     ║  │   Agent Container     │                  ║
     ║  │   alias: "agent"      │                  ║
     ║  │                       │                  ║
-    ║  │ - NO EXECUTION_TOKEN  │ ← no host access ║
+    ║  │ - NO RUN_TOKEN        │ ← no host access ║
     ║  │ - NO PLATFORM_API_URL │ ← no ExtraHosts  ║
     ║  │ - NO credentials      │                  ║
     ║  │ - SIDECAR_URL only    │                  ║
@@ -202,7 +202,7 @@ curl -s "$SIDECAR_URL/proxy" \
 
 The sidecar:
 
-1. **Fetches credentials** from the platform API (`GET /internal/credentials/gmail`) using its `EXECUTION_TOKEN`
+1. **Fetches credentials** from the platform API (`GET /internal/credentials/gmail`) using its `RUN_TOKEN`
 2. **Substitutes** `{{token}}` with the real OAuth access token in headers and URL
 3. **Validates** the resolved URL against `authorizedUris` (see [Layer 3](#layer-3--url-authorization))
 4. **Forwards** the request to the target API with real credentials

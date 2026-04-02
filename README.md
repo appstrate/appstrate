@@ -197,7 +197,7 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 | `REDIS_URL`                 | Yes      | —                                             | Redis connection string                                            |
 | `S3_BUCKET`                 | Yes      | —                                             | S3 bucket name for storage                                         |
 | `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                                       |
-| `EXECUTION_TOKEN_SECRET`    | No       | —                                             | Run token signing secret                                           |
+| `RUN_TOKEN_SECRET`          | No       | —                                             | Run token signing secret                                           |
 | `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                     |
 | `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins (comma-separated)                                     |
 | `PORT`                      | No       | `3000`                                        | Server port                                                        |
@@ -207,7 +207,7 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 | `SYSTEM_PROXIES`            | No       | `[]`                                          | JSON array of system proxy definitions                             |
 | `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy for sidecar containers                         |
 | `LOG_LEVEL`                 | No       | `info`                                        | `debug` \| `info` \| `warn` \| `error`                             |
-| `EXECUTION_ADAPTER`         | No       | `pi`                                          | Adapter type for agent run                                         |
+| `RUN_ADAPTER`               | No       | `pi`                                          | Adapter type for agent run                                         |
 | `SIDECAR_POOL_SIZE`         | No       | `2`                                           | Pre-warmed sidecar containers (0 = disabled)                       |
 | `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2)                                  |
 | `PI_IMAGE`                  | No       | `appstrate-pi:latest`                         | Docker image for the Pi agent runtime                              |

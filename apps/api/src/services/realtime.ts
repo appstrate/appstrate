@@ -40,7 +40,7 @@ export async function initRealtime(): Promise<void> {
   if (initialized) return;
   initialized = true;
 
-  await listenClient.listen("execution_update", (payload) => {
+  await listenClient.listen("run_update", (payload) => {
     try {
       const raw = JSON.parse(payload) as Record<string, unknown>;
       const data = snakeToCamel(raw);
@@ -51,13 +51,13 @@ export async function initRealtime(): Promise<void> {
         sub.send({ event: "run_update", data });
       }
     } catch (err) {
-      logger.error("Failed to parse execution_update payload", {
+      logger.error("Failed to parse run_update payload", {
         error: err instanceof Error ? err.message : String(err),
       });
     }
   });
 
-  await listenClient.listen("execution_log_insert", (payload) => {
+  await listenClient.listen("run_log_insert", (payload) => {
     try {
       const raw = JSON.parse(payload) as Record<string, unknown>;
       const data = snakeToCamel(raw);
@@ -68,7 +68,7 @@ export async function initRealtime(): Promise<void> {
         sub.send({ event: "run_log", data });
       }
     } catch (err) {
-      logger.error("Failed to parse execution_log_insert payload", {
+      logger.error("Failed to parse run_log_insert payload", {
         error: err instanceof Error ? err.message : String(err),
       });
     }

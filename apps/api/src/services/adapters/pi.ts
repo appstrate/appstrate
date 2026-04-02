@@ -48,7 +48,7 @@ export class PiAdapter implements RunAdapter {
 
       // Sidecar config (platform network resolution handled by orchestrator)
       const sidecarConfig = {
-        executionToken: ctx.runApi?.token ?? "",
+        runToken: ctx.runApi?.token ?? "",
         platformApiUrl: ctx.runApi?.url ?? "",
         proxyUrl: ctx.proxyUrl ?? undefined,
         llm: llmApiKey
@@ -56,7 +56,7 @@ export class PiAdapter implements RunAdapter {
           : undefined,
       };
 
-      // Build agent env — NO EXECUTION_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
+      // Build agent env — NO RUN_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
       const containerEnv: Record<string, string> = {
         AGENT_PROMPT: prompt,
         MODEL_API: llmConfig.api,

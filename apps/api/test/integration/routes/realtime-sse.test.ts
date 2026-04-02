@@ -80,22 +80,22 @@ describe("realtime SSE routes (integration)", () => {
       await res.body?.cancel();
     });
 
-    it("receives execution_update events in SSE format", async () => {
+    it("receives run_update events in SSE format", async () => {
       const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
       expect(res.status).toBe(200);
       expect(res.body).not.toBeNull();
 
       // Fire PG NOTIFY after a short delay to ensure subscriber is registered
       await wait();
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: ctx.orgId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
       });
 
-      // Collect: first event should be ping (from keep-alive), then our execution_update
-      // But ping has 30s delay, so the execution_update should arrive first
+      // Collect: first event should be ping (from keep-alive), then our run_update
+      // But ping has 30s delay, so the run_update should arrive first
       const events = await collectSSEEvents(res.body!, 1, {
         timeoutMs: 3000,
         ignoreEvents: ["ping"],
@@ -142,7 +142,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
 
       // Fire event for a different run — should be filtered out
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: ctx.orgId,
         id: otherExec.id,
         status: "running",
@@ -151,7 +151,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
 
       // Fire event for the target run — should be received
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: ctx.orgId,
         id: run.id,
         status: "success",
@@ -170,12 +170,12 @@ describe("realtime SSE routes (integration)", () => {
       expect(data.status).toBe("success");
     });
 
-    it("non-verbose mode strips result field from execution_update", async () => {
+    it("non-verbose mode strips result field from run_update", async () => {
       const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: ctx.orgId,
         id: run.id,
         status: "success",
@@ -188,17 +188,17 @@ describe("realtime SSE routes (integration)", () => {
         ignoreEvents: ["ping"],
       });
       const data = JSON.parse(events[0]!.data);
-      // stripPayload removes "result" for execution_update in non-verbose mode
+      // stripPayload removes "result" for run_update in non-verbose mode
       expect(data).not.toHaveProperty("result");
       expect(data.id).toBe(run.id);
     });
 
-    it("non-verbose mode strips data field from execution_log", async () => {
+    it("non-verbose mode strips data field from run_log", async () => {
       const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
-      await pgNotify("execution_log_insert", {
+      await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
         run_id: run.id,
         level: "info",
@@ -213,7 +213,7 @@ describe("realtime SSE routes (integration)", () => {
       expect(events[0]!.event).toBe("run_log");
 
       const data = JSON.parse(events[0]!.data);
-      // stripPayload removes "data" for execution_log in non-verbose mode
+      // stripPayload removes "data" for run_log in non-verbose mode
       expect(data).not.toHaveProperty("data");
       expect(data.message).toBe("processing");
     });
@@ -223,7 +223,7 @@ describe("realtime SSE routes (integration)", () => {
       expect(res.body).not.toBeNull();
 
       await wait();
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: ctx.orgId,
         id: run.id,
         status: "success",
@@ -241,12 +241,12 @@ describe("realtime SSE routes (integration)", () => {
       expect(data.id).toBe(run.id);
     });
 
-    it("verbose mode includes data field for execution_log", async () => {
+    it("verbose mode includes data field for run_log", async () => {
       const res = await sseRequest(`/api/realtime/runs/${run.id}?verbose=true`, ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
-      await pgNotify("execution_log_insert", {
+      await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
         run_id: run.id,
         level: "info",
@@ -277,7 +277,7 @@ describe("realtime SSE routes (integration)", () => {
       expect(res.body).not.toBeNull();
 
       await wait();
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: ctx.orgId,
         id: run.id,
         status: "running",
@@ -297,7 +297,7 @@ describe("realtime SSE routes (integration)", () => {
     });
 
     it("ignores events from other agents", async () => {
-      const otherFlow = await seedAgent({ orgId: ctx.orgId });
+      const otherAgent = await seedAgent({ orgId: ctx.orgId });
 
       const res = await sseRequest(
         `/api/realtime/agents/${encodeURIComponent(agentPkg.id)}/runs`,
@@ -308,16 +308,16 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
 
       // Fire event for a different agent — should be filtered
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: ctx.orgId,
         id: "exec-other",
         status: "running",
-        package_id: otherFlow.id,
+        package_id: otherAgent.id,
       });
       await wait();
 
       // Fire event for the target agent — should be received
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: ctx.orgId,
         id: run.id,
         status: "success",
@@ -351,7 +351,7 @@ describe("realtime SSE routes (integration)", () => {
       expect(res.body).not.toBeNull();
 
       await wait();
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: ctx.orgId,
         id: run.id,
         status: "running",
@@ -367,8 +367,8 @@ describe("realtime SSE routes (integration)", () => {
     });
 
     it("receives events from multiple agents", async () => {
-      const flow2 = await seedAgent({ orgId: ctx.orgId });
-      const exec2 = await seedRun({ packageId: flow2.id, orgId: ctx.orgId });
+      const agent2 = await seedAgent({ orgId: ctx.orgId });
+      const exec2 = await seedRun({ packageId: agent2.id, orgId: ctx.orgId });
 
       const res = await sseRequest("/api/realtime/runs", ctx);
       expect(res.body).not.toBeNull();
@@ -376,18 +376,18 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
 
       // Fire events for two different agents
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: ctx.orgId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
       });
       await wait(50);
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: ctx.orgId,
         id: exec2.id,
         status: "success",
-        package_id: flow2.id,
+        package_id: agent2.id,
       });
 
       const events = await collectSSEEvents(res.body!, 2, {
@@ -448,8 +448,8 @@ describe("realtime SSE routes (integration)", () => {
     it("org B SSE does not receive org A events", async () => {
       // Create a second org context
       const ctxB = await createTestContext();
-      const flowB = await seedAgent({ orgId: ctxB.orgId });
-      await seedRun({ packageId: flowB.id, orgId: ctxB.orgId });
+      const agentB = await seedAgent({ orgId: ctxB.orgId });
+      await seedRun({ packageId: agentB.id, orgId: ctxB.orgId });
 
       // Open SSE for org B (all runs)
       const resB = await sseRequest("/api/realtime/runs", ctxB);
@@ -458,7 +458,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
 
       // Fire event for org A — org B should NOT receive it
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: ctx.orgId,
         id: run.id,
         status: "running",
@@ -467,11 +467,11 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
 
       // Fire event for org B — org B SHOULD receive it
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: ctxB.orgId,
         id: "exec-b",
         status: "success",
-        package_id: flowB.id,
+        package_id: agentB.id,
       });
 
       const events = await collectSSEEvents(resB.body!, 1, {

@@ -32,7 +32,7 @@ export interface IsolationBoundary {
 }
 
 export interface SidecarConfig {
-  executionToken: string;
+  runToken: string;
   platformApiUrl: string;
   proxyUrl?: string;
   llm?: LlmProxyConfig;

@@ -107,12 +107,12 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     const body = await c.req.json<{
-      executionToken?: string;
+      runToken?: string;
       platformApiUrl?: string;
       proxyUrl?: string;
       llm?: LlmProxyConfig;
     }>();
-    if (body.executionToken) config.executionToken = body.executionToken;
+    if (body.runToken) config.runToken = body.runToken;
     if (body.platformApiUrl) config.platformApiUrl = body.platformApiUrl;
     if (body.proxyUrl !== undefined) config.proxyUrl = body.proxyUrl;
     if (body.llm !== undefined) {
@@ -129,13 +129,13 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ status: "configured" });
   });
 
-  // Run history proxy (legacy /execution-history kept for backwards compat)
+  // Run history proxy
   const runHistoryHandler = async (c: any) => {
     const qs = new URL(c.req.url).search;
     const url = `${config.platformApiUrl}/internal/run-history${qs}`;
 
     const result = await fetchOrError(c, fetchFn, "Run history fetch failed", url, {
-      headers: { Authorization: `Bearer ${config.executionToken}` },
+      headers: { Authorization: `Bearer ${config.runToken}` },
     });
     if (!result.ok) return result.errorResponse;
 
@@ -145,7 +145,6 @@ export function createApp(deps: AppDeps): Hono {
     });
   };
   app.get("/run-history", runHistoryHandler);
-  app.get("/execution-history", runHistoryHandler); // backwards compat
 
   // LLM reverse proxy — replaces placeholder key with real API key, streams response.
   // The SDK formats all headers (auth, beta, identity) naturally using the placeholder;

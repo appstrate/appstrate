@@ -8,7 +8,7 @@ import type { CredentialsResponse } from "./helpers.ts";
 // via POST /configure (used by sidecar pool for pre-warmed containers).
 const config = {
   platformApiUrl: process.env.PLATFORM_API_URL || "http://localhost:3000",
-  executionToken: process.env.EXECUTION_TOKEN || "",
+  runToken: process.env.RUN_TOKEN || "",
   proxyUrl: process.env.PROXY_URL || "",
   llm:
     process.env.PI_BASE_URL && process.env.PI_API_KEY
@@ -24,7 +24,7 @@ const cookieJar = new Map<string, string[]>();
 
 async function fetchCredentials(providerId: string): Promise<CredentialsResponse> {
   const res = await fetch(`${config.platformApiUrl}/internal/credentials/${providerId}`, {
-    headers: { Authorization: `Bearer ${config.executionToken}` },
+    headers: { Authorization: `Bearer ${config.runToken}` },
   });
   if (!res.ok) {
     let detail = "";
@@ -40,7 +40,7 @@ async function fetchCredentials(providerId: string): Promise<CredentialsResponse
 }
 
 const proxy = createForwardProxy({ config });
-const preConfigured = Boolean(process.env.EXECUTION_TOKEN);
+const preConfigured = Boolean(process.env.RUN_TOKEN);
 const app = createApp({
   config,
   fetchCredentials,

@@ -25,7 +25,7 @@ Use a **separate sidecar container** that runs alongside each agent container on
 5. Validates the target URL against the provider's `authorizedUris` allowlist
 6. Forwards the request to the external API and returns the response as-is
 
-The agent container has no `EXECUTION_TOKEN`, no `PLATFORM_API_URL`, and no `ExtraHosts` entry -- it cannot reach the host machine or the platform API directly. All external communication goes through the sidecar.
+The agent container has no `RUN_TOKEN`, no `PLATFORM_API_URL`, and no `ExtraHosts` entry -- it cannot reach the host machine or the platform API directly. All external communication goes through the sidecar.
 
 A **sidecar pool** (`sidecar-pool.ts`) pre-warms containers at startup to avoid cold-start latency. Pool size is configurable via `SIDECAR_POOL_SIZE` (default: 2). Pooled sidecars are configured at acquisition time via `POST /configure`.
 

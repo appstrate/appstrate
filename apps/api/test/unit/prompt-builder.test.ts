@@ -283,7 +283,7 @@ describe("buildEnrichedPrompt — run history", () => {
     });
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Run History");
-    expect(prompt).toContain("$SIDECAR_URL/execution-history");
+    expect(prompt).toContain("$SIDECAR_URL/run-history");
   });
 
   it("omits run history when no runApi", () => {

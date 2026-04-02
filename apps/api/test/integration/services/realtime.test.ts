@@ -60,7 +60,7 @@ describe("realtime service (integration)", () => {
       });
 
       // Subscriber should receive matching events.
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: "org-lifecycle",
         id: "exec1",
         status: "running",
@@ -72,7 +72,7 @@ describe("realtime service (integration)", () => {
       removeSubscriber(id);
       send.mockClear();
 
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: "org-lifecycle",
         id: "exec2",
         status: "running",
@@ -82,9 +82,9 @@ describe("realtime service (integration)", () => {
     });
   });
 
-  // ── execution_update dispatching ────────────────────────────
+  // ── run_update dispatching ────────────────────────────
 
-  describe("execution_update", () => {
+  describe("run_update", () => {
     it("dispatches to subscriber matching orgId", async () => {
       const send = mock((_e: RealtimeEvent) => {});
       const id = "sub-org-match";
@@ -92,7 +92,7 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({ id, filter: { orgId: "org1" }, send });
 
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: "org1",
         id: "exec-1",
         status: "running",
@@ -129,7 +129,7 @@ describe("realtime service (integration)", () => {
         send: sendOrg2,
       });
 
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: "org-alpha",
         id: "exec-x",
         status: "success",
@@ -152,7 +152,7 @@ describe("realtime service (integration)", () => {
       });
 
       // Non-matching run ID should be filtered out.
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: "org-ef",
         id: "other-exec",
         status: "running",
@@ -161,7 +161,7 @@ describe("realtime service (integration)", () => {
       expect(send).not.toHaveBeenCalled();
 
       // Matching run ID should be dispatched.
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: "org-ef",
         id: "target-exec",
         status: "success",
@@ -183,7 +183,7 @@ describe("realtime service (integration)", () => {
       });
 
       // Non-matching package ID should be filtered out.
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: "org-pf",
         id: "exec-a",
         status: "running",
@@ -193,7 +193,7 @@ describe("realtime service (integration)", () => {
       expect(send).not.toHaveBeenCalled();
 
       // Matching package ID should be dispatched.
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: "org-pf",
         id: "exec-b",
         status: "running",
@@ -205,9 +205,9 @@ describe("realtime service (integration)", () => {
     });
   });
 
-  // ── execution_log_insert dispatching ────────────────────────
+  // ── run_log_insert dispatching ────────────────────────
 
-  describe("execution_log_insert", () => {
+  describe("run_log_insert", () => {
     it("non-admin does not receive debug logs", async () => {
       const send = mock((_e: RealtimeEvent) => {});
       const id = "sub-non-admin";
@@ -219,7 +219,7 @@ describe("realtime service (integration)", () => {
         send,
       });
 
-      await pgNotify("execution_log_insert", {
+      await pgNotify("run_log_insert", {
         org_id: "org-log",
         run_id: "exec-log-1",
         level: "debug",
@@ -230,7 +230,7 @@ describe("realtime service (integration)", () => {
       expect(send).not.toHaveBeenCalled();
 
       // Non-debug logs should still be received.
-      await pgNotify("execution_log_insert", {
+      await pgNotify("run_log_insert", {
         org_id: "org-log",
         run_id: "exec-log-1",
         level: "info",
@@ -253,7 +253,7 @@ describe("realtime service (integration)", () => {
         send,
       });
 
-      await pgNotify("execution_log_insert", {
+      await pgNotify("run_log_insert", {
         org_id: "org-log-admin",
         run_id: "exec-log-2",
         level: "debug",
@@ -278,7 +278,7 @@ describe("realtime service (integration)", () => {
       });
 
       // Non-matching run_id.
-      await pgNotify("execution_log_insert", {
+      await pgNotify("run_log_insert", {
         org_id: "org-lef",
         run_id: "other-exec",
         level: "info",
@@ -288,7 +288,7 @@ describe("realtime service (integration)", () => {
       expect(send).not.toHaveBeenCalled();
 
       // Matching run_id.
-      await pgNotify("execution_log_insert", {
+      await pgNotify("run_log_insert", {
         org_id: "org-lef",
         run_id: "target-log-exec",
         level: "info",
@@ -310,7 +310,7 @@ describe("realtime service (integration)", () => {
         send,
       });
 
-      await pgNotify("execution_log_insert", {
+      await pgNotify("run_log_insert", {
         org_id: "org-default",
         run_id: "exec-d",
         level: "debug",
@@ -319,7 +319,7 @@ describe("realtime service (integration)", () => {
       await wait();
       expect(send).not.toHaveBeenCalled();
 
-      await pgNotify("execution_log_insert", {
+      await pgNotify("run_log_insert", {
         org_id: "org-default",
         run_id: "exec-d",
         level: "warn",
@@ -344,7 +344,7 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({ id, filter: { orgId: "org-idem" }, send });
 
-      await pgNotify("execution_update", {
+      await pgNotify("run_update", {
         org_id: "org-idem",
         id: "exec-idem",
         status: "running",

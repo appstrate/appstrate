@@ -48,7 +48,7 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
   // Run
-  EXECUTION_ADAPTER: z.enum(["pi"]).default("pi"),
+  RUN_ADAPTER: z.enum(["pi"]).default("pi"),
   SIDECAR_POOL_SIZE: z.coerce.number().int().min(0).default(2),
 
   // Docker images (override for GHCR / custom registries)
@@ -61,8 +61,8 @@ const envSchema = z.object({
   // Outbound proxy
   PROXY_URL: z.string().optional(),
 
-  // Execution token signing (optional — if unset, execution tokens are unsigned)
-  EXECUTION_TOKEN_SECRET: z.string().optional(),
+  // Run token signing (optional — if unset, run tokens are unsigned)
+  RUN_TOKEN_SECRET: z.string().optional(),
 
   // Social auth (optional — enables Google/GitHub sign-in when both are set)
   GOOGLE_CLIENT_ID: z.string().optional(),

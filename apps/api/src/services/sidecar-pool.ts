@@ -71,9 +71,9 @@ export async function initSidecarPool(): Promise<void> {
  */
 export async function acquireSidecar(
   runId: string,
-  executionNetworkId: string,
+  runNetworkId: string,
   sidecarEnv: {
-    executionToken: string;
+    runToken: string;
     platformApiUrl: string;
     proxyUrl?: string;
     llm?: { baseUrl: string; apiKey: string; placeholder: string };
@@ -94,7 +94,7 @@ export async function acquireSidecar(
         Authorization: `Bearer ${entry.configSecret}`,
       },
       body: JSON.stringify({
-        executionToken: sidecarEnv.executionToken,
+        runToken: sidecarEnv.runToken,
         platformApiUrl: sidecarEnv.platformApiUrl,
         proxyUrl: sidecarEnv.proxyUrl || "",
         llm: sidecarEnv.llm,
@@ -107,7 +107,7 @@ export async function acquireSidecar(
     }
 
     // Connect to run network with "sidecar" alias for agent DNS resolution
-    await connectContainerToNetwork(executionNetworkId, entry.containerId, ["sidecar"]);
+    await connectContainerToNetwork(runNetworkId, entry.containerId, ["sidecar"]);
 
     // Connect to platform network for host access (containerized deployments)
     if (platformNetwork) {

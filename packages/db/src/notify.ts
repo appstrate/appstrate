@@ -13,7 +13,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
     CREATE OR REPLACE FUNCTION notify_run_change()
     RETURNS TRIGGER AS $$
     BEGIN
-      PERFORM pg_notify('execution_update', json_build_object(
+      PERFORM pg_notify('run_update', json_build_object(
         'operation', TG_OP,
         'id', NEW.id,
         'package_id', NEW.package_id,
@@ -37,7 +37,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
     CREATE OR REPLACE FUNCTION notify_run_log_insert()
     RETURNS TRIGGER AS $$
     BEGIN
-      PERFORM pg_notify('execution_log_insert', json_build_object(
+      PERFORM pg_notify('run_log_insert', json_build_object(
         'id', NEW.id,
         'run_id', NEW.run_id,
         'org_id', NEW.org_id,

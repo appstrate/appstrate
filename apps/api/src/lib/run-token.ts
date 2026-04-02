@@ -11,7 +11,7 @@ import { timingSafeEqual } from "node:crypto";
 import { getEnv } from "@appstrate/env";
 
 export function signRunToken(runId: string): string {
-  const hasher = new Bun.CryptoHasher("sha256", getEnv().EXECUTION_TOKEN_SECRET);
+  const hasher = new Bun.CryptoHasher("sha256", getEnv().RUN_TOKEN_SECRET);
   hasher.update(runId);
   return `${runId}.${hasher.digest("hex")}`;
 }
@@ -24,7 +24,7 @@ export function parseSignedToken(token: string): string | null {
   const signature = token.substring(dotIndex + 1);
   if (!runId || !signature) return null;
 
-  const hasher = new Bun.CryptoHasher("sha256", getEnv().EXECUTION_TOKEN_SECRET);
+  const hasher = new Bun.CryptoHasher("sha256", getEnv().RUN_TOKEN_SECRET);
   hasher.update(runId);
   const expected = hasher.digest("hex");
 

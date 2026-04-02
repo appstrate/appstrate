@@ -20,7 +20,7 @@ export interface LlmProxyConfig {
 }
 
 export interface SidecarConfig {
-  executionToken: string;
+  runToken: string;
   platformApiUrl: string;
   proxyUrl?: string;
   llm?: LlmProxyConfig;

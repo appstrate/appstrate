@@ -21,7 +21,7 @@ Minimal Docker Compose setup for self-hosting Appstrate with PostgreSQL, Redis, 
    ```bash
    # Generate secrets (run each command and paste the output into .env)
    openssl rand -hex 32      # BETTER_AUTH_SECRET
-   openssl rand -hex 32      # EXECUTION_TOKEN_SECRET
+   openssl rand -hex 32      # RUN_TOKEN_SECRET
    openssl rand -base64 32   # CONNECTION_ENCRYPTION_KEY
    ```
 

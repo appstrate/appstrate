@@ -13,8 +13,7 @@ import { toJSONSchema } from "zod/v4/core";
 import { resolve, dirname } from "node:path";
 import { writeFile, mkdir, rm } from "node:fs/promises";
 import {
-  // TODO: rename to agentManifestSchema after @afps-spec/schema is republished
-  flowManifestSchema as agentManifestSchema,
+  agentManifestSchema,
   skillManifestSchema,
   toolManifestSchema,
   providerManifestSchema,

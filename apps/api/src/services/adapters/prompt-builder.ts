@@ -266,7 +266,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
         "This is useful for trend analysis, auditing past runs, or recovering from failures.\n",
     );
     sections.push("```bash");
-    sections.push('curl -s "$SIDECAR_URL/execution-history?limit=10&fields=state"');
+    sections.push('curl -s "$SIDECAR_URL/run-history?limit=10&fields=state"');
     sections.push("```\n");
     sections.push("Query parameters:");
     sections.push("- `limit` (1-50, default 10): Number of past runs to return");

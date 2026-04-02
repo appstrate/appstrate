@@ -286,7 +286,6 @@ export function App() {
             <Route path="/org-settings" element={<OrgSettingsPage />} />
             {/* Legacy redirects */}
             <Route path="/flows/*" element={<Navigate to="/agents" replace />} />
-            <Route path="/executions/*" element={<Navigate to="/runs" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

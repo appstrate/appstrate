@@ -56,7 +56,7 @@ function startEchoServer(): Promise<{ port: number; server: HttpServer }> {
 
 function makeProxy(overrides?: Parameters<typeof createForwardProxy>[0]): ForwardProxyResult {
   const result = createForwardProxy({
-    config: { platformApiUrl: "http://mock:3000", executionToken: "tok", proxyUrl: "" },
+    config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
     listenPort: 0,
     listenHost: "127.0.0.1",
     // Allow 127.0.0.1 by default for testing (otherwise echo server is blocked)

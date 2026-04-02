@@ -5,15 +5,15 @@ import { _resetCacheForTesting } from "@appstrate/env";
 import { signRunToken, parseSignedToken } from "../../src/lib/run-token.ts";
 
 // Set a known secret via process.env (no mock.module — compatible with same-process runs)
-const originalSecret = process.env.EXECUTION_TOKEN_SECRET;
+const originalSecret = process.env.RUN_TOKEN_SECRET;
 
 beforeAll(() => {
-  process.env.EXECUTION_TOKEN_SECRET = "test-secret-for-hmac-signing-min32chars!!";
+  process.env.RUN_TOKEN_SECRET = "test-secret-for-hmac-signing-min32chars!!";
   _resetCacheForTesting();
 });
 
 afterAll(() => {
-  process.env.EXECUTION_TOKEN_SECRET = originalSecret;
+  process.env.RUN_TOKEN_SECRET = originalSecret;
   _resetCacheForTesting();
 });
 
