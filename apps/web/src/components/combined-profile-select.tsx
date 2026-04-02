@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Building2 } from "lucide-react";
+import { Building2, User } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -12,6 +13,12 @@ import {
 } from "@/components/ui/select";
 import { useConnectionProfiles, useOrgProfiles } from "../hooks/use-connection-profiles";
 import { PROFILE_ALL_VALUE, encodeProfileValue, decodeProfileValue } from "@/lib/profile-selection";
+
+export interface ForeignProfile {
+  id: string;
+  name: string;
+  ownerName: string;
+}
 
 interface CombinedProfileSelectProps {
   /** Current value */
@@ -24,6 +31,8 @@ interface CombinedProfileSelectProps {
   triggerClassName?: string;
   /** ID for form association */
   id?: string;
+  /** A profile owned by another user — shown as disabled, selectable only if currently active */
+  foreignProfile?: ForeignProfile;
 }
 
 export function CombinedProfileSelect({
@@ -32,6 +41,7 @@ export function CombinedProfileSelect({
   showAllOption,
   triggerClassName = "w-[200px]",
   id,
+  foreignProfile,
 }: CombinedProfileSelectProps) {
   const { t } = useTranslation(["settings", "agents"]);
   const { data: userProfiles } = useConnectionProfiles();
@@ -40,9 +50,20 @@ export function CombinedProfileSelect({
   const hasUserProfiles = (userProfiles?.length ?? 0) > 0;
   const hasOrgProfiles = (orgProfiles?.length ?? 0) > 0;
 
+  // Determine if the foreign profile should be shown (value matches and not in own/org lists)
+  const showForeign = useMemo(() => {
+    if (!foreignProfile) return false;
+    const inUser = userProfiles?.some((p) => p.id === foreignProfile.id) ?? false;
+    const inOrg = orgProfiles?.some((p) => p.id === foreignProfile.id) ?? false;
+    return !inUser && !inOrg;
+  }, [foreignProfile, userProfiles, orgProfiles]);
+
+  const hasMeaningfulChoice = hasUserProfiles || hasOrgProfiles || showForeign;
+
   // Hide when no meaningful choice
-  if (!hasUserProfiles && !hasOrgProfiles) return null;
-  if (!showAllOption && !hasOrgProfiles && (userProfiles?.length ?? 0) <= 1) return null;
+  if (!hasMeaningfulChoice) return null;
+  if (!showAllOption && !hasOrgProfiles && !showForeign && (userProfiles?.length ?? 0) <= 1)
+    return null;
 
   const selectValue = encodeProfileValue(value);
 
@@ -57,6 +78,24 @@ export function CombinedProfileSelect({
       </SelectTrigger>
       <SelectContent>
         {showAllOption && <SelectItem value={PROFILE_ALL_VALUE}>{t("profiles.all")}</SelectItem>}
+        {showForeign && foreignProfile && (
+          <SelectGroup>
+            <div
+              className="text-muted-foreground flex items-center gap-1 px-2 py-1.5 text-xs font-medium"
+              role="presentation"
+            >
+              <User className="size-3" />
+              {foreignProfile.ownerName}
+            </div>
+            <SelectItem
+              key={foreignProfile.id}
+              value={foreignProfile.id}
+              disabled={value !== foreignProfile.id}
+            >
+              {foreignProfile.name}
+            </SelectItem>
+          </SelectGroup>
+        )}
         {userProfiles?.map((p) => (
           <SelectItem key={p.id} value={p.id}>
             {p.name}
