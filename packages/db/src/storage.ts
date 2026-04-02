@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { getEnv } from "@appstrate/env";
 import { createS3Storage } from "@appstrate/core/storage-s3";
 import type { Storage } from "@appstrate/core/storage";

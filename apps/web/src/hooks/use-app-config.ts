@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { AppConfig } from "@appstrate/shared-types";
 
 declare global {

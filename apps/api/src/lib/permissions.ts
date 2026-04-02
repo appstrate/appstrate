@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * RBAC Permission Registry — Single source of truth.
  *

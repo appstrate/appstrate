@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { getEnv } from "@appstrate/env";
 

@@ -1,8 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
-import {
-  buildMinimalZip,
-  unzipAndNormalize,
-} from "../../../src/services/package-storage.ts";
+import { buildMinimalZip, unzipAndNormalize } from "../../../src/services/package-storage.ts";
 
 describe("package-storage integration", () => {
   const sampleManifest = {
@@ -48,7 +47,8 @@ describe("package-storage integration", () => {
     });
 
     it("handles unicode characters in content", () => {
-      const unicodeContent = "Bonjour le monde! Cafe\u0301 \u2615 \u{1F600} \u00E9\u00E8\u00EA\u00EB";
+      const unicodeContent =
+        "Bonjour le monde! Cafe\u0301 \u2615 \u{1F600} \u00E9\u00E8\u00EA\u00EB";
       const zip = buildMinimalZip(sampleManifest, unicodeContent);
       const entries = unzipAndNormalize(zip);
       const decoded = new TextDecoder().decode(entries["prompt.md"]);

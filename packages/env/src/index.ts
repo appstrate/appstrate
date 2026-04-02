@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { z } from "zod";
 import { createEnvGetter } from "@appstrate/core/env";
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export const providerKeysPaths = {
   "/api/provider-keys": {
     get: {

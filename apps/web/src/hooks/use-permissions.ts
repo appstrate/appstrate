@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useOrg } from "./use-org.ts";
 import type { OrgRole } from "@appstrate/shared-types";
 

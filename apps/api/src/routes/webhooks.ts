@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Webhooks API — CRUD + test ping + secret rotation + delivery history.
  */

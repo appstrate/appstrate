@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { getEnv } from "@appstrate/env";
 import type { ContainerOrchestrator } from "./interface.ts";
 import type {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Verify OpenAPI spec: completeness, structural validity, and best practices.
  *

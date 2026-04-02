@@ -40,7 +40,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 data/
 storage/
 
-docs/
+docs/*
+!docs/adr/
 flows/*
 
 claudedocs/

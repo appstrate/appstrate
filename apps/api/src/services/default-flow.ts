@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { createOrgItem } from "./package-items/crud.ts";
 import { FLOW_CONFIG } from "./package-items/config.ts";
 import { logger } from "../lib/logger.ts";

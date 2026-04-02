@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useTranslation } from "react-i18next";
 import { Spinner } from "./spinner";
 import type { LucideIcon } from "lucide-react";

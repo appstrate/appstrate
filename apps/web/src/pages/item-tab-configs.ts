@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { LucideIcon } from "lucide-react";
 import { Plug, Puzzle, Wrench } from "lucide-react";
 import { usePackageList } from "../hooks/use-packages";

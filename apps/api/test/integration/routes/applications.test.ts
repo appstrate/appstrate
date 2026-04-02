@@ -1,11 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import {
-  createTestContext,
-  authHeaders,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 
 const app = getTestApp();
 
@@ -17,7 +15,6 @@ describe("Applications API", () => {
     ctx = await createTestContext({ orgSlug: "testorg" });
   });
 
-
   describe("GET /api/applications", () => {
     it("lists applications including the default app from createTestContext", async () => {
       const res = await app.request("/api/applications", {
@@ -25,14 +22,12 @@ describe("Applications API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.object).toBe("list");
       expect(body.data).toBeArray();
       expect(body.data.length).toBeGreaterThanOrEqual(1);
 
-      const defaultApp = body.data.find(
-        (a: { id: string }) => a.id === ctx.defaultAppId,
-      );
+      const defaultApp = body.data.find((a: { id: string }) => a.id === ctx.defaultAppId);
       expect(defaultApp).toBeDefined();
       expect(defaultApp.object).toBe("application");
     });
@@ -52,12 +47,11 @@ describe("Applications API", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.object).toBe("application");
       expect(body.name).toBe("My New App");
       expect(body.id).toBeDefined();
     });
-
   });
 
   describe("GET /api/applications/:id", () => {
@@ -67,7 +61,7 @@ describe("Applications API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.object).toBe("application");
       expect(body.id).toBe(ctx.defaultAppId);
     });
@@ -81,7 +75,7 @@ describe("Applications API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Original Name" }),
       });
-      const created = await createRes.json() as any;
+      const created = (await createRes.json()) as any;
 
       const res = await app.request(`/api/applications/${created.id}`, {
         method: "PATCH",
@@ -90,7 +84,7 @@ describe("Applications API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.object).toBe("application");
       expect(body.name).toBe("Updated Name");
     });
@@ -104,7 +98,7 @@ describe("Applications API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "To Delete" }),
       });
-      const created = await createRes.json() as any;
+      const created = (await createRes.json()) as any;
 
       const res = await app.request(`/api/applications/${created.id}`, {
         method: "DELETE",
@@ -117,10 +111,8 @@ describe("Applications API", () => {
       const listRes = await app.request("/api/applications", {
         headers: authHeaders(ctx),
       });
-      const listBody = await listRes.json() as any;
-      const found = listBody.data.find(
-        (a: { id: string }) => a.id === created.id,
-      );
+      const listBody = (await listRes.json()) as any;
+      const found = listBody.data.find((a: { id: string }) => a.id === created.id);
       expect(found).toBeUndefined();
     });
   });

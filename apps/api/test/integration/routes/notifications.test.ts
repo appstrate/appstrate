@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -15,15 +17,11 @@ describe("Notifications API", () => {
     ctx = await createTestContext({ orgSlug: "notiforg" });
   });
 
-
   /**
    * Seed a flow and N executions with notifiedAt set (so they count as unread).
    * Returns the flow and the seeded execution records.
    */
-  async function seedNotifiableExecutions(
-    count: number,
-    flowName = "notif-flow",
-  ) {
+  async function seedNotifiableExecutions(count: number, flowName = "notif-flow") {
     const flow = await seedFlow({
       id: `@notiforg/${flowName}`,
       orgId: ctx.orgId,
@@ -103,10 +101,9 @@ describe("Notifications API", () => {
 
   describe("GET /api/notifications/unread-counts-by-flow", () => {
     it("returns empty counts when no executions exist", async () => {
-      const res = await app.request(
-        "/api/notifications/unread-counts-by-flow",
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/notifications/unread-counts-by-flow", {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
@@ -119,10 +116,9 @@ describe("Notifications API", () => {
       await seedNotifiableExecutions(2, "flow-a");
       await seedNotifiableExecutions(1, "flow-b");
 
-      const res = await app.request(
-        "/api/notifications/unread-counts-by-flow",
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/notifications/unread-counts-by-flow", {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
@@ -140,29 +136,28 @@ describe("Notifications API", () => {
       const { executions: execs } = await seedNotifiableExecutions(1);
       const execId = execs[0]!.id;
 
-      const res = await app.request(
-        `/api/notifications/read/${execId}`,
-        { method: "PUT", headers: authHeaders(ctx) },
-      );
+      const res = await app.request(`/api/notifications/read/${execId}`, {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as { ok: boolean };
       expect(body.ok).toBe(true);
 
       // Verify the count dropped
-      const countRes = await app.request(
-        "/api/notifications/unread-count",
-        { headers: authHeaders(ctx) },
-      );
+      const countRes = await app.request("/api/notifications/unread-count", {
+        headers: authHeaders(ctx),
+      });
       const countBody = (await countRes.json()) as { count: number };
       expect(countBody.count).toBe(0);
     });
 
     it("returns false for non-existent execution", async () => {
-      const res = await app.request(
-        "/api/notifications/read/exec_nonexistent",
-        { method: "PUT", headers: authHeaders(ctx) },
-      );
+      const res = await app.request("/api/notifications/read/exec_nonexistent", {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as { ok: boolean };
@@ -182,10 +177,10 @@ describe("Notifications API", () => {
         status: "success",
       });
 
-      const res = await app.request(
-        `/api/notifications/read/${exec.id}`,
-        { method: "PUT", headers: authHeaders(ctx) },
-      );
+      const res = await app.request(`/api/notifications/read/${exec.id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as { ok: boolean };
@@ -209,10 +204,9 @@ describe("Notifications API", () => {
       expect(body.updated).toBe(3);
 
       // Verify the count is now 0
-      const countRes = await app.request(
-        "/api/notifications/unread-count",
-        { headers: authHeaders(ctx) },
-      );
+      const countRes = await app.request("/api/notifications/unread-count", {
+        headers: authHeaders(ctx),
+      });
       const countBody = (await countRes.json()) as { count: number };
       expect(countBody.count).toBe(0);
     });

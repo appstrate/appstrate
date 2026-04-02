@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export * from "./enums.ts";
 export * from "./auth.ts";
 export * from "./organizations.ts";

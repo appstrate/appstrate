@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Manifest } from "@appstrate/core/validation";
 import type { FlowProviderRequirement } from "../types/index.ts";
 import { asRecord } from "./safe-json.ts";

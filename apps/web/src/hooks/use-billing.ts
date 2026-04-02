@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Sparkles, Zap, Crown, type LucideIcon } from "lucide-react";
 import { api } from "../api";

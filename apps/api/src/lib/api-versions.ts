@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * API version registry — date-based versioning (Stripe pattern).
  *

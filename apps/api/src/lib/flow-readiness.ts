@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Strip empty/null values from required fields before AJV validation.
  * AJV with coerceTypes coerces null → "" for strings, which incorrectly passes.

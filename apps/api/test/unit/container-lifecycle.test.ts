@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, mock } from "bun:test";
 import type { ContainerOrchestrator } from "../../src/services/orchestrator/interface.ts";
 import type { WorkloadHandle } from "../../src/services/orchestrator/types.ts";

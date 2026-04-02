@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { PromptContext } from "./adapters/types.ts";
 import type { LoadedPackage, FlowProviderRequirement } from "../types/index.ts";
 import type { FileReference } from "./adapters/types.ts";

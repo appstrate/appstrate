@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
 import {
   resolvePermissions,
@@ -154,10 +156,7 @@ describe("resolveApiKeyPermissions", () => {
 
   it("role downgrade reduces effective permissions", () => {
     // Key has admin-level scopes, but creator was downgraded to member
-    const perms = resolveApiKeyPermissions(
-      ["flows:read", "flows:write", "flows:delete"],
-      "member",
-    );
+    const perms = resolveApiKeyPermissions(["flows:read", "flows:write", "flows:delete"], "member");
     // Member has flows:read but not flows:write or flows:delete
     expect(perms.has("flows:read")).toBe(true);
     expect(perms.has("flows:write")).toBe(false);
@@ -168,15 +167,33 @@ describe("resolveApiKeyPermissions", () => {
 describe("API_KEY_ALLOWED_SCOPES", () => {
   it("excludes session-only permissions", () => {
     const excluded = [
-      "org:read", "org:update", "org:delete",
-      "members:read", "members:invite", "members:remove", "members:change-role",
-      "billing:read", "billing:manage",
-      "api-keys:read", "api-keys:create", "api-keys:revoke",
-      "provider-keys:read", "provider-keys:write", "provider-keys:delete",
-      "profiles:read", "profiles:write", "profiles:delete",
-      "org-profiles:read", "org-profiles:write", "org-profiles:delete", "org-profiles:bind",
-      "connections:read", "connections:connect", "connections:disconnect",
-      "memories:read", "memories:delete",
+      "org:read",
+      "org:update",
+      "org:delete",
+      "members:read",
+      "members:invite",
+      "members:remove",
+      "members:change-role",
+      "billing:read",
+      "billing:manage",
+      "api-keys:read",
+      "api-keys:create",
+      "api-keys:revoke",
+      "provider-keys:read",
+      "provider-keys:write",
+      "provider-keys:delete",
+      "profiles:read",
+      "profiles:write",
+      "profiles:delete",
+      "org-profiles:read",
+      "org-profiles:write",
+      "org-profiles:delete",
+      "org-profiles:bind",
+      "connections:read",
+      "connections:connect",
+      "connections:disconnect",
+      "memories:read",
+      "memories:delete",
     ];
     for (const perm of excluded) {
       expect(API_KEY_ALLOWED_SCOPES.has(perm as never)).toBe(false);
@@ -185,11 +202,19 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
 
   it("includes headless-relevant permissions", () => {
     const included = [
-      "flows:read", "flows:write", "flows:run",
-      "executions:read", "executions:cancel",
-      "end-users:read", "end-users:write", "end-users:delete",
-      "webhooks:read", "webhooks:write", "webhooks:delete",
-      "applications:read", "applications:write",
+      "flows:read",
+      "flows:write",
+      "flows:run",
+      "executions:read",
+      "executions:cancel",
+      "end-users:read",
+      "end-users:write",
+      "end-users:delete",
+      "webhooks:read",
+      "webhooks:write",
+      "webhooks:delete",
+      "applications:read",
+      "applications:write",
     ];
     for (const perm of included) {
       expect(API_KEY_ALLOWED_SCOPES.has(perm as never)).toBe(true);

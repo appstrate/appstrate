@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Shared helpers for system+DB merge patterns and partial update building.
  *

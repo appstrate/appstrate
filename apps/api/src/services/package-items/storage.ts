@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { zipArtifact, unzipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { verifyArtifactIntegrity } from "@appstrate/core/integrity";

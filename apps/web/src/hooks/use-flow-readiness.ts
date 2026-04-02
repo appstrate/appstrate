@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useMemo } from "react";
 import type { FlowDetail, OrgModelInfo } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";

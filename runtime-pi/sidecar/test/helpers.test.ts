@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
 import {
   isBlockedHost,
@@ -263,9 +265,7 @@ describe("matchesAuthorizedUri", () => {
   });
 
   it("rejects non-matching URL", () => {
-    expect(
-      matchesAuthorizedUri("https://evil.com/api", ["https://api.example.com/*"]),
-    ).toBe(false);
+    expect(matchesAuthorizedUri("https://evil.com/api", ["https://api.example.com/*"])).toBe(false);
   });
 
   it("rejects when patterns is empty", () => {
@@ -273,8 +273,8 @@ describe("matchesAuthorizedUri", () => {
   });
 
   it("matches with multiple patterns", () => {
-    expect(
-      matchesAuthorizedUri("https://b.com/data", ["https://a.com/*", "https://b.com/*"]),
-    ).toBe(true);
+    expect(matchesAuthorizedUri("https://b.com/data", ["https://a.com/*", "https://b.com/*"])).toBe(
+      true,
+    );
   });
 });

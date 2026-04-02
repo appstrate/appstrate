@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 import { useTheme } from "../../stores/theme-store";
 

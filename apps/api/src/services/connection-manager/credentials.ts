@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { db } from "@appstrate/db/client";
 import { logger } from "../../lib/logger.ts";
 import { saveConnection } from "@appstrate/connect";

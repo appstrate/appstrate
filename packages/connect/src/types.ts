@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { AuthMode, ResolvedProviderDefinition } from "@appstrate/core/validation";
 
 export type { AuthMode };

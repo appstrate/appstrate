@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { usePackageDetail } from "./use-packages";
 import { useProfileConnections, useOrgProfileBindings } from "./use-connection-profiles";
 import { isProviderConnectedInProfile } from "../lib/provider-status";

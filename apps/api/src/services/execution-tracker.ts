@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Tracks in-flight executions for graceful shutdown and cancellation.
 // Cross-instance cancel signaling via Redis Pub/Sub.
 

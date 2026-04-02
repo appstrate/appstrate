@@ -1,0 +1,171 @@
+# Appstrate — Minimal Self-Hosting Docker Compose
+#
+# Usage:
+#   cp .env.example .env   # edit secrets
+#   docker compose up -d
+#
+# This is a simplified version of the root docker-compose.yml for quick
+# self-hosting. For the full production setup with all options, see the
+# docker-compose.yml at the repository root.
+
+name: appstrate
+
+networks:
+  appstrate-data:
+    driver: bridge
+    internal: true
+  appstrate-public:
+    driver: bridge
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    networks:
+      - appstrate-data
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-appstrate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: appstrate
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appstrate}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ───────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    networks:
+      - appstrate-data
+    command: redis-server --maxmemory-policy noeviction
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MinIO (S3-compatible storage) ───────────────────────────
+  minio:
+    image: minio/minio:latest
+    networks:
+      - appstrate-data
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MinIO bucket initialization ─────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    networks:
+      - appstrate-data
+    restart: "no"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET: ${S3_BUCKET:-appstrate}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" 2>/dev/null; do sleep 1; done
+        mc mb "local/$$S3_BUCKET" --ignore-existing
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  # ── Database migrations ─────────────────────────────────────
+  migrate:
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-latest}
+    networks:
+      - appstrate-data
+    restart: "no"
+    command: ["bun", "packages/db/src/migrate.ts"]
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@postgres:5432/appstrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Pre-pull runtime images ─────────────────────────────────
+  pi-pull:
+    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
+    entrypoint: ["true"]
+    restart: "no"
+
+  sidecar-pull:
+    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
+    entrypoint: ["true"]
+    restart: "no"
+
+  # ── Appstrate platform ─────────────────────────────────────
+  appstrate:
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-latest}
+    networks:
+      - appstrate-data
+      - appstrate-public
+    ports:
+      - "${PORT:-3000}:3000"
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@postgres:5432/appstrate
+      - APP_URL=${APP_URL:-http://localhost:3000}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env}
+      - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
+      - SYSTEM_PROVIDER_KEYS=${SYSTEM_PROVIDER_KEYS:-[]}
+      - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY:?Set CONNECTION_ENCRYPTION_KEY in .env}
+      - EXECUTION_TOKEN_SECRET=${EXECUTION_TOKEN_SECRET:-}
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-appstrate}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ENDPOINT=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - EXECUTION_ADAPTER=${EXECUTION_ADAPTER:-pi}
+      - DOCKER_SOCKET=/var/run/docker.sock
+      - SIDECAR_POOL_SIZE=${SIDECAR_POOL_SIZE:-2}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
+      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      pi-pull:
+        condition: service_completed_successfully
+      sidecar-pull:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

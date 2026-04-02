@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * HMAC-SHA256 signed execution tokens.
  *

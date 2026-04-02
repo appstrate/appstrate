@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Connection Profiles — manages actor and org connection profiles and profile resolution.
  */

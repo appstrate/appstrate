@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Log types and pure utility functions shared between log-viewer components and pages.
 
 export interface LogEntry {

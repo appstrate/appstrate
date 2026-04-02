@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { getCurrentOrgId } from "./hooks/use-org";
 
 const API_BASE = "/api";

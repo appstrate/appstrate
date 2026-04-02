@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {

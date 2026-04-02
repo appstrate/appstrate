@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import Ajv from "ajv";
 import {
   isFileField,

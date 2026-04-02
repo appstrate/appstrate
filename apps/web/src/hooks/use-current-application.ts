@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useStore } from "zustand";
 import { appStore, getCurrentApplicationId } from "../stores/app-store";
 import { useApplications } from "./use-applications";

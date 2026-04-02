@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { zipArtifact } from "@appstrate/core/zip";
 
 const MAX_FILES = 50;

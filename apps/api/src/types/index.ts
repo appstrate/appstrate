@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Only re-export types actually imported through this path (backend-only consumers).
 // All other shared types should be imported directly from "@appstrate/shared-types".
 export type { OrgRole } from "@appstrate/shared-types";

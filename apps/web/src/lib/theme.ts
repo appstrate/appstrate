@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Sun, Moon, Monitor, type LucideIcon } from "lucide-react";
 import type { Theme } from "../stores/theme-store";
 

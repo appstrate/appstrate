@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Integration tests for env-builder service.
  *
@@ -6,10 +8,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import {
-  ModelNotConfiguredError,
-  buildExecutionApi,
-} from "../../../src/services/env-builder.ts";
+import { ModelNotConfiguredError, buildExecutionApi } from "../../../src/services/env-builder.ts";
 
 // ─── ModelNotConfiguredError ────────────────────────────────
 

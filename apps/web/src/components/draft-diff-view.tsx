@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { DiffEditor } from "@monaco-editor/react";
 import { useTheme } from "../stores/theme-store";
 

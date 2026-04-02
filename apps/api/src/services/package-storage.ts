@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { zipArtifact, unzipArtifact, type Zippable } from "@appstrate/core/zip";
 import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";

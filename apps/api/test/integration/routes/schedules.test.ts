@@ -1,8 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedFlow, seedSchedule, seedConnectionProfile, seedExecution } from "../../helpers/seed.ts";
+import {
+  seedFlow,
+  seedSchedule,
+  seedConnectionProfile,
+  seedExecution,
+} from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -17,7 +24,6 @@ describe("Schedules API", () => {
     profileId = profile.id;
   });
 
-
   function flowId(name: string) {
     return `@${ctx.org.slug}/${name}`;
   }
@@ -29,7 +35,7 @@ describe("Schedules API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body).toBeArray();
       expect(body).toHaveLength(0);
     });
@@ -50,7 +56,7 @@ describe("Schedules API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.length).toBeGreaterThanOrEqual(1);
       expect(body[0].name).toBe("Hourly");
     });
@@ -98,7 +104,7 @@ describe("Schedules API", () => {
       });
 
       expect(res.status).toBe(400);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.detail).toContain("email");
     });
 
@@ -170,7 +176,7 @@ describe("Schedules API", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.cronExpression).toBe("0 9 * * 1-5");
       expect(body.name).toBe("Weekday 9am");
       expect(body.timezone).toBe("Europe/Paris");
@@ -209,7 +215,7 @@ describe("Schedules API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.name).toBe("New Name");
       expect(body.cronExpression).toBe("0 12 * * *");
     });

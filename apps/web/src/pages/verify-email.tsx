@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation, Trans } from "react-i18next";

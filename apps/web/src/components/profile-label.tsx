@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { User, Building2 } from "lucide-react";
 
 interface ProfileLabelProps {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Webhooks service — CRUD, signing (Standard Webhooks), and BullMQ delivery.
  */

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
 import type { PackageType } from "@appstrate/core/validation";

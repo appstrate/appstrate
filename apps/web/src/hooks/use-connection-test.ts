@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useRef, useEffect } from "react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { TestResult } from "@appstrate/shared-types";

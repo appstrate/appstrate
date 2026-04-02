@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -14,7 +16,6 @@ describe("Invitations API", () => {
     ctx = await createTestContext({ orgSlug: "inviteorg" });
   });
 
-
   describe("GET /invite/:token/info (public)", () => {
     it("returns invitation info", async () => {
       const inv = await seedInvitation({
@@ -26,7 +27,7 @@ describe("Invitations API", () => {
       const res = await app.request(`/invite/${inv.token}/info`);
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.email).toBe("new@test.com");
       expect(body.isNewUser).toBe(true);
     });
@@ -67,7 +68,7 @@ describe("Invitations API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.success).toBe(true);
       expect(body.isNewUser).toBe(true);
       expect(body.orgId).toBe(ctx.orgId);
@@ -215,6 +216,5 @@ describe("Invitations API", () => {
       const body = (await res.json()) as any;
       expect(body.success).toBe(true);
     });
-
   });
 });

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type SupportedLocale = "fr" | "en";
 
 export type EmailType = "verification" | "invitation" | "magic-link" | "reset-password";

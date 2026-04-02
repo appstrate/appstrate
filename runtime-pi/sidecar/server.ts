@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { createApp } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
 import type { CredentialsResponse } from "./helpers.ts";
@@ -8,13 +10,14 @@ const config = {
   platformApiUrl: process.env.PLATFORM_API_URL || "http://localhost:3000",
   executionToken: process.env.EXECUTION_TOKEN || "",
   proxyUrl: process.env.PROXY_URL || "",
-  llm: process.env.PI_BASE_URL && process.env.PI_API_KEY
-    ? {
-        baseUrl: process.env.PI_BASE_URL,
-        apiKey: process.env.PI_API_KEY,
-        placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",
-      }
-    : undefined,
+  llm:
+    process.env.PI_BASE_URL && process.env.PI_API_KEY
+      ? {
+          baseUrl: process.env.PI_BASE_URL,
+          apiKey: process.env.PI_API_KEY,
+          placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",
+        }
+      : undefined,
 };
 
 const cookieJar = new Map<string, string[]>();

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
 import { parseRequestInput } from "../../src/services/input-parser.ts";
@@ -40,7 +42,9 @@ function requestWithSchema(
 }
 
 function jsonAppWithSchema(body: unknown, inputSchema: Parameters<typeof parseRequestInput>[1]) {
-  return requestWithSchema(JSON.stringify(body), inputSchema, { "Content-Type": "application/json" });
+  return requestWithSchema(JSON.stringify(body), inputSchema, {
+    "Content-Type": "application/json",
+  });
 }
 
 function formDataApp(formData: FormData, inputSchema: Parameters<typeof parseRequestInput>[1]) {
@@ -113,10 +117,7 @@ describe("parseRequestInput", () => {
 
 describe("parseRequestInput — input schema validation", () => {
   it("rejects missing required field", async () => {
-    const res = await jsonAppWithSchema(
-      { input: { message: "hi" } },
-      INPUT_SCHEMA_WITH_REQUIRED,
-    );
+    const res = await jsonAppWithSchema({ input: { message: "hi" } }, INPUT_SCHEMA_WITH_REQUIRED);
     expect(res.status).toBe(400);
   });
 
@@ -126,18 +127,12 @@ describe("parseRequestInput — input schema validation", () => {
   });
 
   it("rejects empty string on required field", async () => {
-    const res = await jsonAppWithSchema(
-      { input: { email: "" } },
-      INPUT_SCHEMA_WITH_REQUIRED,
-    );
+    const res = await jsonAppWithSchema({ input: { email: "" } }, INPUT_SCHEMA_WITH_REQUIRED);
     expect(res.status).toBe(400);
   });
 
   it("rejects null on required field", async () => {
-    const res = await jsonAppWithSchema(
-      { input: { email: null } },
-      INPUT_SCHEMA_WITH_REQUIRED,
-    );
+    const res = await jsonAppWithSchema({ input: { email: null } }, INPUT_SCHEMA_WITH_REQUIRED);
     expect(res.status).toBe(400);
   });
 

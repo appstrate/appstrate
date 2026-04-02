@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Token resolution — resolves provider tokens for execution.
  * Shared by executions.ts and scheduler.ts.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { ContainerOrchestrator } from "./interface.ts";
 import { DockerOrchestrator } from "./docker-orchestrator.ts";
 

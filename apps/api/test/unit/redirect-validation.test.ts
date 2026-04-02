@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { ApiError } from "../../src/lib/errors.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
@@ -36,7 +38,7 @@ describe("validateReturnUrl", () => {
   beforeEach(() => setProdEnv());
 
   describe("scheme validation", () => {
-    it("accepts https URLs when domain is whitelisted", () => {
+    it("accepts https URLs when domain is allowed", () => {
       validateReturnUrl("https://myapp.com/callback", ["myapp.com"]);
     });
 
@@ -91,7 +93,7 @@ describe("validateReturnUrl", () => {
     });
   });
 
-  describe("domain whitelist", () => {
+  describe("domain allowlist", () => {
     it("accepts exact domain match", () => {
       validateReturnUrl("https://myapp.com/done", ["myapp.com"]);
     });
@@ -113,7 +115,7 @@ describe("validateReturnUrl", () => {
       expectThrows(() => validateReturnUrl("https://notmyapp.com/done", ["myapp.com"]));
     });
 
-    it("rejects when whitelist is empty", () => {
+    it("rejects when allowlist is empty", () => {
       expectThrows(() => validateReturnUrl("https://myapp.com/done", []));
     });
 

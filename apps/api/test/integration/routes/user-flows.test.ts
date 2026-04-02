@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -17,7 +19,6 @@ describe("User Flows API", () => {
     ctx = await createTestContext({ orgSlug: "myorg" });
   });
 
-
   describe("DELETE /api/packages/flows/:scope/:name", () => {
     // NOTE: DELETE flow calls S3 to remove artifacts — returns 500 without real S3.
     // These tests verify auth/guard behavior only. Full delete tests require MinIO.
@@ -27,7 +28,6 @@ describe("User Flows API", () => {
       });
       expect(res.status).toBe(401);
     });
-
   });
 
   describe("PUT /api/flows/:scope/:name/skills", () => {
@@ -56,7 +56,12 @@ describe("User Flows API", () => {
         orgId: ctx.orgId,
         id: "@myorg/skill-a",
         type: "skill",
-        draftManifest: { name: "@myorg/skill-a", version: "1.0.0", type: "skill", description: "Skill A" },
+        draftManifest: {
+          name: "@myorg/skill-a",
+          version: "1.0.0",
+          type: "skill",
+          description: "Skill A",
+        },
       });
       await seedFlow({
         id: "@myorg/skills-flow",
@@ -147,7 +152,12 @@ describe("User Flows API", () => {
         orgId: ctx.orgId,
         id: "@myorg/tool-x",
         type: "tool",
-        draftManifest: { name: "@myorg/tool-x", version: "1.0.0", type: "tool", description: "Tool X" },
+        draftManifest: {
+          name: "@myorg/tool-x",
+          version: "1.0.0",
+          type: "tool",
+          description: "Tool X",
+        },
       });
       await seedFlow({
         id: "@myorg/tools-flow",

@@ -1,10 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Validates OAuth return URLs against an organization's allowed redirect domains.
  *
  * Security layers:
  * 1. Scheme validation — only https:// (http://localhost for dev)
  * 2. Dangerous scheme blocking — javascript:, data:, vbscript:, file:
- * 3. Domain whitelist matching — parsed host vs allowed domains
+ * 3. Domain allowlist matching — parsed host vs allowed domains
  * 4. localhost always allowed in dev mode
  */
 
@@ -58,12 +60,12 @@ export function validateReturnUrl(returnUrl: string, allowedDomains: string[]): 
     }
   }
 
-  // Localhost is always allowed in dev mode (skip domain whitelist)
+  // Localhost is always allowed in dev mode (skip domain allowlist)
   if (isLocalhost && isDev) {
     return;
   }
 
-  // Check against whitelist
+  // Check against allowlist
   const hostname = parsed.hostname.toLowerCase();
   const isAllowed = allowedDomains.some((domain) => {
     const d = domain.toLowerCase();

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, XCircle, Clock, Ban } from "lucide-react";
 import { Spinner } from "./spinner";

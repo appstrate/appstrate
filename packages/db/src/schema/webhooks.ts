@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { pgTable, text, timestamp, boolean, integer, uuid, index } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations.ts";
 import { applications } from "./applications.ts";

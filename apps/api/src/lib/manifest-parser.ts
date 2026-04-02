@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Parse manifest.json from a ZIP files dictionary.
  * Shared across post-install, package upload, and other ZIP-based flows.

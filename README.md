@@ -3,6 +3,8 @@
 [![CI](https://github.com/appstrate/appstrate/actions/workflows/test.yml/badge.svg)](https://github.com/appstrate/appstrate/actions/workflows/test.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![Docker Image](https://img.shields.io/badge/Docker-ghcr.io%2Fappstrate%2Fappstrate-blue)](https://github.com/appstrate/appstrate/pkgs/container/appstrate)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/appstrate/appstrate/badge)](https://scorecard.dev/viewer/?uri=github.com/appstrate/appstrate)
+[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
 An open-source platform for executing one-shot AI flows in ephemeral Docker containers. Users sign up, connect OAuth/API key services (Gmail, ClickUp, etc.), click "Run", and the AI agent processes their data autonomously inside a temporary container.
 

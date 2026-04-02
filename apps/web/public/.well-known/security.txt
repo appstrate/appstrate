@@ -1,0 +1,5 @@
+Contact: mailto:security@appstrate.dev
+Expires: 2027-04-01T00:00:00.000Z
+Preferred-Languages: en, fr
+Canonical: https://appstrate.dev/.well-known/security.txt
+Policy: https://github.com/appstrate/appstrate/blob/main/SECURITY.md

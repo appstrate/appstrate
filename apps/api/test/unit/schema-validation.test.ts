@@ -1,7 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { validateManifest } from "@appstrate/core/validation";
-import { validateConfig, validateInput, validateOutput, validateFlowContent } from "../../src/services/schema.ts";
+import {
+  validateConfig,
+  validateInput,
+  validateOutput,
+  validateFlowContent,
+} from "../../src/services/schema.ts";
 
 // --- Fixtures ---
 

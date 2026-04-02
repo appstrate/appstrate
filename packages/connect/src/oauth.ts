@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { randomBytes, createHash } from "node:crypto";
 import { eq, and, gt } from "drizzle-orm";
 import { oauthStates } from "@appstrate/db/schema";

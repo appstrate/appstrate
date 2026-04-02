@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, afterAll } from "bun:test";
 import { renderEmail, registerEmailOverrides, resetEmailRegistry } from "../src/index.ts";
 import type { EmailRenderer } from "../src/index.ts";

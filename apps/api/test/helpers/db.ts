@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Test database helpers.
  *
@@ -49,8 +51,8 @@ const ALL_TABLES = [
   "profiles",
   "verification",
   "account",
-  '"session"',   // quoted — PostgreSQL reserved word
-  '"user"',      // quoted — PostgreSQL reserved word
+  '"session"', // quoted — PostgreSQL reserved word
+  '"user"', // quoted — PostgreSQL reserved word
 ] as const;
 
 /**
@@ -63,4 +65,3 @@ export async function truncateAll(): Promise<void> {
     await db.execute(sql.raw(`DELETE FROM ${table}`));
   }
 }
-

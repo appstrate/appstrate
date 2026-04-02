@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Report Tool — Generate a markdown report as part of the execution result.
  *

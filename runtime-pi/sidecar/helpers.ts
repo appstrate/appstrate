@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pure functions and constants extracted from server.ts for testability.
 
 export { isBlockedHost, isBlockedUrl } from "./ssrf.ts";
@@ -41,8 +43,14 @@ export function findUnresolvedPlaceholders(text: string): string[] {
 
 /** RFC 7230 §6.1 hop-by-hop headers — must not be forwarded by proxies. */
 export const HOP_BY_HOP_HEADERS = new Set([
-  "connection", "keep-alive", "proxy-connection", "transfer-encoding",
-  "te", "trailer", "upgrade", "proxy-authorization",
+  "connection",
+  "keep-alive",
+  "proxy-connection",
+  "transfer-encoding",
+  "te",
+  "trailer",
+  "upgrade",
+  "proxy-authorization",
 ]);
 
 /** Strip host, content-length, and hop-by-hop headers. Optionally skip additional header names (lowercase). */
@@ -53,7 +61,13 @@ export function filterHeaders(
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(headers)) {
     const lower = key.toLowerCase();
-    if (lower === "host" || lower === "content-length" || HOP_BY_HOP_HEADERS.has(lower) || extraSkip?.has(lower)) continue;
+    if (
+      lower === "host" ||
+      lower === "content-length" ||
+      HOP_BY_HOP_HEADERS.has(lower) ||
+      extraSkip?.has(lower)
+    )
+      continue;
     out[key] = value;
   }
   return out;
