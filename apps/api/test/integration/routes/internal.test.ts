@@ -36,16 +36,16 @@ describe("Internal API", () => {
     runningToken = signRunToken(runningRunId);
   });
 
-  // ─── GET /internal/execution-history ─────────────────────────
+  // ─── GET /internal/run-history ─────────────────────────
 
-  describe("GET /internal/execution-history", () => {
+  describe("GET /internal/run-history", () => {
     it("returns 401 without token", async () => {
-      const res = await app.request("/internal/execution-history");
+      const res = await app.request("/internal/run-history");
       expect(res.status).toBe(401);
     });
 
     it("returns 401 with invalid token", async () => {
-      const res = await app.request("/internal/execution-history", {
+      const res = await app.request("/internal/run-history", {
         headers: { Authorization: "Bearer totally-invalid-token" },
       });
       expect(res.status).toBe(401);
@@ -53,7 +53,7 @@ describe("Internal API", () => {
 
     it("returns 401 with forged signature", async () => {
       // Valid format but wrong HMAC
-      const res = await app.request("/internal/execution-history", {
+      const res = await app.request("/internal/run-history", {
         headers: {
           Authorization: `Bearer ${runningRunId}.0000000000000000000000000000000000000000000000000000000000000000`,
         },
@@ -70,14 +70,14 @@ describe("Internal API", () => {
       });
       const doneToken = signRunToken(doneRun.id);
 
-      const res = await app.request("/internal/execution-history", {
+      const res = await app.request("/internal/run-history", {
         headers: { Authorization: `Bearer ${doneToken}` },
       });
       expect(res.status).toBe(403);
     });
 
     it("returns empty array for first run (no prior history)", async () => {
-      const res = await app.request("/internal/execution-history", {
+      const res = await app.request("/internal/run-history", {
         headers: { Authorization: `Bearer ${runningToken}` },
       });
 
@@ -104,7 +104,7 @@ describe("Internal API", () => {
         state: { counter: 2 },
       });
 
-      const res = await app.request("/internal/execution-history", {
+      const res = await app.request("/internal/run-history", {
         headers: { Authorization: `Bearer ${runningToken}` },
       });
 
@@ -126,7 +126,7 @@ describe("Internal API", () => {
         });
       }
 
-      const res = await app.request("/internal/execution-history?limit=2", {
+      const res = await app.request("/internal/run-history?limit=2", {
         headers: { Authorization: `Bearer ${runningToken}` },
       });
 
@@ -137,13 +137,13 @@ describe("Internal API", () => {
 
     it("clamps limit to valid range (min 1, max 50)", async () => {
       // limit=0 should be clamped to 1
-      const res = await app.request("/internal/execution-history?limit=0", {
+      const res = await app.request("/internal/run-history?limit=0", {
         headers: { Authorization: `Bearer ${runningToken}` },
       });
       expect(res.status).toBe(200);
 
       // limit=999 should be clamped to 50
-      const res2 = await app.request("/internal/execution-history?limit=999", {
+      const res2 = await app.request("/internal/run-history?limit=999", {
         headers: { Authorization: `Bearer ${runningToken}` },
       });
       expect(res2.status).toBe(200);
@@ -151,7 +151,7 @@ describe("Internal API", () => {
 
     it("excludes the current running run from results", async () => {
       // The running run itself should never appear in history
-      const res = await app.request("/internal/execution-history", {
+      const res = await app.request("/internal/run-history", {
         headers: { Authorization: `Bearer ${runningToken}` },
       });
 
@@ -177,7 +177,7 @@ describe("Internal API", () => {
         state: { foreign: true },
       });
 
-      const res = await app.request("/internal/execution-history", {
+      const res = await app.request("/internal/run-history", {
         headers: { Authorization: `Bearer ${runningToken}` },
       });
 
@@ -196,7 +196,7 @@ describe("Internal API", () => {
         result: { output: "done" },
       });
 
-      const res = await app.request("/internal/execution-history?fields=state,result", {
+      const res = await app.request("/internal/run-history?fields=state,result", {
         headers: { Authorization: `Bearer ${runningToken}` },
       });
 
