@@ -17,6 +17,7 @@ export function buildTokenHeaders(
 ): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/x-www-form-urlencoded",
+    Accept: "application/json",
   };
   if (tokenAuthMethod === "client_secret_basic") {
     // RFC 6749 §2.3.1: credentials MUST be URL-encoded before base64
