@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq, and, sql } from "drizzle-orm";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -12,9 +14,7 @@ import {
 } from "@appstrate/db/schema";
 import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
 import { setFlowOverride } from "../../../src/services/state/package-config.ts";
-import {
-  setUserFlowProviderOverride,
-} from "../../../src/services/connection-profiles.ts";
+import { setUserFlowProviderOverride } from "../../../src/services/connection-profiles.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 
 describe("Cascade Deletion", () => {
@@ -47,9 +47,7 @@ describe("Cascade Deletion", () => {
       );
 
       // Delete the source (user) profile
-      await db
-        .delete(connectionProfiles)
-        .where(eq(connectionProfiles.id, userProfile.id));
+      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, userProfile.id));
 
       // Bindings should be gone via FK CASCADE on sourceProfileId
       await assertDbMissing(
@@ -72,9 +70,7 @@ describe("Cascade Deletion", () => {
       );
 
       // Delete the profile
-      await db
-        .delete(connectionProfiles)
-        .where(eq(connectionProfiles.id, userProfile.id));
+      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, userProfile.id));
 
       // Override should be gone via FK CASCADE on profileId
       await assertDbMissing(
@@ -101,9 +97,7 @@ describe("Cascade Deletion", () => {
       expect(configBefore.orgProfileId).toBe(orgProfile.id);
 
       // Delete the org profile
-      await db
-        .delete(connectionProfiles)
-        .where(eq(connectionProfiles.id, orgProfile.id));
+      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, orgProfile.id));
 
       // orgProfileId should be nullified (SET NULL)
       const configAfter = await getDbRow(
@@ -128,9 +122,7 @@ describe("Cascade Deletion", () => {
       );
 
       // Delete the org profile
-      await db
-        .delete(connectionProfiles)
-        .where(eq(connectionProfiles.id, orgProfile.id));
+      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, orgProfile.id));
 
       // All bindings should be gone via FK CASCADE on orgProfileId
       await assertDbMissing(
@@ -148,15 +140,10 @@ describe("Cascade Deletion", () => {
       await bindOrgProfileProvider(orgProfile2.id, "@test/gmail", userProfile.id, userId);
 
       // Delete profile 1
-      await db
-        .delete(connectionProfiles)
-        .where(eq(connectionProfiles.id, orgProfile1.id));
+      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, orgProfile1.id));
 
       // Profile 2 and its binding should still exist
-      await assertDbHas(
-        connectionProfiles,
-        eq(connectionProfiles.id, orgProfile2.id),
-      );
+      await assertDbHas(connectionProfiles, eq(connectionProfiles.id, orgProfile2.id));
       await assertDbHas(
         orgProfileProviderBindings,
         eq(orgProfileProviderBindings.orgProfileId, orgProfile2.id),
@@ -173,9 +160,7 @@ describe("Cascade Deletion", () => {
       await setFlowOverride(orgId, flow2.id, "orgProfileId", orgProfile.id);
 
       // Delete the org profile
-      await db
-        .delete(connectionProfiles)
-        .where(eq(connectionProfiles.id, orgProfile.id));
+      await db.delete(connectionProfiles).where(eq(connectionProfiles.id, orgProfile.id));
 
       // Both flows should have orgProfileId nullified
       const config1 = await getDbRow(
@@ -209,10 +194,7 @@ describe("Cascade Deletion", () => {
       await bindOrgProfileProvider(orgProfile.id, "@test/gmail", memberProfile.id, member.id);
 
       // Verify setup
-      await assertDbHas(
-        connectionProfiles,
-        eq(connectionProfiles.id, memberProfile.id),
-      );
+      await assertDbHas(connectionProfiles, eq(connectionProfiles.id, memberProfile.id));
       await assertDbHas(
         orgProfileProviderBindings,
         eq(orgProfileProviderBindings.sourceProfileId, memberProfile.id),
@@ -224,10 +206,7 @@ describe("Cascade Deletion", () => {
       await db.execute(sql`DELETE FROM "user" WHERE id = ${member.id}`);
 
       // Member profile should be gone
-      await assertDbMissing(
-        connectionProfiles,
-        eq(connectionProfiles.id, memberProfile.id),
-      );
+      await assertDbMissing(connectionProfiles, eq(connectionProfiles.id, memberProfile.id));
 
       // Binding should be gone (sourceProfileId cascade from deleted profile)
       await assertDbMissing(
@@ -236,10 +215,7 @@ describe("Cascade Deletion", () => {
       );
 
       // Org profile should still exist (it belongs to org, not user)
-      await assertDbHas(
-        connectionProfiles,
-        eq(connectionProfiles.id, orgProfile.id),
-      );
+      await assertDbHas(connectionProfiles, eq(connectionProfiles.id, orgProfile.id));
     });
   });
 });

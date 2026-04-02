@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
@@ -221,8 +223,10 @@ const model: Model<Api> = {
   provider,
   baseUrl: process.env.MODEL_BASE_URL || "",
   reasoning: process.env.MODEL_REASONING === "true",
-  input: process.env.MODEL_INPUT ? JSON.parse(process.env.MODEL_INPUT) as string[] : ["text"],
-  cost: process.env.MODEL_COST ? JSON.parse(process.env.MODEL_COST) : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  input: process.env.MODEL_INPUT ? (JSON.parse(process.env.MODEL_INPUT) as string[]) : ["text"],
+  cost: process.env.MODEL_COST
+    ? JSON.parse(process.env.MODEL_COST)
+    : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   contextWindow: Number(process.env.MODEL_CONTEXT_WINDOW) || 128000,
   maxTokens: Number(process.env.MODEL_MAX_TOKENS) || 16384,
 };
@@ -345,7 +349,7 @@ try {
 
       default:
         break;
-}
+    }
   });
 
   // --- 7. Run the prompt ---

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
 import { buildEnrichedPrompt } from "../../src/services/adapters/prompt-builder.ts";
 import type { PromptContext } from "../../src/services/adapters/types.ts";

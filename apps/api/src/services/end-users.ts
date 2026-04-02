@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * End-Users API — CRUD operations for end-users managed via API.
  *

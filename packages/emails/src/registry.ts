@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { EmailType, EmailRenderer, EmailPropsMap, RenderedEmail } from "./types.ts";
 import { renderVerificationEmail } from "./templates/verification.ts";
 import { renderInvitationEmail } from "./templates/invitation.ts";

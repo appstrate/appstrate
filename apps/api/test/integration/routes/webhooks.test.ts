@@ -1,11 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import {
-  createTestContext,
-  authHeaders,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 
 const app = getTestApp();
 
@@ -16,7 +14,6 @@ describe("Webhooks API", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "testorg" });
   });
-
 
   function webhookPayload(overrides?: Record<string, unknown>) {
     return {
@@ -47,7 +44,7 @@ describe("Webhooks API", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.id).toBeDefined();
       expect(body.url).toBe("https://example.com/webhook");
       expect(body.events).toContain("execution.completed");
@@ -64,10 +61,9 @@ describe("Webhooks API", () => {
         headers: authHeaders(ctx),
       });
       expect(getRes.status).toBe(200);
-      const detail = await getRes.json() as any;
+      const detail = (await getRes.json()) as any;
       expect(detail.secret).toBeUndefined();
     });
-
   });
 
   describe("GET /api/webhooks", () => {
@@ -80,7 +76,7 @@ describe("Webhooks API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.object).toBe("list");
       expect(body.data).toBeArray();
       expect(body.data.length).toBeGreaterThanOrEqual(2);
@@ -96,7 +92,7 @@ describe("Webhooks API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.id).toBe(created.id);
       expect(body.url).toBe("https://example.com/webhook");
     });
@@ -113,7 +109,7 @@ describe("Webhooks API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.url).toBe("https://example.com/updated");
     });
   });
@@ -141,7 +137,7 @@ describe("Webhooks API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.secret).toBeDefined();
       expect(typeof body.secret).toBe("string");
       expect(body.secret.length).toBeGreaterThan(0);

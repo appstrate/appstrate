@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { unzipArtifact, stripWrapperPrefix, type ParsedPackageZip } from "@appstrate/core/zip";
 import { extractSkillMeta, validateManifest } from "@appstrate/core/validation";
 import { bumpPatch } from "@appstrate/core/semver";

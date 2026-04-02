@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { InferSelectModel } from "drizzle-orm";
 import type { profiles } from "./profiles.ts";
 import type {

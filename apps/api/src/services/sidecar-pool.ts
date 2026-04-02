@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
 import {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Guards middleware unit tests.
  *
@@ -8,7 +10,11 @@
 import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
 import type { AppEnv, LoadedPackage } from "../../src/types/index.ts";
-import { requireOwnedPackage, checkScopeMatch, requireMutableFlow } from "../../src/middleware/guards.ts";
+import {
+  requireOwnedPackage,
+  checkScopeMatch,
+  requireMutableFlow,
+} from "../../src/middleware/guards.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 

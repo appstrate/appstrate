@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Convert a Date to ISO string, returning null if missing.
  */

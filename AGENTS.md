@@ -1,0 +1,235 @@
+# Appstrate — AI Agent Instructions
+
+Appstrate is an open-source platform for executing one-shot AI flows in ephemeral Docker containers. Users connect providers (Gmail, ClickUp, etc.), configure flows, and let AI agents process their data autonomously.
+
+## Build & Development
+
+| Command                  | Description                                                         |
+| ------------------------ | ------------------------------------------------------------------- |
+| `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)                |
+| `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                  |
+| `bun test`               | Run all tests (1000+, bun:test framework, requires Docker)          |
+| `bun run check`          | TypeScript + ESLint + Prettier + OpenAPI validation (181 endpoints) |
+| `bun run build`          | Build everything (turbo build)                                      |
+| `bun run db:generate`    | Generate Drizzle migrations from schema changes                     |
+| `bun run db:migrate`     | Apply migrations to PostgreSQL                                      |
+| `bun run verify:openapi` | Validate OpenAPI spec (structural + lint, 0 errors required)        |
+
+**Runtime**: Bun everywhere -- NOT Node.js. Bun auto-loads `.env`.
+
+### First-time Setup
+
+```sh
+bun install
+bun run setup     # copies .env, starts Docker infra, runs migrations, builds frontend
+bun run dev       # http://localhost:3000
+```
+
+Or manually:
+
+```sh
+cp .env.example .env
+docker compose -f docker-compose.dev.yml up -d   # PostgreSQL, Redis, MinIO
+bun run db:migrate
+bun run build
+bun run dev
+```
+
+## Code Conventions
+
+- **TypeScript strict mode**, no build step for backend (Bun resolves `.ts` directly)
+- **No `console.*`** -- use `@appstrate/core/logger` (pino JSON to stdout)
+- **No Node APIs** -- use Bun equivalents (`Bun.CryptoHasher`, `Bun.file`, etc.)
+- **French UI text** via i18next (`fr` default, `en`), English code/comments
+- **Conventional Commits**: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`
+- **Zod 4** for all request body/query validation (NOT Zod 3). Use `z.url()` not `z.string().url()`
+- **AJV** only for dynamic manifest schemas (flow config/input/output from user-defined manifests)
+- **bun:test** with `it()` -- NOT `test()`, NOT vitest/jest
+- **File naming**: `*.test.ts` -- NOT `*.spec.ts`
+
+## Architecture
+
+### Monorepo Structure (Turborepo + Bun workspaces)
+
+```
+appstrate/
+├── apps/
+│   ├── api/src/              # Hono API server (:3000)
+│   │   ├── routes/           # Route handlers (one file per domain)
+│   │   ├── services/         # Business logic, Docker, adapters, scheduler
+│   │   ├── openapi/          # OpenAPI 3.1 spec (source of truth, 181 endpoints)
+│   │   └── middleware/       # Auth, rate-limit, guards
+│   └── web/src/              # React 19 SPA (Vite + React Query v5 + Zustand)
+│       ├── pages/            # Route pages (React Router v7)
+│       ├── hooks/            # React Query + SSE realtime hooks
+│       ├── components/       # UI components
+│       └── stores/           # Zustand stores (auth, org, profile)
+├── packages/
+│   ├── core/                 # @appstrate/core -- shared validation, storage, utilities (npm)
+│   ├── db/                   # @appstrate/db -- Drizzle ORM (31 tables, 5 enums) + Better Auth
+│   ├── env/                  # @appstrate/env -- Zod env validation (authoritative source)
+│   ├── emails/               # @appstrate/emails -- Email templates + rendering
+│   ├── shared-types/         # @appstrate/shared-types -- Drizzle InferSelectModel re-exports
+│   └── connect/              # @appstrate/connect -- OAuth2/PKCE, API key, credential encryption
+├── runtime-pi/               # Docker image: Pi Coding Agent SDK + sidecar proxy
+└── system-packages/          # System package ZIPs (providers, skills, tools, flows)
+```
+
+### Stack
+
+| Layer      | Technology                                                        |
+| ---------- | ----------------------------------------------------------------- |
+| Runtime    | Bun                                                               |
+| API        | Hono (SSE, middleware, routing)                                   |
+| Database   | PostgreSQL 16 + Drizzle ORM (no RLS, app-level security by orgId) |
+| Auth       | Better Auth (cookie sessions) + API keys (`ask_*` prefix)         |
+| Frontend   | React 19 + Vite + React Router v7 + React Query v5 + Zustand      |
+| Styling    | Tailwind CSS 4 (`@tailwindcss/vite`, dark theme)                  |
+| Validation | Zod 4 (routes) + AJV (dynamic manifest schemas)                   |
+| Docker     | `fetch()` + unix socket (NOT dockerode)                           |
+| Scheduling | BullMQ (Redis-backed distributed cron)                            |
+| Storage    | S3 via `@appstrate/core/storage-s3` (MinIO/R2 compatible)         |
+| Build      | Turborepo + Bun workspaces                                        |
+
+## Important Patterns
+
+### API Routes
+
+- **OpenAPI specs** in `apps/api/src/openapi/` are the source of truth (181 endpoints)
+- New route: create route file in `routes/` + OpenAPI path in `openapi/paths/` + wire in `index.ts`
+- All route bodies validated with `parseBody(schema, body)` from `lib/errors.ts`
+- Error responses follow RFC 9457 `application/problem+json`
+- `Request-Id` (`req_` prefix) on all responses
+
+### Database
+
+- **No RLS** -- all queries filter by `orgId` at the application level (multi-tenant)
+- Schema: `packages/db/src/schema.ts` (31 tables, 5 enums)
+- Migrations: edit schema.ts -> `bun run db:generate` -> `bun run db:migrate`
+- Service layer: function-based (no classes), `state.ts` is central data-access layer
+
+### Backend Patterns
+
+- No build step: backend ships as `.ts`, Bun resolves directly
+- Logging: `lib/logger.ts` (pino JSON) -- never `console.*`
+- Auth: Better Auth cookie sessions + `X-Org-Id` header for org context
+- API key auth (`ask_*` prefix) tried first, then cookie fallback
+- Request pipeline: error handler -> Request-Id -> CORS -> health -> auth -> org context -> routes
+- Route guards: `requireAdmin()`, `requireOwner()`, `requireFlow()`, `requireMutableFlow()`
+- Rate limiting: Redis-backed, keyed by `method:path:identity`
+
+### Frontend Patterns
+
+- i18next: `fr` (default) + `en`, namespaces: `common`, `flows`, `settings`
+- API helpers in `api.ts`: `api<T>(path)` prepends `/api`, injects `X-Org-Id`, `credentials: "include"`
+- React Query keys: org-scoped `[entity, orgId, id?]`
+- Feature gating: `useAppConfig()` reads `window.__APP_CONFIG__` (injected at boot)
+- Always use `<Modal>` from `components/modal.tsx` for dialogs
+
+### Docker Integration
+
+- Docker client: `fetch()` + unix socket -- NOT dockerode (socket bugs with Bun)
+- Sidecar pool: pre-warmed containers for fast startup
+- Credential isolation: agent calls sidecar proxy, never sees raw credentials
+- Multiplexed stream headers: `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`
+
+## Testing
+
+### Running Tests
+
+```sh
+bun test                          # All 1000+ tests, requires Docker
+bun test apps/api/test/unit/      # API unit tests only (fast, no DB)
+bun test apps/api/test/           # API unit + integration
+bun test runtime-pi/              # Runtime + sidecar tests
+bun test packages/core/           # Core library tests (367+, no DB)
+```
+
+### Test Conventions
+
+- **Framework**: `bun:test` -- NOT vitest/jest
+- **Test function**: `it()` -- NOT `test()`
+- **DB isolation**: `beforeEach(async () => { await truncateAll(); })`
+- **App testing**: `app.request()` via Hono -- NOT `Bun.serve()`, no port binding
+- **Auth in tests**: Real Better Auth sign-up -> session cookie (not mock auth)
+- **DB cleanup**: `DELETE FROM` in FK-safe order (not `TRUNCATE` -- avoids deadlocks)
+- **No `mock.module()`**: Use dependency injection instead (global module mocking breaks other tests)
+
+### Test Helpers (`apps/api/test/helpers/`)
+
+| Helper          | Purpose                                                      |
+| --------------- | ------------------------------------------------------------ |
+| `app.ts`        | `getTestApp()` -- full Hono app replica (no boot/Docker)     |
+| `auth.ts`       | `createTestUser()`, `createTestOrg()`, `createTestContext()` |
+| `db.ts`         | `truncateAll()` -- DELETE FROM all tables in FK-safe order   |
+| `seed.ts`       | 15+ factories: `seedPackage()`, `seedExecution()`, etc.      |
+| `assertions.ts` | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`      |
+| `redis.ts`      | `getRedis()`, `flushRedis()`                                 |
+
+### Writing a New Test
+
+```typescript
+// Unit test (no DB)
+import { describe, it, expect } from "bun:test";
+import { myFunction } from "../../src/services/my-service.ts";
+
+describe("myFunction", () => {
+  it("returns expected result", () => {
+    expect(myFunction("input")).toBe("expected");
+  });
+});
+```
+
+```typescript
+// Integration test (real DB + HTTP)
+import { describe, it, expect, beforeEach } from "bun:test";
+import { getTestApp } from "../../helpers/app.ts";
+import { truncateAll } from "../../helpers/db.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+
+const app = getTestApp();
+
+describe("GET /api/my-resource", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "testorg" });
+  });
+
+  it("returns 200 with data", async () => {
+    const res = await app.request("/api/my-resource", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+  });
+});
+```
+
+## Workspace Imports
+
+Import from workspace packages using their published subpaths:
+
+- `@appstrate/core/*` -- validation, zip, naming, dependencies, integrity, semver, logger, storage, etc.
+- `@appstrate/db/schema` -- Drizzle schema (31 tables)
+- `@appstrate/db/client` -- `db` + `listenClient`
+- `@appstrate/env` -- `getEnv()` (Zod-validated, cached, fail-fast)
+- `@appstrate/connect` -- OAuth2/PKCE, credential encryption
+- `@appstrate/shared-types` -- Drizzle InferSelectModel re-exports
+- `@appstrate/emails` -- Email template rendering
+
+## Key Environment Variables
+
+| Variable                    | Required | Description                                   |
+| --------------------------- | -------- | --------------------------------------------- |
+| `DATABASE_URL`              | Yes      | PostgreSQL connection string                  |
+| `BETTER_AUTH_SECRET`        | Yes      | Session signing secret                        |
+| `CONNECTION_ENCRYPTION_KEY` | Yes      | 32 bytes base64, encrypts stored credentials  |
+| `REDIS_URL`                 | Yes      | Redis connection string                       |
+| `S3_BUCKET`                 | Yes      | S3 bucket name                                |
+| `S3_REGION`                 | Yes      | S3 region                                     |
+| `APP_URL`                   | No       | Public URL (default: `http://localhost:3000`) |
+| `PORT`                      | No       | Server port (default: `3000`)                 |
+| `LOG_LEVEL`                 | No       | `debug` / `info` / `warn` / `error`           |
+
+Full list: `packages/env/src/index.ts` (authoritative Zod schema).

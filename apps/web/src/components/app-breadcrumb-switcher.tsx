@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Check, ChevronsUpDown, Star } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useApplications } from "../hooks/use-applications";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useParams, Link, Navigate } from "react-router-dom";

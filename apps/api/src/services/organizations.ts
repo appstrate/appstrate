@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { db } from "@appstrate/db/client";
 import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
 import { toISORequired } from "../lib/date-helpers.ts";

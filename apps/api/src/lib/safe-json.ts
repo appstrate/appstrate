@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /** Safely narrow a JSONB value to a record, returning {} if null/non-object/array. */
 export function asRecord(val: unknown): Record<string, unknown> {
   return val !== null && typeof val === "object" && !Array.isArray(val)

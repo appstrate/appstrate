@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
 import type { AppEnv } from "../../src/types/index.ts";
@@ -31,7 +33,7 @@ describe("errorHandler middleware", () => {
     expect(res.status).toBe(400);
     expect(res.headers.get("Content-Type")).toContain("application/problem+json");
 
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     expect(body.type).toBe("https://docs.appstrate.dev/errors/invalid-request");
     expect(body.title).toBe("Invalid Request");
     expect(body.status).toBe(400);
@@ -61,7 +63,7 @@ describe("errorHandler middleware", () => {
     const res = await app.request("/test");
     expect(res.status).toBe(400);
 
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     expect(body.code).toBe("validation_failed");
     expect(Array.isArray(body.errors)).toBe(true);
     const errors = body.errors as { field: string; code: string; message: string }[];
@@ -78,7 +80,7 @@ describe("errorHandler middleware", () => {
 
     const res = await app.request("/test");
     expect(res.status).toBe(401);
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     expect(body.code).toBe("unauthorized");
   });
 
@@ -90,7 +92,7 @@ describe("errorHandler middleware", () => {
 
     const res = await app.request("/test");
     expect(res.status).toBe(403);
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     expect(body.code).toBe("forbidden");
   });
 
@@ -102,7 +104,7 @@ describe("errorHandler middleware", () => {
 
     const res = await app.request("/test");
     expect(res.status).toBe(404);
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     expect(body.code).toBe("not_found");
   });
 
@@ -114,7 +116,7 @@ describe("errorHandler middleware", () => {
 
     const res = await app.request("/test");
     expect(res.status).toBe(409);
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     expect(body.code).toBe("flow_in_use");
   });
 
@@ -126,7 +128,7 @@ describe("errorHandler middleware", () => {
 
     const res = await app.request("/test");
     expect(res.status).toBe(410);
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     expect(body.code).toBe("token_invalid");
   });
 
@@ -144,7 +146,7 @@ describe("errorHandler middleware", () => {
 
     const res = await app.request("/test");
     expect(res.status).toBe(429);
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     expect(body.retryAfter).toBe(30);
   });
 
@@ -159,7 +161,7 @@ describe("errorHandler middleware", () => {
         retryAfter: 15,
         headers: {
           "Retry-After": "15",
-          "RateLimit": "limit=60, remaining=0, reset=15",
+          RateLimit: "limit=60, remaining=0, reset=15",
           "RateLimit-Policy": "60;w=60",
         },
       });
@@ -181,7 +183,7 @@ describe("errorHandler middleware", () => {
 
     const res = await app.request("/test");
     expect(res.status).toBe(500);
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     expect(body.code).toBe("internal_error");
     expect(body.detail).not.toContain("something broke");
   });
@@ -198,7 +200,7 @@ describe("errorHandler middleware", () => {
     });
 
     const res = await app.request("/test");
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     expect(body.type).toBe("https://docs.appstrate.dev/errors/webhook-url-invalid");
   });
 
@@ -210,7 +212,7 @@ describe("errorHandler middleware", () => {
 
     const res = await app.request("/test");
     const header = res.headers.get("Request-Id");
-    const body = await res.json() as any;
+    const body = (await res.json()) as any;
     expect(body.requestId).toBe(header);
   });
 });

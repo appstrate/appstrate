@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Flows paths — includes both flows.ts and user-flows.ts endpoints
  * since they share base paths (e.g. /api/flows/{scope}/{name}).

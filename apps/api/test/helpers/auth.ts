@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Test authentication helpers.
  *
@@ -66,7 +68,7 @@ export async function createTestUser(
   }
   const cookie = `better-auth.session_token=${match[1]}`;
 
-  const body = await res.json() as { user: { id: string; email: string; name: string } };
+  const body = (await res.json()) as { user: { id: string; email: string; name: string } };
   if (!body.user?.id) {
     throw new Error(`Sign-up response missing user data: ${JSON.stringify(body)}`);
   }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Integration tests for org profile binding ownership checks.
  *
@@ -124,17 +126,14 @@ describe("RBAC — Org profile binding ownership", () => {
     it("member CANNOT overwrite another member's binding", async () => {
       await seedBinding(memberAProfileId, memberA.user.id);
 
-      const res = await app.request(
-        `/api/connection-profiles/org/${orgProfileId}/bind`,
-        {
-          method: "POST",
-          headers: authHeaders(memberB, { "Content-Type": "application/json" }),
-          body: JSON.stringify({
-            providerId: PROVIDER_ID,
-            sourceProfileId: memberBProfileId,
-          }),
-        },
-      );
+      const res = await app.request(`/api/connection-profiles/org/${orgProfileId}/bind`, {
+        method: "POST",
+        headers: authHeaders(memberB, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          providerId: PROVIDER_ID,
+          sourceProfileId: memberBProfileId,
+        }),
+      });
       expect(res.status).toBe(403);
       const body = (await res.json()) as { detail: string };
       expect(body.detail).toContain("another member");
@@ -149,17 +148,14 @@ describe("RBAC — Org profile binding ownership", () => {
         name: "Admin Profile",
       });
 
-      const res = await app.request(
-        `/api/connection-profiles/org/${orgProfileId}/bind`,
-        {
-          method: "POST",
-          headers: authHeaders(admin, { "Content-Type": "application/json" }),
-          body: JSON.stringify({
-            providerId: PROVIDER_ID,
-            sourceProfileId: adminProfile.id,
-          }),
-        },
-      );
+      const res = await app.request(`/api/connection-profiles/org/${orgProfileId}/bind`, {
+        method: "POST",
+        headers: authHeaders(admin, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          providerId: PROVIDER_ID,
+          sourceProfileId: adminProfile.id,
+        }),
+      });
       // May fail for other reasons (no connection for provider) but NOT 403
       if (res.status === 403) {
         const body = (await res.json()) as { detail: string };

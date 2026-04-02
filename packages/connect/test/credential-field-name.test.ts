@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
 import { getCredentialFieldName } from "../src/registry.ts";
 import type { ProviderDefinition } from "../src/types.ts";

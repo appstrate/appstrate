@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { EmailType, EmailRenderer } from "@appstrate/emails";
 import { registerEmailOverrides } from "@appstrate/emails";
 import { setBeforeSignupHook } from "@appstrate/db/auth";

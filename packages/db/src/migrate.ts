@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";

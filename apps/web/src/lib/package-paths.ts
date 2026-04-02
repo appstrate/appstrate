@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { PACKAGE_CONFIG, type PackageType } from "../hooks/use-packages";
 
 /** /flows/{id} or /{type}s/{id} */

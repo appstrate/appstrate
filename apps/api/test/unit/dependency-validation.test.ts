@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
 import { ApiError } from "../../src/lib/errors.ts";
 import {
@@ -31,10 +33,7 @@ function createMockDeps(overrides?: Partial<DependencyValidationDeps>): Dependen
 describe("validateFlowDependencies", () => {
   it("succeeds when all providers are connected with sufficient scopes", async () => {
     const deps = createMockDeps();
-    const providers = [
-      { id: "@test/gmail", scopes: ["read"] },
-      { id: "@test/clickup" },
-    ];
+    const providers = [{ id: "@test/gmail", scopes: ["read"] }, { id: "@test/clickup" }];
     const profiles = profileMap({ "@test/gmail": "profile-1", "@test/clickup": "profile-2" });
 
     await validateFlowDependencies(providers, profiles, "org-1", deps);

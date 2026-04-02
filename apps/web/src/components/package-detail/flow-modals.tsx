@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useConnectApiKey, useConnectCredentials } from "../../hooks/use-mutations";

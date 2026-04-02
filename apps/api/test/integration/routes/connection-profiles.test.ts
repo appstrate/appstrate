@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -189,7 +191,6 @@ describe("Connection Profiles API", () => {
 
       expect(res.status).toBe(400);
     });
-
   });
 
   describe("PUT /api/connection-profiles/org/:id", () => {
@@ -411,10 +412,9 @@ describe("Connection Profiles API", () => {
       };
 
       // user2 views user1's profile connections
-      const res = await app.request(
-        `/api/connection-profiles/${user1Profile.id}/connections`,
-        { headers: authHeaders(user2Ctx) },
-      );
+      const res = await app.request(`/api/connection-profiles/${user1Profile.id}/connections`, {
+        headers: authHeaders(user2Ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
@@ -433,10 +433,9 @@ describe("Connection Profiles API", () => {
       });
 
       // User from org2 tries to view org1 user's profile connections
-      const res = await app.request(
-        `/api/connection-profiles/${org1Profile.id}/connections`,
-        { headers: authHeaders(org2Ctx) },
-      );
+      const res = await app.request(`/api/connection-profiles/${org1Profile.id}/connections`, {
+        headers: authHeaders(org2Ctx),
+      });
 
       expect(res.status).toBe(404);
     });
@@ -447,10 +446,9 @@ describe("Connection Profiles API", () => {
         name: "My Profile",
       });
 
-      const res = await app.request(
-        `/api/connection-profiles/${ownProfile.id}/connections`,
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request(`/api/connection-profiles/${ownProfile.id}/connections`, {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
@@ -463,10 +461,9 @@ describe("Connection Profiles API", () => {
         name: "Org Shared Profile",
       });
 
-      const res = await app.request(
-        `/api/connection-profiles/${orgProfile.id}/connections`,
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request(`/api/connection-profiles/${orgProfile.id}/connections`, {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
 
 import { zipArtifact } from "@appstrate/core/zip";

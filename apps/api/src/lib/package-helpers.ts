@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { eq, or, isNull } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
 import { asRecord } from "./safe-json.ts";

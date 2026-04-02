@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { join } from "node:path";
 import { logger } from "../lib/logger.ts";
 import { loadSystemPackages, type SystemPackageEntry } from "@appstrate/core/system-packages";

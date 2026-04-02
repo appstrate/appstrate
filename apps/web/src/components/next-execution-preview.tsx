@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useTranslation } from "react-i18next";
 import { Badge as UIBadge } from "@/components/ui/badge";
 import { Calendar, Clock } from "lucide-react";

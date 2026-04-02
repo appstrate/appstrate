@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Coins } from "lucide-react";

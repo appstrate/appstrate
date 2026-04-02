@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { PromptContext } from "./types.ts";
 import {
   getCredentialFieldName,

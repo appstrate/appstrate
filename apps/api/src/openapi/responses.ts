@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Reusable OpenAPI response definitions — RFC 9457 Problem Details format.
  */

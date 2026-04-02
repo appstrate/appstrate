@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { packageDetailPath } from "./package-paths";
 
 export function getVersionRedirect(params: {

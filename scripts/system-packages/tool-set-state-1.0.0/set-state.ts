@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Set State Tool — Persist state for the next execution run.
  *

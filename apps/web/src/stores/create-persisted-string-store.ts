@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { createStore, type StoreApi } from "zustand/vanilla";
 
 export interface PersistedStringState {

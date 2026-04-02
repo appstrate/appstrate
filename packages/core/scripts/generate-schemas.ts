@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Generate Appstrate JSON Schema files from @afps-spec/schema Zod definitions.
  *

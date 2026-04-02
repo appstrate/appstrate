@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { eq, and, asc, count } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packageMemories } from "@appstrate/db/schema";

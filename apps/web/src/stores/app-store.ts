@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { createPersistedStringStore } from "./create-persisted-string-store";
 
 export const appStore = createPersistedStringStore("appstrate_current_app");

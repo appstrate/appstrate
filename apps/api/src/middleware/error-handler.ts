@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Error handler middleware — catches ApiError and returns RFC 9457 Problem Details.
  * Non-ApiError exceptions are logged and converted to a generic 500.

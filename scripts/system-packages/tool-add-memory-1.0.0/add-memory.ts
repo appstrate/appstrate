@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Add Memory Tool — Save a discovery or learning as a long-term memory.
  *

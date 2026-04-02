@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { sql as drizzleSql } from "drizzle-orm";
 import type { Db } from "./client.ts";
 

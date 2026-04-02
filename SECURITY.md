@@ -1,3 +1,70 @@
+# Security Policy
+
+## Reporting Security Vulnerabilities
+
+**Do NOT open public issues for security vulnerabilities.**
+
+If you discover a security vulnerability in Appstrate, please report it responsibly through one of these channels:
+
+1. **GitHub Security Advisories** (preferred): Use [GitHub's private vulnerability reporting](https://github.com/appstrate/appstrate/security/advisories/new) to submit a detailed report directly on the repository.
+2. **Email**: Send a report to **security@appstrate.dev** with a description of the vulnerability, steps to reproduce, and any relevant proof-of-concept code.
+
+Please include as much detail as possible:
+
+- Affected component (API, sidecar, runtime, frontend, core library)
+- Steps to reproduce the vulnerability
+- Potential impact and attack scenario
+- Suggested fix, if any
+
+## Supported Versions
+
+| Version        | Support Level         |
+| -------------- | --------------------- |
+| Latest release | Full support          |
+| Previous major | Security patches only |
+| Older versions | Not supported         |
+
+We recommend always running the latest release. Security patches for the previous major version are provided on a best-effort basis and only for critical or high severity issues.
+
+## Response Timeline
+
+| Stage                       | Timeline               |
+| --------------------------- | ---------------------- |
+| Acknowledgment              | Within 48 hours        |
+| Initial assessment          | Within 5 business days |
+| Fix — Critical (CVSS 9.0+)  | 7 days                 |
+| Fix — High (CVSS 7.0–8.9)   | 14 days                |
+| Fix — Medium (CVSS 4.0–6.9) | 30 days                |
+| Fix — Low (CVSS 0.1–3.9)    | 90 days                |
+
+Timelines start from the initial assessment. We will keep you informed of progress throughout the process.
+
+## Disclosure Policy
+
+Appstrate follows a coordinated disclosure process:
+
+1. **Confirm** — We acknowledge the report and begin investigation.
+2. **Fix** — We develop and test a patch in a private branch.
+3. **Advisory** — We prepare a GitHub Security Advisory with CVE assignment (when applicable).
+4. **Release** — We publish the patched version and the advisory simultaneously.
+5. **Credit** — We credit the reporter in the advisory (unless anonymity is requested).
+
+We ask reporters to allow us reasonable time to address the vulnerability before any public disclosure. We aim to coordinate a disclosure timeline that works for both parties.
+
+## Safe Harbor
+
+Security research conducted in accordance with this policy is considered authorized. We will not pursue legal action against researchers who:
+
+- Act in good faith to avoid privacy violations, data destruction, and service disruption
+- Only interact with accounts they own or have explicit permission to test
+- Report vulnerabilities promptly and do not exploit them beyond what is necessary to demonstrate the issue
+- Do not exfiltrate, retain, or disclose user data discovered during research
+- Follow the reporting process described above
+
+If in doubt about whether your research complies with this policy, contact us at **security@appstrate.dev** before proceeding.
+
+---
+
 # Appstrate Security Architecture
 
 Appstrate executes AI agent code inside ephemeral Docker containers with full access to bash, curl, and arbitrary tools. Users connect sensitive services — Gmail, ClickUp, Brevo, Google Calendar — via OAuth or API keys. The central security challenge is: **how do you give an AI agent the ability to call authenticated APIs without ever exposing credentials to the agent itself?**
@@ -8,6 +75,11 @@ This document describes Appstrate's defense-in-depth approach, the threat model 
 
 ## Table of Contents
 
+- [Reporting Security Vulnerabilities](#reporting-security-vulnerabilities)
+- [Supported Versions](#supported-versions)
+- [Response Timeline](#response-timeline)
+- [Disclosure Policy](#disclosure-policy)
+- [Safe Harbor](#safe-harbor)
 - [Threat Model](#threat-model)
 - [Architecture Overview](#architecture-overview)
 - [Layer 1 — Network Isolation](#layer-1--network-isolation)
@@ -138,12 +210,12 @@ The sidecar:
 
 ### What the agent sees vs. what is transmitted
 
-| Component   | Agent sees                         | Wire (to target API)                   |
-| ----------- | ---------------------------------- | -------------------------------------- |
-| URL         | `https://gmail.googleapis.com/...` | `https://gmail.googleapis.com/...`     |
-| Auth header | `Bearer {{token}}`                 | `Bearer ya29.a0AfH6SM...` (real token) |
-| Response    | Raw upstream body (status code forwarded) | —                               |
-| Credentials | Never                              | Substituted by sidecar                 |
+| Component   | Agent sees                                | Wire (to target API)                   |
+| ----------- | ----------------------------------------- | -------------------------------------- |
+| URL         | `https://gmail.googleapis.com/...`        | `https://gmail.googleapis.com/...`     |
+| Auth header | `Bearer {{token}}`                        | `Bearer ya29.a0AfH6SM...` (real token) |
+| Response    | Raw upstream body (status code forwarded) | —                                      |
+| Credentials | Never                                     | Substituted by sidecar                 |
 
 ### Credential access is scoped and audited
 
@@ -307,9 +379,7 @@ Every authenticated request must include an `X-Org-Id` header. The middleware ve
 const membership = await db
   .select({ role: organizationMembers.role })
   .from(organizationMembers)
-  .where(
-    and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, user.id)),
-  )
+  .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, user.id)))
   .limit(1);
 if (!membership[0]) return c.json({ error: "FORBIDDEN" }, 403);
 ```
@@ -371,15 +441,15 @@ await markOrphanExecutionsFailed();
 
 All data access is scoped by organization at the application level. Every Drizzle query includes an `orgId` filter via `where` clauses, enforced by the org-context middleware which validates organization membership on every request.
 
-| Table                  | SELECT          | INSERT                | UPDATE                | DELETE                |
-| ---------------------- | --------------- | --------------------- | --------------------- | --------------------- |
-| `executions`           | Org members     | Own user + org member | —                     | —                     |
-| `execution_logs`       | Org members     | Org members           | —                     | —                     |
-| `flow_configs`         | Org members     | Org admins            | Org admins            | Org admins            |
-| `flows`                | Org members     | Org admins            | Org admins            | Org admins            |
-| `flow_schedules`       | Org members     | Own user + org member | Own user + org member | Own user + org member |
-| `user_provider_connections` | Own user + org  | Own user + org member | Own user + org member | Own user + org member |
-| `share_links`          | Org members     | Org members           | Org members           | —                     |
+| Table                       | SELECT         | INSERT                | UPDATE                | DELETE                |
+| --------------------------- | -------------- | --------------------- | --------------------- | --------------------- |
+| `executions`                | Org members    | Own user + org member | —                     | —                     |
+| `execution_logs`            | Org members    | Org members           | —                     | —                     |
+| `flow_configs`              | Org members    | Org admins            | Org admins            | Org admins            |
+| `flows`                     | Org members    | Org admins            | Org admins            | Org admins            |
+| `flow_schedules`            | Org members    | Own user + org member | Own user + org member | Own user + org member |
+| `user_provider_connections` | Own user + org | Own user + org member | Own user + org member | Own user + org member |
+| `share_links`               | Org members    | Org members           | Org members           | —                     |
 
 Application-level isolation uses the org-context middleware and Drizzle `where` clauses:
 
@@ -532,14 +602,14 @@ error: `Request to ${targetUrl} failed: ${err.message}`,
 
 ### NIST SP 800-53 Rev 5 — Security Controls
 
-| Control                                     | Implementation                                                     |
-| ------------------------------------------- | ------------------------------------------------------------------ |
+| Control                                     | Implementation                                                                         |
+| ------------------------------------------- | -------------------------------------------------------------------------------------- |
 | **AC-3** Access Enforcement                 | Application-level org-scoped queries, cookie session auth, org membership verification |
-| **AC-4** Information Flow Enforcement       | Network isolation, sidecar proxy, credential brokering             |
-| **AC-6** Least Privilege                    | Agent has zero credentials, scoped URL authorization, admin guards |
-| **AU-3** Content of Audit Records           | Structured JSON logging with execution context                     |
-| **SC-7** Boundary Protection                | Docker bridge network, no host access for agents                   |
-| **SC-28** Protection of Information at Rest | Credentials encrypted via AES-256-GCM in PostgreSQL (application-level isolation) |
+| **AC-4** Information Flow Enforcement       | Network isolation, sidecar proxy, credential brokering                                 |
+| **AC-6** Least Privilege                    | Agent has zero credentials, scoped URL authorization, admin guards                     |
+| **AU-3** Content of Audit Records           | Structured JSON logging with execution context                                         |
+| **SC-7** Boundary Protection                | Docker bridge network, no host access for agents                                       |
+| **SC-28** Protection of Information at Rest | Credentials encrypted via AES-256-GCM in PostgreSQL (application-level isolation)      |
 
 ### CIS Docker Benchmark v1.8.0
 
@@ -562,12 +632,12 @@ error: `Request to ${targetUrl} failed: ${err.message}`,
 
 ### OWASP API Security Top 10 (2023)
 
-| Risk                                           | Mitigation                                                                          |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Risk                                           | Mitigation                                                                              |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------- |
 | **API1 — BOLA**                                | Execution tokens scoped to single execution. Org-scoped queries enforce data isolation. |
 | **API2 — Broken Authentication**               | Multi-layer auth: cookie sessions + org membership + admin guards + execution tokens.   |
-| **API5 — Broken Function Level Authorization** | Admin guards on privileged operations. Org-scoped queries at application level.          |
-| **API8 — Security Misconfiguration**           | `authorizedUris` URL restriction. Input validation on all external boundaries.      |
+| **API5 — Broken Function Level Authorization** | Admin guards on privileged operations. Org-scoped queries at application level.         |
+| **API8 — Security Misconfiguration**           | `authorizedUris` URL restriction. Input validation on all external boundaries.          |
 
 ---
 

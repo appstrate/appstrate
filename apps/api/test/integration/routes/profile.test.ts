@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -20,7 +22,7 @@ describe("Profile API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.id).toBe(ctx.user.id);
       expect(body.displayName).toBeTruthy();
       expect(body.language).toBe("fr"); // default
@@ -41,7 +43,7 @@ describe("Profile API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.ok).toBe(true);
       expect(body.language).toBe("en");
 
@@ -49,7 +51,7 @@ describe("Profile API", () => {
       const getRes = await app.request("/api/profile", {
         headers: { Cookie: ctx.cookie },
       });
-      const profile = await getRes.json() as any;
+      const profile = (await getRes.json()) as any;
       expect(profile.language).toBe("en");
     });
 
@@ -61,7 +63,7 @@ describe("Profile API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.ok).toBe(true);
       expect(body.displayName).toBe("New Name");
     });
@@ -88,7 +90,7 @@ describe("Profile API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.profiles).toBeArray();
       expect(body.profiles).toHaveLength(2);
     });
@@ -101,7 +103,7 @@ describe("Profile API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.profiles).toHaveLength(0);
     });
   });

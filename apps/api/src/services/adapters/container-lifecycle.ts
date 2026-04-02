@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { logger } from "../../lib/logger.ts";
 import type { ExecutionMessage } from "./types.ts";
 import { TimeoutError } from "./types.ts";

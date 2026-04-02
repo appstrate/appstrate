@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Context } from "hono";
 import { eq } from "drizzle-orm";
 import type { Column } from "drizzle-orm";

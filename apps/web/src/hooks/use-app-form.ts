@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useCallback, useRef } from "react";
 import { useForm, type UseFormProps, type FieldValues, type Path } from "react-hook-form";
 

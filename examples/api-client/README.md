@@ -1,0 +1,165 @@
+# API Client Example
+
+Demonstrates how to interact with the Appstrate API programmatically using API keys.
+
+## Prerequisites
+
+1. A running Appstrate instance (see [self-hosting example](../self-hosting/))
+2. An account with at least one configured flow
+3. An API key created from the dashboard (Settings > API Keys)
+
+API keys use the `ask_` prefix and are sent via the `Authorization: Bearer` header.
+
+## Create an API Key
+
+From the dashboard, navigate to **Settings > API Keys** and create a new key. Copy the key -- it is only shown once.
+
+## Run a Flow
+
+### With curl
+
+```bash
+# Set your variables
+APPSTRATE_URL="http://localhost:3000"
+API_KEY="ask_your_api_key_here"
+ORG_ID="your_org_id"
+FLOW_ID="your_flow_id"
+
+# Trigger a flow execution
+curl -X POST "$APPSTRATE_URL/api/flows/$FLOW_ID/run" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"message": "Hello from the API"}}'
+```
+
+The response is a Server-Sent Events (SSE) stream. Each event contains execution logs in real time.
+
+### With curl (SSE stream)
+
+```bash
+# Stream execution logs in real time
+curl -N -X POST "$APPSTRATE_URL/api/flows/$FLOW_ID/run" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"message": "Hello from the API"}}'
+```
+
+The `-N` flag disables buffering so you see events as they arrive.
+
+## Poll for Results
+
+If you prefer polling over SSE, you can check the execution status:
+
+```bash
+EXECUTION_ID="exec_id_from_run_response"
+
+# Get execution status and result
+curl "$APPSTRATE_URL/api/executions/$EXECUTION_ID" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-Org-Id: $ORG_ID"
+```
+
+Possible status values: `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`.
+
+## JavaScript / fetch Example
+
+```javascript
+const APPSTRATE_URL = "http://localhost:3000";
+const API_KEY = "ask_your_api_key_here";
+const ORG_ID = "your_org_id";
+const FLOW_ID = "your_flow_id";
+
+// Run a flow and read the SSE stream
+async function runFlow(input) {
+  const response = await fetch(`${APPSTRATE_URL}/api/flows/${FLOW_ID}/run`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      "X-Org-Id": ORG_ID,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ input }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(`API error: ${error.title} - ${error.detail}`);
+  }
+
+  // Read SSE stream
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const text = decoder.decode(value, { stream: true });
+    // SSE events are separated by double newlines
+    const events = text.split("\n\n").filter(Boolean);
+
+    for (const event of events) {
+      const dataLine = event.split("\n").find((line) => line.startsWith("data: "));
+      if (dataLine) {
+        const data = JSON.parse(dataLine.slice(6));
+        console.log(`[${data.type}]`, data);
+      }
+    }
+  }
+}
+
+// Poll execution status
+async function getExecution(executionId) {
+  const response = await fetch(`${APPSTRATE_URL}/api/executions/${executionId}`, {
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      "X-Org-Id": ORG_ID,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(`API error: ${error.title} - ${error.detail}`);
+  }
+
+  return response.json();
+}
+
+// Usage
+runFlow({ message: "Hello from JavaScript" }).catch(console.error);
+```
+
+## End-User Impersonation
+
+When building applications on top of Appstrate, use the `Appstrate-User` header to associate executions with your end-users:
+
+```bash
+curl -X POST "$APPSTRATE_URL/api/flows/$FLOW_ID/run" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Appstrate-User: eu_your_end_user_id" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"message": "Hello"}}'
+```
+
+This header is only available with API key authentication (not cookie sessions). The end-user must belong to the API key's application.
+
+## Error Format
+
+All errors follow [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) (`application/problem+json`):
+
+```json
+{
+  "type": "https://appstrate.com/problems/not-found",
+  "title": "Not Found",
+  "status": 404,
+  "detail": "Flow not found"
+}
+```
+
+## Further Reading
+
+- Interactive API docs: `GET /api/docs` (Swagger UI)
+- Raw OpenAPI spec: `GET /api/openapi.json`

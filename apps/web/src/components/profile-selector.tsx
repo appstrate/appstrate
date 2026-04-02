@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useTranslation } from "react-i18next";
 import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { Label } from "@/components/ui/label";

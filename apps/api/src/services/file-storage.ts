@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /** Sanitize filename for storage (ASCII-only keys). */
 export function sanitizeStorageKey(name: string): string {
   return name

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { eq, and, inArray } from "drizzle-orm";

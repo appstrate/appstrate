@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -194,10 +196,9 @@ describe("Internal API", () => {
         result: { output: "done" },
       });
 
-      const res = await app.request(
-        "/internal/execution-history?fields=state,result",
-        { headers: { Authorization: `Bearer ${runningToken}` } },
-      );
+      const res = await app.request("/internal/execution-history?fields=state,result", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as { executions: Record<string, unknown>[] };
@@ -242,10 +243,9 @@ describe("Internal API", () => {
       // The test flow has no manifest providers, so any provider should 404.
       // However, getPackage may return null for a flow without a published manifest.
       // The route will either 404 on "Flow not found" or "Provider not required".
-      const res = await app.request(
-        "/internal/credentials/@internalorg/unknown-provider",
-        { headers: { Authorization: `Bearer ${runningToken}` } },
-      );
+      const res = await app.request("/internal/credentials/@internalorg/unknown-provider", {
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
 
       expect(res.status).toBe(404);
     });

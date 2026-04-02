@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeAll, afterEach, mock } from "bun:test";
 import { db } from "../../helpers/db.ts";
 import { sql } from "drizzle-orm";
@@ -12,9 +14,7 @@ import {
  * Helper: fire pg_notify on a channel with a JSON payload.
  */
 async function pgNotify(channel: string, payload: Record<string, unknown>) {
-  await db.execute(
-    sql`SELECT pg_notify(${channel}, ${JSON.stringify(payload)})`,
-  );
+  await db.execute(sql`SELECT pg_notify(${channel}, ${JSON.stringify(payload)})`);
 }
 
 /**

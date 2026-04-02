@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { FlowEditorState, ProviderEntry, ResourceEntry } from "./types";
 import type { MetadataState } from "./metadata-section";
 import type { SchemaField } from "./schema-section";

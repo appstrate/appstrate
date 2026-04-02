@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, test } from "bun:test";
 import { extractDependencies, detectCycle } from "../src/dependencies.ts";
 import type { DepEntry } from "../src/dependencies.ts";

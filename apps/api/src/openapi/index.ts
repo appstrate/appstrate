@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * OpenAPI 3.1 specification for the Appstrate API.
  * Assembled from sub-modules — no runtime code generation.

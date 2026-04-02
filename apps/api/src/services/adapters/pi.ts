@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { logger } from "../../lib/logger.ts";
 import type { ExecutionAdapter, ExecutionMessage, PromptContext, UploadedFile } from "./types.ts";
 import { buildEnrichedPrompt } from "./prompt-builder.ts";

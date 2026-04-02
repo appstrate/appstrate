@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { PackageTypeModule, PackageFormState, ContentPackageInput } from "./index";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { manifestToMetadata, metadataToManifestPatch } from "../../components/flow-editor/utils";

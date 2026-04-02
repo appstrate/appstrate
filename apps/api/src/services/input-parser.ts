@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Request input parsing — parses input from FormData or JSON body.
  * Shared by executions.ts.

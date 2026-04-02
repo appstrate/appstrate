@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
 import type { AppEnv } from "../../src/types/index.ts";

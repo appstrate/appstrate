@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type { Profile, ExecutionLog, ConnectionProfile } from "@appstrate/db/schema";
 import type {
   PackageType,

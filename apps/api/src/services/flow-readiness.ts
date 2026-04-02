@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Centralized flow readiness validation — ensures a flow is properly configured
  * before execution. Called from all execution paths (manual, scheduled).

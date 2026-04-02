@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, it, beforeAll, afterAll } from "bun:test";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { signExecutionToken, parseSignedToken } from "../../src/lib/execution-token.ts";

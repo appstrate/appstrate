@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Integration tests for execution-tracker service.
  *
@@ -188,4 +190,3 @@ describe("waitForInFlight", () => {
     expect(result).toBe(true);
   });
 });
-

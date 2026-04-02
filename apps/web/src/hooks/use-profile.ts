@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useMutation } from "@tanstack/react-query";
 import i18n from "../i18n";
 import { api } from "../api";

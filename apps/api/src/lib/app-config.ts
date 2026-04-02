@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { getEnv } from "@appstrate/env";
 import { getCloudModule } from "./cloud-loader.ts";
 import type { AppConfig } from "@appstrate/shared-types";

@@ -1,11 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import {
-  createTestContext,
-  authHeaders,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedFlow, seedExecution, seedExecutionLog } from "../../helpers/seed.ts";
 
 const app = getTestApp();
@@ -17,7 +15,6 @@ describe("Executions API", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "execorg" });
   });
-
 
   // ─── POST /api/flows/:scope/:name/run — input validation ──
 
@@ -57,7 +54,7 @@ describe("Executions API", () => {
       });
 
       expect(res.status).toBe(400);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.detail).toContain("email");
     });
 
@@ -109,7 +106,7 @@ describe("Executions API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.executions).toBeArray();
       expect(body.executions).toHaveLength(0);
       expect(body.total).toBe(0);
@@ -129,7 +126,7 @@ describe("Executions API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.executions.length).toBeGreaterThanOrEqual(1);
       const found = body.executions.find((e: { id: string }) => e.id === exec.id);
       expect(found).toBeDefined();
@@ -176,7 +173,7 @@ describe("Executions API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.id).toBe(exec.id);
       expect(body.status).toBe("success");
     });
@@ -241,7 +238,7 @@ describe("Executions API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body).toBeArray();
       expect(body.length).toBeGreaterThanOrEqual(2);
     });
@@ -260,7 +257,7 @@ describe("Executions API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body).toBeArray();
       expect(body).toHaveLength(0);
     });
@@ -306,7 +303,7 @@ describe("Executions API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.ok).toBe(true);
     });
 
@@ -325,7 +322,7 @@ describe("Executions API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.ok).toBe(true);
     });
 
@@ -405,7 +402,7 @@ describe("Executions API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.deleted).toBeGreaterThanOrEqual(2);
     });
 

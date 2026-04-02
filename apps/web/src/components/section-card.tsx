@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 interface SectionCardProps {
   title: string;
   /** Extra content rendered inline in the header (e.g. an upload button). */

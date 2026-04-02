@@ -1,11 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import {
-  createTestContext,
-  authHeaders,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 
 const app = getTestApp();
@@ -18,7 +16,6 @@ describe("Providers API", () => {
     ctx = await createTestContext({ orgSlug: "provorg" });
   });
 
-
   // ─── GET /api/providers ────────────────────────────────────
 
   describe("GET /api/providers", () => {
@@ -28,7 +25,7 @@ describe("Providers API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.providers).toBeArray();
       expect(body.callbackUrl).toBeString();
     });
@@ -68,7 +65,7 @@ describe("Providers API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       const found = body.providers.find((p: { id: string }) => p.id === "@provorg/my-provider");
       expect(found).toBeDefined();
     });
@@ -93,7 +90,7 @@ describe("Providers API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       const leaked = body.providers.find(
         (p: { id: string }) => p.id === "@otherorg/secret-provider",
       );
@@ -128,7 +125,7 @@ describe("Providers API", () => {
       });
 
       expect(res.status).toBe(201);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.id).toBe(`@${ctx.org.slug}/new-api-provider`);
     });
 
@@ -256,7 +253,7 @@ describe("Providers API", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json() as any;
+      const body = (await res.json()) as any;
       expect(body.id).toBe(`@${ctx.org.slug}/to-update`);
     });
 
@@ -272,6 +269,5 @@ describe("Providers API", () => {
 
       expect(res.status).toBe(404);
     });
-
   });
 });

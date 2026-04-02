@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export const authPaths = {
   "/api/auth/sign-up/email": {
     post: {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { RateLimiterRedis } from "rate-limiter-flexible";
 import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import type { Context, Next } from "hono";

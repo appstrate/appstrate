@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { logger } from "../lib/logger.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { createVersionAndUpload } from "./package-versions.ts";
