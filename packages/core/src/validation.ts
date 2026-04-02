@@ -376,7 +376,13 @@ export interface ToolSourceValidationResult {
 }
 
 function stripLineComments(source: string): string {
-  return source.replace(/\/\/[^\n]*$/gm, "");
+  return source
+    .split("\n")
+    .map((line) => {
+      const idx = line.indexOf("//");
+      return idx === -1 ? line : line.slice(0, idx);
+    })
+    .join("\n");
 }
 
 function countParams(paramStr: string): number {
