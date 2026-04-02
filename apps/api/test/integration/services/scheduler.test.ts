@@ -449,7 +449,7 @@ describe("scheduler service", () => {
       await seedProviderPackage(providerId);
       await saveConnection(db, profileId, providerId, orgId, { api_key: "k" });
 
-      const flowConnected = await seedPackage({
+      const agentConnected = await seedPackage({
         orgId,
         id: `@${orgSlug}/agent-connected`,
         draftManifest: {
@@ -461,7 +461,7 @@ describe("scheduler service", () => {
         },
       });
 
-      await createSchedule(flowConnected.id, profileId, orgId, {
+      await createSchedule(agentConnected.id, profileId, orgId, {
         name: "Connected Schedule",
         cronExpression: "0 * * * *",
       });

@@ -337,7 +337,7 @@ describe("manifest-based dependency resolution", () => {
   // ── getOrgItem — dependents list ──────────────────────────
 
   describe("getOrgItem — dependents list", () => {
-    it("returns dependent packages in flows array", async () => {
+    it("returns dependent packages in agents array", async () => {
       await seedPackage({
         orgId,
         id: `@${orgSlug}/detail-tool`,

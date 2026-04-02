@@ -28,7 +28,7 @@ describe("resolvePermissions", () => {
     expect(perms.has("billing:manage")).toBe(true);
   });
 
-  it("member can read + run flows + manage own connections/schedules", () => {
+  it("member can read + run agents + manage own connections/schedules", () => {
     const perms = resolvePermissions("member");
     // Can read
     expect(perms.has("agents:read")).toBe(true);
@@ -48,7 +48,7 @@ describe("resolvePermissions", () => {
     expect(perms.has("org-profiles:bind")).toBe(true);
     // Can write end-users
     expect(perms.has("end-users:write")).toBe(true);
-    // Cannot write flows
+    // Cannot write agents
     expect(perms.has("agents:write")).toBe(false);
     expect(perms.has("agents:configure")).toBe(false);
     expect(perms.has("agents:delete")).toBe(false);

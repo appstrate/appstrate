@@ -267,7 +267,7 @@ describe("RBAC — Permission enforcement", () => {
   // ─── Read routes accessible to all ─────────────────────────
 
   describe("read routes accessible to all roles", () => {
-    it("viewer can list flows", async () => {
+    it("viewer can list agents", async () => {
       const res = await app.request("/api/agents", {
         headers: authHeaders(viewer),
       });

@@ -179,7 +179,7 @@ describe("PiAdapter.execute()", () => {
     const orchestrator = createMockOrchestrator();
     const adapter = new PiAdapter(orchestrator);
 
-    const flowPackage = Buffer.from("fake-zip-content");
+    const agentPackage = Buffer.from("fake-zip-content");
     const inputFiles = [
       {
         fieldName: "doc",
@@ -191,7 +191,7 @@ describe("PiAdapter.execute()", () => {
     ];
 
     await collectMessages(
-      adapter.execute("exec-005", basePromptContext(), 30, flowPackage, undefined, inputFiles),
+      adapter.execute("exec-005", basePromptContext(), 30, agentPackage, undefined, inputFiles),
     );
 
     const workloadCall = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]!;

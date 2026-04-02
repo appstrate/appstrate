@@ -21,7 +21,7 @@ describe("org-context middleware", () => {
   });
 
   it("sets orgId when valid X-Org-Id header provided", async () => {
-    // Use a route that requires org context (e.g., flows list)
+    // Use a route that requires org context (e.g., agents list)
     const res = await app.request("/api/agents", {
       headers: authHeaders(ctx),
     });

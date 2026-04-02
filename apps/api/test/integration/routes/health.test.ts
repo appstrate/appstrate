@@ -52,7 +52,7 @@ describe("GET /health", () => {
     expect(body.uptime_ms).toBeGreaterThanOrEqual(0);
   });
 
-  it("checks object contains database and flows sub-checks", async () => {
+  it("checks object contains database and agents sub-checks", async () => {
     const res = await app.request("/health");
     const body = (await res.json()) as any;
 
