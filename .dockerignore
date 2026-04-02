@@ -39,7 +39,6 @@ CHANGELOG.md
 CODE_OF_CONDUCT.md
 SECURITY.md
 TRADEMARK.md
-turbo.json
 bunfig.toml
 commitlint.config.ts
 eslint.config.mjs
