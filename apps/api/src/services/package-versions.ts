@@ -627,8 +627,8 @@ export async function createVersionFromDraft(params: {
       "manifest.json": new TextEncoder().encode(JSON.stringify(finalManifest, null, 2)),
     };
     zipBuffer = Buffer.from(zipArtifact(entries, 6));
-  } else if (pkg.type === "flow") {
-    const storedFiles = await downloadPackageFiles("flows", orgId, packageId);
+  } else if (pkg.type === "agent") {
+    const storedFiles = await downloadPackageFiles("agents", orgId, packageId);
     if (storedFiles) {
       const entries: Record<string, Uint8Array> = { ...storedFiles };
       entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export const realtimePaths = {
-  "/api/realtime/executions": {
+  "/api/realtime/runs": {
     get: {
-      operationId: "streamAllExecutions",
+      operationId: "streamAllRuns",
       tags: ["Realtime"],
-      summary: "SSE: all execution status changes",
+      summary: "SSE: all run status changes",
       description:
-        "Server-Sent Events stream for all execution status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter.",
+        "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter.",
       parameters: [
         { $ref: "#/components/parameters/SseOrgId" },
         { $ref: "#/components/parameters/SseToken" },
@@ -22,13 +22,13 @@ export const realtimePaths = {
       },
     },
   },
-  "/api/realtime/executions/{id}": {
+  "/api/realtime/runs/{id}": {
     get: {
-      operationId: "streamExecution",
+      operationId: "streamRun",
       tags: ["Realtime"],
-      summary: "SSE: single execution events",
+      summary: "SSE: single run events",
       description:
-        "Server-Sent Events stream for execution status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter.",
+        "Server-Sent Events stream for run status + log events. Supports cookie auth and API key auth via ?token=ask_... query parameter.",
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/SseOrgId" },
@@ -44,20 +44,20 @@ export const realtimePaths = {
       },
     },
   },
-  "/api/realtime/flows/{packageId}/executions": {
+  "/api/realtime/agents/{packageId}/runs": {
     get: {
-      operationId: "streamFlowExecutions",
+      operationId: "streamAgentRuns",
       tags: ["Realtime"],
-      summary: "SSE: flow execution changes",
+      summary: "SSE: agent run changes",
       description:
-        "Server-Sent Events stream for execution changes for a specific flow. Supports cookie auth and API key auth via ?token=ask_... query parameter.",
+        "Server-Sent Events stream for run changes for a specific agent. Supports cookie auth and API key auth via ?token=ask_... query parameter.",
       parameters: [
         {
           name: "packageId",
           in: "path",
           required: true,
           schema: { type: "string" },
-          description: "Flow package ID",
+          description: "Agent package ID",
         },
         { $ref: "#/components/parameters/SseOrgId" },
         { $ref: "#/components/parameters/SseToken" },

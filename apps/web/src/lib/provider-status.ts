@@ -31,7 +31,7 @@ export function hasDisconnectedProviders(providers: Array<{ status: string }>): 
  */
 export function computeProvidersSummary(
   providers: Array<{ status: string; scopesSufficient?: boolean | null }>,
-  t: TFunction<"flows">,
+  t: TFunction<"agents">,
 ): { text: string; connectedCount: number; actionCount: number } | null {
   if (providers.length === 0) return null;
 

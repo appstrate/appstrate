@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
-import type { Execution } from "@appstrate/shared-types";
+import type { Run } from "@appstrate/shared-types";
 
 export function useUnreadCount() {
   const orgId = useCurrentOrgId();
@@ -17,13 +17,13 @@ export function useUnreadCount() {
   });
 }
 
-export function useUnreadCountsByFlow() {
+export function useUnreadCountsByAgent() {
   const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["unread-counts-by-flow", orgId],
+    queryKey: ["unread-counts-by-agent", orgId],
     queryFn: async () => {
       const data = await api<{ counts: Record<string, number> }>(
-        "/notifications/unread-counts-by-flow",
+        "/notifications/unread-counts-by-agent",
       );
       return data.counts;
     },
@@ -31,15 +31,13 @@ export function useUnreadCountsByFlow() {
   });
 }
 
-export function useAllExecutions(page: number, limit = 20) {
+export function useAllRuns(page: number, limit = 20) {
   const orgId = useCurrentOrgId();
   const offset = page * limit;
   return useQuery({
-    queryKey: ["all-executions", orgId, page, limit],
+    queryKey: ["all-runs", orgId, page, limit],
     queryFn: async () => {
-      return api<{ executions: Execution[]; total: number }>(
-        `/executions?limit=${limit}&offset=${offset}`,
-      );
+      return api<{ runs: Run[]; total: number }>(`/runs?limit=${limit}&offset=${offset}`);
     },
   });
 }
@@ -47,16 +45,16 @@ export function useAllExecutions(page: number, limit = 20) {
 export function useMarkRead() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (executionId: string) => {
-      return api<{ ok: boolean }>(`/notifications/read/${executionId}`, { method: "PUT" });
+    mutationFn: async (runId: string) => {
+      return api<{ ok: boolean }>(`/notifications/read/${runId}`, { method: "PUT" });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["unread-count"] });
-      qc.invalidateQueries({ queryKey: ["unread-counts-by-flow"] });
-      qc.invalidateQueries({ queryKey: ["all-executions"] });
-      qc.invalidateQueries({ queryKey: ["paginated-executions"] });
-      qc.invalidateQueries({ queryKey: ["executions"] });
-      qc.invalidateQueries({ queryKey: ["execution"] });
+      qc.invalidateQueries({ queryKey: ["unread-counts-by-agent"] });
+      qc.invalidateQueries({ queryKey: ["all-runs"] });
+      qc.invalidateQueries({ queryKey: ["paginated-runs"] });
+      qc.invalidateQueries({ queryKey: ["runs"] });
+      qc.invalidateQueries({ queryKey: ["run"] });
     },
   });
 }
@@ -69,11 +67,11 @@ export function useMarkAllRead() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["unread-count"] });
-      qc.invalidateQueries({ queryKey: ["unread-counts-by-flow"] });
-      qc.invalidateQueries({ queryKey: ["all-executions"] });
-      qc.invalidateQueries({ queryKey: ["paginated-executions"] });
-      qc.invalidateQueries({ queryKey: ["executions"] });
-      qc.invalidateQueries({ queryKey: ["execution"] });
+      qc.invalidateQueries({ queryKey: ["unread-counts-by-agent"] });
+      qc.invalidateQueries({ queryKey: ["all-runs"] });
+      qc.invalidateQueries({ queryKey: ["paginated-runs"] });
+      qc.invalidateQueries({ queryKey: ["runs"] });
+      qc.invalidateQueries({ queryKey: ["run"] });
     },
   });
 }

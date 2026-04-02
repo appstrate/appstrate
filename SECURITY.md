@@ -116,7 +116,7 @@ The OWASP Top 10 for LLM Applications (2025) classifies these under **LLM01 (Pro
 
 ## Architecture Overview
 
-Each flow execution creates an isolated, ephemeral environment with two containers and a dedicated network:
+Each run creates an isolated, ephemeral environment with two containers and a dedicated network:
 
 ```
                     Platform API (host)
@@ -125,7 +125,7 @@ Each flow execution creates an isolated, ephemeral environment with two containe
                          |
     ╔════════════════════╧════════════════════════╗
     ║  Docker Network: appstrate-exec-{execId}    ║
-    ║  (custom bridge, per-execution, ephemeral)  ║
+    ║  (custom bridge, per-run, ephemeral)         ║
     ║                                             ║
     ║  ┌───────────────────────┐                  ║
     ║  │   Sidecar Container   │                  ║
@@ -154,7 +154,7 @@ Each flow execution creates an isolated, ephemeral environment with two containe
 
 **What the agent can reach:** The sidecar container, via `http://sidecar:8080`. Nothing else.
 
-**What the agent cannot reach:** The platform API, the host machine, other execution networks, the internet (except through the sidecar proxy), environment variables containing tokens.
+**What the agent cannot reach:** The platform API, the host machine, other run networks, the internet (except through the sidecar proxy), environment variables containing tokens.
 
 ---
 
@@ -162,17 +162,17 @@ Each flow execution creates an isolated, ephemeral environment with two containe
 
 **Files:** `apps/api/src/services/adapters/pi.ts`, `apps/api/src/services/docker.ts`
 
-Each execution creates a dedicated Docker bridge network (`appstrate-exec-{executionId}`). Two containers are placed on this network:
+Each run creates a dedicated Docker bridge network (`appstrate-exec-{runId}`). Two containers are placed on this network:
 
 - **Sidecar** — created with `extraHosts: ["host.docker.internal:host-gateway"]`, enabling it to reach the platform API on the host.
 - **Agent** — created with **no** `extraHosts` and **no** default bridge connection. The only DNS name it can resolve is `sidecar`.
 
 ```typescript
 // Agent container — custom network ONLY, no host access
-const containerId = await createContainer(executionId, containerEnv, {
+const containerId = await createContainer(runId, containerEnv, {
   image: PI_RUNTIME_IMAGE,
   adapterName: "pi",
-  networkId, // isolated per-execution network
+  networkId, // isolated per-run network
   networkAlias: "agent", // no extraHosts = no route to host
 });
 ```
@@ -221,9 +221,9 @@ The sidecar:
 
 The platform API (`/internal/credentials/:providerId`) enforces additional controls:
 
-- **Execution must be running** — tokens for completed/failed executions are rejected (`internal.ts`)
-- **Provider must be declared** — the requested `providerId` must appear as a key in the flow's `manifest.requires.providers` object. An agent cannot request credentials for providers it hasn't declared.
-- **Access is logged** — every credential fetch is recorded with execution ID, provider ID, and flow ID
+- **Run must be active** — tokens for completed/failed runs are rejected (`internal.ts`)
+- **Provider must be declared** — the requested `providerId` must appear as a key in the agent's `manifest.requires.providers` object. An agent cannot request credentials for providers it hasn't declared.
+- **Access is logged** — every credential fetch is recorded with run ID, provider ID, and agent ID
 
 ### Why not pass credentials as environment variables?
 
@@ -247,7 +247,7 @@ Every outbound request through the sidecar is validated against an allowlist of 
 
 ### How it works
 
-Each provider declares `authorized_uris` — either explicitly in the flow manifest or derived from provider defaults:
+Each provider declares `authorized_uris` — either explicitly in the agent manifest or derived from provider defaults:
 
 ```json
 {
@@ -320,7 +320,7 @@ const DEFAULT_NANO_CPUS = 2_000_000_000; // 2 vCPUs
 
 ### Ephemeral containers
 
-Containers are created, executed, and destroyed per execution. No persistent state survives between runs. The `finally` block in `pi.ts` ensures cleanup even on errors:
+Containers are created, executed, and destroyed per run. No persistent state survives between runs. The `finally` block in `pi.ts` ensures cleanup even on errors:
 
 ```typescript
 finally {
@@ -340,7 +340,7 @@ All managed containers are labeled for auditability:
 
 ```typescript
 Labels: {
-  "appstrate.execution": executionId,
+  "appstrate.run": runId,
   "appstrate.adapter": adapterName,
   "appstrate.managed": "true",
 }
@@ -384,30 +384,30 @@ const membership = await db
 if (!membership[0]) return c.json({ error: "FORBIDDEN" }, 403);
 ```
 
-### Execution tokens (container-to-host)
+### Run tokens (container-to-host)
 
-Internal endpoints (`/internal/*`) use the execution ID as a bearer token. This token is:
+Internal endpoints (`/internal/*`) use the run ID as a bearer token. This token is:
 
-- **Time-bound** — only valid while the execution status is `running`
-- **Scope-limited** — only grants access to credentials for services declared in the flow manifest
-- **Single-use per execution** — tied to a specific execution record in the database
+- **Time-bound** — only valid while the run status is `running`
+- **Scope-limited** — only grants access to credentials for services declared in the agent manifest
+- **Single-use per run** — tied to a specific run record in the database
 
 ```typescript
 // internal.ts — credential endpoint
 const rows = await db
-  .select({ packageId: executions.packageId, status: executions.status, orgId: executions.orgId })
-  .from(executions)
-  .where(eq(executions.id, executionId))
+  .select({ packageId: runs.packageId, status: runs.status, orgId: runs.orgId })
+  .from(runs)
+  .where(eq(runs.id, runId))
   .limit(1);
 
 if (!rows[0] || rows[0].status !== "running") {
-  return c.json({ error: "Invalid or expired execution token" }, 401);
+  return c.json({ error: "Invalid or expired run token" }, 401);
 }
 ```
 
 ### Admin guards
 
-Privileged operations (flow import, configuration, deletion) require admin role within the organization:
+Privileged operations (agent import, configuration, deletion) require admin role within the organization:
 
 ```typescript
 // guards.ts
@@ -422,13 +422,13 @@ export function requireAdmin() {
 }
 ```
 
-### Orphaned execution recovery
+### Orphaned run recovery
 
-On platform startup, any executions left in `pending` or `running` state from a previous crash are marked as `failed`. This prevents stale execution tokens from remaining valid:
+On platform startup, any runs left in `pending` or `running` state from a previous crash are marked as `failed`. This prevents stale run tokens from remaining valid:
 
 ```typescript
 // index.ts — startup
-await markOrphanExecutionsFailed();
+await markOrphanRunsFailed();
 ```
 
 **Standard:** This multi-layer authentication model implements the access control architecture described in **NIST SP 800-207** (Zero Trust Architecture): per-request verification, no implicit trust, and session-scoped credentials with automatic expiration.
@@ -443,11 +443,11 @@ All data access is scoped by organization at the application level. Every Drizzl
 
 | Table                       | SELECT         | INSERT                | UPDATE                | DELETE                |
 | --------------------------- | -------------- | --------------------- | --------------------- | --------------------- |
-| `executions`                | Org members    | Own user + org member | —                     | —                     |
-| `execution_logs`            | Org members    | Org members           | —                     | —                     |
-| `flow_configs`              | Org members    | Org admins            | Org admins            | Org admins            |
-| `flows`                     | Org members    | Org admins            | Org admins            | Org admins            |
-| `flow_schedules`            | Org members    | Own user + org member | Own user + org member | Own user + org member |
+| `runs`                      | Org members    | Own user + org member | —                     | —                     |
+| `run_logs`                  | Org members    | Org members           | —                     | —                     |
+| `package_configs`           | Org members    | Org admins            | Org admins            | Org admins            |
+| `packages`                  | Org members    | Org admins            | Org admins            | Org admins            |
+| `package_schedules`         | Org members    | Own user + org member | Own user + org member | Own user + org member |
 | `user_provider_connections` | Own user + org | Own user + org member | Own user + org member | Own user + org member |
 | `share_links`               | Org members    | Org members           | Org members           | —                     |
 
@@ -467,8 +467,8 @@ c.set("orgRole", membership[0].role);
 // Every query filters by orgId — example from state.ts
 const rows = await db
   .select()
-  .from(executions)
-  .where(and(eq(executions.packageId, packageId), eq(executions.orgId, orgId)));
+  .from(runs)
+  .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)));
 ```
 
 **Standard:** Application-level org-scoped queries implement access control satisfying **NIST SP 800-53** controls **AC-3** (Access Enforcement) and **AC-4** (Information Flow Enforcement).
@@ -477,21 +477,21 @@ const rows = await db
 
 ## Layer 7 — Input Validation
 
-**Files:** `apps/api/src/services/schema.ts`, `apps/api/src/services/flow-import.ts`
+**Files:** `apps/api/src/services/schema.ts`, `apps/api/src/services/agent-import.ts`
 
 All external inputs are validated using Zod schemas before processing:
 
-| Input              | Validation                                                | Location                         |
-| ------------------ | --------------------------------------------------------- | -------------------------------- |
-| Flow manifests     | Zod schema with slug regex, typed enums, required fields  | `schema.ts:validateManifest()`   |
-| Flow configuration | AJV against manifest config schema                        | `schema.ts:validateConfig()`     |
-| Execution input    | AJV against manifest input schema                         | `schema.ts:validateInput()`      |
-| File uploads       | Extension allowlist, size limit, count limit              | `schema.ts:validateFileInputs()` |
-| Agent output       | Native LLM schema enforcement + AJV post-validation       | `schema.ts:validateOutput()`     |
-| ZIP imports        | 10 MB size limit, manifest validation, content validation | `flow-import.ts`                 |
-| Flow IDs           | Slug regex at DB level and Zod level                      | `schema.ts`, `001_initial.sql`   |
+| Input               | Validation                                                | Location                         |
+| ------------------- | --------------------------------------------------------- | -------------------------------- |
+| Agent manifests     | Zod schema with slug regex, typed enums, required fields  | `schema.ts:validateManifest()`   |
+| Agent configuration | AJV against manifest config schema                        | `schema.ts:validateConfig()`     |
+| Run input           | AJV against manifest input schema                         | `schema.ts:validateInput()`      |
+| File uploads        | Extension allowlist, size limit, count limit              | `schema.ts:validateFileInputs()` |
+| Agent output        | Native LLM schema enforcement + AJV post-validation       | `schema.ts:validateOutput()`     |
+| ZIP imports         | 10 MB size limit, manifest validation, content validation | `agent-import.ts`                |
+| Agent IDs           | Slug regex at DB level and Zod level                      | `schema.ts`, `001_initial.sql`   |
 
-**Output validation:** When a flow defines `output.schema`, the schema is injected into the agent container (`OUTPUT_SCHEMA` env var) so the LLM tool definition includes the exact JSON Schema for constrained decoding. Post-execution, AJV validates the merged result against the schema. On mismatch, a warning is logged. This dual-layer approach (LLM-level + platform-level) prevents malformed output from being persisted.
+**Output validation:** When an agent defines `output.schema`, the schema is injected into the agent container (`OUTPUT_SCHEMA` env var) so the LLM tool definition includes the exact JSON Schema for constrained decoding. Post-run, AJV validates the merged result against the schema. On mismatch, a warning is logged. This dual-layer approach (LLM-level + platform-level) prevents malformed output from being persisted.
 
 **Standard:** Input validation addresses **OWASP API Security Top 10** risks **API8:2023** (Security Misconfiguration) and aligns with **OWASP Top 10 for LLM Applications** **LLM05:2025** (Improper Output Handling).
 
@@ -503,15 +503,15 @@ All external inputs are validated using Zod schemas before processing:
 
 Token bucket rate limiting prevents abuse:
 
-| Endpoint                  | Limit     | Scope    |
-| ------------------------- | --------- | -------- |
-| `POST /api/flows/:id/run` | 20/minute | Per user |
-| `POST /api/flows/import`  | 10/minute | Per user |
-| `POST /api/flows`         | 10/minute | Per user |
+| Endpoint                   | Limit     | Scope    |
+| -------------------------- | --------- | -------- |
+| `POST /api/agents/:id/run` | 20/minute | Per user |
+| `POST /api/agents/import`  | 10/minute | Per user |
+| `POST /api/agents`         | 10/minute | Per user |
 
-### Execution timeout
+### Run timeout
 
-Every execution has a configurable timeout (default defined in flow manifest). On timeout, both the agent and sidecar containers are forcibly stopped:
+Every run has a configurable timeout (default defined in agent manifest). On timeout, both the agent and sidecar containers are forcibly stopped:
 
 ```typescript
 const timeoutHandle = setTimeout(() => {
@@ -527,26 +527,26 @@ const timeoutHandle = setTimeout(() => {
 
 On SIGTERM/SIGINT, the platform:
 
-1. Stops accepting new execution requests (503)
+1. Stops accepting new run requests (503)
 2. Stops the cron scheduler
-3. Waits up to 30 seconds for in-flight executions to complete
+3. Waits up to 30 seconds for in-flight runs to complete
 4. Forces exit if timeout is exceeded
 
-### Execution cancellation
+### Run cancellation
 
-Running executions can be cancelled via API. The cancel handler verifies organization ownership before aborting:
+Running runs can be cancelled via API. The cancel handler verifies organization ownership before aborting:
 
 ```typescript
-if (execution.org_id !== orgId) {
+if (run.org_id !== orgId) {
   return c.json({ error: "FORBIDDEN" }, 403);
 }
-abortExecution(executionId);
+abortRun(runId);
 await stopContainer(containerId);
 ```
 
 ### Structured logging
 
-All backend operations use structured JSON logging (`lib/logger.ts`). Credential access events are logged with execution ID, provider ID, and flow ID — **never with credential values**.
+All backend operations use structured JSON logging (`lib/logger.ts`). Credential access events are logged with run ID, provider ID, and agent ID — **never with credential values**.
 
 ### Response size limits
 
@@ -573,32 +573,32 @@ error: `Request to ${targetUrl} failed: ${err.message}`,
 
 ### NIST SP 800-190 — Application Container Security Guide
 
-| Recommendation             | Appstrate Implementation                                    |
-| -------------------------- | ----------------------------------------------------------- |
-| Run containers as non-root | `USER pi` / `USER bun` in Dockerfiles                       |
-| Set resource limits        | Memory and CPU limits on all containers                     |
-| Segment container networks | Per-execution bridge network with no host access for agents |
-| Use immutable containers   | Ephemeral containers destroyed after each execution         |
-| Minimize container images  | `bun:1-slim` base, production-only dependencies             |
+| Recommendation             | Appstrate Implementation                              |
+| -------------------------- | ----------------------------------------------------- |
+| Run containers as non-root | `USER pi` / `USER bun` in Dockerfiles                 |
+| Set resource limits        | Memory and CPU limits on all containers               |
+| Segment container networks | Per-run bridge network with no host access for agents |
+| Use immutable containers   | Ephemeral containers destroyed after each run         |
+| Minimize container images  | `bun:1-slim` base, production-only dependencies       |
 
 ### NIST SP 800-207 — Zero Trust Architecture
 
 | Tenet                                                 | Appstrate Implementation                                      |
 | ----------------------------------------------------- | ------------------------------------------------------------- |
 | All data sources and computing services are resources | Each service connection is a discrete, authenticated resource |
-| All communication is secured regardless of location   | Execution tokens validated per-request, even on internal APIs |
-| Access is granted on a per-session basis              | Execution tokens expire when execution completes              |
+| All communication is secured regardless of location   | Run tokens validated per-request, even on internal APIs       |
+| Access is granted on a per-session basis              | Run tokens expire when run completes                          |
 | Access is determined by dynamic policy                | Service allowlists checked at runtime via `authorizedUris`    |
 | Enterprise monitors and measures integrity            | Structured logging of all credential access events            |
 
 ### NIST SP 800-207A — Zero Trust for Cloud-Native Applications
 
-| Recommendation                             | Appstrate Implementation                            |
-| ------------------------------------------ | --------------------------------------------------- |
-| Use sidecar proxies for policy enforcement | Credential sidecar proxy with URL authorization     |
-| Short-lived, scoped credentials            | Execution tokens valid only during `running` state  |
-| Identity-tier policies                     | Service access scoped to flow manifest declarations |
-| Network-tier policies                      | Per-execution isolated bridge networks              |
+| Recommendation                             | Appstrate Implementation                             |
+| ------------------------------------------ | ---------------------------------------------------- |
+| Use sidecar proxies for policy enforcement | Credential sidecar proxy with URL authorization      |
+| Short-lived, scoped credentials            | Run tokens valid only during `running` state         |
+| Identity-tier policies                     | Service access scoped to agent manifest declarations |
+| Network-tier policies                      | Per-run isolated bridge networks                     |
 
 ### NIST SP 800-53 Rev 5 — Security Controls
 
@@ -607,19 +607,19 @@ error: `Request to ${targetUrl} failed: ${err.message}`,
 | **AC-3** Access Enforcement                 | Application-level org-scoped queries, cookie session auth, org membership verification |
 | **AC-4** Information Flow Enforcement       | Network isolation, sidecar proxy, credential brokering                                 |
 | **AC-6** Least Privilege                    | Agent has zero credentials, scoped URL authorization, admin guards                     |
-| **AU-3** Content of Audit Records           | Structured JSON logging with execution context                                         |
+| **AU-3** Content of Audit Records           | Structured JSON logging with run context                                               |
 | **SC-7** Boundary Protection                | Docker bridge network, no host access for agents                                       |
 | **SC-28** Protection of Information at Rest | Credentials encrypted via AES-256-GCM in PostgreSQL (application-level isolation)      |
 
 ### CIS Docker Benchmark v1.8.0
 
-| Section                 | Status    | Notes                                                           |
-| ----------------------- | --------- | --------------------------------------------------------------- |
-| 4.1 Non-root user       | Compliant | `USER pi` / `USER bun`                                          |
-| 5.10 Memory limits      | Compliant | 1 GB agent, 256 MB sidecar                                      |
-| 5.11 CPU limits         | Compliant | 2 vCPU agent, 0.5 vCPU sidecar                                  |
-| 5.13 Container labeling | Compliant | `appstrate.execution`, `appstrate.adapter`, `appstrate.managed` |
-| 5.15 Host network mode  | Compliant | Custom bridge networks, no `--network host`                     |
+| Section                 | Status    | Notes                                                     |
+| ----------------------- | --------- | --------------------------------------------------------- |
+| 4.1 Non-root user       | Compliant | `USER pi` / `USER bun`                                    |
+| 5.10 Memory limits      | Compliant | 1 GB agent, 256 MB sidecar                                |
+| 5.11 CPU limits         | Compliant | 2 vCPU agent, 0.5 vCPU sidecar                            |
+| 5.13 Container labeling | Compliant | `appstrate.run`, `appstrate.adapter`, `appstrate.managed` |
+| 5.15 Host network mode  | Compliant | Custom bridge networks, no `--network host`               |
 
 ### OWASP Top 10 for LLM Applications (2025)
 
@@ -632,12 +632,12 @@ error: `Request to ${targetUrl} failed: ${err.message}`,
 
 ### OWASP API Security Top 10 (2023)
 
-| Risk                                           | Mitigation                                                                              |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------- |
-| **API1 — BOLA**                                | Execution tokens scoped to single execution. Org-scoped queries enforce data isolation. |
-| **API2 — Broken Authentication**               | Multi-layer auth: cookie sessions + org membership + admin guards + execution tokens.   |
-| **API5 — Broken Function Level Authorization** | Admin guards on privileged operations. Org-scoped queries at application level.         |
-| **API8 — Security Misconfiguration**           | `authorizedUris` URL restriction. Input validation on all external boundaries.          |
+| Risk                                           | Mitigation                                                                      |
+| ---------------------------------------------- | ------------------------------------------------------------------------------- |
+| **API1 — BOLA**                                | Run tokens scoped to single run. Org-scoped queries enforce data isolation.     |
+| **API2 — Broken Authentication**               | Multi-layer auth: cookie sessions + org membership + admin guards + run tokens. |
+| **API5 — Broken Function Level Authorization** | Admin guards on privileged operations. Org-scoped queries at application level. |
+| **API8 — Security Misconfiguration**           | `authorizedUris` URL restriction. Input validation on all external boundaries.  |
 
 ---
 
@@ -655,7 +655,7 @@ This paper demonstrates that alignment training alone is insufficient to secure 
 
 ### "Securing AI Agent Execution" (Buhler, Biagiola et al., 2025)
 
-Introduces **AgentBound**, the first access control framework for MCP servers. Combines a declarative policy mechanism (AgentManifest) with a sandbox enforcement engine (AgentBox). Appstrate's flow manifest (`requires.providers` object with `authorized_uris` in provider definitions) is architecturally analogous to AgentManifest — a declarative specification of what the agent is allowed to access.
+Introduces **AgentBound**, the first access control framework for MCP servers. Combines a declarative policy mechanism (AgentManifest) with a sandbox enforcement engine (AgentBox). Appstrate's agent manifest (`requires.providers` object with `authorized_uris` in provider definitions) is architecturally analogous to AgentManifest — a declarative specification of what the agent is allowed to access.
 
 **Reference:** arXiv:2510.21236
 

@@ -53,7 +53,7 @@ export const schemas = {
         type: "string",
         enum: ["organization", "application"],
         description:
-          "Webhook scope. 'organization' fires for all executions; 'application' fires only for executions via the linked application's API key",
+          "Webhook scope. 'organization' fires for all runs; 'application' fires only for runs via the linked application's API key",
       },
       applicationId: {
         type: ["string", "null"],
@@ -160,7 +160,7 @@ export const schemas = {
       },
     },
   },
-  FlowSkillRef: {
+  AgentSkillRef: {
     type: "object",
     properties: {
       id: { type: "string" },
@@ -169,7 +169,7 @@ export const schemas = {
       description: { type: "string" },
     },
   },
-  FlowToolRef: {
+  AgentToolRef: {
     type: "object",
     properties: {
       id: { type: "string" },
@@ -178,7 +178,7 @@ export const schemas = {
       description: { type: "string" },
     },
   },
-  FlowListItem: {
+  AgentListItem: {
     type: "object",
     properties: {
       id: { type: "string" },
@@ -196,9 +196,9 @@ export const schemas = {
       type: {
         type: "string",
         description: "Package type from manifest",
-        enum: ["flow", "skill", "tool", "provider"],
+        enum: ["agent", "skill", "tool", "provider"],
       },
-      runningExecutions: { type: "integer" },
+      runningRuns: { type: "integer" },
       dependencies: {
         type: "object",
         properties: {
@@ -209,7 +209,7 @@ export const schemas = {
       },
     },
   },
-  FlowDetail: {
+  AgentDetail: {
     type: "object",
     properties: {
       id: { type: "string" },
@@ -219,22 +219,22 @@ export const schemas = {
       scope: { type: ["string", "null"], description: "Scope from manifest name" },
       version: { type: ["string", "null"], description: "Version from manifest" },
       manifest: {
-        allOf: [{ $ref: "#/components/schemas/FlowManifest" }],
-        description: "Full manifest object (user flows only)",
+        allOf: [{ $ref: "#/components/schemas/AgentManifest" }],
+        description: "Full manifest object (user agents only)",
       },
-      prompt: { type: "string", description: "Agent prompt markdown (user flows only)" },
+      prompt: { type: "string", description: "Agent prompt markdown (user agents only)" },
       updatedAt: {
         type: "string",
         format: "date-time",
-        description: "Last updated timestamp (user flows only)",
+        description: "Last updated timestamp (user agents only)",
       },
       lockVersion: {
         type: "integer",
-        description: "Optimistic lock version (user flows only)",
+        description: "Optimistic lock version (user agents only)",
       },
       config: {
         type: "object",
-        description: "AFPS schema wrapper for flow configuration (set once, reused across runs).",
+        description: "AFPS schema wrapper for agent configuration (set once, reused across runs).",
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
           current: { type: "object", description: "Current configuration values" },
@@ -249,7 +249,7 @@ export const schemas = {
       },
       input: {
         type: "object",
-        description: "AFPS schema wrapper for per-execution input.",
+        description: "AFPS schema wrapper for per-run input.",
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
           fileConstraints: { $ref: "#/components/schemas/FileConstraintsMap" },
@@ -263,7 +263,7 @@ export const schemas = {
       },
       output: {
         type: "object",
-        description: "AFPS schema wrapper for per-execution output.",
+        description: "AFPS schema wrapper for per-run output.",
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
           propertyOrder: {
@@ -277,13 +277,13 @@ export const schemas = {
         type: "object",
         properties: {
           providers: { type: "array", items: { $ref: "#/components/schemas/ProviderStatus" } },
-          skills: { type: "array", items: { $ref: "#/components/schemas/FlowSkillRef" } },
-          tools: { type: "array", items: { $ref: "#/components/schemas/FlowToolRef" } },
+          skills: { type: "array", items: { $ref: "#/components/schemas/AgentSkillRef" } },
+          tools: { type: "array", items: { $ref: "#/components/schemas/AgentToolRef" } },
         },
       },
-      lastExecution: {
+      lastRun: {
         type: ["object", "null"],
-        description: "Summary of the most recent execution (null if never executed)",
+        description: "Summary of the most recent run (null if never run)",
         properties: {
           id: { type: "string" },
           status: { type: "string" },
@@ -291,29 +291,29 @@ export const schemas = {
           duration: { type: "integer" },
         },
       },
-      runningExecutions: { type: "integer" },
+      runningRuns: { type: "integer" },
       versionCount: {
         type: "integer",
-        description: "Number of published versions (0 for built-in flows)",
+        description: "Number of published versions (0 for built-in agents)",
       },
-      flowOrgProfileId: {
+      agentOrgProfileId: {
         type: ["string", "null"],
         format: "uuid",
         description: "Admin-configured org connection profile ID (null if none)",
       },
-      flowOrgProfileName: {
+      agentOrgProfileName: {
         type: ["string", "null"],
         description: "Display name of the admin-configured org connection profile",
       },
       forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
       hasUnpublishedChanges: {
         type: "boolean",
-        description: "Whether the flow has local changes not yet published as a version",
+        description: "Whether the agent has local changes not yet published as a version",
       },
       populatedProviders: {
         type: "object",
         additionalProperties: { $ref: "#/components/schemas/ProviderConfig" },
-        description: "ProviderConfig keyed by provider ID for the flow's required providers",
+        description: "ProviderConfig keyed by provider ID for the agent's required providers",
       },
       callbackUrl: {
         type: "string",
@@ -321,7 +321,7 @@ export const schemas = {
       },
     },
   },
-  FlowVersion: {
+  AgentVersion: {
     type: "object",
     properties: {
       id: { type: "integer" },
@@ -334,7 +334,7 @@ export const schemas = {
       createdAt: { type: ["string", "null"], format: "date-time" },
     },
   },
-  Execution: {
+  Run: {
     type: "object",
     properties: {
       id: { type: "string" },
@@ -357,24 +357,24 @@ export const schemas = {
       connectionProfileId: { type: "string" },
       scheduleId: { type: "string" },
       packageVersionId: { type: "integer" },
-      proxyLabel: { type: ["string", "null"], description: "Proxy label used at execution time" },
-      modelLabel: { type: ["string", "null"], description: "Model label used at execution time" },
-      cost: { type: ["number", "null"], description: "Execution cost in dollars" },
+      proxyLabel: { type: ["string", "null"], description: "Proxy label used at run time" },
+      modelLabel: { type: ["string", "null"], description: "Model label used at run time" },
+      cost: { type: ["number", "null"], description: "Run cost in dollars" },
       endUserId: {
         type: ["string", "null"],
         description: "End-user ID (eu_ prefix) if executed on behalf of an end-user",
       },
       applicationId: {
         type: ["string", "null"],
-        description: "Application ID (app_ prefix) that owns this execution",
+        description: "Application ID (app_ prefix) that owns this run",
       },
     },
   },
-  ExecutionLog: {
+  RunLog: {
     type: "object",
     properties: {
       id: { type: "integer" },
-      executionId: { type: "string" },
+      runId: { type: "string" },
       userId: { type: "string" },
       orgId: { type: "string" },
       type: { type: "string" },
@@ -494,7 +494,7 @@ export const schemas = {
       iconUrl: { type: "string" },
       categories: { type: "array", items: { type: "string" } },
       docsUrl: { type: "string" },
-      usedByFlows: { type: "integer" },
+      usedByAgents: { type: "integer" },
     },
   },
   ProviderConfigInput: {
@@ -569,7 +569,7 @@ export const schemas = {
       source: { type: "string", enum: ["system", "local"] },
       createdBy: { type: ["string", "null"] },
       createdByName: { type: "string" },
-      usedByFlows: { type: "integer" },
+      usedByAgents: { type: "integer" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
       autoInstalled: { type: "boolean" },
       forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
@@ -587,7 +587,7 @@ export const schemas = {
       source: { type: "string", enum: ["system", "local"] },
       createdBy: { type: ["string", "null"] },
       createdByName: { type: "string" },
-      usedByFlows: { type: "integer" },
+      usedByAgents: { type: "integer" },
       autoInstalled: { type: "boolean" },
       lockVersion: { type: "integer", description: "Optimistic lock version" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
@@ -597,7 +597,7 @@ export const schemas = {
         description: "Manifest name (@scope/name) — may differ from package ID",
       },
       forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
-      flows: {
+      agents: {
         type: "array",
         items: {
           type: "object",
@@ -611,12 +611,12 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  FlowMemory: {
+  AgentMemory: {
     type: "object",
     properties: {
       id: { type: "integer" },
       content: { type: "string" },
-      executionId: { type: ["string", "null"] },
+      runId: { type: ["string", "null"] },
       createdAt: { type: ["string", "null"], format: "date-time" },
     },
   },
@@ -729,11 +729,11 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  FlowManifest: {
+  AgentManifest: {
     description:
-      "AFPS Flow manifest extended with Appstrate platform fields. " +
-      "Standard fields are defined by the AFPS Flow schema; extension fields use the x- prefix per AFPS §10.",
-    allOf: [{ $ref: "https://afps.appstrate.dev/schema/v1/flow.schema.json" }],
+      "AFPS Agent manifest extended with Appstrate platform fields. " +
+      "Standard fields are defined by the AFPS Agent schema; extension fields use the x- prefix per AFPS §10.",
+    allOf: [{ $ref: "https://afps.appstrate.dev/schema/v1/agent.schema.json" }],
   },
   SkillManifest: {
     description: "AFPS Skill manifest. See https://afps.appstrate.dev for field reference.",

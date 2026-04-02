@@ -7,7 +7,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a package from ZIP",
       description:
-        "Import a package (flow, skill, tool, or provider) from a ZIP file. The ZIP must contain a valid manifest.json. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
+        "Import a package (agent, skill, tool, or provider) from a ZIP file. The ZIP must contain a valid manifest.json. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -53,7 +53,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "The imported package ID" },
                   type: {
                     type: "string",
-                    description: "Package type (flow/skill/tool/provider)",
+                    description: "Package type (agent/skill/tool/provider)",
                   },
                 },
               },
@@ -115,7 +115,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a package from a GitHub URL",
       description:
-        "Import a package (flow, skill, tool, or provider) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. Rate-limited to 10 requests/minute.",
+        "Import a package (agent, skill, tool, or provider) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. Rate-limited to 10 requests/minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -151,7 +151,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "The imported package ID" },
                   type: {
                     type: "string",
-                    description: "Package type (flow/skill/tool/provider)",
+                    description: "Package type (agent/skill/tool/provider)",
                   },
                 },
               },
@@ -475,7 +475,7 @@ export const packagesPaths = {
                 properties: {
                   versions: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/FlowVersion" },
+                    items: { $ref: "#/components/schemas/AgentVersion" },
                   },
                 },
               },
@@ -850,7 +850,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Skill is referenced by flows or required by other packages",
+          description: "Skill is referenced by agents or required by other packages",
           content: {
             "application/json": {
               schema: {
@@ -860,16 +860,16 @@ export const packagesPaths = {
                     type: "string",
                     enum: ["IN_USE", "DEPENDED_ON"],
                     description:
-                      "IN_USE: referenced by flows. DEPENDED_ON: required by other packages.",
+                      "IN_USE: referenced by agents. DEPENDED_ON: required by other packages.",
                   },
                   message: { type: "string" },
-                  flows: {
+                  agents: {
                     type: "array",
                     items: {
                       type: "object",
                       properties: { id: { type: "string" }, displayName: { type: "string" } },
                     },
-                    description: "Flows referencing this skill (for IN_USE)",
+                    description: "Agents referencing this skill (for IN_USE)",
                   },
                   dependents: {
                     type: "array",
@@ -1057,7 +1057,7 @@ export const packagesPaths = {
                 properties: {
                   versions: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/FlowVersion" },
+                    items: { $ref: "#/components/schemas/AgentVersion" },
                   },
                 },
               },
@@ -1431,7 +1431,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Tool is referenced by flows or required by other packages",
+          description: "Tool is referenced by agents or required by other packages",
           content: {
             "application/json": {
               schema: {
@@ -1441,16 +1441,16 @@ export const packagesPaths = {
                     type: "string",
                     enum: ["IN_USE", "DEPENDED_ON"],
                     description:
-                      "IN_USE: referenced by flows. DEPENDED_ON: required by other packages.",
+                      "IN_USE: referenced by agents. DEPENDED_ON: required by other packages.",
                   },
                   message: { type: "string" },
-                  flows: {
+                  agents: {
                     type: "array",
                     items: {
                       type: "object",
                       properties: { id: { type: "string" }, displayName: { type: "string" } },
                     },
-                    description: "Flows referencing this tool (for IN_USE)",
+                    description: "Agents referencing this tool (for IN_USE)",
                   },
                   dependents: {
                     type: "array",
@@ -1468,13 +1468,13 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/flows": {
+  "/api/packages/agents": {
     post: {
-      operationId: "createFlow",
+      operationId: "createAgent",
       tags: ["Packages"],
-      summary: "Create a user flow",
+      summary: "Create a user agent",
       description:
-        "Create a new user flow from manifest and content. Creates an initial version automatically.",
+        "Create a new user agent from manifest and content. Creates an initial version automatically.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -1484,7 +1484,7 @@ export const packagesPaths = {
               type: "object",
               required: ["manifest", "content"],
               properties: {
-                manifest: { $ref: "#/components/schemas/FlowManifest" },
+                manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: { type: "string", description: "Agent prompt (markdown)" },
               },
             },
@@ -1493,7 +1493,7 @@ export const packagesPaths = {
       },
       responses: {
         "201": {
-          description: "Flow created",
+          description: "Agent created",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -1517,12 +1517,12 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/flows/{scope}/{name}": {
+  "/api/packages/agents/{scope}/{name}": {
     get: {
-      operationId: "getFlowPackage",
+      operationId: "getAgentPackage",
       tags: ["Packages"],
-      summary: "Get flow detail",
-      description: "Returns flow detail including providers, config, state, skills, and tools.",
+      summary: "Get agent detail",
+      description: "Returns agent detail including providers, config, state, skills, and tools.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1542,7 +1542,7 @@ export const packagesPaths = {
       ],
       responses: {
         "200": {
-          description: "Flow detail",
+          description: "Agent detail",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -1552,7 +1552,7 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  flow: { $ref: "#/components/schemas/FlowDetail" },
+                  agent: { $ref: "#/components/schemas/AgentDetail" },
                 },
               },
             },
@@ -1563,10 +1563,10 @@ export const packagesPaths = {
       },
     },
     put: {
-      operationId: "updateFlow",
+      operationId: "updateAgent",
       tags: ["Packages"],
-      summary: "Update a user flow",
-      description: "Update manifest and content of a user flow with optimistic locking.",
+      summary: "Update a user agent",
+      description: "Update manifest and content of a user agent with optimistic locking.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1592,7 +1592,7 @@ export const packagesPaths = {
               type: "object",
               required: ["manifest", "content", "lockVersion"],
               properties: {
-                manifest: { $ref: "#/components/schemas/FlowManifest" },
+                manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: { type: "string" },
                 lockVersion: { type: "integer", description: "Optimistic lock version" },
               },
@@ -1602,7 +1602,7 @@ export const packagesPaths = {
       },
       responses: {
         "200": {
-          description: "Flow updated",
+          description: "Agent updated",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -1623,14 +1623,14 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Concurrent modification or flow in use" },
+        "409": { description: "Concurrent modification or agent in use" },
       },
     },
     delete: {
-      operationId: "deleteFlow",
+      operationId: "deleteAgent",
       tags: ["Packages"],
-      summary: "Delete a user flow",
-      description: "Delete a user flow. Built-in flows cannot be deleted.",
+      summary: "Delete a user agent",
+      description: "Delete a user agent. Built-in agents cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1650,23 +1650,23 @@ export const packagesPaths = {
       ],
       responses: {
         "204": {
-          description: "Flow deleted",
+          description: "Agent deleted",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "409": { description: "Flow in use" },
+        "409": { description: "Agent in use" },
       },
     },
   },
-  "/api/packages/flows/{scope}/{name}/versions/info": {
+  "/api/packages/agents/{scope}/{name}/versions/info": {
     get: {
-      operationId: "getFlowVersionInfo",
+      operationId: "getAgentVersionInfo",
       tags: ["Packages"],
-      summary: "Get flow version info (latest published + draft)",
-      description: "Returns the latest published version and current draft version for a flow.",
+      summary: "Get agent version info (latest published + draft)",
+      description: "Returns the latest published version and current draft version for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1708,12 +1708,12 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/flows/{scope}/{name}/versions": {
+  "/api/packages/agents/{scope}/{name}/versions": {
     get: {
-      operationId: "listFlowVersions",
+      operationId: "listAgentVersions",
       tags: ["Packages"],
-      summary: "List flow versions",
-      description: "Returns all published versions for a flow.",
+      summary: "List agent versions",
+      description: "Returns all published versions for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1745,7 +1745,7 @@ export const packagesPaths = {
                 properties: {
                   versions: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/FlowVersion" },
+                    items: { $ref: "#/components/schemas/AgentVersion" },
                   },
                 },
               },
@@ -1757,11 +1757,11 @@ export const packagesPaths = {
       },
     },
     post: {
-      operationId: "createFlowVersion",
+      operationId: "createAgentVersion",
       tags: ["Packages"],
-      summary: "Create a flow version from draft",
+      summary: "Create an agent version from draft",
       description:
-        "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running executions.",
+        "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1818,16 +1818,16 @@ export const packagesPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "409": { description: "Flow in use (running executions)" },
+        "409": { description: "Agent in use (runs in progress)" },
       },
     },
   },
-  "/api/packages/flows/{scope}/{name}/versions/{version}/restore": {
+  "/api/packages/agents/{scope}/{name}/versions/{version}/restore": {
     post: {
-      operationId: "restoreFlowVersion",
+      operationId: "restoreAgentVersion",
       tags: ["Packages"],
-      summary: "Restore a flow version into the draft",
-      description: "Restore a published version into the draft. Requires no running executions.",
+      summary: "Restore an agent version into the draft",
+      description: "Restore a published version into the draft. Requires no runs in progress.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1869,16 +1869,16 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Concurrent modification or flow in use" },
+        "409": { description: "Concurrent modification or agent in use" },
       },
     },
   },
-  "/api/packages/flows/{scope}/{name}/versions/{version}": {
+  "/api/packages/agents/{scope}/{name}/versions/{version}": {
     get: {
-      operationId: "getFlowVersionDetail",
+      operationId: "getAgentVersionDetail",
       tags: ["Packages"],
-      summary: "Get flow version detail",
-      description: "Returns the detail of a specific flow version including manifest and content.",
+      summary: "Get agent version detail",
+      description: "Returns the detail of a specific agent version including manifest and content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1911,7 +1911,7 @@ export const packagesPaths = {
                 properties: {
                   id: { type: "integer" },
                   version: { type: "string" },
-                  manifest: { $ref: "#/components/schemas/FlowManifest" },
+                  manifest: { $ref: "#/components/schemas/AgentManifest" },
                   content: { type: ["string", "null"] },
                   yanked: { type: "boolean" },
                   yankedReason: { type: ["string", "null"] },
@@ -1929,11 +1929,11 @@ export const packagesPaths = {
       },
     },
     delete: {
-      operationId: "deleteFlowVersion",
+      operationId: "deleteAgentVersion",
       tags: ["Packages"],
-      summary: "Delete a flow version",
+      summary: "Delete an agent version",
       description:
-        "Permanently delete a flow version. Reassigns affected dist-tags to the next best stable version. Blocked if executions are running.",
+        "Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -1963,7 +1963,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Flow has running executions",
+          description: "Agent has runs in progress",
           content: {
             "application/json": {
               schema: {
@@ -2037,7 +2037,7 @@ export const packagesPaths = {
                   packageId: { type: "string", description: "New package ID under org scope" },
                   type: {
                     type: "string",
-                    enum: ["flow", "skill", "tool", "provider"],
+                    enum: ["agent", "skill", "tool", "provider"],
                   },
                   forkedFrom: { type: "string", description: "Source package ID" },
                 },
@@ -2270,7 +2270,7 @@ export const packagesPaths = {
                 properties: {
                   versions: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/FlowVersion" },
+                    items: { $ref: "#/components/schemas/AgentVersion" },
                   },
                 },
               },
@@ -2640,7 +2640,7 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { description: "Provider in use by flows" },
+        "409": { description: "Provider in use by agents" },
       },
     },
   },

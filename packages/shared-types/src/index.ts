@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export type { Profile, ExecutionLog, ConnectionProfile } from "@appstrate/db/schema";
+export type { Profile, RunLog, ConnectionProfile } from "@appstrate/db/schema";
 import type {
   PackageType,
   ProviderSetupGuide,
@@ -8,8 +8,8 @@ import type {
 } from "@appstrate/core/validation";
 export type { PackageType };
 
-import type { Execution as _Execution } from "@appstrate/db/schema";
-export type Execution = _Execution & { packageVersion?: string | null };
+import type { Run as _Run } from "@appstrate/db/schema";
+export type Run = _Run & { packageVersion?: string | null };
 
 // --- App Config Types ---
 
@@ -42,8 +42,8 @@ export interface ResourceEntry {
 
 // --- Execution Types ---
 
-import { executionStatusEnum } from "@appstrate/db/schema";
-export type ExecutionStatus = (typeof executionStatusEnum.enumValues)[number];
+import { runStatusEnum } from "@appstrate/db/schema";
+export type RunStatus = (typeof runStatusEnum.enumValues)[number];
 
 // --- Schedule Types ---
 
@@ -97,7 +97,7 @@ export interface OrgInvitation {
 
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 
-// --- Flow Readiness Utilities ---
+// --- Agent Readiness Utilities ---
 
 /** Check if a prompt is empty or whitespace-only. */
 export function isPromptEmpty(prompt: string): boolean {
@@ -186,7 +186,7 @@ export interface ProviderStatus {
   profileOwnerName: string | null;
 }
 
-export interface FlowListItem {
+export interface AgentListItem {
   id: string;
   displayName: string;
   description: string;
@@ -198,7 +198,7 @@ export interface FlowListItem {
     skills: Record<string, string>;
     tools: Record<string, string>;
   };
-  runningExecutions: number;
+  runningRuns: number;
   source: "system" | "local";
   scope: string | null;
   version: string | null;
@@ -206,7 +206,7 @@ export interface FlowListItem {
   forkedFrom: string | null;
 }
 
-export interface FlowDetail {
+export interface AgentDetail {
   id: string;
   displayName: string;
   description: string;
@@ -221,20 +221,20 @@ export interface FlowDetail {
   config: SchemaWrapper & {
     current: Record<string, unknown>;
   };
-  runningExecutions: number;
-  lastExecution: Partial<import("@appstrate/db/schema").Execution> | null;
+  runningRuns: number;
+  lastRun: Partial<import("@appstrate/db/schema").Run> | null;
   updatedAt: string | null;
   lockVersion: number;
   prompt?: string;
   scope: string | null;
   version: string | null;
-  manifest?: Record<string, unknown>; // Raw manifest from DB (user flows only)
+  manifest?: Record<string, unknown>; // Raw manifest from DB (user agents only)
 
   populatedProviders?: Record<string, ProviderConfig>;
   callbackUrl?: string;
-  /** Org profile ID configured for this flow. Used for per-provider org bindings. */
-  flowOrgProfileId: string | null;
-  flowOrgProfileName: string | null;
+  /** Org profile ID configured for this agent. Used for per-provider org bindings. */
+  agentOrgProfileId: string | null;
+  agentOrgProfileName: string | null;
   versions?: PackageVersionInfo[];
   distTags?: DistTagInfo[];
   versionCount?: number;
@@ -253,7 +253,7 @@ export interface OrgPackageItem {
   createdByName: string | null;
   createdAt: string;
   updatedAt: string;
-  usedByFlows: number;
+  usedByAgents: number;
   version: string | null;
   autoInstalled: boolean;
   forkedFrom: string | null;
@@ -261,7 +261,7 @@ export interface OrgPackageItem {
 
 export interface OrgPackageItemDetail extends OrgPackageItem {
   content: string;
-  flows: { id: string; displayName: string }[];
+  agents: { id: string; displayName: string }[];
   manifest?: Record<string, unknown>;
   manifestName?: string | null;
   lockVersion?: number;
@@ -313,12 +313,12 @@ export interface DistTagInfo {
   version: string;
 }
 
-// --- Flow Memory Types ---
+// --- Agent Memory Types ---
 
-export interface FlowMemoryItem {
+export interface AgentMemoryItem {
   id: number;
   content: string;
-  executionId: string | null;
+  runId: string | null;
   createdAt: string | null;
 }
 
@@ -426,7 +426,7 @@ export interface ProviderConfig extends Omit<
   authorizationParams?: Record<string, string>;
   tokenParams?: Record<string, string>;
   credentialSchema?: Record<string, unknown>;
-  usedByFlows?: number;
+  usedByAgents?: number;
 }
 
 // --- Application Types ---

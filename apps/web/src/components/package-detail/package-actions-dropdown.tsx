@@ -40,8 +40,8 @@ interface PackageActionsDropdownProps {
   onCreateVersion?: () => void;
   onFork?: () => void;
   // Flow-specific
-  runningExecutions?: number;
-  hasExecutions?: boolean;
+  runningRuns?: number;
+  hasRuns?: boolean;
   hasMemories?: boolean;
   hasFileInput?: boolean;
   onDeleteFlow?: () => void;
@@ -68,8 +68,8 @@ export function PackageActionsDropdown({
   onDownload,
   onCreateVersion,
   onFork,
-  runningExecutions = 0,
-  hasExecutions,
+  runningRuns = 0,
+  hasRuns,
   hasMemories,
   hasFileInput,
   onDeleteFlow,
@@ -81,12 +81,12 @@ export function PackageActionsDropdown({
   canDeletePackage,
   onDeletePackage,
 }: PackageActionsDropdownProps) {
-  const { t } = useTranslation(["flows", "common", "settings"]);
+  const { t } = useTranslation(["agents", "common", "settings"]);
   const navigate = useNavigate();
   const { isAdmin, isMember } = usePermissions();
   const [definitionOpen, setDefinitionOpen] = useState(false);
 
-  const isFlow = type === "flow";
+  const isFlow = type === "agent";
   const isMutable = isAdmin && !isBuiltIn && !isHistoricalVersion && isOwned;
 
   if (!isFlow && !manifest) return null;
@@ -153,10 +153,10 @@ export function PackageActionsDropdown({
                   {t("schedule.titleNew")}
                 </DropdownMenuItem>
               )}
-              {isAdmin && hasExecutions && onDeleteExecutions && (
+              {isAdmin && hasRuns && onDeleteExecutions && (
                 <DropdownMenuItem
                   onSelect={onDeleteExecutions}
-                  disabled={runningExecutions > 0}
+                  disabled={runningRuns > 0}
                   className="text-destructive focus:text-destructive"
                 >
                   <Trash2 size={14} />
@@ -196,7 +196,7 @@ export function PackageActionsDropdown({
               {isFlow && onDeleteFlow && (
                 <DropdownMenuItem
                   onSelect={onDeleteFlow}
-                  disabled={runningExecutions > 0}
+                  disabled={runningRuns > 0}
                   className="text-destructive focus:text-destructive"
                 >
                   <Trash2 size={14} />

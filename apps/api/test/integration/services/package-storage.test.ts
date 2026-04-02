@@ -5,10 +5,10 @@ import { buildMinimalZip, unzipAndNormalize } from "../../../src/services/packag
 
 describe("package-storage integration", () => {
   const sampleManifest = {
-    name: "test-flow",
+    name: "test-agent",
     version: "1.0.0",
-    type: "flow",
-    description: "A test flow",
+    type: "agent",
+    description: "A test agent",
   };
   const sampleContent = "# Hello World\n\nThis is a test prompt.";
 

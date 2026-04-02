@@ -5,7 +5,7 @@ Demonstrates how to interact with the Appstrate API programmatically using API k
 ## Prerequisites
 
 1. A running Appstrate instance (see [self-hosting example](../self-hosting/))
-2. An account with at least one configured flow
+2. An account with at least one configured agent
 3. An API key created from the dashboard (Settings > API Keys)
 
 API keys use the `ask_` prefix and are sent via the `Authorization: Bearer` header.
@@ -14,7 +14,7 @@ API keys use the `ask_` prefix and are sent via the `Authorization: Bearer` head
 
 From the dashboard, navigate to **Settings > API Keys** and create a new key. Copy the key -- it is only shown once.
 
-## Run a Flow
+## Run an Agent
 
 ### With curl
 
@@ -23,23 +23,23 @@ From the dashboard, navigate to **Settings > API Keys** and create a new key. Co
 APPSTRATE_URL="http://localhost:3000"
 API_KEY="ask_your_api_key_here"
 ORG_ID="your_org_id"
-FLOW_ID="your_flow_id"
+AGENT_ID="your_agent_id"
 
-# Trigger a flow execution
-curl -X POST "$APPSTRATE_URL/api/flows/$FLOW_ID/run" \
+# Trigger an agent run
+curl -X POST "$APPSTRATE_URL/api/agents/$AGENT_ID/run" \
   -H "Authorization: Bearer $API_KEY" \
   -H "X-Org-Id: $ORG_ID" \
   -H "Content-Type: application/json" \
   -d '{"input": {"message": "Hello from the API"}}'
 ```
 
-The response is a Server-Sent Events (SSE) stream. Each event contains execution logs in real time.
+The response is a Server-Sent Events (SSE) stream. Each event contains run logs in real time.
 
 ### With curl (SSE stream)
 
 ```bash
-# Stream execution logs in real time
-curl -N -X POST "$APPSTRATE_URL/api/flows/$FLOW_ID/run" \
+# Stream run logs in real time
+curl -N -X POST "$APPSTRATE_URL/api/agents/$AGENT_ID/run" \
   -H "Authorization: Bearer $API_KEY" \
   -H "X-Org-Id: $ORG_ID" \
   -H "Content-Type: application/json" \
@@ -50,13 +50,13 @@ The `-N` flag disables buffering so you see events as they arrive.
 
 ## Poll for Results
 
-If you prefer polling over SSE, you can check the execution status:
+If you prefer polling over SSE, you can check the run status:
 
 ```bash
-EXECUTION_ID="exec_id_from_run_response"
+RUN_ID="run_id_from_run_response"
 
-# Get execution status and result
-curl "$APPSTRATE_URL/api/executions/$EXECUTION_ID" \
+# Get run status and result
+curl "$APPSTRATE_URL/api/runs/$RUN_ID" \
   -H "Authorization: Bearer $API_KEY" \
   -H "X-Org-Id: $ORG_ID"
 ```
@@ -69,11 +69,11 @@ Possible status values: `pending`, `running`, `success`, `failed`, `timeout`, `c
 const APPSTRATE_URL = "http://localhost:3000";
 const API_KEY = "ask_your_api_key_here";
 const ORG_ID = "your_org_id";
-const FLOW_ID = "your_flow_id";
+const AGENT_ID = "your_agent_id";
 
-// Run a flow and read the SSE stream
-async function runFlow(input) {
-  const response = await fetch(`${APPSTRATE_URL}/api/flows/${FLOW_ID}/run`, {
+// Run an agent and read the SSE stream
+async function runAgent(input) {
+  const response = await fetch(`${APPSTRATE_URL}/api/agents/${AGENT_ID}/run`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${API_KEY}`,
@@ -110,9 +110,9 @@ async function runFlow(input) {
   }
 }
 
-// Poll execution status
-async function getExecution(executionId) {
-  const response = await fetch(`${APPSTRATE_URL}/api/executions/${executionId}`, {
+// Poll run status
+async function getRun(runId) {
+  const response = await fetch(`${APPSTRATE_URL}/api/runs/${runId}`, {
     headers: {
       Authorization: `Bearer ${API_KEY}`,
       "X-Org-Id": ORG_ID,
@@ -128,15 +128,15 @@ async function getExecution(executionId) {
 }
 
 // Usage
-runFlow({ message: "Hello from JavaScript" }).catch(console.error);
+runAgent({ message: "Hello from JavaScript" }).catch(console.error);
 ```
 
 ## End-User Impersonation
 
-When building applications on top of Appstrate, use the `Appstrate-User` header to associate executions with your end-users:
+When building applications on top of Appstrate, use the `Appstrate-User` header to associate runs with your end-users:
 
 ```bash
-curl -X POST "$APPSTRATE_URL/api/flows/$FLOW_ID/run" \
+curl -X POST "$APPSTRATE_URL/api/agents/$AGENT_ID/run" \
   -H "Authorization: Bearer $API_KEY" \
   -H "X-Org-Id: $ORG_ID" \
   -H "Appstrate-User: eu_your_end_user_id" \
@@ -155,7 +155,7 @@ All errors follow [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) (`applicati
   "type": "https://appstrate.com/problems/not-found",
   "title": "Not Found",
   "status": 404,
-  "detail": "Flow not found"
+  "detail": "Agent not found"
 }
 ```
 

@@ -40,7 +40,7 @@ export function ProviderConnectionCard({
   readOnly: readOnlyProp,
   viewProfileId,
 }: ProviderConnectionCardProps) {
-  const { t } = useTranslation(["settings", "flows"]);
+  const { t } = useTranslation(["settings", "agents"]);
 
   const {
     userProfiles,

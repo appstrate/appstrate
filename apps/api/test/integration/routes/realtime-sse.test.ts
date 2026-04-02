@@ -4,9 +4,9 @@
  * Integration tests for SSE realtime routes.
  *
  * Tests the actual HTTP SSE format returned by the three realtime endpoints:
- *   - GET /api/realtime/executions/:id
- *   - GET /api/realtime/flows/:packageId/executions
- *   - GET /api/realtime/executions
+ *   - GET /api/realtime/runs/:id
+ *   - GET /api/realtime/agents/:packageId/runs
+ *   - GET /api/realtime/runs
  *
  * These tests verify the full pipeline: HTTP request -> auth -> SSE stream -> PG NOTIFY -> event delivery.
  * The underlying subscriber logic is already tested in services/realtime.test.ts.
@@ -15,7 +15,7 @@ import { describe, expect, it, beforeEach, beforeAll } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedFlow, seedExecution } from "../../helpers/seed.ts";
+import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { sql } from "drizzle-orm";
 import { initRealtime } from "../../../src/services/realtime.ts";
 import { collectSSEEvents } from "../../helpers/sse.ts";
@@ -54,8 +54,8 @@ async function sseRequest(
 
 describe("realtime SSE routes (integration)", () => {
   let ctx: TestContext;
-  let flowPkg: Awaited<ReturnType<typeof seedFlow>>;
-  let execution: Awaited<ReturnType<typeof seedExecution>>;
+  let agentPkg: Awaited<ReturnType<typeof seedAgent>>;
+  let run: Awaited<ReturnType<typeof seedRun>>;
 
   beforeAll(async () => {
     await initRealtime();
@@ -64,15 +64,15 @@ describe("realtime SSE routes (integration)", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext();
-    flowPkg = await seedFlow({ orgId: ctx.orgId });
-    execution = await seedExecution({ packageId: flowPkg.id, orgId: ctx.orgId });
+    agentPkg = await seedAgent({ orgId: ctx.orgId });
+    run = await seedRun({ packageId: agentPkg.id, orgId: ctx.orgId });
   });
 
-  // ── GET /api/realtime/executions/:id ────────────────────────
+  // ── GET /api/realtime/runs/:id ────────────────────────
 
-  describe("GET /api/realtime/executions/:id", () => {
+  describe("GET /api/realtime/runs/:id", () => {
     it("returns SSE content-type header", async () => {
-      const res = await sseRequest(`/api/realtime/executions/${execution.id}`, ctx);
+      const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
       expect(res.status).toBe(200);
       const contentType = res.headers.get("content-type");
       expect(contentType).toContain("text/event-stream");
@@ -81,7 +81,7 @@ describe("realtime SSE routes (integration)", () => {
     });
 
     it("receives execution_update events in SSE format", async () => {
-      const res = await sseRequest(`/api/realtime/executions/${execution.id}`, ctx);
+      const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
       expect(res.status).toBe(200);
       expect(res.body).not.toBeNull();
 
@@ -89,9 +89,9 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("execution_update", {
         org_id: ctx.orgId,
-        id: execution.id,
+        id: run.id,
         status: "running",
-        package_id: flowPkg.id,
+        package_id: agentPkg.id,
       });
 
       // Collect: first event should be ping (from keep-alive), then our execution_update
@@ -104,14 +104,14 @@ describe("realtime SSE routes (integration)", () => {
       expect(events[0]!.event).toBe("execution_update");
 
       const data = JSON.parse(events[0]!.data);
-      expect(data.id).toBe(execution.id);
+      expect(data.id).toBe(run.id);
       expect(data.status).toBe("running");
       expect(data.orgId).toBe(ctx.orgId);
-      expect(data.packageId).toBe(flowPkg.id);
+      expect(data.packageId).toBe(agentPkg.id);
     });
 
     it("receives ping as first event", async () => {
-      const res = await sseRequest(`/api/realtime/executions/${execution.id}`, ctx);
+      const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
       expect(res.body).not.toBeNull();
 
       // The first event from the SSE stream should be a ping (keep-alive)
@@ -122,40 +122,40 @@ describe("realtime SSE routes (integration)", () => {
     });
 
     it("returns 401 without cookie", async () => {
-      const res = await app.request(`/api/realtime/executions/${execution.id}?orgId=${ctx.orgId}`);
+      const res = await app.request(`/api/realtime/runs/${run.id}?orgId=${ctx.orgId}`);
       expect(res.status).toBe(401);
     });
 
     it("returns 401 without orgId query param", async () => {
-      const res = await app.request(`/api/realtime/executions/${execution.id}`, {
+      const res = await app.request(`/api/realtime/runs/${run.id}`, {
         headers: { Cookie: ctx.cookie },
       });
       expect(res.status).toBe(401);
     });
 
-    it("filters events by executionId — ignores other executions", async () => {
-      const otherExec = await seedExecution({ packageId: flowPkg.id, orgId: ctx.orgId });
+    it("filters events by runId — ignores other runs", async () => {
+      const otherExec = await seedRun({ packageId: agentPkg.id, orgId: ctx.orgId });
 
-      const res = await sseRequest(`/api/realtime/executions/${execution.id}`, ctx);
+      const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
 
-      // Fire event for a different execution — should be filtered out
+      // Fire event for a different run — should be filtered out
       await pgNotify("execution_update", {
         org_id: ctx.orgId,
         id: otherExec.id,
         status: "running",
-        package_id: flowPkg.id,
+        package_id: agentPkg.id,
       });
       await wait();
 
-      // Fire event for the target execution — should be received
+      // Fire event for the target run — should be received
       await pgNotify("execution_update", {
         org_id: ctx.orgId,
-        id: execution.id,
+        id: run.id,
         status: "success",
-        package_id: flowPkg.id,
+        package_id: agentPkg.id,
       });
 
       const events = await collectSSEEvents(res.body!, 1, {
@@ -166,20 +166,20 @@ describe("realtime SSE routes (integration)", () => {
       expect(events[0]!.event).toBe("execution_update");
 
       const data = JSON.parse(events[0]!.data);
-      expect(data.id).toBe(execution.id);
+      expect(data.id).toBe(run.id);
       expect(data.status).toBe("success");
     });
 
     it("non-verbose mode strips result field from execution_update", async () => {
-      const res = await sseRequest(`/api/realtime/executions/${execution.id}`, ctx);
+      const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
       await pgNotify("execution_update", {
         org_id: ctx.orgId,
-        id: execution.id,
+        id: run.id,
         status: "success",
-        package_id: flowPkg.id,
+        package_id: agentPkg.id,
         result: { some: "large-data" },
       });
 
@@ -190,17 +190,17 @@ describe("realtime SSE routes (integration)", () => {
       const data = JSON.parse(events[0]!.data);
       // stripPayload removes "result" for execution_update in non-verbose mode
       expect(data).not.toHaveProperty("result");
-      expect(data.id).toBe(execution.id);
+      expect(data.id).toBe(run.id);
     });
 
     it("non-verbose mode strips data field from execution_log", async () => {
-      const res = await sseRequest(`/api/realtime/executions/${execution.id}`, ctx);
+      const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
       await pgNotify("execution_log_insert", {
         org_id: ctx.orgId,
-        execution_id: execution.id,
+        execution_id: run.id,
         level: "info",
         message: "processing",
         data: { verbose: "details" },
@@ -219,15 +219,15 @@ describe("realtime SSE routes (integration)", () => {
     });
 
     it("verbose mode includes all fields", async () => {
-      const res = await sseRequest(`/api/realtime/executions/${execution.id}?verbose=true`, ctx);
+      const res = await sseRequest(`/api/realtime/runs/${run.id}?verbose=true`, ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
       await pgNotify("execution_update", {
         org_id: ctx.orgId,
-        id: execution.id,
+        id: run.id,
         status: "success",
-        package_id: flowPkg.id,
+        package_id: agentPkg.id,
         result: { output: "data" },
       });
 
@@ -238,17 +238,17 @@ describe("realtime SSE routes (integration)", () => {
       const data = JSON.parse(events[0]!.data);
       // In verbose mode, result is NOT stripped
       expect(data.result).toEqual({ output: "data" });
-      expect(data.id).toBe(execution.id);
+      expect(data.id).toBe(run.id);
     });
 
     it("verbose mode includes data field for execution_log", async () => {
-      const res = await sseRequest(`/api/realtime/executions/${execution.id}?verbose=true`, ctx);
+      const res = await sseRequest(`/api/realtime/runs/${run.id}?verbose=true`, ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
       await pgNotify("execution_log_insert", {
         org_id: ctx.orgId,
-        execution_id: execution.id,
+        execution_id: run.id,
         level: "info",
         message: "step completed",
         data: { detail: "full-info" },
@@ -265,12 +265,12 @@ describe("realtime SSE routes (integration)", () => {
     });
   });
 
-  // ── GET /api/realtime/flows/:packageId/executions ───────────
+  // ── GET /api/realtime/agents/:packageId/runs ───────────
 
-  describe("GET /api/realtime/flows/:packageId/executions", () => {
-    it("receives flow-scoped execution events", async () => {
+  describe("GET /api/realtime/agents/:packageId/runs", () => {
+    it("receives agent-scoped run events", async () => {
       const res = await sseRequest(
-        `/api/realtime/flows/${encodeURIComponent(flowPkg.id)}/executions`,
+        `/api/realtime/agents/${encodeURIComponent(agentPkg.id)}/runs`,
         ctx,
       );
       expect(res.status).toBe(200);
@@ -279,9 +279,9 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("execution_update", {
         org_id: ctx.orgId,
-        id: execution.id,
+        id: run.id,
         status: "running",
-        package_id: flowPkg.id,
+        package_id: agentPkg.id,
       });
 
       const events = await collectSSEEvents(res.body!, 1, {
@@ -292,22 +292,22 @@ describe("realtime SSE routes (integration)", () => {
       expect(events[0]!.event).toBe("execution_update");
 
       const data = JSON.parse(events[0]!.data);
-      expect(data.packageId).toBe(flowPkg.id);
-      expect(data.id).toBe(execution.id);
+      expect(data.packageId).toBe(agentPkg.id);
+      expect(data.id).toBe(run.id);
     });
 
-    it("ignores events from other flows", async () => {
-      const otherFlow = await seedFlow({ orgId: ctx.orgId });
+    it("ignores events from other agents", async () => {
+      const otherFlow = await seedAgent({ orgId: ctx.orgId });
 
       const res = await sseRequest(
-        `/api/realtime/flows/${encodeURIComponent(flowPkg.id)}/executions`,
+        `/api/realtime/agents/${encodeURIComponent(agentPkg.id)}/runs`,
         ctx,
       );
       expect(res.body).not.toBeNull();
 
       await wait();
 
-      // Fire event for a different flow — should be filtered
+      // Fire event for a different agent — should be filtered
       await pgNotify("execution_update", {
         org_id: ctx.orgId,
         id: "exec-other",
@@ -316,12 +316,12 @@ describe("realtime SSE routes (integration)", () => {
       });
       await wait();
 
-      // Fire event for the target flow — should be received
+      // Fire event for the target agent — should be received
       await pgNotify("execution_update", {
         org_id: ctx.orgId,
-        id: execution.id,
+        id: run.id,
         status: "success",
-        package_id: flowPkg.id,
+        package_id: agentPkg.id,
       });
 
       const events = await collectSSEEvents(res.body!, 1, {
@@ -331,31 +331,31 @@ describe("realtime SSE routes (integration)", () => {
       expect(events.length).toBe(1);
 
       const data = JSON.parse(events[0]!.data);
-      expect(data.packageId).toBe(flowPkg.id);
+      expect(data.packageId).toBe(agentPkg.id);
     });
 
     it("returns 401 without auth", async () => {
       const res = await app.request(
-        `/api/realtime/flows/${encodeURIComponent(flowPkg.id)}/executions?orgId=${ctx.orgId}`,
+        `/api/realtime/agents/${encodeURIComponent(agentPkg.id)}/runs?orgId=${ctx.orgId}`,
       );
       expect(res.status).toBe(401);
     });
   });
 
-  // ── GET /api/realtime/executions ────────────────────────────
+  // ── GET /api/realtime/runs ────────────────────────────
 
-  describe("GET /api/realtime/executions", () => {
-    it("receives all org execution events", async () => {
-      const res = await sseRequest("/api/realtime/executions", ctx);
+  describe("GET /api/realtime/runs", () => {
+    it("receives all org run events", async () => {
+      const res = await sseRequest("/api/realtime/runs", ctx);
       expect(res.status).toBe(200);
       expect(res.body).not.toBeNull();
 
       await wait();
       await pgNotify("execution_update", {
         org_id: ctx.orgId,
-        id: execution.id,
+        id: run.id,
         status: "running",
-        package_id: flowPkg.id,
+        package_id: agentPkg.id,
       });
 
       const events = await collectSSEEvents(res.body!, 1, {
@@ -366,21 +366,21 @@ describe("realtime SSE routes (integration)", () => {
       expect(events[0]!.event).toBe("execution_update");
     });
 
-    it("receives events from multiple flows", async () => {
-      const flow2 = await seedFlow({ orgId: ctx.orgId });
-      const exec2 = await seedExecution({ packageId: flow2.id, orgId: ctx.orgId });
+    it("receives events from multiple agents", async () => {
+      const flow2 = await seedAgent({ orgId: ctx.orgId });
+      const exec2 = await seedRun({ packageId: flow2.id, orgId: ctx.orgId });
 
-      const res = await sseRequest("/api/realtime/executions", ctx);
+      const res = await sseRequest("/api/realtime/runs", ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
 
-      // Fire events for two different flows
+      // Fire events for two different agents
       await pgNotify("execution_update", {
         org_id: ctx.orgId,
-        id: execution.id,
+        id: run.id,
         status: "running",
-        package_id: flowPkg.id,
+        package_id: agentPkg.id,
       });
       await wait(50);
       await pgNotify("execution_update", {
@@ -397,12 +397,12 @@ describe("realtime SSE routes (integration)", () => {
       expect(events.length).toBe(2);
 
       const ids = events.map((e) => JSON.parse(e.data).id);
-      expect(ids).toContain(execution.id);
+      expect(ids).toContain(run.id);
       expect(ids).toContain(exec2.id);
     });
 
     it("returns 401 without auth", async () => {
-      const res = await app.request("/api/realtime/executions");
+      const res = await app.request("/api/realtime/runs");
       expect(res.status).toBe(401);
     });
   });
@@ -431,13 +431,13 @@ describe("realtime SSE routes (integration)", () => {
     });
 
     it("authenticates with valid API key in token query param", async () => {
-      const res = await app.request(`/api/realtime/executions?token=${apiKeyRaw}`);
+      const res = await app.request(`/api/realtime/runs?token=${apiKeyRaw}`);
       expect(res.status).toBe(200);
       expect(res.headers.get("Content-Type")).toContain("text/event-stream");
     });
 
     it("returns 401 with invalid API key", async () => {
-      const res = await app.request(`/api/realtime/executions?token=ask_invalid_key`);
+      const res = await app.request(`/api/realtime/runs?token=ask_invalid_key`);
       expect(res.status).toBe(401);
     });
   });
@@ -448,11 +448,11 @@ describe("realtime SSE routes (integration)", () => {
     it("org B SSE does not receive org A events", async () => {
       // Create a second org context
       const ctxB = await createTestContext();
-      const flowB = await seedFlow({ orgId: ctxB.orgId });
-      await seedExecution({ packageId: flowB.id, orgId: ctxB.orgId });
+      const flowB = await seedAgent({ orgId: ctxB.orgId });
+      await seedRun({ packageId: flowB.id, orgId: ctxB.orgId });
 
-      // Open SSE for org B (all executions)
-      const resB = await sseRequest("/api/realtime/executions", ctxB);
+      // Open SSE for org B (all runs)
+      const resB = await sseRequest("/api/realtime/runs", ctxB);
       expect(resB.body).not.toBeNull();
 
       await wait();
@@ -460,9 +460,9 @@ describe("realtime SSE routes (integration)", () => {
       // Fire event for org A — org B should NOT receive it
       await pgNotify("execution_update", {
         org_id: ctx.orgId,
-        id: execution.id,
+        id: run.id,
         status: "running",
-        package_id: flowPkg.id,
+        package_id: agentPkg.id,
       });
       await wait();
 

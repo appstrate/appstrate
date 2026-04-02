@@ -10,7 +10,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedConnectionProfile, seedFlow, seedPackage } from "../../helpers/seed.ts";
+import { seedConnectionProfile, seedAgent, seedPackage } from "../../helpers/seed.ts";
 import { providerCredentials } from "@appstrate/db/schema";
 
 const app = getTestApp();
@@ -241,23 +241,23 @@ describe("Connection Profiles API", () => {
   });
 
   describe("GET /api/connection-profiles/org/:id/flows", () => {
-    it("returns flows configured with the org profile", async () => {
+    it("returns agents configured with the org profile", async () => {
       const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Prod Profile" });
-      await seedFlow({
-        id: "@testorg/linked-flow",
+      await seedAgent({
+        id: "@testorg/linked-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
-          name: "@testorg/linked-flow",
+          name: "@testorg/linked-agent",
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "Test",
-          displayName: "Linked Flow",
+          displayName: "Linked Agent",
         },
       });
 
-      // Set org profile on the flow
-      const setRes = await app.request("/api/flows/@testorg/linked-flow/org-profile", {
+      // Set org profile on the agent
+      const setRes = await app.request("/api/agents/@testorg/linked-agent/org-profile", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ orgProfileId: orgProfile.id }),
@@ -272,11 +272,11 @@ describe("Connection Profiles API", () => {
       const body = (await res.json()) as any;
       expect(body.flows).toBeArray();
       expect(body.flows).toHaveLength(1);
-      expect(body.flows[0].id).toBe("@testorg/linked-flow");
-      expect(body.flows[0].displayName).toBe("Linked Flow");
+      expect(body.flows[0].id).toBe("@testorg/linked-agent");
+      expect(body.flows[0].displayName).toBe("Linked Agent");
     });
 
-    it("returns empty array when no flows use the profile", async () => {
+    it("returns empty array when no agents use the profile", async () => {
       const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Unused" });
 
       const res = await app.request(`/api/connection-profiles/org/${orgProfile.id}/flows`, {

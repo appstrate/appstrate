@@ -22,7 +22,7 @@ export class PiAdapter implements ExecutionAdapter {
   }
 
   async *execute(
-    executionId: string,
+    runId: string,
     ctx: PromptContext,
     timeout: number,
     flowPackage?: Buffer,
@@ -40,7 +40,7 @@ export class PiAdapter implements ExecutionAdapter {
 
     try {
       // Phase 1: Create isolation boundary
-      boundary = await orchestrator.createIsolationBoundary(executionId);
+      boundary = await orchestrator.createIsolationBoundary(runId);
 
       // Resolve LLM config for sidecar proxy
       const llmApiKey = llmConfig.apiKey;
@@ -123,10 +123,10 @@ export class PiAdapter implements ExecutionAdapter {
 
       // Phase 2: Setup sidecar + create agent (parallel)
       const [sidecar, agent] = await Promise.all([
-        orchestrator.createSidecar(executionId, boundary, sidecarConfig),
+        orchestrator.createSidecar(runId, boundary, sidecarConfig),
         orchestrator.createWorkload(
           {
-            executionId,
+            runId,
             role: "agent",
             image: getEnv().PI_IMAGE,
             env: containerEnv,
@@ -146,7 +146,7 @@ export class PiAdapter implements ExecutionAdapter {
         orchestrator,
         handle: agent,
         adapterName: "pi",
-        executionId,
+        runId,
         timeout,
         extraData: { api: llmConfig.api, model: modelId },
         signal,

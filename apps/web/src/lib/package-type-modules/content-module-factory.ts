@@ -2,7 +2,7 @@
 
 import type { PackageTypeModule, PackageFormState, ContentPackageInput } from "./index";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
-import { manifestToMetadata, metadataToManifestPatch } from "../../components/flow-editor/utils";
+import { manifestToMetadata, metadataToManifestPatch } from "../../components/agent-editor/utils";
 
 /**
  * Factory for skill/tool modules — they share identical logic

@@ -106,7 +106,7 @@ async function createRawContainer(
       },
       Labels: {
         "appstrate.managed": "true",
-        "appstrate.execution": `test-${uid()}`,
+        "appstrate.run": `test-${uid()}`,
         "appstrate.adapter": "test",
         ...opts.labels,
       },
@@ -146,9 +146,9 @@ describe("createContainer", () => {
   it(
     "creates a container and returns its ID",
     async () => {
-      const executionId = `test-${uid()}`;
+      const runId = `test-${uid()}`;
       const id = await createContainer(
-        executionId,
+        runId,
         {},
         {
           image: IMAGE,
@@ -166,9 +166,9 @@ describe("createContainer", () => {
   it(
     "sets custom labels on the container",
     async () => {
-      const executionId = `test-${uid()}`;
+      const runId = `test-${uid()}`;
       const id = await createContainer(
-        executionId,
+        runId,
         {},
         {
           image: IMAGE,
@@ -182,7 +182,7 @@ describe("createContainer", () => {
       const data = (await res.json()) as any;
       expect(data.Config.Labels["test.custom"]).toBe("myvalue");
       expect(data.Config.Labels["appstrate.managed"]).toBe("true");
-      expect(data.Config.Labels["appstrate.execution"]).toBe(executionId);
+      expect(data.Config.Labels["appstrate.run"]).toBe(runId);
       expect(data.Config.Labels["appstrate.adapter"]).toBe("test");
     },
     TIMEOUT,
@@ -191,9 +191,9 @@ describe("createContainer", () => {
   it(
     "passes environment variables to the container",
     async () => {
-      const executionId = `test-${uid()}`;
+      const runId = `test-${uid()}`;
       const id = await createContainer(
-        executionId,
+        runId,
         { MY_VAR: "hello", OTHER: "world" },
         { image: IMAGE, adapterName: "test" },
       );
@@ -211,10 +211,10 @@ describe("createContainer", () => {
   it(
     "throws on invalid image",
     async () => {
-      const executionId = `test-${uid()}`;
-      await expect(
-        createContainer(executionId, {}, { image: "", adapterName: "test" }),
-      ).rejects.toThrow("Docker create test container failed");
+      const runId = `test-${uid()}`;
+      await expect(createContainer(runId, {}, { image: "", adapterName: "test" })).rejects.toThrow(
+        "Docker create test container failed",
+      );
     },
     TIMEOUT,
   );

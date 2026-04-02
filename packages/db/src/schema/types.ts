@@ -8,7 +8,7 @@ import type {
   packageDistTags,
   packageVersionDependencies,
 } from "./packages.ts";
-import type { executions, executionLogs, packageSchedules } from "./executions.ts";
+import type { runs, runLogs, packageSchedules } from "./runs.ts";
 import type { connectionProfiles, orgProfileProviderBindings } from "./connections.ts";
 import type { applications, endUsers } from "./applications.ts";
 
@@ -24,9 +24,9 @@ export type PackageVersionDependency = InferSelectModel<typeof packageVersionDep
 
 export type PackageSchedule = InferSelectModel<typeof packageSchedules>;
 
-export type Execution = InferSelectModel<typeof executions>;
+export type Run = InferSelectModel<typeof runs>;
 
-export type ExecutionLog = InferSelectModel<typeof executionLogs>;
+export type RunLog = InferSelectModel<typeof runLogs>;
 
 export type ConnectionProfile = InferSelectModel<typeof connectionProfiles>;
 

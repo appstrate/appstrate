@@ -107,11 +107,11 @@ export interface CreateContainerOptions {
 }
 
 export async function createContainer(
-  executionId: string,
+  runId: string,
   envVars: Record<string, string>,
   options: CreateContainerOptions,
 ): Promise<string> {
-  const containerName = `appstrate-${options.adapterName}-${executionId}`;
+  const containerName = `appstrate-${options.adapterName}-${runId}`;
 
   const env = Object.entries(envVars).map(([k, v]) => `${k}=${v}`);
 
@@ -144,7 +144,7 @@ export async function createContainer(
       EndpointsConfig: Object.keys(networkingConfig).length > 0 ? networkingConfig : undefined,
     },
     Labels: {
-      "appstrate.execution": executionId,
+      "appstrate.run": runId,
       "appstrate.adapter": options.adapterName,
       "appstrate.managed": "true",
       ...options.labels,
@@ -367,12 +367,12 @@ export async function stopContainer(containerId: string, timeout = 5): Promise<v
  * Stop all containers belonging to an execution, identified by label.
  * Returns "stopped" if any containers were found, "not_found" otherwise.
  */
-export async function stopContainersByExecution(
-  executionId: string,
+export async function stopContainersByRun(
+  runId: string,
   timeout = 5,
 ): Promise<"stopped" | "not_found"> {
   const filters = JSON.stringify({
-    label: [`appstrate.execution=${executionId}`, "appstrate.managed=true"],
+    label: [`appstrate.run=${runId}`, "appstrate.managed=true"],
   });
   const res = await dockerFetch(`/containers/json?filters=${encodeURIComponent(filters)}`);
   if (!res.ok) return "not_found";
@@ -485,7 +485,7 @@ export async function cleanupOrphanedContainers(): Promise<{
 
 /**
  * List all Docker networks matching `appstrate-exec-*` or `appstrate-sidecar-pool` and remove them.
- * This is safe to call at startup because no executions should be running.
+ * This is safe to call at startup because no runs should be running.
  */
 async function cleanupOrphanedNetworks(): Promise<number> {
   const res = await dockerFetch("/networks");

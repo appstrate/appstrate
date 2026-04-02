@@ -6,7 +6,7 @@ export const schedulesPaths = {
       operationId: "listSchedules",
       tags: ["Schedules"],
       summary: "List all schedules",
-      description: "List all schedules across all flows for the organization.",
+      description: "List all schedules across all agents for the organization.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -28,12 +28,12 @@ export const schedulesPaths = {
       },
     },
   },
-  "/api/flows/{scope}/{name}/schedules": {
+  "/api/agents/{scope}/{name}/schedules": {
     get: {
-      operationId: "listFlowSchedules",
+      operationId: "listAgentSchedules",
       tags: ["Schedules"],
-      summary: "List schedules for a flow",
-      description: "List all cron schedules configured for a specific flow.",
+      summary: "List schedules for an agent",
+      description: "List all cron schedules configured for a specific agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -67,7 +67,7 @@ export const schedulesPaths = {
       operationId: "createSchedule",
       tags: ["Schedules"],
       summary: "Create a schedule",
-      description: "Create a cron schedule for a flow.",
+      description: "Create a cron schedule for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -114,7 +114,7 @@ export const schedulesPaths = {
         },
         "400": {
           description:
-            "Validation error. Possible causes: missing/invalid cron expression, invalid input, or flow has file inputs (cannot be scheduled).",
+            "Validation error. Possible causes: missing/invalid cron expression, invalid input, or agent has file inputs (cannot be scheduled).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -221,12 +221,12 @@ export const schedulesPaths = {
       },
     },
   },
-  "/api/schedules/{id}/executions": {
+  "/api/schedules/{id}/runs": {
     get: {
-      operationId: "listScheduleExecutions",
+      operationId: "listScheduleRuns",
       tags: ["Schedules"],
-      summary: "List executions for a schedule",
-      description: "List recent executions triggered by a specific schedule.",
+      summary: "List runs for a schedule",
+      description: "List recent runs triggered by a specific schedule.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -243,7 +243,7 @@ export const schedulesPaths = {
       ],
       responses: {
         "200": {
-          description: "Paginated execution list",
+          description: "Paginated run list",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -253,13 +253,13 @@ export const schedulesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  executions: {
+                  runs: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/Execution" },
+                    items: { $ref: "#/components/schemas/Run" },
                   },
                   total: { type: "integer" },
                 },
-                required: ["executions", "total"],
+                required: ["runs", "total"],
               },
             },
           },

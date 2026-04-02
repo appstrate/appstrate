@@ -232,10 +232,10 @@ export async function getOrgProfile(
 }
 
 /**
- * Load the org profile configured on a flow, returning null if none configured
+ * Load the org profile configured on an agent, returning null if none configured
  * or if the referenced profile was deleted.
  */
-export async function getFlowOrgProfile(
+export async function getAgentOrgProfile(
   orgId: string,
   packageId: string,
 ): Promise<{ id: string; name: string } | null> {
@@ -340,8 +340,8 @@ export async function listOrgProfilesWithUserBindings(
 
 // ─── Per-Provider Profile Overrides ──────────────────────────
 
-/** Get all per-provider profile overrides for an actor+flow combination. */
-export async function getUserFlowProviderOverrides(
+/** Get all per-provider profile overrides for an actor+agent combination. */
+export async function getUserAgentProviderOverrides(
   actor: Actor,
   packageId: string,
 ): Promise<Record<string, string>> {
@@ -369,7 +369,7 @@ export async function getUserFlowProviderOverrides(
 }
 
 /** Set a per-provider profile override (atomic upsert via raw SQL). */
-export async function setUserFlowProviderOverride(
+export async function setUserAgentProviderOverride(
   actor: Actor,
   packageId: string,
   providerId: string,
@@ -380,13 +380,13 @@ export async function setUserFlowProviderOverride(
   const endUserId = actorValues.endUserId ?? null;
 
   if (!userId && !endUserId) {
-    throw new Error("setUserFlowProviderOverride: exactly one of userId or endUserId must be set");
+    throw new Error("setUserAgentProviderOverride: exactly one of userId or endUserId must be set");
   }
 
   // Atomic upsert — partial unique indexes (idx_ufpp_member / idx_ufpp_end_user)
   // cannot be targeted by Drizzle's onConflictDoUpdate, so we use raw SQL.
   await db.execute(sql`
-    INSERT INTO user_flow_provider_profiles (user_id, end_user_id, package_id, provider_id, profile_id, updated_at)
+    INSERT INTO user_agent_provider_profiles (user_id, end_user_id, package_id, provider_id, profile_id, updated_at)
     VALUES (${userId}, ${endUserId}, ${packageId}, ${providerId}, ${profileId}, NOW())
     ON CONFLICT (${userId !== null ? sql`user_id` : sql`end_user_id`}, package_id, provider_id)
       WHERE ${userId !== null ? sql`user_id IS NOT NULL` : sql`end_user_id IS NOT NULL`}
@@ -395,7 +395,7 @@ export async function setUserFlowProviderOverride(
 }
 
 /** Remove a per-provider profile override (revert to default). */
-export async function removeUserFlowProviderOverride(
+export async function removeUserAgentProviderOverride(
   actor: Actor,
   packageId: string,
   providerId: string,
@@ -418,8 +418,8 @@ export async function getDefaultProfileId(actor: Actor): Promise<string> {
 }
 
 /**
- * Resolve actor profile context for a flow: default profile + per-provider overrides.
- * Used by execution, flow-detail, and internal (sidecar credential proxy) routes.
+ * Resolve actor profile context for an agent: default profile + per-provider overrides.
+ * Used by runs, agent-detail, and internal (sidecar credential proxy) routes.
  *
  * When actor is null (e.g. sidecar with no user), pass fallbackProfileId to skip
  * ensureDefaultProfile and per-provider overrides.
@@ -437,7 +437,7 @@ export async function resolveActorProfileContext(
   }
   const [defaultUserProfileId, userProviderOverrides] = await Promise.all([
     getDefaultProfileId(actor),
-    getUserFlowProviderOverrides(actor, packageId),
+    getUserAgentProviderOverrides(actor, packageId),
   ]);
   return { defaultUserProfileId, userProviderOverrides };
 }
@@ -466,17 +466,17 @@ export async function getProfileByIdUnsafe(profileId: string): Promise<Connectio
  * based on whether the profile is an org profile or a user profile.
  *
  * - Org profile → passed as orgProfileId (bindings loaded), no user fallback
- * - User profile → passed as defaultUserProfileId, flowOrgProfileId as org fallback
+ * - User profile → passed as defaultUserProfileId, agentOrgProfileId as org fallback
  */
 export function resolveScheduleProfileArgs(
   profile: ConnectionProfile,
   connectionProfileId: string,
-  flowOrgProfileId?: string | null,
+  agentOrgProfileId?: string | null,
 ): { defaultUserProfileId: string | null; orgProfileId: string | null } {
   const isOrgProfile = !!profile.orgId;
   return {
     defaultUserProfileId: isOrgProfile ? null : connectionProfileId,
-    orgProfileId: isOrgProfile ? connectionProfileId : (flowOrgProfileId ?? null),
+    orgProfileId: isOrgProfile ? connectionProfileId : (agentOrgProfileId ?? null),
   };
 }
 

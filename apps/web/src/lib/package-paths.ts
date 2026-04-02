@@ -2,12 +2,12 @@
 
 import { PACKAGE_CONFIG, type PackageType } from "../hooks/use-packages";
 
-/** /flows/{id} or /{type}s/{id} */
+/** /agents/{id} or /{type}s/{id} */
 export function packageDetailPath(type: PackageType | string, packageId: string): string {
   return `/${PACKAGE_CONFIG[type as PackageType].path}/${packageId}`;
 }
 
-/** /flows for flows, /{type}s for others */
+/** /agents for agents, /{type}s for others */
 export function packageListPath(type: PackageType | string): string {
   return `/${PACKAGE_CONFIG[type as PackageType].path}`;
 }

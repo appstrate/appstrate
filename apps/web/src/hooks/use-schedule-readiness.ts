@@ -14,8 +14,8 @@ export function useScheduleProviderReadiness(schedule: ScheduleReadinessInput | 
   const isOrgProfile = schedule?.profileType === "org";
   const orgProfileId = isOrgProfile ? schedule?.connectionProfileId : undefined;
 
-  const { data: flowDetail, isLoading: isLoadingFlow } = usePackageDetail(
-    "flow",
+  const { data: agentDetail, isLoading: isLoadingAgent } = usePackageDetail(
+    "agent",
     schedule?.packageId,
   );
   const { data: profileConnections, isLoading: isLoadingConnections } = useProfileConnections(
@@ -23,14 +23,14 @@ export function useScheduleProviderReadiness(schedule: ScheduleReadinessInput | 
   );
   const { data: bindings, isLoading: isLoadingBindings } = useOrgProfileBindings(orgProfileId);
 
-  const flowProviders: string[] =
-    flowDetail?.dependencies?.providers?.map((p: { id: string }) => p.id) ?? [];
+  const agentProviders: string[] =
+    agentDetail?.dependencies?.providers?.map((p: { id: string }) => p.id) ?? [];
 
-  // Still loading if the flow detail or the relevant connection data hasn't arrived
-  const isLoading = isLoadingFlow || (isOrgProfile ? isLoadingBindings : isLoadingConnections);
+  // Still loading if the agent detail or the relevant connection data hasn't arrived
+  const isLoading = isLoadingAgent || (isOrgProfile ? isLoadingBindings : isLoadingConnections);
 
   let connectedCount = 0;
-  for (const pid of flowProviders) {
+  for (const pid of agentProviders) {
     if (isOrgProfile) {
       if (bindings?.find((b) => b.providerId === pid && b.connected)) connectedCount++;
     } else {
@@ -38,8 +38,8 @@ export function useScheduleProviderReadiness(schedule: ScheduleReadinessInput | 
     }
   }
 
-  const totalProviders = flowProviders.length;
+  const totalProviders = agentProviders.length;
   const allReady = totalProviders === 0 || connectedCount === totalProviders;
 
-  return { totalProviders, connectedCount, allReady, flowProviders, isLoading };
+  return { totalProviders, connectedCount, allReady, agentProviders, isLoading };
 }

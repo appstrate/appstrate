@@ -10,21 +10,21 @@ import type { PackageType } from "@appstrate/core/validation";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 
 const emojiMap: Record<PackageType, string> = {
-  flow: "⚡",
+  agent: "⚡",
   skill: "🧠",
   tool: "🔧",
   provider: "🔌",
 };
 
 const breadcrumbNewKeys: Record<PackageType, string> = {
-  flow: "editor.breadcrumbNew",
+  agent: "editor.breadcrumbNew",
   skill: "editor.breadcrumbNewSkill",
   tool: "editor.breadcrumbNewTool",
   provider: "editor.breadcrumbNewProvider",
 };
 
 const listLabelKeys: Record<PackageType, { key: string; ns?: string }> = {
-  flow: { key: "detail.breadcrumb" },
+  agent: { key: "detail.breadcrumb" },
   skill: { key: "packages.type.skills", ns: "settings" },
   tool: { key: "packages.type.tools", ns: "settings" },
   provider: { key: "packages.type.providers", ns: "settings" },
@@ -66,7 +66,7 @@ export function EditorShell({
   hideSubmitBar = false,
   children,
 }: EditorShellProps) {
-  const { t } = useTranslation(["flows", "settings", "common"]);
+  const { t } = useTranslation(["agents", "settings", "common"]);
   const listLabel = listLabelKeys[type];
   const listPath = packageListPath(type);
 

@@ -13,11 +13,11 @@ export function toggleEvent(event: string, setter: Dispatch<SetStateAction<strin
 }
 
 export const WEBHOOK_EVENTS = [
-  "execution.started",
-  "execution.completed",
-  "execution.failed",
-  "execution.timeout",
-  "execution.cancelled",
+  "run.started",
+  "run.completed",
+  "run.failed",
+  "run.timeout",
+  "run.cancelled",
 ] as const;
 
 export function useWebhooks(filters?: { scope?: string; applicationId?: string }) {

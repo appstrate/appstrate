@@ -4,7 +4,7 @@ import { sql as drizzleSql } from "drizzle-orm";
 import type { Db } from "./client.ts";
 
 /**
- * Install NOTIFY trigger functions and triggers on executions and execution_logs tables.
+ * Install NOTIFY trigger functions and triggers on runs and run_logs tables.
  * Safe to call multiple times (uses CREATE OR REPLACE).
  */
 export async function createNotifyTriggers(db: Db): Promise<void> {
@@ -59,20 +59,20 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
 
   // Create triggers (drop first to avoid duplicates)
   await db.execute(drizzleSql`
-    DROP TRIGGER IF EXISTS executions_notify_trigger ON executions
+    DROP TRIGGER IF EXISTS executions_notify_trigger ON runs
   `);
   await db.execute(drizzleSql`
     CREATE TRIGGER executions_notify_trigger
-      AFTER INSERT OR UPDATE ON executions
+      AFTER INSERT OR UPDATE ON runs
       FOR EACH ROW EXECUTE FUNCTION notify_execution_change()
   `);
 
   await db.execute(drizzleSql`
-    DROP TRIGGER IF EXISTS execution_logs_notify_trigger ON execution_logs
+    DROP TRIGGER IF EXISTS execution_logs_notify_trigger ON run_logs
   `);
   await db.execute(drizzleSql`
     CREATE TRIGGER execution_logs_notify_trigger
-      AFTER INSERT ON execution_logs
+      AFTER INSERT ON run_logs
       FOR EACH ROW EXECUTE FUNCTION notify_execution_log_insert()
   `);
 }

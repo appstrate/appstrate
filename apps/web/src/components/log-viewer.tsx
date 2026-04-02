@@ -48,7 +48,7 @@ interface LogViewerProps {
 }
 
 export function LogViewer({ entries }: LogViewerProps) {
-  const { t, i18n } = useTranslation("flows");
+  const { t, i18n } = useTranslation("agents");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [showTimestamps, setShowTimestamps] = useState(false);

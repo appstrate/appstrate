@@ -28,7 +28,7 @@ export function VersionSelector({
   hasDraftChanges,
   currentIsDraft,
 }: VersionSelectorProps) {
-  const { t } = useTranslation("flows");
+  const { t } = useTranslation("agents");
   const navigate = useNavigate();
   const { data: versions } = usePackageVersions(type, packageId);
   const detailPath = packageDetailPath(type, packageId);

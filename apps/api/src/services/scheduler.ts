@@ -13,7 +13,7 @@ import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
 import { createRun, createFailedRun } from "./state/index.ts";
-import { executeFlowInBackground } from "../routes/executions.ts";
+import { executeAgentInBackground } from "../routes/runs.ts";
 import { dispatchWebhookEvents } from "./webhooks.ts";
 import { buildExecutionContext, ModelNotConfiguredError } from "./env-builder.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
@@ -26,7 +26,7 @@ import {
   getProfileByIdUnsafe,
   resolveProviderProfiles,
   resolveScheduleProfileArgs,
-  getFlowOrgProfile,
+  getAgentOrgProfile,
 } from "./connection-profiles.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
@@ -232,8 +232,8 @@ async function triggerScheduledExecution(
   }
 
   try {
-    const flow = await getPackage(packageId, orgId);
-    if (!flow) {
+    const agent = await getPackage(packageId, orgId);
+    if (!agent) {
       logger.warn("Package not found, skipping schedule", { packageId, scheduleId });
       await failSchedule(`Package '${packageId}' not found`);
       return;
@@ -252,12 +252,12 @@ async function triggerScheduledExecution(
 
     const actor: Actor | null = actorFromIds(profile.userId, profile.endUserId);
 
-    // Load the flow's admin-configured org profile (validates it still exists)
-    const flowOrgProfile = await getFlowOrgProfile(orgId, packageId);
+    // Load the agent's admin-configured org profile (validates it still exists)
+    const agentOrgProfile = await getAgentOrgProfile(orgId, packageId);
     const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
       profile,
       connectionProfileId,
-      flowOrgProfile?.id ?? null,
+      agentOrgProfile?.id ?? null,
     );
 
     // Resolve provider profiles, config, and validate readiness (inlined preflight).
@@ -267,7 +267,7 @@ async function triggerScheduledExecution(
     let preflightModelId: string | null;
     let preflightProxyId: string | null;
     try {
-      const manifestProviders = resolveManifestProviders(flow.manifest);
+      const manifestProviders = resolveManifestProviders(agent.manifest);
 
       const [resolvedProfiles, packageConfig] = await Promise.all([
         resolveProviderProfiles(
@@ -281,7 +281,7 @@ async function triggerScheduledExecution(
       ]);
 
       await validateAgentReadiness({
-        agent: flow,
+        agent,
         providerProfiles: resolvedProfiles,
         orgId,
         config: packageConfig.config,
@@ -305,8 +305,8 @@ async function triggerScheduledExecution(
       throw err;
     }
 
-    // Validate input against flow's input schema (schema may have changed since schedule creation)
-    const inputSchema = flow.manifest.input?.schema;
+    // Validate input against agent's input schema (schema may have changed since schedule creation)
+    const inputSchema = agent.manifest.input?.schema;
     if (inputSchema) {
       const inputValidation = validateInput(input, asJSONSchemaObject(inputSchema));
       if (!inputValidation.valid) {
@@ -334,8 +334,8 @@ async function triggerScheduledExecution(
     try {
       ({ promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel } =
         await buildExecutionContext({
-          executionId: runId,
-          flow,
+          runId,
+          agent,
           providerProfiles,
           orgId,
           actor,
@@ -408,7 +408,7 @@ async function triggerScheduledExecution(
     });
 
     // Fire-and-forget (catch to prevent unhandled rejection)
-    executeFlowInBackground(runId, orgId, flow, promptContext, agentPackage).catch((err) => {
+    executeAgentInBackground(runId, orgId, agent, promptContext, agentPackage).catch((err) => {
       logger.error("Unhandled error in scheduled run", {
         runId,
         error: err instanceof Error ? err.message : String(err),
@@ -456,7 +456,7 @@ export async function getSchedule(id: string): Promise<EnrichedSchedule | null> 
   return enriched ?? null;
 }
 
-/** Compute readiness status for a single schedule based on its profile and flow. */
+/** Compute readiness status for a single schedule based on its profile and agent. */
 async function computeScheduleReadiness(
   schedule: Schedule,
   profile: ConnectionProfile | null,

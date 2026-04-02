@@ -2,7 +2,7 @@
 
 export interface WorkloadHandle {
   readonly id: string;
-  readonly executionId: string;
+  readonly runId: string;
   readonly role: string;
 }
 
@@ -18,7 +18,7 @@ export interface InjectableFile {
 }
 
 export interface WorkloadSpec {
-  executionId: string;
+  runId: string;
   role: string;
   image: string;
   env: Record<string, string>;

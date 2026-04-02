@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
 import { ShieldCheck } from "lucide-react";
 import { Badge } from "./status-badge";
-import { RunFlowButton } from "./run-flow-button";
+import { RunAgentButton } from "./run-agent-button";
 import { ProviderIcon } from "./provider-icon";
 import { packageDetailPath } from "../lib/package-paths";
 import { ScrollArea, ScrollBar } from "./ui/scroll-area";
@@ -18,10 +18,10 @@ interface PackageCardProps {
   description?: string | null;
   type: PackageType;
   source?: "system" | "local";
-  runningExecutions?: number;
+  runningRuns?: number;
   keywords?: string[];
   providerIds?: string[];
-  usedByFlows?: number;
+  usedByAgents?: number;
   unreadCount?: number;
   statusBadge?: React.ReactNode;
   actions?: React.ReactNode;
@@ -35,17 +35,17 @@ export function PackageCard({
   description,
   type,
   source,
-  runningExecutions,
+  runningRuns,
   keywords,
   providerIds,
-  usedByFlows,
+  usedByAgents,
   unreadCount,
   statusBadge,
   actions,
   iconUrl,
   autoInstalled,
 }: PackageCardProps) {
-  const { t } = useTranslation(["flows", "settings", "common"]);
+  const { t } = useTranslation(["agents", "settings", "common"]);
   const href = packageDetailPath(type, id);
   const navigate = useNavigate();
   const { data: providersData } = useProviders();
@@ -94,12 +94,10 @@ export function PackageCard({
               {unreadCount > 99 ? "99+" : unreadCount}
             </span>
           )}
-          {type === "flow" && !!runningExecutions && runningExecutions > 0 && (
-            <Badge status="running" />
-          )}
-          {type === "flow" && (
+          {type === "agent" && !!runningRuns && runningRuns > 0 && <Badge status="running" />}
+          {type === "agent" && (
             <div onClick={(e) => e.stopPropagation()}>
-              <RunFlowButton
+              <RunAgentButton
                 packageId={id}
                 variant="ghost"
                 size="icon"
@@ -131,9 +129,9 @@ export function PackageCard({
               {kw}
             </span>
           ))}
-          {type !== "flow" && usedByFlows !== undefined && usedByFlows > 0 && (
+          {type !== "agent" && usedByAgents !== undefined && usedByAgents > 0 && (
             <span className="bg-background text-muted-foreground border-border shrink-0 rounded-full border px-2 py-0.5 text-[0.7rem]">
-              {t("list.usedByFlows", { count: usedByFlows, ns: "flows" })}
+              {t("list.usedByAgents", { count: usedByAgents, ns: "agents" })}
             </span>
           )}
         </div>

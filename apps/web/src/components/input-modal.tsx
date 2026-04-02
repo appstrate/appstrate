@@ -14,12 +14,12 @@ import {
   type SchemaWrapper,
   type JSONSchemaObject,
 } from "@appstrate/core/form";
-import type { FlowDetail } from "@appstrate/shared-types";
+import type { AgentDetail } from "@appstrate/shared-types";
 
 interface InputModalProps {
   open: boolean;
   onClose: () => void;
-  flow: FlowDetail;
+  flow: AgentDetail;
   onSubmit: (input: Record<string, unknown>, files?: Record<string, File[]>) => void;
   isPending?: boolean;
   initialValues?: Record<string, unknown>;
@@ -33,7 +33,7 @@ export function InputModal({
   isPending,
   initialValues,
 }: InputModalProps) {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
 
   const guardedClose = () => {
     if (!isPending) onClose();
@@ -73,13 +73,13 @@ function InputModalForm({
   isPending,
   initialValues,
 }: {
-  flow: FlowDetail;
+  flow: AgentDetail;
   onClose: () => void;
   onSubmit: (input: Record<string, unknown>, files?: Record<string, File[]>) => void;
   isPending?: boolean;
   initialValues?: Record<string, unknown>;
 }) {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const wrapper: SchemaWrapper = flow.input ?? { schema: EMPTY_SCHEMA };
   const schema = wrapper.schema;
 

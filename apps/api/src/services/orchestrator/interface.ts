@@ -23,7 +23,7 @@ export interface ContainerOrchestrator {
   ensureImages(images: string[]): Promise<void>;
 
   /** Create an isolated environment for an execution. Docker: bridge network. K8s: namespace. */
-  createIsolationBoundary(executionId: string): Promise<IsolationBoundary>;
+  createIsolationBoundary(runId: string): Promise<IsolationBoundary>;
 
   /** Remove an isolated environment. Idempotent. */
   removeIsolationBoundary(boundary: IsolationBoundary): Promise<void>;
@@ -34,7 +34,7 @@ export interface ContainerOrchestrator {
    * ExtraHosts, port mapping, health check.
    */
   createSidecar(
-    executionId: string,
+    runId: string,
     boundary: IsolationBoundary,
     config: SidecarConfig,
   ): Promise<WorkloadHandle>;
@@ -58,5 +58,5 @@ export interface ContainerOrchestrator {
   streamLogs(handle: WorkloadHandle, signal?: AbortSignal): AsyncGenerator<string>;
 
   /** Stop ALL workloads for an execution by ID. For cancel. */
-  stopByExecutionId(executionId: string, timeoutSeconds?: number): Promise<StopResult>;
+  stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult>;
 }

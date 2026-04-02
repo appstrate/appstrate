@@ -94,7 +94,7 @@ export interface PromptContext {
 
 export interface ExecutionAdapter {
   execute(
-    executionId: string,
+    runId: string,
     ctx: PromptContext,
     timeout: number,
     flowPackage?: Buffer,

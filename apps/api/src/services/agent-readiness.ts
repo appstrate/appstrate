@@ -6,7 +6,7 @@
  */
 
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
-import { validateFlowDependencies } from "./dependency-validation.ts";
+import { validateAgentDependencies } from "./dependency-validation.ts";
 import { validateConfig } from "./schema.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/shared-types";
@@ -20,7 +20,7 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
  * 1. Empty prompt
  * 2. Missing required skills
  * 3. Missing required tools
- * 4. Provider dependencies (delegates to validateFlowDependencies)
+ * 4. Provider dependencies (delegates to validateAgentDependencies)
  * 5. Config validation (if config provided)
  *
  * Throws ApiError on first validation failure.
@@ -74,7 +74,7 @@ export async function validateAgentReadiness(params: {
 
   // 4. Provider dependencies
   const manifestProviders = resolveManifestProviders(manifest);
-  await validateFlowDependencies(manifestProviders, providerProfiles, orgId);
+  await validateAgentDependencies(manifestProviders, providerProfiles, orgId);
 
   // 5. Config validation
   if (config) {

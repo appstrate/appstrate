@@ -64,7 +64,7 @@ export async function boot(): Promise<void> {
     }),
   ]);
 
-  // Sequential cleanup: orphan executions must be marked before container cleanup,
+  // Sequential cleanup: orphan runs must be marked before container cleanup,
   // and containers must be cleaned before sidecar pool init.
   try {
     const { count, runIds } = await markOrphanRunsFailed();

@@ -9,7 +9,7 @@ import {
 } from "@appstrate/core/form";
 import type { UploadedFile } from "./adapters/types.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
-import { normalizeConfigForValidation } from "../lib/flow-readiness.ts";
+import { normalizeConfigForValidation } from "../lib/agent-readiness-utils.ts";
 
 // --- AJV runtime validation ---
 

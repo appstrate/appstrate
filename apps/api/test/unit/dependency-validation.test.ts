@@ -3,7 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import { ApiError } from "../../src/lib/errors.ts";
 import {
-  validateFlowDependencies,
+  validateAgentDependencies,
   type DependencyValidationDeps,
 } from "../../src/services/dependency-validation.ts";
 import type { ProviderProfileMap } from "../../src/types/index.ts";
@@ -30,13 +30,13 @@ function createMockDeps(overrides?: Partial<DependencyValidationDeps>): Dependen
   };
 }
 
-describe("validateFlowDependencies", () => {
+describe("validateAgentDependencies", () => {
   it("succeeds when all providers are connected with sufficient scopes", async () => {
     const deps = createMockDeps();
     const providers = [{ id: "@test/gmail", scopes: ["read"] }, { id: "@test/clickup" }];
     const profiles = profileMap({ "@test/gmail": "profile-1", "@test/clickup": "profile-2" });
 
-    await validateFlowDependencies(providers, profiles, "org-1", deps);
+    await validateAgentDependencies(providers, profiles, "org-1", deps);
   });
 
   it("throws when provider is not enabled", async () => {
@@ -45,7 +45,7 @@ describe("validateFlowDependencies", () => {
     const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     try {
-      await validateFlowDependencies(providers, profiles, "org-1", deps);
+      await validateAgentDependencies(providers, profiles, "org-1", deps);
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -61,7 +61,7 @@ describe("validateFlowDependencies", () => {
     const profiles: ProviderProfileMap = {};
 
     try {
-      await validateFlowDependencies(providers, profiles, "org-1", deps);
+      await validateAgentDependencies(providers, profiles, "org-1", deps);
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -81,7 +81,7 @@ describe("validateFlowDependencies", () => {
     const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     try {
-      await validateFlowDependencies(providers, profiles, "org-1", deps);
+      await validateAgentDependencies(providers, profiles, "org-1", deps);
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -102,7 +102,7 @@ describe("validateFlowDependencies", () => {
     const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     try {
-      await validateFlowDependencies(providers, profiles, "org-1", deps);
+      await validateAgentDependencies(providers, profiles, "org-1", deps);
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -118,7 +118,7 @@ describe("validateFlowDependencies", () => {
     const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     try {
-      await validateFlowDependencies(providers, profiles, "org-1", deps);
+      await validateAgentDependencies(providers, profiles, "org-1", deps);
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -137,7 +137,7 @@ describe("validateFlowDependencies", () => {
     const providers = [{ id: "@test/gmail" }];
     const profiles = profileMap({ "@test/gmail": "profile-1" });
 
-    await validateFlowDependencies(providers, profiles, "org-1", deps);
+    await validateAgentDependencies(providers, profiles, "org-1", deps);
     expect(scopesCalled).toBe(false);
   });
 
@@ -152,7 +152,7 @@ describe("validateFlowDependencies", () => {
     const providers = [{ id: "@test/gmail", scopes: [] }];
     const profiles = profileMap({ "@test/gmail": "profile-1" });
 
-    await validateFlowDependencies(providers, profiles, "org-1", deps);
+    await validateAgentDependencies(providers, profiles, "org-1", deps);
     expect(scopesCalled).toBe(false);
   });
 
@@ -171,7 +171,7 @@ describe("validateFlowDependencies", () => {
       "@test/stripe": "p3",
     });
 
-    await validateFlowDependencies(providers, profiles, "org-1", deps);
+    await validateAgentDependencies(providers, profiles, "org-1", deps);
     expect(statusCallCount).toBe(3);
   });
 
@@ -186,13 +186,13 @@ describe("validateFlowDependencies", () => {
     const providers = [{ id: "@test/gmail" }, { id: "@test/clickup" }];
     const profiles = profileMap({ "@test/gmail": "p1", "@test/clickup": "p2" });
 
-    await validateFlowDependencies(providers, profiles, "org-1", deps);
+    await validateAgentDependencies(providers, profiles, "org-1", deps);
     expect(enabledCallCount).toBe(2);
   });
 
   it("succeeds with empty providers list", async () => {
     const deps = createMockDeps();
-    await validateFlowDependencies([], {}, "org-1", deps);
+    await validateAgentDependencies([], {}, "org-1", deps);
   });
 
   it("works with org_binding source entries", async () => {
@@ -203,6 +203,6 @@ describe("validateFlowDependencies", () => {
       "@test/gdrive": { profileId: "admin-profile-1", source: "org_binding" },
     };
 
-    await validateFlowDependencies(providers, profiles, "org-1", deps);
+    await validateAgentDependencies(providers, profiles, "org-1", deps);
   });
 });

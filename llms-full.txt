@@ -1,6 +1,6 @@
 # Appstrate — AI Agent Instructions
 
-Appstrate is an open-source platform for executing one-shot AI flows in ephemeral Docker containers. Users connect providers (Gmail, ClickUp, etc.), configure flows, and let AI agents process their data autonomously.
+Appstrate is an open-source platform for running autonomous AI agents in sandboxed Docker containers. Users connect providers (Gmail, ClickUp, etc.), configure agents, and let AI agents process their data autonomously.
 
 ## Build & Development
 

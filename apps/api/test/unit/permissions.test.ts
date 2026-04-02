@@ -14,7 +14,7 @@ describe("resolvePermissions", () => {
     const perms = resolvePermissions("owner");
     expect(perms.has("org:delete")).toBe(true);
     expect(perms.has("members:change-role")).toBe(true);
-    expect(perms.has("flows:write")).toBe(true);
+    expect(perms.has("agents:write")).toBe(true);
     expect(perms.has("billing:manage")).toBe(true);
   });
 
@@ -23,7 +23,7 @@ describe("resolvePermissions", () => {
     expect(perms.has("org:delete")).toBe(false);
     expect(perms.has("members:change-role")).toBe(false);
     expect(perms.has("org:update")).toBe(true);
-    expect(perms.has("flows:write")).toBe(true);
+    expect(perms.has("agents:write")).toBe(true);
     expect(perms.has("members:invite")).toBe(true);
     expect(perms.has("billing:manage")).toBe(true);
   });
@@ -31,27 +31,27 @@ describe("resolvePermissions", () => {
   it("member can read + run flows + manage own connections/schedules", () => {
     const perms = resolvePermissions("member");
     // Can read
-    expect(perms.has("flows:read")).toBe(true);
+    expect(perms.has("agents:read")).toBe(true);
     expect(perms.has("org:read")).toBe(true);
-    expect(perms.has("executions:read")).toBe(true);
+    expect(perms.has("runs:read")).toBe(true);
     // Can run
-    expect(perms.has("flows:run")).toBe(true);
+    expect(perms.has("agents:run")).toBe(true);
     // Can manage connections
     expect(perms.has("connections:connect")).toBe(true);
     expect(perms.has("connections:disconnect")).toBe(true);
     // Can manage schedules
     expect(perms.has("schedules:write")).toBe(true);
     expect(perms.has("schedules:delete")).toBe(true);
-    // Can cancel executions
-    expect(perms.has("executions:cancel")).toBe(true);
+    // Can cancel runs
+    expect(perms.has("runs:cancel")).toBe(true);
     // Can bind org profiles
     expect(perms.has("org-profiles:bind")).toBe(true);
     // Can write end-users
     expect(perms.has("end-users:write")).toBe(true);
     // Cannot write flows
-    expect(perms.has("flows:write")).toBe(false);
-    expect(perms.has("flows:configure")).toBe(false);
-    expect(perms.has("flows:delete")).toBe(false);
+    expect(perms.has("agents:write")).toBe(false);
+    expect(perms.has("agents:configure")).toBe(false);
+    expect(perms.has("agents:delete")).toBe(false);
     // Cannot manage members
     expect(perms.has("members:invite")).toBe(false);
     expect(perms.has("members:remove")).toBe(false);
@@ -66,17 +66,17 @@ describe("resolvePermissions", () => {
   it("viewer can only read", () => {
     const perms = resolvePermissions("viewer");
     // Can read everything visible
-    expect(perms.has("flows:read")).toBe(true);
+    expect(perms.has("agents:read")).toBe(true);
     expect(perms.has("org:read")).toBe(true);
-    expect(perms.has("executions:read")).toBe(true);
+    expect(perms.has("runs:read")).toBe(true);
     expect(perms.has("models:read")).toBe(true);
     expect(perms.has("billing:read")).toBe(true);
     // Cannot do anything else
-    expect(perms.has("flows:write")).toBe(false);
-    expect(perms.has("flows:run")).toBe(false);
+    expect(perms.has("agents:write")).toBe(false);
+    expect(perms.has("agents:run")).toBe(false);
     expect(perms.has("connections:connect")).toBe(false);
     expect(perms.has("schedules:write")).toBe(false);
-    expect(perms.has("executions:cancel")).toBe(false);
+    expect(perms.has("runs:cancel")).toBe(false);
     expect(perms.has("org:update")).toBe(false);
     expect(perms.has("org:delete")).toBe(false);
   });
@@ -91,34 +91,34 @@ describe("resolvePermissions", () => {
 
 describe("hasPermission", () => {
   it("checks exact resource:action match", () => {
-    const perms = new Set(["flows:read", "flows:write"]);
-    expect(hasPermission(perms, "flows", "read")).toBe(true);
-    expect(hasPermission(perms, "flows", "write")).toBe(true);
-    expect(hasPermission(perms, "flows", "delete")).toBe(false);
+    const perms = new Set(["agents:read", "agents:write"]);
+    expect(hasPermission(perms, "agents", "read")).toBe(true);
+    expect(hasPermission(perms, "agents", "write")).toBe(true);
+    expect(hasPermission(perms, "agents", "delete")).toBe(false);
   });
 
   it("returns false for empty set", () => {
     const perms = new Set<string>();
-    expect(hasPermission(perms, "flows", "read")).toBe(false);
+    expect(hasPermission(perms, "agents", "read")).toBe(false);
   });
 });
 
 describe("validateScopes", () => {
   it("filters scopes to creator role permissions + API key allowlist", () => {
-    const scopes = ["flows:read", "flows:write", "flows:run"];
+    const scopes = ["agents:read", "agents:write", "agents:run"];
     // Admin has all three
     const adminResult = validateScopes(scopes, "admin");
-    expect(adminResult).toContain("flows:read");
-    expect(adminResult).toContain("flows:write");
-    expect(adminResult).toContain("flows:run");
+    expect(adminResult).toContain("agents:read");
+    expect(adminResult).toContain("agents:write");
+    expect(adminResult).toContain("agents:run");
   });
 
   it("member cannot get flows:write scope", () => {
-    const scopes = ["flows:read", "flows:write", "flows:run"];
+    const scopes = ["agents:read", "agents:write", "agents:run"];
     const memberResult = validateScopes(scopes, "member");
-    expect(memberResult).toContain("flows:read");
-    expect(memberResult).toContain("flows:run");
-    expect(memberResult).not.toContain("flows:write");
+    expect(memberResult).toContain("agents:read");
+    expect(memberResult).toContain("agents:run");
+    expect(memberResult).not.toContain("agents:write");
   });
 
   it("rejects session-only permissions", () => {
@@ -146,21 +146,27 @@ describe("resolveApiKeyPermissions", () => {
   });
 
   it("scoped key returns intersection with current role", () => {
-    const perms = resolveApiKeyPermissions(["flows:read", "flows:write", "flows:delete"], "admin");
-    expect(perms.has("flows:read")).toBe(true);
-    expect(perms.has("flows:write")).toBe(true);
-    expect(perms.has("flows:delete")).toBe(true);
+    const perms = resolveApiKeyPermissions(
+      ["agents:read", "agents:write", "agents:delete"],
+      "admin",
+    );
+    expect(perms.has("agents:read")).toBe(true);
+    expect(perms.has("agents:write")).toBe(true);
+    expect(perms.has("agents:delete")).toBe(true);
     // Not in the scopes
     expect(perms.has("models:write")).toBe(false);
   });
 
   it("role downgrade reduces effective permissions", () => {
     // Key has admin-level scopes, but creator was downgraded to member
-    const perms = resolveApiKeyPermissions(["flows:read", "flows:write", "flows:delete"], "member");
+    const perms = resolveApiKeyPermissions(
+      ["agents:read", "agents:write", "agents:delete"],
+      "member",
+    );
     // Member has flows:read but not flows:write or flows:delete
-    expect(perms.has("flows:read")).toBe(true);
-    expect(perms.has("flows:write")).toBe(false);
-    expect(perms.has("flows:delete")).toBe(false);
+    expect(perms.has("agents:read")).toBe(true);
+    expect(perms.has("agents:write")).toBe(false);
+    expect(perms.has("agents:delete")).toBe(false);
   });
 });
 
@@ -202,11 +208,11 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
 
   it("includes headless-relevant permissions", () => {
     const included = [
-      "flows:read",
-      "flows:write",
-      "flows:run",
-      "executions:read",
-      "executions:cancel",
+      "agents:read",
+      "agents:write",
+      "agents:run",
+      "runs:read",
+      "runs:cancel",
       "end-users:read",
       "end-users:write",
       "end-users:delete",

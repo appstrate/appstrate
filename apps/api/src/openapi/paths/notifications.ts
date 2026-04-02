@@ -6,7 +6,7 @@ export const notificationsPaths = {
       operationId: "getUnreadNotificationCount",
       tags: ["Notifications"],
       summary: "Get unread notification count",
-      description: "Returns the number of unread execution notifications for the current user.",
+      description: "Returns the number of unread run notifications for the current user.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -31,13 +31,12 @@ export const notificationsPaths = {
       },
     },
   },
-  "/api/notifications/unread-counts-by-flow": {
+  "/api/notifications/unread-counts-by-agent": {
     get: {
-      operationId: "getUnreadCountsByFlow",
+      operationId: "getUnreadCountsByAgent",
       tags: ["Notifications"],
-      summary: "Get unread notification counts grouped by flow",
-      description:
-        "Returns the number of unread execution notifications per flow for the current user.",
+      summary: "Get unread notification counts grouped by agent",
+      description: "Returns the number of unread run notifications per agent for the current user.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -66,15 +65,15 @@ export const notificationsPaths = {
       },
     },
   },
-  "/api/notifications/read/{executionId}": {
+  "/api/notifications/read/{runId}": {
     put: {
       operationId: "markNotificationRead",
       tags: ["Notifications"],
       summary: "Mark a notification as read",
-      description: "Marks the notification for a specific execution as read.",
+      description: "Marks the notification for a specific run as read.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "executionId", in: "path", required: true, schema: { type: "string" } },
+        { name: "runId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -132,13 +131,13 @@ export const notificationsPaths = {
       },
     },
   },
-  "/api/executions": {
+  "/api/runs": {
     get: {
-      operationId: "listExecutions",
+      operationId: "listRuns",
       tags: ["Notifications"],
-      summary: "List executions",
+      summary: "List runs",
       description:
-        "Lists all executions for the organization across all flows, ordered by most recent. Use `?user=me` to filter to the current user's executions only.",
+        "Lists all runs for the organization across all agents, ordered by most recent. Use `?user=me` to filter to the current user's runs only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -146,24 +145,24 @@ export const notificationsPaths = {
           in: "query",
           schema: { type: "string", enum: ["me"] },
           description:
-            "Filter executions by user. `me` returns only the current user's executions. Omit for all org executions.",
+            "Filter runs by user. `me` returns only the current user's runs. Omit for all org runs.",
         },
         {
           name: "limit",
           in: "query",
           schema: { type: "integer", default: 20, maximum: 100 },
-          description: "Maximum number of executions to return",
+          description: "Maximum number of runs to return",
         },
         {
           name: "offset",
           in: "query",
           schema: { type: "integer", default: 0 },
-          description: "Number of executions to skip",
+          description: "Number of runs to skip",
         },
       ],
       responses: {
         "200": {
-          description: "Paginated execution list",
+          description: "Paginated run list",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -173,13 +172,13 @@ export const notificationsPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  executions: {
+                  runs: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/Execution" },
+                    items: { $ref: "#/components/schemas/Run" },
                   },
-                  total: { type: "integer", description: "Total number of executions" },
+                  total: { type: "integer", description: "Total number of runs" },
                 },
-                required: ["executions", "total"],
+                required: ["runs", "total"],
               },
             },
           },

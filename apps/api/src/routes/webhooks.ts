@@ -24,11 +24,11 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { getApplication } from "../services/applications.ts";
 
 const webhookEventsEnum = z.enum([
-  "execution.started",
-  "execution.completed",
-  "execution.failed",
-  "execution.timeout",
-  "execution.cancelled",
+  "run.started",
+  "run.completed",
+  "run.failed",
+  "run.timeout",
+  "run.cancelled",
 ]);
 
 const webhookScopeEnum = z.enum(["organization", "application"]);

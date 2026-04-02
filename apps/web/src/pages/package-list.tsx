@@ -6,8 +6,8 @@ import { Trans, useTranslation } from "react-i18next";
 import { type LucideIcon, Layers } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@/components/ui/button";
-import { useFlows } from "../hooks/use-packages";
-import { useUnreadCountsByFlow } from "../hooks/use-notifications";
+import { useAgents } from "../hooks/use-packages";
+import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { ImportModal } from "../components/import-modal";
@@ -20,10 +20,10 @@ export interface CardItem {
   description?: string | null;
   type: PackageType;
   source?: "system" | "local";
-  runningExecutions?: number;
+  runningRuns?: number;
   keywords?: string[];
   providerIds?: string[];
-  usedByFlows?: number;
+  usedByAgents?: number;
   unreadCount?: number;
   statusBadge?: ReactNode;
   actions?: ReactNode;
@@ -95,19 +95,19 @@ export function PackageTab({
 }
 
 export function PackageList() {
-  const { t } = useTranslation(["flows", "common"]);
-  const { data: flows, isLoading, error } = useFlows();
-  const { data: unreadCounts } = useUnreadCountsByFlow();
+  const { t } = useTranslation(["agents", "common"]);
+  const { data: agents, isLoading, error } = useAgents();
+  const { data: unreadCounts } = useUnreadCountsByAgent();
   const { isAdmin } = usePermissions();
   const [importOpen, setImportOpen] = useState(false);
 
-  const items: CardItem[] | undefined = flows?.map((f) => ({
+  const items: CardItem[] | undefined = agents?.map((f) => ({
     id: f.id,
     displayName: f.displayName,
     description: f.description,
-    type: "flow",
+    type: "agent",
     source: f.source,
-    runningExecutions: f.runningExecutions,
+    runningRuns: f.runningRuns,
     keywords: f.keywords,
     providerIds: f.dependencies.providers,
     unreadCount: unreadCounts?.[f.id],
@@ -134,7 +134,7 @@ export function PackageList() {
               <Button variant="outline" onClick={() => setImportOpen(true)}>
                 {t("nav.import", { ns: "common" })}
               </Button>
-              <Link to="/flows/new">
+              <Link to="/agents/new">
                 <Button>{t("list.create")}</Button>
               </Link>
             </>

@@ -83,30 +83,30 @@ export function useTestProxy() {
   });
 }
 
-export function useFlowProxy(packageId: string | undefined) {
+export function useAgentProxy(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["flow-proxy", orgId, packageId],
+    queryKey: ["agent-proxy", orgId, packageId],
     queryFn: () =>
       api<{ proxyId: string | null; proxyLabel?: string; resolved: boolean }>(
-        `/flows/${packageId}/proxy`,
+        `/agents/${packageId}/proxy`,
       ),
     enabled: !!orgId && !!packageId,
   });
 }
 
-export function useSetFlowProxy(packageId: string) {
+export function useSetAgentProxy(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (proxyId: string | null) => {
-      return api(`/flows/${packageId}/proxy`, {
+      return api(`/agents/${packageId}/proxy`, {
         method: "PUT",
         body: JSON.stringify({ proxyId }),
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow-proxy"] });
-      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
+      qc.invalidateQueries({ queryKey: ["agent-proxy"] });
+      qc.invalidateQueries({ queryKey: ["packages", "agent"] });
     },
   });
 }

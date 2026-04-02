@@ -24,7 +24,7 @@ export function OrgProfileProvidersBlock({
   orgProfileName,
   providerIds,
 }: OrgProfileProvidersBlockProps) {
-  const { t } = useTranslation(["flows"]);
+  const { t } = useTranslation(["agents"]);
   const { data: bindings } = useOrgProfileBindings(orgProfileId);
 
   if (providerIds.length === 0) return null;

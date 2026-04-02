@@ -11,7 +11,7 @@ interface ScheduleStatusBadgeProps {
 }
 
 export function ScheduleStatusBadge({ enabled, hasProviders, allReady }: ScheduleStatusBadgeProps) {
-  const { t } = useTranslation(["flows"]);
+  const { t } = useTranslation(["agents"]);
 
   if (!enabled) {
     return (

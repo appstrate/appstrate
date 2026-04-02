@@ -21,9 +21,9 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { JsonEditor } from "../json-editor";
-import { MetadataSection, type MetadataState } from "../flow-editor/metadata-section";
-import { SchemaSection, type SchemaField } from "../flow-editor/schema-section";
-import { schemaToFields, fieldsToSchema, getManifestName } from "../flow-editor/utils";
+import { MetadataSection, type MetadataState } from "../agent-editor/metadata-section";
+import { SchemaSection, type SchemaField } from "../agent-editor/schema-section";
+import { schemaToFields, fieldsToSchema, getManifestName } from "../agent-editor/utils";
 import { SectionCard } from "../section-card";
 import { EditorShell } from "../editor-shell";
 import type { ProviderConfig } from "@appstrate/shared-types";
@@ -224,7 +224,7 @@ export function ProviderEditorInner({
   packageId,
   orgSlug,
 }: ProviderEditorInnerProps) {
-  const { t } = useTranslation(["settings", "flows", "common"]);
+  const { t } = useTranslation(["settings", "agents", "common"]);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const createProvider = useCreateProvider();
@@ -287,7 +287,7 @@ export function ProviderEditorInner({
   const handleSubmit = () => {
     setError(null);
     if (!metadata.id || !metadata.displayName) {
-      setError(t("editor.errorRequired", { ns: "flows" }));
+      setError(t("editor.errorRequired", { ns: "agents" }));
       setActiveTab("general");
       return;
     }
@@ -314,10 +314,10 @@ export function ProviderEditorInner({
   const isPending = createProvider.isPending || updateProvider.isPending;
 
   const tabs: Array<{ id: ProviderEditorTab; label: string }> = [
-    { id: "general", label: t("editor.tabGeneral", { ns: "flows" }) },
+    { id: "general", label: t("editor.tabGeneral", { ns: "agents" }) },
     { id: "auth", label: t("providers.form.authMode") },
     { id: "uris", label: t("providers.form.sectionUris") },
-    { id: "json", label: t("editor.tabJson", { ns: "flows" }) },
+    { id: "json", label: t("editor.tabJson", { ns: "agents" }) },
   ];
 
   return (

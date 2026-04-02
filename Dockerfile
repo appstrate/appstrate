@@ -2,7 +2,7 @@
 FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.9-alpine AS deps
 
 LABEL org.opencontainers.image.source="https://github.com/appstrate/appstrate"
-LABEL org.opencontainers.image.description="Appstrate — Open-source platform for executing one-shot AI flows in ephemeral Docker containers"
+LABEL org.opencontainers.image.description="Appstrate — Open-source platform for running autonomous AI agents in sandboxed Docker containers"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 WORKDIR /app

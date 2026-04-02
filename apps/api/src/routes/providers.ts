@@ -22,7 +22,7 @@ import {
   systemEntityForbidden,
 } from "../lib/errors.ts";
 import { encryptCredentials } from "@appstrate/connect";
-import { listPackages } from "../services/flow-service.ts";
+import { listPackages } from "../services/agent-service.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import { isValidVersion } from "@appstrate/core/semver";
@@ -194,7 +194,7 @@ export function createProvidersRouter() {
         { id: pkg.id, manifest: pkg.draftManifest, source: pkg.source },
         cred,
       );
-      cfg.usedByFlows = providerUsage.get(pkg.id) ?? 0;
+      cfg.usedByAgents = providerUsage.get(pkg.id) ?? 0;
       return cfg;
     });
 

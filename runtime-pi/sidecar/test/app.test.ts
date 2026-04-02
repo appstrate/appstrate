@@ -178,9 +178,9 @@ describe("POST /configure", () => {
   });
 });
 
-// --- GET /execution-history ---
+// --- GET /run-history (+ /execution-history backwards compat) ---
 
-describe("GET /execution-history", () => {
+describe("GET /run-history", () => {
   it("proxies to platform API", async () => {
     const fetchFn = mock(
       async () =>
@@ -190,11 +190,11 @@ describe("GET /execution-history", () => {
         }),
     );
     const app = createApp(makeDeps({ fetchFn }));
-    const res = await app.request("/execution-history");
+    const res = await app.request("/run-history");
     expect(res.status).toBe(200);
     expect(fetchFn).toHaveBeenCalledTimes(1);
     const url = (fetchFn.mock.calls[0] as [string])[0];
-    expect(url).toBe("http://mock:3000/internal/execution-history");
+    expect(url).toBe("http://mock:3000/internal/run-history");
   });
 
   it("forwards query string", async () => {
@@ -206,7 +206,7 @@ describe("GET /execution-history", () => {
         }),
     );
     const app = createApp(makeDeps({ fetchFn }));
-    await app.request("/execution-history?limit=10&offset=0");
+    await app.request("/run-history?limit=10&offset=0");
     const url = (fetchFn.mock.calls[0] as [string])[0];
     expect(url).toContain("?limit=10&offset=0");
   });
@@ -220,7 +220,7 @@ describe("GET /execution-history", () => {
         }),
     );
     const app = createApp(makeDeps({ fetchFn }));
-    await app.request("/execution-history");
+    await app.request("/run-history");
     const opts = (fetchFn.mock.calls[0] as [string, RequestInit])[1];
     expect((opts.headers as Record<string, string>).Authorization).toBe("Bearer tok");
   });
@@ -230,10 +230,26 @@ describe("GET /execution-history", () => {
       throw new Error("connection refused");
     });
     const app = createApp(makeDeps({ fetchFn }));
-    const res = await app.request("/execution-history");
+    const res = await app.request("/run-history");
     expect(res.status).toBe(502);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBeDefined();
+  });
+
+  it("supports legacy /execution-history path", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"entries":[]}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/execution-history");
+    expect(res.status).toBe(200);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    const url = (fetchFn.mock.calls[0] as [string])[0];
+    expect(url).toBe("http://mock:3000/internal/run-history");
   });
 });
 
@@ -289,7 +305,7 @@ describe("ALL /proxy — validation", () => {
 
   it("returns 502 with platform detail when provider is unknown", async () => {
     const fetchCredentials = mock(async () => {
-      throw new Error("Provider '@appstrate/gmail' is not required by this flow");
+      throw new Error("Provider '@appstrate/gmail' is not required by this agent");
     });
     const app = createApp(makeDeps({ fetchCredentials }));
     const res = await app.request("/proxy", {
@@ -298,7 +314,7 @@ describe("ALL /proxy — validation", () => {
     });
     expect(res.status).toBe(502);
     const body = (await res.json()) as { error: string };
-    expect(body.error).toContain("is not required by this flow");
+    expect(body.error).toContain("is not required by this agent");
   });
 
   it("returns 400 for unresolved placeholders in URL", async () => {

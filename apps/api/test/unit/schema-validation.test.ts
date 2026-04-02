@@ -7,18 +7,18 @@ import {
   validateConfig,
   validateInput,
   validateOutput,
-  validateFlowContent,
+  validateAgentContent,
 } from "../../src/services/schema.ts";
 
 // --- Fixtures ---
 
 const VALID_MANIFEST = {
   schemaVersion: "1.0",
-  name: "@test-org/test-flow",
+  name: "@test-org/test-agent",
   version: "1.0.0",
-  type: "flow",
-  displayName: "Test Flow",
-  description: "A test flow",
+  type: "agent",
+  displayName: "Test Agent",
+  description: "A test agent",
   author: "test",
   dependencies: {
     providers: { "@appstrate/gmail": "1.0.0" },
@@ -112,9 +112,9 @@ describe("validateManifest", () => {
       schemaVersion: "1.0",
       name: "@test-org/minimal",
       version: "1.0.0",
-      type: "flow",
+      type: "agent",
       displayName: "Minimal",
-      description: "Minimal flow",
+      description: "Minimal agent",
       author: "test",
       dependencies: { providers: {} },
     };
@@ -148,7 +148,7 @@ describe("validateManifest", () => {
       schemaVersion: "1.0",
       name: "@test-org/test",
       version: "1.0.0",
-      type: "flow",
+      type: "agent",
       dependencies: { providers: {} },
     };
     const result = validateManifest(bad);
@@ -447,12 +447,12 @@ describe("validateOutput", () => {
 });
 
 // =====================================================
-// validateFlowContent
+// validateAgentContent
 // =====================================================
 
-describe("validateFlowContent", () => {
+describe("validateAgentContent", () => {
   it("bare slug without scope is rejected", () => {
-    const result = validateFlowContent("Do something", [
+    const result = validateAgentContent("Do something", [
       { id: "web-search", description: "Search", content: "..." },
     ]);
     expect(result.valid).toBe(false);
@@ -460,7 +460,7 @@ describe("validateFlowContent", () => {
   });
 
   it("valid prompt and skills pass (scoped name)", () => {
-    const result = validateFlowContent("Do something", [
+    const result = validateAgentContent("Do something", [
       { id: "@appstrate/web-search", description: "Search", content: "..." },
     ]);
     expect(result.valid).toBe(true);
@@ -468,13 +468,13 @@ describe("validateFlowContent", () => {
   });
 
   it("empty prompt fails", () => {
-    const result = validateFlowContent("", []);
+    const result = validateAgentContent("", []);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes("prompt"))).toBe(true);
   });
 
   it("invalid skill ID fails", () => {
-    const result = validateFlowContent("Do something", [
+    const result = validateAgentContent("Do something", [
       { id: "Invalid Skill!", description: "Bad", content: "..." },
     ]);
     expect(result.valid).toBe(false);
@@ -482,7 +482,7 @@ describe("validateFlowContent", () => {
   });
 
   it("invalid scoped skill ID fails", () => {
-    const result = validateFlowContent("Do something", [
+    const result = validateAgentContent("Do something", [
       { id: "@UPPER/case", description: "Bad", content: "..." },
     ]);
     expect(result.valid).toBe(false);
@@ -490,7 +490,7 @@ describe("validateFlowContent", () => {
   });
 
   it("duplicate skill IDs fail", () => {
-    const result = validateFlowContent("Do something", [
+    const result = validateAgentContent("Do something", [
       { id: "@appstrate/search", description: "A", content: "..." },
       { id: "@appstrate/search", description: "B", content: "..." },
     ]);

@@ -427,8 +427,8 @@ function getDeliveryQueue(): Queue<DeliveryJobData> {
  * Called from the execution pipeline after status transitions.
  *
  * Matches webhooks in two scopes:
- * - "organization": fires for ALL executions in the org (dashboard + API)
- * - "application": fires only for executions via a specific application's API key
+ * - "organization": fires for ALL runs in the org (dashboard + API)
+ * - "application": fires only for runs via a specific application's API key
  */
 export async function dispatchWebhookEvents(
   orgId: string,

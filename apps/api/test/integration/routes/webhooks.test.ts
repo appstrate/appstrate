@@ -20,7 +20,7 @@ describe("Webhooks API", () => {
       scope: "application",
       applicationId: ctx.defaultAppId,
       url: "https://example.com/webhook",
-      events: ["execution.completed"],
+      events: ["run.completed"],
       ...overrides,
     };
   }
@@ -47,7 +47,7 @@ describe("Webhooks API", () => {
       const body = (await res.json()) as any;
       expect(body.id).toBeDefined();
       expect(body.url).toBe("https://example.com/webhook");
-      expect(body.events).toContain("execution.completed");
+      expect(body.events).toContain("run.completed");
     });
 
     it("returns secret only at creation", async () => {

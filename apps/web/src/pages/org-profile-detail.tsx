@@ -12,10 +12,10 @@ import {
   useOrgProfiles,
   useRenameOrgProfile,
   useDeleteOrgProfile,
-  useOrgProfileFlows,
+  useOrgProfileAgents,
 } from "../hooks/use-connection-profiles";
 import { useProviders } from "../hooks/use-providers";
-import { useFlows } from "../hooks/use-packages";
+import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { ProviderConnectionCard } from "../components/provider-connection-card";
 import { PackageCard } from "../components/package-card";
@@ -29,9 +29,9 @@ export function OrgProfileDetailPage() {
 
   const { data: orgProfiles, isLoading: profilesLoading } = useOrgProfiles();
   const { data: providers } = useProviders();
-  const { data: flows } = useFlows();
+  const { data: agents } = useAgents();
   const { data: allSchedules } = useAllSchedules();
-  const { data: linkedFlowRefs } = useOrgProfileFlows(id);
+  const { data: linkedAgentRefs } = useOrgProfileAgents(id);
 
   const renameMutation = useRenameOrgProfile();
   const deleteMutation = useDeleteOrgProfile();
@@ -126,23 +126,23 @@ export function OrgProfileDetailPage() {
         </h3>
 
         {(() => {
-          const linkedFlowIds = new Set(linkedFlowRefs?.map((f) => f.id) ?? []);
-          const linkedFlowItems = (flows ?? []).filter((f) => linkedFlowIds.has(f.id));
-          return linkedFlowItems.length === 0 ? (
+          const linkedAgentIds = new Set(linkedAgentRefs?.map((f) => f.id) ?? []);
+          const linkedAgentItems = (agents ?? []).filter((f) => linkedAgentIds.has(f.id));
+          return linkedAgentItems.length === 0 ? (
             <EmptyState message={t("orgProfiles.noFlows")} icon={Workflow} compact />
           ) : (
             <div className="space-y-2">
-              {linkedFlowItems.map((flow) => (
+              {linkedAgentItems.map((agent) => (
                 <PackageCard
-                  key={flow.id}
-                  id={flow.id}
-                  displayName={flow.displayName}
-                  description={flow.description}
-                  type="flow"
-                  source={flow.source}
-                  runningExecutions={flow.runningExecutions}
-                  keywords={flow.keywords}
-                  providerIds={flow.dependencies?.providers}
+                  key={agent.id}
+                  id={agent.id}
+                  displayName={agent.displayName}
+                  description={agent.description}
+                  type="agent"
+                  source={agent.source}
+                  runningRuns={agent.runningRuns}
+                  keywords={agent.keywords}
+                  providerIds={agent.dependencies?.providers}
                 />
               ))}
             </div>

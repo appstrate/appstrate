@@ -21,12 +21,12 @@ export type { Db };
 const ALL_TABLES = [
   // Leaf tables (no dependents)
   "webhook_deliveries",
-  "execution_logs",
+  "run_logs",
   "package_memories",
   "package_version_dependencies",
   "package_dist_tags",
   "package_configs",
-  "user_flow_provider_profiles",
+  "user_agent_provider_profiles",
   "org_profile_provider_bindings",
   "user_provider_connections",
   "oauth_states",
@@ -38,7 +38,7 @@ const ALL_TABLES = [
   "org_invitations",
   // Mid-level tables
   "webhooks",
-  "executions",
+  "runs",
   "package_versions",
   "api_keys",
   "end_users",

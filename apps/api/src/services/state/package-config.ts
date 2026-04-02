@@ -56,7 +56,7 @@ export async function setPackageConfig(
     });
 }
 
-export async function setFlowOverride(
+export async function setAgentOverride(
   orgId: string,
   packageId: string,
   field: "modelId" | "proxyId" | "orgProfileId",

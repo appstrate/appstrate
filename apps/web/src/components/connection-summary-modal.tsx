@@ -29,7 +29,7 @@ export function ConnectionSummaryModal({
   orgProfileName,
   isPending,
 }: ConnectionSummaryModalProps) {
-  const { t } = useTranslation(["flows", "settings", "common"]);
+  const { t } = useTranslation(["agents", "settings", "common"]);
   const { data: providersData } = useProviders();
 
   const allReady = providers.every((p) => isProviderStatusConnected(p.status));

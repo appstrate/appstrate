@@ -24,7 +24,7 @@ export interface ContentPackageInput {
 
 // --- Generic form state ---
 
-import type { MetadataState } from "../../components/flow-editor/metadata-section";
+import type { MetadataState } from "../../components/agent-editor/metadata-section";
 
 export type PackageMetadata = MetadataState;
 

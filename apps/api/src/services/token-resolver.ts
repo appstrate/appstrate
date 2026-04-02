@@ -2,7 +2,7 @@
 
 /**
  * Token resolution — resolves provider tokens for execution.
- * Shared by executions.ts and scheduler.ts.
+ * Shared by runs.ts and scheduler.ts.
  */
 
 import { getCredentials } from "@appstrate/connect";

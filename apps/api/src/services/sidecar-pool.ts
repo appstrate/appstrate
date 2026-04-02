@@ -70,7 +70,7 @@ export async function initSidecarPool(): Promise<void> {
  * Returns the container ID, or null if pool is empty/disabled (caller falls back to fresh creation).
  */
 export async function acquireSidecar(
-  executionId: string,
+  runId: string,
   executionNetworkId: string,
   sidecarEnv: {
     executionToken: string;
@@ -114,7 +114,7 @@ export async function acquireSidecar(
       await connectContainerToNetwork(platformNetwork.networkId, entry.containerId);
     }
 
-    logger.debug("Acquired sidecar from pool", { executionId, containerId: entry.containerId });
+    logger.debug("Acquired sidecar from pool", { runId, containerId: entry.containerId });
 
     // Replenish pool in background (don't await)
     scheduleReplenish();

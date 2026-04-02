@@ -2,7 +2,7 @@
 
 ## Project Vision
 
-Appstrate is an open-source platform for executing one-shot AI flows in ephemeral Docker containers. It enables users to connect providers, configure flows, and let AI agents process their data autonomously.
+Appstrate is an open-source platform for running autonomous AI agents in sandboxed Docker containers. It enables users to connect providers, configure agents, and let AI agents process their data autonomously.
 
 ## Governance Model
 

@@ -19,11 +19,11 @@ import type { OrgRole } from "../types/index.ts";
 interface ResourceActions {
   org: "read" | "update" | "delete";
   members: "read" | "invite" | "remove" | "change-role";
-  flows: "read" | "write" | "configure" | "delete" | "run";
+  agents: "read" | "write" | "configure" | "delete" | "run";
   skills: "read" | "write" | "delete";
   tools: "read" | "write" | "delete";
   providers: "read" | "write" | "delete";
-  executions: "read" | "cancel" | "delete";
+  runs: "read" | "cancel" | "delete";
   schedules: "read" | "write" | "delete";
   memories: "read" | "delete";
   connections: "read" | "connect" | "disconnect";
@@ -65,11 +65,11 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "members:remove",
   "members:change-role",
   // Flows
-  "flows:read",
-  "flows:write",
-  "flows:configure",
-  "flows:delete",
-  "flows:run",
+  "agents:read",
+  "agents:write",
+  "agents:configure",
+  "agents:delete",
+  "agents:run",
   // Skills
   "skills:read",
   "skills:write",
@@ -83,9 +83,9 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "providers:write",
   "providers:delete",
   // Executions
-  "executions:read",
-  "executions:cancel",
-  "executions:delete",
+  "runs:read",
+  "runs:cancel",
+  "runs:delete",
   // Schedules
   "schedules:read",
   "schedules:write",
@@ -139,21 +139,21 @@ const ADMIN_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>(
   [...OWNER_PERMISSIONS].filter((p) => p !== "org:delete" && p !== "members:change-role"),
 );
 
-/** Member: use the platform — run flows, manage own connections, schedules. */
+/** Member: use the platform — run agents, manage own connections, schedules. */
 const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   // Organization (read only)
   "org:read",
   "members:read",
   // Flows (read + run, no write/configure/delete)
-  "flows:read",
-  "flows:run",
+  "agents:read",
+  "agents:run",
   // Skills, Tools, Providers (read only)
   "skills:read",
   "tools:read",
   "providers:read",
   // Executions (read + cancel own)
-  "executions:read",
-  "executions:cancel",
+  "runs:read",
+  "runs:cancel",
   // Schedules (read + write + delete own)
   "schedules:read",
   "schedules:write",
@@ -186,11 +186,11 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
 const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "org:read",
   "members:read",
-  "flows:read",
+  "agents:read",
   "skills:read",
   "tools:read",
   "providers:read",
-  "executions:read",
+  "runs:read",
   "schedules:read",
   "memories:read",
   "connections:read",
@@ -221,11 +221,11 @@ const ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<Permission>> = {
  */
 export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>([
   // Flows
-  "flows:read",
-  "flows:write",
-  "flows:configure",
-  "flows:delete",
-  "flows:run",
+  "agents:read",
+  "agents:write",
+  "agents:configure",
+  "agents:delete",
+  "agents:run",
   // Skills
   "skills:read",
   "skills:write",
@@ -239,9 +239,9 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "providers:write",
   "providers:delete",
   // Executions
-  "executions:read",
-  "executions:cancel",
-  "executions:delete",
+  "runs:read",
+  "runs:cancel",
+  "runs:delete",
   // Schedules
   "schedules:read",
   "schedules:write",

@@ -18,7 +18,7 @@ interface VersionHistoryProps {
 }
 
 export function VersionHistory({ packageId, type, isOwned }: VersionHistoryProps) {
-  const { t } = useTranslation("flows");
+  const { t } = useTranslation("agents");
   const { data: versions } = usePackageVersions(type, packageId);
   const restoreVersion = useRestoreVersion(type, packageId);
   const deleteVersion = useDeleteVersion(type, packageId);

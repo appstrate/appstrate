@@ -4,7 +4,7 @@
  * PiAdapter.execute() unit tests.
  *
  * Uses a mock ContainerOrchestrator injected via constructor DI to test
- * the full execution pipeline without Docker.
+ * the full run pipeline without Docker.
  */
 import { describe, it, expect, mock } from "bun:test";
 import { PiAdapter } from "../../src/services/adapters/pi.ts";
@@ -26,21 +26,21 @@ function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): Con
     cleanupOrphans: mock(() => Promise.resolve({ workloads: 0, isolationBoundaries: 0 })),
     ensureImages: mock(() => Promise.resolve()),
     createIsolationBoundary: mock(
-      (executionId: string): Promise<IsolationBoundary> =>
-        Promise.resolve({ id: `net-${executionId}`, name: `appstrate-exec-${executionId}` }),
+      (runId: string): Promise<IsolationBoundary> =>
+        Promise.resolve({ id: `net-${runId}`, name: `appstrate-exec-${runId}` }),
     ),
     removeIsolationBoundary: mock(() => Promise.resolve()),
     createSidecar: mock(
       (
-        _executionId: string,
+        _runId: string,
         _boundary: IsolationBoundary,
         _config: SidecarConfig,
       ): Promise<WorkloadHandle> =>
-        Promise.resolve({ id: "sidecar-001", executionId: _executionId, role: "sidecar" }),
+        Promise.resolve({ id: "sidecar-001", runId: _runId, role: "sidecar" }),
     ),
     createWorkload: mock(
       (spec: WorkloadSpec, _boundary: IsolationBoundary): Promise<WorkloadHandle> =>
-        Promise.resolve({ id: "agent-001", executionId: spec.executionId, role: "agent" }),
+        Promise.resolve({ id: "agent-001", runId: spec.runId, role: "agent" }),
     ),
     startWorkload: mock(() => Promise.resolve()),
     stopWorkload: mock(() => Promise.resolve()),
@@ -50,7 +50,7 @@ function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): Con
       yield JSON.stringify({ type: "text_delta", text: "Working..." });
       yield JSON.stringify({ type: "output", data: { result: "Done" } });
     }),
-    stopByExecutionId: mock(() => Promise.resolve("stopped" as const)),
+    stopByRunId: mock(() => Promise.resolve("stopped" as const)),
     ...overrides,
   };
 }
@@ -175,7 +175,7 @@ describe("PiAdapter.execute()", () => {
     expect(spec.env.MODEL_API_KEY).toBeUndefined();
   });
 
-  it("injects flow package and input files into agent workload", async () => {
+  it("injects agent package and input files into agent workload", async () => {
     const orchestrator = createMockOrchestrator();
     const adapter = new PiAdapter(orchestrator);
 

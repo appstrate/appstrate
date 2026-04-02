@@ -140,14 +140,14 @@ describe("realtime service (integration)", () => {
       expect(sendOrg2).not.toHaveBeenCalled();
     });
 
-    it("filters by executionId when set", async () => {
+    it("filters by runId when set", async () => {
       const send = mock((_e: RealtimeEvent) => {});
       const id = "sub-exec-filter";
       trackSubscriber(id);
 
       addSubscriber({
         id,
-        filter: { orgId: "org-ef", executionId: "target-exec" },
+        filter: { orgId: "org-ef", runId: "target-exec" },
         send,
       });
 
@@ -266,14 +266,14 @@ describe("realtime service (integration)", () => {
       expect(send.mock.calls[0]![0]!.data.level).toBe("debug");
     });
 
-    it("filters logs by executionId when set", async () => {
+    it("filters logs by runId when set", async () => {
       const send = mock((_e: RealtimeEvent) => {});
       const id = "sub-log-exec-filter";
       trackSubscriber(id);
 
       addSubscriber({
         id,
-        filter: { orgId: "org-lef", executionId: "target-log-exec" },
+        filter: { orgId: "org-lef", runId: "target-log-exec" },
         send,
       });
 

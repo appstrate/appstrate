@@ -13,7 +13,8 @@ import { toJSONSchema } from "zod/v4/core";
 import { resolve, dirname } from "node:path";
 import { writeFile, mkdir, rm } from "node:fs/promises";
 import {
-  flowManifestSchema,
+  // TODO: rename to agentManifestSchema after @afps-spec/schema is republished
+  flowManifestSchema as agentManifestSchema,
   skillManifestSchema,
   toolManifestSchema,
   providerManifestSchema,
@@ -28,10 +29,10 @@ const OUTPUT_DIR = resolve(dirname(import.meta.filename!), "../schema");
 // No Appstrate-specific extensions for now — all types use AFPS schemas directly
 const appstrateSchemas = [
   {
-    filename: "flow.schema.json",
-    title: "Appstrate Flow Manifest",
-    description: "Appstrate flow manifest — extends AFPS flow.",
-    schema: flowManifestSchema,
+    filename: "agent.schema.json",
+    title: "Appstrate Agent Manifest",
+    description: "Appstrate agent manifest — extends AFPS agent.",
+    schema: agentManifestSchema,
   },
   {
     filename: "skill.schema.json",

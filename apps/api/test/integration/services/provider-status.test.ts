@@ -7,7 +7,7 @@ import { seedConnectionProfile, seedPackage } from "../../helpers/seed.ts";
 import { saveConnection } from "@appstrate/connect";
 import { providerCredentials } from "@appstrate/db/schema";
 import { resolveProviderStatuses } from "../../../src/services/connection-manager/status.ts";
-import type { FlowProviderRequirement, ProviderProfileMap } from "../../../src/types/index.ts";
+import type { AgentProviderRequirement, ProviderProfileMap } from "../../../src/types/index.ts";
 
 describe("resolveProviderStatuses", () => {
   let userId: string;
@@ -52,7 +52,7 @@ describe("resolveProviderStatuses", () => {
     await seedProvider(providerId);
     await saveConnection(db, profileId, providerId, orgId, { api_key: "k" });
 
-    const providers: FlowProviderRequirement[] = [{ id: providerId }];
+    const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const profiles: ProviderProfileMap = {
       [providerId]: { profileId, source: "user_profile" },
     };
@@ -71,7 +71,7 @@ describe("resolveProviderStatuses", () => {
     await seedProvider(providerId);
     await saveConnection(db, profileId, providerId, orgId, { api_key: "k" });
 
-    const providers: FlowProviderRequirement[] = [{ id: providerId }];
+    const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const profiles: ProviderProfileMap = {
       [providerId]: { profileId, source: "org_binding" },
     };
@@ -87,7 +87,7 @@ describe("resolveProviderStatuses", () => {
     const providerId = "@system/test-deleted";
     await seedProvider(providerId);
 
-    const providers: FlowProviderRequirement[] = [{ id: providerId }];
+    const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const profiles: ProviderProfileMap = {
       [providerId]: {
         profileId: "00000000-0000-0000-0000-000000000000",
@@ -105,7 +105,7 @@ describe("resolveProviderStatuses", () => {
     const providerId = "@system/test-no-entry";
     await seedProvider(providerId);
 
-    const providers: FlowProviderRequirement[] = [{ id: providerId }];
+    const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const profiles: ProviderProfileMap = {};
 
     const statuses = await resolveProviderStatuses(providers, profiles, orgId);

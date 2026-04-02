@@ -3,17 +3,17 @@
 /**
  * Guards middleware integration tests.
  *
- * Tests requireFlow and requireMutableFlow via real HTTP routes and DB.
+ * Tests requireAgent and requireMutableAgent via real HTTP routes and DB.
  */
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedExecution } from "../../helpers/seed.ts";
+import { seedPackage, seedRun } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
-describe("requireFlow (via flow config route)", () => {
+describe("requireAgent (via agent config route)", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -21,10 +21,10 @@ describe("requireFlow (via flow config route)", () => {
     ctx = await createTestContext({ orgSlug: "testorg" });
   });
 
-  it("loads flow when it exists", async () => {
-    await seedPackage({ id: "@testorg/my-flow", orgId: ctx.orgId, createdBy: ctx.user.id });
+  it("loads agent when it exists", async () => {
+    await seedPackage({ id: "@testorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
 
-    const res = await app.request("/api/flows/@testorg/my-flow/config", {
+    const res = await app.request("/api/agents/@testorg/my-agent/config", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -32,8 +32,8 @@ describe("requireFlow (via flow config route)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("returns 404 when flow does not exist", async () => {
-    const res = await app.request("/api/flows/@testorg/nonexistent/config", {
+  it("returns 404 when agent does not exist", async () => {
+    const res = await app.request("/api/agents/@testorg/nonexistent/config", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -42,7 +42,7 @@ describe("requireFlow (via flow config route)", () => {
   });
 });
 
-describe("requireMutableFlow (via flow skills route)", () => {
+describe("requireMutableAgent (via agent skills route)", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -50,10 +50,10 @@ describe("requireMutableFlow (via flow skills route)", () => {
     ctx = await createTestContext({ orgSlug: "testorg" });
   });
 
-  it("allows modification of local flow with no running executions", async () => {
-    await seedPackage({ id: "@testorg/my-flow", orgId: ctx.orgId, createdBy: ctx.user.id });
+  it("allows modification of local agent with no running runs", async () => {
+    await seedPackage({ id: "@testorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
 
-    const res = await app.request("/api/flows/@testorg/my-flow/skills", {
+    const res = await app.request("/api/agents/@testorg/my-agent/skills", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ skillIds: [] }),
@@ -61,23 +61,23 @@ describe("requireMutableFlow (via flow skills route)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("rejects modification of flow with running executions (409)", async () => {
-    await seedPackage({ id: "@testorg/busy-flow", orgId: ctx.orgId, createdBy: ctx.user.id });
+  it("rejects modification of agent with running runs (409)", async () => {
+    await seedPackage({ id: "@testorg/busy-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
 
-    await seedExecution({
-      packageId: "@testorg/busy-flow",
+    await seedRun({
+      packageId: "@testorg/busy-agent",
       orgId: ctx.orgId,
       userId: ctx.user.id,
       status: "running",
     });
 
-    const res = await app.request("/api/flows/@testorg/busy-flow/skills", {
+    const res = await app.request("/api/agents/@testorg/busy-agent/skills", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ skillIds: [] }),
     });
     expect(res.status).toBe(409);
     const body = (await res.json()) as any;
-    expect(body.code).toBe("flow_in_use");
+    expect(body.code).toBe("agent_in_use");
   });
 });

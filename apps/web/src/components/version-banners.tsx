@@ -17,7 +17,7 @@ export function VersionBanners({
   latestUrl: string;
   latestVersion?: string | null;
 }) {
-  const { t } = useTranslation("flows");
+  const { t } = useTranslation("agents");
   if (!isHistorical || !versionDetail) return null;
 
   const linkLabel = hasDraftChanges

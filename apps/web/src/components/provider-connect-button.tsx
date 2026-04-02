@@ -16,7 +16,7 @@ import type { ProviderConfig } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 
 export function ProviderConnectButton({ provider }: { provider: ProviderConfig }) {
-  const { t } = useTranslation(["settings", "flows"]);
+  const { t } = useTranslation(["settings", "agents"]);
   const { data: availableProviders } = useAvailableProviders();
 
   const connectMutation = useConnect();
@@ -74,7 +74,7 @@ export function ProviderConnectButton({ provider }: { provider: ProviderConfig }
             onClick={handleDisconnect}
             disabled={isPending}
           >
-            {t("detail.disconnect", { ns: "flows" })}
+            {t("detail.disconnect", { ns: "agents" })}
           </Button>
         </div>
       ) : (
@@ -86,7 +86,7 @@ export function ProviderConnectButton({ provider }: { provider: ProviderConfig }
           disabled={!provider.enabled || isPending}
           title={!provider.enabled ? t("providers.notConfigured") : undefined}
         >
-          {t("detail.connect", { ns: "flows" })}
+          {t("detail.connect", { ns: "agents" })}
         </Button>
       )}
       <ApiKeyModal

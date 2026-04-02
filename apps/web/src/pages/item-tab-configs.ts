@@ -13,7 +13,7 @@ export interface ItemTabConfig {
           name?: string | null;
           description?: string | null;
           source?: "system" | "local";
-          usedByFlows?: number;
+          usedByAgents?: number;
           autoInstalled?: boolean;
         }[]
       | undefined;

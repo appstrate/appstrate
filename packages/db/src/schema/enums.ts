@@ -4,7 +4,7 @@ import { pgEnum } from "drizzle-orm/pg-core";
 
 export const orgRoleEnum = pgEnum("org_role", ["owner", "admin", "member", "viewer"]);
 
-export const executionStatusEnum = pgEnum("execution_status", [
+export const runStatusEnum = pgEnum("run_status", [
   "pending",
   "running",
   "success",
@@ -20,5 +20,5 @@ export const invitationStatusEnum = pgEnum("invitation_status", [
   "cancelled",
 ]);
 
-export const packageTypeEnum = pgEnum("package_type", ["flow", "skill", "tool", "provider"]);
+export const packageTypeEnum = pgEnum("package_type", ["agent", "skill", "tool", "provider"]);
 export const packageSourceEnum = pgEnum("package_source", ["local", "system"]);

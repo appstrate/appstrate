@@ -33,14 +33,14 @@ describe("package-versions service", () => {
 
   describe("createPackageVersion", () => {
     it("creates a version for an existing package", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/my-flow` });
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/my-agent` });
 
       const result = await createPackageVersion({
         packageId: pkg.id,
         version: "1.0.0",
         integrity: "sha256-abc123",
         artifactSize: 2048,
-        manifest: { name: pkg.id, version: "1.0.0", type: "flow" },
+        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
         orgId,
         createdBy: userId,
       });
@@ -51,14 +51,14 @@ describe("package-versions service", () => {
     });
 
     it("auto-assigns the latest dist-tag on first version", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/tagged-flow` });
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/tagged-agent` });
 
       const result = await createPackageVersion({
         packageId: pkg.id,
         version: "1.0.0",
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "flow" },
+        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
         orgId,
         createdBy: userId,
       });
@@ -75,7 +75,7 @@ describe("package-versions service", () => {
         version: "not-semver",
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, version: "not-semver", type: "flow" },
+        manifest: { name: pkg.id, version: "not-semver", type: "agent" },
         orgId,
         createdBy: userId,
       });
@@ -84,13 +84,13 @@ describe("package-versions service", () => {
     });
 
     it("returns existing version if same version is created twice", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/dup-flow` });
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/dup-agent` });
       const params = {
         packageId: pkg.id,
         version: "1.0.0",
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "flow" },
+        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
         orgId,
         createdBy: userId,
       };
@@ -104,12 +104,12 @@ describe("package-versions service", () => {
     });
 
     it("updates latest dist-tag when a higher version is published", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/bump-flow` });
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/bump-agent` });
       const base = {
         packageId: pkg.id,
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, type: "flow" } as Record<string, unknown>,
+        manifest: { name: pkg.id, type: "agent" } as Record<string, unknown>,
         orgId,
         createdBy: userId,
       };
@@ -134,12 +134,12 @@ describe("package-versions service", () => {
 
   describe("listPackageVersions", () => {
     it("returns all versions for a package, newest first", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/list-flow` });
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/list-agent` });
       const base = {
         packageId: pkg.id,
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, type: "flow" } as Record<string, unknown>,
+        manifest: { name: pkg.id, type: "agent" } as Record<string, unknown>,
         orgId,
         createdBy: userId,
       };
@@ -169,7 +169,7 @@ describe("package-versions service", () => {
     });
 
     it("returns empty array for a package with no versions", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/empty-flow` });
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/empty-agent` });
 
       const versions = await listPackageVersions(pkg.id);
       expect(versions).toHaveLength(0);
@@ -183,7 +183,7 @@ describe("package-versions service", () => {
         version: "1.0.0",
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "flow" },
+        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
         orgId,
         createdBy: userId,
       });
@@ -208,14 +208,14 @@ describe("package-versions service", () => {
     });
 
     it("returns the version pointed to by the latest dist-tag", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/latest-flow` });
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/latest-agent` });
 
       const v1 = await createPackageVersion({
         packageId: pkg.id,
         version: "1.0.0",
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "flow" },
+        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
         orgId,
         createdBy: userId,
       });
@@ -229,14 +229,14 @@ describe("package-versions service", () => {
 
   describe("yankVersion", () => {
     it("sets yanked=true on the target version", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/yank-flow` });
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/yank-agent` });
 
       await createPackageVersion({
         packageId: pkg.id,
         version: "1.0.0",
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "flow" },
+        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
         orgId,
         createdBy: userId,
       });
@@ -256,12 +256,12 @@ describe("package-versions service", () => {
     });
 
     it("reassigns latest dist-tag when the current latest is yanked", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/reassign-flow` });
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/reassign-agent` });
       const base = {
         packageId: pkg.id,
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, type: "flow" } as Record<string, unknown>,
+        manifest: { name: pkg.id, type: "agent" } as Record<string, unknown>,
         orgId,
         createdBy: userId,
       };
@@ -292,7 +292,7 @@ describe("package-versions service", () => {
 
   describe("getVersionCount", () => {
     it("returns the correct count", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/count-flow` });
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/count-agent` });
       expect(await getVersionCount(pkg.id)).toBe(0);
 
       await createPackageVersion({
@@ -300,7 +300,7 @@ describe("package-versions service", () => {
         version: "1.0.0",
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "flow" },
+        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
         orgId,
         createdBy: userId,
       });
@@ -313,14 +313,14 @@ describe("package-versions service", () => {
 
   describe("addDistTag", () => {
     it("adds a custom dist-tag to a version", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/tag-flow` });
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/tag-agent` });
 
       const v1 = await createPackageVersion({
         packageId: pkg.id,
         version: "1.0.0",
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "flow" },
+        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
         orgId,
         createdBy: userId,
       });
@@ -340,7 +340,7 @@ describe("package-versions service", () => {
         version: "1.0.0",
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "flow" },
+        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
         orgId,
         createdBy: userId,
       });
@@ -358,7 +358,7 @@ describe("package-versions service", () => {
         version: "1.0.0",
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "flow" },
+        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
         orgId,
         createdBy: userId,
       });
@@ -372,7 +372,7 @@ describe("package-versions service", () => {
         packageId: pkg.id,
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, type: "flow" } as Record<string, unknown>,
+        manifest: { name: pkg.id, type: "agent" } as Record<string, unknown>,
         orgId,
         createdBy: userId,
       };
@@ -413,7 +413,7 @@ describe("package-versions service", () => {
         version: "1.0.0",
         integrity: "sha256-abc",
         artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "flow" },
+        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
         orgId,
         createdBy: userId,
       });

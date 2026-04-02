@@ -58,11 +58,11 @@ describe("manifest-based dependency resolution", () => {
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/my-flow`,
+        id: `@${orgSlug}/my-agent`,
         draftManifest: {
-          name: `@${orgSlug}/my-flow`,
+          name: `@${orgSlug}/my-agent`,
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "Flow with deps",
           dependencies: {
             skills: { [`@${orgSlug}/dep-skill`]: "^1.0.0" },
@@ -71,7 +71,7 @@ describe("manifest-based dependency resolution", () => {
         },
       });
 
-      const deps = await buildDependencies(`@${orgSlug}/my-flow`);
+      const deps = await buildDependencies(`@${orgSlug}/my-agent`);
 
       expect(deps).not.toBeNull();
       expect(deps!.skills).toBeDefined();
@@ -87,7 +87,7 @@ describe("manifest-based dependency resolution", () => {
         draftManifest: {
           name: `@${orgSlug}/no-deps`,
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "No deps",
         },
       });
@@ -105,7 +105,7 @@ describe("manifest-based dependency resolution", () => {
   // ── deleteOrgItem — in-use protection ─────────────────────
 
   describe("deleteOrgItem — in-use protection", () => {
-    it("blocks deletion when a flow depends on the tool", async () => {
+    it("blocks deletion when an agent depends on the tool", async () => {
       await seedPackage({
         orgId,
         id: `@${orgSlug}/used-tool`,
@@ -119,11 +119,11 @@ describe("manifest-based dependency resolution", () => {
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/consumer-flow`,
+        id: `@${orgSlug}/consumer-agent`,
         draftManifest: {
-          name: `@${orgSlug}/consumer-flow`,
+          name: `@${orgSlug}/consumer-agent`,
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "Uses the tool",
           dependencies: {
             tools: { [`@${orgSlug}/used-tool`]: "*" },
@@ -136,7 +136,7 @@ describe("manifest-based dependency resolution", () => {
       expect(result.ok).toBe(false);
       expect(result.error).toBe("IN_USE");
       expect(result.dependents).toHaveLength(1);
-      expect(result.dependents![0]!.id).toBe(`@${orgSlug}/consumer-flow`);
+      expect(result.dependents![0]!.id).toBe(`@${orgSlug}/consumer-agent`);
     });
 
     it("blocks deletion when a tool depends on the skill (cross-type)", async () => {
@@ -206,22 +206,22 @@ describe("manifest-based dependency resolution", () => {
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/flow-a`,
+        id: `@${orgSlug}/agent-a`,
         draftManifest: {
-          name: `@${orgSlug}/flow-a`,
+          name: `@${orgSlug}/agent-a`,
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "Flow A",
           dependencies: { skills: { [`@${orgSlug}/popular-skill`]: "*" } },
         },
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/flow-b`,
+        id: `@${orgSlug}/agent-b`,
         draftManifest: {
-          name: `@${orgSlug}/flow-b`,
+          name: `@${orgSlug}/agent-b`,
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "Flow B",
           dependencies: { skills: { [`@${orgSlug}/popular-skill`]: "*" } },
         },
@@ -252,12 +252,12 @@ describe("manifest-based dependency resolution", () => {
       // Flow in OTHER org references our tool (shouldn't block our deletion)
       await seedPackage({
         orgId: otherOrg.id,
-        id: `@otherorg/their-flow`,
+        id: `@otherorg/their-agent`,
         draftManifest: {
-          name: `@otherorg/their-flow`,
+          name: `@otherorg/their-agent`,
           version: "0.1.0",
-          type: "flow",
-          description: "Other org flow",
+          type: "agent",
+          description: "Other org agent",
           dependencies: { tools: { [`@${orgSlug}/our-tool`]: "*" } },
         },
       });
@@ -268,9 +268,9 @@ describe("manifest-based dependency resolution", () => {
     });
   });
 
-  // ── listOrgItems — usedByFlows count ──────────────────────
+  // ── listOrgItems — usedByAgents count ──────────────────────
 
-  describe("listOrgItems — usedByFlows count", () => {
+  describe("listOrgItems — usedByAgents count", () => {
     it("counts manifest-based dependencies correctly", async () => {
       await seedPackage({
         orgId,
@@ -285,22 +285,22 @@ describe("manifest-based dependency resolution", () => {
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/flow-1`,
+        id: `@${orgSlug}/agent-1`,
         draftManifest: {
-          name: `@${orgSlug}/flow-1`,
+          name: `@${orgSlug}/agent-1`,
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "Flow 1",
           dependencies: { tools: { [`@${orgSlug}/counted-tool`]: "*" } },
         },
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/flow-2`,
+        id: `@${orgSlug}/agent-2`,
         draftManifest: {
-          name: `@${orgSlug}/flow-2`,
+          name: `@${orgSlug}/agent-2`,
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "Flow 2",
           dependencies: { tools: { [`@${orgSlug}/counted-tool`]: "*" } },
         },
@@ -310,7 +310,7 @@ describe("manifest-based dependency resolution", () => {
       const tool = items.find((i) => i.id === `@${orgSlug}/counted-tool`);
 
       expect(tool).toBeDefined();
-      expect(tool!.usedByFlows).toBe(2);
+      expect(tool!.usedByAgents).toBe(2);
     });
 
     it("returns 0 for unreferenced items", async () => {
@@ -330,7 +330,7 @@ describe("manifest-based dependency resolution", () => {
       const skill = items.find((i) => i.id === `@${orgSlug}/unused-skill`);
 
       expect(skill).toBeDefined();
-      expect(skill!.usedByFlows).toBe(0);
+      expect(skill!.usedByAgents).toBe(0);
     });
   });
 
@@ -352,12 +352,12 @@ describe("manifest-based dependency resolution", () => {
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/using-flow`,
+        id: `@${orgSlug}/using-agent`,
         draftManifest: {
-          name: `@${orgSlug}/using-flow`,
+          name: `@${orgSlug}/using-agent`,
           displayName: "Using Flow",
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "Uses tool",
           dependencies: { tools: { [`@${orgSlug}/detail-tool`]: "*" } },
         },
@@ -367,7 +367,7 @@ describe("manifest-based dependency resolution", () => {
 
       expect(item).not.toBeNull();
       expect(item!.flows).toHaveLength(1);
-      expect(item!.flows[0]!.id).toBe(`@${orgSlug}/using-flow`);
+      expect(item!.flows[0]!.id).toBe(`@${orgSlug}/using-agent`);
     });
 
     it("returns empty flows array when unused", async () => {
@@ -426,7 +426,7 @@ describe("manifest-based dependency resolution", () => {
   // ── collectAllDepIds — transitive resolution ──────────────
 
   describe("collectAllDepIds — transitive resolution", () => {
-    it("collects transitive deps (flow → tool → skill)", async () => {
+    it("collects transitive deps (agent → tool → skill)", async () => {
       await seedPackage({
         orgId,
         id: `@${orgSlug}/deep-skill`,
@@ -452,17 +452,17 @@ describe("manifest-based dependency resolution", () => {
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/top-flow`,
+        id: `@${orgSlug}/top-agent`,
         draftManifest: {
-          name: `@${orgSlug}/top-flow`,
+          name: `@${orgSlug}/top-agent`,
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "Flow depending on tool",
           dependencies: { tools: { [`@${orgSlug}/mid-tool`]: "*" } },
         },
       });
 
-      const deps = await collectAllDepIds(`@${orgSlug}/top-flow`);
+      const deps = await collectAllDepIds(`@${orgSlug}/top-agent`);
 
       expect(deps.toolIds).toContain(`@${orgSlug}/mid-tool`);
       expect(deps.skillIds).toContain(`@${orgSlug}/deep-skill`);
@@ -506,11 +506,11 @@ describe("manifest-based dependency resolution", () => {
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/diamond-flow`,
+        id: `@${orgSlug}/diamond-agent`,
         draftManifest: {
-          name: `@${orgSlug}/diamond-flow`,
+          name: `@${orgSlug}/diamond-agent`,
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "Diamond",
           dependencies: {
             tools: {
@@ -521,7 +521,7 @@ describe("manifest-based dependency resolution", () => {
         },
       });
 
-      const deps = await collectAllDepIds(`@${orgSlug}/diamond-flow`);
+      const deps = await collectAllDepIds(`@${orgSlug}/diamond-agent`);
 
       expect(deps.toolIds).toHaveLength(2);
       expect(deps.skillIds).toHaveLength(1);
@@ -555,17 +555,17 @@ describe("manifest-based dependency resolution", () => {
       });
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/cycle-flow`,
+        id: `@${orgSlug}/cycle-agent`,
         draftManifest: {
-          name: `@${orgSlug}/cycle-flow`,
+          name: `@${orgSlug}/cycle-agent`,
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "Flow with cyclic tools",
           dependencies: { tools: { [`@${orgSlug}/cycle-tool-a`]: "*" } },
         },
       });
 
-      const deps = await collectAllDepIds(`@${orgSlug}/cycle-flow`);
+      const deps = await collectAllDepIds(`@${orgSlug}/cycle-agent`);
 
       // Both tools collected, no infinite loop
       expect(deps.toolIds).toHaveLength(2);
@@ -576,16 +576,16 @@ describe("manifest-based dependency resolution", () => {
     it("returns empty when package has no dependencies", async () => {
       await seedPackage({
         orgId,
-        id: `@${orgSlug}/no-deps-flow`,
+        id: `@${orgSlug}/no-deps-agent`,
         draftManifest: {
-          name: `@${orgSlug}/no-deps-flow`,
+          name: `@${orgSlug}/no-deps-agent`,
           version: "0.1.0",
-          type: "flow",
+          type: "agent",
           description: "No deps",
         },
       });
 
-      const deps = await collectAllDepIds(`@${orgSlug}/no-deps-flow`);
+      const deps = await collectAllDepIds(`@${orgSlug}/no-deps-agent`);
 
       expect(deps.skillIds).toHaveLength(0);
       expect(deps.toolIds).toHaveLength(0);

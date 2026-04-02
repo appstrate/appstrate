@@ -15,7 +15,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
-import { useFlows } from "../hooks/use-packages";
+import { useAgents } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import {
   SidebarGroup,
@@ -30,15 +30,15 @@ export function NavOrg() {
   const { t } = useTranslation();
   const location = useLocation();
   const { data: unreadCount } = useUnreadCount();
-  const { data: flows } = useFlows();
+  const { data: agents } = useAgents();
   const { isAdmin } = usePermissions();
 
-  const hasRunning = flows?.some((f) => f.runningExecutions > 0) ?? false;
+  const hasRunning = agents?.some((f) => f.runningRuns > 0) ?? false;
   const unread = unreadCount ?? 0;
 
   const automationItems = [
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
-    { path: "/flows", label: t("nav.flows"), icon: Layers },
+    { path: "/agents", label: t("nav.flows"), icon: Layers },
     { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
   ];
 
@@ -76,10 +76,10 @@ export function NavOrg() {
           <SidebarMenuItem className="relative">
             <SidebarMenuButton
               asChild
-              isActive={location.pathname.startsWith("/executions")}
-              tooltip={t("nav.executions")}
+              isActive={location.pathname.startsWith("/runs")}
+              tooltip={t("nav.runs")}
             >
-              <Link to="/executions">
+              <Link to="/runs">
                 <span className="flex size-4 shrink-0 items-center justify-center">
                   {hasRunning ? (
                     <Loader2 size={16} className="animate-spin" />
@@ -87,7 +87,7 @@ export function NavOrg() {
                     <Activity size={16} />
                   )}
                 </span>
-                <span>{t("nav.executions")}</span>
+                <span>{t("nav.runs")}</span>
               </Link>
             </SidebarMenuButton>
             {unread > 0 && (

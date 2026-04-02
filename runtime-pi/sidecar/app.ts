@@ -124,17 +124,17 @@ export function createApp(deps: AppDeps): Hono {
 
     configUsed = true;
 
-    // Reset cookie jar for new execution context
+    // Reset cookie jar for new run context
     cookieJar.clear();
     return c.json({ status: "configured" });
   });
 
-  // Execution history proxy
-  app.get("/execution-history", async (c) => {
+  // Run history proxy (legacy /execution-history kept for backwards compat)
+  const runHistoryHandler = async (c: any) => {
     const qs = new URL(c.req.url).search;
-    const url = `${config.platformApiUrl}/internal/execution-history${qs}`;
+    const url = `${config.platformApiUrl}/internal/run-history${qs}`;
 
-    const result = await fetchOrError(c, fetchFn, "Execution history fetch failed", url, {
+    const result = await fetchOrError(c, fetchFn, "Run history fetch failed", url, {
       headers: { Authorization: `Bearer ${config.executionToken}` },
     });
     if (!result.ok) return result.errorResponse;
@@ -143,7 +143,9 @@ export function createApp(deps: AppDeps): Hono {
     return c.body(body, result.response.status, {
       "Content-Type": result.response.headers.get("Content-Type") || "application/json",
     });
-  });
+  };
+  app.get("/run-history", runHistoryHandler);
+  app.get("/execution-history", runHistoryHandler); // backwards compat
 
   // LLM reverse proxy — replaces placeholder key with real API key, streams response.
   // The SDK formats all headers (auth, beta, identity) naturally using the placeholder;
@@ -267,7 +269,7 @@ export function createApp(deps: AppDeps): Hono {
       forwardedHeaders[key] = substituteVars(value, creds.credentials);
     }
 
-    // Infrastructure proxy (flow-level, transparent)
+    // Infrastructure proxy (agent-level, transparent)
     const resolvedProxy = config.proxyUrl || "";
 
     // 5b. Check for unresolved placeholders in headers

@@ -165,7 +165,7 @@ export async function updateOrgItem(
   return rows[0] ?? null;
 }
 
-/** List all items of a type in the org with usedByFlows count. */
+/** List all items of a type in the org with usedByAgents count. */
 export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
   const orgFilter = orgOrSystemFilter(orgId);
 
@@ -204,7 +204,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
       createdBy: row.createdBy,
       createdAt: toISORequired(row.createdAt),
       updatedAt: toISORequired(row.updatedAt),
-      usedByFlows: countMap.get(row.id) ?? 0,
+      usedByAgents: countMap.get(row.id) ?? 0,
       version: typeof m.version === "string" ? m.version : null,
       autoInstalled: row.autoInstalled,
       forkedFrom: row.forkedFrom ?? null,

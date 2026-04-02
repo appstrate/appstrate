@@ -9,7 +9,7 @@ export interface ContainerLifecycleOptions {
   orchestrator: ContainerOrchestrator;
   handle: WorkloadHandle;
   adapterName: string;
-  executionId: string;
+  runId: string;
   timeout: number;
   extraData?: Record<string, unknown>;
   signal?: AbortSignal;
@@ -25,12 +25,12 @@ export interface ContainerLifecycleOptions {
 export async function* runContainerLifecycle(
   options: ContainerLifecycleOptions,
 ): AsyncGenerator<ExecutionMessage> {
-  const { orchestrator, handle, adapterName, executionId, timeout, extraData, signal } = options;
+  const { orchestrator, handle, adapterName, runId, timeout, extraData, signal } = options;
 
   yield {
     type: "progress",
     message: `container started`,
-    data: { adapter: adapterName, executionId, workloadId: handle.id, ...extraData },
+    data: { adapter: adapterName, runId, workloadId: handle.id, ...extraData },
   };
 
   await orchestrator.startWorkload(handle);

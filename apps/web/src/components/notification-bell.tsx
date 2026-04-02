@@ -12,31 +12,31 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import {
   useUnreadCount,
-  useAllExecutions,
+  useAllRuns,
   useMarkRead,
   useMarkAllRead,
 } from "../hooks/use-notifications";
-import { useFlows } from "../hooks/use-packages";
+import { useAgents } from "../hooks/use-packages";
 import { useIsMobile } from "../hooks/use-mobile";
-import type { Execution } from "@appstrate/shared-types";
+import type { Run } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 
 function NotificationContent({
   unread,
-  unreadExecutions,
-  flowNameMap,
+  unreadRuns,
+  agentNameMap,
   onItemClick,
   onClose,
   markAllRead,
 }: {
   unread: number;
-  unreadExecutions: Pick<Execution, "id" | "packageId" | "status" | "startedAt">[];
-  flowNameMap: Map<string, string>;
-  onItemClick: (executionId: string) => void;
+  unreadRuns: Pick<Run, "id" | "packageId" | "status" | "startedAt">[];
+  agentNameMap: Map<string, string>;
+  onItemClick: (runId: string) => void;
   onClose: () => void;
   markAllRead: () => void;
 }) {
-  const { t } = useTranslation(["common", "flows"]);
+  const { t } = useTranslation(["common", "agents"]);
 
   return (
     <>
@@ -65,30 +65,30 @@ function NotificationContent({
       <Separator />
 
       {/* Notification list */}
-      {unreadExecutions.length === 0 ? (
+      {unreadRuns.length === 0 ? (
         <div className="flex flex-col items-center justify-center px-4 py-10">
           <Bell size={32} className="text-muted-foreground/30 mb-3" />
           <p className="text-muted-foreground text-sm">{t("notifications.empty")}</p>
         </div>
       ) : (
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
-          {unreadExecutions.map((execution) => (
+          {unreadRuns.map((run) => (
             <Link
-              key={execution.id}
-              to={`/flows/${execution.packageId}/executions/${execution.id}`}
-              onClick={() => onItemClick(execution.id)}
+              key={run.id}
+              to={`/agents/${run.packageId}/runs/${run.id}`}
+              onClick={() => onItemClick(run.id)}
               className="hover:bg-muted/50 group flex gap-3 px-4 py-3 transition-colors"
             >
               <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
               <div className="min-w-0 flex-1">
                 <div className="mb-0.5 flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-medium">
-                    {flowNameMap.get(execution.packageId) ?? execution.packageId}
+                    {agentNameMap.get(run.packageId) ?? run.packageId}
                   </span>
-                  <Badge status={execution.status} />
+                  <Badge status={run.status} />
                 </div>
                 <p className="text-muted-foreground text-xs">
-                  {execution.startedAt ? formatDateField(execution.startedAt) : ""}
+                  {run.startedAt ? formatDateField(run.startedAt) : ""}
                 </p>
               </div>
             </Link>
@@ -100,7 +100,7 @@ function NotificationContent({
       <Separator />
       <div className="p-2">
         <Link
-          to="/executions"
+          to="/runs"
           onClick={onClose}
           className="text-muted-foreground hover:text-foreground hover:bg-muted/50 flex items-center justify-center rounded-md py-2 text-xs font-medium transition-colors"
         >
@@ -112,27 +112,27 @@ function NotificationContent({
 }
 
 export function NotificationBell() {
-  const { t } = useTranslation(["common", "flows"]);
+  const { t } = useTranslation(["common", "agents"]);
   const { data: count } = useUnreadCount();
-  const { data: flows } = useFlows();
-  const { data: executionsData } = useAllExecutions(0, 50);
+  const { data: agents } = useAgents();
+  const { data: executionsData } = useAllRuns(0, 50);
   const markRead = useMarkRead();
   const markAllRead = useMarkAllRead();
   const [open, setOpen] = useState(false);
   const isMobile = useIsMobile();
   const unread = count ?? 0;
-  const hasRunning = flows?.some((f) => f.runningExecutions > 0) ?? false;
+  const hasRunning = agents?.some((f) => f.runningRuns > 0) ?? false;
 
-  const flowNameMap = new Map<string, string>();
-  if (flows) {
-    for (const f of flows) flowNameMap.set(f.id, f.displayName);
+  const agentNameMap = new Map<string, string>();
+  if (agents) {
+    for (const f of agents) agentNameMap.set(f.id, f.displayName);
   }
 
-  const unreadExecutions =
-    executionsData?.executions.filter((e) => e.notifiedAt != null && e.readAt == null) ?? [];
+  const unreadRuns =
+    executionsData?.runs.filter((e) => e.notifiedAt != null && e.readAt == null) ?? [];
 
-  const handleClick = (executionId: string) => {
-    markRead.mutate(executionId);
+  const handleClick = (runId: string) => {
+    markRead.mutate(runId);
     setOpen(false);
   };
 
@@ -156,8 +156,8 @@ export function NotificationBell() {
 
   const contentProps = {
     unread,
-    unreadExecutions,
-    flowNameMap,
+    unreadRuns,
+    agentNameMap,
     onItemClick: handleClick,
     onClose: () => setOpen(false),
     markAllRead: () => markAllRead.mutate(),

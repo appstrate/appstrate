@@ -31,7 +31,7 @@ import {
   ASSIGNABLE_ROLES,
 } from "../services/invitations.ts";
 import { getAppConfig } from "../lib/app-config.ts";
-import { provisionDefaultFlowForOrg } from "../services/default-flow.ts";
+import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { createDefaultApplication } from "../services/applications.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
 import { logger } from "../lib/logger.ts";
@@ -132,7 +132,7 @@ router.post("/", async (c) => {
   });
 
   // Provision default hello-world flow for the new org (non-fatal)
-  await provisionDefaultFlowForOrg(org.id, org.slug, user.id).catch(() => {});
+  await provisionDefaultAgentForOrg(org.id, org.slug, user.id).catch(() => {});
 
   return c.json(
     {

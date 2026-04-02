@@ -21,7 +21,7 @@ const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 type FormData = { file: File | null; githubUrl: string };
 
 export function ImportModal({ open, onClose }: ImportModalProps) {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const [dragOver, setDragOver] = useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = useState<{
     packageId: string;

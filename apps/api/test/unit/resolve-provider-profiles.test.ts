@@ -5,7 +5,7 @@ import {
   resolveProviderProfiles,
   type ResolveProviderProfilesDeps,
 } from "../../src/services/connection-profiles.ts";
-import type { FlowProviderRequirement } from "../../src/types/index.ts";
+import type { AgentProviderRequirement } from "../../src/types/index.ts";
 
 const TEST_ORG_ID = "test-org-id";
 
@@ -16,9 +16,9 @@ function createMockDeps(bindings: Record<string, string> = {}): ResolveProviderP
 }
 
 describe("resolveProviderProfiles", () => {
-  const gmail: FlowProviderRequirement = { id: "@test/gmail" };
-  const clickup: FlowProviderRequirement = { id: "@test/clickup" };
-  const stripe: FlowProviderRequirement = { id: "@test/stripe" };
+  const gmail: AgentProviderRequirement = { id: "@test/gmail" };
+  const clickup: AgentProviderRequirement = { id: "@test/clickup" };
+  const stripe: AgentProviderRequirement = { id: "@test/stripe" };
 
   it("uses defaultUserProfileId for all providers when no org profile and no overrides", async () => {
     const deps = createMockDeps();

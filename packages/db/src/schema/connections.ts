@@ -54,9 +54,9 @@ export const connectionProfiles = pgTable(
   ],
 );
 
-// Per-provider profile overrides: (actor, flow, provider) → profile
-export const userFlowProviderProfiles = pgTable(
-  "user_flow_provider_profiles",
+// Per-provider profile overrides: (actor, agent, provider) → profile
+export const userAgentProviderProfiles = pgTable(
+  "user_agent_provider_profiles",
   {
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     endUserId: text("end_user_id").references(() => endUsers.id, {

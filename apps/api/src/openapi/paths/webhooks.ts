@@ -25,7 +25,7 @@ export const webhooksPaths = {
                   enum: ["organization", "application"],
                   default: "application",
                   description:
-                    "Webhook scope. 'organization' fires for all executions; 'application' fires only for executions via the linked application's API key",
+                    "Webhook scope. 'organization' fires for all runs; 'application' fires only for runs via the linked application's API key",
                 },
                 applicationId: {
                   type: "string",
@@ -37,18 +37,18 @@ export const webhooksPaths = {
                   items: {
                     type: "string",
                     enum: [
-                      "execution.started",
-                      "execution.completed",
-                      "execution.failed",
-                      "execution.timeout",
-                      "execution.cancelled",
+                      "run.started",
+                      "run.completed",
+                      "run.failed",
+                      "run.timeout",
+                      "run.cancelled",
                     ],
                   },
                   description: "Event types to subscribe to",
                 },
                 packageId: {
                   type: ["string", "null"],
-                  description: "Filter by flow ID (null = all flows)",
+                  description: "Filter by agent ID (null = all agents)",
                 },
                 payloadMode: {
                   type: "string",

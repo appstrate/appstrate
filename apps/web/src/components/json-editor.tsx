@@ -13,7 +13,7 @@ interface JsonEditorProps {
 }
 
 export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const { resolvedTheme } = useTheme();
 
   const initialJson = useMemo(() => {

@@ -14,7 +14,7 @@ export function ProviderConfigureButton({
   provider: ProviderConfig;
   callbackUrl?: string;
 }) {
-  const { t } = useTranslation("flows");
+  const { t } = useTranslation("agents");
   const [open, setOpen] = useState(false);
 
   return (

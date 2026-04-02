@@ -33,7 +33,7 @@ export function CombinedProfileSelect({
   triggerClassName = "w-[200px]",
   id,
 }: CombinedProfileSelectProps) {
-  const { t } = useTranslation(["settings", "flows"]);
+  const { t } = useTranslation(["settings", "agents"]);
   const { data: userProfiles } = useConnectionProfiles();
   const { data: orgProfiles } = useOrgProfiles();
 
@@ -70,7 +70,7 @@ export function CombinedProfileSelect({
               role="presentation"
             >
               <Building2 className="size-3" />
-              {t("schedule.orgProfiles", { ns: "flows" })}
+              {t("schedule.orgProfiles", { ns: "agents" })}
             </div>
             {orgProfiles?.map((p) => (
               <SelectItem key={p.id} value={p.id}>

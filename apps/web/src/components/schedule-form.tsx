@@ -66,9 +66,9 @@ interface ScheduleFormProps {
     input?: Record<string, unknown>;
   };
   inputSchema?: JSONSchemaObject;
-  flows?: Array<{ id: string; displayName: string }>;
-  selectedFlowId?: string;
-  onFlowChange?: (flowId: string) => void;
+  agents?: Array<{ id: string; displayName: string }>;
+  selectedAgentId?: string;
+  onAgentChange?: (agentId: string) => void;
   onSubmit: (data: ScheduleSaveData) => void;
   onCancel: () => void;
   onDelete?: () => void;
@@ -88,16 +88,16 @@ export function ScheduleForm({
   mode,
   defaultValues,
   inputSchema,
-  flows,
-  selectedFlowId,
-  onFlowChange,
+  agents,
+  selectedAgentId,
+  onAgentChange,
   onSubmit,
   onCancel,
   onDelete,
   isPending,
   blockedMessage,
 }: ScheduleFormProps) {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const cronPresets = getCronPresets(t);
   const isEdit = mode === "edit";
 
@@ -177,15 +177,15 @@ export function ScheduleForm({
   return (
     <form onSubmit={onFormSubmit} className="space-y-6">
       {/* Flow selector (create mode only) */}
-      {mode === "create" && flows && onFlowChange && (
+      {mode === "create" && agents && onAgentChange && (
         <div className="space-y-3">
-          <Label htmlFor="sched-flow">{t("schedule.flow")}</Label>
-          <Select value={selectedFlowId ?? ""} onValueChange={onFlowChange}>
-            <SelectTrigger id="sched-flow">
+          <Label htmlFor="sched-agent">{t("schedule.flow")}</Label>
+          <Select value={selectedAgentId ?? ""} onValueChange={onAgentChange}>
+            <SelectTrigger id="sched-agent">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {flows.map((f) => (
+              {agents.map((f) => (
                 <SelectItem key={f.id} value={f.id}>
                   {f.displayName}
                 </SelectItem>

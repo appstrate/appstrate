@@ -26,7 +26,7 @@ interface Props {
 type FormData = { name: string };
 
 export function ForkPackageModal({ open, onClose, packageId, defaultName, type }: Props) {
-  const { t } = useTranslation(["flows", "common"]);
+  const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
   const { currentOrg } = useOrg();
   const forkMutation = useForkPackage();

@@ -2,7 +2,7 @@
 
 /**
  * Dependency validation — validates that all required providers are connected before execution.
- * Shared by executions.ts and scheduler.ts.
+ * Shared by runs.ts and scheduler.ts.
  */
 
 import { getConnectionStatus, validateScopes } from "./connection-manager/index.ts";
@@ -33,7 +33,7 @@ const defaultDeps: DependencyValidationDeps = {
  * providerProfiles maps providerId → connectionProfileId.
  * Throws ApiError on first unsatisfied dependency.
  */
-export async function validateFlowDependencies(
+export async function validateAgentDependencies(
   providers: AgentProviderRequirement[],
   providerProfiles: ProviderProfileMap,
   orgId: string,

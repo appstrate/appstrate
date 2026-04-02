@@ -262,20 +262,18 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   if (ctx.executionApi) {
     sections.push("## Execution History\n");
     sections.push(
-      "You can access data from previous executions beyond just the latest state. " +
-        "This is useful for trend analysis, auditing past results, or recovering from failures.\n",
+      "You can access data from previous runs beyond just the latest state. " +
+        "This is useful for trend analysis, auditing past runs, or recovering from failures.\n",
     );
     sections.push("```bash");
     sections.push('curl -s "$SIDECAR_URL/execution-history?limit=10&fields=state"');
     sections.push("```\n");
     sections.push("Query parameters:");
-    sections.push("- `limit` (1-50, default 10): Number of past executions to return");
+    sections.push("- `limit` (1-50, default 10): Number of past runs to return");
     sections.push(
       "- `fields` (comma-separated: `state`, `result`; default: `state`): Which data fields to include\n",
     );
-    sections.push(
-      "Returns `{ executions: [{ id, status, date, duration, ...selected_fields }] }`\n",
-    );
+    sections.push("Returns `{ runs: [{ id, status, date, duration, ...selected_fields }] }`\n");
   }
 
   // Append raw prompt at the end, without any interpolation

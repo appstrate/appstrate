@@ -111,13 +111,13 @@ describe("errorHandler middleware", () => {
   it("conflict returns 409 with custom code", async () => {
     const app = createApp();
     app.get("/test", () => {
-      throw conflict("flow_in_use", "Flow has running executions");
+      throw conflict("agent_in_use", "Agent has running runs");
     });
 
     const res = await app.request("/test");
     expect(res.status).toBe(409);
     const body = (await res.json()) as any;
-    expect(body.code).toBe("flow_in_use");
+    expect(body.code).toBe("agent_in_use");
   });
 
   it("gone returns 410 with custom code", async () => {

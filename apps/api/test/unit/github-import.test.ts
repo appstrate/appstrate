@@ -24,12 +24,12 @@ describe("parseGithubUrl", () => {
     });
 
     it("parses URL with tree/branch/path", () => {
-      const result = parseGithubUrl("https://github.com/acme/my-repo/tree/main/src/flows/my-flow");
+      const result = parseGithubUrl("https://github.com/acme/my-repo/tree/main/src/flows/my-agent");
       expect(result).toEqual({
         owner: "acme",
         repo: "my-repo",
         ref: "main",
-        path: "src/flows/my-flow",
+        path: "src/flows/my-agent",
       });
     });
 

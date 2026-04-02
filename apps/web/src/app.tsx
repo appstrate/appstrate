@@ -5,9 +5,9 @@ import { Routes, Route, Outlet, useLocation, Navigate, Link } from "react-router
 import { PackageList } from "./pages/package-list";
 import { UnifiedPackageDetailPage } from "./pages/unified-package-detail";
 import { PackageEditorPage } from "./pages/package-editor";
-import { ExecutionDetailPage } from "./pages/execution-detail";
+import { RunDetailPage } from "./pages/run-detail";
 import { SchedulesListPage } from "./pages/schedules-list";
-import { ExecutionsPage } from "./pages/executions-page";
+import { RunsPage } from "./pages/runs-page";
 import { DashboardPage } from "./pages/dashboard";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { WelcomePage } from "./pages/welcome";
@@ -45,7 +45,7 @@ import { NotificationBell } from "./components/notification-bell";
 import { useAuth } from "./hooks/use-auth";
 import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
-import { useGlobalExecutionSync } from "./hooks/use-global-execution-sync";
+import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useApplicationResolver } from "./hooks/use-current-application";
 import { useTheme } from "./stores/theme-store";
 import { useSidebarStore } from "./stores/sidebar-store";
@@ -89,7 +89,7 @@ function MainLayout() {
 }
 
 function GlobalRealtimeSync({ children }: { children: React.ReactNode }) {
-  useGlobalExecutionSync();
+  useGlobalRunSync();
   return <>{children}</>;
 }
 
@@ -114,7 +114,7 @@ function OrgGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // No orgs at all — redirect to onboarding
+  // No orgs at all -- redirect to onboarding
   if (orgs.length === 0) {
     return <Navigate to="/onboarding/create" replace />;
   }
@@ -147,7 +147,7 @@ function useExternalRedirect(isAuthenticated: boolean) {
         window.location.assign(redirect);
       }
     } catch {
-      // Invalid URL — ignore
+      // Invalid URL -- ignore
     }
   }, [isAuthenticated, trustedOrigins]);
 }
@@ -183,7 +183,7 @@ export function App() {
     );
   }
 
-  // Authenticated but email not verified — block access until verified
+  // Authenticated but email not verified -- block access until verified
   if (features.smtp && !user.emailVerified) {
     return (
       <ErrorBoundary>
@@ -217,19 +217,19 @@ export function App() {
             }
           >
             <Route path="/" element={<DashboardPage />} />
-            <Route path="/flows" element={<PackageList />} />
-            <Route path="/flows/new" element={<PackageEditorPage type="flow" />} />
-            <Route path="/flows/:scope/:name/edit" element={<PackageEditorPage type="flow" />} />
-            <Route path="/flows/:scope/:name" element={<UnifiedPackageDetailPage type="flow" />} />
+            <Route path="/agents" element={<PackageList />} />
+            <Route path="/agents/new" element={<PackageEditorPage type="agent" />} />
+            <Route path="/agents/:scope/:name/edit" element={<PackageEditorPage type="agent" />} />
             <Route
-              path="/flows/:scope/:name/:version"
-              element={<UnifiedPackageDetailPage type="flow" />}
+              path="/agents/:scope/:name"
+              element={<UnifiedPackageDetailPage type="agent" />}
             />
             <Route
-              path="/flows/:scope/:name/executions/:execId"
-              element={<ExecutionDetailPage />}
+              path="/agents/:scope/:name/:version"
+              element={<UnifiedPackageDetailPage type="agent" />}
             />
-            <Route path="/executions" element={<ExecutionsPage />} />
+            <Route path="/agents/:scope/:name/runs/:runId" element={<RunDetailPage />} />
+            <Route path="/runs" element={<RunsPage />} />
             <Route path="/schedules" element={<SchedulesListPage />} />
             <Route path="/schedules/new" element={<ScheduleCreatePage />} />
             <Route path="/schedules/:id" element={<ScheduleDetailPage />} />
@@ -281,6 +281,9 @@ export function App() {
             <Route path="/api-keys" element={<ApiKeysPage />} />
             <Route path="/app-settings" element={<AppSettingsPage />} />
             <Route path="/org-settings" element={<OrgSettingsPage />} />
+            {/* Legacy redirects */}
+            <Route path="/flows/*" element={<Navigate to="/agents" replace />} />
+            <Route path="/executions/*" element={<Navigate to="/runs" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

@@ -3,7 +3,7 @@
 import { Link } from "react-router-dom";
 import { Badge } from "./status-badge";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
-import { NextExecutionPreview } from "./next-execution-preview";
+import { NextRunPreview } from "./next-run-preview";
 import { ProfileLabel } from "./profile-label";
 import { useScheduleExecutions } from "../hooks/use-schedules";
 import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";
@@ -11,26 +11,25 @@ import type { EnrichedSchedule } from "@appstrate/shared-types";
 
 interface ScheduleCardProps {
   schedule: EnrichedSchedule;
-  flowName?: string;
+  agentName?: string;
 }
 
-export function ScheduleCard({ schedule, flowName }: ScheduleCardProps) {
-  const { data: executions } = useScheduleExecutions(schedule.id);
+export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
+  const { data: runs } = useScheduleExecutions(schedule.id);
   const { totalProviders, allReady, isLoading } = useScheduleProviderReadiness(schedule);
   const hasProviders = totalProviders > 0;
 
-  // Running + unread counts scoped to this schedule's executions
-  const runningExecutions =
-    executions?.filter((e) => e.status === "running" || e.status === "pending").length ?? 0;
-  const unreadCount =
-    executions?.filter((e) => e.notifiedAt != null && e.readAt == null).length ?? 0;
+  // Running + unread counts scoped to this schedule's runs
+  const runningRuns =
+    runs?.filter((e) => e.status === "running" || e.status === "pending").length ?? 0;
+  const unreadCount = runs?.filter((e) => e.notifiedAt != null && e.readAt == null).length ?? 0;
 
   // While client-side readiness is loading, use the server-side readiness from EnrichedSchedule
   const effectiveReady = isLoading ? schedule.readiness.status === "ready" : allReady;
   const effectiveHasProviders = isLoading ? schedule.readiness.totalProviders > 0 : hasProviders;
 
   const isActive = (schedule.enabled ?? true) && effectiveReady;
-  const lastExecutionNumber = executions?.[0]?.executionNumber ?? 0;
+  const lastRunNumber = runs?.[0]?.runNumber ?? 0;
 
   const statusBadge = (
     <ScheduleStatusBadge
@@ -53,7 +52,7 @@ export function ScheduleCard({ schedule, flowName }: ScheduleCardProps) {
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
-        {runningExecutions > 0 && <Badge status="running" />}
+        {runningRuns > 0 && <Badge status="running" />}
         <ProfileLabel
           profileType={schedule.profileType}
           profileName={schedule.profileName}
@@ -62,11 +61,11 @@ export function ScheduleCard({ schedule, flowName }: ScheduleCardProps) {
         />
       </div>
 
-      {/* Next run preview — flush to card edges */}
+      {/* Next run preview -- flush to card edges */}
       {isActive && schedule.nextRunAt && (
-        <NextExecutionPreview
-          executionNumber={lastExecutionNumber + 1}
-          flowName={flowName}
+        <NextRunPreview
+          runNumber={lastRunNumber + 1}
+          agentName={agentName}
           scheduleName={schedule.name || schedule.id}
           nextRunAt={schedule.nextRunAt}
           className="border-border border-t border-dashed"

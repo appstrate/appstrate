@@ -4,17 +4,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { onMutationError } from "./use-mutations";
-import type { Schedule, EnrichedSchedule, Execution } from "@appstrate/shared-types";
+import type { Schedule, EnrichedSchedule, Run } from "@appstrate/shared-types";
 
 export function useScheduleExecutions(scheduleId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
-    queryKey: ["schedule-executions", orgId, scheduleId],
+    queryKey: ["schedule-runs", orgId, scheduleId],
     queryFn: async () => {
-      const result = await api<{ executions: Execution[]; total: number }>(
-        `/schedules/${scheduleId}/executions`,
-      );
-      return result.executions;
+      const result = await api<{ runs: Run[]; total: number }>(`/schedules/${scheduleId}/runs`);
+      return result.runs;
     },
     enabled: !!scheduleId,
   });
@@ -46,7 +44,7 @@ export function useSchedules(packageId: string | undefined) {
   return useQuery({
     queryKey: ["schedules", orgId, packageId],
     queryFn: async () => {
-      return api<EnrichedSchedule[]>(`/flows/${packageId}/schedules`);
+      return api<EnrichedSchedule[]>(`/agents/${packageId}/schedules`);
     },
     enabled: !!packageId,
   });
@@ -67,7 +65,7 @@ export function useCreateSchedule(packageId: string) {
       timezone?: string;
       input?: Record<string, unknown>;
     }) => {
-      return api<Schedule>(`/flows/${packageId}/schedules`, {
+      return api<Schedule>(`/agents/${packageId}/schedules`, {
         method: "POST",
         body: JSON.stringify(data),
       });

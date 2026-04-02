@@ -26,19 +26,19 @@ export function useSaveConfig(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (config: Record<string, unknown>) => {
-      return api(`/flows/${packageId}/config`, {
+      return api(`/agents/${packageId}/config`, {
         method: "PUT",
         body: JSON.stringify(config),
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
+      qc.invalidateQueries({ queryKey: ["packages", "agent"] });
     },
     onError: onMutationError,
   });
 }
 
-export function useRunFlow(packageId: string) {
+export function useRunAgent(packageId: string) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
@@ -62,19 +62,19 @@ export function useRunFlow(packageId: string) {
             fd.append(key, file);
           }
         }
-        return uploadFormData<{ executionId: string }>(`/flows/${packageId}/run${qs}`, fd);
+        return uploadFormData<{ runId: string }>(`/agents/${packageId}/run${qs}`, fd);
       }
 
       // JSON mode (existing behavior)
-      return api<{ executionId: string }>(`/flows/${packageId}/run${qs}`, {
+      return api<{ runId: string }>(`/agents/${packageId}/run${qs}`, {
         method: "POST",
         body: JSON.stringify(input ? { input } : {}),
       });
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["executions"] });
-      qc.invalidateQueries({ queryKey: ["paginated-executions"] });
-      navigate(`/flows/${packageId}/executions/${data.executionId}`);
+      qc.invalidateQueries({ queryKey: ["runs"] });
+      qc.invalidateQueries({ queryKey: ["paginated-runs"] });
+      navigate(`/agents/${packageId}/runs/${data.runId}`);
     },
     onError: onMutationError,
   });
@@ -186,9 +186,9 @@ export function useImportPackage() {
       return uploadFormData<{ packageId: string; type: string }>(`/packages/import${qs}`, fd);
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["agents"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
-      navigate(`/${data.type}s/${data.packageId}`);
+      navigate(`/${data.type === "agent" ? "agent" : data.type}s/${data.packageId}`);
     },
     onError: onMutationError,
   });
@@ -206,24 +206,24 @@ export function useImportFromGithub() {
       });
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["agents"] });
       qc.invalidateQueries({ queryKey: ["packages"] });
-      navigate(`/${data.type}s/${data.packageId}`);
+      navigate(`/${data.type === "agent" ? "agent" : data.type}s/${data.packageId}`);
     },
     onError: onMutationError,
   });
 }
 
-export function useCancelExecution() {
+export function useCancelRun() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (execId: string) => {
-      return api(`/executions/${execId}/cancel`, { method: "POST" });
+    mutationFn: async (runId: string) => {
+      return api(`/runs/${runId}/cancel`, { method: "POST" });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["execution"] });
-      qc.invalidateQueries({ queryKey: ["executions"] });
-      qc.invalidateQueries({ queryKey: ["paginated-executions"] });
+      qc.invalidateQueries({ queryKey: ["run"] });
+      qc.invalidateQueries({ queryKey: ["runs"] });
+      qc.invalidateQueries({ queryKey: ["paginated-runs"] });
     },
     onError: onMutationError,
   });
@@ -251,31 +251,31 @@ export function useConnectCredentials() {
   });
 }
 
-export function useDeleteFlowExecutions(packageId: string) {
+export function useDeleteAgentRuns(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      return api<{ deleted: number }>(`/flows/${packageId}/executions`, { method: "DELETE" });
+      return api<{ deleted: number }>(`/agents/${packageId}/runs`, { method: "DELETE" });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["executions"] });
-      qc.invalidateQueries({ queryKey: ["paginated-executions"] });
-      qc.invalidateQueries({ queryKey: ["packages", "flow"] });
-      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["runs"] });
+      qc.invalidateQueries({ queryKey: ["paginated-runs"] });
+      qc.invalidateQueries({ queryKey: ["packages", "agent"] });
+      qc.invalidateQueries({ queryKey: ["agents"] });
     },
     onError: onMutationError,
   });
 }
 
-export function useDeleteFlow() {
+export function useDeleteAgent() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (packageId: string) => {
-      await api(`/packages/flows/${packageId}`, { method: "DELETE" });
+      await api(`/packages/agents/${packageId}`, { method: "DELETE" });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flows"] });
+      qc.invalidateQueries({ queryKey: ["agents"] });
       navigate("/");
     },
     onError: onMutationError,
@@ -288,10 +288,10 @@ export function useDeleteMemory(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (memoryId: number) => {
-      return api(`/flows/${packageId}/memories/${memoryId}`, { method: "DELETE" });
+      return api(`/agents/${packageId}/memories/${memoryId}`, { method: "DELETE" });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow-memories"] });
+      qc.invalidateQueries({ queryKey: ["agent-memories"] });
     },
     onError: onMutationError,
   });
@@ -301,10 +301,10 @@ export function useDeleteAllMemories(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      return api<{ deleted: number }>(`/flows/${packageId}/memories`, { method: "DELETE" });
+      return api<{ deleted: number }>(`/agents/${packageId}/memories`, { method: "DELETE" });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["flow-memories"] });
+      qc.invalidateQueries({ queryKey: ["agent-memories"] });
     },
     onError: onMutationError,
   });
@@ -329,7 +329,7 @@ export function useCreatePackage(type: PackageType) {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["packages"] });
-      if (type === "flow") qc.invalidateQueries({ queryKey: ["flows"] });
+      if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
       if (data.packageId) {
         navigate(packageDetailPath(type, data.packageId));
       }
@@ -355,7 +355,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages"] });
-      if (type === "flow") qc.invalidateQueries({ queryKey: ["flows"] });
+      if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
       qc.invalidateQueries({ queryKey: ["version-info"] });
       navigate(packageDetailPath(type, packageId));
     },

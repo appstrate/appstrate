@@ -91,8 +91,8 @@ export async function postInstallPackage(params: {
     await uploadPackageFiles("providers", orgId, packageId, files);
   }
 
-  if (packageType === "flow" && Object.keys(files).length > 0) {
-    await uploadPackageFiles("flows", orgId, packageId, files);
+  if (packageType === "agent" && Object.keys(files).length > 0) {
+    await uploadPackageFiles("agents", orgId, packageId, files);
   }
 
   await createVersion(manifest);

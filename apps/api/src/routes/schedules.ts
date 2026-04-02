@@ -13,7 +13,7 @@ import {
 } from "../services/scheduler.ts";
 import { isValidCron } from "../lib/cron.ts";
 import { validateInput, schemaHasFileFields } from "../services/schema.ts";
-import { requireFlow } from "../middleware/guards.ts";
+import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -48,22 +48,22 @@ export function createSchedulesRouter() {
     return c.json(schedules);
   });
 
-  // GET /api/flows/:scope/:name/schedules — list schedules for a flow
-  router.get("/flows/:scope{@[^/]+}/:name/schedules", requireFlow(), async (c) => {
-    const flow = c.get("flow");
+  // GET /api/agents/:scope/:name/schedules — list schedules for an agent
+  router.get("/agents/:scope{@[^/]+}/:name/schedules", requireAgent(), async (c) => {
+    const agent = c.get("agent");
     const orgId = c.get("orgId");
-    const schedules = await listPackageSchedules(flow.id, orgId);
+    const schedules = await listPackageSchedules(agent.id, orgId);
     return c.json(schedules);
   });
 
-  // POST /api/flows/:scope/:name/schedules — create a schedule
+  // POST /api/agents/:scope/:name/schedules — create a schedule
   router.post(
-    "/flows/:scope{@[^/]+}/:name/schedules",
+    "/agents/:scope{@[^/]+}/:name/schedules",
     rateLimit(10),
-    requireFlow(),
+    requireAgent(),
     requirePermission("schedules", "write"),
     async (c) => {
-      const flow = c.get("flow");
+      const agent = c.get("agent");
       const actor = getActor(c);
 
       const body = await c.req.json();
@@ -75,10 +75,10 @@ export function createSchedulesRouter() {
         throw forbidden("Cannot use a profile you do not own");
       }
 
-      // Block scheduling for flows with file inputs
-      const inputSchema = flow.manifest.input?.schema;
+      // Block scheduling for agents with file inputs
+      const inputSchema = agent.manifest.input?.schema;
       if (schemaHasFileFields(inputSchema ? asJSONSchemaObject(inputSchema) : undefined)) {
-        throw invalidRequest("Cannot schedule flows with file inputs");
+        throw invalidRequest("Cannot schedule agents with file inputs");
       }
 
       // Validate cron expression
@@ -86,7 +86,7 @@ export function createSchedulesRouter() {
         throw invalidRequest("Invalid cron expression", "cronExpression");
       }
 
-      // Validate input against flow's input schema (catches missing required fields even when input is undefined)
+      // Validate input against agent's input schema (catches missing required fields even when input is undefined)
       if (inputSchema) {
         const inputValidation = validateInput(data.input, asJSONSchemaObject(inputSchema));
         if (!inputValidation.valid) {
@@ -96,7 +96,7 @@ export function createSchedulesRouter() {
       }
 
       const schedule = await createSchedule(
-        flow.id,
+        agent.id,
         data.connectionProfileId,
         c.get("orgId"),
         data,
