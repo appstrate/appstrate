@@ -10,7 +10,7 @@ export type PackageType = (typeof packageTypeEnum.enumValues)[number];
 
 export interface PackageTypeConfig {
   type: PackageType;
-  storageFolder: "flows" | "skills" | "tools" | "providers";
+  storageFolder: "agents" | "skills" | "tools" | "providers";
   label: string;
 }
 
@@ -26,10 +26,10 @@ export const TOOL_CONFIG: PackageTypeConfig = {
   label: "Tools",
 };
 
-export const FLOW_CONFIG: PackageTypeConfig = {
-  type: "flow",
-  storageFolder: "flows",
-  label: "Flows",
+export const AGENT_CONFIG: PackageTypeConfig = {
+  type: "agent",
+  storageFolder: "agents",
+  label: "Agents",
 };
 
 export const PROVIDER_CONFIG: PackageTypeConfig = {
@@ -42,7 +42,7 @@ export const PROVIDER_CONFIG: PackageTypeConfig = {
 // Type → config lookup
 // ─────────────────────────────────────────────
 
-const ALL_CONFIGS: PackageTypeConfig[] = [FLOW_CONFIG, SKILL_CONFIG, TOOL_CONFIG, PROVIDER_CONFIG];
+const ALL_CONFIGS: PackageTypeConfig[] = [AGENT_CONFIG, SKILL_CONFIG, TOOL_CONFIG, PROVIDER_CONFIG];
 
 const CONFIG_BY_TYPE = Object.fromEntries(ALL_CONFIGS.map((c) => [c.type, c])) as Record<
   PackageType,

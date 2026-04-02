@@ -1,51 +1,51 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Tracks in-flight executions for graceful shutdown and cancellation.
+// Tracks in-flight runs for graceful shutdown and cancellation.
 // Cross-instance cancel signaling via Redis Pub/Sub.
 
 import { getRedisConnection, getRedisSubscriber } from "../lib/redis.ts";
 import { logger } from "../lib/logger.ts";
 
-const CANCEL_CHANNEL = "executions:cancel";
+const CANCEL_CHANNEL = "runs:cancel";
 const PUBLISH_MAX_RETRIES = 3;
 const PUBLISH_BASE_DELAY_MS = 100;
 
 const inFlight = new Map<string, AbortController>();
 
-export function trackExecution(executionId: string): AbortController {
+export function trackRun(runId: string): AbortController {
   const controller = new AbortController();
-  inFlight.set(executionId, controller);
+  inFlight.set(runId, controller);
   return controller;
 }
 
-export function untrackExecution(executionId: string): void {
-  inFlight.delete(executionId);
+export function untrackRun(runId: string): void {
+  inFlight.delete(runId);
 }
 
-export function abortExecution(executionId: string): void {
+export function abortRun(runId: string): void {
   // Local fast-path: abort immediately if running on this instance
-  const controller = inFlight.get(executionId);
+  const controller = inFlight.get(runId);
   if (controller) controller.abort();
 
   // Cross-instance: publish cancel signal with retry
-  publishCancelWithRetry(executionId).catch((err) => {
-    logger.error("Failed to publish execution cancel to Redis after retries", {
-      executionId,
+  publishCancelWithRetry(runId).catch((err) => {
+    logger.error("Failed to publish run cancel to Redis after retries", {
+      runId,
       retries: PUBLISH_MAX_RETRIES,
       error: err instanceof Error ? err.message : String(err),
     });
   });
 }
 
-async function publishCancelWithRetry(executionId: string): Promise<void> {
+async function publishCancelWithRetry(runId: string): Promise<void> {
   for (let attempt = 0; attempt < PUBLISH_MAX_RETRIES; attempt++) {
     try {
-      await getRedisConnection().publish(CANCEL_CHANNEL, executionId);
+      await getRedisConnection().publish(CANCEL_CHANNEL, runId);
       return;
     } catch (err) {
       if (attempt === PUBLISH_MAX_RETRIES - 1) throw err;
-      logger.warn("Retrying execution cancel publish", {
-        executionId,
+      logger.warn("Retrying run cancel publish", {
+        runId,
         attempt: attempt + 1,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -58,42 +58,42 @@ export function getInFlightCount(): number {
   return inFlight.size;
 }
 
-/** Subscribe to Redis cancel channel so this instance can abort executions triggered by other instances. */
+/** Subscribe to Redis cancel channel so this instance can abort runs triggered by other instances. */
 export function initCancelSubscriber(): void {
   const subscriber = getRedisSubscriber();
 
   subscriber.subscribe(CANCEL_CHANNEL, (err) => {
     if (err) {
-      logger.error("Failed to subscribe to execution cancel channel", {
+      logger.error("Failed to subscribe to run cancel channel", {
         channel: CANCEL_CHANNEL,
         error: err instanceof Error ? err.message : String(err),
       });
       return;
     }
-    logger.info("Subscribed to execution cancel channel", {
+    logger.info("Subscribed to run cancel channel", {
       channel: CANCEL_CHANNEL,
     });
   });
 
-  subscriber.on("message", (channel, executionId) => {
+  subscriber.on("message", (channel, runId) => {
     if (channel !== CANCEL_CHANNEL) return;
 
-    const controller = inFlight.get(executionId);
+    const controller = inFlight.get(runId);
     if (controller) {
-      logger.info("Aborting execution via cross-instance cancel", {
-        executionId,
+      logger.info("Aborting run via cross-instance cancel", {
+        runId,
       });
       controller.abort();
     }
   });
 }
 
-/** Unsubscribe from the cancel channel. Call before draining in-flight executions during shutdown. */
+/** Unsubscribe from the cancel channel. Call before draining in-flight runs during shutdown. */
 export async function stopCancelSubscriber(): Promise<void> {
   try {
     const subscriber = getRedisSubscriber();
     await subscriber.unsubscribe(CANCEL_CHANNEL);
-    logger.info("Unsubscribed from execution cancel channel");
+    logger.info("Unsubscribed from run cancel channel");
   } catch (err) {
     logger.warn("Error unsubscribing from cancel channel", {
       error: err instanceof Error ? err.message : String(err),
@@ -101,7 +101,7 @@ export async function stopCancelSubscriber(): Promise<void> {
   }
 }
 
-/** Wait for all in-flight executions to complete, up to timeoutMs. Returns true if all drained. */
+/** Wait for all in-flight runs to complete, up to timeoutMs. Returns true if all drained. */
 export async function waitForInFlight(timeoutMs: number): Promise<boolean> {
   if (inFlight.size === 0) return true;
 

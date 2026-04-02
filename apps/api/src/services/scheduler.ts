@@ -12,15 +12,15 @@ import {
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
-import { createExecution, createFailedExecution } from "./state/index.ts";
+import { createRun, createFailedRun } from "./state/index.ts";
 import { executeFlowInBackground } from "../routes/executions.ts";
 import { dispatchWebhookEvents } from "./webhooks.ts";
 import { buildExecutionContext, ModelNotConfiguredError } from "./env-builder.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
 import type { PromptContext } from "./adapters/types.ts";
-import { getPackage, packageExists } from "./flow-service.ts";
+import { getPackage, packageExists } from "./agent-service.ts";
 import { getPackageConfig } from "./state/index.ts";
-import { validateFlowReadiness } from "./flow-readiness.ts";
+import { validateAgentReadiness } from "./agent-readiness.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import {
   getProfileByIdUnsafe,
@@ -35,7 +35,7 @@ import { validateInput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getRedisConnection } from "../lib/redis.ts";
 import { computeNextRun } from "../lib/cron.ts";
-import { getRunningExecutionCountForOrg } from "./state/index.ts";
+import { getRunningRunCountForOrg } from "./state/index.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 
@@ -100,7 +100,7 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
       tz: schedule.timezone ?? "UTC",
     },
     {
-      name: "execute-flow",
+      name: "execute-agent",
       data: jobData,
     },
   );
@@ -211,29 +211,21 @@ async function triggerScheduledExecution(
   orgId: string,
   input: Record<string, unknown> | undefined,
 ) {
-  /** Create a failed execution record + dispatch webhook so the user is notified. */
+  /** Create a failed run record + dispatch webhook so the user is notified. */
   async function failSchedule(error: string, actor: Actor | null = null): Promise<void> {
-    const executionId = `exec_${crypto.randomUUID()}`;
+    const runId = `run_${crypto.randomUUID()}`;
     try {
-      await createFailedExecution(
-        executionId,
-        packageId,
-        actor,
-        orgId,
-        error,
-        scheduleId,
-        connectionProfileId,
-      );
-      dispatchWebhookEvents(orgId, "execution.failed", {
-        id: executionId,
+      await createFailedRun(runId, packageId, actor, orgId, error, scheduleId, connectionProfileId);
+      dispatchWebhookEvents(orgId, "run.failed", {
+        id: runId,
         packageId,
         status: "failed",
         error,
       }).catch(() => {});
     } catch (err) {
-      logger.error("Failed to create failed schedule execution record", {
+      logger.error("Failed to create failed schedule run record", {
         scheduleId,
-        executionId,
+        runId,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -288,8 +280,8 @@ async function triggerScheduledExecution(
         getPackageConfig(orgId, packageId),
       ]);
 
-      await validateFlowReadiness({
-        flow,
+      await validateAgentReadiness({
+        agent: flow,
         providerProfiles: resolvedProfiles,
         orgId,
         config: packageConfig.config,
@@ -301,7 +293,7 @@ async function triggerScheduledExecution(
       preflightProxyId = packageConfig.proxyId;
     } catch (err) {
       if (err instanceof ApiError) {
-        logger.warn("Flow readiness check failed, skipping schedule", {
+        logger.warn("Agent readiness check failed, skipping schedule", {
           scheduleId,
           packageId,
           code: err.code,
@@ -331,18 +323,18 @@ async function triggerScheduledExecution(
       }
     }
 
-    const executionId = `exec_${crypto.randomUUID()}`;
+    const runId = `run_${crypto.randomUUID()}`;
 
     // Build execution context (tokens, config, state, providers, package, version)
     let promptContext: PromptContext;
-    let flowPackage: Buffer | null;
+    let agentPackage: Buffer | null;
     let packageVersionId: number | null;
     let proxyLabel: string | null;
     let modelLabel: string | null;
     try {
-      ({ promptContext, flowPackage, packageVersionId, proxyLabel, modelLabel } =
+      ({ promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel } =
         await buildExecutionContext({
-          executionId,
+          executionId: runId,
           flow,
           providerProfiles,
           orgId,
@@ -354,7 +346,7 @@ async function triggerScheduledExecution(
         }));
     } catch (err) {
       if (err instanceof ModelNotConfiguredError) {
-        logger.warn("No model configured, skipping scheduled execution", {
+        logger.warn("No model configured, skipping scheduled run", {
           scheduleId,
           packageId,
           orgId,
@@ -365,15 +357,15 @@ async function triggerScheduledExecution(
       throw err;
     }
 
-    // Pre-execution quota check (Cloud only — skip silently if quota exceeded)
+    // Pre-run quota check (Cloud only — skip silently if quota exceeded)
     const cloud = getCloudModule();
     if (cloud) {
       try {
-        const runningCount = await getRunningExecutionCountForOrg(orgId);
+        const runningCount = await getRunningRunCountForOrg(orgId);
         await cloud.cloudHooks.checkQuota(orgId, runningCount);
       } catch (err) {
         if (err instanceof cloud.QuotaExceededError) {
-          logger.warn("Quota exceeded, skipping scheduled execution", {
+          logger.warn("Quota exceeded, skipping scheduled run", {
             scheduleId,
             packageId,
             orgId,
@@ -391,9 +383,9 @@ async function triggerScheduledExecution(
       Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
     );
 
-    // Create execution record with schedule_id and version
-    await createExecution(
-      executionId,
+    // Create run record with schedule_id and version
+    await createRun(
+      runId,
       packageId,
       actor,
       orgId,
@@ -407,8 +399,8 @@ async function triggerScheduledExecution(
       profileIdMap,
     );
 
-    logger.info("Triggering scheduled execution", {
-      executionId,
+    logger.info("Triggering scheduled run", {
+      runId,
       packageId,
       scheduleId,
       connectionProfileId,
@@ -416,9 +408,9 @@ async function triggerScheduledExecution(
     });
 
     // Fire-and-forget (catch to prevent unhandled rejection)
-    executeFlowInBackground(executionId, orgId, flow, promptContext, flowPackage).catch((err) => {
-      logger.error("Unhandled error in scheduled execution", {
-        executionId,
+    executeFlowInBackground(runId, orgId, flow, promptContext, agentPackage).catch((err) => {
+      logger.error("Unhandled error in scheduled run", {
+        runId,
         error: err instanceof Error ? err.message : String(err),
       });
     });

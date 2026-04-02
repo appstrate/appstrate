@@ -25,11 +25,11 @@ import { prefixedId } from "../lib/ids.ts";
 // ---------------------------------------------------------------------------
 
 export const webhookEventSchema = z.enum([
-  "execution.started",
-  "execution.completed",
-  "execution.failed",
-  "execution.timeout",
-  "execution.cancelled",
+  "run.started",
+  "run.completed",
+  "run.failed",
+  "run.timeout",
+  "run.cancelled",
 ]);
 
 export type WebhookEventType = z.infer<typeof webhookEventSchema>;
@@ -372,7 +372,7 @@ export function buildEventEnvelope(params: {
   const eventId = prefixedId("evt");
   const now = Math.floor(Date.now() / 1000);
 
-  const execObj: Record<string, unknown> = { ...params.execution, object: "execution" };
+  const execObj: Record<string, unknown> = { ...params.execution, object: "run" };
 
   // Summary mode: strip result and input
   if (params.payloadMode === "summary") {

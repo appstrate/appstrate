@@ -228,7 +228,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   if (ctx.previousState) {
     sections.push("## Previous State\n");
     sections.push(
-      "This flow supports stateful execution across runs. " +
+      "This agent supports stateful execution across runs. " +
         "Your most recent execution left the following state:\n",
     );
     sections.push("```json");
@@ -244,8 +244,8 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   if (ctx.memories && ctx.memories.length > 0) {
     sections.push("## Memory\n");
     sections.push(
-      "This flow has accumulated the following memories from previous executions. " +
-        "These are shared across all users running this flow:\n",
+      "This agent has accumulated the following memories from previous runs. " +
+        "These are shared across all users running this agent:\n",
     );
     for (const mem of ctx.memories) {
       const date = mem.createdAt ? ` (${mem.createdAt})` : "";

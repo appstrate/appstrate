@@ -9,7 +9,7 @@ import { getConnectionStatus, validateScopes } from "./connection-manager/index.
 import type { ConnectionStatus } from "./connection-manager/index.ts";
 import { isProviderEnabled } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
-import type { FlowProviderRequirement, ProviderProfileMap } from "../types/index.ts";
+import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { ApiError } from "../lib/errors.ts";
 
 export interface DependencyValidationDeps {
@@ -34,7 +34,7 @@ const defaultDeps: DependencyValidationDeps = {
  * Throws ApiError on first unsatisfied dependency.
  */
 export async function validateFlowDependencies(
-  providers: FlowProviderRequirement[],
+  providers: AgentProviderRequirement[],
   providerProfiles: ProviderProfileMap,
   orgId: string,
   deps: DependencyValidationDeps = defaultDeps,

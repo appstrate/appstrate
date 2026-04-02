@@ -1,36 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * HMAC-SHA256 signed execution tokens.
+ * HMAC-SHA256 signed run tokens.
  *
- * Format: `executionId.signature` where signature = HMAC-SHA256(executionId, secret).
- * Prevents token reuse from leaked executionIds (logs, monitoring)
+ * Format: `runId.signature` where signature = HMAC-SHA256(runId, secret).
+ * Prevents token reuse from leaked runIds (logs, monitoring)
  * because the signature cannot be forged without the platform secret.
  */
 import { timingSafeEqual } from "node:crypto";
 import { getEnv } from "@appstrate/env";
 
-export function signExecutionToken(executionId: string): string {
+export function signRunToken(runId: string): string {
   const hasher = new Bun.CryptoHasher("sha256", getEnv().EXECUTION_TOKEN_SECRET);
-  hasher.update(executionId);
-  return `${executionId}.${hasher.digest("hex")}`;
+  hasher.update(runId);
+  return `${runId}.${hasher.digest("hex")}`;
 }
 
 export function parseSignedToken(token: string): string | null {
   const dotIndex = token.lastIndexOf(".");
   if (dotIndex === -1) return null;
 
-  const executionId = token.substring(0, dotIndex);
+  const runId = token.substring(0, dotIndex);
   const signature = token.substring(dotIndex + 1);
-  if (!executionId || !signature) return null;
+  if (!runId || !signature) return null;
 
   const hasher = new Bun.CryptoHasher("sha256", getEnv().EXECUTION_TOKEN_SECRET);
-  hasher.update(executionId);
+  hasher.update(runId);
   const expected = hasher.digest("hex");
 
   // Constant-time comparison
   if (signature.length !== expected.length) return null;
   const sigBuf = Buffer.from(signature);
   const expBuf = Buffer.from(expected);
-  return timingSafeEqual(sigBuf, expBuf) ? executionId : null;
+  return timingSafeEqual(sigBuf, expBuf) ? runId : null;
 }

@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createOrgItem } from "./package-items/crud.ts";
-import { FLOW_CONFIG } from "./package-items/config.ts";
+import { AGENT_CONFIG } from "./package-items/config.ts";
 import { logger } from "../lib/logger.ts";
 
 const HELLO_WORLD_MANIFEST = {
   version: "1.0.0",
-  type: "flow",
+  type: "agent",
   schemaVersion: "1.0",
   displayName: "Hello World",
   author: "Appstrate",
-  description: "Un flow de démonstration pour découvrir les capacités de la plateforme Appstrate.",
+  description: "Un agent de démonstration pour découvrir les capacités de la plateforme Appstrate.",
   keywords: ["demo", "example", "getting-started"],
   dependencies: {
     tools: {
@@ -32,16 +32,16 @@ Welcome to Appstrate! You are an AI agent running inside an ephemeral Docker con
    - Execute complex automated tasks autonomously
    - Produce structured, actionable results
 
-3. **Encourage the user** to create their own flows to automate their daily tasks.
+3. **Encourage the user** to create their own agents to automate their daily tasks.
 
 Be concise, enthusiastic, and professional.
 `;
 
 /**
- * Provision a default "Hello World" flow for a newly created organization.
- * Non-fatal: logs a warning on failure (e.g. if the flow already exists).
+ * Provision a default "Hello World" agent for a newly created organization.
+ * Non-fatal: logs a warning on failure (e.g. if the agent already exists).
  */
-export async function provisionDefaultFlowForOrg(
+export async function provisionDefaultAgentForOrg(
   orgId: string,
   orgSlug: string,
   createdBy: string,
@@ -60,13 +60,13 @@ export async function provisionDefaultFlowForOrg(
         content: HELLO_WORLD_PROMPT,
         createdBy,
       },
-      FLOW_CONFIG,
+      AGENT_CONFIG,
       manifest,
     );
 
-    logger.info("Provisioned default hello-world flow", { orgId, packageId });
+    logger.info("Provisioned default hello-world agent", { orgId, packageId });
   } catch (err) {
-    logger.warn("Failed to provision default hello-world flow (may already exist)", {
+    logger.warn("Failed to provision default hello-world agent (may already exist)", {
       orgId,
       err,
     });

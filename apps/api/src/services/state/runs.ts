@@ -2,15 +2,15 @@
 
 import { eq, and, ne, desc, isNotNull, inArray, count, max, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { executions, executionLogs, packageVersions } from "@appstrate/db/schema";
+import { runs, runLogs, packageVersions } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
 import { type Actor, actorInsert, actorFilter } from "../../lib/actor.ts";
 import { asRecordOrNull } from "../../lib/safe-json.ts";
 import { toISO } from "../../lib/date-helpers.ts";
 
-// --- Executions ---
+// --- Runs ---
 
-export async function createExecution(
+export async function createRun(
   id: string,
   packageId: string,
   actor: Actor | null,
@@ -25,12 +25,12 @@ export async function createExecution(
   providerProfileIds?: Record<string, string>,
 ): Promise<void> {
   const [maxRow] = await db
-    .select({ maxNum: max(executions.executionNumber) })
-    .from(executions)
-    .where(and(eq(executions.packageId, packageId), eq(executions.orgId, orgId)));
-  const executionNumber = (maxRow?.maxNum ?? 0) + 1;
+    .select({ maxNum: max(runs.runNumber) })
+    .from(runs)
+    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)));
+  const runNumber = (maxRow?.maxNum ?? 0) + 1;
 
-  await db.insert(executions).values({
+  await db.insert(runs).values({
     id,
     packageId,
     ...(actor ? actorInsert(actor) : { userId: null, endUserId: null }),
@@ -45,15 +45,15 @@ export async function createExecution(
     modelLabel,
     applicationId,
     providerProfileIds,
-    executionNumber,
+    runNumber,
   });
 }
 
 /**
- * Create an execution record that is immediately failed (preflight error).
+ * Create a run record that is immediately failed (preflight error).
  * Single INSERT with status=failed — triggers one pg_notify for realtime.
  */
-export async function createFailedExecution(
+export async function createFailedRun(
   id: string,
   packageId: string,
   actor: Actor | null,
@@ -63,13 +63,13 @@ export async function createFailedExecution(
   connectionProfileId?: string,
 ): Promise<void> {
   const [maxRow] = await db
-    .select({ maxNum: max(executions.executionNumber) })
-    .from(executions)
-    .where(and(eq(executions.packageId, packageId), eq(executions.orgId, orgId)));
-  const executionNumber = (maxRow?.maxNum ?? 0) + 1;
+    .select({ maxNum: max(runs.runNumber) })
+    .from(runs)
+    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)));
+  const runNumber = (maxRow?.maxNum ?? 0) + 1;
   const now = new Date();
 
-  await db.insert(executions).values({
+  await db.insert(runs).values({
     id,
     packageId,
     ...(actor ? actorInsert(actor) : { userId: null, endUserId: null }),
@@ -83,11 +83,11 @@ export async function createFailedExecution(
     notifiedAt: now,
     connectionProfileId,
     scheduleId,
-    executionNumber,
+    runNumber,
   });
 }
 
-export async function updateExecution(
+export async function updateRun(
   id: string,
   updates: {
     status?: string;
@@ -116,80 +116,72 @@ export async function updateExecution(
   if (updates.cost !== undefined) set.cost = updates.cost;
 
   try {
-    await db.update(executions).set(set).where(eq(executions.id, id));
+    await db.update(runs).set(set).where(eq(runs.id, id));
   } catch (err) {
-    logger.error("Failed to update execution", {
-      executionId: id,
+    logger.error("Failed to update run", {
+      runId: id,
       error: err instanceof Error ? err.message : String(err),
     });
   }
 }
 
-export async function getLastExecutionState(
+export async function getLastRunState(
   packageId: string,
   actor: Actor | null,
   orgId: string,
 ): Promise<Record<string, unknown> | null> {
-  const conditions = [
-    eq(executions.packageId, packageId),
-    eq(executions.orgId, orgId),
-    isNotNull(executions.state),
-  ];
+  const conditions = [eq(runs.packageId, packageId), eq(runs.orgId, orgId), isNotNull(runs.state)];
   if (actor) {
-    conditions.push(
-      actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
-    );
+    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
 
   const [row] = await db
-    .select({ state: executions.state })
-    .from(executions)
+    .select({ state: runs.state })
+    .from(runs)
     .where(and(...conditions))
-    .orderBy(desc(executions.startedAt))
+    .orderBy(desc(runs.startedAt))
     .limit(1);
   return asRecordOrNull(row?.state);
 }
 
-export async function getRecentExecutions(
+export async function getRecentRuns(
   packageId: string,
   actor: Actor | null,
   orgId: string,
   options: {
     limit?: number;
     fields?: ("state" | "result")[];
-    excludeExecutionId?: string;
+    excludeRunId?: string;
   } = {},
 ): Promise<Record<string, unknown>[]> {
   const limit = options.limit ?? 10;
   const fields = options.fields ?? ["state"];
 
   const conditions = [
-    eq(executions.packageId, packageId),
-    eq(executions.orgId, orgId),
-    eq(executions.status, "success"),
+    eq(runs.packageId, packageId),
+    eq(runs.orgId, orgId),
+    eq(runs.status, "success"),
   ];
   if (actor) {
-    conditions.push(
-      actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
-    );
+    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
 
-  if (options.excludeExecutionId) {
-    conditions.push(ne(executions.id, options.excludeExecutionId));
+  if (options.excludeRunId) {
+    conditions.push(ne(runs.id, options.excludeRunId));
   }
 
   const rows = await db
     .select({
-      id: executions.id,
-      status: executions.status,
-      startedAt: executions.startedAt,
-      duration: executions.duration,
-      state: executions.state,
-      result: executions.result,
+      id: runs.id,
+      status: runs.status,
+      startedAt: runs.startedAt,
+      duration: runs.duration,
+      state: runs.state,
+      result: runs.result,
     })
-    .from(executions)
+    .from(runs)
     .where(and(...conditions))
-    .orderBy(desc(executions.startedAt))
+    .orderBy(desc(runs.startedAt))
     .limit(limit);
 
   return rows.map((row) => {
@@ -205,30 +197,28 @@ export async function getRecentExecutions(
   });
 }
 
-export async function getLastExecution(packageId: string, actor: Actor | null, orgId: string) {
-  const conditions = [eq(executions.packageId, packageId), eq(executions.orgId, orgId)];
+export async function getLastRun(packageId: string, actor: Actor | null, orgId: string) {
+  const conditions = [eq(runs.packageId, packageId), eq(runs.orgId, orgId)];
   if (actor) {
-    conditions.push(
-      actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
-    );
+    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
 
   const [row] = await db
     .select({
-      id: executions.id,
-      status: executions.status,
-      startedAt: executions.startedAt,
-      duration: executions.duration,
+      id: runs.id,
+      status: runs.status,
+      startedAt: runs.startedAt,
+      duration: runs.duration,
     })
-    .from(executions)
+    .from(runs)
     .where(and(...conditions))
-    .orderBy(desc(executions.startedAt))
+    .orderBy(desc(runs.startedAt))
     .limit(1);
   return row ?? null;
 }
 
-export async function appendExecutionLog(
-  executionId: string,
+export async function appendRunLog(
+  runId: string,
   orgId: string,
   type: string,
   event: string | null,
@@ -238,9 +228,9 @@ export async function appendExecutionLog(
 ): Promise<number> {
   try {
     const [row] = await db
-      .insert(executionLogs)
+      .insert(runLogs)
       .values({
-        executionId,
+        runId,
         orgId,
         type,
         event,
@@ -248,53 +238,45 @@ export async function appendExecutionLog(
         data,
         level,
       })
-      .returning({ id: executionLogs.id });
+      .returning({ id: runLogs.id });
     return row?.id ?? 0;
   } catch (err) {
-    logger.error("Failed to append execution log", {
-      executionId,
+    logger.error("Failed to append run log", {
+      runId,
       error: err instanceof Error ? err.message : String(err),
     });
     return 0;
   }
 }
 
-export async function getRunningExecutionsForPackage(
-  packageId: string,
-  actor?: Actor,
-): Promise<number> {
-  const conditions = [
-    eq(executions.packageId, packageId),
-    inArray(executions.status, ["running", "pending"]),
-  ];
+export async function getRunningRunsForPackage(packageId: string, actor?: Actor): Promise<number> {
+  const conditions = [eq(runs.packageId, packageId), inArray(runs.status, ["running", "pending"])];
 
   if (actor) {
-    conditions.push(
-      actorFilter(actor, { userId: executions.userId, endUserId: executions.endUserId }),
-    );
+    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
 
   const [row] = await db
     .select({ count: count() })
-    .from(executions)
+    .from(runs)
     .where(and(...conditions));
   return row?.count ?? 0;
 }
 
-export async function getRunningExecutionCountForOrg(orgId: string): Promise<number> {
+export async function getRunningRunCountForOrg(orgId: string): Promise<number> {
   const [row] = await db
     .select({ count: count() })
-    .from(executions)
-    .where(and(eq(executions.orgId, orgId), inArray(executions.status, ["running", "pending"])));
+    .from(runs)
+    .where(and(eq(runs.orgId, orgId), inArray(runs.status, ["running", "pending"])));
   return row?.count ?? 0;
 }
 
-export async function getRunningExecutionsCounts(orgId: string): Promise<Record<string, number>> {
+export async function getRunningRunCounts(orgId: string): Promise<Record<string, number>> {
   const rows = await db
-    .select({ packageId: executions.packageId, count: count() })
-    .from(executions)
-    .where(and(eq(executions.orgId, orgId), inArray(executions.status, ["running", "pending"])))
-    .groupBy(executions.packageId);
+    .select({ packageId: runs.packageId, count: count() })
+    .from(runs)
+    .where(and(eq(runs.orgId, orgId), inArray(runs.status, ["running", "pending"])))
+    .groupBy(runs.packageId);
 
   const counts: Record<string, number> = {};
   for (const row of rows) {
@@ -303,59 +285,59 @@ export async function getRunningExecutionsCounts(orgId: string): Promise<Record<
   return counts;
 }
 
-export async function getExecution(id: string) {
+export async function getRun(id: string) {
   const [row] = await db
     .select({
-      id: executions.id,
-      status: executions.status,
-      userId: executions.userId,
-      endUserId: executions.endUserId,
-      orgId: executions.orgId,
-      packageId: executions.packageId,
+      id: runs.id,
+      status: runs.status,
+      userId: runs.userId,
+      endUserId: runs.endUserId,
+      orgId: runs.orgId,
+      packageId: runs.packageId,
     })
-    .from(executions)
-    .where(eq(executions.id, id))
+    .from(runs)
+    .where(eq(runs.id, id))
     .limit(1);
   return row ?? null;
 }
 
-export async function deletePackageExecutions(packageId: string, orgId: string): Promise<number> {
+export async function deletePackageRuns(packageId: string, orgId: string): Promise<number> {
   const deleted = await db
-    .delete(executions)
-    .where(and(eq(executions.packageId, packageId), eq(executions.orgId, orgId)))
-    .returning({ id: executions.id });
+    .delete(runs)
+    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)))
+    .returning({ id: runs.id });
   return deleted.length;
 }
 
-export async function listExecutionsWithFilter(
+export async function listRunsWithFilter(
   filter: SQL,
   limit: number,
   offset = 0,
-): Promise<{ executions: Record<string, unknown>[]; total: number }> {
-  const [countRow] = await db.select({ count: count() }).from(executions).where(filter);
+): Promise<{ runs: Record<string, unknown>[]; total: number }> {
+  const [countRow] = await db.select({ count: count() }).from(runs).where(filter);
 
   const rows = await db
     .select({
-      execution: executions,
+      run: runs,
       packageVersion: packageVersions.version,
     })
-    .from(executions)
-    .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
+    .from(runs)
+    .leftJoin(packageVersions, eq(runs.packageVersionId, packageVersions.id))
     .where(filter)
-    .orderBy(desc(executions.startedAt))
+    .orderBy(desc(runs.startedAt))
     .limit(limit)
     .offset(offset);
 
   return {
-    executions: rows.map((r) => ({
-      ...r.execution,
+    runs: rows.map((r) => ({
+      ...r.run,
       packageVersion: r.packageVersion,
     })) as unknown as Record<string, unknown>[],
     total: countRow?.count ?? 0,
   };
 }
 
-export async function listPackageExecutions(
+export async function listPackageRuns(
   packageId: string,
   orgId: string,
   options: {
@@ -366,63 +348,63 @@ export async function listPackageExecutions(
   } = {},
 ) {
   const { limit = 50, offset = 0, applicationId, endUserId } = options;
-  const conditions = [eq(executions.packageId, packageId), eq(executions.orgId, orgId)];
+  const conditions = [eq(runs.packageId, packageId), eq(runs.orgId, orgId)];
   if (applicationId) {
-    conditions.push(eq(executions.applicationId, applicationId));
+    conditions.push(eq(runs.applicationId, applicationId));
   }
   if (endUserId) {
-    conditions.push(eq(executions.endUserId, endUserId));
+    conditions.push(eq(runs.endUserId, endUserId));
   }
-  return listExecutionsWithFilter(and(...conditions)!, limit, offset);
+  return listRunsWithFilter(and(...conditions)!, limit, offset);
 }
 
-export async function listScheduleExecutions(
+export async function listScheduleRuns(
   scheduleId: string,
   orgId: string,
   options: { limit?: number; offset?: number } = {},
 ) {
   const { limit = 20, offset = 0 } = options;
-  return listExecutionsWithFilter(
-    and(eq(executions.scheduleId, scheduleId), eq(executions.orgId, orgId))!,
+  return listRunsWithFilter(
+    and(eq(runs.scheduleId, scheduleId), eq(runs.orgId, orgId))!,
     limit,
     offset,
   );
 }
 
-export async function getExecutionFull(id: string) {
+export async function getRunFull(id: string) {
   const [row] = await db
     .select({
-      execution: executions,
+      run: runs,
       packageVersion: packageVersions.version,
     })
-    .from(executions)
-    .leftJoin(packageVersions, eq(executions.packageVersionId, packageVersions.id))
-    .where(eq(executions.id, id))
+    .from(runs)
+    .leftJoin(packageVersions, eq(runs.packageVersionId, packageVersions.id))
+    .where(eq(runs.id, id))
     .limit(1);
   if (!row) return null;
-  return { ...row.execution, packageVersion: row.packageVersion };
+  return { ...row.run, packageVersion: row.packageVersion };
 }
 
-export async function listExecutionLogs(executionId: string, orgId: string) {
+export async function listRunLogs(runId: string, orgId: string) {
   return db
     .select()
-    .from(executionLogs)
-    .where(and(eq(executionLogs.executionId, executionId), eq(executionLogs.orgId, orgId)))
-    .orderBy(executionLogs.id);
+    .from(runLogs)
+    .where(and(eq(runLogs.runId, runId), eq(runLogs.orgId, orgId)))
+    .orderBy(runLogs.id);
 }
 
-export async function markOrphanExecutionsFailed(): Promise<{
+export async function markOrphanRunsFailed(): Promise<{
   count: number;
-  executionIds: string[];
+  runIds: string[];
 }> {
   const updated = await db
-    .update(executions)
+    .update(runs)
     .set({
       status: "failed",
-      error: "Server restarted while execution was in progress. Please retry.",
+      error: "Server restarted while run was in progress. Please retry.",
       completedAt: new Date(),
     })
-    .where(inArray(executions.status, ["running", "pending"]))
-    .returning({ id: executions.id });
-  return { count: updated.length, executionIds: updated.map((r) => r.id) };
+    .where(inArray(runs.status, ["running", "pending"]))
+    .returning({ id: runs.id });
+  return { count: updated.length, runIds: updated.map((r) => r.id) };
 }

@@ -5,7 +5,7 @@ import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
 import type { PackageType } from "./package-items/config.ts";
-import type { FlowManifest, LoadedPackage } from "../types/index.ts";
+import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
@@ -41,7 +41,7 @@ function mapDependencies(
 }
 
 function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
-  const manifest = asRecord(row.draftManifest) as FlowManifest;
+  const manifest = asRecord(row.draftManifest) as AgentManifest;
   const deps = row.depRefs ?? [];
 
   return {
@@ -117,9 +117,9 @@ export async function getPackage(id: string, orgId?: string): Promise<LoadedPack
   });
 }
 
-/** List all flows: system (orgId: null) + user packages of type "flow" (from DB, scoped by org). */
+/** List all agents: system (orgId: null) + user packages of type "agent" (from DB, scoped by org). */
 export async function listPackages(orgId?: string): Promise<LoadedPackage[]> {
-  const conditions = [eq(packages.type, "flow")];
+  const conditions = [eq(packages.type, "agent")];
   if (orgId) {
     conditions.push(orgOrSystemFilter(orgId));
   }

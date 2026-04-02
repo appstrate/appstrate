@@ -209,7 +209,7 @@ export function validateOutput(
   return { valid: false, errors };
 }
 
-export function validateFlowContent(
+export function validateAgentContent(
   prompt: string,
   skills: { id: string; name?: string; description: string; content: string }[],
 ): { valid: boolean; errors: string[] } {

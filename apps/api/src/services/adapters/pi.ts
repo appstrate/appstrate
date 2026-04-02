@@ -58,7 +58,7 @@ export class PiAdapter implements ExecutionAdapter {
 
       // Build agent env — NO EXECUTION_TOKEN, NO PLATFORM_API_URL, NO ExtraHosts
       const containerEnv: Record<string, string> = {
-        FLOW_PROMPT: prompt,
+        AGENT_PROMPT: prompt,
         MODEL_API: llmConfig.api,
         MODEL_ID: modelId,
         SIDECAR_URL: "http://sidecar:8080",

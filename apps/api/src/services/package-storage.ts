@@ -65,7 +65,7 @@ export async function uploadPackageZip(
   try {
     await storage.uploadFile(BUCKET, path, zipBuffer);
   } catch (error) {
-    logger.error("Failed to upload flow package", {
+    logger.error("Failed to upload agent package", {
       packageId,
       version,
       error: error instanceof Error ? error.message : String(error),
@@ -74,16 +74,16 @@ export async function uploadPackageZip(
   }
 }
 
-interface FlowPackageResult {
+interface AgentPackageResult {
   zip: Buffer;
   toolDocs: Array<{ id: string; content: string }>;
 }
 
-/** Build a flow package ZIP on-the-fly and extract TOOL.md docs in a single pass. */
-export async function buildFlowPackage(
+/** Build an agent package ZIP on-the-fly and extract TOOL.md docs in a single pass. */
+export async function buildAgentPackage(
   flow: LoadedPackage,
   orgId: string,
-): Promise<FlowPackageResult> {
+): Promise<AgentPackageResult> {
   const entries: Zippable = {
     "manifest.json": new TextEncoder().encode(JSON.stringify(flow.manifest, null, 2)),
     "prompt.md": new TextEncoder().encode(flow.prompt),

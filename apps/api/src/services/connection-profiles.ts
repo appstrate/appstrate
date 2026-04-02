@@ -8,7 +8,7 @@ import { eq, and, count, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   connectionProfiles,
-  userFlowProviderProfiles,
+  userAgentProviderProfiles,
   userProviderConnections,
   orgProfileProviderBindings,
   organizationMembers,
@@ -18,7 +18,7 @@ import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
 import { getOrgProfileBindings } from "./state/index.ts";
 import { getPackageConfig } from "./state/package-config.ts";
-import type { FlowProviderRequirement, ProviderProfileMap } from "../types/index.ts";
+import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { notFound, invalidRequest } from "../lib/errors.ts";
 
 const PROFILE_ACTOR_COLUMNS = {
@@ -347,17 +347,17 @@ export async function getUserFlowProviderOverrides(
 ): Promise<Record<string, string>> {
   const rows = await db
     .select({
-      providerId: userFlowProviderProfiles.providerId,
-      profileId: userFlowProviderProfiles.profileId,
+      providerId: userAgentProviderProfiles.providerId,
+      profileId: userAgentProviderProfiles.profileId,
     })
-    .from(userFlowProviderProfiles)
+    .from(userAgentProviderProfiles)
     .where(
       and(
         actorFilter(actor, {
-          userId: userFlowProviderProfiles.userId,
-          endUserId: userFlowProviderProfiles.endUserId,
+          userId: userAgentProviderProfiles.userId,
+          endUserId: userAgentProviderProfiles.endUserId,
         }),
-        eq(userFlowProviderProfiles.packageId, packageId),
+        eq(userAgentProviderProfiles.packageId, packageId),
       ),
     );
 
@@ -400,14 +400,14 @@ export async function removeUserFlowProviderOverride(
   packageId: string,
   providerId: string,
 ): Promise<void> {
-  await db.delete(userFlowProviderProfiles).where(
+  await db.delete(userAgentProviderProfiles).where(
     and(
       actorFilter(actor, {
-        userId: userFlowProviderProfiles.userId,
-        endUserId: userFlowProviderProfiles.endUserId,
+        userId: userAgentProviderProfiles.userId,
+        endUserId: userAgentProviderProfiles.endUserId,
       }),
-      eq(userFlowProviderProfiles.packageId, packageId),
-      eq(userFlowProviderProfiles.providerId, providerId),
+      eq(userAgentProviderProfiles.packageId, packageId),
+      eq(userAgentProviderProfiles.providerId, providerId),
     ),
   );
 }
@@ -503,7 +503,7 @@ const defaultResolveProviderProfilesDeps: ResolveProviderProfilesDeps = {
  * with orgProfileId if the schedule uses an org profile. No per-provider overrides.
  */
 export async function resolveProviderProfiles(
-  providers: FlowProviderRequirement[],
+  providers: AgentProviderRequirement[],
   defaultUserProfileId: string | null,
   userProviderOverrides?: Record<string, string>,
   orgProfileId?: string | null,
