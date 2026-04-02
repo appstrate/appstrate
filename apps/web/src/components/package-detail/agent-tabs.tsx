@@ -45,7 +45,7 @@ export function AgentRunsTab({
       pageSize={12}
       hideAgentName
       emptyState={
-        <EmptyState message={t("detail.emptyExec")} icon={Play} compact>
+        <EmptyState message={t("detail.emptyRuns")} icon={Play} compact>
           <RunAgentButton
             packageId={packageId}
             detail={detail}

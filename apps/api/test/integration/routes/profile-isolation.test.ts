@@ -58,13 +58,13 @@ describe("Multi-org profile isolation", () => {
       expect(res.status).toBe(404);
     });
 
-    it("org A cannot access org B's profile flows endpoint", async () => {
+    it("org A cannot access org B's profile agents endpoint", async () => {
       const profileB = await seedConnectionProfile({
         orgId: ctxB.orgId,
-        name: "Beta Flows",
+        name: "Beta Agents",
       });
 
-      const res = await app.request(`/api/connection-profiles/org/${profileB.id}/flows`, {
+      const res = await app.request(`/api/connection-profiles/org/${profileB.id}/agents`, {
         headers: authHeaders(ctxA),
       });
 

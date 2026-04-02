@@ -160,7 +160,7 @@ export function PackageActionsDropdown({
                   className="text-destructive focus:text-destructive"
                 >
                   <Trash2 size={14} />
-                  {t("detail.clearExec")}
+                  {t("detail.clearRuns")}
                 </DropdownMenuItem>
               )}
               {isAdmin && hasMemories && onDeleteMemories && (

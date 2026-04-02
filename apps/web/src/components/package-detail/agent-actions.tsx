@@ -100,7 +100,7 @@ export function AgentActions({
         onDeleteRuns={() =>
           setConfirmState({
             type: "clearRuns",
-            label: t("detail.clearExecConfirm"),
+            label: t("detail.clearRunsConfirm"),
           })
         }
         onAddSchedule={() => {

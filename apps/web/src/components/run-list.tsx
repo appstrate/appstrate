@@ -84,7 +84,7 @@ export function RunList({
 
   if (runs.length === 0) {
     if (emptyState) return <>{emptyState}</>;
-    return <EmptyState message={t("detail.emptyExec")} icon={PlayCircle} compact />;
+    return <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />;
   }
 
   const resolveAgentName = (run: (typeof runs)[0]) => {

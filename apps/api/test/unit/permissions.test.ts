@@ -113,7 +113,7 @@ describe("validateScopes", () => {
     expect(adminResult).toContain("agents:run");
   });
 
-  it("member cannot get flows:write scope", () => {
+  it("member cannot get agents:write scope", () => {
     const scopes = ["agents:read", "agents:write", "agents:run"];
     const memberResult = validateScopes(scopes, "member");
     expect(memberResult).toContain("agents:read");
@@ -163,7 +163,7 @@ describe("resolveApiKeyPermissions", () => {
       ["agents:read", "agents:write", "agents:delete"],
       "member",
     );
-    // Member has flows:read but not flows:write or flows:delete
+    // Member has agents:read but not agents:write or agents:delete
     expect(perms.has("agents:read")).toBe(true);
     expect(perms.has("agents:write")).toBe(false);
     expect(perms.has("agents:delete")).toBe(false);
