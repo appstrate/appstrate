@@ -288,7 +288,7 @@ app.route("/invite", invitationsRouter);
 // Welcome route (authenticated, cookie-based — org context not required)
 app.route("/api", welcomeRouter);
 
-// Internal routes (container-to-host, auth via execution token — no JWT)
+// Internal routes (container-to-host, auth via run token — no JWT)
 const internalRouter = createInternalRouter();
 app.route("/internal", internalRouter);
 

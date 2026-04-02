@@ -86,7 +86,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
 feat: add webhook retry configuration
-fix: prevent duplicate cron executions
+fix: prevent duplicate cron runs
 docs: update API overview table
 refactor: extract credential validation into service
 ```

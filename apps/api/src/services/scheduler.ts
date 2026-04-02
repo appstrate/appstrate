@@ -201,7 +201,7 @@ export async function shutdownScheduleWorker(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Execution trigger
+// Run trigger
 // ---------------------------------------------------------------------------
 
 async function triggerScheduledExecution(
@@ -310,7 +310,7 @@ async function triggerScheduledExecution(
     if (inputSchema) {
       const inputValidation = validateInput(input, asJSONSchemaObject(inputSchema));
       if (!inputValidation.valid) {
-        logger.warn("Scheduled input validation failed, skipping execution", {
+        logger.warn("Scheduled input validation failed, skipping run", {
           scheduleId,
           packageId,
           errors: inputValidation.errors,
@@ -325,7 +325,7 @@ async function triggerScheduledExecution(
 
     const runId = `run_${crypto.randomUUID()}`;
 
-    // Build execution context (tokens, config, state, providers, package, version)
+    // Build run context (tokens, config, state, providers, package, version)
     let promptContext: PromptContext;
     let agentPackage: Buffer | null;
     let packageVersionId: number | null;
@@ -460,14 +460,14 @@ export async function getSchedule(id: string): Promise<EnrichedSchedule | null> 
 async function computeScheduleReadiness(
   schedule: Schedule,
   profile: ConnectionProfile | null,
-  flow: LoadedPackage | null,
+  agent: LoadedPackage | null,
   orgId: string,
 ): Promise<ScheduleReadiness> {
-  if (!flow) {
+  if (!agent) {
     return { status: "not_ready", totalProviders: 0, connectedProviders: 0, missingProviders: [] };
   }
 
-  const providers = resolveManifestProviders(flow.manifest);
+  const providers = resolveManifestProviders(agent.manifest);
 
   if (!profile) {
     return {
@@ -558,15 +558,15 @@ async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<En
   const userIds = [...new Set(profileRows.filter((p) => p.userId).map((p) => p.userId!))];
   const userNameMap = await batchLoadUserNames(userIds);
 
-  // Batch load unique flows
+  // Batch load unique agents
   const packageIds = [...new Set(schedules.map((s) => s.packageId))];
-  const flows = await Promise.all(packageIds.map((id) => getPackage(id, orgId)));
-  const flowMap = new Map(packageIds.map((id, i) => [id, flows[i] ?? null]));
+  const agents = await Promise.all(packageIds.map((id) => getPackage(id, orgId)));
+  const agentMap = new Map(packageIds.map((id, i) => [id, agents[i] ?? null]));
 
   return Promise.all(
     schedules.map(async (schedule) => {
       const profile = profileMap.get(schedule.connectionProfileId);
-      const flow = flowMap.get(schedule.packageId);
+      const agent = agentMap.get(schedule.packageId);
 
       let profileName: string | null = null;
       let profileType: "user" | "org" | null = null;
@@ -582,7 +582,7 @@ async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<En
       const readiness = await computeScheduleReadiness(
         schedule,
         profile ?? null,
-        flow ?? null,
+        agent ?? null,
         orgId,
       );
       return { ...schedule, profileName, profileType, profileOwnerName, readiness };

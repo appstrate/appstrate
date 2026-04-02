@@ -223,7 +223,7 @@ function buildCurlMultipartExample(params: CurlParams): string {
   return lines.join("\n");
 }
 
-// ─── Flow API Tab ─────────────────────────────────────────────────────
+// ─── Agent API Tab ─────────────────────────────────────────────────────
 
 export function AgentApiTab({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "common"]);
@@ -350,7 +350,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
         </div>
       )}
 
-      {/* curl example — multipart (when flow has file inputs) */}
+      {/* curl example — multipart (when agent has file inputs) */}
       {curlMultipart && (
         <div>
           <div className="mb-2 flex items-center justify-between">

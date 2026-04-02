@@ -29,7 +29,7 @@ function contextWithSystemTools(overrides?: Partial<PromptContext>): PromptConte
   return baseContext({
     availableTools: [
       { id: "@appstrate/log", name: "Log", description: "Send progress messages" },
-      { id: "@appstrate/output", name: "Output", description: "Return execution result" },
+      { id: "@appstrate/output", name: "Output", description: "Return run result" },
       { id: "@appstrate/set-state", name: "Set State", description: "Persist state" },
       { id: "@appstrate/add-memory", name: "Add Memory", description: "Save a memory" },
     ],

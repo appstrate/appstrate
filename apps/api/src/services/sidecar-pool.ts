@@ -66,7 +66,7 @@ export async function initSidecarPool(): Promise<void> {
 
 /**
  * Acquire a pre-warmed sidecar from the pool.
- * Configures it with execution-specific credentials and connects to the execution network.
+ * Configures it with run-specific credentials and connects to the run network.
  * Returns the container ID, or null if pool is empty/disabled (caller falls back to fresh creation).
  */
 export async function acquireSidecar(
@@ -106,7 +106,7 @@ export async function acquireSidecar(
       throw new Error(`Configure failed: ${configRes.status}`);
     }
 
-    // Connect to execution network with "sidecar" alias for agent DNS resolution
+    // Connect to run network with "sidecar" alias for agent DNS resolution
     await connectContainerToNetwork(executionNetworkId, entry.containerId, ["sidecar"]);
 
     // Connect to platform network for host access (containerized deployments)

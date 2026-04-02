@@ -22,7 +22,7 @@ export interface ContainerOrchestrator {
   /** Ensure images are locally available (pull if missing/outdated). No-op when not applicable. */
   ensureImages(images: string[]): Promise<void>;
 
-  /** Create an isolated environment for an execution. Docker: bridge network. K8s: namespace. */
+  /** Create an isolated environment for a run. Docker: bridge network. K8s: namespace. */
   createIsolationBoundary(runId: string): Promise<IsolationBoundary>;
 
   /** Remove an isolated environment. Idempotent. */
@@ -57,6 +57,6 @@ export interface ContainerOrchestrator {
   /** Stream logs from a running workload. Format-agnostic (text line by line). */
   streamLogs(handle: WorkloadHandle, signal?: AbortSignal): AsyncGenerator<string>;
 
-  /** Stop ALL workloads for an execution by ID. For cancel. */
+  /** Stop ALL workloads for a run by ID. For cancel. */
   stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult>;
 }

@@ -9,13 +9,13 @@ import type { PackageType } from "./validation.ts";
 
 /** A parsed system package loaded from an AFPS file on disk. */
 export interface SystemPackageEntry {
-  /** Full package ID (e.g. "@system/my-flow"). */
+  /** Full package ID (e.g. "@system/my-agent"). */
   packageId: string;
   /** Package scope with `@` prefix. */
   scope: string;
   /** Package name without scope. */
   name: string;
-  /** Package type (flow, skill, tool, provider). */
+  /** Package type (agent, skill, tool, provider). */
   type: PackageType;
   /** Semver version from the manifest. */
   version: string;

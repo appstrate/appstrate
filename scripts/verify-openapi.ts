@@ -99,15 +99,15 @@ const expectedEndpoints = [
   "DELETE /api/connection-profiles/{id}",
   "GET /api/connection-profiles/{id}/connections",
 
-  // Flow Provider Profiles
+  // Agent Provider Profiles
   "GET /api/agents/{scope}/{name}/provider-profiles",
   "PUT /api/agents/{scope}/{name}/provider-profiles",
   "DELETE /api/agents/{scope}/{name}/provider-profiles",
 
-  // Flow Org Profile
+  // Agent Org Profile
   "PUT /api/agents/{scope}/{name}/org-profile",
 
-  // Flow Proxy
+  // Agent Proxy
   "GET /api/agents/{scope}/{name}/proxy",
   "PUT /api/agents/{scope}/{name}/proxy",
 
@@ -182,7 +182,7 @@ const expectedEndpoints = [
   "DELETE /api/packages/providers/{scope}/{name}/versions/{version}",
   "GET /api/packages/providers/{scope}/{name}/versions/{version}",
 
-  // Packages — Flows
+  // Packages — Agents
   "POST /api/packages/agents",
   "GET /api/packages/agents/{scope}/{name}",
   "PUT /api/packages/agents/{scope}/{name}",

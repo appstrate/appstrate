@@ -40,7 +40,7 @@ export function DashboardPage() {
     return <Navigate to="/agents" replace />;
   }
 
-  // Build flow lookup map
+  // Build agent lookup map
   const agentMap = new Map<
     string,
     {
@@ -117,7 +117,7 @@ export function DashboardPage() {
         </section>
       )}
 
-      {/* Recent flows (horizontal scroll) */}
+      {/* Recent agents (horizontal scroll) */}
       {recentAgentIds.length > 0 && (
         <section>
           <div className="mb-3 flex items-center justify-between">

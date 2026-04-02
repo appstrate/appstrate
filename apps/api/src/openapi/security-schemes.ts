@@ -20,6 +20,6 @@ export const securitySchemes = {
   bearerExecToken: {
     type: "http" as const,
     scheme: "bearer",
-    description: "Execution token for container-to-host internal routes.",
+    description: "Run token for container-to-host internal routes.",
   },
 } as const;

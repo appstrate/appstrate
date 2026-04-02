@@ -31,7 +31,7 @@ export function formatToolArgs(args: Record<string, unknown>): string {
 }
 
 /**
- * Transform raw execution logs into LogEntry[], merging consecutive text-only
+ * Transform raw run logs into LogEntry[], merging consecutive text-only
  * progress entries and extracting structured output data.
  */
 export function buildLogEntries(rawLogs: RawLog[]): {
@@ -55,7 +55,7 @@ export function buildLogEntries(rawLogs: RawLog[]): {
         report = report ? report + "\n\n" + content : content;
       }
       lastWasPlainText = false;
-    } else if (log.event === "execution_completed") {
+    } else if (log.event === "run_completed") {
       lastWasPlainText = false;
     } else {
       const logData = (log.data ?? {}) as Record<string, unknown>;

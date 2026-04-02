@@ -12,7 +12,7 @@ import {
   PROVIDER_CONFIG,
 } from "./package-items/index.ts";
 
-const BUCKET = "flow-packages";
+const BUCKET = "agent-packages";
 const ZIP_COMPRESSION_LEVEL = 6;
 
 /** Download a versioned package ZIP from Storage. Optionally verifies integrity. Returns null if not found. */
@@ -81,19 +81,19 @@ interface AgentPackageResult {
 
 /** Build an agent package ZIP on-the-fly and extract TOOL.md docs in a single pass. */
 export async function buildAgentPackage(
-  flow: LoadedPackage,
+  agent: LoadedPackage,
   orgId: string,
 ): Promise<AgentPackageResult> {
   const entries: Zippable = {
-    "manifest.json": new TextEncoder().encode(JSON.stringify(flow.manifest, null, 2)),
-    "prompt.md": new TextEncoder().encode(flow.prompt),
+    "manifest.json": new TextEncoder().encode(JSON.stringify(agent.manifest, null, 2)),
+    "prompt.md": new TextEncoder().encode(agent.prompt),
   };
 
   // Fetch skill, tool, and provider files in parallel
   const [skillFiles, toolFiles, providerFiles] = await Promise.all([
-    getPackageDepFiles(flow.id, orgId, SKILL_CONFIG),
-    getPackageDepFiles(flow.id, orgId, TOOL_CONFIG),
-    getPackageDepFiles(flow.id, orgId, PROVIDER_CONFIG),
+    getPackageDepFiles(agent.id, orgId, SKILL_CONFIG),
+    getPackageDepFiles(agent.id, orgId, TOOL_CONFIG),
+    getPackageDepFiles(agent.id, orgId, PROVIDER_CONFIG),
   ]);
 
   for (const [skillId, files] of skillFiles) {

@@ -203,11 +203,11 @@ export async function resolveModel(
   packageId: string,
   modelId: string | null,
 ): Promise<ResolvedModel | null> {
-  // 1. Explicit override (flow column or per-execution)
+  // 1. Explicit override (agent column or per-run)
   if (modelId) {
     const result = await loadModel(orgId, modelId);
     if (result) return result;
-    logger.warn("Flow model override not found, falling through to org default", {
+    logger.warn("Agent model override not found, falling through to org default", {
       packageId,
       modelId,
     });

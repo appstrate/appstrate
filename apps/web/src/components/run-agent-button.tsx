@@ -51,7 +51,7 @@ export function RunAgentButton({
 
   const detail = providedDetail ?? fetchedDetail;
 
-  // Eagerly fetch flow detail on mount (for cards in list/dashboard) so the
+  // Eagerly fetch agent detail on mount (for cards in list/dashboard) so the
   // orange warning badge is visible before the user clicks the button.
   useEffect(() => {
     if (providedDetail || fetchedDetail) return;
@@ -83,7 +83,7 @@ export function RunAgentButton({
     }
   };
 
-  /** Start the run flow: show summary if providers, otherwise proceed directly. */
+  /** Start the run agent: show summary if providers, otherwise proceed directly. */
   const startRun = () => {
     if (hasProviders) {
       setSummaryOpen(true);
@@ -165,7 +165,7 @@ export function RunAgentButton({
         </Button>
       )}
 
-      {/* Connection summary — always shown before execution when flow has providers */}
+      {/* Connection summary — always shown before run when agent has providers */}
       {detail && (
         <ConnectionSummaryModal
           open={summaryOpen}
@@ -181,12 +181,12 @@ export function RunAgentButton({
         />
       )}
 
-      {/* Input modal — shown after summary confirmation if flow has input schema */}
+      {/* Input modal — shown after summary confirmation if agent has input schema */}
       {detail && (
         <InputModal
           open={inputOpen}
           onClose={() => setInputOpen(false)}
-          flow={detail}
+          agent={detail}
           onSubmit={(input, files) => runAgent.mutate({ input, files, version })}
           isPending={runAgent.isPending}
         />

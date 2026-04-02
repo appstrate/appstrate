@@ -16,11 +16,11 @@ import type { Manifest } from "../src/validation.ts";
 
 function validAgentManifest(overrides?: Record<string, unknown>) {
   return {
-    name: "@test/my-flow",
+    name: "@test/my-agent",
     version: "1.0.0",
     type: "agent",
     schemaVersion: "1.0",
-    displayName: "My Flow",
+    displayName: "My Agent",
     author: "test",
     ...overrides,
   };
@@ -73,7 +73,7 @@ function validProviderManifest(overrides?: Record<string, unknown>) {
 // ─────────────────────────────────────────────
 
 describe("validateManifest", () => {
-  test("valid flow manifest", () => {
+  test("valid agent manifest", () => {
     const result = validateManifest(validAgentManifest());
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
@@ -133,14 +133,14 @@ describe("validateManifest", () => {
     expect(result.errors.some((e) => e.includes("semver"))).toBe(true);
   });
 
-  test("flow manifest valid without optional default fields", () => {
-    // Minimal flow manifest — no dependencies, timeout
+  test("agent manifest valid without optional default fields", () => {
+    // Minimal agent manifest — no dependencies, timeout
     const manifest = {
       name: "@test/minimal",
       version: "1.0.0",
       type: "agent",
       schemaVersion: "1.0",
-      displayName: "Minimal Flow",
+      displayName: "Minimal Agent",
       author: "test",
       // dependencies, timeout, providersConfiguration intentionally omitted
     };
@@ -155,7 +155,7 @@ describe("validateManifest", () => {
     expect(m.providersConfiguration).toBeUndefined();
   });
 
-  test("flow with dependencies (skills/tools/providers)", () => {
+  test("agent with dependencies (skills/tools/providers)", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
@@ -174,7 +174,7 @@ describe("validateManifest", () => {
     expect(deps.tools).toEqual({ "@test/ext": ">=0.1.0" });
   });
 
-  test("flow with built-in skill using wildcard version", () => {
+  test("agent with built-in skill using wildcard version", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
@@ -196,7 +196,7 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(false);
   });
 
-  test("flow with providersConfiguration", () => {
+  test("agent with providersConfiguration", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
@@ -355,7 +355,7 @@ describe("validateManifest", () => {
     expect(result.valid).toBe(true);
   });
 
-  test("flow with dependencies.providers", () => {
+  test("agent with dependencies.providers", () => {
     const result = validateManifest(
       validAgentManifest({
         dependencies: {
@@ -407,7 +407,7 @@ describe("validateManifest", () => {
       schemaVersion: "1.0",
       displayName: "Hello World",
       author: "Appstrate",
-      description: "A demo flow",
+      description: "A demo agent",
       keywords: ["demo", "example", "getting-started"],
     };
     const result = validateManifest(manifest);
@@ -419,7 +419,7 @@ describe("validateManifest", () => {
     // Mirrors dbRowToLoadedAgent fallback in strate/apps/api/src/services/agent-service.ts
     // author is empty — tolerated by core for local drafts (AFPS requires it for publication)
     const manifest = {
-      name: "@test-org/fallback-flow",
+      name: "@test-org/fallback-agent",
       version: "0.0.0",
       type: "agent",
       schemaVersion: "1.0",
@@ -433,7 +433,7 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  test("flow manifest without author is accepted (tolerant local editing)", () => {
+  test("agent manifest without author is accepted (tolerant local editing)", () => {
     const { author: _, ...noAuthor } = validAgentManifest();
     const result = validateManifest(noAuthor);
     expect(result.valid).toBe(true);
@@ -442,12 +442,12 @@ describe("validateManifest", () => {
   test("default agent manifest (frontend defaultFormState) is valid", () => {
     // Mirrors assemblePayload output from strate/apps/web/src/components/agent-editor/utils.ts
     const manifest = {
-      name: "@test-org/my-flow",
+      name: "@test-org/my-agent",
       version: "1.0.0",
       type: "agent",
       schemaVersion: "1.0",
-      displayName: "My Flow",
-      description: "A flow",
+      displayName: "My Agent",
+      description: "An agent",
       author: "user@example.com",
       dependencies: { providers: {} },
     };
@@ -600,13 +600,13 @@ describe("extractManifestMetadata", () => {
 
   test("displayName — extracted when present", () => {
     const manifest = {
-      name: "@test/my-flow",
+      name: "@test/my-agent",
       version: "1.0.0",
       type: "agent" as const,
-      displayName: "My Custom Flow",
+      displayName: "My Custom Agent",
     } as Partial<Manifest>;
     const metadata = extractManifestMetadata(manifest);
-    expect(metadata.displayName).toBe("My Custom Flow");
+    expect(metadata.displayName).toBe("My Custom Agent");
   });
 
   test("empty manifest — returns empty object", () => {

@@ -36,7 +36,7 @@ import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ProviderCredentialsForm } from "../components/provider-credentials-form";
 import { ProviderConnectButton } from "../components/provider-connect-button";
-// Flow-specific components
+// Agent-specific components
 import { AgentActions } from "../components/package-detail/agent-actions";
 import {
   AgentConnectorsTab,
@@ -66,7 +66,7 @@ type DetailTab =
 
 const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} };
 
-// ─── Flow Run Button (inline, no wrapper) ────────────────────────────
+// ─── Agent Run Button (inline, no wrapper) ────────────────────────────
 
 function AgentRunButtonInline({
   packageId,
@@ -619,7 +619,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         type={type}
       />
 
-      {/* Flow modals */}
+      {/* Agent modals */}
       {type === "agent" && <AgentModals packageId={packageId} />}
 
       <ConfirmModal

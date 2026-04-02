@@ -167,11 +167,11 @@ export function createProvidersRouter() {
       .where(and(orgOrSystemFilter(orgId), eq(packages.type, "provider")))
       .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`);
 
-    // Count provider usage across all flows
-    const allFlows = await listPackages(orgId);
+    // Count provider usage across all agents
+    const allAgents = await listPackages(orgId);
     const providerUsage = new Map<string, number>();
-    for (const flow of allFlows) {
-      for (const svc of resolveManifestProviders(flow.manifest)) {
+    for (const agent of allAgents) {
+      for (const svc of resolveManifestProviders(agent.manifest)) {
         providerUsage.set(svc.id, (providerUsage.get(svc.id) ?? 0) + 1);
       }
     }
@@ -508,11 +508,11 @@ export function createProvidersRouter() {
       throw systemEntityForbidden("system provider", providerId, "delete");
     }
 
-    // Block deleting providers that are in use by flows
-    const allFlows = await listPackages(orgId);
+    // Block deleting providers that are in use by agents
+    const allAgents = await listPackages(orgId);
     let usageCount = 0;
-    for (const flow of allFlows) {
-      for (const svc of resolveManifestProviders(flow.manifest)) {
+    for (const agent of allAgents) {
+      for (const svc of resolveManifestProviders(agent.manifest)) {
         if (svc.id === providerId) {
           usageCount++;
           break;
@@ -522,7 +522,7 @@ export function createProvidersRouter() {
     if (usageCount > 0) {
       throw conflict(
         "provider_in_use",
-        `Cannot delete provider '${providerId}': used by ${usageCount} flow(s)`,
+        `Cannot delete provider '${providerId}': used by ${usageCount} agent(s)`,
       );
     }
 

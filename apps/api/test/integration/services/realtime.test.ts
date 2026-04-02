@@ -151,7 +151,7 @@ describe("realtime service (integration)", () => {
         send,
       });
 
-      // Non-matching execution ID should be filtered out.
+      // Non-matching run ID should be filtered out.
       await pgNotify("execution_update", {
         org_id: "org-ef",
         id: "other-exec",
@@ -160,7 +160,7 @@ describe("realtime service (integration)", () => {
       await wait();
       expect(send).not.toHaveBeenCalled();
 
-      // Matching execution ID should be dispatched.
+      // Matching run ID should be dispatched.
       await pgNotify("execution_update", {
         org_id: "org-ef",
         id: "target-exec",

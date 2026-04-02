@@ -105,7 +105,7 @@ describe("sidecar pool infrastructure", () => {
     expect(hostPort!).toBeGreaterThan(0);
   });
 
-  it("connects a pooled container to an execution network with alias", async () => {
+  it("connects a pooled container to a run network with alias", async () => {
     const poolNet = await createNetwork(`test-pool-${uid()}`);
     networksToCleanup.push(poolNet);
 
@@ -117,7 +117,7 @@ describe("sidecar pool infrastructure", () => {
 
     await startContainer(containerId);
 
-    // Connect to execution network with "sidecar" alias (simulates acquireSidecar)
+    // Connect to run network with "sidecar" alias (simulates acquireSidecar)
     await connectContainerToNetwork(execNet, containerId, ["sidecar"]);
 
     // Verify via Docker inspect

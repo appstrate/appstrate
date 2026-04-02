@@ -77,7 +77,7 @@ function dispatchWebhooks(
   });
 }
 
-// --- Background execution (decoupled from client) ---
+// --- Background run (decoupled from client) ---
 
 export async function executeAgentInBackground(
   runId: string,
@@ -203,7 +203,7 @@ export async function executeAgentInBackground(
           runId,
           orgId,
           "system",
-          "execution_completed",
+          "run_completed",
           null,
           {
             runId,
@@ -244,7 +244,7 @@ export async function executeAgentInBackground(
         runId,
         orgId,
         "system",
-        "execution_completed",
+        "run_completed",
         null,
         { runId, status: "failed", error },
         "error",
@@ -322,7 +322,7 @@ export async function executeAgentInBackground(
         runId,
         orgId,
         "system",
-        "execution_completed",
+        "run_completed",
         null,
         { runId, status: "success" },
         "info",
@@ -346,7 +346,7 @@ export async function executeAgentInBackground(
       runId,
       orgId,
       "system",
-      "execution_completed",
+      "run_completed",
       null,
       {
         runId,
@@ -539,7 +539,7 @@ export function createRunsRouter() {
         profileIdMap,
       );
 
-      // Fire-and-forget background execution
+      // Fire-and-forget background run
       executeAgentInBackground(
         runId,
         orgId,
@@ -549,7 +549,7 @@ export function createRunsRouter() {
         uploadedFiles,
         c.get("applicationId") ?? null,
       ).catch((err) => {
-        logger.error("Unhandled error in background execution", {
+        logger.error("Unhandled error in background run", {
           runId,
           error: err instanceof Error ? err.message : String(err),
         });
@@ -674,7 +674,7 @@ export function createRunsRouter() {
       runId,
       orgId,
       "system",
-      "execution_completed",
+      "run_completed",
       null,
       {
         runId,

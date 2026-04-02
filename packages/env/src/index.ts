@@ -47,7 +47,7 @@ const envSchema = z.object({
   PLATFORM_API_URL: z.string().optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
-  // Execution
+  // Run
   EXECUTION_ADAPTER: z.enum(["pi"]).default("pi"),
   SIDECAR_POOL_SIZE: z.coerce.number().int().min(0).default(2),
 

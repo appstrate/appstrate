@@ -26,7 +26,7 @@ healthRouter.get("/health", async (c) => {
 
   // System packages check
   const systemAgentCount = getSystemPackagesByType("agent").length;
-  checks.flows = {
+  checks.agents = {
     status: systemAgentCount > 0 ? "healthy" : "degraded",
   };
 

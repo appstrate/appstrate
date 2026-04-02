@@ -210,7 +210,7 @@ export function RunDetailPage() {
         <InputModal
           open={inputOpen}
           onClose={() => setInputOpen(false)}
-          flow={agent}
+          agent={agent}
           onSubmit={(input, files) => {
             runAgent.mutate({ input, files }, { onSuccess: () => setInputOpen(false) });
           }}

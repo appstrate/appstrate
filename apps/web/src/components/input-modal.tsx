@@ -19,7 +19,7 @@ import type { AgentDetail } from "@appstrate/shared-types";
 interface InputModalProps {
   open: boolean;
   onClose: () => void;
-  flow: AgentDetail;
+  agent: AgentDetail;
   onSubmit: (input: Record<string, unknown>, files?: Record<string, File[]>) => void;
   isPending?: boolean;
   initialValues?: Record<string, unknown>;
@@ -28,7 +28,7 @@ interface InputModalProps {
 export function InputModal({
   open,
   onClose,
-  flow,
+  agent,
   onSubmit,
   isPending,
   initialValues,
@@ -43,12 +43,12 @@ export function InputModal({
     <Modal
       open={open}
       onClose={guardedClose}
-      title={t("input.title", { name: flow.displayName })}
+      title={t("input.title", { name: agent.displayName })}
       actions={null}
     >
       {open && (
         <InputModalForm
-          flow={flow}
+          agent={agent}
           onClose={guardedClose}
           onSubmit={onSubmit}
           isPending={isPending}
@@ -67,20 +67,20 @@ type InputFormData = {
 };
 
 function InputModalForm({
-  flow,
+  agent,
   onClose,
   onSubmit,
   isPending,
   initialValues,
 }: {
-  flow: AgentDetail;
+  agent: AgentDetail;
   onClose: () => void;
   onSubmit: (input: Record<string, unknown>, files?: Record<string, File[]>) => void;
   isPending?: boolean;
   initialValues?: Record<string, unknown>;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const wrapper: SchemaWrapper = flow.input ?? { schema: EMPTY_SCHEMA };
+  const wrapper: SchemaWrapper = agent.input ?? { schema: EMPTY_SCHEMA };
   const schema = wrapper.schema;
 
   const {

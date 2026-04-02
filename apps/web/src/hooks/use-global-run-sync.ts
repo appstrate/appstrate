@@ -53,7 +53,7 @@ function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
 }
 
 /**
- * Global SSE subscription on execution changes.
+ * Global SSE subscription on run changes.
  * Uses fetch + ReadableStream instead of EventSource to avoid
  * Safari's aggressive auto-reconnect behavior on connection failure.
  */

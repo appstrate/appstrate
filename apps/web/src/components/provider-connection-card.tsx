@@ -20,7 +20,7 @@ import type { JSONSchemaObject } from "@appstrate/core/form";
 
 interface ProviderConnectionCardProps {
   providerId: string;
-  /** Flow package ID — enables per-provider profile persistence. */
+  /** Agent package ID — enables per-provider profile persistence. */
   packageId?: string;
   /** Org profile ID — enables the org binding section. */
   orgProfileId?: string;

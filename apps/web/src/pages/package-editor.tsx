@@ -17,7 +17,7 @@ import { api } from "../api";
 import { useUnsavedChanges } from "../hooks/use-unsaved-changes";
 import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 
-// Flow editor components
+// Agent editor components
 import { MetadataSection } from "../components/agent-editor/metadata-section";
 import { SchemaSection } from "../components/agent-editor/schema-section";
 import { ResourceSection } from "../components/agent-editor/resource-section";
@@ -127,7 +127,7 @@ function AgentEditorInner({
 
   const saveDraft = useCallback(async () => {
     if (!isEdit || !detail || !packageId) return;
-    await api(`/packages/flows/${packageId}`, {
+    await api(`/packages/agents/${packageId}`, {
       method: "PUT",
       body: JSON.stringify({
         manifest: state.manifest,
@@ -193,7 +193,7 @@ function AgentEditorInner({
 
   const isPending = createFlow.isPending || updateFlow.isPending;
 
-  const flowTabs: Array<{ id: GenericEditorTab; label: string }> = [
+  const agentTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
     { id: "prompt", label: t("editor.tabPrompt") },
     { id: "providers", label: t("editor.tabServices") },
@@ -209,7 +209,7 @@ function AgentEditorInner({
       packageId={packageId}
       isEdit={isEdit}
       displayName={(state.manifest.displayName as string) || packageId}
-      tabs={flowTabs}
+      tabs={agentTabs}
       activeTab={activeTab}
       onTabChange={(v) => {
         if (v === "json") setJsonEditorKey((k) => k + 1);
@@ -486,7 +486,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   const isEdit = !!scope;
 
   // Load detail for editing
-  const flowQuery = usePackageDetail("agent", type === "agent" && isEdit ? packageId : undefined);
+  const agentQuery = usePackageDetail("agent", type === "agent" && isEdit ? packageId : undefined);
   const pkgQuery = usePackageDetail(
     type,
     type !== "agent" && type !== "provider" && isEdit ? packageId : undefined,
@@ -495,13 +495,13 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
 
   const isLoading =
     type === "agent"
-      ? flowQuery.isLoading
+      ? agentQuery.isLoading
       : type === "provider"
         ? providersQuery.isLoading
         : pkgQuery.isLoading;
   const detail =
     type === "agent"
-      ? flowQuery.data
+      ? agentQuery.data
       : type === "provider"
         ? providersQuery.data?.providers.find((p) => p.id === packageId)
         : pkgQuery.data;
@@ -528,9 +528,9 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     return null;
   }
 
-  // Flow editor
+  // Agent editor
   if (type === "agent") {
-    const agentDetail = flowQuery.data;
+    const agentDetail = agentQuery.data;
     const initialState: AgentEditorState =
       isEdit && agentDetail
         ? {
@@ -567,7 +567,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     );
   }
 
-  // Skill/Tool editor (flow/provider returned early above — pkgQuery is always OrgPackageItemDetail here)
+  // Skill/Tool editor (agent/provider returned early above — pkgQuery is always OrgPackageItemDetail here)
   const module = getPackageTypeModule(type);
   const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
 

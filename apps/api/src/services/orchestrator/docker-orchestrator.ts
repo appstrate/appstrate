@@ -122,7 +122,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     }
 
     // Create sidecar on egress network (primary) so it has DNS + internet.
-    // Then connect to execution network (internal) with "sidecar" alias for agent DNS.
+    // Then connect to run network (internal) with "sidecar" alias for agent DNS.
     const containerId = await docker.createContainer(runId, sidecarEnv, {
       image: getSidecarImage(),
       adapterName: "sidecar",
@@ -134,7 +134,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
       exposedPorts: SIDECAR_EXPOSED_PORTS,
     });
 
-    // Connect to execution network (agent reaches sidecar via "sidecar" DNS alias)
+    // Connect to run network (agent reaches sidecar via "sidecar" DNS alias)
     await docker.connectContainerToNetwork(boundary.id, containerId, ["sidecar"]);
 
     if (platformNetwork) {

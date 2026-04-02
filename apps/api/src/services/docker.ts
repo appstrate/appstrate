@@ -364,7 +364,7 @@ export async function stopContainer(containerId: string, timeout = 5): Promise<v
 }
 
 /**
- * Stop all containers belonging to an execution, identified by label.
+ * Stop all containers belonging to a run, identified by label.
  * Returns "stopped" if any containers were found, "not_found" otherwise.
  */
 export async function stopContainersByRun(

@@ -136,8 +136,8 @@ export function createConnectionProfilesRouter() {
     }
   });
 
-  // GET /api/connection-profiles/org/:id/flows — list flows using this org profile
-  router.get("/org/:id/flows", async (c) => {
+  // GET /api/connection-profiles/org/:id/agents — list agents using this org profile
+  router.get("/org/:id/agents", async (c) => {
     const orgId = c.get("orgId");
     const profileId = c.req.param("id")!;
     await requireOrgProfile(profileId, orgId);
@@ -151,7 +151,7 @@ export function createConnectionProfilesRouter() {
       .innerJoin(packages, eq(packages.id, packageConfigs.packageId))
       .where(and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.orgProfileId, profileId)));
 
-    return c.json({ flows: rows });
+    return c.json({ agents: rows });
   });
 
   // GET /api/connection-profiles/org/:id/bindings — list provider bindings for an org profile

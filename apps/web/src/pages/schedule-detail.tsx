@@ -329,7 +329,7 @@ function ScheduleHistory({
   const isActive = schedule.enabled && schedule.readiness.status === "ready";
 
   // Use the same hook as RunList so React Query deduplicates the fetch.
-  // We only need the first execution for the "next run" preview row.
+  // We only need the first run for the "next run" preview row.
   const { data } = usePaginatedRuns({
     scheduleId: schedule.id,
     limit: 20,
@@ -337,7 +337,7 @@ function ScheduleHistory({
   });
   const firstExec = data?.runs?.[0];
 
-  // Show the fake "next execution" row only if the last execution started > 30s ago.
+  // Show the fake "next run" row only if the last run started > 30s ago.
   const lastStartedAt = firstExec?.startedAt;
   const [showNext, setShowNext] = useState(true);
 

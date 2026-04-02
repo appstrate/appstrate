@@ -26,7 +26,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
 
   sections.push("### Environment");
   sections.push(
-    "- **Ephemeral container**: This container is destroyed when your execution ends. " +
+    "- **Ephemeral container**: This container is destroyed when your run ends. " +
       "Any files you create, modifications you make, or data you store on the filesystem will be permanently lost. " +
       "Do NOT rely on the filesystem for persistence.",
   );
@@ -45,7 +45,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   sections.push(
     "- **Workspace**: `/workspace` is your working directory. " +
       "Uploaded documents are available at `/workspace/documents/`. " +
-      "You may use the filesystem for temporary processing during this execution only.\n",
+      "You may use the filesystem for temporary processing during this run only.\n",
   );
 
   // Available tools
@@ -228,8 +228,8 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   if (ctx.previousState) {
     sections.push("## Previous State\n");
     sections.push(
-      "This agent supports stateful execution across runs. " +
-        "Your most recent execution left the following state:\n",
+      "This agent supports stateful operation across runs. " +
+        "Your most recent run left the following state:\n",
     );
     sections.push("```json");
     sections.push(JSON.stringify(ctx.previousState, null, 2));

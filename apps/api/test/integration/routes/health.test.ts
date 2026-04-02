@@ -64,10 +64,10 @@ describe("GET /health", () => {
     expect(typeof body.checks.database.latency_ms).toBe("number");
     expect(body.checks.database.latency_ms).toBeGreaterThanOrEqual(0);
 
-    // Flows check structure
-    expect(body.checks).toHaveProperty("flows");
-    expect(body.checks.flows).toHaveProperty("status");
-    expect(["healthy", "degraded"]).toContain(body.checks.flows.status);
+    // Agents check structure
+    expect(body.checks).toHaveProperty("agents");
+    expect(body.checks.agents).toHaveProperty("status");
+    expect(["healthy", "degraded"]).toContain(body.checks.agents.status);
   });
 
   it("returns HTTP 200 when database is reachable", async () => {

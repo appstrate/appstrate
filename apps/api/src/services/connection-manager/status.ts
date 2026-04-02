@@ -133,7 +133,7 @@ async function batchGetConnectionStatuses(
 }
 
 /**
- * Resolve provider statuses for a flow's required providers.
+ * Resolve provider statuses for an agent's required providers.
  * providerProfiles maps each providerId to the profile holding its credentials
  * (already resolved via org profile bindings or user profile direct).
  */

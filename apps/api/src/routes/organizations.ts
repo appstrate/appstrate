@@ -131,7 +131,7 @@ router.post("/", async (c) => {
     });
   });
 
-  // Provision default hello-world flow for the new org (non-fatal)
+  // Provision default hello-world agent for the new org (non-fatal)
   await provisionDefaultAgentForOrg(org.id, org.slug, user.id).catch(() => {});
 
   return c.json(

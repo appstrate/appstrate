@@ -63,7 +63,7 @@ describe("manifest-based dependency resolution", () => {
           name: `@${orgSlug}/my-agent`,
           version: "0.1.0",
           type: "agent",
-          description: "Flow with deps",
+          description: "Agent with deps",
           dependencies: {
             skills: { [`@${orgSlug}/dep-skill`]: "^1.0.0" },
             tools: { [`@${orgSlug}/dep-tool`]: "^2.0.0" },
@@ -211,7 +211,7 @@ describe("manifest-based dependency resolution", () => {
           name: `@${orgSlug}/agent-a`,
           version: "0.1.0",
           type: "agent",
-          description: "Flow A",
+          description: "Agent A",
           dependencies: { skills: { [`@${orgSlug}/popular-skill`]: "*" } },
         },
       });
@@ -222,7 +222,7 @@ describe("manifest-based dependency resolution", () => {
           name: `@${orgSlug}/agent-b`,
           version: "0.1.0",
           type: "agent",
-          description: "Flow B",
+          description: "Agent B",
           dependencies: { skills: { [`@${orgSlug}/popular-skill`]: "*" } },
         },
       });
@@ -249,7 +249,7 @@ describe("manifest-based dependency resolution", () => {
           description: "Our tool",
         },
       });
-      // Flow in OTHER org references our tool (shouldn't block our deletion)
+      // Agent in OTHER org references our tool (shouldn't block our deletion)
       await seedPackage({
         orgId: otherOrg.id,
         id: `@otherorg/their-agent`,
@@ -290,7 +290,7 @@ describe("manifest-based dependency resolution", () => {
           name: `@${orgSlug}/agent-1`,
           version: "0.1.0",
           type: "agent",
-          description: "Flow 1",
+          description: "Agent 1",
           dependencies: { tools: { [`@${orgSlug}/counted-tool`]: "*" } },
         },
       });
@@ -301,7 +301,7 @@ describe("manifest-based dependency resolution", () => {
           name: `@${orgSlug}/agent-2`,
           version: "0.1.0",
           type: "agent",
-          description: "Flow 2",
+          description: "Agent 2",
           dependencies: { tools: { [`@${orgSlug}/counted-tool`]: "*" } },
         },
       });
@@ -355,7 +355,7 @@ describe("manifest-based dependency resolution", () => {
         id: `@${orgSlug}/using-agent`,
         draftManifest: {
           name: `@${orgSlug}/using-agent`,
-          displayName: "Using Flow",
+          displayName: "Using Agent",
           version: "0.1.0",
           type: "agent",
           description: "Uses tool",
@@ -366,11 +366,11 @@ describe("manifest-based dependency resolution", () => {
       const item = await getOrgItem(orgId, `@${orgSlug}/detail-tool`, TOOL_CONFIG);
 
       expect(item).not.toBeNull();
-      expect(item!.flows).toHaveLength(1);
-      expect(item!.flows[0]!.id).toBe(`@${orgSlug}/using-agent`);
+      expect(item!.agents).toHaveLength(1);
+      expect(item!.agents[0]!.id).toBe(`@${orgSlug}/using-agent`);
     });
 
-    it("returns empty flows array when unused", async () => {
+    it("returns empty agents array when unused", async () => {
       await seedPackage({
         orgId,
         id: `@${orgSlug}/orphan-tool`,
@@ -386,7 +386,7 @@ describe("manifest-based dependency resolution", () => {
       const item = await getOrgItem(orgId, `@${orgSlug}/orphan-tool`, TOOL_CONFIG);
 
       expect(item).not.toBeNull();
-      expect(item!.flows).toHaveLength(0);
+      expect(item!.agents).toHaveLength(0);
     });
 
     it("includes cross-type dependents (tool depends on skill)", async () => {
@@ -418,8 +418,8 @@ describe("manifest-based dependency resolution", () => {
       const item = await getOrgItem(orgId, `@${orgSlug}/base-skill`, SKILL_CONFIG);
 
       expect(item).not.toBeNull();
-      expect(item!.flows).toHaveLength(1);
-      expect(item!.flows[0]!.id).toBe(`@${orgSlug}/dependent-tool`);
+      expect(item!.agents).toHaveLength(1);
+      expect(item!.agents[0]!.id).toBe(`@${orgSlug}/dependent-tool`);
     });
   });
 
@@ -457,7 +457,7 @@ describe("manifest-based dependency resolution", () => {
           name: `@${orgSlug}/top-agent`,
           version: "0.1.0",
           type: "agent",
-          description: "Flow depending on tool",
+          description: "Agent depending on tool",
           dependencies: { tools: { [`@${orgSlug}/mid-tool`]: "*" } },
         },
       });
@@ -560,7 +560,7 @@ describe("manifest-based dependency resolution", () => {
           name: `@${orgSlug}/cycle-agent`,
           version: "0.1.0",
           type: "agent",
-          description: "Flow with cyclic tools",
+          description: "Agent with cyclic tools",
           dependencies: { tools: { [`@${orgSlug}/cycle-tool-a`]: "*" } },
         },
       });

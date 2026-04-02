@@ -58,13 +58,13 @@ export async function* runContainerLifecycle(
 
     // Skip waitForExit if cancelled — workload will be killed by stopWorkload
     if (signal?.aborted) {
-      throw new Error("Execution cancelled");
+      throw new Error("Run cancelled");
     }
 
     const exitCode = await orchestrator.waitForExit(handle);
 
     if (timedOut) {
-      throw new TimeoutError(`Execution timed out after ${timeout}s`);
+      throw new TimeoutError(`Run timed out after ${timeout}s`);
     }
 
     if (exitCode !== 0 && !hasOutput) {

@@ -28,7 +28,7 @@ export const healthPaths = {
                           latency_ms: { type: "number" },
                         },
                       },
-                      flows: {
+                      agents: {
                         type: "object",
                         properties: {
                           status: { type: "string", enum: ["healthy", "degraded"] },

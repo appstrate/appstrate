@@ -281,7 +281,7 @@ describe("webhooks service", () => {
     it("builds a valid event envelope in full mode", () => {
       const { eventId, payload } = buildEventEnvelope({
         eventType: "run.completed",
-        execution: {
+        run: {
           id: "exec_123",
           status: "success",
           result: "output data",
@@ -303,7 +303,7 @@ describe("webhooks service", () => {
     it("strips result and input in summary mode", () => {
       const { payload } = buildEventEnvelope({
         eventType: "run.completed",
-        execution: { id: "exec_123", status: "success", result: "output", input: "input" },
+        run: { id: "exec_123", status: "success", result: "output", input: "input" },
         payloadMode: "summary",
       });
 

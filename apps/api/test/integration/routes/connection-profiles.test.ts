@@ -240,7 +240,7 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("GET /api/connection-profiles/org/:id/flows", () => {
+  describe("GET /api/connection-profiles/org/:id/agents", () => {
     it("returns agents configured with the org profile", async () => {
       const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Prod Profile" });
       await seedAgent({
@@ -264,33 +264,33 @@ describe("Connection Profiles API", () => {
       });
       expect(setRes.status).toBe(200);
 
-      const res = await app.request(`/api/connection-profiles/org/${orgProfile.id}/flows`, {
+      const res = await app.request(`/api/connection-profiles/org/${orgProfile.id}/agents`, {
         headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.flows).toBeArray();
-      expect(body.flows).toHaveLength(1);
-      expect(body.flows[0].id).toBe("@testorg/linked-agent");
-      expect(body.flows[0].displayName).toBe("Linked Agent");
+      expect(body.agents).toBeArray();
+      expect(body.agents).toHaveLength(1);
+      expect(body.agents[0].id).toBe("@testorg/linked-agent");
+      expect(body.agents[0].displayName).toBe("Linked Agent");
     });
 
     it("returns empty array when no agents use the profile", async () => {
       const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Unused" });
 
-      const res = await app.request(`/api/connection-profiles/org/${orgProfile.id}/flows`, {
+      const res = await app.request(`/api/connection-profiles/org/${orgProfile.id}/agents`, {
         headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.flows).toHaveLength(0);
+      expect(body.agents).toHaveLength(0);
     });
 
     it("returns 404 for non-existent profile", async () => {
       const res = await app.request(
-        "/api/connection-profiles/org/00000000-0000-0000-0000-000000000000/flows",
+        "/api/connection-profiles/org/00000000-0000-0000-0000-000000000000/agents",
         { headers: authHeaders(ctx) },
       );
 

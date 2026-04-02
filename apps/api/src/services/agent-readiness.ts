@@ -2,7 +2,7 @@
 
 /**
  * Centralized agent readiness validation — ensures an agent is properly configured
- * before execution. Called from all execution paths (manual, scheduled).
+ * before a run. Called from all run paths (manual, scheduled).
  */
 
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
@@ -14,7 +14,7 @@ import { ApiError } from "../lib/errors.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 
 /**
- * Validate that an agent is ready for execution.
+ * Validate that an agent is ready for a run.
  * Checks are ordered cheapest-first, fail-fast on first error.
  *
  * 1. Empty prompt

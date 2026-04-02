@@ -212,7 +212,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
   });
 }
 
-/** Get a single item with content and list of flows referencing it. */
+/** Get a single item with content and list of agents referencing it. */
 export async function getOrgItem(orgId: string, itemId: string, cfg: PackageTypeConfig) {
   const orgFilter = orgOrSystemFilter(orgId);
 
@@ -243,7 +243,7 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
     manifest: asRecord(data.draftManifest),
     lockVersion: data.lockVersion,
     forkedFrom: data.forkedFrom ?? null,
-    flows: dependents,
+    agents: dependents,
   };
 }
 

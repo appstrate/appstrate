@@ -111,7 +111,7 @@ describe("scheduler org-profile readiness", () => {
         name: `@${orgSlug}/agent-org-bound`,
         version: "0.1.0",
         type: "agent",
-        description: "Flow with bound provider",
+        description: "Agent with bound provider",
         dependencies: { providers: { [providerId]: "*" } },
       },
     });
@@ -143,7 +143,7 @@ describe("scheduler org-profile readiness", () => {
         name: `@${orgSlug}/agent-org-unbound`,
         version: "0.1.0",
         type: "agent",
-        description: "Flow with unbound provider",
+        description: "Agent with unbound provider",
         dependencies: { providers: { [providerId]: "*" } },
       },
     });
@@ -163,7 +163,7 @@ describe("scheduler org-profile readiness", () => {
     expect(s.readiness.missingProviders).toEqual([providerId]);
   });
 
-  // ── Execution-path resolution (triggerScheduledExecution parity) ──
+  // ── Run-path resolution (triggerScheduledExecution parity) ──
 
   it("resolves providers via org bindings without agentOrgProfileId (run path)", async () => {
     // This is the exact scenario that caused the production bug:

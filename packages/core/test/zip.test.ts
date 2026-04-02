@@ -23,11 +23,11 @@ function makeZip(entries: Record<string, string>): Uint8Array {
 
 function validAgentManifest() {
   return JSON.stringify({
-    name: "@test/my-flow",
+    name: "@test/my-agent",
     version: "1.0.0",
     type: "agent",
     schemaVersion: "1.0",
-    displayName: "My Flow",
+    displayName: "My Agent",
     author: "test",
   });
 }
@@ -91,7 +91,7 @@ export default function(pi) {
 // ─────────────────────────────────────────────
 
 describe("parsePackageZip", () => {
-  test("valid flow ZIP", () => {
+  test("valid agent ZIP", () => {
     const zip = makeZip({
       "manifest.json": validAgentManifest(),
       "prompt.md": "# My prompt\nDo something useful.",
@@ -99,7 +99,7 @@ describe("parsePackageZip", () => {
     const result = parsePackageZip(zip);
     expect(result.type).toBe("agent");
     expect(result.content).toContain("My prompt");
-    expect(result.manifest.name).toBe("@test/my-flow");
+    expect(result.manifest.name).toBe("@test/my-agent");
   });
 
   test("valid skill ZIP", () => {
@@ -187,7 +187,7 @@ describe("parsePackageZip", () => {
     }
   });
 
-  test("flow missing prompt.md", () => {
+  test("agent missing prompt.md", () => {
     const zip = makeZip({ "manifest.json": validAgentManifest() });
     expect(() => parsePackageZip(zip)).toThrow(PackageZipError);
     try {
@@ -430,10 +430,10 @@ describe("tool entrypoint detection", () => {
 // ─────────────────────────────────────────────
 
 describe("wrapper folder stripping (parsePackageZip)", () => {
-  test("wrapped flow ZIP", () => {
+  test("wrapped agent ZIP", () => {
     const zip = makeZip({
-      "my-flow/manifest.json": validAgentManifest(),
-      "my-flow/prompt.md": "# My prompt\nDo something useful.",
+      "my-agent/manifest.json": validAgentManifest(),
+      "my-agent/prompt.md": "# My prompt\nDo something useful.",
     });
     const result = parsePackageZip(zip);
     expect(result.type).toBe("agent");

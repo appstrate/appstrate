@@ -194,21 +194,21 @@ describe("scheduler service", () => {
       });
 
       await createSchedule(packageId, profileId, orgId, {
-        name: "Flow 1 Schedule",
+        name: "Agent 1 Schedule",
         cronExpression: "0 * * * *",
       });
       await createSchedule(pkg2.id, profileId, orgId, {
-        name: "Flow 2 Schedule",
+        name: "Agent 2 Schedule",
         cronExpression: "*/15 * * * *",
       });
 
       const schedules = await listPackageSchedules(packageId, orgId);
       expect(schedules).toHaveLength(1);
-      expect(schedules[0]!.name).toBe("Flow 1 Schedule");
+      expect(schedules[0]!.name).toBe("Agent 1 Schedule");
 
       const schedules2 = await listPackageSchedules(pkg2.id, orgId);
       expect(schedules2).toHaveLength(1);
-      expect(schedules2[0]!.name).toBe("Flow 2 Schedule");
+      expect(schedules2[0]!.name).toBe("Agent 2 Schedule");
     });
 
     it("returns empty array for package with no schedules", async () => {
@@ -425,7 +425,7 @@ describe("scheduler service", () => {
           name: `@${orgSlug}/agent-with-provider`,
           version: "0.1.0",
           type: "agent",
-          description: "Flow needing a provider",
+          description: "Agent needing a provider",
           dependencies: { providers: { [providerId]: "*" } },
         },
       });

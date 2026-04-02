@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Dependency validation — validates that all required providers are connected before execution.
+ * Dependency validation — validates that all required providers are connected before a run.
  * Shared by runs.ts and scheduler.ts.
  */
 

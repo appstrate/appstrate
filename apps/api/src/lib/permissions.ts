@@ -64,7 +64,7 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "members:invite",
   "members:remove",
   "members:change-role",
-  // Flows
+  // Agents
   "agents:read",
   "agents:write",
   "agents:configure",
@@ -82,7 +82,7 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "providers:read",
   "providers:write",
   "providers:delete",
-  // Executions
+  // Runs
   "runs:read",
   "runs:cancel",
   "runs:delete",
@@ -144,14 +144,14 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   // Organization (read only)
   "org:read",
   "members:read",
-  // Flows (read + run, no write/configure/delete)
+  // Agents (read + run, no write/configure/delete)
   "agents:read",
   "agents:run",
   // Skills, Tools, Providers (read only)
   "skills:read",
   "tools:read",
   "providers:read",
-  // Executions (read + cancel own)
+  // Runs (read + cancel own)
   "runs:read",
   "runs:cancel",
   // Schedules (read + write + delete own)
@@ -220,7 +220,7 @@ const ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<Permission>> = {
  * Session-only operations (org management, billing, personal profiles, etc.) are excluded.
  */
 export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>([
-  // Flows
+  // Agents
   "agents:read",
   "agents:write",
   "agents:configure",
@@ -238,7 +238,7 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "providers:read",
   "providers:write",
   "providers:delete",
-  // Executions
+  // Runs
   "runs:read",
   "runs:cancel",
   "runs:delete",

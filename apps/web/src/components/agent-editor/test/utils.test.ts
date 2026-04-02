@@ -18,14 +18,14 @@ import type { JSONSchemaObject } from "@appstrate/core/form";
 
 describe("getManifestName", () => {
   it("parses scoped name", () => {
-    expect(getManifestName({ name: "@my-org/my-flow" })).toEqual({
+    expect(getManifestName({ name: "@my-org/my-agent" })).toEqual({
       scope: "my-org",
-      id: "my-flow",
+      id: "my-agent",
     });
   });
 
   it("returns empty scope for unscoped name", () => {
-    expect(getManifestName({ name: "my-flow" })).toEqual({ scope: "", id: "my-flow" });
+    expect(getManifestName({ name: "my-agent" })).toEqual({ scope: "", id: "my-agent" });
   });
 
   it("handles missing name", () => {

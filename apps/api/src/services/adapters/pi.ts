@@ -95,7 +95,7 @@ export class PiAdapter implements RunAdapter {
       }
 
       // All outbound HTTP traffic routed through sidecar forward proxy.
-      // The execution network is internal (no NAT) — clients that ignore
+      // The run network is internal (no NAT) — clients that ignore
       // HTTP_PROXY simply get connection failures, which is the desired behavior.
       containerEnv.HTTP_PROXY = "http://sidecar:8081";
       containerEnv.HTTPS_PROXY = "http://sidecar:8081";

@@ -40,7 +40,7 @@ export interface ResourceEntry {
   description?: string;
 }
 
-// --- Execution Types ---
+// --- Run Types ---
 
 import { runStatusEnum } from "@appstrate/db/schema";
 export type RunStatus = (typeof runStatusEnum.enumValues)[number];
