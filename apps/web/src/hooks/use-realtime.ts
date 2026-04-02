@@ -25,7 +25,7 @@ export function useRunRealtime(
       { withCredentials: true },
     );
 
-    es.addEventListener("execution_update", (e) => {
+    es.addEventListener("run_update", (e) => {
       try {
         const data = JSON.parse(e.data);
         onStatusRef.current?.(data);
@@ -62,7 +62,7 @@ export function useRunLogsRealtime(
       { withCredentials: true },
     );
 
-    es.addEventListener("execution_log", (e) => {
+    es.addEventListener("run_log", (e) => {
       try {
         const data = JSON.parse(e.data);
         onNewLogRef.current(data);

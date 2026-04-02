@@ -13,11 +13,11 @@ import { validateApiKey } from "../services/api-keys.ts";
 
 /** Strip large user-content fields from SSE payloads for non-verbose consumers. */
 function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
-  if (evt.event === "execution_update") {
+  if (evt.event === "run_update") {
     const { result: _result, ...rest } = evt.data;
     return rest;
   }
-  if (evt.event === "execution_log") {
+  if (evt.event === "run_log") {
     const { data: _data, ...rest } = evt.data;
     return rest;
   }

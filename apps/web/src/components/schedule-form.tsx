@@ -176,10 +176,10 @@ export function ScheduleForm({
 
   return (
     <form onSubmit={onFormSubmit} className="space-y-6">
-      {/* Flow selector (create mode only) */}
+      {/* Agent selector (create mode only) */}
       {mode === "create" && agents && onAgentChange && (
         <div className="space-y-3">
-          <Label htmlFor="sched-agent">{t("schedule.flow")}</Label>
+          <Label htmlFor="sched-agent">{t("schedule.agent")}</Label>
           <Select value={selectedAgentId ?? ""} onValueChange={onAgentChange}>
             <SelectTrigger id="sched-agent">
               <SelectValue />

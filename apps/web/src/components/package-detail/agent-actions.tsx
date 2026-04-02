@@ -47,7 +47,7 @@ export function AgentActions({
   const setEditingSchedule = useAgentDetailUI((s) => s.setEditingSchedule);
 
   const [confirmState, setConfirmState] = useState<{
-    type: "deleteAgent" | "clearExecutions" | "clearMemories";
+    type: "deleteAgent" | "clearRuns" | "clearMemories";
     label: string;
   } | null>(null);
 
@@ -64,7 +64,7 @@ export function AgentActions({
       case "deleteAgent":
         deleteAgent.mutate(detail.id, { onSuccess });
         break;
-      case "clearExecutions":
+      case "clearRuns":
         deleteRuns.mutate(undefined, { onSuccess });
         break;
       case "clearMemories":
@@ -91,15 +91,15 @@ export function AgentActions({
         hasRuns={!!runs && runs.length > 0}
         hasMemories={!!memories && memories.length > 0}
         hasFileInput={!!hasFileInput}
-        onDeleteFlow={() =>
+        onDeleteAgent={() =>
           setConfirmState({
             type: "deleteAgent",
             label: t("detail.deleteConfirm", { name: detail.displayName }),
           })
         }
-        onDeleteExecutions={() =>
+        onDeleteRuns={() =>
           setConfirmState({
-            type: "clearExecutions",
+            type: "clearRuns",
             label: t("detail.clearExecConfirm"),
           })
         }

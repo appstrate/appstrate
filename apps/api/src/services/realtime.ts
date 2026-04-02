@@ -33,7 +33,7 @@ function snakeToCamel(obj: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
- * Initialize PG LISTEN channels for execution_update and execution_log_insert.
+ * Initialize PG LISTEN channels for run_update and run_log_insert.
  * Safe to call multiple times — only initializes once.
  */
 export async function initRealtime(): Promise<void> {
@@ -48,7 +48,7 @@ export async function initRealtime(): Promise<void> {
         if (sub.filter.orgId !== raw.org_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.id) continue;
         if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
-        sub.send({ event: "execution_update", data });
+        sub.send({ event: "run_update", data });
       }
     } catch (err) {
       logger.error("Failed to parse execution_update payload", {
@@ -63,9 +63,9 @@ export async function initRealtime(): Promise<void> {
       const data = snakeToCamel(raw);
       for (const sub of subscribers.values()) {
         if (sub.filter.orgId !== raw.org_id) continue;
-        if (sub.filter.runId && sub.filter.runId !== raw.execution_id) continue;
+        if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
         if (!sub.filter.isAdmin && raw.level === "debug") continue;
-        sub.send({ event: "execution_log", data });
+        sub.send({ event: "run_log", data });
       }
     } catch (err) {
       logger.error("Failed to parse execution_log_insert payload", {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { logger } from "../../lib/logger.ts";
-import type { ExecutionAdapter, ExecutionMessage, PromptContext, UploadedFile } from "./types.ts";
+import type { RunAdapter, RunMessage, PromptContext, UploadedFile } from "./types.ts";
 import { buildEnrichedPrompt } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { sanitizeStorageKey } from "../file-storage.ts";
@@ -14,7 +14,7 @@ import {
 
 import { getEnv } from "@appstrate/env";
 
-export class PiAdapter implements ExecutionAdapter {
+export class PiAdapter implements RunAdapter {
   private readonly _orchestrator?: ContainerOrchestrator;
 
   constructor(orchestrator?: ContainerOrchestrator) {
@@ -25,10 +25,10 @@ export class PiAdapter implements ExecutionAdapter {
     runId: string,
     ctx: PromptContext,
     timeout: number,
-    flowPackage?: Buffer,
+    agentPackage?: Buffer,
     signal?: AbortSignal,
     inputFiles?: UploadedFile[],
-  ): AsyncGenerator<ExecutionMessage> {
+  ): AsyncGenerator<RunMessage> {
     const prompt = buildEnrichedPrompt(ctx);
 
     const llmConfig = ctx.llmConfig;
@@ -106,8 +106,8 @@ export class PiAdapter implements ExecutionAdapter {
 
       // Prepare files for batch injection into agent
       const filesToInject: Array<{ name: string; content: Buffer }> = [];
-      if (flowPackage) {
-        filesToInject.push({ name: "flow-package.afps", content: flowPackage });
+      if (agentPackage) {
+        filesToInject.push({ name: "agent-package.afps", content: agentPackage });
       }
       if (inputFiles) {
         for (const f of inputFiles) {
@@ -188,11 +188,11 @@ function deriveKeyPlaceholder(key: string | undefined): string {
   return parts.slice(0, -1).join("-") + "-placeholder";
 }
 
-async function* processPiLogs(logs: AsyncGenerator<string>): AsyncGenerator<ExecutionMessage> {
+async function* processPiLogs(logs: AsyncGenerator<string>): AsyncGenerator<RunMessage> {
   let textBuffer = "";
   let inCodeBlock = false;
 
-  const emitBuffer = (): ExecutionMessage | null => {
+  const emitBuffer = (): RunMessage | null => {
     const text = textBuffer.trim();
     textBuffer = "";
     return text.length > 0 ? { type: "progress", message: text } : null;
@@ -251,7 +251,7 @@ export { processPiLogs as _processPiLogsForTesting };
 export { deriveKeyPlaceholder as _deriveKeyPlaceholderForTesting };
 
 /** @internal Exported for testing */
-export function parsePiStreamLine(line: string): ExecutionMessage | null {
+export function parsePiStreamLine(line: string): RunMessage | null {
   try {
     const obj = JSON.parse(line);
 

@@ -122,7 +122,7 @@ export function DashboardPage() {
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-muted-foreground text-sm font-medium">
-              {t("dashboard.recentFlows")}
+              {t("dashboard.recentAgents")}
             </h2>
             <Link
               to="/agents"

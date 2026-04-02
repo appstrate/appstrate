@@ -102,7 +102,7 @@ describe("realtime service (integration)", () => {
 
       expect(send).toHaveBeenCalledTimes(1);
       const call = send.mock.calls[0]![0]!;
-      expect(call.event).toBe("execution_update");
+      expect(call.event).toBe("run_update");
       // Verify snake_case is converted to camelCase.
       expect(call.data).toEqual({
         orgId: "org1",
@@ -221,7 +221,7 @@ describe("realtime service (integration)", () => {
 
       await pgNotify("execution_log_insert", {
         org_id: "org-log",
-        execution_id: "exec-log-1",
+        run_id: "exec-log-1",
         level: "debug",
         message: "debug info",
       });
@@ -232,14 +232,14 @@ describe("realtime service (integration)", () => {
       // Non-debug logs should still be received.
       await pgNotify("execution_log_insert", {
         org_id: "org-log",
-        execution_id: "exec-log-1",
+        run_id: "exec-log-1",
         level: "info",
         message: "info log",
       });
       await wait();
 
       expect(send).toHaveBeenCalledTimes(1);
-      expect(send.mock.calls[0]![0]!.event).toBe("execution_log");
+      expect(send.mock.calls[0]![0]!.event).toBe("run_log");
     });
 
     it("admin receives debug logs", async () => {
@@ -255,14 +255,14 @@ describe("realtime service (integration)", () => {
 
       await pgNotify("execution_log_insert", {
         org_id: "org-log-admin",
-        execution_id: "exec-log-2",
+        run_id: "exec-log-2",
         level: "debug",
         message: "debug for admin",
       });
       await wait();
 
       expect(send).toHaveBeenCalledTimes(1);
-      expect(send.mock.calls[0]![0]!.event).toBe("execution_log");
+      expect(send.mock.calls[0]![0]!.event).toBe("run_log");
       expect(send.mock.calls[0]![0]!.data.level).toBe("debug");
     });
 
@@ -277,20 +277,20 @@ describe("realtime service (integration)", () => {
         send,
       });
 
-      // Non-matching execution_id.
+      // Non-matching run_id.
       await pgNotify("execution_log_insert", {
         org_id: "org-lef",
-        execution_id: "other-exec",
+        run_id: "other-exec",
         level: "info",
         message: "wrong exec",
       });
       await wait();
       expect(send).not.toHaveBeenCalled();
 
-      // Matching execution_id.
+      // Matching run_id.
       await pgNotify("execution_log_insert", {
         org_id: "org-lef",
-        execution_id: "target-log-exec",
+        run_id: "target-log-exec",
         level: "info",
         message: "right exec",
       });
@@ -312,7 +312,7 @@ describe("realtime service (integration)", () => {
 
       await pgNotify("execution_log_insert", {
         org_id: "org-default",
-        execution_id: "exec-d",
+        run_id: "exec-d",
         level: "debug",
         message: "debug hidden",
       });
@@ -321,7 +321,7 @@ describe("realtime service (integration)", () => {
 
       await pgNotify("execution_log_insert", {
         org_id: "org-default",
-        execution_id: "exec-d",
+        run_id: "exec-d",
         level: "warn",
         message: "warn visible",
       });

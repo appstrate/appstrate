@@ -122,14 +122,14 @@ export function OrgProfileDetailPage() {
       {/* ─── Flows liés ───────────────────────────────────── */}
       <section className="mb-8 space-y-3">
         <h3 className="text-muted-foreground text-sm font-medium">
-          {t("orgProfiles.linkedFlows")}
+          {t("orgProfiles.linkedAgents")}
         </h3>
 
         {(() => {
           const linkedAgentIds = new Set(linkedAgentRefs?.map((f) => f.id) ?? []);
           const linkedAgentItems = (agents ?? []).filter((f) => linkedAgentIds.has(f.id));
           return linkedAgentItems.length === 0 ? (
-            <EmptyState message={t("orgProfiles.noFlows")} icon={Workflow} compact />
+            <EmptyState message={t("orgProfiles.noAgents")} icon={Workflow} compact />
           ) : (
             <div className="space-y-2">
               {linkedAgentItems.map((agent) => (

@@ -39,13 +39,13 @@ interface PackageActionsDropdownProps {
   onDownload?: (version: string) => void;
   onCreateVersion?: () => void;
   onFork?: () => void;
-  // Flow-specific
+  // Agent-specific
   runningRuns?: number;
   hasRuns?: boolean;
   hasMemories?: boolean;
   hasFileInput?: boolean;
-  onDeleteFlow?: () => void;
-  onDeleteExecutions?: () => void;
+  onDeleteAgent?: () => void;
+  onDeleteRuns?: () => void;
   onAddSchedule?: () => void;
   onDeleteMemories?: () => void;
   // Provider-specific
@@ -72,8 +72,8 @@ export function PackageActionsDropdown({
   hasRuns,
   hasMemories,
   hasFileInput,
-  onDeleteFlow,
-  onDeleteExecutions,
+  onDeleteAgent,
+  onDeleteRuns,
   onAddSchedule,
   onDeleteMemories,
   hasCredentials,
@@ -86,10 +86,10 @@ export function PackageActionsDropdown({
   const { isAdmin, isMember } = usePermissions();
   const [definitionOpen, setDefinitionOpen] = useState(false);
 
-  const isFlow = type === "agent";
+  const isAgent = type === "agent";
   const isMutable = isAdmin && !isBuiltIn && !isHistoricalVersion && isOwned;
 
-  if (!isFlow && !manifest) return null;
+  if (!isAgent && !manifest) return null;
 
   return (
     <>
@@ -143,8 +143,8 @@ export function PackageActionsDropdown({
             </DropdownMenuItem>
           )}
 
-          {/* ── Flow secondary actions ── */}
-          {isFlow && (
+          {/* ── Agent secondary actions ── */}
+          {isAgent && (
             <>
               <DropdownMenuSeparator />
               {isMember && !hasFileInput && onAddSchedule && (
@@ -153,9 +153,9 @@ export function PackageActionsDropdown({
                   {t("schedule.titleNew")}
                 </DropdownMenuItem>
               )}
-              {isAdmin && hasRuns && onDeleteExecutions && (
+              {isAdmin && hasRuns && onDeleteRuns && (
                 <DropdownMenuItem
-                  onSelect={onDeleteExecutions}
+                  onSelect={onDeleteRuns}
                   disabled={runningRuns > 0}
                   className="text-destructive focus:text-destructive"
                 >
@@ -193,9 +193,9 @@ export function PackageActionsDropdown({
           {isAdmin && !isBuiltIn && isOwned && (
             <>
               <DropdownMenuSeparator />
-              {isFlow && onDeleteFlow && (
+              {isAgent && onDeleteAgent && (
                 <DropdownMenuItem
-                  onSelect={onDeleteFlow}
+                  onSelect={onDeleteAgent}
                   disabled={runningRuns > 0}
                   className="text-destructive focus:text-destructive"
                 >
@@ -203,7 +203,7 @@ export function PackageActionsDropdown({
                   {t("btn.delete")}
                 </DropdownMenuItem>
               )}
-              {!isFlow && canDeletePackage && onDeletePackage && (
+              {!isAgent && canDeletePackage && onDeletePackage && (
                 <DropdownMenuItem
                   onSelect={onDeletePackage}
                   className="text-destructive focus:text-destructive"

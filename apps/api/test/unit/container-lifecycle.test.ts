@@ -4,7 +4,7 @@ import { describe, it, expect, mock } from "bun:test";
 import type { ContainerOrchestrator } from "../../src/services/orchestrator/interface.ts";
 import type { WorkloadHandle } from "../../src/services/orchestrator/types.ts";
 import { runContainerLifecycle } from "../../src/services/adapters/container-lifecycle.ts";
-import type { ExecutionMessage } from "../../src/services/adapters/types.ts";
+import type { RunMessage } from "../../src/services/adapters/types.ts";
 
 function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): ContainerOrchestrator {
   return {
@@ -41,8 +41,8 @@ function createHandle(overrides?: Partial<WorkloadHandle>): WorkloadHandle {
   };
 }
 
-async function collectMessages(gen: AsyncGenerator<ExecutionMessage>): Promise<ExecutionMessage[]> {
-  const messages: ExecutionMessage[] = [];
+async function collectMessages(gen: AsyncGenerator<RunMessage>): Promise<RunMessage[]> {
+  const messages: RunMessage[] = [];
   for await (const msg of gen) {
     messages.push(msg);
   }

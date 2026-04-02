@@ -8,9 +8,9 @@ import type { Db } from "./client.ts";
  * Safe to call multiple times (uses CREATE OR REPLACE).
  */
 export async function createNotifyTriggers(db: Db): Promise<void> {
-  // Trigger function for execution changes
+  // Trigger function for run changes
   await db.execute(drizzleSql`
-    CREATE OR REPLACE FUNCTION notify_execution_change()
+    CREATE OR REPLACE FUNCTION notify_run_change()
     RETURNS TRIGGER AS $$
     BEGIN
       PERFORM pg_notify('execution_update', json_build_object(
@@ -32,14 +32,14 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
     $$ LANGUAGE plpgsql
   `);
 
-  // Trigger function for execution log inserts
+  // Trigger function for run log inserts
   await db.execute(drizzleSql`
-    CREATE OR REPLACE FUNCTION notify_execution_log_insert()
+    CREATE OR REPLACE FUNCTION notify_run_log_insert()
     RETURNS TRIGGER AS $$
     BEGIN
       PERFORM pg_notify('execution_log_insert', json_build_object(
         'id', NEW.id,
-        'execution_id', NEW.execution_id,
+        'run_id', NEW.run_id,
         'org_id', NEW.org_id,
         'type', NEW.type,
         'level', NEW.level,
@@ -59,20 +59,20 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
 
   // Create triggers (drop first to avoid duplicates)
   await db.execute(drizzleSql`
-    DROP TRIGGER IF EXISTS executions_notify_trigger ON runs
+    DROP TRIGGER IF EXISTS runs_notify_trigger ON runs
   `);
   await db.execute(drizzleSql`
-    CREATE TRIGGER executions_notify_trigger
+    CREATE TRIGGER runs_notify_trigger
       AFTER INSERT OR UPDATE ON runs
-      FOR EACH ROW EXECUTE FUNCTION notify_execution_change()
+      FOR EACH ROW EXECUTE FUNCTION notify_run_change()
   `);
 
   await db.execute(drizzleSql`
-    DROP TRIGGER IF EXISTS execution_logs_notify_trigger ON run_logs
+    DROP TRIGGER IF EXISTS run_logs_notify_trigger ON run_logs
   `);
   await db.execute(drizzleSql`
-    CREATE TRIGGER execution_logs_notify_trigger
+    CREATE TRIGGER run_logs_notify_trigger
       AFTER INSERT ON run_logs
-      FOR EACH ROW EXECUTE FUNCTION notify_execution_log_insert()
+      FOR EACH ROW EXECUTE FUNCTION notify_run_log_insert()
   `);
 }

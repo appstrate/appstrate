@@ -15,7 +15,7 @@ import type {
   WorkloadSpec,
   SidecarConfig,
 } from "../../src/services/orchestrator/types.ts";
-import type { ExecutionMessage, PromptContext } from "../../src/services/adapters/types.ts";
+import type { RunMessage, PromptContext } from "../../src/services/adapters/types.ts";
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -75,8 +75,8 @@ function basePromptContext(overrides?: Partial<PromptContext>): PromptContext {
   };
 }
 
-async function collectMessages(gen: AsyncGenerator<ExecutionMessage>): Promise<ExecutionMessage[]> {
-  const messages: ExecutionMessage[] = [];
+async function collectMessages(gen: AsyncGenerator<RunMessage>): Promise<RunMessage[]> {
+  const messages: RunMessage[] = [];
   for await (const msg of gen) messages.push(msg);
   return messages;
 }
@@ -200,7 +200,7 @@ describe("PiAdapter.execute()", () => {
     expect(spec.files).toBeDefined();
     expect(spec.files!.targetDir).toBe("/workspace");
     expect(spec.files!.items).toHaveLength(2);
-    expect(spec.files!.items[0]!.name).toBe("flow-package.afps");
+    expect(spec.files!.items[0]!.name).toBe("agent-package.afps");
     expect(spec.files!.items[1]!.name).toBe("documents/report.pdf");
   });
 

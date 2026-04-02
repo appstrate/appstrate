@@ -5,7 +5,7 @@ import { Badge } from "./status-badge";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
 import { NextRunPreview } from "./next-run-preview";
 import { ProfileLabel } from "./profile-label";
-import { useScheduleExecutions } from "../hooks/use-schedules";
+import { useScheduleRuns } from "../hooks/use-schedules";
 import { useScheduleProviderReadiness } from "../hooks/use-schedule-readiness";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
 
@@ -15,7 +15,7 @@ interface ScheduleCardProps {
 }
 
 export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
-  const { data: runs } = useScheduleExecutions(schedule.id);
+  const { data: runs } = useScheduleRuns(schedule.id);
   const { totalProviders, allReady, isLoading } = useScheduleProviderReadiness(schedule);
   const hasProviders = totalProviders > 0;
 

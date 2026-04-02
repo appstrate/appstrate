@@ -101,7 +101,7 @@ describe("realtime SSE routes (integration)", () => {
         ignoreEvents: ["ping"],
       });
       expect(events.length).toBe(1);
-      expect(events[0]!.event).toBe("execution_update");
+      expect(events[0]!.event).toBe("run_update");
 
       const data = JSON.parse(events[0]!.data);
       expect(data.id).toBe(run.id);
@@ -163,7 +163,7 @@ describe("realtime SSE routes (integration)", () => {
         ignoreEvents: ["ping"],
       });
       expect(events.length).toBe(1);
-      expect(events[0]!.event).toBe("execution_update");
+      expect(events[0]!.event).toBe("run_update");
 
       const data = JSON.parse(events[0]!.data);
       expect(data.id).toBe(run.id);
@@ -200,7 +200,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("execution_log_insert", {
         org_id: ctx.orgId,
-        execution_id: run.id,
+        run_id: run.id,
         level: "info",
         message: "processing",
         data: { verbose: "details" },
@@ -210,7 +210,7 @@ describe("realtime SSE routes (integration)", () => {
         timeoutMs: 3000,
         ignoreEvents: ["ping"],
       });
-      expect(events[0]!.event).toBe("execution_log");
+      expect(events[0]!.event).toBe("run_log");
 
       const data = JSON.parse(events[0]!.data);
       // stripPayload removes "data" for execution_log in non-verbose mode
@@ -248,7 +248,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("execution_log_insert", {
         org_id: ctx.orgId,
-        execution_id: run.id,
+        run_id: run.id,
         level: "info",
         message: "step completed",
         data: { detail: "full-info" },
@@ -258,7 +258,7 @@ describe("realtime SSE routes (integration)", () => {
         timeoutMs: 3000,
         ignoreEvents: ["ping"],
       });
-      expect(events[0]!.event).toBe("execution_log");
+      expect(events[0]!.event).toBe("run_log");
 
       const data = JSON.parse(events[0]!.data);
       expect(data.data).toEqual({ detail: "full-info" });
@@ -289,7 +289,7 @@ describe("realtime SSE routes (integration)", () => {
         ignoreEvents: ["ping"],
       });
       expect(events.length).toBe(1);
-      expect(events[0]!.event).toBe("execution_update");
+      expect(events[0]!.event).toBe("run_update");
 
       const data = JSON.parse(events[0]!.data);
       expect(data.packageId).toBe(agentPkg.id);
@@ -363,7 +363,7 @@ describe("realtime SSE routes (integration)", () => {
         ignoreEvents: ["ping"],
       });
       expect(events.length).toBe(1);
-      expect(events[0]!.event).toBe("execution_update");
+      expect(events[0]!.event).toBe("run_update");
     });
 
     it("receives events from multiple agents", async () => {

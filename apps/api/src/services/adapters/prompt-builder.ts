@@ -258,9 +258,9 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     );
   }
 
-  // --- Execution History API ---
+  // --- Run History API ---
   if (ctx.executionApi) {
-    sections.push("## Execution History\n");
+    sections.push("## Run History\n");
     sections.push(
       "You can access data from previous runs beyond just the latest state. " +
         "This is useful for trend analysis, auditing past runs, or recovering from failures.\n",

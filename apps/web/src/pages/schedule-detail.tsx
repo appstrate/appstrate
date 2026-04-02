@@ -207,7 +207,7 @@ function ScheduleParams({
         </div>
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">
-          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramFlow")}</p>
+          <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramAgent")}</p>
           <Link
             to={`/agents/${schedule.packageId}`}
             className="text-sm font-medium hover:underline"
@@ -379,7 +379,7 @@ function ScheduleHistory({
         <div className="border-border rounded-md border">
           {previewRow}
           <div className="p-6">
-            <EmptyState message={t("schedule.noExecutions")} icon={Clock} compact />
+            <EmptyState message={t("schedule.noRuns")} icon={Clock} compact />
           </div>
         </div>
       }

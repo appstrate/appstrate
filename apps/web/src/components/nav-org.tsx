@@ -38,7 +38,7 @@ export function NavOrg() {
 
   const automationItems = [
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
-    { path: "/agents", label: t("nav.flows"), icon: Layers },
+    { path: "/agents", label: t("nav.agents"), icon: Layers },
     { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
   ];
 
@@ -72,7 +72,7 @@ export function NavOrg() {
         <SidebarGroupLabel>{t("nav.automationSection")}</SidebarGroupLabel>
         <SidebarMenu>
           {renderItems(automationItems)}
-          {/* Executions — with unread badge + running indicator */}
+          {/* Runs — with unread badge + running indicator */}
           <SidebarMenuItem className="relative">
             <SidebarMenuButton
               asChild

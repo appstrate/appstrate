@@ -542,7 +542,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         <div className="border-border bg-card rounded-lg border p-4">
           {pkgDetail.agents.length === 0 ? (
             <p className="text-muted-foreground py-4 text-center text-sm">
-              {t("packages.noFlows")}
+              {t("packages.noAgents")}
             </p>
           ) : (
             <div className="flex flex-wrap gap-2">

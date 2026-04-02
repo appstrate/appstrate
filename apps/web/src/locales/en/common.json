@@ -18,7 +18,7 @@
   "nav.resourcesSection": "Resources",
   "nav.integrationsSection": "Integrations",
   "nav.dashboard": "Dashboard",
-  "nav.flows": "Agents",
+  "nav.agents": "Agents",
   "nav.runs": "Runs",
   "nav.schedules": "Schedules",
   "nav.skills": "Skills",

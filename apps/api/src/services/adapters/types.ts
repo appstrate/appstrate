@@ -23,7 +23,7 @@ export const tokenUsageSchema = z.object({
 });
 export type TokenUsage = z.infer<typeof tokenUsageSchema>;
 
-export interface ExecutionMessage {
+export interface RunMessage {
   type: "progress" | "usage" | "error" | "output" | "set_state" | "add_memory" | "report";
   message?: string;
   data?: Record<string, unknown>;
@@ -92,15 +92,15 @@ export interface PromptContext {
   toolDocs?: Array<{ id: string; content: string }>;
 }
 
-export interface ExecutionAdapter {
+export interface RunAdapter {
   execute(
     runId: string,
     ctx: PromptContext,
     timeout: number,
-    flowPackage?: Buffer,
+    agentPackage?: Buffer,
     signal?: AbortSignal,
     inputFiles?: UploadedFile[],
-  ): AsyncGenerator<ExecutionMessage>;
+  ): AsyncGenerator<RunMessage>;
 }
 
 export class TimeoutError extends Error {

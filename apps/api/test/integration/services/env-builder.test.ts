@@ -72,7 +72,7 @@ describe("buildRunApi", () => {
     expect(parts[1]!.length).toBe(64); // SHA256 hex = 64 chars
   });
 
-  it("produces deterministic tokens for the same executionId", () => {
+  it("produces deterministic tokens for the same runId", () => {
     const a = buildRunApi("exec_deterministic");
     const b = buildRunApi("exec_deterministic");
     expect(a.token).toBe(b.token);

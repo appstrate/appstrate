@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { logger } from "../../lib/logger.ts";
-import type { ExecutionMessage } from "./types.ts";
+import type { RunMessage } from "./types.ts";
 import { TimeoutError } from "./types.ts";
 import type { ContainerOrchestrator, WorkloadHandle } from "../orchestrator/index.ts";
 
@@ -15,7 +15,7 @@ export interface ContainerLifecycleOptions {
   signal?: AbortSignal;
   /** Extra workload handles to stop on timeout (e.g. sidecar). */
   stopOnTimeout?: WorkloadHandle[];
-  processLogs: (logs: AsyncGenerator<string>) => AsyncGenerator<ExecutionMessage>;
+  processLogs: (logs: AsyncGenerator<string>) => AsyncGenerator<RunMessage>;
 }
 
 /**
@@ -24,7 +24,7 @@ export interface ContainerLifecycleOptions {
  */
 export async function* runContainerLifecycle(
   options: ContainerLifecycleOptions,
-): AsyncGenerator<ExecutionMessage> {
+): AsyncGenerator<RunMessage> {
   const { orchestrator, handle, adapterName, runId, timeout, extraData, signal } = options;
 
   yield {

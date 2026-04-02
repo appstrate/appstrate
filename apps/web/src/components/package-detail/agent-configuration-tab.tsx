@@ -99,8 +99,8 @@ function ModelSection({ packageId }: { packageId: string }) {
         <SelectContent>
           <SelectItem value="__inherit__">
             {orgDefaultModel
-              ? t("models.flow.inherit", { ns: "settings", name: orgDefaultModel.label })
-              : t("models.flow.inheritNoDefault", { ns: "settings" })}
+              ? t("models.agent.inherit", { ns: "settings", name: orgDefaultModel.label })
+              : t("models.agent.inheritNoDefault", { ns: "settings" })}
           </SelectItem>
           {orgModels.map((m) => {
             const mp = findProviderByApiAndBaseUrl(m.api, m.baseUrl);
@@ -146,10 +146,10 @@ function ProxySection({ packageId }: { packageId: string }) {
         <SelectContent>
           <SelectItem value="__inherit__">
             {orgDefaultProxy
-              ? t("proxies.flow.inherit", { ns: "settings", name: orgDefaultProxy.label })
-              : t("proxies.flow.inheritNoDefault", { ns: "settings" })}
+              ? t("proxies.agent.inherit", { ns: "settings", name: orgDefaultProxy.label })
+              : t("proxies.agent.inheritNoDefault", { ns: "settings" })}
           </SelectItem>
-          <SelectItem value="none">{t("proxies.flow.none", { ns: "settings" })}</SelectItem>
+          <SelectItem value="none">{t("proxies.agent.none", { ns: "settings" })}</SelectItem>
           {orgProxies.map((p) => (
             <SelectItem key={p.id} value={p.id}>
               {p.label}

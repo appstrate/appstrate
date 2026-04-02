@@ -6,7 +6,7 @@ import { useCurrentOrgId } from "./use-org";
 import { onMutationError } from "./use-mutations";
 import type { Schedule, EnrichedSchedule, Run } from "@appstrate/shared-types";
 
-export function useScheduleExecutions(scheduleId: string | undefined) {
+export function useScheduleRuns(scheduleId: string | undefined) {
   const orgId = useCurrentOrgId();
   return useQuery({
     queryKey: ["schedule-runs", orgId, scheduleId],

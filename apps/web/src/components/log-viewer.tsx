@@ -202,14 +202,14 @@ export function LogViewer({ entries }: LogViewerProps) {
   );
 }
 
-// --- ExecutionTimeline (public/user view) ---
+// --- RunTimeline (public/user view) ---
 
-interface ExecutionTimelineProps {
+interface RunTimelineProps {
   entries: LogEntry[];
   isRunning?: boolean;
 }
 
-export function ExecutionTimeline({ entries, isRunning }: ExecutionTimelineProps) {
+export function RunTimeline({ entries, isRunning }: RunTimelineProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll on new entries or when loader appears

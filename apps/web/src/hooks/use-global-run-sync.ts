@@ -98,7 +98,7 @@ export function useGlobalRunSync() {
               if (line.startsWith("event:")) event = line.slice(6).trim();
               else if (line.startsWith("data:")) data = line.slice(5).trim();
             }
-            if (event === "execution_update" && data) {
+            if (event === "run_update" && data) {
               handleSSEMessage(qcRef.current, orgId, data);
             }
           }
