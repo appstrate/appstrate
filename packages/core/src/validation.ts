@@ -457,7 +457,7 @@ export function validateToolSource(source: string): ToolSourceValidationResult {
   }
 
   const cleaned = stripLineComments(source);
-  const executeMatches = [...cleaned.matchAll(/execute\s*\(([^)]*)\)/g)];
+  const executeMatches = [...cleaned.matchAll(/execute\s*\(([^)]{0,500})\)/g)];
   for (const match of executeMatches) {
     const paramStr = match[1]!;
     const paramCount = countParams(paramStr);
