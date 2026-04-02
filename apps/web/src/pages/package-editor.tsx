@@ -83,8 +83,8 @@ function AgentEditorInner({
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const createFlow = useCreatePackage("agent");
-  const updateFlow = useUpdatePackage("agent", packageId || "");
+  const createAgent = useCreatePackage("agent");
+  const updateAgent = useUpdatePackage("agent", packageId || "");
 
   const [state, setState] = useState<AgentEditorState>(initialState);
   const [error, setError] = useState<string | null>(null);
@@ -182,16 +182,16 @@ function AgentEditorInner({
     allowNavigation();
     const body = { manifest: state.manifest, content: state.prompt };
     if (isEdit && detail) {
-      updateFlow.mutate(
+      updateAgent.mutate(
         { ...body, lockVersion: detail.lockVersion! },
         { onError: (err) => setError(err.message) },
       );
     } else {
-      createFlow.mutate(body, { onError: (err) => setError(err.message) });
+      createAgent.mutate(body, { onError: (err) => setError(err.message) });
     }
   };
 
-  const isPending = createFlow.isPending || updateFlow.isPending;
+  const isPending = createAgent.isPending || updateAgent.isPending;
 
   const agentTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },

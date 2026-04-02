@@ -54,7 +54,7 @@ export function getManifestName(m: Record<string, unknown>): { scope: string; id
   return match ? { scope: match[1]!, id: match[2]! } : { scope: "", id: raw };
 }
 
-/** Extract MetadataState from a manifest object. Includes timeout if present (flows only). */
+/** Extract MetadataState from a manifest object. Includes timeout if present (agents only). */
 export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
   const { scope, id } = getManifestName(m);
   return {

@@ -162,7 +162,7 @@ bun test packages/core/           # Core library tests (367+, no DB)
 | `app.ts`        | `getTestApp()` -- full Hono app replica (no boot/Docker)        |
 | `auth.ts`       | `createTestUser()`, `createTestOrg()`, `createTestContext()`    |
 | `db.ts`         | `truncateAll()` -- DELETE FROM all tables in FK-safe order      |
-| `seed.ts`       | 15+ factories: `seedPackage()`, `seedExecution()`, etc.         |
+| `seed.ts`       | 15+ factories: `seedPackage()`, `seedRun()`, etc.               |
 | `assertions.ts` | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`        |
 | `redis.ts`      | `getRedis()`, `flushRedis()`                                   |
 

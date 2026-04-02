@@ -115,7 +115,7 @@ export function stripWrapperPrefix(files: Record<string, Uint8Array>): Record<st
 export interface ParsedPackageZip {
   /** The validated manifest from manifest.json. */
   manifest: Manifest | AgentManifest | ProviderManifest;
-  /** The primary content (prompt.md for flows, SKILL.md for skills, source for tools, etc.). */
+  /** The primary content (prompt.md for agents, SKILL.md for skills, source for tools, etc.). */
   content: string;
   /** All files in the ZIP archive (path to content). */
   files: Record<string, Uint8Array>;
@@ -145,7 +145,7 @@ const DEFAULT_MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 /**
  * Parse and validate an AFPS package ZIP file.
  * Decompresses the ZIP, validates the manifest, and extracts the primary content
- * based on package type (prompt.md for flows, SKILL.md for skills, entrypoint for tools).
+ * based on package type (prompt.md for agents, SKILL.md for skills, entrypoint for tools).
  * Includes zip bomb protection and wrapper folder stripping.
  * @param zipBuffer - The raw ZIP file as a Uint8Array
  * @param maxSize - Maximum compressed size in bytes (defaults to 10 MB)

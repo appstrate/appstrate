@@ -119,7 +119,7 @@ export function OrgProfileDetailPage() {
         )}
       </section>
 
-      {/* ─── Flows liés ───────────────────────────────────── */}
+      {/* ─── Agents liés ──────────────────────────────────── */}
       <section className="mb-8 space-y-3">
         <h3 className="text-muted-foreground text-sm font-medium">
           {t("orgProfiles.linkedAgents")}

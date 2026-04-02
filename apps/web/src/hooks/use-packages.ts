@@ -100,7 +100,7 @@ export {
   PACKAGE_CONFIG,
 };
 
-// --- Flows ---
+// --- Agents ---
 
 export function useAgents() {
   const orgId = useCurrentOrgId();
