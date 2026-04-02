@@ -301,7 +301,7 @@ function parseWithSchema(
 
 /**
  * Validate a raw manifest object by dispatching to the appropriate type-specific schema.
- * Determines the schema from the `type` field (flow, skill, tool, provider) and validates accordingly.
+ * Determines the schema from the `type` field (agent, skill, tool, provider) and validates accordingly.
  * @param raw - The raw manifest object to validate (typically parsed from JSON)
  * @returns Validation result with parsed manifest on success, or error messages on failure
  */
@@ -345,7 +345,7 @@ export function extractSkillMeta(content: string): {
   warnings: string[];
 } {
   const warnings: string[] = [];
-  const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
+  const fmMatch = content.match(/^---[^\S\n]*\n([\s\S]*?)\n---/);
   if (!fmMatch) {
     warnings.push("No YAML frontmatter detected (expected --- ... --- block)");
     return { name: "", description: "", warnings };
@@ -376,7 +376,7 @@ export interface ToolSourceValidationResult {
 }
 
 function stripLineComments(source: string): string {
-  return source.replace(/\/\/.*$/gm, "");
+  return source.replace(/\/\/[^\n]*$/gm, "");
 }
 
 function countParams(paramStr: string): number {
@@ -443,7 +443,7 @@ export function validateToolSource(source: string): ToolSourceValidationResult {
   }
 
   // Check for empty tool name in registerTool({ name: "" })
-  if (/registerTool\s*\(\s*\{[^}]*name\s*:\s*["']\s*["']/.test(source)) {
+  if (/registerTool\s*\(\s*\{[^}]{0,200}name\s*:\s*["']\s*["']/.test(source)) {
     errors.push(
       "Tool `name` must not be empty in `registerTool()`. " +
         'Example: pi.registerTool({ name: "my_tool", ... })',
