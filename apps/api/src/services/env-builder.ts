@@ -57,7 +57,7 @@ export async function resolveProviderDefs(
 }
 
 /**
- * Build the execution API descriptor for container-to-host calls.
+ * Build the run API descriptor for container-to-host calls.
  * Token is HMAC-signed to prevent forgery from leaked runIds.
  */
 export function buildRunApi(runId: string): { url: string; token: string } {
@@ -74,7 +74,7 @@ export function buildPromptContext(params: {
   tokens: Record<string, string>;
   config: Record<string, unknown>;
   previousState: Record<string, unknown> | null;
-  executionApi?: { url: string; token: string };
+  runApi?: { url: string; token: string };
   input?: Record<string, unknown>;
   files?: FileReference[];
   providers?: PromptContext["providers"];
@@ -88,7 +88,7 @@ export function buildPromptContext(params: {
     tokens: params.tokens,
     config: params.config,
     previousState: params.previousState,
-    executionApi: params.executionApi,
+    runApi: params.runApi,
     input: params.input ?? {},
     files: params.files,
     schemas: {
@@ -123,10 +123,10 @@ export function buildPromptContext(params: {
 }
 
 /**
- * Load all independent execution data in parallel: tokens, config, state,
+ * Load all independent run data in parallel: tokens, config, state,
  * provider definitions, agent package, latest version, and memories.
  */
-async function loadExecutionData(params: {
+async function loadRunData(params: {
   agent: LoadedPackage;
   providerProfiles: ProviderProfileMap;
   orgId: string;
@@ -231,10 +231,10 @@ function resolvePackageVersionId(
 }
 
 /**
- * Build the full execution context (tokens, config, state, providers, package, version).
+ * Build the full run context (tokens, config, state, providers, package, version).
  * Shared by runs.ts and scheduler.ts.
  */
-export async function buildExecutionContext(params: {
+export async function buildRunContext(params: {
   runId: string;
   agent: LoadedPackage;
   providerProfiles: ProviderProfileMap;
@@ -269,7 +269,7 @@ export async function buildExecutionContext(params: {
     agentPackageResult,
     latestVersion,
     memories,
-  } = await loadExecutionData({
+  } = await loadRunData({
     agent,
     providerProfiles,
     orgId,
@@ -303,7 +303,7 @@ export async function buildExecutionContext(params: {
     tokens,
     config,
     previousState,
-    executionApi: buildRunApi(runId),
+    runApi: buildRunApi(runId),
     input,
     files,
     providers: providerDefs,

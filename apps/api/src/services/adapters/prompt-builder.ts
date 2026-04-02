@@ -259,7 +259,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   }
 
   // --- Run History API ---
-  if (ctx.executionApi) {
+  if (ctx.runApi) {
     sections.push("## Run History\n");
     sections.push(
       "You can access data from previous runs beyond just the latest state. " +

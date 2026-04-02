@@ -50,7 +50,7 @@ export interface PromptContext {
   tokens: Record<string, string>;
   config: Record<string, unknown>;
   previousState: Record<string, unknown> | null;
-  executionApi?: { url: string; token: string };
+  runApi?: { url: string; token: string };
   input: Record<string, unknown>;
   files?: FileReference[];
   schemas: {

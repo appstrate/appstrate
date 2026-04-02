@@ -48,8 +48,8 @@ export class PiAdapter implements RunAdapter {
 
       // Sidecar config (platform network resolution handled by orchestrator)
       const sidecarConfig = {
-        executionToken: ctx.executionApi?.token ?? "",
-        platformApiUrl: ctx.executionApi?.url ?? "",
+        executionToken: ctx.runApi?.token ?? "",
+        platformApiUrl: ctx.runApi?.url ?? "",
         proxyUrl: ctx.proxyUrl ?? undefined,
         llm: llmApiKey
           ? { baseUrl: llmConfig.baseUrl, apiKey: llmApiKey, placeholder: llmPlaceholder }

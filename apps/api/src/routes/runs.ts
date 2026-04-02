@@ -29,7 +29,7 @@ import { validateAgentReadiness } from "../services/agent-readiness.ts";
 import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
-import { buildExecutionContext, ModelNotConfiguredError } from "../services/env-builder.ts";
+import { buildRunContext, ModelNotConfiguredError } from "../services/env-builder.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -474,7 +474,7 @@ export function createRunsRouter() {
           packageVersionId,
           proxyLabel,
           modelLabel,
-        } = await buildExecutionContext({
+        } = await buildRunContext({
           runId,
           agent: effectiveAgent,
           providerProfiles,

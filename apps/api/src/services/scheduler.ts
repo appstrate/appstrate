@@ -15,7 +15,7 @@ import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/s
 import { createRun, createFailedRun } from "./state/index.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
 import { dispatchWebhookEvents } from "./webhooks.ts";
-import { buildExecutionContext, ModelNotConfiguredError } from "./env-builder.ts";
+import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
 import type { PromptContext } from "./adapters/types.ts";
 import { getPackage, packageExists } from "./agent-service.ts";
@@ -333,7 +333,7 @@ async function triggerScheduledExecution(
     let modelLabel: string | null;
     try {
       ({ promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel } =
-        await buildExecutionContext({
+        await buildRunContext({
           runId,
           agent,
           providerProfiles,
