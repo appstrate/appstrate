@@ -20,7 +20,7 @@ export interface CloudModule {
   QuotaExceededError: new (...args: any[]) => Error & { code: "QUOTA_EXCEEDED" };
   publicPaths: string[];
   cloudHooks: {
-    checkQuota(orgId: string, runningExecutionCount: number): Promise<void>;
+    checkQuota(orgId: string, runningRunCount: number): Promise<void>;
     recordUsage(orgId: string, runId: string, cost: number): Promise<void>;
     onOrgCreated(orgId: string, userEmail: string): Promise<void>;
     onOrgDeleted(orgId: string): Promise<void>;

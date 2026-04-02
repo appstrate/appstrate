@@ -284,8 +284,6 @@ export function App() {
             <Route path="/api-keys" element={<ApiKeysPage />} />
             <Route path="/app-settings" element={<AppSettingsPage />} />
             <Route path="/org-settings" element={<OrgSettingsPage />} />
-            {/* Legacy redirects */}
-            <Route path="/flows/*" element={<Navigate to="/agents" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

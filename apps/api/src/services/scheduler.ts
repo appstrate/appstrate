@@ -116,7 +116,7 @@ async function removeScheduleJob(scheduleId: string): Promise<void> {
 async function handleScheduleJob(job: Job<ScheduleJobData>): Promise<void> {
   const { scheduleId, packageId, connectionProfileId, orgId, input } = job.data;
 
-  await triggerScheduledExecution(scheduleId, packageId, connectionProfileId, orgId, input);
+  await triggerScheduledRun(scheduleId, packageId, connectionProfileId, orgId, input);
 
   // Update schedule timestamps
   const schedule = await getSchedule(scheduleId);
@@ -204,7 +204,7 @@ export async function shutdownScheduleWorker(): Promise<void> {
 // Run trigger
 // ---------------------------------------------------------------------------
 
-async function triggerScheduledExecution(
+async function triggerScheduledRun(
   scheduleId: string,
   packageId: string,
   connectionProfileId: string,

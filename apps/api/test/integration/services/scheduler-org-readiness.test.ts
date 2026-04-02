@@ -163,7 +163,7 @@ describe("scheduler org-profile readiness", () => {
     expect(s.readiness.missingProviders).toEqual([providerId]);
   });
 
-  // ── Run-path resolution (triggerScheduledExecution parity) ──
+  // ── Run-path resolution (triggerScheduledRun parity) ──
 
   it("resolves providers via org bindings without agentOrgProfileId (run path)", async () => {
     // This is the exact scenario that caused the production bug:
@@ -176,7 +176,7 @@ describe("scheduler org-profile readiness", () => {
     const orgProfile = await seedConnectionProfile({ orgId, name: "Org Exec" });
     await bindOrgProfileProvider(orgProfile.id, providerId, userProfileId, userId);
 
-    // Simulate what triggerScheduledExecution does:
+    // Simulate what triggerScheduledRun does:
     // 1. Load profile
     const profile = await getProfileByIdUnsafe(orgProfile.id);
     expect(profile).not.toBeNull();

@@ -62,9 +62,6 @@ export type Manifest = z.infer<typeof manifestSchema>;
 
 /** Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts. */
 export const agentManifestSchema = afpsAgentManifestSchema.extend({
-  // Override type to "agent" (published @afps-spec/schema still uses "flow" literal).
-  // TODO: remove this override after @afps-spec/schema is republished with "agent".
-  type: z.literal("agent"),
   // All standard fields (name, version, schemaVersion, dependencies,
   // displayName, providersConfiguration, input/output/config, timeout) inherited from AFPS.
   // Override metadata fields with .catch(undefined) for tolerant local editing.
