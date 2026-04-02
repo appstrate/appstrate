@@ -74,6 +74,10 @@
       "additionalProperties": {}
     }
   },
-  "required": ["name", "version", "type"],
+  "required": [
+    "name",
+    "version",
+    "type"
+  ],
   "additionalProperties": {}
 }

@@ -94,10 +94,20 @@
           "additionalProperties": {}
         }
       },
-      "required": ["name", "description", "inputSchema"],
+      "required": [
+        "name",
+        "description",
+        "inputSchema"
+      ],
       "additionalProperties": false
     }
   },
-  "required": ["name", "version", "type", "entrypoint", "tool"],
+  "required": [
+    "name",
+    "version",
+    "type",
+    "entrypoint",
+    "tool"
+  ],
   "additionalProperties": {}
 }
