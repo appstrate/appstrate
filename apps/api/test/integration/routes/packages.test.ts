@@ -511,6 +511,38 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(401);
     });
+
+    it("allows deleting an imported package with foreign scope", async () => {
+      await seedAgent({
+        id: "@foreignscope/imported-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+
+      const res = await app.request("/api/packages/agents/@foreignscope/imported-agent", {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(204);
+      await assertDbMissing(packages, eq(packages.id, "@foreignscope/imported-agent"));
+    });
+
+    it("returns 403 when trying to delete a package owned by another org (DB check)", async () => {
+      const otherCtx = await createTestContext({ orgSlug: "otherdelorg2" });
+      await seedAgent({
+        id: "@foreignscope/other-org-agent",
+        orgId: otherCtx.orgId,
+        createdBy: otherCtx.user.id,
+      });
+
+      const res = await app.request("/api/packages/agents/@foreignscope/other-org-agent", {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(403);
+    });
   });
 
   // ═══════════════════════════════════════════════

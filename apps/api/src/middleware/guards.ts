@@ -4,8 +4,9 @@ import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { isOwnedByOrg } from "@appstrate/core/naming";
 import { getPackage } from "../services/agent-service.ts";
+import { getPackageById } from "../services/package-items/crud.ts";
 import { getRunningRunsForPackage } from "../services/state/index.ts";
-import { ApiError, forbidden, conflict, invalidRequest } from "../lib/errors.ts";
+import { ApiError, forbidden, notFound, conflict, invalidRequest } from "../lib/errors.ts";
 
 /** Middleware: load an agent by route param and set it on context, or 404. */
 export function requireAgent() {
@@ -28,21 +29,44 @@ export function requireAgent() {
   };
 }
 
-/** Middleware: reject with 403 if the package is not owned by the current org. */
+/** Extract the package ID from route params (scoped `@scope/name` or unscoped `id`). */
+function extractPackageId(c: Context<AppEnv>): string {
+  const scope = c.req.param("scope");
+  const name = c.req.param("name");
+  const id = c.req.param("id");
+  // Route pattern `:scope{@[^/]+}` includes the @ prefix
+  const packageId = scope && name ? `${scope}/${name}` : id;
+  if (!packageId) {
+    throw invalidRequest("Package ID is required");
+  }
+  return packageId;
+}
+
+/** Middleware: reject with 403 if the package scope doesn't match the org slug.
+ *  Use for content mutation (edit, publish versions) where scope identity matters. */
 export function requireOwnedPackage() {
   return async (c: Context<AppEnv>, next: Next) => {
-    const scope = c.req.param("scope");
-    const name = c.req.param("name");
-    const id = c.req.param("id");
-    // Route pattern `:scope{@[^/]+}` includes the @ prefix
-    const packageId = scope && name ? `${scope}/${name}` : id;
-    if (!packageId) {
-      throw invalidRequest("Package ID is required");
-    }
-
+    const packageId = extractPackageId(c);
     const orgSlug = c.get("orgSlug");
     if (!isOwnedByOrg(packageId, orgSlug)) {
       throw forbidden("Cannot modify a package not owned by your organization. Fork it instead.");
+    }
+    return next();
+  };
+}
+
+/** Middleware: reject with 404/403 if the package doesn't belong to the current org in the DB.
+ *  Use for lifecycle operations (delete) where DB ownership matters, not scope. */
+export function requireOrgPackage() {
+  return async (c: Context<AppEnv>, next: Next) => {
+    const packageId = extractPackageId(c);
+    const orgId = c.get("orgId");
+    const row = await getPackageById(packageId);
+    if (!row) {
+      throw notFound(`Package '${packageId}' not found`);
+    }
+    if (row.orgId !== orgId) {
+      throw forbidden("Cannot delete a package not in your organization.");
     }
     return next();
   };
