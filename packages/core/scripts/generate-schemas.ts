@@ -17,6 +17,7 @@ import {
   skillManifestSchema,
   toolManifestSchema,
   providerManifestSchema,
+  afpsJsonSchemaOverride,
 } from "@afps-spec/schema";
 
 const OUTPUT_DIR = resolve(dirname(import.meta.filename!), "../schema");
@@ -64,6 +65,7 @@ for (const entry of appstrateSchemas) {
   const jsonSchema = toJSONSchema(entry.schema, {
     unrepresentable: "any",
     target: "draft-2020-12",
+    override: afpsJsonSchemaOverride,
   }) as Record<string, unknown>;
 
   delete jsonSchema.$schema;

@@ -185,7 +185,9 @@ describe("validateManifest", () => {
     };
     const result = validateManifest(bad);
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e: string) => e.includes("type"))).toBe(true);
+    expect(result.errors.some((e: string) => e.includes("JSON Schema") || e.includes("type"))).toBe(
+      true,
+    );
   });
 
   it("accepts custom placeholder property in schema", () => {

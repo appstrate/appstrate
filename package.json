@@ -88,7 +88,10 @@
     "*.{ts,tsx,json,md,yml,yaml}": "prettier --write"
   },
   "dependencies": {
-    "@afps-spec/schema": "^1.1.0",
+    "@afps-spec/schema": "^1.2.1",
     "@appstrate/core": "workspace:*"
+  },
+  "patchedDependencies": {
+    "@redocly/openapi-core@2.25.2": "patches/@redocly%2Fopenapi-core@2.25.2.patch"
   }
 }

@@ -101,96 +101,23 @@
       "type": "object",
       "properties": {
         "schema": {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "const": "object"
+          "allOf": [
+            {
+              "$ref": "https://json-schema.org/draft/2020-12/schema"
             },
-            "properties": {
+            {
               "type": "object",
-              "propertyNames": {
-                "type": "string"
-              },
-              "additionalProperties": {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "string",
-                      "number",
-                      "boolean",
-                      "array",
-                      "object"
-                    ]
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "default": {},
-                  "enum": {
-                    "type": "array",
-                    "items": {}
-                  },
-                  "format": {
-                    "type": "string"
-                  },
-                  "contentMediaType": {
-                    "type": "string"
-                  },
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string",
-                        "enum": [
-                          "string",
-                          "number",
-                          "boolean",
-                          "array",
-                          "object"
-                        ]
-                      },
-                      "description": {
-                        "type": "string"
-                      },
-                      "format": {
-                        "type": "string"
-                      },
-                      "contentMediaType": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type"
-                    ],
-                    "additionalProperties": {}
-                  },
-                  "maxItems": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  }
-                },
-                "required": [
-                  "type"
-                ],
-                "additionalProperties": {}
-              }
-            },
-            "required": {
-              "type": "array",
-              "items": {
-                "type": "string"
+              "required": [
+                "type",
+                "properties"
+              ],
+              "properties": {
+                "type": {
+                  "const": "object"
+                }
               }
             }
-          },
-          "required": [
-            "type",
-            "properties"
-          ],
-          "additionalProperties": {}
+          ]
         },
         "fileConstraints": {
           "type": "object",
@@ -242,96 +169,23 @@
       "type": "object",
       "properties": {
         "schema": {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "const": "object"
+          "allOf": [
+            {
+              "$ref": "https://json-schema.org/draft/2020-12/schema"
             },
-            "properties": {
+            {
               "type": "object",
-              "propertyNames": {
-                "type": "string"
-              },
-              "additionalProperties": {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "string",
-                      "number",
-                      "boolean",
-                      "array",
-                      "object"
-                    ]
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "default": {},
-                  "enum": {
-                    "type": "array",
-                    "items": {}
-                  },
-                  "format": {
-                    "type": "string"
-                  },
-                  "contentMediaType": {
-                    "type": "string"
-                  },
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string",
-                        "enum": [
-                          "string",
-                          "number",
-                          "boolean",
-                          "array",
-                          "object"
-                        ]
-                      },
-                      "description": {
-                        "type": "string"
-                      },
-                      "format": {
-                        "type": "string"
-                      },
-                      "contentMediaType": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type"
-                    ],
-                    "additionalProperties": {}
-                  },
-                  "maxItems": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  }
-                },
-                "required": [
-                  "type"
-                ],
-                "additionalProperties": {}
-              }
-            },
-            "required": {
-              "type": "array",
-              "items": {
-                "type": "string"
+              "required": [
+                "type",
+                "properties"
+              ],
+              "properties": {
+                "type": {
+                  "const": "object"
+                }
               }
             }
-          },
-          "required": [
-            "type",
-            "properties"
-          ],
-          "additionalProperties": {}
+          ]
         },
         "fileConstraints": {
           "type": "object",
@@ -383,96 +237,23 @@
       "type": "object",
       "properties": {
         "schema": {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "const": "object"
+          "allOf": [
+            {
+              "$ref": "https://json-schema.org/draft/2020-12/schema"
             },
-            "properties": {
+            {
               "type": "object",
-              "propertyNames": {
-                "type": "string"
-              },
-              "additionalProperties": {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "string",
-                      "number",
-                      "boolean",
-                      "array",
-                      "object"
-                    ]
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "default": {},
-                  "enum": {
-                    "type": "array",
-                    "items": {}
-                  },
-                  "format": {
-                    "type": "string"
-                  },
-                  "contentMediaType": {
-                    "type": "string"
-                  },
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string",
-                        "enum": [
-                          "string",
-                          "number",
-                          "boolean",
-                          "array",
-                          "object"
-                        ]
-                      },
-                      "description": {
-                        "type": "string"
-                      },
-                      "format": {
-                        "type": "string"
-                      },
-                      "contentMediaType": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "type"
-                    ],
-                    "additionalProperties": {}
-                  },
-                  "maxItems": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0,
-                    "maximum": 9007199254740991
-                  }
-                },
-                "required": [
-                  "type"
-                ],
-                "additionalProperties": {}
-              }
-            },
-            "required": {
-              "type": "array",
-              "items": {
-                "type": "string"
+              "required": [
+                "type",
+                "properties"
+              ],
+              "properties": {
+                "type": {
+                  "const": "object"
+                }
               }
             }
-          },
-          "required": [
-            "type",
-            "properties"
-          ],
-          "additionalProperties": {}
+          ]
         },
         "fileConstraints": {
           "type": "object",
