@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "./spinner";
 import { useConfigureProviderCredentials } from "../hooks/use-mutations";
-import { ExternalLink, Copy, Check } from "lucide-react";
+import { ExternalLink, Copy, Check, AlertTriangle } from "lucide-react";
 import type { ProviderConfig } from "@appstrate/shared-types";
 
 interface ProviderCredentialsFormProps {
@@ -33,6 +33,7 @@ export function ProviderCredentialsForm({
   const mutation = useConfigureProviderCredentials();
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState(false);
+  const [invalidateConnections, setInvalidateConnections] = useState(true);
 
   const schema = provider.adminCredentialSchema;
   const properties = schema?.properties ?? {};
@@ -80,6 +81,7 @@ export function ProviderCredentialsForm({
       providerId: string;
       credentials?: Record<string, string>;
       enabled: boolean;
+      invalidateConnections?: boolean;
     } = { providerId: provider.id, enabled: true };
 
     if (hasSchemaFields) {
@@ -94,6 +96,9 @@ export function ProviderCredentialsForm({
       }
     }
 
+    if (provider.hasCredentials && payload.credentials) {
+      payload.invalidateConnections = invalidateConnections;
+    }
     mutation.mutate(payload, { onSuccess });
   };
 
@@ -190,6 +195,22 @@ export function ProviderCredentialsForm({
           </div>
         )}
       </div>
+
+      {/* Warning: credential update invalidates user connections */}
+      {provider.hasCredentials && hasSchemaFields && (
+        <label className="mt-4 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+          <input
+            type="checkbox"
+            checked={invalidateConnections}
+            onChange={(e) => setInvalidateConnections(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span className="text-xs text-amber-600 dark:text-amber-400">
+            <AlertTriangle className="mr-1 inline size-3" />
+            {t("providers.form.invalidateWarning")}
+          </span>
+        </label>
+      )}
 
       <div className="border-border mt-4 flex items-center border-t pt-4">
         <div className="flex-1">{footer}</div>

@@ -255,6 +255,7 @@
   "providers.form.activated": "Activé",
   "providers.form.submit": "Ajouter le provider",
   "providers.form.noCredsNeeded": "Aucun identifiant requis à cette étape. Après la création, allez sur la page Providers pour ajouter votre clé API.",
+  "providers.form.invalidateWarning": "Invalider les connexions existantes. Les utilisateurs devront reconnecter ce provider.",
   "orgSettings.pendingInvitations": "Invitations en attente",
   "orgSettings.invited": "Invité",
   "orgSettings.invitationSent": "Invitation envoyée par email.",

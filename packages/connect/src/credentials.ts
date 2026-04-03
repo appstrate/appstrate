@@ -205,6 +205,7 @@ export async function saveConnection(
     credentialsEncrypted: encrypted,
     scopesGranted: options?.scopesGranted ?? [],
     expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
+    needsReconnection: false,
   };
 
   await db
@@ -266,6 +267,7 @@ function rowToConnection(row: typeof userProviderConnections.$inferSelect): Conn
     orgId: row.orgId,
     credentialsEncrypted: row.credentialsEncrypted,
     scopesGranted: (row.scopesGranted as string[]) ?? [],
+    needsReconnection: row.needsReconnection,
     expiresAt: row.expiresAt?.toISOString() ?? null,
     createdAt: row.createdAt!.toISOString(),
     updatedAt: row.updatedAt!.toISOString(),

@@ -20,6 +20,7 @@ export interface ConnectionRecord {
   orgId: string;
   credentialsEncrypted: string;
   scopesGranted: string[];
+  needsReconnection: boolean;
   expiresAt: string | null;
   createdAt: string;
   updatedAt: string;

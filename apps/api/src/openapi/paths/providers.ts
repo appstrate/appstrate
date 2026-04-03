@@ -204,6 +204,11 @@ export const providersPaths = {
                   type: "boolean",
                   description: "Whether to enable this provider for use",
                 },
+                invalidateConnections: {
+                  type: "boolean",
+                  description:
+                    "When true and credentials are provided, all existing user connections for this provider in the org are deleted. Users will need to reconnect.",
+                },
               },
             },
           },

@@ -4,7 +4,15 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedConnectionProfile,
+  seedUserConnection,
+  seedProviderCredentials,
+} from "../../helpers/seed.ts";
+import { assertDbCount } from "../../helpers/assertions.ts";
+import { userProviderConnections } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 
 const app = getTestApp();
 
@@ -268,6 +276,145 @@ describe("Providers API", () => {
       });
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  // ─── PUT /api/providers/credentials — invalidateConnections ──
+
+  describe("PUT /api/providers/credentials/:scope/:name — invalidateConnections", () => {
+    const providerId = "@provorg/oauth-provider";
+
+    async function setupProviderWithConnections() {
+      await seedPackage({
+        id: providerId,
+        orgId: ctx.orgId,
+        type: "provider",
+        draftManifest: {
+          name: providerId,
+          type: "provider",
+          version: "1.0.0",
+          displayName: "OAuth Provider",
+          definition: { authMode: "oauth2" },
+        },
+      });
+
+      await seedProviderCredentials({
+        providerId,
+        orgId: ctx.orgId,
+      });
+
+      const profile = await seedConnectionProfile({
+        userId: ctx.user.id,
+        isDefault: true,
+      });
+
+      await seedUserConnection({
+        profileId: profile.id,
+        providerId,
+        orgId: ctx.orgId,
+      });
+
+      return profile;
+    }
+
+    it("deletes user connections when invalidateConnections is true", async () => {
+      await setupProviderWithConnections();
+      await assertDbCount(
+        userProviderConnections,
+        eq(userProviderConnections.providerId, providerId),
+        1,
+      );
+
+      const res = await app.request(`/api/providers/credentials/@provorg/oauth-provider`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          credentials: { clientId: "new-id", clientSecret: "new-secret" },
+          invalidateConnections: true,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      await assertDbCount(
+        userProviderConnections,
+        eq(userProviderConnections.providerId, providerId),
+        0,
+      );
+    });
+
+    it("preserves user connections when invalidateConnections is false", async () => {
+      await setupProviderWithConnections();
+      await assertDbCount(
+        userProviderConnections,
+        eq(userProviderConnections.providerId, providerId),
+        1,
+      );
+
+      const res = await app.request(`/api/providers/credentials/@provorg/oauth-provider`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          credentials: { clientId: "new-id", clientSecret: "new-secret" },
+          invalidateConnections: false,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      await assertDbCount(
+        userProviderConnections,
+        eq(userProviderConnections.providerId, providerId),
+        1,
+      );
+    });
+
+    it("preserves user connections when invalidateConnections is omitted", async () => {
+      await setupProviderWithConnections();
+      await assertDbCount(
+        userProviderConnections,
+        eq(userProviderConnections.providerId, providerId),
+        1,
+      );
+
+      const res = await app.request(`/api/providers/credentials/@provorg/oauth-provider`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          credentials: { clientId: "new-id", clientSecret: "new-secret" },
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      await assertDbCount(
+        userProviderConnections,
+        eq(userProviderConnections.providerId, providerId),
+        1,
+      );
+    });
+
+    it("does not delete connections when only enabled changes", async () => {
+      await setupProviderWithConnections();
+      await assertDbCount(
+        userProviderConnections,
+        eq(userProviderConnections.providerId, providerId),
+        1,
+      );
+
+      const res = await app.request(`/api/providers/credentials/@provorg/oauth-provider`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          enabled: false,
+          invalidateConnections: true,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      // invalidateConnections only takes effect when credentials are provided
+      await assertDbCount(
+        userProviderConnections,
+        eq(userProviderConnections.providerId, providerId),
+        1,
+      );
     });
   });
 });

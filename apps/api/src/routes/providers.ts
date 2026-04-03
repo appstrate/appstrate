@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { providerCredentials, packages } from "@appstrate/db/schema";
+import { providerCredentials, packages, userProviderConnections } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import type { ProviderConfig } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
@@ -422,6 +422,7 @@ export function createProvidersRouter() {
       const credSchema = z.object({
         credentials: z.record(z.string(), z.string().min(1)).optional(),
         enabled: z.boolean().optional(),
+        invalidateConnections: z.boolean().optional(),
       });
       const data = parseBody(credSchema, body);
 
@@ -474,6 +475,22 @@ export function createProvidersRouter() {
           target: [providerCredentials.providerId, providerCredentials.orgId],
           set: setClause,
         });
+
+      // Invalidate all user connections when admin explicitly requests it (credential rotation)
+      if (hasCredentials && data.invalidateConnections) {
+        await db
+          .delete(userProviderConnections)
+          .where(
+            and(
+              eq(userProviderConnections.providerId, providerId),
+              eq(userProviderConnections.orgId, orgId),
+            ),
+          );
+        logger.info("Invalidated user connections after credential update", {
+          providerId,
+          orgId,
+        });
+      }
 
       return c.json({ configured: true });
     },

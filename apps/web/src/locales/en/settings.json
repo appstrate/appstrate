@@ -255,6 +255,7 @@
   "providers.form.activated": "Activated",
   "providers.form.submit": "Add provider",
   "providers.form.noCredsNeeded": "No credentials needed at this step. After creation, go to the Connectors page to add your API key.",
+  "providers.form.invalidateWarning": "Invalidate existing connections. Users will need to reconnect this provider.",
   "orgSettings.pendingInvitations": "Pending invitations",
   "orgSettings.invited": "Invited",
   "orgSettings.invitationSent": "Invitation sent by email.",

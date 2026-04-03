@@ -27,7 +27,7 @@ export async function getConnectionStatus(
   if (conn) {
     return {
       provider,
-      status: "connected",
+      status: conn.needsReconnection ? "needs_reconnection" : "connected",
       connectionId: conn.id,
       connectedAt: conn.createdAt,
       scopesGranted: conn.scopesGranted,
@@ -101,7 +101,12 @@ async function buildProfileInfoMap(
 async function batchGetConnectionStatuses(
   profileIds: string[],
   orgId: string,
-): Promise<Map<string, { id: string; createdAt: string; scopesGranted: string[] | null }>> {
+): Promise<
+  Map<
+    string,
+    { id: string; createdAt: string; scopesGranted: string[] | null; needsReconnection: boolean }
+  >
+> {
   if (profileIds.length === 0) return new Map();
 
   const rows = await db
@@ -111,6 +116,7 @@ async function batchGetConnectionStatuses(
       providerId: userProviderConnections.providerId,
       createdAt: userProviderConnections.createdAt,
       scopesGranted: userProviderConnections.scopesGranted,
+      needsReconnection: userProviderConnections.needsReconnection,
     })
     .from(userProviderConnections)
     .where(
@@ -120,13 +126,17 @@ async function batchGetConnectionStatuses(
       ),
     );
 
-  const map = new Map<string, { id: string; createdAt: string; scopesGranted: string[] | null }>();
+  const map = new Map<
+    string,
+    { id: string; createdAt: string; scopesGranted: string[] | null; needsReconnection: boolean }
+  >();
   for (const row of rows) {
     const key = `${row.profileId}:${row.providerId}`;
     map.set(key, {
       id: row.id,
       createdAt: toISORequired(row.createdAt) || toISORequired(new Date()),
       scopesGranted: row.scopesGranted,
+      needsReconnection: row.needsReconnection,
     });
   }
   return map;
@@ -190,7 +200,11 @@ export async function resolveProviderStatuses(
     // Look up connection from batch-fetched map
     const connKey = `${entry.profileId}:${svc.id}`;
     const conn = connectionMap.get(connKey);
-    const connStatus: ConnectionStatusValue = conn ? "connected" : "not_connected";
+    const connStatus: ConnectionStatusValue = conn
+      ? conn.needsReconnection
+        ? "needs_reconnection"
+        : "connected"
+      : "not_connected";
 
     const profileInfo = profileInfoMap.get(entry.profileId) ?? {
       profileName: null,

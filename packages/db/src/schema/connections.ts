@@ -144,6 +144,7 @@ export const userProviderConnections = pgTable(
     scopesGranted: text("scopes_granted")
       .array()
       .default(sql`'{}'::text[]`),
+    needsReconnection: boolean("needs_reconnection").default(false).notNull(),
     expiresAt: timestamp("expires_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),

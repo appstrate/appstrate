@@ -20,8 +20,10 @@ import {
   orgProviderKeys,
   orgModels,
   connectionProfiles,
+  userProviderConnections,
   orgInvitations,
   packageVersions,
+  providerCredentials,
 } from "@appstrate/db/schema";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
@@ -312,6 +314,52 @@ export async function seedConnectionProfile(
     })
     .returning();
   return profile!;
+}
+
+// ─── User Provider Connections ────────────────────────────
+
+type UserConnectionInsert = Partial<InferInsertModel<typeof userProviderConnections>> & {
+  profileId: string;
+  providerId: string;
+  orgId: string;
+};
+
+export async function seedUserConnection(
+  overrides: UserConnectionInsert,
+): Promise<InferSelectModel<typeof userProviderConnections>> {
+  const [conn] = await db
+    .insert(userProviderConnections)
+    .values({
+      credentialsEncrypted: "test-encrypted",
+      ...overrides,
+    })
+    .returning();
+  return conn!;
+}
+
+// ─── Provider Credentials ────────────────────────────────
+
+type ProviderCredentialsInsert = Partial<InferInsertModel<typeof providerCredentials>> & {
+  providerId: string;
+  orgId: string;
+};
+
+export async function seedProviderCredentials(
+  overrides: ProviderCredentialsInsert,
+): Promise<InferInsertModel<typeof providerCredentials>> {
+  const values = {
+    enabled: true,
+    credentialsEncrypted: "test-admin-encrypted",
+    ...overrides,
+  };
+  await db
+    .insert(providerCredentials)
+    .values(values)
+    .onConflictDoUpdate({
+      target: [providerCredentials.providerId, providerCredentials.orgId],
+      set: values,
+    });
+  return values;
 }
 
 // ─── Invitations ──────────────────────────────────────────
