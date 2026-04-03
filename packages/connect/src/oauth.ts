@@ -212,11 +212,7 @@ export async function handleOAuthCallback(
     throw new Error(`Token exchange returned non-JSON response for '${stateRow.providerId}'`);
   }
 
-  const parsed = parseTokenResponse(
-    tokenData,
-    provider.scopeSeparator ?? " ",
-    stateRow.scopesRequested,
-  );
+  const parsed = parseTokenResponse(tokenData, stateRow.scopesRequested);
 
   // Clean up the OAuth state
   await db.delete(oauthStates).where(eq(oauthStates.state, state));
