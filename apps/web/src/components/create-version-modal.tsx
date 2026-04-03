@@ -45,11 +45,18 @@ interface CreateVersionModalProps {
   onClose: () => void;
   type: PackageType;
   packageId: string;
+  hasUnarchivedChanges?: boolean;
 }
 
 type FormData = { selectedBump: BumpType };
 
-export function CreateVersionModal({ open, onClose, type, packageId }: CreateVersionModalProps) {
+export function CreateVersionModal({
+  open,
+  onClose,
+  type,
+  packageId,
+  hasUnarchivedChanges = true,
+}: CreateVersionModalProps) {
   const { t } = useTranslation("agents");
   const { data: versionInfo } = useVersionInfo(type, packageId);
   const createVersion = useCreateVersion(type, packageId);
@@ -78,7 +85,7 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
 
   const targetVersion = needsBump ? bumpVersion(latestVersion, selectedBump) : activeVersion;
 
-  const canCreate = needsBump || canCreateDirect;
+  const canCreate = (needsBump || canCreateDirect) && hasUnarchivedChanges;
 
   const handleFormSubmit = () => {
     setError("root", { message: "" });
@@ -160,6 +167,7 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
         {isBlocked && activeVersion && latestVersion && (
           <p className="text-warning text-sm">{t("version.mustBeHigher")}</p>
         )}
+        {!hasUnarchivedChanges && <p className="text-warning text-sm">{t("version.noChanges")}</p>}
         {!activeVersion && (
           <p className="text-warning text-sm">{t("version.noVersionInManifest")}</p>
         )}

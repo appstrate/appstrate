@@ -791,7 +791,10 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       version: versionOverride,
     });
 
-    if (!result) {
+    if ("error" in result) {
+      if (result.error === "no_changes") {
+        throw conflict("no_changes", "No changes since the last version");
+      }
       throw invalidRequest("Failed to create version (invalid or duplicate)");
     }
 

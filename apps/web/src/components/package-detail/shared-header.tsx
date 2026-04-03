@@ -26,11 +26,13 @@ interface SharedHeaderDetail {
 export function SharedHeader({
   detail,
   isHistoricalVersion,
+  hasUnarchivedChanges,
   actionsLeft,
   actionsRight,
 }: {
   detail: SharedHeaderDetail;
   isHistoricalVersion: boolean;
+  hasUnarchivedChanges?: boolean;
   actionsLeft?: React.ReactNode;
   actionsRight?: React.ReactNode;
 }) {
@@ -62,6 +64,11 @@ export function SharedHeader({
             {detail.version && (
               <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[0.65rem] font-medium">
                 v{detail.version}
+              </span>
+            )}
+            {hasUnarchivedChanges && !isHistoricalVersion && (
+              <span className="bg-warning/15 text-warning rounded px-1.5 py-0.5 text-[0.65rem] font-medium">
+                {t("version.modified")}
               </span>
             )}
             {isHistoricalVersion && (
