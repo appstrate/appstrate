@@ -960,3 +960,190 @@ describe("POST /configure — llm field", () => {
     });
   });
 });
+
+// --- Retry on 401 ---
+
+describe("proxy retry-on-401", () => {
+  it("retries with refreshed credentials on upstream 401", async () => {
+    let callCount = 0;
+    const deps = makeDeps({
+      fetchCredentials: mock(
+        async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "old-token" },
+          authorizedUris: ["https://api.example.com/*"],
+          allowAllUris: false,
+        }),
+      ),
+      refreshCredentials: mock(
+        async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "new-token" },
+          authorizedUris: ["https://api.example.com/*"],
+          allowAllUris: false,
+        }),
+      ),
+      fetchFn: mock(async (_url: string, _init?: RequestInit) => {
+        callCount++;
+        const authHeader = (_init?.headers as Record<string, string>)?.["authorization"] ?? "";
+        if (authHeader.includes("old-token")) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+        return new Response('{"ok":true}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    });
+
+    const app = createApp(deps);
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "@test/github",
+        "X-Target": "https://api.example.com/user",
+        Authorization: "Bearer {{access_token}}",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(callCount).toBe(2); // first call (401) + retry (200)
+    expect(deps.refreshCredentials).toHaveBeenCalledTimes(1);
+  });
+
+  it("flags connection when retry also returns 401", async () => {
+    let reportCalled = false;
+    const deps = makeDeps({
+      refreshCredentials: mock(
+        async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "still-bad" },
+          authorizedUris: ["https://api.example.com/*"],
+          allowAllUris: false,
+        }),
+      ),
+      fetchFn: mock(async (url: string, _init?: RequestInit) => {
+        if (typeof url === "string" && url.includes("report-auth-failure")) {
+          reportCalled = true;
+          return new Response('{"flagged":true}', { status: 200 });
+        }
+        return new Response("Unauthorized", { status: 401 });
+      }),
+    });
+
+    const app = createApp(deps);
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "@test/github",
+        "X-Target": "https://api.example.com/user",
+        Authorization: "Bearer {{access_token}}",
+      },
+    });
+
+    expect(res.status).toBe(401);
+    // Give the fire-and-forget report time to complete
+    await new Promise((r) => setTimeout(r, 50));
+    expect(reportCalled).toBe(true);
+  });
+
+  it("flags connection when refresh itself fails", async () => {
+    let reportCalled = false;
+    const deps = makeDeps({
+      refreshCredentials: mock(async () => {
+        throw new Error("invalid_grant");
+      }),
+      fetchFn: mock(async (url: string) => {
+        if (typeof url === "string" && url.includes("report-auth-failure")) {
+          reportCalled = true;
+          return new Response('{"flagged":true}', { status: 200 });
+        }
+        return new Response("Unauthorized", { status: 401 });
+      }),
+    });
+
+    const app = createApp(deps);
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "@test/github",
+        "X-Target": "https://api.example.com/user",
+        Authorization: "Bearer {{access_token}}",
+      },
+    });
+
+    expect(res.status).toBe(401);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(reportCalled).toBe(true);
+  });
+
+  it("does not retry when no refreshCredentials function is provided", async () => {
+    let upstreamCallCount = 0;
+    const deps = makeDeps({
+      refreshCredentials: undefined,
+      fetchFn: mock(async (url: string) => {
+        if (typeof url === "string" && url.includes("report-auth-failure")) {
+          return new Response('{"flagged":true}', { status: 200 });
+        }
+        upstreamCallCount++;
+        return new Response("Unauthorized", { status: 401 });
+      }),
+    });
+
+    const app = createApp(deps);
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "@test/github",
+        "X-Target": "https://api.example.com/user",
+        Authorization: "Bearer {{access_token}}",
+      },
+    });
+
+    expect(res.status).toBe(401);
+    expect(upstreamCallCount).toBe(1); // no retry, just the original call
+  });
+
+  it("retries POST requests with buffered body", async () => {
+    let lastBody: string | undefined;
+    const deps = makeDeps({
+      refreshCredentials: mock(
+        async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "new-token" },
+          authorizedUris: ["https://api.example.com/*"],
+          allowAllUris: false,
+        }),
+      ),
+      fetchFn: mock(async (_url: string, init?: RequestInit) => {
+        const authHeader = (init?.headers as Record<string, string>)?.["authorization"] ?? "";
+        if (authHeader.includes("old-token")) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+        lastBody = typeof init?.body === "string" ? init.body : undefined;
+        return new Response('{"ok":true}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+      fetchCredentials: mock(
+        async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "old-token" },
+          authorizedUris: ["https://api.example.com/*"],
+          allowAllUris: false,
+        }),
+      ),
+    });
+
+    const app = createApp(deps);
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "@test/github",
+        "X-Target": "https://api.example.com/issues",
+        Authorization: "Bearer {{access_token}}",
+        "Content-Type": "application/json",
+      },
+      body: '{"title":"test"}',
+    });
+
+    expect(res.status).toBe(200);
+    expect(lastBody).toBe('{"title":"test"}');
+  });
+});

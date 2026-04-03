@@ -40,9 +40,7 @@ export function ConnectionSummaryModal({
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { data: providersData } = useProviders();
 
-  const allReady = providers.every(
-    (p) => isProviderStatusConnected(p.status) && p.scopesSufficient !== false,
-  );
+  const allReady = providers.every((p) => p.status === "connected" && p.scopesSufficient !== false);
 
   return (
     <Modal
