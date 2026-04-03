@@ -29,6 +29,9 @@ services:
   appstrate-minio:
     image: minio/minio:RELEASE.2025-03-12T18-04-18Z
     command: server /data --console-address ":9001"
+    networks:
+      - appstrate-data
+      - default
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -56,6 +59,22 @@ services:
       mc mb --ignore-existing local/appstrate &&
       echo 'Bucket appstrate ready'
       "
+
+  # ── Expose database ports to host for local development ────────
+  # appstrate-data is internal: true, so ports require a non-internal network.
+  appstrate-postgres:
+    networks:
+      - appstrate-data
+      - default
+    ports:
+      - "5432:5432"
+
+  appstrate-redis:
+    networks:
+      - appstrate-data
+      - default
+    ports:
+      - "6379:6379"
 
   # ── Disable services handled manually in dev ────────────────────
   # Migrations: bun run db:migrate

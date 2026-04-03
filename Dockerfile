@@ -95,7 +95,12 @@ RUN mkdir -p data storage && chown -R bun:bun data storage
 COPY --from=build /app/package.json ./
 COPY --from=build /app/system-packages ./system-packages
 
-USER bun
+# su-exec for lightweight privilege drop in entrypoint
+RUN apk add --no-cache su-exec
+
+# Entrypoint: detects Docker socket GID and adds bun to that group before exec
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 3000
 
@@ -104,4 +109,5 @@ ENV NODE_ENV=production
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
   CMD wget -q -O /dev/null http://localhost:3000/ || exit 1
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["bun", "apps/api/src/index.ts"]

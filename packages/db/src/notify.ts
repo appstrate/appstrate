@@ -57,6 +57,22 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
     $$ LANGUAGE plpgsql
   `);
 
+  // Drop legacy triggers from pre-rename era (flow→agent, execution→run).
+  // The old execution_logs_notify_trigger references NEW.execution_id which no longer exists,
+  // causing every INSERT into run_logs to fail.
+  await db.execute(drizzleSql`
+    DROP TRIGGER IF EXISTS executions_notify_trigger ON runs
+  `);
+  await db.execute(drizzleSql`
+    DROP TRIGGER IF EXISTS execution_logs_notify_trigger ON run_logs
+  `);
+  await db.execute(drizzleSql`
+    DROP FUNCTION IF EXISTS notify_execution_change()
+  `);
+  await db.execute(drizzleSql`
+    DROP FUNCTION IF EXISTS notify_execution_log_insert()
+  `);
+
   // Create triggers (drop first to avoid duplicates)
   await db.execute(drizzleSql`
     DROP TRIGGER IF EXISTS runs_notify_trigger ON runs
