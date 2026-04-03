@@ -7,6 +7,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWatch } from "react-hook-form";
 import { useAppForm } from "../../hooks/use-app-form";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "../../api";
@@ -65,6 +66,7 @@ export function OnboardingCreateStep() {
   });
 
   const [slugEdited, setSlugEdited] = useState(false);
+  const [slugOpen, setSlugOpen] = useState(false);
   const nameValue = useWatch({ control, name: "name" });
   const slugValue = useWatch({ control, name: "slug" });
 
@@ -101,7 +103,12 @@ export function OnboardingCreateStep() {
       if (nextRoute) navigate(nextRoute);
     },
     onError: (err: Error) => {
-      setError("root", { message: err.message });
+      if (err.message.toLowerCase().includes("slug")) {
+        setSlugOpen(true);
+        setError("slug", { message: err.message });
+      } else {
+        setError("root", { message: err.message });
+      }
     },
   });
 
@@ -144,32 +151,53 @@ export function OnboardingCreateStep() {
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="org-slug">{t("createOrg.slug")}</Label>
-            <Input
-              id="org-slug"
-              type="text"
-              {...register("slug", {
-                validate: (v) => {
-                  if (!v.trim()) return t("validation.required", { ns: "common" });
-                  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(v.trim()))
-                    return t("validation.slugFormat", { ns: "common" });
-                  return true;
-                },
-                onChange: (e) => {
-                  setSlugEdited(true);
-                  setValue("slug", toLiveSlug(e.target.value));
-                },
-                onBlur: () => {
-                  setValue("slug", toSlug(slugValue));
-                },
-              })}
-              placeholder={t("createOrg.slugPlaceholder")}
-              aria-invalid={showError("slug") ? true : undefined}
-              className={cn(showError("slug") && "border-destructive")}
-            />
-            <div className="text-muted-foreground text-sm">{t("createOrg.slugHint")}</div>
-            {showError("slug") && (
-              <div className="text-destructive text-sm">{errors.slug?.message}</div>
+            {slugOpen ? (
+              <>
+                <Label htmlFor="org-slug">{t("createOrg.slug")}</Label>
+                <Input
+                  id="org-slug"
+                  type="text"
+                  {...register("slug", {
+                    validate: (v) => {
+                      if (!v.trim()) return t("validation.required", { ns: "common" });
+                      if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(v.trim()))
+                        return t("validation.slugFormat", { ns: "common" });
+                      return true;
+                    },
+                    onChange: (e) => {
+                      setSlugEdited(true);
+                      setValue("slug", toLiveSlug(e.target.value));
+                    },
+                    onBlur: () => {
+                      setValue("slug", toSlug(slugValue));
+                    },
+                  })}
+                  placeholder={t("createOrg.slugPlaceholder")}
+                  autoFocus
+                  aria-invalid={showError("slug") ? true : undefined}
+                  className={cn(showError("slug") && "border-destructive")}
+                />
+                <div className="text-muted-foreground text-sm">{t("createOrg.slugHint")}</div>
+                {showError("slug") && (
+                  <div className="text-destructive text-sm">{errors.slug?.message}</div>
+                )}
+              </>
+            ) : (
+              <div className="text-muted-foreground flex items-center gap-2 text-sm">
+                <span>
+                  {t("createOrg.slugLabel")}{" "}
+                  <span className="text-foreground font-medium">{slugValue || "—"}</span>
+                </span>
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0"
+                  onClick={() => setSlugOpen(true)}
+                >
+                  {t("createOrg.slugEdit")}
+                </Button>
+              </div>
             )}
           </div>
 
