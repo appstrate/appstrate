@@ -83,7 +83,7 @@ export function OnboardingCreateStep() {
   }, [fromSwitcher, orgs, user, i18n.language, reset]);
 
   useEffect(() => {
-    if (!slugEdited) {
+    if (!slugEdited && !defaultAppliedRef.current) {
       setValue("slug", toSlug(nameValue));
     }
   }, [nameValue, slugEdited, setValue]);
