@@ -513,10 +513,10 @@ export async function getMatchingDistTags(packageId: string, version: string): P
   return distTags.filter((dt) => dt.version === version).map((dt) => dt.tag);
 }
 
-/** Return the latest published version and the current draft version from the manifest. */
+/** Return the latest published version and the current active version from the manifest. */
 export async function getVersionInfo(
   packageId: string,
-): Promise<{ latestVersion: string | null; draftVersion: string | null }> {
+): Promise<{ latestPublishedVersion: string | null; activeVersion: string | null }> {
   const [[pkg], [latestTag]] = await Promise.all([
     db
       .select({ draftManifest: packages.draftManifest })
@@ -531,19 +531,19 @@ export async function getVersionInfo(
   ]);
 
   const draftManifest = asRecordOrNull(pkg?.draftManifest);
-  const draftVersion = typeof draftManifest?.version === "string" ? draftManifest.version : null;
+  const activeVersion = typeof draftManifest?.version === "string" ? draftManifest.version : null;
 
-  let latestVersion: string | null = null;
+  let latestPublishedVersion: string | null = null;
   if (latestTag) {
     const [row] = await db
       .select({ version: packageVersions.version })
       .from(packageVersions)
       .where(eq(packageVersions.id, latestTag.versionId))
       .limit(1);
-    latestVersion = row?.version ?? null;
+    latestPublishedVersion = row?.version ?? null;
   }
 
-  return { latestVersion, draftVersion };
+  return { latestPublishedVersion, activeVersion };
 }
 
 // ─────────────────────────────────────────────

@@ -233,7 +233,7 @@ export function useVersionInfo(type: PackageType, packageId: string | undefined)
   return useQuery({
     queryKey: ["version-info", orgId, type, packageId],
     queryFn: () =>
-      api<{ latestVersion: string | null; draftVersion: string | null }>(
+      api<{ latestPublishedVersion: string | null; activeVersion: string | null }>(
         `${packageBasePath(type, packageId!)}/versions/info`,
       ),
     enabled: !!packageId,

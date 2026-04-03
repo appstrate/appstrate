@@ -4,7 +4,6 @@ import type { PromptContext } from "./adapters/types.ts";
 import type { LoadedPackage, AgentProviderRequirement } from "../types/index.ts";
 import type { FileReference } from "./adapters/types.ts";
 import { getProvider } from "@appstrate/connect";
-import type { Db } from "@appstrate/db/client";
 import { db } from "@appstrate/db/client";
 import { getEnv } from "@appstrate/env";
 import { signRunToken } from "../lib/run-token.ts";
@@ -25,209 +24,6 @@ export class ModelNotConfiguredError extends Error {
     super("No LLM model configured for this organization");
     this.name = "ModelNotConfiguredError";
   }
-}
-
-/**
- * Resolve unique provider definitions for prompt context.
- */
-export async function resolveProviderDefs(
-  database: Db,
-  orgId: string,
-  providers: AgentProviderRequirement[],
-): Promise<NonNullable<PromptContext["providers"]>> {
-  const uniqueProviders = [...new Set(providers.map((s) => s.id))];
-  const defs = await Promise.all(uniqueProviders.map((p) => getProvider(database, orgId, p)));
-  return defs
-    .filter((def): def is NonNullable<typeof def> => def != null)
-    .filter((def) => def.authMode != null)
-    .map((def) => ({
-      id: def.id,
-      displayName: def.displayName,
-      authMode: def.authMode!,
-      credentialSchema: def.credentialSchema,
-      credentialFieldName: def.credentialFieldName,
-      credentialHeaderName: def.credentialHeaderName,
-      credentialHeaderPrefix: def.credentialHeaderPrefix,
-      authorizedUris: def.authorizedUris,
-      allowAllUris: def.allowAllUris,
-      docsUrl: def.docsUrl,
-      hasProviderDoc: def.hasProviderDoc,
-      categories: def.categories,
-    }));
-}
-
-/**
- * Build the run API descriptor for container-to-host calls.
- * Token is HMAC-signed to prevent forgery from leaked runIds.
- */
-export function buildRunApi(runId: string): { url: string; token: string } {
-  const apiEnv = getEnv();
-  const url = apiEnv.PLATFORM_API_URL ?? `http://host.docker.internal:${apiEnv.PORT}`;
-  return { url, token: signRunToken(runId) };
-}
-
-/**
- * Builds a structured PromptContext from agent data.
- */
-export function buildPromptContext(params: {
-  agent: LoadedPackage;
-  tokens: Record<string, string>;
-  config: Record<string, unknown>;
-  previousState: Record<string, unknown> | null;
-  runApi?: { url: string; token: string };
-  input?: Record<string, unknown>;
-  files?: FileReference[];
-  providers?: PromptContext["providers"];
-  memories?: PromptContext["memories"];
-  toolDocs?: PromptContext["toolDocs"];
-  proxyUrl?: string | null;
-  llmConfig: PromptContext["llmConfig"];
-}): PromptContext {
-  return {
-    rawPrompt: params.agent.prompt,
-    tokens: params.tokens,
-    config: params.config,
-    previousState: params.previousState,
-    runApi: params.runApi,
-    input: params.input ?? {},
-    files: params.files,
-    schemas: {
-      input: params.agent.manifest.input?.schema
-        ? asJSONSchemaObject(params.agent.manifest.input.schema)
-        : undefined,
-      config: params.agent.manifest.config?.schema
-        ? asJSONSchemaObject(params.agent.manifest.config.schema)
-        : undefined,
-      output: params.agent.manifest.output?.schema
-        ? asJSONSchemaObject(params.agent.manifest.output.schema)
-        : undefined,
-    },
-    providers: params.providers ?? [],
-    memories: params.memories,
-    llmModel: params.llmConfig?.modelId ?? "unknown",
-    llmConfig: params.llmConfig,
-    proxyUrl: params.proxyUrl,
-    timeout: (params.agent.manifest.timeout as number | undefined) ?? 300,
-    availableTools: params.agent.tools.map((e) => ({
-      id: e.id,
-      name: e.name,
-      description: e.description,
-    })),
-    availableSkills: params.agent.skills.map((s) => ({
-      id: s.id,
-      name: s.name,
-      description: s.description,
-    })),
-    toolDocs: params.toolDocs,
-  };
-}
-
-/**
- * Load all independent run data in parallel: tokens, config, state,
- * provider definitions, agent package, latest version, and memories.
- */
-async function loadRunData(params: {
-  agent: LoadedPackage;
-  providerProfiles: ProviderProfileMap;
-  orgId: string;
-  actor: Actor | null;
-  manifestProviders: AgentProviderRequirement[];
-  skipConfigFetch: boolean;
-  overrideVersionId?: number;
-}) {
-  const { agent, providerProfiles, orgId, actor, manifestProviders, skipConfigFetch } = params;
-
-  const [
-    tokens,
-    configFull,
-    previousState,
-    providerDefs,
-    agentPackageResult,
-    latestVersion,
-    memories,
-  ] = await Promise.all([
-    buildProviderTokens(manifestProviders, providerProfiles, orgId),
-    skipConfigFetch ? null : getPackageConfig(orgId, agent.id),
-    getLastRunState(agent.id, actor, orgId),
-    resolveProviderDefs(db, orgId, manifestProviders),
-    buildAgentPackage(agent, orgId),
-    params.overrideVersionId
-      ? Promise.resolve(params.overrideVersionId)
-      : agent.source !== "system"
-        ? getLatestVersionWithManifest(agent.id).catch(() => null)
-        : null,
-    getPackageMemories(agent.id, orgId),
-  ]);
-
-  return {
-    tokens,
-    configFull,
-    previousState,
-    providerDefs,
-    agentPackageResult,
-    latestVersion,
-    memories,
-  };
-}
-
-/**
- * Resolve model and proxy with cascade logic:
- * request override → agent column → org/system default.
- * Throws ModelNotConfiguredError if no model is found.
- */
-async function resolveModelAndProxy(params: {
-  orgId: string;
-  agentId: string;
-  effectiveModelId: string | null;
-  effectiveProxyId: string | null;
-}) {
-  const { orgId, agentId, effectiveModelId, effectiveProxyId } = params;
-
-  const [proxyResult, modelResult] = await Promise.all([
-    resolveProxy(orgId, agentId, effectiveProxyId),
-    resolveModel(orgId, agentId, effectiveModelId),
-  ]);
-
-  if (!modelResult) {
-    throw new ModelNotConfiguredError();
-  }
-
-  const proxyUrl = proxyResult?.url ?? null;
-  const proxyLabel = proxyResult?.label ?? null;
-  const modelLabel = modelResult.label;
-  const llmConfig: PromptContext["llmConfig"] = {
-    api: modelResult.api,
-    baseUrl: modelResult.baseUrl,
-    modelId: modelResult.modelId,
-    apiKey: modelResult.apiKey,
-    input: modelResult.input,
-    contextWindow: modelResult.contextWindow,
-    maxTokens: modelResult.maxTokens,
-    reasoning: modelResult.reasoning,
-    cost: modelResult.cost,
-  };
-
-  return { proxyUrl, proxyLabel, modelLabel, llmConfig };
-}
-
-/**
- * Resolve the package version ID from the latest version result.
- * Explicit override is trusted; otherwise only associate the latest version
- * if its manifest matches the live agent (dirty check).
- */
-function resolvePackageVersionId(
-  latestVersion: number | { id: number; manifest: Record<string, unknown> } | null,
-  agentManifest: Record<string, unknown>,
-): number | null {
-  if (typeof latestVersion === "number") {
-    return latestVersion;
-  }
-  if (latestVersion) {
-    const liveKey = JSON.stringify(agentManifest);
-    const versionKey = JSON.stringify(latestVersion.manifest);
-    return liveKey === versionKey ? latestVersion.id : null;
-  }
-  return null;
 }
 
 /**
@@ -261,7 +57,7 @@ export async function buildRunContext(params: {
     params.config !== undefined && params.modelId !== undefined && params.proxyId !== undefined;
 
   // Step 1: load all independent data in parallel
-  const {
+  const [
     tokens,
     configFull,
     previousState,
@@ -269,15 +65,19 @@ export async function buildRunContext(params: {
     agentPackageResult,
     latestVersion,
     memories,
-  } = await loadRunData({
-    agent,
-    providerProfiles,
-    orgId,
-    actor,
-    manifestProviders,
-    skipConfigFetch,
-    overrideVersionId: params.overrideVersionId,
-  });
+  ] = await Promise.all([
+    buildProviderTokens(manifestProviders, providerProfiles, orgId),
+    skipConfigFetch ? null : getPackageConfig(orgId, agent.id),
+    getLastRunState(agent.id, actor, orgId),
+    resolveProviderDefs(orgId, manifestProviders),
+    buildAgentPackage(agent, orgId),
+    params.overrideVersionId
+      ? Promise.resolve(params.overrideVersionId)
+      : agent.source !== "system"
+        ? getLatestVersionWithManifest(agent.id).catch(() => null)
+        : null,
+    getPackageMemories(agent.id, orgId),
+  ]);
 
   const config = params.config ?? configFull?.config ?? {};
   const agentPackage = agentPackageResult.zip;
@@ -287,35 +87,111 @@ export async function buildRunContext(params: {
   const effectiveModelId = params.modelId ?? configFull?.modelId ?? null;
   const effectiveProxyId = params.proxyId ?? configFull?.proxyId ?? null;
 
-  const { proxyUrl, proxyLabel, modelLabel, llmConfig } = await resolveModelAndProxy({
-    orgId,
-    agentId: agent.id,
-    effectiveModelId,
-    effectiveProxyId,
-  });
+  const [proxyResult, modelResult] = await Promise.all([
+    resolveProxy(orgId, agent.id, effectiveProxyId),
+    resolveModel(orgId, agent.id, effectiveModelId),
+  ]);
 
-  // Step 3: resolve version ID
-  const packageVersionId = resolvePackageVersionId(latestVersion, agent.manifest);
+  if (!modelResult) {
+    throw new ModelNotConfiguredError();
+  }
+
+  const proxyUrl = proxyResult?.url ?? null;
+  const proxyLabel = proxyResult?.label ?? null;
+  const modelLabel = modelResult.label;
+  const llmConfig: PromptContext["llmConfig"] = {
+    api: modelResult.api,
+    baseUrl: modelResult.baseUrl,
+    modelId: modelResult.modelId,
+    apiKey: modelResult.apiKey,
+    input: modelResult.input,
+    contextWindow: modelResult.contextWindow,
+    maxTokens: modelResult.maxTokens,
+    reasoning: modelResult.reasoning,
+    cost: modelResult.cost,
+  };
+
+  // Step 3: resolve version ID (dirty check against live manifest)
+  let packageVersionId: number | null = null;
+  if (typeof latestVersion === "number") {
+    packageVersionId = latestVersion;
+  } else if (latestVersion) {
+    const liveKey = JSON.stringify(agent.manifest);
+    const versionKey = JSON.stringify(latestVersion.manifest);
+    packageVersionId = liveKey === versionKey ? latestVersion.id : null;
+  }
 
   // Step 4: assemble prompt context
-  const promptContext = buildPromptContext({
-    agent,
+  const apiEnv = getEnv();
+  const runApiUrl = apiEnv.PLATFORM_API_URL ?? `http://host.docker.internal:${apiEnv.PORT}`;
+
+  const promptContext: PromptContext = {
+    rawPrompt: agent.prompt,
     tokens,
     config,
     previousState,
-    runApi: buildRunApi(runId),
-    input,
+    runApi: { url: runApiUrl, token: signRunToken(runId) },
+    input: input ?? {},
     files,
+    schemas: {
+      input: agent.manifest.input?.schema
+        ? asJSONSchemaObject(agent.manifest.input.schema)
+        : undefined,
+      config: agent.manifest.config?.schema
+        ? asJSONSchemaObject(agent.manifest.config.schema)
+        : undefined,
+      output: agent.manifest.output?.schema
+        ? asJSONSchemaObject(agent.manifest.output.schema)
+        : undefined,
+    },
     providers: providerDefs,
     memories: memories.map((m) => ({
       id: m.id,
       content: m.content,
       createdAt: toISO(m.createdAt),
     })),
-    toolDocs,
-    proxyUrl,
+    llmModel: llmConfig.modelId ?? "unknown",
     llmConfig,
-  });
+    proxyUrl,
+    timeout: (agent.manifest.timeout as number | undefined) ?? 300,
+    availableTools: agent.tools.map((e) => ({
+      id: e.id,
+      name: e.name,
+      description: e.description,
+    })),
+    availableSkills: agent.skills.map((s) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+    })),
+    toolDocs,
+  };
 
   return { promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel };
+}
+
+/** Resolve unique provider definitions for prompt context. */
+async function resolveProviderDefs(
+  orgId: string,
+  providers: AgentProviderRequirement[],
+): Promise<NonNullable<PromptContext["providers"]>> {
+  const uniqueProviders = [...new Set(providers.map((s) => s.id))];
+  const defs = await Promise.all(uniqueProviders.map((p) => getProvider(db, orgId, p)));
+  return defs
+    .filter((def): def is NonNullable<typeof def> => def != null)
+    .filter((def) => def.authMode != null)
+    .map((def) => ({
+      id: def.id,
+      displayName: def.displayName,
+      authMode: def.authMode!,
+      credentialSchema: def.credentialSchema,
+      credentialFieldName: def.credentialFieldName,
+      credentialHeaderName: def.credentialHeaderName,
+      credentialHeaderPrefix: def.credentialHeaderPrefix,
+      authorizedUris: def.authorizedUris,
+      allowAllUris: def.allowAllUris,
+      docsUrl: def.docsUrl,
+      hasProviderDoc: def.hasProviderDoc,
+      categories: def.categories,
+    }));
 }
