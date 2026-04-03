@@ -67,6 +67,7 @@ export function createApp(deps: AppDeps): Hono {
   const { config, fetchCredentials, cookieJar } = deps;
   const fetchFn = deps.fetchFn ?? fetch;
   const isReady = deps.isReady ?? (() => true);
+  const reportedAuthFailures = new Set<string>();
 
   const app = new Hono();
 
@@ -370,6 +371,24 @@ export function createApp(deps: AppDeps): Hono {
     const responseHeaders: Record<string, string> = { "Content-Type": contentType };
     if (truncated) {
       responseHeaders["X-Truncated"] = "true";
+    }
+
+    // Report auth failures to platform so connections can be flagged (once per provider per run)
+    if (
+      targetRes.status === 401 &&
+      config.platformApiUrl &&
+      config.runToken &&
+      !reportedAuthFailures.has(providerId)
+    ) {
+      reportedAuthFailures.add(providerId);
+      fetch(`${config.platformApiUrl}/internal/connections/report-auth-failure`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.runToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ providerId }),
+      }).catch(() => {});
     }
 
     return c.body(text, targetRes.status, responseHeaders);

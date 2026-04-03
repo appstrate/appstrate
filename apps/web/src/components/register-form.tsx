@@ -74,7 +74,7 @@ export function RegisterForm({
           data.password,
           data.displayName.trim() || undefined,
         );
-        if (result.emailVerificationRequired) {
+        if (features.smtp && result.emailVerificationRequired) {
           navigate("/verify-email", { state: { email: data.email } });
         }
       }

@@ -19,7 +19,10 @@ export interface DependencyValidationDeps {
     connectionProfileId: string,
     orgId: string,
   ) => Promise<ConnectionStatus>;
-  validateScopes: (granted: string[], required: string[]) => { sufficient: boolean };
+  validateScopes: (
+    granted: string[],
+    required: string[],
+  ) => { sufficient: boolean; missing: string[] };
 }
 
 const defaultDeps: DependencyValidationDeps = {
@@ -100,7 +103,7 @@ export async function validateAgentDependencies(
           status: 400,
           code: "scope_insufficient",
           title: "Scope Insufficient",
-          detail: `Provider '${provider.id}' requires additional permissions`,
+          detail: `Provider '${provider.id}' requires additional permissions: ${scopeResult.missing.join(", ")}`,
         });
       }
     }

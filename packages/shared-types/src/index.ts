@@ -405,6 +405,7 @@ export interface AvailableProvider {
   authMode?: string;
   connectionId?: string;
   connectedAt?: string;
+  scopesGranted?: string[];
 }
 
 // --- Provider Config Types ---

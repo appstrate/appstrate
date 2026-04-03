@@ -337,5 +337,7 @@
   "schedule.providersNotBoundWarning": "Some providers are not bound to this profile. The schedule cannot run until all required providers are bound.",
   "run.notConnected": "Not connected",
   "run.notAllConnected": "All providers must be connected before running this agent.",
-  "run.configureConnections": "Configure connections"
+  "run.configureConnections": "Configure connections",
+  "providerCard.scopesMissing": "Insufficient permissions",
+  "providerCard.updatePermissions": "Update permissions"
 }

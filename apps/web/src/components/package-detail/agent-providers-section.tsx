@@ -47,6 +47,8 @@ export function AgentProvidersSection({
           packageId={packageId}
           orgProfileId={agentOrgProfileId ?? undefined}
           orgProfileName={agentOrgProfileName ?? undefined}
+          scopesRequired={svc.scopesRequired}
+          scopesMissing={svc.scopesMissing}
         />
       ))}
     </div>

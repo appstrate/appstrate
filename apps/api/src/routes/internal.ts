@@ -3,9 +3,9 @@
 import { z } from "zod";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
+import { runs, userProviderConnections } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
@@ -13,7 +13,7 @@ import { getRecentRuns } from "../services/state/index.ts";
 import { getPackage } from "../services/agent-service.ts";
 import { resolveCredentialsForProxy } from "@appstrate/connect";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { unauthorized, forbidden, notFound, internalError } from "../lib/errors.ts";
+import { unauthorized, forbidden, notFound, invalidRequest, internalError } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 
 /**
@@ -178,6 +178,42 @@ export function createInternalRouter() {
     });
 
     return c.json(result);
+  });
+
+  // POST /internal/connections/report-auth-failure — sidecar reports upstream 401
+  router.post("/connections/report-auth-failure", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    const body = await c.req.json();
+    const parsed = z.object({ providerId: z.string().min(1) }).safeParse(body);
+    if (!parsed.success) {
+      throw invalidRequest("Missing or invalid providerId");
+    }
+    const { providerId } = parsed.data;
+
+    const profileId = run.providerProfileIds?.[providerId];
+    if (!profileId) {
+      logger.warn("Auth failure report for unknown provider profile", { runId, providerId });
+      return c.json({ flagged: false });
+    }
+
+    await db
+      .update(userProviderConnections)
+      .set({ needsReconnection: true, updatedAt: new Date() })
+      .where(
+        and(
+          eq(userProviderConnections.profileId, profileId),
+          eq(userProviderConnections.providerId, providerId),
+          eq(userProviderConnections.orgId, run.orgId),
+        ),
+      );
+
+    logger.info("Connection flagged for reconnection after upstream 401", {
+      runId,
+      providerId,
+      profileId,
+    });
+
+    return c.json({ flagged: true });
   });
 
   return router;

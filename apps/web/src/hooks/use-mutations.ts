@@ -381,14 +381,16 @@ export function useConfigureProviderCredentials() {
       providerId,
       credentials,
       enabled,
+      invalidateConnections,
     }: {
       providerId: string;
       credentials?: Record<string, string>;
       enabled?: boolean;
+      invalidateConnections?: boolean;
     }) => {
       return api(`/providers/credentials/${providerId}`, {
         method: "PUT",
-        body: JSON.stringify({ credentials, enabled }),
+        body: JSON.stringify({ credentials, enabled, invalidateConnections }),
       });
     },
     onSuccess: () => invalidateProviderQueries(qc),
