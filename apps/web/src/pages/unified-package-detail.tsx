@@ -68,6 +68,14 @@ type DetailTab =
 
 const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} };
 
+/** Primary companion file name per package type. */
+const COMPANION_FILE_NAME: Record<PackageType, string> = {
+  agent: "prompt.md",
+  skill: "SKILL.md",
+  tool: "TOOL.md",
+  provider: "PROVIDER.md",
+};
+
 // ─── Agent Run Button (inline, no wrapper) ────────────────────────────
 
 function AgentRunButtonInline({
@@ -269,6 +277,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   }
   const { isHistoricalVersion } = versionResult;
 
+  // Companion file for the dropdown (built from existing API fields)
+  const companionContent = isHistoricalVersion ? versionDetail?.content : currentContent;
+  const companionFile = companionContent
+    ? { name: COMPANION_FILE_NAME[type], content: companionContent }
+    : undefined;
+
   // ── Version-aware config schema ──
   // When viewing a historical version, use that version's config schema (or empty if none).
   // An empty schema means "no config fields" — distinct from undefined which means "use draft".
@@ -323,7 +337,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     ...(isAdmin && type === "provider"
       ? [{ id: "configuration" as DetailTab, label: t("providers.configure", { ns: "settings" }) }]
       : []),
-    { id: "content", label: t("packages.content") },
+    {
+      id: "content",
+      label: type === "tool" ? t("editor.tabSource") : t(`editor.tabContent.${type}`),
+    },
     { id: "usedBy", label: t("packages.usedBy") },
   ];
 
@@ -363,6 +380,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   | Record<string, unknown>
                   | undefined
               }
+              companionFile={companionFile}
               isOwned={isOwned}
               isImported={isImported}
               isHistoricalVersion={isHistoricalVersion}
@@ -381,6 +399,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                     | Record<string, unknown>
                     | undefined
                 }
+                companionFile={companionFile}
                 isOwned={isOwned}
                 isImported={isImported}
                 isBuiltIn={isBuiltIn}
@@ -497,9 +516,13 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type !== "agent" && tab === "content" && pkgDetail && (
         <div className="border-border bg-card rounded-lg border p-4">
           <pre className="text-muted-foreground bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
-            {isHistoricalVersion && versionDetail?.content != null
-              ? versionDetail.content
-              : pkgDetail.content}
+            {type === "tool"
+              ? ((isHistoricalVersion && versionDetail?.sourceCode != null
+                  ? versionDetail.sourceCode
+                  : pkgDetail.sourceCode) ?? "")
+              : isHistoricalVersion && versionDetail?.content != null
+                ? versionDetail.content
+                : pkgDetail.content}
           </pre>
         </div>
       )}
