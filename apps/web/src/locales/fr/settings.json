@@ -63,6 +63,8 @@
   "createOrg.name": "Nom",
   "createOrg.namePlaceholder": "Mon organisation",
   "createOrg.slug": "Slug",
+  "createOrg.slugLabel": "Identifiant de l'organisation :",
+  "createOrg.slugEdit": "Modifier",
   "createOrg.slugPlaceholder": "mon-organisation",
   "createOrg.slugHint": "Identifiant unique en minuscules (lettres, chiffres, tirets).",
   "createOrg.creating": "Création...",

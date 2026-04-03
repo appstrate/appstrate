@@ -74,8 +74,10 @@ export function RegisterForm({
           data.password,
           data.displayName.trim() || undefined,
         );
-        if (features.smtp && result.emailVerificationRequired) {
+        if (result.emailVerificationRequired) {
           navigate("/verify-email", { state: { email: data.email } });
+        } else {
+          navigate("/");
         }
       }
     } catch (err) {

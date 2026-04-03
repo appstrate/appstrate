@@ -28,12 +28,16 @@ import { ContentEditor } from "../components/package-editor/content-editor";
 import { ProviderEditorInner } from "../components/provider-editor/provider-editor-inner";
 import { Spinner } from "../components/spinner";
 import { EditorShell } from "../components/editor-shell";
-import { useProviders } from "../hooks/use-providers";
 
 import type { AgentEditorState } from "../components/agent-editor/types";
 import type { MetadataState } from "../components/agent-editor/metadata-section";
 import {
   defaultEditorState,
+  defaultSkillManifest,
+  defaultToolManifest,
+  defaultProviderManifest,
+  DEFAULT_SKILL_CONTENT,
+  DEFAULT_TOOL_CONTENT,
   getManifestName,
   manifestToMetadata,
   metadataToManifestPatch,
@@ -47,8 +51,6 @@ import {
 } from "../components/agent-editor/utils";
 import type { SchemaField } from "../components/agent-editor/schema-section";
 import { agentSchema, skillSchema, toolSchema } from "@appstrate/core/schemas";
-import type { PackageFormState } from "../lib/package-type-modules";
-import { getPackageTypeModule } from "../lib/package-type-modules";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 
 const PACKAGE_SCHEMAS: Record<string, object | undefined> = {
@@ -71,12 +73,12 @@ type GenericEditorTab =
 
 function AgentEditorInner({
   initialState,
-  detail,
+  resolvedDeps,
   packageId,
   isEdit,
 }: {
   initialState: AgentEditorState;
-  detail: { dependencies: { skills: unknown[]; tools: unknown[] }; lockVersion?: number } | null;
+  resolvedDeps: { skills: unknown[]; tools: unknown[] } | null;
   packageId: string | undefined;
   isEdit: boolean;
 }) {
@@ -126,26 +128,27 @@ function AgentEditorInner({
   const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
 
   const saveDraft = useCallback(async () => {
-    if (!isEdit || !detail || !packageId) return;
-    await api(`/packages/agents/${packageId}`, {
+    if (!isEdit || !packageId) return;
+    const cfg = PACKAGE_CONFIG.agent;
+    await api(`/packages/${cfg.path}/${packageId}`, {
       method: "PUT",
       body: JSON.stringify({
         manifest: state.manifest,
         content: state.prompt,
-        lockVersion: detail.lockVersion!,
+        lockVersion: state.lockVersion!,
       }),
     });
     qc.invalidateQueries({ queryKey: ["packages"] });
     qc.invalidateQueries({ queryKey: ["agents"] });
-  }, [state, isEdit, detail, packageId, qc]);
+  }, [state, isEdit, packageId, qc]);
 
   // Sync resolved skill/tool metadata from server (names, descriptions)
   useEffect(() => {
-    if (!detail) return;
+    if (!resolvedDeps) return;
     setState((prev) => {
       const m = { ...prev.manifest };
       const skills = (
-        detail.dependencies.skills as {
+        resolvedDeps.skills as {
           id: string;
           version?: string;
           name?: string;
@@ -153,7 +156,7 @@ function AgentEditorInner({
         }[]
       ).map(toResourceEntry);
       const tools = (
-        detail.dependencies.tools as {
+        resolvedDeps.tools as {
           id: string;
           version?: string;
           name?: string;
@@ -164,7 +167,7 @@ function AgentEditorInner({
       setResourceEntries(m, "tools", tools);
       return { ...prev, manifest: m };
     });
-  }, [detail]);
+  }, [resolvedDeps]);
 
   const handleSubmit = () => {
     setError(null);
@@ -181,9 +184,9 @@ function AgentEditorInner({
     }
     allowNavigation();
     const body = { manifest: state.manifest, content: state.prompt };
-    if (isEdit && detail) {
+    if (isEdit) {
       updateAgent.mutate(
-        { ...body, lockVersion: detail.lockVersion! },
+        { ...body, lockVersion: state.lockVersion! },
         { onError: (err) => setError(err.message) },
       );
     } else {
@@ -323,6 +326,12 @@ function AgentEditorInner({
 
 // ─── Package (Skill/Tool) Editor Inner Form ─────────────────────────
 
+interface PackageEditorState {
+  manifest: Record<string, unknown>;
+  content: string;
+  lockVersion?: number;
+}
+
 function PackageEditorInner({
   type,
   initialState,
@@ -330,7 +339,7 @@ function PackageEditorInner({
   isEdit,
 }: {
   type: "skill" | "tool";
-  initialState: PackageFormState;
+  initialState: PackageEditorState;
   packageId: string | undefined;
   isEdit: boolean;
 }) {
@@ -340,57 +349,61 @@ function PackageEditorInner({
   const createPkg = useCreatePackage(type);
   const updatePkg = useUpdatePackage(type, packageId || "");
 
-  const [form, setForm] = useState(initialState);
+  const [state, setState] = useState(initialState);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
   const [jsonEditorKey, setJsonEditorKey] = useState(0);
 
+  const updateManifest = (patch: Record<string, unknown>) =>
+    setState((s) => ({ ...s, manifest: { ...s.manifest, ...patch } }));
+
+  const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
+  const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
+
   // --- Unsaved changes detection ---
   const isDirty = useMemo(
-    () => JSON.stringify(initialState) !== JSON.stringify(form),
-    [initialState, form],
+    () => JSON.stringify(initialState) !== JSON.stringify(state),
+    [initialState, state],
   );
   const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
 
   const saveDraft = useCallback(async () => {
     if (!isEdit || !packageId) return;
-    const module = getPackageTypeModule(type);
-    const payload = module.assemblePayload(form);
     const cfg = PACKAGE_CONFIG[type];
     await api(`/packages/${cfg.path}/${packageId}`, {
       method: "PUT",
-      body: JSON.stringify({ ...payload, lockVersion: form._lockVersion! }),
+      body: JSON.stringify({
+        manifest: state.manifest,
+        content: state.content,
+        lockVersion: state.lockVersion!,
+      }),
     });
     qc.invalidateQueries({ queryKey: ["packages"] });
-  }, [form, isEdit, type, packageId, qc]);
-
-  if (form._type !== "skill" && form._type !== "tool") return null;
+  }, [state, isEdit, type, packageId, qc]);
 
   const handleSubmit = () => {
     setError(null);
-    const meta = form.metadata;
-    if (!meta.id || !meta.displayName) {
+    const { id } = getManifestName(state.manifest);
+    if (!id || !state.manifest.displayName) {
       setError(t("editor.errorRequired"));
       setActiveTab("general");
       return;
     }
-    if (!form.content.trim()) {
+    if (!state.content.trim()) {
       setError(t("editor.errorContent", { defaultValue: "Le contenu est requis." }));
       setActiveTab("content");
       return;
     }
 
     allowNavigation();
-    const module = getPackageTypeModule(type);
-    const payload = module.assemblePayload(form);
+    const body = { manifest: state.manifest, content: state.content };
     if (isEdit) {
-      updatePkg.mutate({ ...payload, lockVersion: form._lockVersion! } as never, {
-        onError: (err) => setError(err.message),
-      });
+      updatePkg.mutate(
+        { ...body, lockVersion: state.lockVersion! },
+        { onError: (err) => setError(err.message) },
+      );
     } else {
-      createPkg.mutate({ id: meta.id, ...payload } as never, {
-        onError: (err) => setError(err.message),
-      });
+      createPkg.mutate(body, { onError: (err) => setError(err.message) });
     }
   };
 
@@ -409,7 +422,7 @@ function PackageEditorInner({
       type={type}
       packageId={packageId}
       isEdit={isEdit}
-      displayName={form.metadata.displayName || packageId}
+      displayName={(state.manifest.displayName as string) || packageId}
       tabs={pkgTabs}
       activeTab={activeTab}
       onTabChange={(v) => {
@@ -425,17 +438,13 @@ function PackageEditorInner({
       hideSubmitBar={activeTab === "json"}
     >
       {activeTab === "general" && (
-        <MetadataSection
-          value={form.metadata}
-          onChange={(metadata) => setForm((s) => ({ ...s, metadata }))}
-          isEdit={isEdit}
-        />
+        <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit} />
       )}
 
       {activeTab === "content" && (
         <ContentEditor
-          value={form.content}
-          onChange={(content) => setForm((s) => ({ ...s, content }))}
+          value={state.content}
+          onChange={(content) => setState((s) => ({ ...s, content }))}
           language={language}
         />
       )}
@@ -443,26 +452,9 @@ function PackageEditorInner({
       {activeTab === "json" && (
         <JsonEditor
           key={jsonEditorKey}
-          value={
-            (
-              getPackageTypeModule(type).assemblePayload(form) as {
-                manifest: Record<string, unknown>;
-              }
-            ).manifest
-          }
-          onApply={(parsed) => {
-            const parsedName = getManifestName(parsed);
-            setForm((s) => ({
-              ...s,
-              metadata: {
-                ...s.metadata,
-                displayName: (parsed.displayName as string) ?? s.metadata.displayName,
-                description: (parsed.description as string) ?? s.metadata.description,
-                version: (parsed.version as string) ?? s.metadata.version,
-                ...(parsedName.scope ? { scope: parsedName.scope, id: parsedName.id } : {}),
-              },
-              _manifestBase: parsed,
-            }));
+          value={state.manifest}
+          onApply={(manifest) => {
+            setState((s) => ({ ...s, manifest }));
             setActiveTab("general");
           }}
           schema={{ uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type]! }}
@@ -487,24 +479,10 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
 
   // Load detail for editing
   const agentQuery = usePackageDetail("agent", type === "agent" && isEdit ? packageId : undefined);
-  const pkgQuery = usePackageDetail(
-    type,
-    type !== "agent" && type !== "provider" && isEdit ? packageId : undefined,
-  );
-  const providersQuery = useProviders();
+  const pkgQuery = usePackageDetail(type, type !== "agent" && isEdit ? packageId : undefined);
 
-  const isLoading =
-    type === "agent"
-      ? agentQuery.isLoading
-      : type === "provider"
-        ? providersQuery.isLoading
-        : pkgQuery.isLoading;
-  const detail =
-    type === "agent"
-      ? agentQuery.data
-      : type === "provider"
-        ? providersQuery.data?.providers.find((p) => p.id === packageId)
-        : pkgQuery.data;
+  const isLoading = type === "agent" ? agentQuery.isLoading : pkgQuery.isLoading;
+  const detail = type === "agent" ? agentQuery.data : pkgQuery.data;
 
   if (isEdit && isLoading) {
     return (
@@ -536,6 +514,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
         ? {
             manifest: (agentDetail.manifest ?? {}) as Record<string, unknown>,
             prompt: agentDetail.prompt || "",
+            lockVersion: agentDetail.lockVersion,
           }
         : defaultEditorState(currentOrg?.slug, user?.email);
 
@@ -543,48 +522,51 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
       <AgentEditorInner
         key={packageId ?? "new"}
         initialState={initialState}
-        detail={agentDetail ?? null}
+        resolvedDeps={agentDetail?.dependencies ?? null}
         packageId={packageId}
         isEdit={isEdit}
       />
     );
   }
 
-  // Provider editor — uses dedicated provider API
+  // Provider editor — uses package detail (manifest as source of truth)
   if (type === "provider") {
-    const editProvider = isEdit
-      ? (providersQuery.data?.providers.find((p) => p.id === packageId) ?? null)
-      : null;
+    const providerDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
 
     return (
       <ProviderEditorInner
         key={packageId ?? "new"}
-        provider={editProvider}
+        initialState={
+          isEdit && providerDetail
+            ? {
+                manifest: providerDetail.manifest ?? {},
+                lockVersion: providerDetail.lockVersion,
+              }
+            : { manifest: defaultProviderManifest(currentOrg?.slug, user?.email) }
+        }
         isEdit={isEdit}
         packageId={packageId}
-        orgSlug={currentOrg?.slug}
       />
     );
   }
 
   // Skill/Tool editor (agent/provider returned early above — pkgQuery is always OrgPackageItemDetail here)
-  const module = getPackageTypeModule(type);
   const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
 
-  const initialState: PackageFormState =
+  const defaultManifest =
+    type === "tool"
+      ? defaultToolManifest(currentOrg?.slug, user?.email)
+      : defaultSkillManifest(currentOrg?.slug, user?.email);
+  const defaultContent = type === "tool" ? DEFAULT_TOOL_CONTENT : DEFAULT_SKILL_CONTENT;
+
+  const initialState: PackageEditorState =
     isEdit && pkgDetail
-      ? module.detailToFormState({
-          id: pkgDetail.id,
-          displayName: pkgDetail.name ?? pkgDetail.id,
-          description: pkgDetail.description ?? "",
-          source: pkgDetail.source ?? "local",
-          version: pkgDetail.version,
-          content: pkgDetail.content,
-          updatedAt: pkgDetail.updatedAt,
-          manifestName: pkgDetail.manifestName,
+      ? {
+          manifest: pkgDetail.manifest ?? {},
+          content: pkgDetail.content ?? "",
           lockVersion: pkgDetail.lockVersion,
-        })
-      : module.defaultFormState(currentOrg?.slug, user?.email);
+        }
+      : { manifest: defaultManifest, content: defaultContent };
 
   return (
     <PackageEditorInner
