@@ -533,7 +533,7 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 
-    const hasUnpublishedChanges =
+    const hasUnarchivedChanges =
       item.source === "local"
         ? versionCount === 0
           ? true // No versions yet — entire package is unpublished
@@ -546,7 +546,7 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
       [rcfg.responseKey]: {
         ...item,
         versionCount,
-        hasUnpublishedChanges,
+        hasUnarchivedChanges,
       },
     });
   };
@@ -1106,11 +1106,11 @@ export function createPackagesRouter() {
           getVersionCount(packageId),
           getLatestVersionCreatedAt(packageId),
         ]);
-        const hasUnpublishedChanges =
+        const hasUnarchivedChanges =
           existing.source === "local" && vCount > 0 && latestDate
             ? (existing.updatedAt ?? new Date()) > latestDate
             : false;
-        if (hasUnpublishedChanges) {
+        if (hasUnarchivedChanges) {
           throw conflict(
             "draft_overwrite",
             "This package has unpublished changes that will be overwritten by the import.",

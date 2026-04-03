@@ -306,9 +306,9 @@ export const schemas = {
         description: "Display name of the admin-configured org connection profile",
       },
       forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
-      hasUnpublishedChanges: {
+      hasUnarchivedChanges: {
         type: "boolean",
-        description: "Whether the agent has local changes not yet published as a version",
+        description: "Whether the active version has changes not yet archived as a version",
       },
       populatedProviders: {
         type: "object",
@@ -596,6 +596,14 @@ export const schemas = {
       manifestName: {
         type: ["string", "null"],
         description: "Manifest name (@scope/name) — may differ from package ID",
+      },
+      versionCount: {
+        type: "integer",
+        description: "Number of published versions",
+      },
+      hasUnarchivedChanges: {
+        type: "boolean",
+        description: "Whether the active version has changes not yet archived as a version",
       },
       forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
       agents: {

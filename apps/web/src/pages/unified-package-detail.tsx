@@ -31,7 +31,6 @@ import { PackageActionsDropdown } from "../components/package-detail/package-act
 import { VersionBanners } from "../components/version-banners";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { VersionHistory } from "../components/version-history";
-import { DraftDiffView } from "../components/draft-diff-view";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ProviderCredentialsForm } from "../components/provider-credentials-form";
@@ -60,7 +59,6 @@ type DetailTab =
   | "memories"
   | "api"
   | "versions"
-  | "changes"
   | "content"
   | "usedBy";
 
@@ -173,9 +171,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const displayName = agentDetail?.displayName ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
   const source = agentDetail?.source ?? pkgDetail?.source;
   const version = agentDetail?.version ?? pkgDetail?.version;
-  const versionCount = agentDetail?.versionCount ?? pkgDetail?.versionCount;
-  const hasUnpublishedChanges =
-    agentDetail?.hasUnpublishedChanges ?? pkgDetail?.hasUnpublishedChanges;
+  const hasUnarchivedChanges = agentDetail?.hasUnarchivedChanges ?? pkgDetail?.hasUnarchivedChanges;
   const forkedFrom = agentDetail?.forkedFrom ?? pkgDetail?.forkedFrom ?? null;
 
   const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
@@ -184,13 +180,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     versionParam,
   );
 
-  const hasDraftChanges = source !== "system" && !!hasUnpublishedChanges;
-  const { data: latestVersionForDiff } = useVersionDetail(
-    type,
-    packageId,
-    hasDraftChanges ? "latest" : undefined,
-  );
-
+  const hasArchivableChanges = source !== "system" && !!hasUnarchivedChanges;
   const downloadPackage = usePackageDownload(scope, name);
   const deletePkgMutation = useDeletePackage(type);
   const deleteCredentialsMutation = useDeleteProviderCredentials();
@@ -209,7 +199,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     "memories",
     "api",
     "versions",
-    "changes",
     "content",
     "usedBy",
   ];
@@ -230,14 +219,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const defaultTab: DetailTab =
     type === "agent" ? "runs" : type === "provider" ? "configuration" : "content";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
-  // Reset tab if it becomes invalid (e.g. #changes when draft is published)
+  // Reset tab if it becomes invalid
   useEffect(() => {
-    if (tab === "changes" && (!hasDraftChanges || isVersionView)) setTab(defaultTab);
     if (tab === "versions" && source === "system") setTab(defaultTab);
-  }, [tab, hasDraftChanges, isVersionView, source, defaultTab, setTab]);
+  }, [tab, source, defaultTab, setTab]);
 
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
-  const [diffTabOverride, setDiffTab] = useState<"manifest" | "content" | null>(null);
 
   // ── Loading / Error ──
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
@@ -252,7 +239,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     versionParam,
     versionDetail,
     liveVersion: version,
-    hasDraftChanges,
+    hasArchivableChanges,
   });
   if ("redirect" in versionResult) {
     return <Navigate to={versionResult.redirect} replace />;
@@ -290,28 +277,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     source: source ?? ("local" as const),
     type,
     version,
-    versionCount,
-    hasUnpublishedChanges,
   };
-
-  // ── Diff tab logic ──
-  const currentManifest = type === "agent" ? agentDetail?.manifest : pkgDetail?.manifest;
-  const currentContent = agentDetail?.prompt ?? pkgDetail?.content;
-  const contentLabel = type === "agent" ? t("version.diffPrompt") : t("packages.content");
-
-  const hasManifestChanges =
-    JSON.stringify(currentManifest ?? {}) !== JSON.stringify(latestVersionForDiff?.manifest ?? {});
-  const hasContentChanges =
-    latestVersionForDiff?.content != null &&
-    currentContent != null &&
-    latestVersionForDiff.content !== currentContent;
-
-  const diffTab = (() => {
-    const preferred = diffTabOverride ?? "manifest";
-    if (preferred === "content" && !hasContentChanges && hasManifestChanges) return "manifest";
-    if (preferred === "manifest" && !hasManifestChanges && hasContentChanges) return "content";
-    return preferred;
-  })();
 
   // ── Render ──
   const isBuiltIn = source === "system";
@@ -359,9 +325,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     <>
       <SharedHeader
         detail={unifiedForHeader}
-        packageId={packageId}
-        versionParam={versionParam}
-        hasDraftChanges={hasDraftChanges}
         isHistoricalVersion={isHistoricalVersion}
         actionsLeft={
           type === "agent" ? (
@@ -383,7 +346,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               }
               isOwned={isOwned}
               isHistoricalVersion={isHistoricalVersion}
-              hasDraftChanges={hasDraftChanges}
               downloadVersion={downloadVersion}
               downloadPackage={downloadPackage}
               onCreateVersion={() => setCreateVersionOpen(true)}
@@ -402,7 +364,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 isOwned={isOwned}
                 isBuiltIn={isBuiltIn}
                 isHistoricalVersion={isHistoricalVersion}
-                hasDraftChanges={hasDraftChanges}
                 downloadVersion={downloadVersion}
                 onDownload={downloadPackage}
                 onCreateVersion={() => setCreateVersionOpen(true)}
@@ -437,9 +398,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       <VersionBanners
         isHistorical={isHistoricalVersion}
         versionDetail={versionDetail}
-        hasDraftChanges={hasDraftChanges}
-        latestUrl={packageDetailPath(type, packageId)}
-        latestVersion={version}
+        activeUrl={packageDetailPath(type, packageId)}
       />
 
       {type === "agent" && <ModelRequiredAlert />}
@@ -489,10 +448,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               {td.label}
             </TabsTrigger>
           ))}
-          {!isBuiltIn && <TabsTrigger value="versions">{t("version.history")}</TabsTrigger>}
-          {hasDraftChanges && !isVersionView && (
-            <TabsTrigger value="changes">{t("version.diff")}</TabsTrigger>
-          )}
+          {!isBuiltIn && <TabsTrigger value="versions">{t("version.archives")}</TabsTrigger>}
         </TabsList>
       </Tabs>
 
@@ -561,48 +517,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       )}
 
       {tab === "versions" && <VersionHistory packageId={packageId} type={type} isOwned={isOwned} />}
-
-      {tab === "changes" && hasDraftChanges && !isVersionView && latestVersionForDiff && (
-        <>
-          <Tabs
-            value={diffTab}
-            onValueChange={(v) => setDiffTab(v as "manifest" | "content")}
-            className="mb-4"
-          >
-            <TabsList>
-              {hasManifestChanges && (
-                <TabsTrigger value="manifest">{t("version.diffManifest")}</TabsTrigger>
-              )}
-              {hasContentChanges && <TabsTrigger value="content">{contentLabel}</TabsTrigger>}
-            </TabsList>
-          </Tabs>
-          {diffTab === "manifest" && hasManifestChanges && (
-            <DraftDiffView
-              original={JSON.stringify(latestVersionForDiff.manifest ?? {}, null, 2)}
-              modified={JSON.stringify(currentManifest ?? {}, null, 2)}
-              language="json"
-            />
-          )}
-          {diffTab === "content" &&
-            hasContentChanges &&
-            currentContent != null &&
-            latestVersionForDiff.content != null && (
-              <DraftDiffView
-                original={latestVersionForDiff.content}
-                modified={currentContent}
-                language={type === "agent" ? "markdown" : undefined}
-              />
-            )}
-          {!hasManifestChanges && !hasContentChanges && (
-            <p className="text-muted-foreground py-4 text-center text-sm">{t("version.noDiff")}</p>
-          )}
-        </>
-      )}
-      {tab === "changes" && hasDraftChanges && !isVersionView && !latestVersionForDiff && (
-        <p className="text-muted-foreground py-4 text-center text-sm">
-          {t("version.noVersionYet")}
-        </p>
-      )}
 
       <CreateVersionModal
         open={createVersionOpen}

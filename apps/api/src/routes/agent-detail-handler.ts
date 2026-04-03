@@ -125,7 +125,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
 
   const parsed = parseScopedName(m.name);
 
-  const hasUnpublishedChanges =
+  const hasUnarchivedChanges =
     agent.source !== "system" && rawItem
       ? versionCount > 0 && latestVersionDate
         ? (rawItem.updatedAt ?? new Date()) > latestVersionDate
@@ -173,7 +173,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
       populatedProviders,
       callbackUrl: getOAuthCallbackUrl(),
       versionCount,
-      hasUnpublishedChanges,
+      hasUnarchivedChanges,
       agentOrgProfileId,
       agentOrgProfileName,
       forkedFrom: rawItem?.forkedFrom ?? null,

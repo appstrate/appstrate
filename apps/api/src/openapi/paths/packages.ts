@@ -80,7 +80,7 @@ export const packagesPaths = {
                         type: "object",
                         properties: {
                           packageId: { type: "string" },
-                          draftVersion: { type: ["string", "null"] },
+                          activeVersion: { type: ["string", "null"] },
                         },
                       },
                     },
@@ -208,7 +208,7 @@ export const packagesPaths = {
                         type: "object",
                         properties: {
                           packageId: { type: "string" },
-                          draftVersion: { type: ["string", "null"] },
+                          activeVersion: { type: ["string", "null"] },
                         },
                       },
                     },
@@ -425,8 +425,8 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  latestVersion: { type: ["string", "null"] },
-                  draftVersion: { type: ["string", "null"] },
+                  latestPublishedVersion: { type: ["string", "null"] },
+                  activeVersion: { type: ["string", "null"] },
                 },
               },
             },
@@ -1007,8 +1007,8 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  latestVersion: { type: ["string", "null"] },
-                  draftVersion: { type: ["string", "null"] },
+                  latestPublishedVersion: { type: ["string", "null"] },
+                  activeVersion: { type: ["string", "null"] },
                 },
               },
             },
@@ -1696,8 +1696,8 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  latestVersion: { type: ["string", "null"] },
-                  draftVersion: { type: ["string", "null"] },
+                  latestPublishedVersion: { type: ["string", "null"] },
+                  activeVersion: { type: ["string", "null"] },
                 },
               },
             },
@@ -2220,8 +2220,8 @@ export const packagesPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  latestVersion: { type: ["string", "null"] },
-                  draftVersion: { type: ["string", "null"] },
+                  latestPublishedVersion: { type: ["string", "null"] },
+                  activeVersion: { type: ["string", "null"] },
                 },
               },
             },

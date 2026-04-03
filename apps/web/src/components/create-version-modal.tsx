@@ -65,18 +65,18 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
 
   const selectedBump = useWatch({ control, name: "selectedBump" });
 
-  const latestVersion = versionInfo?.latestVersion ?? null;
-  const draftVersion = versionInfo?.draftVersion ?? null;
+  const latestVersion = versionInfo?.latestPublishedVersion ?? null;
+  const activeVersion = versionInfo?.activeVersion ?? null;
 
-  // Mode A: draft === latest -> show bump selector
-  const needsBump = !!draftVersion && !!latestVersion && semverEq(draftVersion, latestVersion);
-  // Mode B: draft > latest or no latest -> direct create
+  // Mode A: active === latest -> show bump selector
+  const needsBump = !!activeVersion && !!latestVersion && semverEq(activeVersion, latestVersion);
+  // Mode B: active > latest or no latest -> direct create
   const canCreateDirect =
-    !!draftVersion && (!latestVersion || semverGt(draftVersion, latestVersion));
-  // Mode C: draft < latest (but not equal) -> blocked
-  const isBlocked = !!draftVersion && !!latestVersion && !needsBump && !canCreateDirect;
+    !!activeVersion && (!latestVersion || semverGt(activeVersion, latestVersion));
+  // Mode C: active < latest (but not equal) -> blocked
+  const isBlocked = !!activeVersion && !!latestVersion && !needsBump && !canCreateDirect;
 
-  const targetVersion = needsBump ? bumpVersion(latestVersion, selectedBump) : draftVersion;
+  const targetVersion = needsBump ? bumpVersion(latestVersion, selectedBump) : activeVersion;
 
   const canCreate = needsBump || canCreateDirect;
 
@@ -122,8 +122,8 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
           )}
           {!needsBump && (
             <Label className="block text-sm">
-              {t("version.draftVersionLabel")}:{" "}
-              <strong>{draftVersion ?? t("version.noVersion")}</strong>
+              {t("version.activeVersionLabel")}:{" "}
+              <strong>{activeVersion ?? t("version.noVersion")}</strong>
             </Label>
           )}
         </div>
@@ -157,10 +157,10 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
           </div>
         )}
 
-        {isBlocked && draftVersion && latestVersion && (
+        {isBlocked && activeVersion && latestVersion && (
           <p className="text-warning text-sm">{t("version.mustBeHigher")}</p>
         )}
-        {!draftVersion && (
+        {!activeVersion && (
           <p className="text-warning text-sm">{t("version.noVersionInManifest")}</p>
         )}
         {errors.root?.message && (

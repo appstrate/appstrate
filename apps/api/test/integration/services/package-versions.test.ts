@@ -14,6 +14,8 @@ import {
   removeDistTag,
   getMatchingDistTags,
   getVersionCount,
+  getVersionInfo,
+  getLatestVersionCreatedAt,
 } from "../../../src/services/package-versions.ts";
 describe("package-versions service", () => {
   let userId: string;
@@ -440,6 +442,104 @@ describe("package-versions service", () => {
 
       // Should not throw
       await removeDistTag(pkg.id, "nonexistent");
+    });
+  });
+
+  // ── getVersionInfo ────────────────────────────────────────
+
+  describe("getVersionInfo", () => {
+    it("returns activeVersion from manifest and null latestPublishedVersion when no versions exist", async () => {
+      await seedPackage({
+        orgId,
+        id: `@${orgSlug}/info-no-ver`,
+        draftManifest: {
+          name: `@${orgSlug}/info-no-ver`,
+          version: "0.5.0",
+          type: "agent",
+        },
+      });
+
+      const info = await getVersionInfo(`@${orgSlug}/info-no-ver`);
+      expect(info.activeVersion).toBe("0.5.0");
+      expect(info.latestPublishedVersion).toBeNull();
+    });
+
+    it("returns latestPublishedVersion from the latest dist-tag", async () => {
+      const pkg = await seedPackage({
+        orgId,
+        id: `@${orgSlug}/info-pub`,
+        draftManifest: {
+          name: `@${orgSlug}/info-pub`,
+          version: "2.0.0",
+          type: "agent",
+        },
+      });
+
+      await createPackageVersion({
+        packageId: pkg.id,
+        version: "1.0.0",
+        integrity: "sha256-abc",
+        artifactSize: 1024,
+        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
+        orgId,
+        createdBy: userId,
+      });
+
+      const info = await getVersionInfo(pkg.id);
+      expect(info.activeVersion).toBe("2.0.0");
+      expect(info.latestPublishedVersion).toBe("1.0.0");
+    });
+
+    it("returns null activeVersion when manifest has no version", async () => {
+      await seedPackage({
+        orgId,
+        id: `@${orgSlug}/info-no-manifest-ver`,
+        draftManifest: { name: `@${orgSlug}/info-no-manifest-ver`, type: "agent" },
+      });
+
+      const info = await getVersionInfo(`@${orgSlug}/info-no-manifest-ver`);
+      expect(info.activeVersion).toBeNull();
+      expect(info.latestPublishedVersion).toBeNull();
+    });
+  });
+
+  // ── getLatestVersionCreatedAt ─────────────────────────────
+
+  describe("getLatestVersionCreatedAt", () => {
+    it("returns null when no versions exist", async () => {
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/no-ver-date` });
+      const result = await getLatestVersionCreatedAt(pkg.id);
+      expect(result).toBeNull();
+    });
+
+    it("returns the most recent version createdAt", async () => {
+      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/ver-date` });
+      const base = {
+        packageId: pkg.id,
+        integrity: "sha256-abc",
+        artifactSize: 1024,
+        manifest: { name: pkg.id, type: "agent" } as Record<string, unknown>,
+        orgId,
+        createdBy: userId,
+      };
+
+      await createPackageVersion({
+        ...base,
+        version: "1.0.0",
+        manifest: { ...base.manifest, version: "1.0.0" },
+      });
+      await createPackageVersion({
+        ...base,
+        version: "2.0.0",
+        manifest: { ...base.manifest, version: "2.0.0" },
+      });
+
+      const result = await getLatestVersionCreatedAt(pkg.id);
+      expect(result).toBeInstanceOf(Date);
+
+      // The latest createdAt should be very recent (within 5s)
+      const diff = Date.now() - result!.getTime();
+      expect(diff).toBeLessThan(5000);
     });
   });
 });

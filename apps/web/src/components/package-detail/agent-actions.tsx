@@ -20,7 +20,6 @@ export function AgentActions({
   manifest,
   isOwned,
   isHistoricalVersion,
-  hasDraftChanges,
   downloadVersion,
   downloadPackage,
   onCreateVersion,
@@ -30,7 +29,6 @@ export function AgentActions({
   manifest?: Record<string, unknown>;
   isOwned: boolean;
   isHistoricalVersion: boolean;
-  hasDraftChanges: boolean;
   downloadVersion: string | undefined;
   downloadPackage: (v: string) => void;
   onCreateVersion: () => void;
@@ -82,7 +80,6 @@ export function AgentActions({
         isOwned={isOwned}
         isBuiltIn={detail.source === "system"}
         isHistoricalVersion={isHistoricalVersion}
-        hasDraftChanges={hasDraftChanges}
         downloadVersion={downloadVersion}
         onDownload={downloadPackage}
         onCreateVersion={onCreateVersion}

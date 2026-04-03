@@ -34,7 +34,6 @@ interface PackageActionsDropdownProps {
   isOwned: boolean;
   isBuiltIn: boolean;
   isHistoricalVersion: boolean;
-  hasDraftChanges: boolean;
   downloadVersion?: string;
   onDownload?: (version: string) => void;
   onCreateVersion?: () => void;
@@ -63,7 +62,6 @@ export function PackageActionsDropdown({
   isOwned,
   isBuiltIn,
   isHistoricalVersion,
-  hasDraftChanges,
   downloadVersion,
   onDownload,
   onCreateVersion,
@@ -121,7 +119,7 @@ export function PackageActionsDropdown({
 
           {/* ── Create version ── */}
           {isMutable && onCreateVersion && (
-            <DropdownMenuItem onSelect={onCreateVersion} disabled={!hasDraftChanges}>
+            <DropdownMenuItem onSelect={onCreateVersion}>
               <GitBranchPlus size={14} />
               {t("version.createVersion")}
             </DropdownMenuItem>

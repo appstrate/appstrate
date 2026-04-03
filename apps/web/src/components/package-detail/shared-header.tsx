@@ -3,7 +3,6 @@
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
-import { VersionSelector } from "../version-selector";
 import { packageListPath } from "../../lib/package-paths";
 import { InlineMarkdown } from "../markdown";
 import { PageHeader } from "../page-header";
@@ -22,23 +21,15 @@ interface SharedHeaderDetail {
   source: string;
   type: PackageType;
   version?: string | null;
-  versionCount?: number;
-  hasUnpublishedChanges?: boolean;
 }
 
 export function SharedHeader({
   detail,
-  packageId,
-  versionParam,
-  hasDraftChanges,
   isHistoricalVersion,
   actionsLeft,
   actionsRight,
 }: {
   detail: SharedHeaderDetail;
-  packageId: string;
-  versionParam: string | undefined;
-  hasDraftChanges: boolean;
   isHistoricalVersion: boolean;
   actionsLeft?: React.ReactNode;
   actionsRight?: React.ReactNode;
@@ -50,8 +41,6 @@ export function SharedHeader({
     detail.type === "agent"
       ? t("detail.breadcrumb")
       : t(`packages.type.${detail.type}s`, { ns: "settings" });
-
-  const hasVersionSelector = detail.versionCount != null && detail.versionCount > 0;
 
   return (
     <>
@@ -70,21 +59,17 @@ export function SharedHeader({
                 <ShieldCheck className="text-muted-foreground h-4 w-4" />
               </span>
             )}
+            {detail.version && (
+              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[0.65rem] font-medium">
+                v{detail.version}
+              </span>
+            )}
             {isHistoricalVersion && (
               <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[0.65rem] font-medium">
                 {t("version.readOnly")}
               </span>
             )}
             {actionsLeft}
-            {hasVersionSelector && (
-              <VersionSelector
-                packageId={packageId}
-                currentVersion={versionParam}
-                type={detail.type}
-                hasDraftChanges={hasDraftChanges}
-                currentIsDraft={!versionParam && hasDraftChanges}
-              />
-            )}
             {actionsRight}
           </>
         }
