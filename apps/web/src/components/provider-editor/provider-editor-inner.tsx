@@ -33,11 +33,12 @@ import {
 } from "../agent-editor/utils";
 import { SectionCard } from "../section-card";
 import { EditorShell } from "../editor-shell";
+import { ContentEditor } from "../package-editor/content-editor";
 import { AFPS_SCHEMA_URLS, type AvailableScope } from "@appstrate/core/validation";
 import { providerSchema } from "@appstrate/core/schemas";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 
-type ProviderEditorTab = "general" | "auth" | "uris" | "json";
+type ProviderEditorTab = "general" | "auth" | "uris" | "content" | "json";
 
 // ─── Manifest accessors for nested definition ──────────────
 
@@ -70,6 +71,7 @@ function updateAuthSub(
 
 interface ProviderEditorState {
   manifest: Record<string, unknown>;
+  content: string;
   lockVersion?: number;
 }
 
@@ -130,7 +132,7 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
       method: "PUT",
       body: JSON.stringify({
         manifest: state.manifest,
-        content: "",
+        content: state.content,
         lockVersion: state.lockVersion!,
       }),
     });
@@ -148,7 +150,7 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
     }
 
     allowNavigation();
-    const body = { manifest: state.manifest, content: "" };
+    const body = { manifest: state.manifest, content: state.content };
     if (isEdit) {
       updatePkg.mutate(
         { ...body, lockVersion: state.lockVersion! },
@@ -165,6 +167,7 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
     { id: "general", label: t("editor.tabGeneral", { ns: "agents" }) },
     { id: "auth", label: t("providers.form.authMode") },
     { id: "uris", label: t("providers.form.sectionUris") },
+    { id: "content", label: t("editor.tabContent.provider", { ns: "agents" }) },
     { id: "json", label: t("editor.tabJson", { ns: "agents" }) },
   ];
 
@@ -643,6 +646,15 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Content Tab ── */}
+      {activeTab === "content" && (
+        <ContentEditor
+          value={state.content}
+          onChange={(content) => setState((s) => ({ ...s, content }))}
+          language="markdown"
+        />
       )}
 
       {/* ── JSON Tab ── */}

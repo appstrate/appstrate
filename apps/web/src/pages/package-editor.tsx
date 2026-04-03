@@ -38,6 +38,7 @@ import {
   defaultProviderManifest,
   DEFAULT_SKILL_CONTENT,
   DEFAULT_TOOL_CONTENT,
+  DEFAULT_TOOL_SOURCE,
   getManifestName,
   manifestToMetadata,
   metadataToManifestPatch,
@@ -67,6 +68,7 @@ type GenericEditorTab =
   | "skills"
   | "tools"
   | "content"
+  | "source"
   | "json";
 
 // ─── Agent Editor Inner Form ────────────────────────────────────────
@@ -198,7 +200,7 @@ function AgentEditorInner({
 
   const agentTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
-    { id: "prompt", label: t("editor.tabPrompt") },
+    { id: "prompt", label: t("editor.tabContent.agent") },
     { id: "providers", label: t("editor.tabServices") },
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
@@ -329,6 +331,7 @@ function AgentEditorInner({
 interface PackageEditorState {
   manifest: Record<string, unknown>;
   content: string;
+  sourceCode?: string;
   lockVersion?: number;
 }
 
@@ -375,6 +378,7 @@ function PackageEditorInner({
       body: JSON.stringify({
         manifest: state.manifest,
         content: state.content,
+        ...(state.sourceCode !== undefined ? { sourceCode: state.sourceCode } : {}),
         lockVersion: state.lockVersion!,
       }),
     });
@@ -389,14 +393,23 @@ function PackageEditorInner({
       setActiveTab("general");
       return;
     }
-    if (!state.content.trim()) {
+    if (type === "skill" && !state.content.trim()) {
       setError(t("editor.errorContent", { defaultValue: "Le contenu est requis." }));
       setActiveTab("content");
       return;
     }
+    if (type === "tool" && !state.sourceCode?.trim()) {
+      setError(t("editor.errorContent", { defaultValue: "Le contenu est requis." }));
+      setActiveTab("source");
+      return;
+    }
 
     allowNavigation();
-    const body = { manifest: state.manifest, content: state.content };
+    const body = {
+      manifest: state.manifest,
+      content: state.content,
+      ...(state.sourceCode !== undefined ? { sourceCode: state.sourceCode } : {}),
+    };
     if (isEdit) {
       updatePkg.mutate(
         { ...body, lockVersion: state.lockVersion! },
@@ -411,11 +424,12 @@ function PackageEditorInner({
 
   const pkgTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
-    { id: "content", label: t("packages.content") },
+    { id: "content", label: t(`editor.tabContent.${type}`) },
+    ...(type === "tool"
+      ? [{ id: "source" as GenericEditorTab, label: t("editor.tabSource") }]
+      : []),
     { id: "json", label: t("editor.tabJson") },
   ];
-
-  const language = type === "skill" ? "markdown" : "typescript";
 
   return (
     <EditorShell
@@ -445,7 +459,15 @@ function PackageEditorInner({
         <ContentEditor
           value={state.content}
           onChange={(content) => setState((s) => ({ ...s, content }))}
-          language={language}
+          language="markdown"
+        />
+      )}
+
+      {activeTab === "source" && type === "tool" && (
+        <ContentEditor
+          value={state.sourceCode ?? ""}
+          onChange={(sourceCode) => setState((s) => ({ ...s, sourceCode }))}
+          language="typescript"
         />
       )}
 
@@ -540,9 +562,10 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
           isEdit && providerDetail
             ? {
                 manifest: providerDetail.manifest ?? {},
+                content: providerDetail.content ?? "",
                 lockVersion: providerDetail.lockVersion,
               }
-            : { manifest: defaultProviderManifest(currentOrg?.slug, user?.email) }
+            : { manifest: defaultProviderManifest(currentOrg?.slug, user?.email), content: "" }
         }
         isEdit={isEdit}
         packageId={packageId}
@@ -564,9 +587,14 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
       ? {
           manifest: pkgDetail.manifest ?? {},
           content: pkgDetail.content ?? "",
+          ...(type === "tool" ? { sourceCode: pkgDetail.sourceCode ?? "" } : {}),
           lockVersion: pkgDetail.lockVersion,
         }
-      : { manifest: defaultManifest, content: defaultContent };
+      : {
+          manifest: defaultManifest,
+          content: defaultContent,
+          ...(type === "tool" ? { sourceCode: DEFAULT_TOOL_SOURCE } : {}),
+        };
 
   return (
     <PackageEditorInner

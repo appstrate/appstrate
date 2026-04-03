@@ -23,7 +23,7 @@ export function DiffTab({ type, latestVersion, currentManifest, currentContent }
     latestVersion.content != null &&
     currentContent != null &&
     latestVersion.content !== currentContent;
-  const contentLabel = type === "agent" ? t("version.diffPrompt") : t("packages.content");
+  const contentLabel = t(`editor.tabContent.${type}`);
 
   const [subTab, setSubTab] = useState<"manifest" | "content">(
     hasManifestChanges ? "manifest" : "content",
