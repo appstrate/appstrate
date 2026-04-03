@@ -597,6 +597,14 @@ export const schemas = {
         type: ["string", "null"],
         description: "Manifest name (@scope/name) — may differ from package ID",
       },
+      versionCount: {
+        type: "integer",
+        description: "Number of published versions",
+      },
+      hasUnarchivedChanges: {
+        type: "boolean",
+        description: "Whether the active version has changes not yet archived as a version",
+      },
       forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
       agents: {
         type: "array",

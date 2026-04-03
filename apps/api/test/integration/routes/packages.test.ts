@@ -6,8 +6,9 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
-import { packages } from "@appstrate/db/schema";
+import { packages, packageDistTags } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { db } from "../../helpers/db.ts";
 
 const app = getTestApp();
 
@@ -127,7 +128,7 @@ describe("Packages API", () => {
   // ═══════════════════════════════════════════════
 
   describe("GET /api/packages/agents/:scope/:name", () => {
-    it("returns agent detail with version count", async () => {
+    it("returns agent detail with versionCount and hasUnarchivedChanges", async () => {
       await seedAgent({
         id: "@pkgorg/detail-agent",
         orgId: ctx.orgId,
@@ -142,6 +143,32 @@ describe("Packages API", () => {
       const body = (await res.json()) as any;
       expect(body.agent).toBeDefined();
       expect(body.agent.id).toBe("@pkgorg/detail-agent");
+      expect(body.agent.versionCount).toBe(0);
+      expect(body.agent.hasUnarchivedChanges).toBe(true);
+    });
+
+    it("returns hasUnarchivedChanges false when no changes since last version", async () => {
+      await seedAgent({
+        id: "@pkgorg/versioned-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+
+      // Create a version with a createdAt in the future to ensure updatedAt < createdAt
+      await seedPackageVersion({
+        packageId: "@pkgorg/versioned-agent",
+        version: "0.1.0",
+        createdAt: new Date(Date.now() + 60_000),
+      });
+
+      const res = await app.request("/api/packages/agents/@pkgorg/versioned-agent", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.agent.versionCount).toBe(1);
+      expect(body.agent.hasUnarchivedChanges).toBe(false);
     });
 
     it("returns 404 for non-existent package", async () => {
@@ -719,11 +746,17 @@ describe("Packages API", () => {
   // ═══════════════════════════════════════════════
 
   describe("GET /api/packages/agents/:scope/:name/versions/info", () => {
-    it("returns version info for an agent", async () => {
+    it("returns activeVersion from manifest when no published versions exist", async () => {
       await seedAgent({
         id: "@pkgorg/info-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@pkgorg/info-agent",
+          version: "1.2.0",
+          type: "agent",
+          description: "Test",
+        },
       });
 
       const res = await app.request("/api/packages/agents/@pkgorg/info-agent/versions/info", {
@@ -732,8 +765,48 @@ describe("Packages API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      // Version info response should contain structured data
-      expect(body).toBeDefined();
+      expect(body.activeVersion).toBe("1.2.0");
+      expect(body.latestPublishedVersion).toBeNull();
+    });
+
+    it("returns latestPublishedVersion when a version with dist-tag exists", async () => {
+      await seedAgent({
+        id: "@pkgorg/published-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@pkgorg/published-agent",
+          version: "2.0.0",
+          type: "agent",
+          description: "Test",
+        },
+      });
+
+      const pv = await seedPackageVersion({
+        packageId: "@pkgorg/published-agent",
+        version: "1.0.0",
+        manifest: {
+          name: "@pkgorg/published-agent",
+          version: "1.0.0",
+          type: "agent",
+        },
+      });
+
+      // Create the "latest" dist-tag pointing to this version
+      await db.insert(packageDistTags).values({
+        packageId: "@pkgorg/published-agent",
+        tag: "latest",
+        versionId: pv.id,
+      });
+
+      const res = await app.request("/api/packages/agents/@pkgorg/published-agent/versions/info", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.activeVersion).toBe("2.0.0");
+      expect(body.latestPublishedVersion).toBe("1.0.0");
     });
 
     it("returns 404 for non-existent agent", async () => {

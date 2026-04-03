@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { ModelNotConfiguredError } from "../../../src/services/env-builder.ts";
-import { signRunToken } from "../../../src/lib/run-token.ts";
+import { signRunToken, parseSignedToken } from "../../../src/lib/run-token.ts";
 
 // ─── ModelNotConfiguredError ────────────────────────────────
 
@@ -75,5 +75,27 @@ describe("signRunToken", () => {
     const a = signRunToken("exec_aaa");
     const b = signRunToken("exec_bbb");
     expect(a).not.toBe(b);
+  });
+});
+
+describe("parseSignedToken", () => {
+  it("round-trips a valid signed token", () => {
+    const runId = "exec_roundtrip-test";
+    const token = signRunToken(runId);
+    expect(parseSignedToken(token)).toBe(runId);
+  });
+
+  it("rejects a token with a tampered signature", () => {
+    const token = signRunToken("exec_tamper");
+    const tampered = token.slice(0, -4) + "dead";
+    expect(parseSignedToken(tampered)).toBeNull();
+  });
+
+  it("rejects a token without a dot separator", () => {
+    expect(parseSignedToken("notokenhere")).toBeNull();
+  });
+
+  it("rejects an empty string", () => {
+    expect(parseSignedToken("")).toBeNull();
   });
 });
