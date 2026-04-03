@@ -14,7 +14,7 @@ import {
   type CreateItemInput,
 } from "./package-items/index.ts";
 import { isValidVersion } from "@appstrate/core/semver";
-import type { PackageType } from "./package-items/config.ts";
+import type { PackageType } from "@appstrate/core/validation";
 
 /** Insert or update a skill/tool during post-install. */
 async function upsertItem(

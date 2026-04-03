@@ -4,7 +4,7 @@ import { eq, and, count, sql, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
-import type { PackageType } from "./package-items/config.ts";
+import type { PackageType } from "@appstrate/core/validation";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";

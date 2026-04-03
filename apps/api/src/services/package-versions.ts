@@ -547,6 +547,23 @@ export async function getVersionInfo(
 }
 
 // ─────────────────────────────────────────────
+// Unpublished changes detection
+// ─────────────────────────────────────────────
+
+/** Whether the active draft has changes not yet archived as a version. */
+export function computeHasUnpublishedChanges(
+  source: string,
+  versionCount: number,
+  updatedAt: Date | null,
+  latestVersionDate: Date | null,
+): boolean {
+  if (source === "system") return false;
+  if (versionCount === 0) return true;
+  if (!latestVersionDate) return false;
+  return (updatedAt ?? new Date()) > latestVersionDate;
+}
+
+// ─────────────────────────────────────────────
 // Draft → version helpers
 // ─────────────────────────────────────────────
 

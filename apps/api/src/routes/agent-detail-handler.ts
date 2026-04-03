@@ -7,7 +7,11 @@ import { db } from "@appstrate/db/client";
 import { packages, providerCredentials } from "@appstrate/db/schema";
 import { getPackage } from "../services/agent-service.ts";
 import { getPackageById } from "../services/package-items/index.ts";
-import { getVersionCount, getLatestVersionCreatedAt } from "../services/package-versions.ts";
+import {
+  getVersionCount,
+  getLatestVersionCreatedAt,
+  computeHasUnpublishedChanges,
+} from "../services/package-versions.ts";
 import { getPackageConfig, getLastRun, getRunningRunsForPackage } from "../services/state/index.ts";
 import {
   resolveProviderProfiles,
@@ -125,12 +129,12 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
 
   const parsed = parseScopedName(m.name);
 
-  const hasUnarchivedChanges =
-    agent.source !== "system" && rawItem
-      ? versionCount > 0 && latestVersionDate
-        ? (rawItem.updatedAt ?? new Date()) > latestVersionDate
-        : versionCount === 0
-      : false;
+  const hasUnarchivedChanges = computeHasUnpublishedChanges(
+    agent.source,
+    versionCount,
+    rawItem?.updatedAt ?? null,
+    latestVersionDate,
+  );
 
   return c.json({
     agent: {
