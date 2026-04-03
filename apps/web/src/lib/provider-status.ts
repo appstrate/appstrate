@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { TFunction } from "i18next";
-
 /**
  * Check whether a provider status string represents a connected state.
  */
@@ -28,35 +26,4 @@ export function hasDisconnectedProviders(
   return providers.some(
     (p) => !isProviderStatusConnected(p.status) || p.scopesSufficient === false,
   );
-}
-
-/**
- * Compute a summary string for the providers section.
- */
-export function computeProvidersSummary(
-  providers: Array<{ status: string; scopesSufficient?: boolean | null }>,
-  t: TFunction<"agents">,
-): { text: string; connectedCount: number; actionCount: number } | null {
-  if (providers.length === 0) return null;
-
-  let connectedCount = 0;
-  let actionCount = 0;
-
-  for (const svc of providers) {
-    if (isProviderStatusConnected(svc.status) && svc.scopesSufficient !== false) {
-      connectedCount++;
-    } else {
-      actionCount++;
-    }
-  }
-
-  const parts: string[] = [];
-  if (connectedCount > 0) {
-    parts.push(t("detail.providersSummaryOk", { connected: connectedCount }));
-  }
-  if (actionCount > 0) {
-    parts.push(t("detail.providersSummaryAction", { count: actionCount }));
-  }
-
-  return { text: parts.join(" \u2014 "), connectedCount, actionCount };
 }

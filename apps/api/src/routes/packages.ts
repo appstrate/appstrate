@@ -43,6 +43,7 @@ import {
   listPackageVersions,
   getVersionInfo,
   getLatestVersionCreatedAt,
+  computeHasUnpublishedChanges,
   createVersionFromDraft,
   createVersionAndUpload,
   deletePackageVersion,
@@ -533,20 +534,16 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 
-    const hasUnarchivedChanges =
-      item.source === "local"
-        ? versionCount === 0
-          ? true // No versions yet — entire package is unpublished
-          : latestVersionDate
-            ? new Date(item.updatedAt ?? Date.now()) > latestVersionDate
-            : false
-        : false;
-
     return c.json({
       [rcfg.responseKey]: {
         ...item,
         versionCount,
-        hasUnarchivedChanges,
+        hasUnarchivedChanges: computeHasUnpublishedChanges(
+          item.source,
+          versionCount,
+          item.updatedAt ? new Date(item.updatedAt) : null,
+          latestVersionDate,
+        ),
       },
     });
   };
@@ -980,7 +977,7 @@ export function createPackagesRouter() {
 
   // --- Fork route ---
   router.post("/:scope{@[^/]+}/:name/fork", requirePermission("agents", "write"), async (c) => {
-    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const packageId = getItemId(c);
     const orgId = c.get("orgId");
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
@@ -1016,7 +1013,7 @@ export function createPackagesRouter() {
 
   // --- Provider versions (standalone — providers use their own CRUD in routes/providers.ts) ---
   router.get("/providers/:scope{@[^/]+}/:name/versions", async (c) => {
-    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const packageId = getItemId(c);
     const versions = await listPackageVersions(packageId);
     return c.json({ versions });
   });
@@ -1106,11 +1103,14 @@ export function createPackagesRouter() {
           getVersionCount(packageId),
           getLatestVersionCreatedAt(packageId),
         ]);
-        const hasUnarchivedChanges =
-          existing.source === "local" && vCount > 0 && latestDate
-            ? (existing.updatedAt ?? new Date()) > latestDate
-            : false;
-        if (hasUnarchivedChanges) {
+        if (
+          computeHasUnpublishedChanges(
+            existing.source,
+            vCount,
+            existing.updatedAt ?? null,
+            latestDate,
+          )
+        ) {
           throw conflict(
             "draft_overwrite",
             "This package has unpublished changes that will be overwritten by the import.",
@@ -1252,7 +1252,7 @@ export function createPackagesRouter() {
 
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP
   router.get("/:scope{@[^/]+}/:name/:version/download", rateLimit(50), async (c) => {
-    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const packageId = getItemId(c);
     const versionQuery = c.req.param("version")!;
 
     const ver = await getVersionForDownload(packageId, versionQuery);

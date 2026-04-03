@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { packageTypeEnum } from "@appstrate/db/schema";
+import type { PackageType } from "@appstrate/core/validation";
 
 // ─────────────────────────────────────────────
 // Package type configuration
 // ─────────────────────────────────────────────
 
-export type PackageType = (typeof packageTypeEnum.enumValues)[number];
+export type { PackageType };
 
 export interface PackageTypeConfig {
   type: PackageType;

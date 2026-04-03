@@ -3,6 +3,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
+import { getItemId } from "./packages.ts";
 import { logger } from "../lib/logger.ts";
 import { escapeHtml } from "../lib/html.ts";
 import { ApiError, forbidden, invalidRequest, internalError, parseBody } from "../lib/errors.ts";
@@ -62,7 +63,7 @@ export function createConnectionsRouter() {
     "/connect/:scope{@[^/]+}/:name",
     requirePermission("connections", "connect"),
     async (c) => {
-      const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
+      const provider = getItemId(c);
       const actor = getActor(c);
       const orgId = c.get("orgId");
 
@@ -102,7 +103,7 @@ export function createConnectionsRouter() {
     "/connect/:scope{@[^/]+}/:name/api-key",
     requirePermission("connections", "connect"),
     async (c) => {
-      const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
+      const provider = getItemId(c);
       const actor = getActor(c);
       const orgId = c.get("orgId");
 
@@ -142,7 +143,7 @@ export function createConnectionsRouter() {
     "/connect/:scope{@[^/]+}/:name/credentials",
     requirePermission("connections", "connect"),
     async (c) => {
-      const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
+      const provider = getItemId(c);
       const actor = getActor(c);
       const orgId = c.get("orgId");
 
@@ -259,7 +260,7 @@ export function createConnectionsRouter() {
     "/:scope{@[^/]+}/:name",
     requirePermission("connections", "disconnect"),
     async (c) => {
-      const provider = `${c.req.param("scope")}/${c.req.param("name")}`;
+      const provider = getItemId(c);
       const actor = getActor(c);
       const connectionId = c.req.query("connectionId");
       try {
