@@ -65,7 +65,7 @@ appstrate/
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
 │   │   ├── headers.ts        # Reusable response header definitions
-│   │   └── paths/            # One file per route domain (181 endpoints)
+│   │   └── paths/            # One file per route domain (182 endpoints)
 │   └── types/                # Backend types + re-exports from shared-types
 │
 ├── apps/web/src/             # @appstrate/web — React 19 + Vite + React Query v5
@@ -87,7 +87,7 @@ appstrate/
 │   ├── registry.ts           # renderEmail + registerEmailOverrides (cloud override mechanism)
 │   └── templates/            # Layout + per-type templates (verification, invitation)
 │
-├── packages/core/            # @appstrate/core — shared validation, storage, utilities (published on npm)
+├── packages/core/            # @appstrate/core — shared validation, storage, utilities
 ├── packages/env/src/         # @appstrate/env — Zod env validation (authoritative)
 ├── packages/shared-types/    # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 ├── packages/connect/         # @appstrate/connect — OAuth2/PKCE, API key, credential encryption
@@ -380,14 +380,14 @@ describe("GET /api/my-resource", () => {
 
 ## API Reference
 
-**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 181 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
+**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 182 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
 
 - **Source files**: `apps/api/src/openapi/` — modular TypeScript files assembled at build time
 - **Live spec**: `GET /api/openapi.json` (raw JSON) — public, no auth
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `agents`, `runs`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `share`, `share-links`, `internal`, `welcome`, `meta`, `models`, `applications`, `end-users`, `webhooks`.
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `agents`, `runs`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `internal`, `welcome`, `meta`, `models`, `applications`, `end-users`, `webhooks`.
 
 ## Database
 
