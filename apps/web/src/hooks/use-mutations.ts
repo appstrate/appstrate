@@ -321,6 +321,7 @@ export function useCreatePackage(type: PackageType) {
       id?: string;
       manifest: Record<string, unknown>;
       content: string;
+      sourceCode?: string;
     }) => {
       return api<{ packageId: string }>(`/packages/${cfg.path}`, {
         method: "POST",
@@ -330,6 +331,7 @@ export function useCreatePackage(type: PackageType) {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
+      if (type === "provider") invalidateProviderQueries(qc);
       if (data.packageId) {
         navigate(packageDetailPath(type, data.packageId));
       }
@@ -346,6 +348,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       content: string;
+      sourceCode?: string;
       lockVersion: number;
     }) => {
       return api<{ lockVersion: number }>(`/packages/${cfg.path}/${packageId}`, {
@@ -356,6 +359,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
+      if (type === "provider") invalidateProviderQueries(qc);
       qc.invalidateQueries({ queryKey: ["version-info"] });
       navigate(packageDetailPath(type, packageId));
     },

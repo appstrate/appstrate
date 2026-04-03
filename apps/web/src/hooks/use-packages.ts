@@ -71,6 +71,10 @@ function useUploadPackage(type: PackageType) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
+      if (type === "provider") {
+        qc.invalidateQueries({ queryKey: ["providers"] });
+        qc.invalidateQueries({ queryKey: ["available-providers"] });
+      }
     },
   });
 }
@@ -85,6 +89,10 @@ function useDeletePackage(type: PackageType) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages", cfg.path] });
+      if (type === "provider") {
+        qc.invalidateQueries({ queryKey: ["providers"] });
+        qc.invalidateQueries({ queryKey: ["available-providers"] });
+      }
       navigate("/");
     },
   });
