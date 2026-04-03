@@ -33,5 +33,10 @@ ALTER TABLE runs RENAME CONSTRAINT executions_at_most_one_actor TO runs_at_most_
 -- 6. Sequence rename (serial column)
 ALTER SEQUENCE execution_logs_id_seq RENAME TO run_logs_id_seq;
 
--- 7. Update pg_notify triggers/functions if they reference old names
--- (Drizzle pg_notify is application-level, not DB triggers — no action needed)
+-- 7. Drop legacy pg_notify triggers and functions that reference old column names.
+-- The old execution_logs_notify_trigger references NEW.execution_id (now run_id),
+-- causing INSERT failures on run_logs.
+DROP TRIGGER IF EXISTS executions_notify_trigger ON runs;
+DROP TRIGGER IF EXISTS execution_logs_notify_trigger ON run_logs;
+DROP FUNCTION IF EXISTS notify_execution_change();
+DROP FUNCTION IF EXISTS notify_execution_log_insert();
