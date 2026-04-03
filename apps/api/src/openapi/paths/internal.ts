@@ -77,6 +77,44 @@ export const internalPaths = {
       },
     },
   },
+  "/internal/credentials/{scope}/{name}/refresh": {
+    post: {
+      operationId: "refreshProviderCredentials",
+      tags: ["Internal"],
+      summary: "Force-refresh provider credentials",
+      description:
+        "Called by sidecar on upstream 401 to force an OAuth2 token refresh before retrying. If the provider is not OAuth2 or has no refresh token, returns current credentials unchanged. If the refresh itself fails, flags the connection as needs_reconnection and returns 401. Container-to-host only. Auth via Bearer run token.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        {
+          name: "scope",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+        },
+        { name: "name", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "Refreshed credentials and authorized URIs",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  credentials: { type: "object" },
+                  authorizedUris: { type: "array", items: { type: "string" } },
+                  allowAllUris: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { description: "Provider or profile not found" },
+      },
+    },
+  },
   "/internal/connections/report-auth-failure": {
     post: {
       operationId: "reportAuthFailure",

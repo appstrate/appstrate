@@ -264,16 +264,17 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     // 5. Build forwarded headers (remove routing + hop-by-hop headers)
-    const filtered = filterHeaders(c.req.header(), CREDENTIAL_PROXY_SKIP);
-    const forwardedHeaders: Record<string, string> = {};
-    for (const [key, value] of Object.entries(filtered)) {
-      forwardedHeaders[key] = substituteVars(value, creds.credentials);
-    }
+    //    Keep raw templates for potential retry with refreshed credentials
+    const rawHeaders = filterHeaders(c.req.header(), CREDENTIAL_PROXY_SKIP);
 
     // Infrastructure proxy (agent-level, transparent)
     const resolvedProxy = config.proxyUrl || "";
 
-    // 5b. Check for unresolved placeholders in headers
+    // 5b. Resolve headers with initial credentials and check for unresolved placeholders
+    const forwardedHeaders: Record<string, string> = {};
+    for (const [key, value] of Object.entries(rawHeaders)) {
+      forwardedHeaders[key] = substituteVars(value, creds.credentials);
+    }
     for (const [key, value] of Object.entries(forwardedHeaders)) {
       const unresolved = findUnresolvedPlaceholders(value);
       if (unresolved.length) {
@@ -282,16 +283,6 @@ export function createApp(deps: AppDeps): Hono {
           400,
         );
       }
-    }
-
-    // 5c. Inject stored cookies from cookie jar
-    const storedCookies = cookieJar.get(providerId);
-    if (storedCookies && storedCookies.length) {
-      const existing = forwardedHeaders["cookie"] || "";
-      const merged = existing
-        ? `${existing}; ${storedCookies.join("; ")}`
-        : storedCookies.join("; ");
-      forwardedHeaders["cookie"] = merged;
     }
 
     // 6. Handle body — always buffer for potential retry on 401
@@ -333,19 +324,23 @@ export function createApp(deps: AppDeps): Hono {
       }
     }
 
-    /** Make an upstream request and return the response. */
-    const doUpstreamRequest = async (
-      credentials: Record<string, string>,
-      headers: Record<string, string>,
-    ): Promise<FetchResult & { body?: string }> => {
-      // Re-substitute credentials into headers for retry with refreshed token
+    /** Make an upstream request, substituting credentials into raw header templates. */
+    const doUpstreamRequest = async (credentials: Record<string, string>): Promise<FetchResult> => {
       const resolvedHeaders: Record<string, string> = {};
-      for (const [key, value] of Object.entries(headers)) {
+      for (const [key, value] of Object.entries(rawHeaders)) {
         resolvedHeaders[key] = substituteVars(value, credentials);
+      }
+      // Re-inject cookies (not credential-dependent)
+      const storedCookies2 = cookieJar.get(providerId);
+      if (storedCookies2 && storedCookies2.length) {
+        const existing = resolvedHeaders["cookie"] || "";
+        resolvedHeaders["cookie"] = existing
+          ? `${existing}; ${storedCookies2.join("; ")}`
+          : storedCookies2.join("; ");
       }
 
       const body = buildBody(credentials);
-      const result = await fetchOrError(c, fetchFn, "Upstream request failed", resolvedUrl, {
+      return fetchOrError(c, fetchFn, "Upstream request failed", resolvedUrl, {
         method,
         headers: resolvedHeaders,
         body,
@@ -353,11 +348,10 @@ export function createApp(deps: AppDeps): Hono {
         // @ts-expect-error - Bun supports proxy option natively
         proxy: resolvedProxy || undefined,
       });
-      return result;
     };
 
     // 7. Make the first request to the target
-    let result = await doUpstreamRequest(creds.credentials, forwardedHeaders);
+    let result = await doUpstreamRequest(creds.credentials);
     if (!result.ok) return result.errorResponse;
     let targetRes = result.response;
 
@@ -372,7 +366,7 @@ export function createApp(deps: AppDeps): Hono {
       try {
         const refreshed = await deps.refreshCredentials(providerId);
         // Retry with refreshed credentials
-        const retryResult = await doUpstreamRequest(refreshed.credentials, forwardedHeaders);
+        const retryResult = await doUpstreamRequest(refreshed.credentials);
         if (retryResult.ok && retryResult.response.status !== 401) {
           // Refresh+retry succeeded — use the retried response
           targetRes = retryResult.response;
@@ -429,7 +423,7 @@ export function createApp(deps: AppDeps): Hono {
       !reportedAuthFailures.has(providerId)
     ) {
       reportedAuthFailures.add(providerId);
-      fetch(`${config.platformApiUrl}/internal/connections/report-auth-failure`, {
+      fetchFn(`${config.platformApiUrl}/internal/connections/report-auth-failure`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${config.runToken}`,
