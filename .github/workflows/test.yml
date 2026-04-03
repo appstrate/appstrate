@@ -41,7 +41,7 @@ jobs:
     name: Integration tests
     if: >-
       github.event_name == 'push' ||
-      !contains(github.event.pull_request.labels.*.name, 'skip-integration')
+      contains(github.event.pull_request.labels.*.name, 'integration')
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

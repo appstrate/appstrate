@@ -119,7 +119,6 @@ async function doRefresh(
 
   const parsed = parseTokenResponse(
     { ...tokenData, access_token: tokenData.access_token ?? creds.access_token },
-    ctx.scopeSeparator ?? " ",
     undefined,
     creds.refresh_token,
   );

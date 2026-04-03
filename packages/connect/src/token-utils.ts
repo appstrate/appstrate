@@ -39,14 +39,15 @@ export interface ParsedTokenResponse {
 /**
  * Parse a standard OAuth2 token endpoint response.
  *
+ * Scope parsing is universal: splits by comma, space, or %20 to handle all
+ * provider conventions (e.g. GitHub returns comma-separated, Google uses spaces).
+ *
  * @param tokenData - Raw JSON response from the token endpoint
- * @param scopeSeparator - Character used to split scope strings (default: " ")
  * @param fallbackScopes - Scopes to use if none are returned in the response
  * @param fallbackRefreshToken - Refresh token to preserve if not present in response
  */
 export function parseTokenResponse(
   tokenData: Record<string, unknown>,
-  scopeSeparator = " ",
   fallbackScopes?: string[],
   fallbackRefreshToken?: string,
 ): ParsedTokenResponse {
@@ -63,10 +64,10 @@ export function parseTokenResponse(
     expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
   }
 
-  // Extract granted scopes
+  // Extract granted scopes — split by comma, space, or %20 universally
   const scopeStr = typeof tokenData.scope === "string" ? tokenData.scope : "";
   const scopesGranted = scopeStr
-    ? scopeStr.split(scopeSeparator).filter(Boolean)
+    ? scopeStr.split(/[\s,]+|%20/).filter(Boolean)
     : (fallbackScopes ?? []);
 
   return { accessToken, refreshToken, expiresAt, scopesGranted };
