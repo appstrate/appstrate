@@ -25,9 +25,7 @@ export function isProviderConnectedInProfile(
 export function hasDisconnectedProviders(
   providers: Array<{ status: string; scopesSufficient?: boolean | null }>,
 ): boolean {
-  return providers.some(
-    (p) => !isProviderStatusConnected(p.status) || p.scopesSufficient === false,
-  );
+  return providers.some((p) => p.status !== "connected" || p.scopesSufficient === false);
 }
 
 /**
@@ -43,7 +41,7 @@ export function computeProvidersSummary(
   let actionCount = 0;
 
   for (const svc of providers) {
-    if (isProviderStatusConnected(svc.status) && svc.scopesSufficient !== false) {
+    if (svc.status === "connected" && svc.scopesSufficient !== false) {
       connectedCount++;
     } else {
       actionCount++;

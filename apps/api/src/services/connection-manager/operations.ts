@@ -21,7 +21,7 @@ export async function listActorConnections(
   const connections = await listConnectionsRaw(db, profileId, orgId);
   return connections.map((c) => ({
     provider: c.providerId,
-    status: "connected" as const,
+    status: c.needsReconnection ? ("needs_reconnection" as const) : ("connected" as const),
     connectionId: c.id,
     connectedAt: c.createdAt,
     scopesGranted: c.scopesGranted,
