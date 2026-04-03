@@ -25,7 +25,7 @@ function createMockDeps(overrides?: Partial<DependencyValidationDeps>): Dependen
       status: "connected" as const,
       scopesGranted: ["read", "write"],
     }),
-    validateScopes: () => ({ sufficient: true }),
+    validateScopes: () => ({ sufficient: true, missing: [] }),
     ...overrides,
   };
 }
@@ -112,7 +112,7 @@ describe("validateAgentDependencies", () => {
 
   it("throws when scopes are insufficient", async () => {
     const deps = createMockDeps({
-      validateScopes: () => ({ sufficient: false }),
+      validateScopes: () => ({ sufficient: false, missing: ["write"] }),
     });
     const providers = [{ id: "@test/gmail", scopes: ["read", "write"] }];
     const profiles = profileMap({ "@test/gmail": "profile-1" });
@@ -123,6 +123,7 @@ describe("validateAgentDependencies", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
       expect((err as ApiError).code).toBe("scope_insufficient");
+      expect((err as ApiError).message).toContain("write");
     }
   });
 
@@ -131,7 +132,7 @@ describe("validateAgentDependencies", () => {
     const deps = createMockDeps({
       validateScopes: () => {
         scopesCalled = true;
-        return { sufficient: true };
+        return { sufficient: true, missing: [] };
       },
     });
     const providers = [{ id: "@test/gmail" }];
@@ -146,7 +147,7 @@ describe("validateAgentDependencies", () => {
     const deps = createMockDeps({
       validateScopes: () => {
         scopesCalled = true;
-        return { sufficient: true };
+        return { sufficient: true, missing: [] };
       },
     });
     const providers = [{ id: "@test/gmail", scopes: [] }];

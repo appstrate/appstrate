@@ -337,5 +337,7 @@
   "schedule.providersNotBoundWarning": "Certains services ne sont pas liés à ce profil. La planification ne pourra pas s'exécuter tant que tous les services requis ne sont pas liés.",
   "run.notConnected": "Non connecté",
   "run.notAllConnected": "Tous les providers doivent être connectés avant de lancer cet agent.",
-  "run.configureConnections": "Configurer les connexions"
+  "run.configureConnections": "Configurer les connexions",
+  "providerCard.scopesMissing": "Permissions insuffisantes",
+  "providerCard.updatePermissions": "Mettre à jour"
 }

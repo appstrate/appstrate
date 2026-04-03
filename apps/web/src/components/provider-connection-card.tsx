@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckCircle2, AlertTriangle, Unlink, Plug, Building2 } from "lucide-react";
+import { CheckCircle2, AlertTriangle, Unlink, Plug, Building2, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -30,6 +30,10 @@ interface ProviderConnectionCardProps {
   readOnly?: boolean;
   /** Profile ID to check connection status for (e.g. schedule owner's profile). */
   viewProfileId?: string;
+  /** Scopes required by the agent for this provider. */
+  scopesRequired?: string[];
+  /** Scopes missing from the current connection (subset of scopesRequired). */
+  scopesMissing?: string[];
 }
 
 export function ProviderConnectionCard({
@@ -39,6 +43,8 @@ export function ProviderConnectionCard({
   orgProfileName,
   readOnly: readOnlyProp,
   viewProfileId,
+  scopesRequired,
+  scopesMissing,
 }: ProviderConnectionCardProps) {
   const { t } = useTranslation(["settings", "agents"]);
 
@@ -47,6 +53,7 @@ export function ProviderConnectionCard({
     hasMultipleProfiles,
     effectiveProfileId,
     isConnected,
+    profileConnections,
     binding,
     isBoundButDisconnected,
     isEffectivelyBound,
@@ -81,13 +88,19 @@ export function ProviderConnectionCard({
   const authMode = provider?.authMode;
   const credentialSchema = provider?.credentialSchema as JSONSchemaObject | undefined;
 
+  const hasMissingScopes = scopesMissing && scopesMissing.length > 0;
+
   const handleConnect = () => {
     if (authMode === "api_key") {
       setApiKeyOpen(true);
     } else if (authMode === "custom" && credentialSchema) {
       setCustomCredOpen(true);
     } else {
-      connectMutation.mutate({ provider: providerId, ...profileParam });
+      connectMutation.mutate({
+        provider: providerId,
+        ...(scopesRequired ? { scopes: scopesRequired } : {}),
+        ...profileParam,
+      });
     }
   };
 
@@ -98,6 +111,7 @@ export function ProviderConnectionCard({
   // ─── Determine active mode: org-bound or user-managed ────
 
   const isOrgMode = isEffectivelyBound || isBoundButDisconnected;
+  const scopesGranted = profileConnections?.find((c) => c.providerId === providerId)?.scopesGranted;
 
   return (
     <>
@@ -147,10 +161,46 @@ export function ProviderConnectionCard({
           /* ─── User-managed mode: profile selector + connect/disconnect ── */
           <>
             {isConnected ? (
-              <span className="text-success inline-flex shrink-0 items-center gap-1 text-xs">
-                <CheckCircle2 className="size-3" />
-                {t("providers.connected")}
-              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                {hasMissingScopes ? (
+                  <span className="inline-flex items-center gap-1 text-xs text-amber-500">
+                    <AlertTriangle className="size-3" />
+                    {t("providerCard.scopesMissing", { ns: "agents" })}
+                  </span>
+                ) : (
+                  <span className="text-success inline-flex items-center gap-1 text-xs">
+                    <CheckCircle2 className="size-3" />
+                    {t("providers.connected")}
+                  </span>
+                )}
+                {scopesGranted && scopesGranted.length > 0 && (
+                  <div className="flex items-center gap-1">
+                    <Shield className="text-muted-foreground size-3" />
+                    {scopesGranted.map((scope) => (
+                      <span
+                        key={scope}
+                        className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
+                          scopesMissing?.includes(scope)
+                            ? "bg-amber-500/10 text-amber-500"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {scope}
+                      </span>
+                    ))}
+                    {scopesMissing?.map((scope) =>
+                      !scopesGranted.includes(scope) ? (
+                        <span
+                          key={scope}
+                          className="rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] text-amber-500"
+                        >
+                          {scope}
+                        </span>
+                      ) : null,
+                    )}
+                  </div>
+                )}
+              </div>
             ) : readOnly ? (
               <span className="text-muted-foreground inline-flex shrink-0 items-center gap-1 text-xs">
                 <AlertTriangle className="size-3" />
@@ -187,7 +237,19 @@ export function ProviderConnectionCard({
                     {t("providerCard.connect")}
                   </Button>
                 )}
-                {isConnected && (
+                {isConnected && hasMissingScopes && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 border-amber-500/50 px-2 text-xs text-amber-500 hover:bg-amber-500/10"
+                    onClick={handleConnect}
+                    disabled={isPending}
+                  >
+                    <Shield className="mr-1 size-3" />
+                    {t("providerCard.updatePermissions", { ns: "agents" })}
+                  </Button>
+                )}
+                {isConnected && !hasMissingScopes && (
                   <Button
                     variant="outline"
                     size="sm"

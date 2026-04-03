@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Building2, User, AlertTriangle, AlertCircle, CheckCircle2, Plug } from "lucide-react";
+import {
+  Building2,
+  User,
+  AlertTriangle,
+  AlertCircle,
+  CheckCircle2,
+  Plug,
+  Shield,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import { Modal } from "./modal";
@@ -32,7 +40,9 @@ export function ConnectionSummaryModal({
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { data: providersData } = useProviders();
 
-  const allReady = providers.every((p) => isProviderStatusConnected(p.status));
+  const allReady = providers.every(
+    (p) => isProviderStatusConnected(p.status) && p.scopesSufficient !== false,
+  );
 
   return (
     <Modal
@@ -103,7 +113,12 @@ export function ConnectionSummaryModal({
                 </span>
               )}
 
-              {isConnected && svc.status === "needs_reconnection" ? (
+              {isConnected && svc.scopesSufficient === false ? (
+                <span className="inline-flex items-center gap-1 text-xs text-amber-500">
+                  <Shield className="size-3.5 shrink-0" />
+                  {t("providerCard.scopesMissing")}
+                </span>
+              ) : isConnected && svc.status === "needs_reconnection" ? (
                 <AlertCircle className="size-3.5 shrink-0 text-amber-500" />
               ) : isConnected ? (
                 <CheckCircle2 className="text-success size-3.5 shrink-0" />

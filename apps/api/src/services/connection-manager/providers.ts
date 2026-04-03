@@ -49,6 +49,7 @@ export async function getAvailableProvidersWithStatus(
         authMode: authModeLabel(provider.authMode),
         connectionId: conn.id,
         connectedAt: conn.createdAt,
+        scopesGranted: conn.scopesGranted,
       };
     }
     return {

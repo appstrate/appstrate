@@ -20,10 +20,14 @@ export function isProviderConnectedInProfile(
 }
 
 /**
- * Check whether any provider in the list is not connected.
+ * Check whether any provider in the list is not connected or has insufficient scopes.
  */
-export function hasDisconnectedProviders(providers: Array<{ status: string }>): boolean {
-  return providers.some((p) => !isProviderStatusConnected(p.status));
+export function hasDisconnectedProviders(
+  providers: Array<{ status: string; scopesSufficient?: boolean | null }>,
+): boolean {
+  return providers.some(
+    (p) => !isProviderStatusConnected(p.status) || p.scopesSufficient === false,
+  );
 }
 
 /**

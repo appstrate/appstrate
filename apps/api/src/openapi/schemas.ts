@@ -429,6 +429,7 @@ export const schemas = {
       authMode: { type: "string" },
       connectionId: { type: "string" },
       connectedAt: { type: "string" },
+      scopesGranted: { type: "array", items: { type: "string" } },
     },
   },
   ConnectionStatus: {
