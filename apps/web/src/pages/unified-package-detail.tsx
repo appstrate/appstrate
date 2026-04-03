@@ -11,6 +11,7 @@ import {
   useVersionDetail,
   usePackageDownload,
   useDeletePackage,
+  useAgents,
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
@@ -48,6 +49,7 @@ import {
 import { AgentModals } from "../components/package-detail/agent-modals";
 import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
 import { RunAgentButton } from "../components/run-agent-button";
+import { PackageCard } from "../components/package-card";
 import { useAgentReadiness } from "../hooks/use-agent-readiness";
 import { useModels, useAgentModel } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
@@ -165,6 +167,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       ? providersQuery.data?.providers.find((p) => p.id === packageId)
       : undefined;
   const callbackUrl = type === "provider" ? providersQuery.data?.callbackUrl : undefined;
+
+  // Agents list for "Used by" tab enrichment
+  const { data: allAgents } = useAgents();
 
   // Type-narrowed aliases for type-specific branches
   const agentDetail = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
@@ -509,27 +514,34 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         </div>
       )}
 
-      {type !== "agent" && tab === "usedBy" && pkgDetail && (
-        <div className="border-border bg-card rounded-lg border p-4">
-          {pkgDetail.agents.length === 0 ? (
+      {type !== "agent" &&
+        tab === "usedBy" &&
+        pkgDetail &&
+        (() => {
+          const agentIds = new Set(pkgDetail.agents.map((a) => a.id));
+          const enrichedAgents = allAgents?.filter((a) => agentIds.has(a.id)) ?? [];
+          return enrichedAgents.length === 0 ? (
             <p className="text-muted-foreground py-4 text-center text-sm">
               {t("packages.noAgents")}
             </p>
           ) : (
-            <div className="flex flex-wrap gap-2">
-              {pkgDetail.agents.map((f) => (
-                <Link
-                  key={f.id}
-                  to={`/agents/${f.id}`}
-                  className="border-border hover:border-primary text-foreground inline-flex items-center rounded-md border px-2.5 py-1 text-sm no-underline transition-colors"
-                >
-                  {f.displayName || f.id}
-                </Link>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {enrichedAgents.map((agent) => (
+                <PackageCard
+                  key={agent.id}
+                  id={agent.id}
+                  displayName={agent.displayName}
+                  description={agent.description}
+                  type="agent"
+                  source={agent.source}
+                  keywords={agent.keywords}
+                  providerIds={agent.dependencies.providers}
+                  runningRuns={agent.runningRuns}
+                />
               ))}
             </div>
-          )}
-        </div>
-      )}
+          );
+        })()}
 
       {tab === "versions" && <VersionHistory packageId={packageId} type={type} isOwned={isOwned} />}
 
