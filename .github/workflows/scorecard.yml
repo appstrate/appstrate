@@ -7,15 +7,16 @@ on:
   schedule:
     - cron: "0 6 * * 1" # Monday 6am UTC
 
-permissions:
-  security-events: write
-  id-token: write
-  contents: read
+permissions: read-all
 
 jobs:
   analysis:
     name: Scorecard Analysis
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
     timeout-minutes: 10
 
     steps:
