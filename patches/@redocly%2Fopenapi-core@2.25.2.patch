@@ -1,0 +1,13 @@
+diff --git a/lib/types/oas3_1.js b/lib/types/oas3_1.js
+index 48dd609b88aafe7f84ed0435b7c29778ad6836d6..3ad9e341b10117bd1c68eac34396204212b1bd2e 100644
+--- a/lib/types/oas3_1.js
++++ b/lib/types/oas3_1.js
+@@ -95,7 +95,7 @@ const Schema = {
+         $schema: { type: 'string' },
+         definitions: 'NamedSchemas',
+         $defs: 'NamedSchemas',
+-        $vocabulary: { type: 'string' },
++        $vocabulary: null,
+         externalDocs: 'ExternalDocs',
+         discriminator: 'Discriminator',
+         title: { type: 'string' },
