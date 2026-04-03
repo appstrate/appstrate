@@ -24,6 +24,7 @@ export type { SidecarConfig } from "./helpers.ts";
 export interface AppDeps {
   config: SidecarConfig;
   fetchCredentials: (providerId: string) => Promise<CredentialsResponse>;
+  refreshCredentials?: (providerId: string) => Promise<CredentialsResponse>;
   cookieJar: Map<string, string[]>;
   fetchFn?: typeof fetch; // default: global fetch — injectable for tests
   isReady?: () => boolean; // default: () => true — controls /health
@@ -293,50 +294,97 @@ export function createApp(deps: AppDeps): Hono {
       forwardedHeaders["cookie"] = merged;
     }
 
-    // 6. Handle body
+    // 6. Handle body — always buffer for potential retry on 401
     const method = c.req.method;
-    let body: BodyInit | undefined;
+    let rawBody: string | undefined;
 
     if (method !== "GET" && method !== "HEAD") {
-      if (substituteBody) {
-        // Check body size before buffering
-        const contentLength = parseInt(c.req.header("content-length") || "0", 10);
-        if (contentLength > MAX_SUBSTITUTE_BODY_SIZE) {
-          return c.json({ error: "Request body too large" }, 413);
-        }
-        // Buffer body and substitute variables
-        const rawBody = await c.req.text();
-        if (rawBody.length > MAX_SUBSTITUTE_BODY_SIZE) {
-          return c.json({ error: "Request body too large" }, 413);
-        }
-        body = substituteVars(rawBody, creds.credentials);
-        // Check for unresolved placeholders in body
-        const unresolvedInBody = findUnresolvedPlaceholders(body);
-        if (unresolvedInBody.length) {
-          return c.json(
-            { error: `Unresolved placeholders in body: {{${unresolvedInBody.join()}}}` },
-            400,
-          );
-        }
-      } else {
-        // Stream body through as-is
-        body = c.req.raw.body ?? undefined;
+      const contentLength = parseInt(c.req.header("content-length") || "0", 10);
+      if (contentLength > MAX_SUBSTITUTE_BODY_SIZE) {
+        return c.json({ error: "Request body too large" }, 413);
+      }
+      rawBody = await c.req.text();
+      if (rawBody.length > MAX_SUBSTITUTE_BODY_SIZE) {
+        return c.json({ error: "Request body too large" }, 413);
       }
     }
 
-    // 7. Make the request to the target (with timeout)
-    const result = await fetchOrError(c, fetchFn, "Upstream request failed", resolvedUrl, {
-      method,
-      headers: forwardedHeaders,
-      body,
-      signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
-      // @ts-expect-error - Bun supports proxy option natively
-      proxy: resolvedProxy || undefined,
-      // @ts-expect-error - Bun supports duplex for streaming request bodies
-      duplex: body instanceof ReadableStream ? "half" : undefined,
-    });
+    /** Build the request body with credential substitution applied. */
+    const buildBody = (credentials: Record<string, string>): string | undefined => {
+      if (!rawBody) return undefined;
+      if (substituteBody) {
+        const substituted = substituteVars(rawBody, credentials);
+        const unresolved = findUnresolvedPlaceholders(substituted);
+        if (unresolved.length) return undefined; // caller checks this
+        return substituted;
+      }
+      return rawBody;
+    };
+
+    // Check placeholder resolution before first request
+    if (substituteBody && rawBody) {
+      const testBody = substituteVars(rawBody, creds.credentials);
+      const unresolvedInBody = findUnresolvedPlaceholders(testBody);
+      if (unresolvedInBody.length) {
+        return c.json(
+          { error: `Unresolved placeholders in body: {{${unresolvedInBody.join()}}}` },
+          400,
+        );
+      }
+    }
+
+    /** Make an upstream request and return the response. */
+    const doUpstreamRequest = async (
+      credentials: Record<string, string>,
+      headers: Record<string, string>,
+    ): Promise<FetchResult & { body?: string }> => {
+      // Re-substitute credentials into headers for retry with refreshed token
+      const resolvedHeaders: Record<string, string> = {};
+      for (const [key, value] of Object.entries(headers)) {
+        resolvedHeaders[key] = substituteVars(value, credentials);
+      }
+
+      const body = buildBody(credentials);
+      const result = await fetchOrError(c, fetchFn, "Upstream request failed", resolvedUrl, {
+        method,
+        headers: resolvedHeaders,
+        body,
+        signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
+        // @ts-expect-error - Bun supports proxy option natively
+        proxy: resolvedProxy || undefined,
+      });
+      return result;
+    };
+
+    // 7. Make the first request to the target
+    let result = await doUpstreamRequest(creds.credentials, forwardedHeaders);
     if (!result.ok) return result.errorResponse;
-    const targetRes = result.response;
+    let targetRes = result.response;
+
+    // 7b. Retry on 401: refresh credentials and retry once (per provider per run)
+    if (
+      targetRes.status === 401 &&
+      deps.refreshCredentials &&
+      config.platformApiUrl &&
+      config.runToken &&
+      !reportedAuthFailures.has(providerId)
+    ) {
+      try {
+        const refreshed = await deps.refreshCredentials(providerId);
+        // Retry with refreshed credentials
+        const retryResult = await doUpstreamRequest(refreshed.credentials, forwardedHeaders);
+        if (retryResult.ok && retryResult.response.status !== 401) {
+          // Refresh+retry succeeded — use the retried response
+          targetRes = retryResult.response;
+        } else {
+          // Retry still failed — fall through to report auth failure below
+          if (retryResult.ok) targetRes = retryResult.response;
+        }
+      } catch {
+        // Refresh itself failed (invalid_grant, network) — platform already flagged the connection
+        // Fall through to report auth failure
+      }
+    }
 
     // 8. Capture Set-Cookie headers into cookie jar
     const setCookieHeaders = targetRes.headers.getSetCookie();
@@ -373,7 +421,7 @@ export function createApp(deps: AppDeps): Hono {
       responseHeaders["X-Truncated"] = "true";
     }
 
-    // Report auth failures to platform so connections can be flagged (once per provider per run)
+    // Report auth failures to platform (once per provider per run, only if retry didn't fix it)
     if (
       targetRes.status === 401 &&
       config.platformApiUrl &&

@@ -41,6 +41,7 @@ export {
   listConnections,
   getCredentials,
   resolveCredentialsForProxy,
+  forceRefreshCredentials,
   saveConnection,
   deleteConnection,
   deleteConnectionById,
