@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@afps-spec/schema": "^1.1.0",
+        "@afps-spec/schema": "^1.2.1",
         "@appstrate/core": "workspace:*",
       },
       "devDependencies": {
@@ -136,7 +136,7 @@
       "name": "@appstrate/core",
       "version": "2.10.3",
       "dependencies": {
-        "@afps-spec/schema": "^1.0.4",
+        "@afps-spec/schema": "^1.2.1",
         "fflate": "^0.8.0",
         "pino": "^10.3.1",
         "semver": "^7.7.1",
@@ -204,7 +204,7 @@
     },
   },
   "packages": {
-    "@afps-spec/schema": ["@afps-spec/schema@1.1.0", "", { "dependencies": { "semver": "^7.7.4", "zod": "^4.3.6" } }, "sha512-Ljqo4TEtRPtoDRbJxECWvpHzoxLvk1Fcjb3A+up7NsPtZAOD8WIT0a6r0gjdz3IY/yIIOMVoBzVz3TwPoJjpqw=="],
+    "@afps-spec/schema": ["@afps-spec/schema@1.2.1", "", { "dependencies": { "ajv": "^8.17.1", "semver": "^7.7.4", "zod": "^4.3.6" } }, "sha512-x1t5HSsoqTTuk6m8H+bwg6gkA3JXeTh5USi4/+O7yAUtOVm4QXhHiNBTNupMxpSYcwM7J0mDwoMIzRoTmTPcJA=="],
 
     "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.73.0", "", { "dependencies": { "json-schema-to-ts": "^3.1.1" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-URURVzhxXGJDGUGFunIOtBlSl7KWvZiAAKY/ttTkZAkXT9bTPqdk2eK0b8qqSxXpikh3QKPnPYpiyX98zf5ebw=="],
 
