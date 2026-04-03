@@ -19,6 +19,7 @@ export function AgentActions({
   packageId,
   manifest,
   isOwned,
+  isImported,
   isHistoricalVersion,
   downloadVersion,
   downloadPackage,
@@ -28,6 +29,7 @@ export function AgentActions({
   packageId: string;
   manifest?: Record<string, unknown>;
   isOwned: boolean;
+  isImported?: boolean;
   isHistoricalVersion: boolean;
   downloadVersion: string | undefined;
   downloadPackage: (v: string) => void;
@@ -78,6 +80,7 @@ export function AgentActions({
         type="agent"
         manifest={manifest}
         isOwned={isOwned}
+        isImported={isImported}
         isBuiltIn={detail.source === "system"}
         isHistoricalVersion={isHistoricalVersion}
         downloadVersion={downloadVersion}
