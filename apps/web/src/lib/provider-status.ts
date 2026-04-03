@@ -23,7 +23,5 @@ export function isProviderConnectedInProfile(
 export function hasDisconnectedProviders(
   providers: Array<{ status: string; scopesSufficient?: boolean | null }>,
 ): boolean {
-  return providers.some(
-    (p) => !isProviderStatusConnected(p.status) || p.scopesSufficient === false,
-  );
+  return providers.some((p) => p.status !== "connected" || p.scopesSufficient === false);
 }

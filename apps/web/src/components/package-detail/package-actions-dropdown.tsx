@@ -32,6 +32,7 @@ interface PackageActionsDropdownProps {
   type: PackageType;
   manifest?: Record<string, unknown>;
   isOwned: boolean;
+  isImported?: boolean;
   isBuiltIn: boolean;
   isHistoricalVersion: boolean;
   downloadVersion?: string;
@@ -60,6 +61,7 @@ export function PackageActionsDropdown({
   type,
   manifest,
   isOwned,
+  isImported,
   isBuiltIn,
   isHistoricalVersion,
   downloadVersion,
@@ -188,7 +190,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Delete ── */}
-          {isAdmin && !isBuiltIn && isOwned && (
+          {isAdmin && !isBuiltIn && (isOwned || isImported) && (
             <>
               <DropdownMenuSeparator />
               {isAgent && onDeleteAgent && (

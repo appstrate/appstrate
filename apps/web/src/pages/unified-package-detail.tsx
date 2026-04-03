@@ -281,6 +281,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // ── Render ──
   const isBuiltIn = source === "system";
+  const isImported = !!detail && !isOwned && !isBuiltIn;
 
   // Determine available tabs based on type
 
@@ -345,6 +346,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   | undefined
               }
               isOwned={isOwned}
+              isImported={isImported}
               isHistoricalVersion={isHistoricalVersion}
               downloadVersion={downloadVersion}
               downloadPackage={downloadPackage}
@@ -362,6 +364,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                     | undefined
                 }
                 isOwned={isOwned}
+                isImported={isImported}
                 isBuiltIn={isBuiltIn}
                 isHistoricalVersion={isHistoricalVersion}
                 downloadVersion={downloadVersion}

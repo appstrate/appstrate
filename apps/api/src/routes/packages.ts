@@ -50,7 +50,7 @@ import {
 } from "../services/package-versions.ts";
 import { agentDetailHandler } from "./agent-detail-handler.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requireOwnedPackage, checkScopeMatch } from "../middleware/guards.ts";
+import { requireOwnedPackage, requireOrgPackage, checkScopeMatch } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getRunningRunsForPackage } from "../services/state/index.ts";
 import { logger } from "../lib/logger.ts";
@@ -965,14 +965,14 @@ export function createPackagesRouter() {
     );
     router.delete(
       `/${path}/:scope{@[^/]+}/:name`,
-      requireOwnedPackage(),
+      requireOrgPackage(),
       deleteGuard,
       makeDeleteHandler(rcfg),
     );
     // Unscoped IDs
     router.get(`/${path}/:id`, rcfg.getHandler ?? makeGetHandler(rcfg));
     router.put(`/${path}/:id`, requireOwnedPackage(), writeGuard, makeUpdateHandler(rcfg));
-    router.delete(`/${path}/:id`, requireOwnedPackage(), deleteGuard, makeDeleteHandler(rcfg));
+    router.delete(`/${path}/:id`, requireOrgPackage(), deleteGuard, makeDeleteHandler(rcfg));
   }
 
   // --- Fork route ---
