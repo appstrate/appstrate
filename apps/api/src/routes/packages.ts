@@ -277,7 +277,11 @@ interface PackageRouteConfig {
   };
   responseKey: string;
   validateContent?: (content: string) => { valid: boolean; errors: string[]; warnings: string[] };
+  /** Validates the secondary source file (e.g. .ts for tools). */
+  validateSource?: (source: string) => { valid: boolean; errors: string[]; warnings: string[] };
   storageFileName: (id: string) => string;
+  /** Secondary source file name (e.g. {name}.ts for tools). */
+  sourceFileName?: (id: string) => string;
   /** Hook called after a new package is created. */
   afterCreate?: (params: {
     packageId: string;
@@ -294,6 +298,8 @@ interface PackageRouteConfig {
   requireMutableForVersionOps?: boolean;
   /** If true, this type uses JSON body for create (not ZIP upload parsing). */
   jsonBodyCreate?: boolean;
+  /** If true, content is required when creating via JSON body. */
+  requireContent?: boolean;
   /** Custom GET detail handler, replaces makeGetHandler when provided. */
   getHandler?: (c: Context<AppEnv>) => Promise<Response>;
 }
@@ -304,13 +310,17 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
     responseKey: "skill",
     storageFileName: () => "SKILL.md",
+    jsonBodyCreate: true,
+    requireContent: true,
   },
   tools: {
     cfg: TOOL_CONFIG,
     parseOpts: { requiredFile: null, contentFileExt: ".ts" },
     responseKey: "tool",
-    validateContent: validateToolSource,
-    storageFileName: (id) => `${parseScopedName(id)?.name ?? id}.ts`,
+    validateSource: validateToolSource,
+    storageFileName: () => "TOOL.md",
+    sourceFileName: (id) => `${parseScopedName(id)?.name ?? id}.ts`,
+    jsonBodyCreate: true,
   },
   agents: {
     cfg: AGENT_CONFIG,
@@ -318,6 +328,7 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     responseKey: "agent",
     storageFileName: () => "prompt.md",
     jsonBodyCreate: true,
+    requireContent: true,
     requireMutableForVersionOps: true,
     getHandler: agentDetailHandler,
   },
@@ -325,7 +336,7 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     cfg: PROVIDER_CONFIG,
     parseOpts: { requiredFile: null, contentFileExt: null },
     responseKey: "provider",
-    storageFileName: () => "definition.json",
+    storageFileName: () => "PROVIDER.md",
     jsonBodyCreate: true,
   },
 };
@@ -347,15 +358,17 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
-    // Agent create uses JSON body with { manifest, content }
+    // JSON body create path: { manifest, content?, source? }
     if (rcfg.jsonBodyCreate) {
       const body = await c.req.json<{
         manifest: Record<string, unknown>;
         content?: string;
+        sourceCode?: string;
       }>();
 
       const manifest = body.manifest;
       const content = body.content ?? "";
+      const sourceCode = body.sourceCode ?? "";
 
       // Validate manifest
       const manifestResult = validateManifest(manifest);
@@ -369,8 +382,26 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       }
       const validatedManifest = manifestResult.manifest;
 
-      if (!content.trim()) {
+      if (rcfg.requireContent && !content.trim()) {
         throw invalidRequest("Content cannot be empty", "content");
+      }
+
+      if (rcfg.validateContent) {
+        const validation = rcfg.validateContent(content);
+        if (!validation.valid) {
+          throw invalidRequest(validation.errors[0] ?? "Validation failed");
+        }
+      }
+
+      if (rcfg.sourceFileName && !sourceCode.trim()) {
+        throw invalidRequest("Source is required", "sourceCode");
+      }
+
+      if (rcfg.validateSource && sourceCode) {
+        const validation = rcfg.validateSource(sourceCode);
+        if (!validation.valid) {
+          throw invalidRequest(validation.errors[0] ?? "Validation failed");
+        }
       }
 
       const packageId = validatedManifest.name;
@@ -401,14 +432,22 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         await rcfg.afterCreate({ packageId, orgId, manifest: validatedManifest });
       }
 
+      // Upload files to S3 storage
+      const normalizedFiles: Record<string, Uint8Array> = {
+        [rcfg.storageFileName(packageId)]: new TextEncoder().encode(content),
+      };
+      if (rcfg.sourceFileName && sourceCode) {
+        normalizedFiles[rcfg.sourceFileName(packageId)] = new TextEncoder().encode(sourceCode);
+      }
+      await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, packageId, normalizedFiles);
+
       // Create initial version (non-fatal)
-      const contentFileName = rcfg.storageFileName(packageId);
       await createVersionSafe({
         packageId,
         orgId,
         userId: user.id,
         manifest: validatedManifest,
-        normalizedFiles: { [contentFileName]: new TextEncoder().encode(content) },
+        normalizedFiles,
       });
 
       return c.json(
@@ -534,9 +573,20 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 
+    // Extract secondary source file from S3 storage (e.g. .ts for tools)
+    let sourceText: string | null = null;
+    if (rcfg.sourceFileName) {
+      const files = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
+      const sourceData = files?.[rcfg.sourceFileName(itemId)];
+      if (sourceData) {
+        sourceText = new TextDecoder().decode(sourceData);
+      }
+    }
+
     return c.json({
       [rcfg.responseKey]: {
         ...item,
+        ...(sourceText != null ? { sourceCode: sourceText } : {}),
         versionCount,
         hasUnarchivedChanges: computeHasUnpublishedChanges(
           item.source,
@@ -567,6 +617,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const body = await c.req.json<{
       manifest?: Record<string, unknown>;
       content?: string;
+      sourceCode?: string;
       lockVersion?: number;
     }>();
 
@@ -577,6 +628,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const manifest =
       body.manifest ?? (existing as { manifest?: Record<string, unknown> }).manifest ?? {};
     const content = body.content ?? existing.content ?? "";
+    const sourceCode = body.sourceCode;
 
     // Validate manifest
     const manifestResult = validateManifest(manifest);
@@ -595,12 +647,12 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       throw invalidRequest("name cannot change", "name");
     }
 
-    // Content cannot be empty (all types)
-    if (!content.trim()) {
+    // Content required check
+    if (rcfg.requireContent && !content.trim()) {
       throw invalidRequest("Content cannot be empty", "content");
     }
 
-    // Content validation (tools)
+    // Content validation
     let warnings: string[] = [];
     if (rcfg.validateContent && content) {
       const validation = rcfg.validateContent(content);
@@ -608,6 +660,19 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
         throw invalidRequest(validation.errors[0] ?? "Validation failed");
       }
       warnings = validation.warnings;
+    }
+
+    // Source validation (tools)
+    if (rcfg.sourceFileName && sourceCode !== undefined) {
+      if (!sourceCode.trim()) {
+        throw invalidRequest("Source cannot be empty", "sourceCode");
+      }
+      if (rcfg.validateSource) {
+        const validation = rcfg.validateSource(sourceCode);
+        if (!validation.valid) {
+          throw invalidRequest(validation.errors[0] ?? "Validation failed");
+        }
+      }
     }
 
     const updated = await updateOrgItem(
@@ -622,10 +687,14 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 
     // Update storage files (merge with existing to preserve ancillary files)
     const existingFiles = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
-    await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, {
+    const updatedFiles: Record<string, Uint8Array> = {
       ...(existingFiles ?? {}),
       [rcfg.storageFileName(itemId)]: new TextEncoder().encode(content),
-    });
+    };
+    if (rcfg.sourceFileName && sourceCode !== undefined) {
+      updatedFiles[rcfg.sourceFileName(itemId)] = new TextEncoder().encode(sourceCode);
+    }
+    await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, updatedFiles);
 
     // After-update hook (e.g. agent junction table sync)
     if (rcfg.afterUpdate) {
@@ -710,11 +779,18 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
 
     // Extract primary content file from the ZIP
     let content: string | null = null;
+    let sourceText: string | null = null;
     if (detail.content) {
       const fileName = rcfg.storageFileName(itemId);
       const fileData = detail.content[fileName];
       if (fileData) {
         content = new TextDecoder().decode(fileData);
+      }
+      if (rcfg.sourceFileName) {
+        const sourceData = detail.content[rcfg.sourceFileName(itemId)];
+        if (sourceData) {
+          sourceText = new TextDecoder().decode(sourceData);
+        }
       }
     }
 
@@ -723,6 +799,7 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
       version: detail.version,
       manifest: detail.manifest,
       content,
+      ...(sourceText != null ? { sourceCode: sourceText } : {}),
       yanked: detail.yanked,
       yankedReason: detail.yankedReason,
       integrity: detail.integrity,
@@ -791,7 +868,10 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       version: versionOverride,
     });
 
-    if (!result) {
+    if ("error" in result) {
+      if (result.error === "no_changes") {
+        throw conflict("no_changes", "No changes since the last version");
+      }
       throw invalidRequest("Failed to create version (invalid or duplicate)");
     }
 

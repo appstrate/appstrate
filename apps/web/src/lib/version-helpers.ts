@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { VersionDetailResponse } from "@appstrate/shared-types";
 import { packageDetailPath } from "./package-paths";
 
 export function getVersionRedirect(params: {
@@ -30,4 +31,20 @@ export function getVersionRedirect(params: {
   // No unarchived changes → latest version is editable, older versions are read-only
   const isLatest = versionDetail.version === liveVersion;
   return { isHistoricalVersion: !isLatest };
+}
+
+/** Check whether there are real content differences between active state and a version. */
+export function hasActualChanges(
+  latestVersion: VersionDetailResponse | undefined,
+  currentManifest: Record<string, unknown> | undefined,
+  currentContent: string | undefined | null,
+): boolean {
+  if (!latestVersion) return false;
+  const manifestDiff =
+    JSON.stringify(currentManifest ?? {}) !== JSON.stringify(latestVersion.manifest ?? {});
+  const contentDiff =
+    latestVersion.content != null &&
+    currentContent != null &&
+    latestVersion.content !== currentContent;
+  return manifestDiff || contentDiff;
 }

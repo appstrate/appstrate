@@ -18,6 +18,7 @@ import { ConfirmModal } from "../confirm-modal";
 export function AgentActions({
   packageId,
   manifest,
+  companionFile,
   isOwned,
   isImported,
   isHistoricalVersion,
@@ -28,6 +29,7 @@ export function AgentActions({
 }: {
   packageId: string;
   manifest?: Record<string, unknown>;
+  companionFile?: { name: string; content: string };
   isOwned: boolean;
   isImported?: boolean;
   isHistoricalVersion: boolean;
@@ -79,6 +81,7 @@ export function AgentActions({
         packageId={packageId}
         type="agent"
         manifest={manifest}
+        companionFile={companionFile}
         isOwned={isOwned}
         isImported={isImported}
         isBuiltIn={detail.source === "system"}

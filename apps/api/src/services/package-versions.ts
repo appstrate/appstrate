@@ -578,15 +578,29 @@ export async function getLatestVersionCreatedAt(packageId: string): Promise<Date
   return row?.createdAt ?? null;
 }
 
+/** Get the integrity hash of the latest version. Returns null if no versions exist. */
+export async function getLatestVersionIntegrity(packageId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ integrity: packageVersions.integrity })
+    .from(packageVersions)
+    .where(eq(packageVersions.packageId, packageId))
+    .orderBy(desc(packageVersions.createdAt))
+    .limit(1);
+  return row?.integrity ?? null;
+}
+
+export type CreateVersionError = "invalid_version" | "no_changes";
+export type CreateVersionResult = { id: number; version: string } | { error: CreateVersionError };
+
 /** Create an immutable version snapshot from the current draft (packages table).
- *  Uses manifest.version as-is — no auto-bump. Returns null if version is missing,
- *  invalid, or fails forward-only validation (handled by createPackageVersion). */
+ *  Uses manifest.version as-is — no auto-bump. Returns an error object if version is missing,
+ *  invalid, fails forward-only validation, or content is identical to the latest version. */
 export async function createVersionFromDraft(params: {
   packageId: string;
   orgId: string;
   userId: string;
   version?: string;
-}): Promise<{ id: number; version: string } | null> {
+}): Promise<CreateVersionResult> {
   const { packageId, orgId, userId } = params;
 
   const [pkg] = await db
@@ -599,7 +613,7 @@ export async function createVersionFromDraft(params: {
     .where(eq(packages.id, packageId))
     .limit(1);
 
-  if (!pkg) return null;
+  if (!pkg) return { error: "invalid_version" };
 
   const baseManifest = asRecord(pkg.draftManifest);
   const content = (pkg.draftContent ?? "") as string;
@@ -608,7 +622,7 @@ export async function createVersionFromDraft(params: {
   const version =
     params.version ?? (typeof baseManifest.version === "string" ? baseManifest.version : undefined);
 
-  if (!version || !isValidVersion(version)) return null;
+  if (!version || !isValidVersion(version)) return { error: "invalid_version" };
 
   // If override version differs from manifest, sync the draft manifest in DB
   if (params.version && params.version !== baseManifest.version) {
@@ -673,7 +687,14 @@ export async function createVersionFromDraft(params: {
     }
   }
 
-  return createVersionAndUpload({
+  // Check for duplicate content — reject if identical to the latest version
+  const newIntegrity = computeIntegrity(new Uint8Array(zipBuffer));
+  const latestIntegrity = await getLatestVersionIntegrity(packageId);
+  if (latestIntegrity && newIntegrity === latestIntegrity) {
+    return { error: "no_changes" };
+  }
+
+  const result = await createVersionAndUpload({
     packageId,
     version,
     orgId,
@@ -681,6 +702,7 @@ export async function createVersionFromDraft(params: {
     zipBuffer,
     manifest: finalManifest,
   });
+  return result ?? { error: "invalid_version" };
 }
 
 // ─────────────────────────────────────────────

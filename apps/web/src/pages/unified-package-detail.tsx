@@ -11,6 +11,7 @@ import {
   useVersionDetail,
   usePackageDownload,
   useDeletePackage,
+  useAgents,
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
@@ -19,7 +20,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useProviders } from "../hooks/use-providers";
 import { useDeleteProviderCredentials } from "../hooks/use-mutations";
 import { LoadingState } from "../components/page-states";
-import { getVersionRedirect } from "../lib/version-helpers";
+import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
 import { useAgentDetailUI } from "../stores/agent-detail-ui-store";
 import { AlertTriangle } from "lucide-react";
@@ -31,6 +32,7 @@ import { PackageActionsDropdown } from "../components/package-detail/package-act
 import { VersionBanners } from "../components/version-banners";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { VersionHistory } from "../components/version-history";
+import { DiffTab } from "../components/diff-tab";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ProviderCredentialsForm } from "../components/provider-credentials-form";
@@ -47,6 +49,7 @@ import {
 import { AgentModals } from "../components/package-detail/agent-modals";
 import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
 import { RunAgentButton } from "../components/run-agent-button";
+import { PackageCard } from "../components/package-card";
 import { useAgentReadiness } from "../hooks/use-agent-readiness";
 import { useModels, useAgentModel } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
@@ -59,10 +62,19 @@ type DetailTab =
   | "memories"
   | "api"
   | "versions"
+  | "diff"
   | "content"
   | "usedBy";
 
 const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} };
+
+/** Primary companion file name per package type. */
+const COMPANION_FILE_NAME: Record<PackageType, string> = {
+  agent: "prompt.md",
+  skill: "SKILL.md",
+  tool: "TOOL.md",
+  provider: "PROVIDER.md",
+};
 
 // ─── Agent Run Button (inline, no wrapper) ────────────────────────────
 
@@ -164,6 +176,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       : undefined;
   const callbackUrl = type === "provider" ? providersQuery.data?.callbackUrl : undefined;
 
+  // Agents list for "Used by" tab enrichment
+  const { data: allAgents } = useAgents();
+
   // Type-narrowed aliases for type-specific branches
   const agentDetail = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
   const pkgDetail = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
@@ -180,7 +195,21 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     versionParam,
   );
 
-  const hasArchivableChanges = source !== "system" && !!hasUnarchivedChanges;
+  // Diff: fetch latest version when timestamps suggest changes
+  const hasTimestampChanges = source !== "system" && !!hasUnarchivedChanges;
+  const { data: latestVersionForDiff } = useVersionDetail(
+    type,
+    packageId,
+    hasTimestampChanges ? "latest" : undefined,
+  );
+  // Refine: once we have the latest version data, check for real content diff
+  const currentManifest = type === "agent" ? agentDetail?.manifest : pkgDetail?.manifest;
+  const currentContent = agentDetail?.prompt ?? pkgDetail?.content;
+  const hasArchivableChanges =
+    hasTimestampChanges &&
+    (!latestVersionForDiff ||
+      hasActualChanges(latestVersionForDiff, currentManifest, currentContent));
+
   const downloadPackage = usePackageDownload(scope, name);
   const deletePkgMutation = useDeletePackage(type);
   const deleteCredentialsMutation = useDeleteProviderCredentials();
@@ -199,6 +228,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     "memories",
     "api",
     "versions",
+    "diff",
     "content",
     "usedBy",
   ];
@@ -221,8 +251,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   // Reset tab if it becomes invalid
   useEffect(() => {
+    if (tab === "diff" && (!hasArchivableChanges || isVersionView)) setTab(defaultTab);
     if (tab === "versions" && source === "system") setTab(defaultTab);
-  }, [tab, source, defaultTab, setTab]);
+  }, [tab, hasArchivableChanges, isVersionView, source, defaultTab, setTab]);
 
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
 
@@ -245,6 +276,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     return <Navigate to={versionResult.redirect} replace />;
   }
   const { isHistoricalVersion } = versionResult;
+
+  // Companion file for the dropdown (built from existing API fields)
+  const companionContent = isHistoricalVersion ? versionDetail?.content : currentContent;
+  const companionFile = companionContent
+    ? { name: COMPANION_FILE_NAME[type], content: companionContent }
+    : undefined;
 
   // ── Version-aware config schema ──
   // When viewing a historical version, use that version's config schema (or empty if none).
@@ -287,38 +324,35 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const agentTabs: Array<{ id: DetailTab; label: string }> = [
     { id: "runs", label: t("detail.tabRuns") },
-    {
-      id: "connectors",
-      label: t("detail.tabConnectors"),
-    },
+    { id: "connectors", label: t("detail.tabConnectors") },
     ...(effectiveShowConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
       : []),
-    {
-      id: "schedules",
-      label: t("detail.tabSchedules"),
-    },
-    {
-      id: "memories",
-      label: t("detail.tabMemories"),
-    },
+    { id: "schedules", label: t("detail.tabSchedules") },
+    { id: "memories", label: t("detail.tabMemories") },
     { id: "api", label: t("detail.tabApi") },
   ];
 
-  const pkgTabs: Array<{ id: DetailTab; label: string; badge?: string }> = [
+  const pkgTabs: Array<{ id: DetailTab; label: string }> = [
     ...(isAdmin && type === "provider"
-      ? [
-          {
-            id: "configuration" as DetailTab,
-            label: t("providers.configure", { ns: "settings" }),
-          },
-        ]
+      ? [{ id: "configuration" as DetailTab, label: t("providers.configure", { ns: "settings" }) }]
       : []),
-    { id: "content", label: t("packages.content") },
+    {
+      id: "content",
+      label: type === "tool" ? t("editor.tabSource") : t(`editor.tabContent.${type}`),
+    },
     { id: "usedBy", label: t("packages.usedBy") },
   ];
 
-  const tabDefs = type === "agent" ? agentTabs : pkgTabs;
+  // Shared tabs appended to all package types
+  const sharedTabs: Array<{ id: DetailTab; label: string }> = [
+    ...(!isBuiltIn ? [{ id: "versions" as DetailTab, label: t("version.archives") }] : []),
+    ...(hasArchivableChanges && !isVersionView
+      ? [{ id: "diff" as DetailTab, label: t("version.diff") }]
+      : []),
+  ];
+
+  const tabDefs = [...(type === "agent" ? agentTabs : pkgTabs), ...sharedTabs];
 
   const resolvedVersion = isHistoricalVersion ? versionDetail?.version : undefined;
 
@@ -327,6 +361,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       <SharedHeader
         detail={unifiedForHeader}
         isHistoricalVersion={isHistoricalVersion}
+        hasUnarchivedChanges={hasArchivableChanges}
         actionsLeft={
           type === "agent" ? (
             <AgentRunButtonInline
@@ -345,6 +380,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   | Record<string, unknown>
                   | undefined
               }
+              companionFile={companionFile}
               isOwned={isOwned}
               isImported={isImported}
               isHistoricalVersion={isHistoricalVersion}
@@ -363,6 +399,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                     | Record<string, unknown>
                     | undefined
                 }
+                companionFile={companionFile}
                 isOwned={isOwned}
                 isImported={isImported}
                 isBuiltIn={isBuiltIn}
@@ -451,7 +488,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               {td.label}
             </TabsTrigger>
           ))}
-          {!isBuiltIn && <TabsTrigger value="versions">{t("version.archives")}</TabsTrigger>}
         </TabsList>
       </Tabs>
 
@@ -480,9 +516,13 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type !== "agent" && tab === "content" && pkgDetail && (
         <div className="border-border bg-card rounded-lg border p-4">
           <pre className="text-muted-foreground bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
-            {isHistoricalVersion && versionDetail?.content != null
-              ? versionDetail.content
-              : pkgDetail.content}
+            {type === "tool"
+              ? ((isHistoricalVersion && versionDetail?.sourceCode != null
+                  ? versionDetail.sourceCode
+                  : pkgDetail.sourceCode) ?? "")
+              : isHistoricalVersion && versionDetail?.content != null
+                ? versionDetail.content
+                : pkgDetail.content}
           </pre>
         </div>
       )}
@@ -497,35 +537,52 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         </div>
       )}
 
-      {type !== "agent" && tab === "usedBy" && pkgDetail && (
-        <div className="border-border bg-card rounded-lg border p-4">
-          {pkgDetail.agents.length === 0 ? (
+      {type !== "agent" &&
+        tab === "usedBy" &&
+        pkgDetail &&
+        (() => {
+          const agentIds = new Set(pkgDetail.agents.map((a) => a.id));
+          const enrichedAgents = allAgents?.filter((a) => agentIds.has(a.id)) ?? [];
+          return enrichedAgents.length === 0 ? (
             <p className="text-muted-foreground py-4 text-center text-sm">
               {t("packages.noAgents")}
             </p>
           ) : (
-            <div className="flex flex-wrap gap-2">
-              {pkgDetail.agents.map((f) => (
-                <Link
-                  key={f.id}
-                  to={`/agents/${f.id}`}
-                  className="border-border hover:border-primary text-foreground inline-flex items-center rounded-md border px-2.5 py-1 text-sm no-underline transition-colors"
-                >
-                  {f.displayName || f.id}
-                </Link>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {enrichedAgents.map((agent) => (
+                <PackageCard
+                  key={agent.id}
+                  id={agent.id}
+                  displayName={agent.displayName}
+                  description={agent.description}
+                  type="agent"
+                  source={agent.source}
+                  keywords={agent.keywords}
+                  providerIds={agent.dependencies.providers}
+                  runningRuns={agent.runningRuns}
+                />
               ))}
             </div>
-          )}
-        </div>
-      )}
+          );
+        })()}
 
       {tab === "versions" && <VersionHistory packageId={packageId} type={type} isOwned={isOwned} />}
+
+      {tab === "diff" && latestVersionForDiff && (
+        <DiffTab
+          type={type}
+          latestVersion={latestVersionForDiff}
+          currentManifest={currentManifest}
+          currentContent={currentContent}
+        />
+      )}
 
       <CreateVersionModal
         open={createVersionOpen}
         onClose={() => setCreateVersionOpen(false)}
         type={type}
         packageId={packageId}
+        hasUnarchivedChanges={hasArchivableChanges}
       />
 
       <ForkPackageModal
