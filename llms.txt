@@ -11,5 +11,5 @@
 
 ## API
 
-- [OpenAPI Spec](https://appstrate.dev/api/openapi.json): REST API (181 endpoints)
+- [OpenAPI Spec](https://appstrate.dev/api/openapi.json): REST API (182 endpoints)
 - [Interactive Docs](https://appstrate.dev/api/docs): Swagger UI

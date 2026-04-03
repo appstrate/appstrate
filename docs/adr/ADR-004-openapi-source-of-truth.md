@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Appstrate exposes 181 API endpoints across multiple route domains (agents, runs, connections, webhooks, organizations, etc.). We need a reliable way to:
+Appstrate exposes 182 API endpoints across multiple route domains (agents, runs, connections, webhooks, organizations, etc.). We need a reliable way to:
 
 - Document all endpoints with request/response schemas, auth requirements, and error codes
 - Keep documentation in sync with the actual implementation
@@ -35,7 +35,7 @@ Route handlers and OpenAPI path files are kept in the same PR. The `verify:opena
 
 **Positive:**
 
-- 181 endpoints fully documented with request/response schemas, error codes, and SSE event formats
+- 182 endpoints fully documented with request/response schemas, error codes, and SSE event formats
 - Interactive Swagger UI at `/api/docs` for developer exploration
 - CI validation (`verify:openapi`) catches documentation drift before merge
 - TypeScript modules allow sharing types between spec and implementation
