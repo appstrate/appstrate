@@ -13,4 +13,5 @@ export interface ProviderEntry {
 export interface AgentEditorState {
   manifest: Record<string, unknown>;
   prompt: string;
+  lockVersion?: number;
 }

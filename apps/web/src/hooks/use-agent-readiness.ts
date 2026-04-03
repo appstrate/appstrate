@@ -16,9 +16,7 @@ export function useAgentReadiness(
     return {
       allConnected: detail
         ? detail.dependencies.providers.every(
-            (s) =>
-              (s.status === "connected" || s.status === "needs_reconnection") &&
-              s.scopesSufficient !== false,
+            (s) => s.status === "connected" && s.scopesSufficient !== false,
           )
         : false,
       hasReconnectionNeeded: detail

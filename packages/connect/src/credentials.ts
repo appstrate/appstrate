@@ -5,7 +5,7 @@ import { userProviderConnections, providerCredentials, packages } from "@appstra
 import type { Db } from "@appstrate/db/client";
 import type { ConnectionRecord, DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
-import { refreshIfNeeded } from "./token-refresh.ts";
+import { refreshIfNeeded, forceRefresh, type RefreshContext } from "./token-refresh.ts";
 
 /**
  * Get a connection by profile + provider + org.
@@ -89,34 +89,7 @@ export async function getCredentials(
   let decrypted: DecryptedCredentials;
 
   if (authMode === "oauth2") {
-    let refreshContext;
-    const oauth2 = (def.oauth2 as Record<string, unknown>) ?? {};
-    const tokenUrl = (oauth2.refreshUrl as string) ?? (oauth2.tokenUrl as string);
-    if (tokenUrl) {
-      const [cred] = await db
-        .select({
-          credentialsEncrypted: providerCredentials.credentialsEncrypted,
-        })
-        .from(providerCredentials)
-        .where(
-          and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
-        )
-        .limit(1);
-
-      if (cred?.credentialsEncrypted) {
-        const adminCreds = decryptCredentials<Record<string, string>>(cred.credentialsEncrypted);
-        if (adminCreds.clientId && adminCreds.clientSecret) {
-          refreshContext = {
-            tokenUrl,
-            clientId: adminCreds.clientId,
-            clientSecret: adminCreds.clientSecret,
-            tokenAuthMethod: (oauth2.tokenAuthMethod as string) ?? undefined,
-            scopeSeparator: (oauth2.scopeSeparator as string) ?? undefined,
-          };
-        }
-      }
-    }
-
+    const refreshContext = await buildRefreshContext(db, def, providerId, orgId);
     decrypted = await refreshIfNeeded(
       db,
       connection.id,
@@ -159,29 +132,59 @@ export async function resolveCredentialsForProxy(
   const def = result.definition;
   const authMode = def.authMode as string | undefined;
 
-  let sidecarCredentials: Record<string, string>;
-  if (authMode === "oauth2" || authMode === "api_key") {
-    const creds = (def.credentials as Record<string, unknown>) ?? {};
-    const fieldName = creds.fieldName as string | undefined;
-    const value = result.credentials.access_token ?? result.credentials.api_key;
-    if (fieldName && value) {
-      sidecarCredentials = { [fieldName]: value };
-    } else {
-      sidecarCredentials = result.credentials;
-    }
+  return {
+    credentials: buildSidecarCredentials(result.credentials, def, authMode),
+    ...extractUriConfig(def),
+  };
+}
+
+/**
+ * Force-refresh credentials for a provider connection and return the updated proxy credentials.
+ * Used by the sidecar retry-on-401 flow. If the provider is not OAuth2 or has no refresh token,
+ * returns the current credentials unchanged (no error).
+ * Throws if the refresh request itself fails (invalid_grant, network error, etc.).
+ */
+export async function forceRefreshCredentials(
+  db: Db,
+  profileId: string,
+  providerId: string,
+  orgId: string,
+): Promise<{
+  credentials: Record<string, string>;
+  authorizedUris: string[] | null;
+  allowAllUris: boolean;
+} | null> {
+  const connection = await getConnection(db, profileId, providerId, orgId);
+  if (!connection) return null;
+
+  const def = await getProviderDefinition(db, providerId);
+  const authMode = def.authMode as string | undefined;
+
+  let decrypted: DecryptedCredentials;
+
+  if (authMode === "oauth2") {
+    const refreshContext = await buildRefreshContext(db, def, providerId, orgId);
+    decrypted = await forceRefresh(
+      db,
+      connection.id,
+      connection.providerId,
+      connection.credentialsEncrypted,
+      refreshContext,
+    );
   } else {
-    sidecarCredentials = result.credentials;
+    decrypted = decryptCredentials<DecryptedCredentials>(connection.credentialsEncrypted);
   }
 
-  const authorizedUris = (def.authorizedUris as string[])?.length
-    ? (def.authorizedUris as string[])
-    : null;
-  const allowAllUris = (def.allowAllUris as boolean) ?? false;
+  const credentials: Record<string, string> = {};
+  for (const [key, value] of Object.entries(decrypted)) {
+    if (value !== undefined) {
+      credentials[key] = value;
+    }
+  }
 
   return {
-    credentials: sidecarCredentials,
-    authorizedUris,
-    allowAllUris,
+    credentials: buildSidecarCredentials(credentials, def, authMode),
+    ...extractUriConfig(def),
   };
 }
 
@@ -272,4 +275,66 @@ function rowToConnection(row: typeof userProviderConnections.$inferSelect): Conn
     createdAt: row.createdAt!.toISOString(),
     updatedAt: row.updatedAt!.toISOString(),
   };
+}
+
+/** Build OAuth2 refresh context from provider definition and admin credentials. */
+async function buildRefreshContext(
+  db: Db,
+  def: Record<string, unknown>,
+  providerId: string,
+  orgId: string,
+): Promise<RefreshContext | undefined> {
+  const oauth2 = (def.oauth2 as Record<string, unknown>) ?? {};
+  const tokenUrl = (oauth2.refreshUrl as string) ?? (oauth2.tokenUrl as string);
+  if (!tokenUrl) return undefined;
+
+  const [cred] = await db
+    .select({ credentialsEncrypted: providerCredentials.credentialsEncrypted })
+    .from(providerCredentials)
+    .where(
+      and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
+    )
+    .limit(1);
+
+  if (!cred?.credentialsEncrypted) return undefined;
+
+  const adminCreds = decryptCredentials<Record<string, string>>(cred.credentialsEncrypted);
+  if (!adminCreds.clientId || !adminCreds.clientSecret) return undefined;
+
+  return {
+    tokenUrl,
+    clientId: adminCreds.clientId,
+    clientSecret: adminCreds.clientSecret,
+    tokenAuthMethod: (oauth2.tokenAuthMethod as string) ?? undefined,
+    scopeSeparator: (oauth2.scopeSeparator as string) ?? undefined,
+  };
+}
+
+/** Map decrypted credentials to the sidecar format (single named field for oauth2/api_key). */
+function buildSidecarCredentials(
+  credentials: Record<string, string>,
+  def: Record<string, unknown>,
+  authMode: string | undefined,
+): Record<string, string> {
+  if (authMode === "oauth2" || authMode === "api_key") {
+    const creds = (def.credentials as Record<string, unknown>) ?? {};
+    const fieldName = creds.fieldName as string | undefined;
+    const value = credentials.access_token ?? credentials.api_key;
+    if (fieldName && value) {
+      return { [fieldName]: value };
+    }
+  }
+  return credentials;
+}
+
+/** Extract authorizedUris and allowAllUris from provider definition. */
+function extractUriConfig(def: Record<string, unknown>): {
+  authorizedUris: string[] | null;
+  allowAllUris: boolean;
+} {
+  const authorizedUris = (def.authorizedUris as string[])?.length
+    ? (def.authorizedUris as string[])
+    : null;
+  const allowAllUris = (def.allowAllUris as boolean) ?? false;
+  return { authorizedUris, allowAllUris };
 }

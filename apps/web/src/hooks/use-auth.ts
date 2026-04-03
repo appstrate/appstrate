@@ -97,9 +97,12 @@ export function useAuth() {
         name: displayName || email,
       });
       if (result.error) throw new Error(result.error.message);
-      // When email verification is enabled, Better Auth may return user data
-      // but without a valid session — detect via missing user or unverified email
-      if (!result.data?.user || !result.data.user.emailVerified) {
+      // When SMTP is enabled, Better Auth requires email verification —
+      // detect via missing user or unverified email.
+      // When SMTP is off, emailVerified stays false (no verification flow)
+      // but the session is valid, so we proceed normally.
+      const smtpEnabled = window.__APP_CONFIG__?.features?.smtp ?? false;
+      if (!result.data?.user || (smtpEnabled && !result.data.user.emailVerified)) {
         return { emailVerificationRequired: true };
       }
       const profile = await fetchProfile();

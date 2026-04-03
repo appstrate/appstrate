@@ -46,6 +46,73 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentE
   };
 }
 
+// ─── Default manifests for skill/tool ───────────────────────
+
+export function defaultSkillManifest(
+  orgSlug?: string,
+  userEmail?: string,
+): Record<string, unknown> {
+  return {
+    $schema: AFPS_SCHEMA_URLS.skill,
+    schemaVersion: "1.0",
+    type: "skill",
+    name: orgSlug ? `@${orgSlug}/` : "",
+    version: "1.0.0",
+    displayName: "",
+    description: "",
+    author: userEmail ?? "",
+  };
+}
+
+export function defaultToolManifest(orgSlug?: string, userEmail?: string): Record<string, unknown> {
+  return {
+    $schema: AFPS_SCHEMA_URLS.tool,
+    schemaVersion: "1.0",
+    type: "tool",
+    name: orgSlug ? `@${orgSlug}/` : "",
+    version: "1.0.0",
+    displayName: "",
+    description: "",
+    author: userEmail ?? "",
+    entrypoint: "tool.ts",
+    tool: {
+      name: "my_tool",
+      description: "Tool",
+      inputSchema: { type: "object", properties: {} },
+    },
+  };
+}
+
+export function defaultProviderManifest(
+  orgSlug?: string,
+  userEmail?: string,
+): Record<string, unknown> {
+  return {
+    $schema: AFPS_SCHEMA_URLS.provider,
+    schemaVersion: "1.0",
+    type: "provider",
+    name: orgSlug ? `@${orgSlug}/` : "",
+    version: "1.0.0",
+    displayName: "",
+    description: "",
+    author: userEmail ?? "",
+    definition: {
+      authMode: "oauth2",
+      oauth2: {
+        authorizationUrl: "",
+        tokenUrl: "",
+        scopeSeparator: " ",
+        pkceEnabled: true,
+        tokenAuthMethod: "client_secret_post",
+      },
+    },
+  };
+}
+
+export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
+
+export const DEFAULT_TOOL_CONTENT = `import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";\n\nexport default function (pi: ExtensionAPI) {\n  pi.registerTool({\n    name: "my_tool",\n    description: "Describe what this tool does",\n    parameters: {},\n    execute(_toolCallId, _params, _signal) {\n      return { content: [{ type: "text", text: "Hello" }] };\n    },\n  });\n}\n`;
+
 // ─── Manifest accessors ─────────────────────────────────────
 
 export function getManifestName(m: Record<string, unknown>): { scope: string; id: string } {

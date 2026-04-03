@@ -45,7 +45,7 @@ export async function getAvailableProvidersWithStatus(
         provider: provider.id,
         displayName: provider.displayName,
         logo: provider.iconUrl ?? "",
-        status: "connected" as const,
+        status: conn.needsReconnection ? ("needs_reconnection" as const) : ("connected" as const),
         authMode: authModeLabel(provider.authMode),
         connectionId: conn.id,
         connectedAt: conn.createdAt,
