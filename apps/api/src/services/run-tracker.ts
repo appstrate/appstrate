@@ -38,7 +38,7 @@ export function abortRun(runId: string): void {
 }
 
 async function publishCancelWithRetry(runId: string): Promise<void> {
-  const pubsub = getPubSub();
+  const pubsub = await getPubSub();
   for (let attempt = 0; attempt < PUBLISH_MAX_RETRIES; attempt++) {
     try {
       await pubsub.publish(CANCEL_CHANNEL, runId);
@@ -62,7 +62,9 @@ export function getInFlightCount(): number {
 /** Subscribe to cancel channel so this instance can abort runs triggered by other instances. */
 export async function initCancelSubscriber(): Promise<void> {
   try {
-    await getPubSub().subscribe(CANCEL_CHANNEL, (runId) => {
+    await (
+      await getPubSub()
+    ).subscribe(CANCEL_CHANNEL, (runId: string) => {
       const controller = inFlight.get(runId);
       if (controller) {
         logger.info("Aborting run via cross-instance cancel", { runId });
@@ -80,7 +82,7 @@ export async function initCancelSubscriber(): Promise<void> {
 /** Unsubscribe from the cancel channel. Call before draining in-flight runs during shutdown. */
 export async function stopCancelSubscriber(): Promise<void> {
   try {
-    await getPubSub().unsubscribe(CANCEL_CHANNEL);
+    await (await getPubSub()).unsubscribe(CANCEL_CHANNEL);
     logger.info("Unsubscribed from run cancel channel");
   } catch (err) {
     logger.warn("Error unsubscribing from cancel channel", {

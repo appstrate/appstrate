@@ -59,7 +59,7 @@ export async function loadCloud(): Promise<CloudModule | null> {
   // Step 3: module found — init must succeed or crash (misconfiguration)
   await mod.initCloud({
     databaseUrl: process.env.DATABASE_URL!,
-    redisUrl: process.env.REDIS_URL!,
+    redisUrl: process.env.REDIS_URL ?? "",
     appUrl: process.env.APP_URL ?? "http://localhost:3000",
     sendMail,
     getOrgAdminEmails: getAdminEmails,

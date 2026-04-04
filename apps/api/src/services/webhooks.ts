@@ -405,9 +405,9 @@ export function buildEventEnvelope(params: {
 
 let deliveryQueue: JobQueue<DeliveryJobData> | null = null;
 
-function getDeliveryQueue(): JobQueue<DeliveryJobData> {
+async function getDeliveryQueue(): Promise<JobQueue<DeliveryJobData>> {
   if (!deliveryQueue) {
-    deliveryQueue = createQueue<DeliveryJobData>("webhook-delivery", {
+    deliveryQueue = await createQueue<DeliveryJobData>("webhook-delivery", {
       attempts: MAX_ATTEMPTS,
       backoff: { type: "custom" },
       removeOnComplete: 1000,
@@ -449,7 +449,7 @@ export async function dispatchWebhookEvents(
     .from(webhooks)
     .where(and(eq(webhooks.orgId, orgId), eq(webhooks.active, true), or(...scopeConditions)));
 
-  const queue = getDeliveryQueue();
+  const queue = await getDeliveryQueue();
 
   for (const wh of rows) {
     if (!wh.events?.includes(eventType)) continue;
@@ -569,8 +569,8 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
 /**
  * Initialize the webhook delivery worker. Called at boot.
  */
-export function initWebhookWorker(): void {
-  const queue = getDeliveryQueue();
+export async function initWebhookWorker(): Promise<void> {
+  const queue = await getDeliveryQueue();
 
   queue.process(processDelivery, {
     concurrency: 10,

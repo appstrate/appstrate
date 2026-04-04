@@ -70,9 +70,9 @@ const QUEUE_NAME = "schedules";
 
 let scheduleQueue: JobQueue<ScheduleJobData> | null = null;
 
-function getQueue(): JobQueue<ScheduleJobData> {
+async function getQueue(): Promise<JobQueue<ScheduleJobData>> {
   if (!scheduleQueue) {
-    scheduleQueue = createQueue<ScheduleJobData>(QUEUE_NAME);
+    scheduleQueue = await createQueue<ScheduleJobData>(QUEUE_NAME);
   }
   return scheduleQueue;
 }
@@ -87,7 +87,9 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
     input: asRecordOrNull(schedule.input) ?? undefined,
   };
 
-  await getQueue().upsertScheduler(
+  await (
+    await getQueue()
+  ).upsertScheduler(
     schedule.id,
     { pattern: schedule.cronExpression, tz: schedule.timezone ?? "UTC" },
     { name: "execute-agent", data: jobData },
@@ -96,7 +98,7 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
 
 /** Remove a repeatable job scheduler. */
 async function removeScheduleJob(scheduleId: string): Promise<void> {
-  await getQueue().removeScheduler(scheduleId);
+  await (await getQueue()).removeScheduler(scheduleId);
 }
 
 /** Process a scheduled job. */
@@ -127,7 +129,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
 
 /** Initialize the schedule worker and sync existing schedules from DB. */
 export async function initScheduleWorker(): Promise<void> {
-  const queue = getQueue();
+  const queue = await getQueue();
 
   queue.process(
     async (job) => {

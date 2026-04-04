@@ -9,11 +9,8 @@ import { hasRedis } from "./mode.ts";
 import type { PubSub } from "./pubsub/interface.ts";
 import type { KeyValueCache } from "./cache/interface.ts";
 import type { RateLimiterFactory } from "./rate-limit/interface.ts";
-import { RedisPubSub } from "./pubsub/redis-pubsub.ts";
 import { LocalPubSub } from "./pubsub/local-pubsub.ts";
-import { RedisCache } from "./cache/redis-cache.ts";
 import { LocalCache } from "./cache/local-cache.ts";
-import { RedisRateLimiterFactory } from "./rate-limit/redis-rate-limit.ts";
 import { LocalRateLimiterFactory } from "./rate-limit/local-rate-limit.ts";
 import { logger } from "../lib/logger.ts";
 
@@ -24,28 +21,45 @@ export type { KeyValueCache, CacheSetOptions } from "./cache/interface.ts";
 export type { RateLimiterFactory } from "./rate-limit/interface.ts";
 
 // ---------------------------------------------------------------------------
-// Singletons
+// Singletons — Redis implementations are loaded lazily via dynamic import()
+// to avoid connecting to Redis when REDIS_URL is absent.
+// Local implementations are imported statically (no side effects).
 // ---------------------------------------------------------------------------
 
 let pubsub: PubSub | null = null;
 let cache: KeyValueCache | null = null;
 let rateLimiterFactory: RateLimiterFactory | null = null;
 
-export function getPubSub(): PubSub {
+export async function getPubSub(): Promise<PubSub> {
   if (pubsub) return pubsub;
-  pubsub = hasRedis() ? new RedisPubSub() : new LocalPubSub();
+  if (hasRedis()) {
+    const { RedisPubSub } = await import("./pubsub/redis-pubsub.ts");
+    pubsub = new RedisPubSub();
+  } else {
+    pubsub = new LocalPubSub();
+  }
   return pubsub;
 }
 
-export function getCache(): KeyValueCache {
+export async function getCache(): Promise<KeyValueCache> {
   if (cache) return cache;
-  cache = hasRedis() ? new RedisCache() : new LocalCache();
+  if (hasRedis()) {
+    const { RedisCache } = await import("./cache/redis-cache.ts");
+    cache = new RedisCache();
+  } else {
+    cache = new LocalCache();
+  }
   return cache;
 }
 
-export function getRateLimiterFactory(): RateLimiterFactory {
+export async function getRateLimiterFactory(): Promise<RateLimiterFactory> {
   if (rateLimiterFactory) return rateLimiterFactory;
-  rateLimiterFactory = hasRedis() ? new RedisRateLimiterFactory() : new LocalRateLimiterFactory();
+  if (hasRedis()) {
+    const { RedisRateLimiterFactory } = await import("./rate-limit/redis-rate-limit.ts");
+    rateLimiterFactory = new RedisRateLimiterFactory();
+  } else {
+    rateLimiterFactory = new LocalRateLimiterFactory();
+  }
   return rateLimiterFactory;
 }
 

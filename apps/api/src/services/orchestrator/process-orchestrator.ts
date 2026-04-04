@@ -9,7 +9,7 @@
  */
 
 import { mkdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { logger } from "../../lib/logger.ts";
 import type { ContainerOrchestrator } from "./interface.ts";
 import type {
@@ -22,31 +22,50 @@ import type {
 } from "./types.ts";
 
 const DATA_DIR = "./data/runs";
+const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
+const AGENT_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/entrypoint.ts");
+
+type BunProcess = ReturnType<typeof Bun.spawn>;
 
 interface ProcessHandle {
-  proc: ReturnType<typeof Bun.spawn>;
+  proc: BunProcess | null;
   role: string;
   runId: string;
   workDir?: string;
 }
 
+interface PendingSpec {
+  entrypoint: string;
+  workDir: string;
+  env: Record<string, string>;
+}
+
+/** Build a clean env Record from process.env (filters out undefined values). */
+function cleanProcessEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) env[k] = v;
+  }
+  return env;
+}
+
 export class ProcessOrchestrator implements ContainerOrchestrator {
   private processes = new Map<string, ProcessHandle>();
   private sidecarPorts = new Map<string, number>();
+  private pendingSpecs = new Map<string, PendingSpec>();
 
   async initialize(): Promise<void> {
     await mkdir(DATA_DIR, { recursive: true });
     logger.warn(
-      "⚠️  Running in PROCESS mode — agents execute without container isolation. " +
+      "Running in PROCESS mode — agents execute without container isolation. " +
         "Use only with trusted agents in development or self-hosted environments.",
     );
   }
 
   async shutdown(): Promise<void> {
-    // Kill all remaining processes
     for (const [id, handle] of this.processes) {
       try {
-        handle.proc.kill("SIGTERM");
+        handle.proc?.kill("SIGTERM");
       } catch {
         // Already dead
       }
@@ -60,7 +79,6 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
   }
 
   async cleanupOrphans(): Promise<CleanupReport> {
-    // No orphans possible — processes die with the parent
     return { workloads: 0, isolationBoundaries: 0 };
   }
 
@@ -86,35 +104,30 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     const port = await this.findAvailablePort();
     const id = `sidecar-${runId}`;
 
-    const sidecarBaseEnv: Record<string, string> = {};
-    for (const [k, v] of Object.entries(process.env)) {
-      if (v !== undefined) sidecarBaseEnv[k] = v;
-    }
-    const sidecarEnv: Record<string, string> = {
-      ...sidecarBaseEnv,
+    const env: Record<string, string> = {
+      ...cleanProcessEnv(),
       PORT: String(port),
       PLATFORM_API_URL: config.platformApiUrl,
       RUN_TOKEN: config.runToken,
     };
-    if (config.proxyUrl) sidecarEnv.PROXY_URL = config.proxyUrl;
+    if (config.proxyUrl) env.PROXY_URL = config.proxyUrl;
     if (config.llm) {
-      sidecarEnv.PI_BASE_URL = config.llm.baseUrl;
-      sidecarEnv.PI_API_KEY = config.llm.apiKey;
-      sidecarEnv.PI_PLACEHOLDER = config.llm.placeholder;
+      env.PI_BASE_URL = config.llm.baseUrl;
+      env.PI_API_KEY = config.llm.apiKey;
+      env.PI_PLACEHOLDER = config.llm.placeholder;
     }
 
-    const sidecarPath = join(import.meta.dir, "../../../../runtime-pi/sidecar/server.ts");
-    const proc = Bun.spawn(["bun", "run", sidecarPath], {
-      env: sidecarEnv,
-      stdout: "ignore",
-      stderr: "ignore",
+    const proc = Bun.spawn(["bun", "run", SIDECAR_ENTRY], {
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
     });
-
+    this.drainStderr(proc, id);
     this.processes.set(id, { proc, role: "sidecar", runId });
     this.sidecarPorts.set(runId, port);
 
-    // Wait for sidecar to be ready
     await this.waitForHealth(`http://localhost:${port}/health`, 5000);
+    logger.info("Sidecar ready", { runId, port, pid: proc.pid });
 
     return { id, runId, role: "sidecar" };
   }
@@ -123,29 +136,20 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     const workDir = join(boundary.id, "workspace");
     await mkdir(workDir, { recursive: true });
 
-    // Write injected files to workspace
     if (spec.files) {
       for (const file of spec.files.items) {
         const filePath = join(workDir, file.name);
-        const dir = join(filePath, "..");
-        await mkdir(dir, { recursive: true });
+        await mkdir(join(filePath, ".."), { recursive: true });
         await Bun.write(filePath, file.content);
       }
     }
 
     const id = `workload-${spec.runId}-${spec.role}`;
-
-    // Resolve sidecar URL for this run
     const sidecarPort = this.sidecarPorts.get(spec.runId);
     const sidecarUrl = sidecarPort ? `http://localhost:${sidecarPort}` : "http://localhost:8080";
 
-    // Replace Docker sidecar URLs with localhost URLs
-    // Filter out undefined values from process.env
-    const baseEnv: Record<string, string> = {};
-    for (const [k, v] of Object.entries(process.env)) {
-      if (v !== undefined) baseEnv[k] = v;
-    }
-    const env: Record<string, string> = { ...baseEnv, ...spec.env };
+    const env: Record<string, string> = { ...cleanProcessEnv(), ...spec.env };
+    env.WORKSPACE_DIR = resolve(workDir);
     if (sidecarPort) {
       env.SIDECAR_URL = sidecarUrl;
       env.MODEL_BASE_URL = `${sidecarUrl}/llm`;
@@ -157,64 +161,61 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       env.no_proxy = "localhost,127.0.0.1";
     }
 
-    const entrypoint = join(import.meta.dir, "../../../../runtime-pi/entrypoint.ts");
-    const proc = Bun.spawn(["bun", "run", entrypoint], {
-      cwd: workDir,
-      env,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-
-    this.processes.set(id, { proc, role: spec.role, runId: spec.runId, workDir });
+    // Store spec for deferred spawn in startWorkload (matches Docker create/start pattern)
+    this.pendingSpecs.set(id, { entrypoint: AGENT_ENTRY, workDir, env });
+    this.processes.set(id, { proc: null, role: spec.role, runId: spec.runId, workDir });
 
     return { id, runId: spec.runId, role: spec.role };
   }
 
-  async startWorkload(_handle: WorkloadHandle): Promise<void> {
-    // In process mode, the workload is already started at creation (Bun.spawn is immediate).
-    // This is a no-op to match the Docker pattern where create and start are separate.
+  async startWorkload(handle: WorkloadHandle): Promise<void> {
+    const pending = this.pendingSpecs.get(handle.id);
+    const ph = this.processes.get(handle.id);
+    if (!pending || !ph) return;
+
+    const proc = Bun.spawn(["bun", "run", pending.entrypoint], {
+      cwd: pending.workDir,
+      env: pending.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    this.drainStderr(proc, handle.id);
+    ph.proc = proc;
+    this.pendingSpecs.delete(handle.id);
   }
 
   async stopWorkload(handle: WorkloadHandle, timeoutSeconds = 5): Promise<void> {
     const ph = this.processes.get(handle.id);
-    if (!ph) return;
+    if (!ph?.proc) return;
 
     ph.proc.kill("SIGTERM");
-
-    // Wait for graceful shutdown, then force kill
     const killed = await Promise.race([
       ph.proc.exited.then(() => true),
       new Promise<false>((r) => setTimeout(() => r(false), timeoutSeconds * 1000)),
     ]);
-
-    if (!killed) {
-      ph.proc.kill("SIGKILL");
-    }
+    if (!killed) ph.proc.kill("SIGKILL");
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
     const ph = this.processes.get(handle.id);
     if (!ph) return;
-
-    // Ensure process is dead
     try {
-      ph.proc.kill("SIGKILL");
+      ph.proc?.kill("SIGKILL");
     } catch {
       // Already dead
     }
-
     this.processes.delete(handle.id);
   }
 
   async waitForExit(handle: WorkloadHandle): Promise<number> {
     const ph = this.processes.get(handle.id);
-    if (!ph) return 1;
+    if (!ph?.proc) return 1;
     return ph.proc.exited;
   }
 
   async *streamLogs(handle: WorkloadHandle, signal?: AbortSignal): AsyncGenerator<string> {
     const ph = this.processes.get(handle.id);
-    if (!ph?.proc.stdout || typeof ph.proc.stdout === "number") return;
+    if (!ph?.proc?.stdout || typeof ph.proc.stdout === "number") return;
 
     const reader = (ph.proc.stdout as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
@@ -223,20 +224,16 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     try {
       while (true) {
         if (signal?.aborted) break;
-
         const { done, value } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
-
         for (const line of lines) {
           if (line.length > 0) yield line;
         }
       }
-
-      // Flush remaining buffer
       if (buffer.length > 0) yield buffer;
     } finally {
       reader.releaseLock();
@@ -259,7 +256,6 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
   // ---------------------------------------------------------------------------
 
   private async findAvailablePort(): Promise<number> {
-    // Use Bun's built-in server to find a free port
     const server = Bun.serve({ port: 0, fetch: () => new Response() });
     const port = server.port ?? 0;
     server.stop(true);
@@ -269,8 +265,6 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
 
   private async waitForHealth(url: string, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
-    const interval = 100;
-
     while (Date.now() < deadline) {
       try {
         const res = await fetch(url, { signal: AbortSignal.timeout(1000) });
@@ -278,9 +272,39 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       } catch {
         // Not ready yet
       }
-      await new Promise((r) => setTimeout(r, interval));
+      await new Promise((r) => setTimeout(r, 100));
     }
+    logger.warn("Sidecar health check timed out", { url, timeoutMs });
+  }
 
-    logger.warn("Sidecar health check timed out, proceeding anyway", { url, timeoutMs });
+  /** Drain stderr from a subprocess and log each line. */
+  private drainStderr(proc: BunProcess, label: string): void {
+    const stderr = proc.stderr;
+    if (!stderr || typeof stderr === "number") return;
+
+    const reader = (stderr as ReadableStream<Uint8Array>).getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+
+    const drain = async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() ?? "";
+          for (const line of lines) {
+            if (line.trim()) logger.warn(`[process:${label}:stderr] ${line}`);
+          }
+        }
+        if (buf.trim()) logger.warn(`[process:${label}:stderr] ${buf}`);
+      } catch {
+        // Stream closed
+      } finally {
+        reader.releaseLock();
+      }
+    };
+    drain();
   }
 }

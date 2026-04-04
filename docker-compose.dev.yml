@@ -1,23 +1,25 @@
 # Appstrate — Development Services
 #
-# Starts infrastructure for local development:
-#   PostgreSQL, Redis, MinIO (S3-compatible storage)
+# Starts infrastructure for local development with profile support:
 #
-# Recommended:  bun run setup   (handles everything automatically)
+#   bun run dev:minimal    → PostgreSQL only (filesystem storage, in-memory queue, process execution)
+#   bun run dev:standard   → PostgreSQL + Redis (persistent scheduling, multi-instance support)
+#   bun run dev            → PostgreSQL + Redis + MinIO (full stack, Docker execution)
 #
-# Manual:
-#   docker compose -f docker-compose.dev.yml up -d
-#   bun run db:migrate
-#   bun run build
-#   bun run dev
+# Manual usage:
+#   docker compose -f docker-compose.dev.yml --profile minimal up -d
+#   docker compose -f docker-compose.dev.yml --profile standard up -d
+#   docker compose -f docker-compose.dev.yml --profile full up -d
 
 name: appstrate-dev
 
 services:
+  # ─── PostgreSQL — all profiles ──────────────────────────────────
   postgres:
     image: postgres:16.8-alpine
+    profiles: ["minimal", "standard", "full"]
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-5423}:5432"
     restart: unless-stopped
     environment:
       POSTGRES_USER: appstrate
@@ -31,8 +33,10 @@ services:
       timeout: 3s
       retries: 10
 
+  # ─── Redis — standard + full ────────────────────────────────────
   redis:
     image: redis:7.4-alpine
+    profiles: ["standard", "full"]
     command: redis-server --maxmemory-policy noeviction
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -45,8 +49,10 @@ services:
       timeout: 3s
       retries: 10
 
+  # ─── MinIO (S3) — full only ────────────────────────────────────
   minio:
     image: minio/minio:RELEASE.2025-03-12T18-04-18Z
+    profiles: ["full"]
     command: server /data --console-address ":9001"
     ports:
       - "${MINIO_PORT:-9000}:9000"
@@ -65,6 +71,7 @@ services:
 
   minio-init:
     image: minio/mc:RELEASE.2025-03-12T17-29-24Z
+    profiles: ["full"]
     restart: "no"
     depends_on:
       minio:

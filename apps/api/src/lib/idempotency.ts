@@ -53,7 +53,7 @@ export async function acquireIdempotencyLock(
 ): Promise<LockResult> {
   const ck = cacheKey(orgId, key);
   const processingValue = JSON.stringify({ status: "processing", bodyHash });
-  const cache = getCache();
+  const cache = await getCache();
 
   // Atomic SET NX with TTL
   const acquired = await cache.set(ck, processingValue, { ttlSeconds: TTL, nx: true });
@@ -90,9 +90,9 @@ export async function storeIdempotencyResult(
   const ck = cacheKey(orgId, key);
   const value = JSON.stringify(result);
 
-  await getCache().set(ck, value, { ttlSeconds: TTL });
+  (await getCache()).set(ck, value, { ttlSeconds: TTL });
 }
 
 export async function releaseIdempotencyLock(orgId: string, key: string): Promise<void> {
-  await getCache().del(cacheKey(orgId, key));
+  (await getCache()).del(cacheKey(orgId, key));
 }
