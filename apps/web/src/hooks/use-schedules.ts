@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
 import { onMutationError } from "./use-mutations";
 import type { Schedule, EnrichedSchedule, Run } from "@appstrate/shared-types";
 
@@ -20,11 +21,13 @@ export function useScheduleRuns(scheduleId: string | undefined) {
 
 export function useAllSchedules() {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["schedules", orgId],
+    queryKey: ["schedules", orgId, appId],
     queryFn: async () => {
       return api<EnrichedSchedule[]>("/schedules");
     },
+    enabled: !!orgId && !!appId,
   });
 }
 

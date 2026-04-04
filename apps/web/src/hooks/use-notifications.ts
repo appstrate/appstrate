@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
 import type { Run } from "@appstrate/shared-types";
 
 export function useUnreadCount() {
@@ -33,12 +34,14 @@ export function useUnreadCountsByAgent() {
 
 export function useAllRuns(page: number, limit = 20) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   const offset = page * limit;
   return useQuery({
-    queryKey: ["all-runs", orgId, page, limit],
+    queryKey: ["all-runs", orgId, appId, page, limit],
     queryFn: async () => {
       return api<{ runs: Run[]; total: number }>(`/runs?limit=${limit}&offset=${offset}`);
     },
+    enabled: !!orgId && !!appId,
   });
 }
 

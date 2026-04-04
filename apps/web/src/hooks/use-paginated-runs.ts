@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
 import type { Run } from "@appstrate/shared-types";
 
 interface PaginatedResult {
@@ -26,6 +27,7 @@ export function usePaginatedRuns({
   offset,
 }: UsePaginatedRunsOptions) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
 
   const endpoint = scheduleId
     ? `/schedules/${scheduleId}/runs`
@@ -39,11 +41,11 @@ export function usePaginatedRuns({
   if (user) params.set("user", user);
 
   return useQuery({
-    queryKey: ["paginated-runs", orgId, endpoint, user, limit, offset],
+    queryKey: ["paginated-runs", orgId, appId, endpoint, user, limit, offset],
     queryFn: async () => {
       return api<PaginatedResult>(`${endpoint}?${params.toString()}`);
     },
     placeholderData: (prev) => prev,
-    enabled: scheduleId ? !!scheduleId : packageId ? !!packageId : true,
+    enabled: !!appId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),
   });
 }
