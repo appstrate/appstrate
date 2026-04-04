@@ -321,6 +321,7 @@ export function useCreatePackage(type: PackageType) {
       id?: string;
       manifest: Record<string, unknown>;
       content: string;
+      sourceCode?: string;
     }) => {
       return api<{ packageId: string }>(`/packages/${cfg.path}`, {
         method: "POST",
@@ -330,6 +331,7 @@ export function useCreatePackage(type: PackageType) {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
+      if (type === "provider") invalidateProviderQueries(qc);
       if (data.packageId) {
         navigate(packageDetailPath(type, data.packageId));
       }
@@ -346,6 +348,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       content: string;
+      sourceCode?: string;
       lockVersion: number;
     }) => {
       return api<{ lockVersion: number }>(`/packages/${cfg.path}/${packageId}`, {
@@ -356,6 +359,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages"] });
       if (type === "agent") qc.invalidateQueries({ queryKey: ["agents"] });
+      if (type === "provider") invalidateProviderQueries(qc);
       qc.invalidateQueries({ queryKey: ["version-info"] });
       navigate(packageDetailPath(type, packageId));
     },
@@ -403,45 +407,6 @@ export function useDeleteProviderCredentials() {
   return useMutation({
     mutationFn: async (providerId: string) => {
       return api(`/providers/credentials/${providerId}`, { method: "DELETE" });
-    },
-    onSuccess: () => invalidateProviderQueries(qc),
-    onError: onMutationError,
-  });
-}
-
-export function useCreateProvider() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: Record<string, unknown>) => {
-      return api<{ id: string }>("/providers", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => invalidateProviderQueries(qc),
-    onError: onMutationError,
-  });
-}
-
-export function useUpdateProvider() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
-      return api(`/providers/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(data),
-      });
-    },
-    onSuccess: () => invalidateProviderQueries(qc),
-    onError: onMutationError,
-  });
-}
-
-export function useDeleteProvider() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      return api(`/providers/${id}`, { method: "DELETE" });
     },
     onSuccess: () => invalidateProviderQueries(qc),
     onError: onMutationError,

@@ -9,7 +9,7 @@ Appstrate is an open-source platform for running autonomous AI agents in sandbox
 | `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)                |
 | `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                  |
 | `bun test`               | Run all tests (1000+, bun:test framework, requires Docker)          |
-| `bun run check`          | TypeScript + ESLint + Prettier + OpenAPI validation (181 endpoints) |
+| `bun run check`          | TypeScript + ESLint + Prettier + OpenAPI validation (182 endpoints) |
 | `bun run build`          | Build everything (turbo build)                                      |
 | `bun run db:generate`    | Generate Drizzle migrations from schema changes                     |
 | `bun run db:migrate`     | Apply migrations to PostgreSQL                                      |
@@ -57,7 +57,7 @@ appstrate/
 │   ├── api/src/              # Hono API server (:3000)
 │   │   ├── routes/           # Route handlers (one file per domain)
 │   │   ├── services/         # Business logic, Docker, adapters, scheduler
-│   │   ├── openapi/          # OpenAPI 3.1 spec (source of truth, 181 endpoints)
+│   │   ├── openapi/          # OpenAPI 3.1 spec (source of truth, 182 endpoints)
 │   │   └── middleware/       # Auth, rate-limit, guards
 │   └── web/src/              # React 19 SPA (Vite + React Query v5 + Zustand)
 │       ├── pages/            # Route pages (React Router v7)
@@ -65,7 +65,7 @@ appstrate/
 │       ├── components/       # UI components
 │       └── stores/           # Zustand stores (auth, org, profile)
 ├── packages/
-│   ├── core/                 # @appstrate/core -- shared validation, storage, utilities (npm)
+│   ├── core/                 # @appstrate/core -- shared validation, storage, utilities
 │   ├── db/                   # @appstrate/db -- Drizzle ORM (31 tables, 5 enums) + Better Auth
 │   ├── env/                  # @appstrate/env -- Zod env validation (authoritative source)
 │   ├── emails/               # @appstrate/emails -- Email templates + rendering
@@ -95,7 +95,7 @@ appstrate/
 
 ### API Routes
 
-- **OpenAPI specs** in `apps/api/src/openapi/` are the source of truth (181 endpoints)
+- **OpenAPI specs** in `apps/api/src/openapi/` are the source of truth (182 endpoints)
 - New route: create route file in `routes/` + OpenAPI path in `openapi/paths/` + wire in `index.ts`
 - All route bodies validated with `parseBody(schema, body)` from `lib/errors.ts`
 - Error responses follow RFC 9457 `application/problem+json`

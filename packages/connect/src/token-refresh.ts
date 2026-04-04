@@ -71,6 +71,42 @@ export async function refreshIfNeeded(
   }
 }
 
+/**
+ * Force a token refresh regardless of expiry.
+ * Returns refreshed credentials, or current credentials if no refresh token / not OAuth2.
+ * Throws if the refresh request itself fails (invalid_grant, network error).
+ */
+export async function forceRefresh(
+  db: Db,
+  connectionId: string,
+  providerId: string,
+  credentialsEncrypted: string,
+  refreshContext?: RefreshContext,
+): Promise<DecryptedCredentials> {
+  if (!refreshContext) {
+    return decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
+  }
+
+  // Reuse inflight deduplication
+  const inflight = inflightRefreshes.get(connectionId);
+  if (inflight) return inflight;
+
+  const refreshPromise = doRefresh(
+    db,
+    connectionId,
+    providerId,
+    credentialsEncrypted,
+    refreshContext,
+  );
+  inflightRefreshes.set(connectionId, refreshPromise);
+
+  try {
+    return await refreshPromise;
+  } finally {
+    inflightRefreshes.delete(connectionId);
+  }
+}
+
 async function doRefresh(
   db: Db,
   connectionId: string,
@@ -119,7 +155,6 @@ async function doRefresh(
 
   const parsed = parseTokenResponse(
     { ...tokenData, access_token: tokenData.access_token ?? creds.access_token },
-    ctx.scopeSeparator ?? " ",
     undefined,
     creds.refresh_token,
   );

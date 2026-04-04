@@ -2,9 +2,9 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, inArray } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { profiles, user as userTable } from "@appstrate/db/schema";
+import { profiles, user as userTable, organizationMembers } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 import { internalError, notFound, parseBody } from "../lib/errors.ts";
@@ -66,8 +66,9 @@ profileRouter.patch("/profile", async (c) => {
   return c.json({ ok: true, language: language ?? null, displayName: displayName ?? null });
 });
 
-// POST /api/profiles/batch — batch lookup display names by user IDs
+// POST /api/profiles/batch — batch lookup display names by user IDs (scoped to org members)
 profileRouter.post("/profiles/batch", async (c) => {
+  const orgId = c.get("orgId");
   const body = await c.req.json();
   const data = parseBody(batchLookupSchema, body);
   const ids = data.ids.filter(Boolean);
@@ -76,7 +77,8 @@ profileRouter.post("/profiles/batch", async (c) => {
   const rows = await db
     .select({ id: profiles.id, displayName: profiles.displayName })
     .from(profiles)
-    .where(inArray(profiles.id, ids));
+    .innerJoin(organizationMembers, eq(profiles.id, organizationMembers.userId))
+    .where(and(eq(organizationMembers.orgId, orgId), inArray(profiles.id, ids)));
 
   return c.json({ profiles: rows });
 });

@@ -74,7 +74,7 @@
   "validation.passwordMismatch": "Passwords do not match",
   "validation.slugFormat": "Lowercase letters, numbers and hyphens only",
   "validation.emailFormat": "Invalid email address",
-  "viewDefinition": "View definition",
+  "viewManifest": "View manifest",
   "dashboard.welcome": "Welcome, {{name}} \ud83d\udc4b",
   "notifications.ariaLabel": "Notifications",
   "notifications.title": "Notifications",

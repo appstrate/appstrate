@@ -11,7 +11,11 @@ import { loadCloud } from "./cloud-loader.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
-import { initSystemPackages, getSystemPackages } from "../services/system-packages.ts";
+import {
+  initSystemPackages,
+  getSystemPackages,
+  type SystemPackageEntry,
+} from "../services/system-packages.ts";
 import { createVersionAndUpload } from "../services/package-versions.ts";
 import {
   uploadPackageFiles,
@@ -153,72 +157,76 @@ async function loadAndSyncSystemPackages(): Promise<void> {
   if (allPackages.size === 0) return;
 
   let synced = 0;
-  for (const [id, entry] of allPackages) {
-    try {
-      const { manifest, zipBuffer, type } = entry;
-      const version = manifest.version as string;
 
-      // Check if this exact version already exists (nothing changed since last boot)
-      const [existingVersion] = await db
-        .select({ id: packageVersions.id })
-        .from(packageVersions)
-        .where(and(eq(packageVersions.packageId, id), eq(packageVersions.version, version)))
-        .limit(1);
+  const syncOne = async (id: string, entry: SystemPackageEntry) => {
+    const { manifest, zipBuffer, type } = entry;
+    const version = manifest.version as string;
 
-      const isNewVersion = !existingVersion;
+    // Check if this exact version already exists (nothing changed since last boot)
+    const [existingVersion] = await db
+      .select({ id: packageVersions.id })
+      .from(packageVersions)
+      .where(and(eq(packageVersions.packageId, id), eq(packageVersions.version, version)))
+      .limit(1);
 
-      // 1. UPSERT packages row (source: "system", orgId: null — global)
-      await db
-        .insert(packages)
-        .values({
-          id,
-          orgId: null,
-          type,
-          source: "system",
+    const isNewVersion = !existingVersion;
+
+    // 1. UPSERT packages row (source: "system", orgId: null — global)
+    await db
+      .insert(packages)
+      .values({
+        id,
+        orgId: null,
+        type,
+        source: "system",
+        draftManifest: manifest as unknown as Record<string, unknown>,
+        draftContent: entry.content,
+      })
+      .onConflictDoUpdate({
+        target: packages.id,
+        set: {
           draftManifest: manifest as unknown as Record<string, unknown>,
           draftContent: entry.content,
-        })
-        .onConflictDoUpdate({
-          target: packages.id,
-          set: {
-            draftManifest: manifest as unknown as Record<string, unknown>,
-            draftContent: entry.content,
-            source: "system",
-            orgId: null,
-            ...(isNewVersion ? { updatedAt: new Date() } : {}),
-          },
-        });
-
-      // 2. Upload system package files to global _system/ namespace (once, not per-org)
-      if (Object.keys(entry.files).length > 1) {
-        await uploadPackageFiles(
-          storageFolderForType(type),
-          SYSTEM_STORAGE_NAMESPACE,
-          id,
-          entry.files,
-        );
-      }
-
-      // 3. Create version from pre-built ZIP (idempotent — skips if version exists)
-      // This uploads to S3 then inserts the version row.
-      await createVersionAndUpload({
-        packageId: id,
-        version,
-        orgId: null,
-        createdBy: null,
-        zipBuffer,
-        manifest: manifest as unknown as Record<string, unknown>,
+          source: "system",
+          orgId: null,
+          ...(isNewVersion ? { updatedAt: new Date() } : {}),
+        },
       });
 
-      synced++;
-    } catch (err) {
-      // Per-package error isolation: log and continue with remaining packages
-      logger.warn("Failed to sync system package", {
-        packageId: id,
-        error: err instanceof Error ? err.message : String(err),
-      });
+    // 2. Upload system package files to global _system/ namespace (once, not per-org)
+    if (Object.keys(entry.files).length > 1) {
+      await uploadPackageFiles(
+        storageFolderForType(type),
+        SYSTEM_STORAGE_NAMESPACE,
+        id,
+        entry.files,
+      );
     }
-  }
+
+    // 3. Create version from pre-built ZIP (idempotent — skips if version exists)
+    await createVersionAndUpload({
+      packageId: id,
+      version,
+      orgId: null,
+      createdBy: null,
+      zipBuffer,
+      manifest: manifest as unknown as Record<string, unknown>,
+    });
+
+    synced++;
+  };
+
+  // Sync all system packages concurrently (per-package error isolation)
+  await Promise.all(
+    Array.from(allPackages).map(([id, entry]) =>
+      syncOne(id, entry).catch((err) => {
+        logger.warn("Failed to sync system package", {
+          packageId: id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }),
+    ),
+  );
 
   logger.info("System packages synced", { packages: synced });
 }
