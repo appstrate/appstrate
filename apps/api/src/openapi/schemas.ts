@@ -359,6 +359,10 @@ export const schemas = {
       packageVersionId: { type: "integer" },
       proxyLabel: { type: ["string", "null"], description: "Proxy label used at run time" },
       modelLabel: { type: ["string", "null"], description: "Model label used at run time" },
+      modelSource: {
+        type: ["string", "null"],
+        description: "Model source: 'system' (platform-provided) or 'org' (user-configured)",
+      },
       cost: { type: ["number", "null"], description: "Run cost in dollars" },
       endUserId: {
         type: ["string", "null"],
@@ -367,6 +371,11 @@ export const schemas = {
       applicationId: {
         type: ["string", "null"],
         description: "Application ID (app_ prefix) that owns this run",
+      },
+      metadata: {
+        type: ["object", "null"],
+        description: "Additional metadata (e.g. creditsUsed in cloud mode)",
+        additionalProperties: true,
       },
     },
   },

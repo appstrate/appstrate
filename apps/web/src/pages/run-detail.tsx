@@ -14,13 +14,14 @@ import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
 import { useRunRealtime, useRunLogsRealtime } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { Coins, Shield } from "lucide-react";
+import { Shield } from "lucide-react";
 import { Badge } from "../components/status-badge";
 import { LogViewer } from "../components/log-viewer";
 import { buildLogEntries, type RawLog } from "../components/log-utils";
 import { InputModal } from "../components/input-modal";
 import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { LoadingState, ErrorState } from "../components/page-states";
+import { RunInfoTab } from "../components/run-info-tab";
 import { useProfiles } from "../hooks/use-profiles";
 import { useMarkRead } from "../hooks/use-notifications";
 import type { RunStatus, RunLog } from "@appstrate/shared-types";
@@ -108,7 +109,7 @@ export function RunDetailPage() {
   // useTabWithHash respects the URL hash if present, so this only affects first load without hash.
   const defaultTab = hasResult ? "result" : "logs";
   const [activeTab, setActiveTab] = useTabWithHash(
-    ["result", "logs", "state", "usage"] as const,
+    ["result", "logs", "state", "info"] as const,
     defaultTab,
   );
 
@@ -228,7 +229,7 @@ export function RunDetailPage() {
       <div className="mb-4 flex items-center justify-between gap-4">
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "state" | "usage")}
+          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "state" | "info")}
         >
           <TabsList>
             {hasResult && <TabsTrigger value="result">{t("exec.tabResultGroup")}</TabsTrigger>}
@@ -241,7 +242,7 @@ export function RunDetailPage() {
               )}
             </TabsTrigger>
             {stateData && <TabsTrigger value="state">{t("exec.tabState")}</TabsTrigger>}
-            <TabsTrigger value="usage">{t("exec.tabUsage")}</TabsTrigger>
+            <TabsTrigger value="info">{t("exec.tabInfo")}</TabsTrigger>
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2">
@@ -287,70 +288,7 @@ export function RunDetailPage() {
 
       {activeTab === "state" && stateData && <JsonView data={stateData} />}
 
-      {activeTab === "usage" &&
-        (() => {
-          const usage = run.tokenUsage as {
-            input_tokens?: number;
-            output_tokens?: number;
-            cache_creation_input_tokens?: number;
-            cache_read_input_tokens?: number;
-          } | null;
-
-          const hasData = run.cost != null || run.tokensUsed != null || run.modelLabel != null;
-
-          if (!hasData) {
-            return <EmptyState message={t("exec.emptyUsage")} icon={Coins} compact />;
-          }
-
-          return (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {run.modelLabel != null && (
-                <div className="border-border bg-muted/30 rounded-lg border p-4">
-                  <p className="text-muted-foreground mb-1 text-xs">{t("exec.usageModel")}</p>
-                  <p className="text-sm font-medium">{run.modelLabel}</p>
-                </div>
-              )}
-              {run.cost != null && (
-                <div className="border-border bg-muted/30 rounded-lg border p-4">
-                  <p className="text-muted-foreground mb-1 text-xs">{t("exec.usageCost")}</p>
-                  <p className="text-sm font-medium">${run.cost.toFixed(4)}</p>
-                </div>
-              )}
-              {usage?.input_tokens != null && (
-                <div className="border-border bg-muted/30 rounded-lg border p-4">
-                  <p className="text-muted-foreground mb-1 text-xs">{t("exec.usageInputTokens")}</p>
-                  <p className="text-sm font-medium">{usage.input_tokens.toLocaleString()}</p>
-                </div>
-              )}
-              {usage?.output_tokens != null && (
-                <div className="border-border bg-muted/30 rounded-lg border p-4">
-                  <p className="text-muted-foreground mb-1 text-xs">
-                    {t("exec.usageOutputTokens")}
-                  </p>
-                  <p className="text-sm font-medium">{usage.output_tokens.toLocaleString()}</p>
-                </div>
-              )}
-              {usage?.cache_creation_input_tokens != null && (
-                <div className="border-border bg-muted/30 rounded-lg border p-4">
-                  <p className="text-muted-foreground mb-1 text-xs">
-                    {t("exec.usageCacheCreation")}
-                  </p>
-                  <p className="text-sm font-medium">
-                    {usage.cache_creation_input_tokens.toLocaleString()}
-                  </p>
-                </div>
-              )}
-              {usage?.cache_read_input_tokens != null && (
-                <div className="border-border bg-muted/30 rounded-lg border p-4">
-                  <p className="text-muted-foreground mb-1 text-xs">{t("exec.usageCacheRead")}</p>
-                  <p className="text-sm font-medium">
-                    {usage.cache_read_input_tokens.toLocaleString()}
-                  </p>
-                </div>
-              )}
-            </div>
-          );
-        })()}
+      {activeTab === "info" && <RunInfoTab run={run} />}
     </>
   );
 }

@@ -21,6 +21,7 @@ export async function createRun(
   connectionProfileId?: string,
   proxyLabel?: string,
   modelLabel?: string,
+  modelSource?: string,
   applicationId?: string | null,
   providerProfileIds?: Record<string, string>,
 ): Promise<void> {
@@ -43,6 +44,7 @@ export async function createRun(
     packageVersionId,
     proxyLabel,
     modelLabel,
+    modelSource,
     applicationId,
     providerProfileIds,
     runNumber,
@@ -100,6 +102,7 @@ export async function updateRun(
     tokenUsage?: Record<string, unknown>;
     notifiedAt?: string;
     cost?: number | null;
+    metadata?: Record<string, unknown>;
   },
 ): Promise<void> {
   const set: Record<string, unknown> = {};
@@ -114,6 +117,7 @@ export async function updateRun(
   if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
   if (updates.notifiedAt !== undefined) set.notifiedAt = new Date(updates.notifiedAt);
   if (updates.cost !== undefined) set.cost = updates.cost;
+  if (updates.metadata !== undefined) set.metadata = updates.metadata;
 
   try {
     await db.update(runs).set(set).where(eq(runs.id, id));

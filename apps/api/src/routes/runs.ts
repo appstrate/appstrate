@@ -87,6 +87,7 @@ export async function executeAgentInBackground(
   agentPackage?: Buffer | null,
   inputFiles?: UploadedFile[],
   applicationId?: string | null,
+  modelSource?: string | null,
 ) {
   const startTime = Date.now();
   const controller = trackRun(runId);
@@ -290,9 +291,12 @@ export async function executeAgentInBackground(
         await addPackageMemories(agent.id, orgId, memories, runId);
       }
 
+      let metadata: Record<string, unknown> | undefined;
       if (cloud && accumulatedCost > 0) {
         try {
-          await cloud.cloudHooks.recordUsage(orgId, runId, accumulatedCost);
+          metadata = await cloud.cloudHooks.recordUsage(orgId, runId, accumulatedCost, {
+            modelSource: modelSource ?? "system",
+          });
         } catch (err) {
           logger.error("Failed to record usage — manual reconciliation needed", {
             err: err instanceof Error ? err.message : String(err),
@@ -313,6 +317,7 @@ export async function executeAgentInBackground(
         tokensUsed: totalTokens > 0 ? totalTokens : undefined,
         ...(totalTokens > 0 ? { tokenUsage: { ...accumulated } as Record<string, unknown> } : {}),
         cost: accumulatedCost > 0 ? accumulatedCost : null,
+        ...(metadata ? { metadata } : {}),
       });
 
       if (hasOutput) {
@@ -467,6 +472,7 @@ export function createRunsRouter() {
       let packageVersionId: number | null;
       let proxyLabel: string | null;
       let modelLabel: string | null;
+      let modelSource: string | null;
       try {
         ({
           promptContext,
@@ -474,6 +480,7 @@ export function createRunsRouter() {
           packageVersionId,
           proxyLabel,
           modelLabel,
+          modelSource,
         } = await buildRunContext({
           runId,
           agent: effectiveAgent,
@@ -535,6 +542,7 @@ export function createRunsRouter() {
         defaultUserProfileId ?? undefined,
         proxyLabel ?? undefined,
         modelLabel ?? undefined,
+        modelSource ?? undefined,
         c.get("applicationId") ?? null,
         profileIdMap,
       );
@@ -548,6 +556,7 @@ export function createRunsRouter() {
         agentPackage,
         uploadedFiles,
         c.get("applicationId") ?? null,
+        modelSource,
       ).catch((err) => {
         logger.error("Unhandled error in background run", {
           runId,
