@@ -97,25 +97,6 @@ export interface OrgInvitation {
 
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 
-// --- Agent Readiness Utilities ---
-
-/** Check if a prompt is empty or whitespace-only. */
-export function isPromptEmpty(prompt: string): boolean {
-  return prompt.trim().length === 0;
-}
-
-/**
- * Find IDs declared in `required` but missing from `installed`.
- * Works for both skills and tools.
- */
-export function findMissingDependencies(
-  required: Record<string, string>,
-  installedIds: string[],
-): string[] {
-  const installed = new Set(installedIds);
-  return Object.keys(required).filter((id) => !installed.has(id));
-}
-
 // --- Connection Types ---
 
 /** Connection record as returned by the API (no encrypted credentials). */

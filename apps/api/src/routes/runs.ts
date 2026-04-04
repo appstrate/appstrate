@@ -5,13 +5,11 @@ import { Hono } from "hono";
 import { logger } from "../lib/logger.ts";
 import type { LoadedPackage, AppEnv } from "../types/index.ts";
 import {
-  createRun,
   updateRun,
   appendRunLog,
   getRun,
   getRunFull,
   getRunningRunsForPackage,
-  getRunningRunCountForOrg,
   deletePackageRuns,
   listPackageRuns,
   listScheduleRuns,
@@ -29,7 +27,6 @@ import { validateAgentReadiness } from "../services/agent-readiness.ts";
 import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
-import { buildRunContext, ModelNotConfiguredError } from "../services/env-builder.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -42,7 +39,8 @@ import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
-import { dispatchWebhookEvents } from "../services/webhooks.ts";
+import { dispatchRunWebhook } from "../services/webhooks.ts";
+import { prepareAndExecuteRun } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
 
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
@@ -52,29 +50,6 @@ function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
     (total.cache_creation_input_tokens ?? 0) + (addition.cache_creation_input_tokens ?? 0);
   total.cache_read_input_tokens =
     (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
-}
-
-/** Fire-and-forget webhook dispatch after run status change. */
-function dispatchWebhooks(
-  orgId: string,
-  status: string,
-  runId: string,
-  packageId: string,
-  extra?: Record<string, unknown>,
-  applicationId?: string | null,
-): void {
-  const eventType = `run.${status}` as Parameters<typeof dispatchWebhookEvents>[1];
-  dispatchWebhookEvents(
-    orgId,
-    eventType,
-    { id: runId, packageId, status, ...extra },
-    applicationId,
-  ).catch((err) => {
-    logger.warn("Webhook dispatch failed", {
-      runId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  });
 }
 
 // --- Background run (decoupled from client) ---
@@ -99,7 +74,7 @@ export async function executeAgentInBackground(
   try {
     // Update status to running
     await updateRun(runId, orgId, { status: "running" });
-    dispatchWebhooks(orgId, "started", runId, agent.id, undefined, applicationId);
+    dispatchRunWebhook(orgId, "started", runId, agent.id, undefined, applicationId);
 
     // Execute via adapter
     const adapter = new PiAdapter();
@@ -212,7 +187,7 @@ export async function executeAgentInBackground(
           },
           "error",
         );
-        dispatchWebhooks(orgId, "timeout", runId, agent.id, { duration }, applicationId);
+        dispatchRunWebhook(orgId, "timeout", runId, agent.id, { duration }, applicationId);
         return;
       }
       throw err;
@@ -250,7 +225,7 @@ export async function executeAgentInBackground(
         { runId, status: "failed", error },
         "error",
       );
-      dispatchWebhooks(orgId, "failed", runId, agent.id, { error, duration }, applicationId);
+      dispatchRunWebhook(orgId, "failed", runId, agent.id, { error, duration }, applicationId);
     } else {
       // --- Success path (with or without structured output) ---
 
@@ -332,7 +307,7 @@ export async function executeAgentInBackground(
         { runId, status: "success" },
         "info",
       );
-      dispatchWebhooks(orgId, "completed", runId, agent.id, { result, duration }, applicationId);
+      dispatchRunWebhook(orgId, "completed", runId, agent.id, { result, duration }, applicationId);
     }
   } catch (err) {
     // If aborted (cancelled), the cancel route already wrote DB status
@@ -360,7 +335,7 @@ export async function executeAgentInBackground(
       },
       "error",
     );
-    dispatchWebhooks(
+    dispatchRunWebhook(
       orgId,
       "failed",
       runId,
@@ -466,103 +441,43 @@ export function createRunsRouter() {
         size: f.size,
       }));
 
-      // Build run context (tokens, config, state, providers, package, version)
-      let promptContext: PromptContext;
-      let agentPackage: Buffer | null;
-      let packageVersionId: number | null;
-      let proxyLabel: string | null;
-      let modelLabel: string | null;
-      let modelSource: string | null;
-      try {
-        ({
-          promptContext,
-          agentPackage: agentPackage,
-          packageVersionId,
-          proxyLabel,
-          modelLabel,
-          modelSource,
-        } = await buildRunContext({
-          runId,
-          agent: effectiveAgent,
-          providerProfiles,
-          orgId,
-          actor,
-          input: parsedInput,
-          files: fileRefs,
-          config,
-          modelId: modelIdOverride ?? preflightModelId,
-          proxyId: proxyIdOverride ?? preflightProxyId,
-          overrideVersionId,
-        }));
-      } catch (err) {
-        if (err instanceof ModelNotConfiguredError) {
+      const result = await prepareAndExecuteRun({
+        runId,
+        agent: effectiveAgent,
+        providerProfiles,
+        orgId,
+        actor,
+        input: parsedInput,
+        files: fileRefs,
+        config,
+        modelId: modelIdOverride ?? preflightModelId,
+        proxyId: proxyIdOverride ?? preflightProxyId,
+        overrideVersionId,
+        connectionProfileId: defaultUserProfileId ?? undefined,
+        applicationId: c.get("applicationId") ?? null,
+        uploadedFiles,
+      });
+
+      if (!result.ok) {
+        const { error } = result;
+        if (error.code === "model_not_configured") {
           throw new ApiError({
             status: 400,
             code: "model_not_configured",
             title: "Bad Request",
-            detail: err.message,
+            detail: error.message,
           });
         }
-        throw err;
-      }
-
-      // Pre-run quota check (Cloud only — reject before creating the run record)
-      const cloud = getCloudModule();
-      if (cloud) {
-        try {
-          const runningCount = await getRunningRunCountForOrg(orgId);
-          await cloud.cloudHooks.checkQuota(orgId, runningCount);
-        } catch (err) {
-          if (err instanceof cloud.QuotaExceededError) {
-            throw new ApiError({
-              status: 402,
-              code: "quota_exceeded",
-              title: "Payment Required",
-              detail: err.message,
-            });
-          }
-          throw err;
+        if (error.code === "quota_exceeded") {
+          throw new ApiError({
+            status: 402,
+            code: "quota_exceeded",
+            title: "Payment Required",
+            detail: error.message,
+          });
         }
+        throw new Error(error.message);
       }
-
-      // Extract just the profileId map (strip source field)
-      const profileIdMap = Object.fromEntries(
-        Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
-      );
-
-      // Create run record
-      await createRun(
-        runId,
-        packageId,
-        actor,
-        orgId,
-        parsedInput ?? null,
-        undefined,
-        packageVersionId ?? undefined,
-        defaultUserProfileId ?? undefined,
-        proxyLabel ?? undefined,
-        modelLabel ?? undefined,
-        modelSource ?? undefined,
-        c.get("applicationId") ?? null,
-        profileIdMap,
-      );
-
-      // Fire-and-forget background run
-      executeAgentInBackground(
-        runId,
-        orgId,
-        effectiveAgent,
-        promptContext,
-        agentPackage,
-        uploadedFiles,
-        c.get("applicationId") ?? null,
-        modelSource,
-      ).catch((err) => {
-        logger.error("Unhandled error in background run", {
-          runId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
 
       return c.json({ runId });
     },
@@ -693,7 +608,7 @@ export function createRunsRouter() {
       .stopByRunId(runId)
       .catch(() => {});
 
-    dispatchWebhooks(
+    dispatchRunWebhook(
       orgId,
       "cancelled",
       runId,

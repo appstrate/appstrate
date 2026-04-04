@@ -12,12 +12,10 @@ import {
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
-import { createRun, createFailedRun } from "./state/index.ts";
-import { executeAgentInBackground } from "../routes/runs.ts";
-import { dispatchWebhookEvents } from "./webhooks.ts";
-import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
+import { createFailedRun } from "./state/index.ts";
+import { dispatchRunWebhook } from "./webhooks.ts";
+import { prepareAndExecuteRun } from "./run-pipeline.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
-import type { PromptContext } from "./adapters/types.ts";
 import { getPackage, packageExists } from "./agent-service.ts";
 import { getPackageConfig } from "./state/index.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -34,8 +32,6 @@ import { ApiError, internalError } from "../lib/errors.ts";
 import { validateInput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { computeNextRun } from "../lib/cron.ts";
-import { getRunningRunCountForOrg } from "./state/index.ts";
-import { getCloudModule } from "../lib/cloud-loader.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 
 // ---------------------------------------------------------------------------
@@ -183,12 +179,7 @@ async function triggerScheduledRun(
     const runId = `run_${crypto.randomUUID()}`;
     try {
       await createFailedRun(runId, packageId, actor, orgId, error, scheduleId, connectionProfileId);
-      dispatchWebhookEvents(orgId, "run.failed", {
-        id: runId,
-        packageId,
-        status: "failed",
-        error,
-      }).catch(() => {});
+      dispatchRunWebhook(orgId, "failed", runId, packageId, { error });
     } catch (err) {
       logger.error("Failed to create failed schedule run record", {
         scheduleId,
@@ -301,99 +292,31 @@ async function triggerScheduledRun(
 
     const runId = `run_${crypto.randomUUID()}`;
 
-    // Build run context (tokens, config, state, providers, package, version)
-    let promptContext: PromptContext;
-    let agentPackage: Buffer | null;
-    let packageVersionId: number | null;
-    let proxyLabel: string | null;
-    let modelLabel: string | null;
-    let modelSource: string | null;
-    try {
-      ({ promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel, modelSource } =
-        await buildRunContext({
-          runId,
-          agent,
-          providerProfiles,
-          orgId,
-          actor,
-          input,
-          config,
-          modelId: preflightModelId,
-          proxyId: preflightProxyId,
-        }));
-    } catch (err) {
-      if (err instanceof ModelNotConfiguredError) {
-        logger.warn("No model configured, skipping scheduled run", {
-          scheduleId,
-          packageId,
-          orgId,
-        });
-        await failSchedule("No model configured", actor);
-        return;
-      }
-      logger.error("Unexpected error building run context for schedule", {
+    const result = await prepareAndExecuteRun({
+      runId,
+      agent,
+      providerProfiles,
+      orgId,
+      actor,
+      input,
+      config,
+      modelId: preflightModelId,
+      proxyId: preflightProxyId,
+      scheduleId,
+      connectionProfileId,
+    });
+
+    if (!result.ok) {
+      logger.warn("Scheduled run pipeline failed", {
         scheduleId,
         packageId,
-        error: err instanceof Error ? err.message : String(err),
+        orgId,
+        code: result.error.code,
+        detail: result.error.message,
       });
-      await failSchedule(
-        `Run context error: ${err instanceof Error ? err.message : String(err)}`,
-        actor,
-      );
+      await failSchedule(result.error.message, actor);
       return;
     }
-
-    // Pre-run quota check (Cloud only — skip silently if quota exceeded)
-    const cloud = getCloudModule();
-    if (cloud) {
-      try {
-        const runningCount = await getRunningRunCountForOrg(orgId);
-        await cloud.cloudHooks.checkQuota(orgId, runningCount);
-      } catch (err) {
-        if (err instanceof cloud.QuotaExceededError) {
-          logger.warn("Quota exceeded, skipping scheduled run", {
-            scheduleId,
-            packageId,
-            orgId,
-            reason: err.message,
-          });
-          await failSchedule(err.message, actor);
-          return;
-        }
-        logger.error("Unexpected error during quota check for schedule", {
-          scheduleId,
-          packageId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        await failSchedule(
-          `Quota check error: ${err instanceof Error ? err.message : String(err)}`,
-          actor,
-        );
-        return;
-      }
-    }
-
-    // Extract just the profileId map (strip source field)
-    const profileIdMap = Object.fromEntries(
-      Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
-    );
-
-    // Create run record with schedule_id and version
-    await createRun(
-      runId,
-      packageId,
-      actor,
-      orgId,
-      input ?? null,
-      scheduleId,
-      packageVersionId ?? undefined,
-      connectionProfileId,
-      proxyLabel ?? undefined,
-      modelLabel ?? undefined,
-      modelSource ?? undefined,
-      undefined,
-      profileIdMap,
-    );
 
     logger.info("Triggering scheduled run", {
       runId,
@@ -401,23 +324,6 @@ async function triggerScheduledRun(
       scheduleId,
       connectionProfileId,
       orgId,
-    });
-
-    // Fire-and-forget (catch to prevent unhandled rejection)
-    executeAgentInBackground(
-      runId,
-      orgId,
-      agent,
-      promptContext,
-      agentPackage,
-      undefined,
-      undefined,
-      modelSource,
-    ).catch((err) => {
-      logger.error("Unhandled error in scheduled run", {
-        runId,
-        error: err instanceof Error ? err.message : String(err),
-      });
     });
   } catch (err) {
     logger.error("Failed to trigger schedule", {
