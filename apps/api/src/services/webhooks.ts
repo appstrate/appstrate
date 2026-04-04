@@ -601,3 +601,29 @@ export async function shutdownWebhookWorker(): Promise<void> {
   await deliveryQueue?.shutdown();
   deliveryQueue = null;
 }
+
+/**
+ * Fire-and-forget webhook dispatch for run status changes.
+ * Shared by the run route (POST /run) and the scheduler (triggerScheduledRun).
+ */
+export function dispatchRunWebhook(
+  orgId: string,
+  status: string,
+  runId: string,
+  packageId: string,
+  extra?: Record<string, unknown>,
+  applicationId?: string | null,
+): void {
+  const eventType = `run.${status}` as WebhookEventType;
+  dispatchWebhookEvents(
+    orgId,
+    eventType,
+    { id: runId, packageId, status, ...extra },
+    applicationId,
+  ).catch((err) => {
+    logger.warn("Webhook dispatch failed", {
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { and, eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { packageVersions } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser } from "../../helpers/auth.ts";
 import { createTestOrg } from "../../helpers/auth.ts";
@@ -9,10 +12,6 @@ import {
   createPackageVersion,
   listPackageVersions,
   getLatestVersionId,
-  yankVersion,
-  addDistTag,
-  removeDistTag,
-  getMatchingDistTags,
   getVersionCount,
   getVersionInfo,
   getLatestVersionCreatedAt,
@@ -193,7 +192,11 @@ describe("package-versions service", () => {
       const before = await listPackageVersions(pkg.id);
       expect(before[0]!.yanked).toBe(false);
 
-      await yankVersion(pkg.id, "1.0.0");
+      // Directly mark as yanked via DB (yankVersion was removed — no route exposes it)
+      await db
+        .update(packageVersions)
+        .set({ yanked: true })
+        .where(and(eq(packageVersions.packageId, pkg.id), eq(packageVersions.version, "1.0.0")));
 
       const after = await listPackageVersions(pkg.id);
       expect(after[0]!.yanked).toBe(true);
@@ -227,69 +230,6 @@ describe("package-versions service", () => {
     });
   });
 
-  // ── yankVersion ───────────────────────────────────────────
-
-  describe("yankVersion", () => {
-    it("sets yanked=true on the target version", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/yank-agent` });
-
-      await createPackageVersion({
-        packageId: pkg.id,
-        version: "1.0.0",
-        integrity: "sha256-abc",
-        artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
-        orgId,
-        createdBy: userId,
-      });
-
-      const yanked = await yankVersion(pkg.id, "1.0.0");
-      expect(yanked).toBe(true);
-
-      const versions = await listPackageVersions(pkg.id);
-      expect(versions[0]!.yanked).toBe(true);
-    });
-
-    it("returns false for a non-existent version", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/no-yank` });
-
-      const result = await yankVersion(pkg.id, "9.9.9");
-      expect(result).toBe(false);
-    });
-
-    it("reassigns latest dist-tag when the current latest is yanked", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/reassign-agent` });
-      const base = {
-        packageId: pkg.id,
-        integrity: "sha256-abc",
-        artifactSize: 1024,
-        manifest: { name: pkg.id, type: "agent" } as Record<string, unknown>,
-        orgId,
-        createdBy: userId,
-      };
-
-      const v1 = await createPackageVersion({
-        ...base,
-        version: "1.0.0",
-        manifest: { ...base.manifest, version: "1.0.0" },
-      });
-      const v2 = await createPackageVersion({
-        ...base,
-        version: "2.0.0",
-        manifest: { ...base.manifest, version: "2.0.0" },
-      });
-
-      // latest should point to v2
-      expect(await getLatestVersionId(pkg.id)).toBe(v2!.id);
-
-      await yankVersion(pkg.id, "2.0.0");
-
-      // After yanking v2, latest should fall back to v1
-      const newLatest = await getLatestVersionId(pkg.id);
-      expect(newLatest).toBe(v1!.id);
-    });
-  });
-
   // ── getVersionCount ───────────────────────────────────────
 
   describe("getVersionCount", () => {
@@ -308,140 +248,6 @@ describe("package-versions service", () => {
       });
 
       expect(await getVersionCount(pkg.id)).toBe(1);
-    });
-  });
-
-  // ── addDistTag / removeDistTag ────────────────────────────
-
-  describe("addDistTag", () => {
-    it("adds a custom dist-tag to a version", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/tag-agent` });
-
-      const v1 = await createPackageVersion({
-        packageId: pkg.id,
-        version: "1.0.0",
-        integrity: "sha256-abc",
-        artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
-        orgId,
-        createdBy: userId,
-      });
-
-      await addDistTag(pkg.id, "beta", v1!.id);
-
-      const tags = await getMatchingDistTags(pkg.id, "1.0.0");
-      expect(tags).toContain("beta");
-      expect(tags).toContain("latest");
-    });
-
-    it("throws when setting the protected latest tag", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/prot-tag` });
-
-      const v1 = await createPackageVersion({
-        packageId: pkg.id,
-        version: "1.0.0",
-        integrity: "sha256-abc",
-        artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
-        orgId,
-        createdBy: userId,
-      });
-
-      await expect(addDistTag(pkg.id, "latest", v1!.id)).rejects.toThrow(
-        "The 'latest' tag cannot be set manually",
-      );
-    });
-
-    it("throws for an invalid tag name", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/inv-tag` });
-
-      const v1 = await createPackageVersion({
-        packageId: pkg.id,
-        version: "1.0.0",
-        integrity: "sha256-abc",
-        artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
-        orgId,
-        createdBy: userId,
-      });
-
-      await expect(addDistTag(pkg.id, "", v1!.id)).rejects.toThrow();
-    });
-
-    it("moves a dist-tag to a different version on re-add", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/move-tag` });
-      const base = {
-        packageId: pkg.id,
-        integrity: "sha256-abc",
-        artifactSize: 1024,
-        manifest: { name: pkg.id, type: "agent" } as Record<string, unknown>,
-        orgId,
-        createdBy: userId,
-      };
-
-      const v1 = await createPackageVersion({
-        ...base,
-        version: "1.0.0",
-        manifest: { ...base.manifest, version: "1.0.0" },
-      });
-      const v2 = await createPackageVersion({
-        ...base,
-        version: "2.0.0",
-        manifest: { ...base.manifest, version: "2.0.0" },
-      });
-
-      await addDistTag(pkg.id, "stable", v1!.id);
-
-      let tags = await getMatchingDistTags(pkg.id, "1.0.0");
-      expect(tags).toContain("stable");
-
-      // Move stable to v2
-      await addDistTag(pkg.id, "stable", v2!.id);
-
-      tags = await getMatchingDistTags(pkg.id, "1.0.0");
-      expect(tags).not.toContain("stable");
-
-      tags = await getMatchingDistTags(pkg.id, "2.0.0");
-      expect(tags).toContain("stable");
-    });
-  });
-
-  describe("removeDistTag", () => {
-    it("removes a custom dist-tag", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/rm-tag` });
-
-      const v1 = await createPackageVersion({
-        packageId: pkg.id,
-        version: "1.0.0",
-        integrity: "sha256-abc",
-        artifactSize: 1024,
-        manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
-        orgId,
-        createdBy: userId,
-      });
-
-      await addDistTag(pkg.id, "canary", v1!.id);
-      let tags = await getMatchingDistTags(pkg.id, "1.0.0");
-      expect(tags).toContain("canary");
-
-      await removeDistTag(pkg.id, "canary");
-      tags = await getMatchingDistTags(pkg.id, "1.0.0");
-      expect(tags).not.toContain("canary");
-    });
-
-    it("throws when removing the protected latest tag", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/rm-latest` });
-
-      await expect(removeDistTag(pkg.id, "latest")).rejects.toThrow(
-        "The 'latest' tag cannot be removed",
-      );
-    });
-
-    it("is a no-op when removing a non-existent tag", async () => {
-      const pkg = await seedPackage({ orgId, id: `@${orgSlug}/rm-noop` });
-
-      // Should not throw
-      await removeDistTag(pkg.id, "nonexistent");
     });
   });
 
