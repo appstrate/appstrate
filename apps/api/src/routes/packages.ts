@@ -10,6 +10,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { packages, profiles, providerCredentials } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { postInstallPackage } from "../services/post-install-package.ts";
+import { installPackage } from "../services/application-packages.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/agent-service.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
@@ -463,6 +464,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         normalizedFiles,
       });
 
+      // Auto-install in the current application (non-fatal)
+      const appId = c.get("appId");
+      if (appId) {
+        await installPackage(appId, orgId, packageId).catch(() => {});
+      }
+
       return c.json(
         {
           packageId,
@@ -551,6 +558,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       manifest: finalManifest,
       normalizedFiles: parsed.normalizedFiles ?? {},
     });
+
+    // Auto-install in the current application (non-fatal)
+    const appId = c.get("appId");
+    if (appId) {
+      await installPackage(appId, orgId, item.id).catch(() => {});
+    }
 
     return c.json(
       {
@@ -1291,6 +1304,12 @@ export function createPackagesRouter() {
     const rcfg = ROUTE_CONFIGS[packageType as PackageType];
     if (rcfg?.afterCreate) {
       await rcfg.afterCreate({ packageId, orgId, manifest: manifest as Record<string, unknown> });
+    }
+
+    // Auto-install in the current application (non-fatal, skip if already installed)
+    const appId = c.get("appId");
+    if (appId) {
+      await installPackage(appId, orgId, packageId).catch(() => {});
     }
 
     // Force import: replace existing version content if integrity differs
