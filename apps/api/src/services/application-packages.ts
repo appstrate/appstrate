@@ -7,7 +7,7 @@
 
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applicationPackages, packages } from "@appstrate/db/schema";
+import { applicationPackages, applications, packages } from "@appstrate/db/schema";
 import { notFound, conflict } from "../lib/errors.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import type { PackageType } from "@appstrate/core/validation";
@@ -155,6 +155,25 @@ export async function isPackageInstalled(
     )
     .limit(1);
   return !!row;
+}
+
+/**
+ * Check if an application has access to a package.
+ *
+ * Default application → access to ALL packages in the org (no binding required).
+ * Custom application → access only to explicitly installed packages.
+ */
+export async function hasPackageAccess(applicationId: string, packageId: string): Promise<boolean> {
+  // Check if this is the default app — default app has access to everything
+  const [app] = await db
+    .select({ isDefault: applications.isDefault })
+    .from(applications)
+    .where(eq(applications.id, applicationId))
+    .limit(1);
+
+  if (app?.isDefault) return true;
+
+  return isPackageInstalled(applicationId, packageId);
 }
 
 // ---------------------------------------------------------------------------

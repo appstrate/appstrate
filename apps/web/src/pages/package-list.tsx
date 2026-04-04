@@ -6,9 +6,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { type LucideIcon, Layers } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { useAgents } from "../hooks/use-packages";
-import { useInstalledPackages } from "../hooks/use-installed-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
@@ -99,12 +97,9 @@ export function PackageTab({
 export function PackageList() {
   const { t } = useTranslation(["agents", "common"]);
   const { data: agents, isLoading, error } = useAgents();
-  const { data: installedPackages } = useInstalledPackages("agent");
   const { data: unreadCounts } = useUnreadCountsByAgent();
   const { isAdmin } = usePermissions();
   const [importOpen, setImportOpen] = useState(false);
-
-  const installedIds = new Set(installedPackages?.map((p) => p.packageId) ?? []);
 
   const items: CardItem[] | undefined = agents?.map((f) => ({
     id: f.id,
@@ -116,7 +111,6 @@ export function PackageList() {
     keywords: f.keywords,
     providerIds: f.dependencies.providers,
     unreadCount: unreadCounts?.[f.id],
-    statusBadge: installedIds.has(f.id) ? <Badge variant="success">Installé</Badge> : null,
   }));
 
   return (

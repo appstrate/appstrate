@@ -15,7 +15,6 @@ import {
   Loader2,
   Users,
   KeyRound,
-  Package,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
@@ -131,13 +130,6 @@ export function NavOrg() {
         <SidebarGroup>
           <SidebarGroupLabel>{t("nav.orgSection")}</SidebarGroupLabel>
           <SidebarMenu>
-            {renderItems([
-              {
-                path: "/catalog",
-                label: t("nav.catalog", { defaultValue: "Catalogue" }),
-                icon: Package,
-              },
-            ])}
             <SidebarMenuItem>
               <SidebarMenuButton
                 asChild
