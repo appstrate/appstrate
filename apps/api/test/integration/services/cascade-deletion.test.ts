@@ -9,7 +9,7 @@ import { assertDbHas, assertDbMissing, assertDbCount, getDbRow } from "../../hel
 import {
   orgProfileProviderBindings,
   connectionProfiles,
-  packageConfigs,
+  applicationPackages,
   userAgentProviderProfiles,
 } from "@appstrate/db/schema";
 import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
@@ -20,14 +20,16 @@ import type { Actor } from "../../../src/lib/actor.ts";
 describe("Cascade Deletion", () => {
   let userId: string;
   let orgId: string;
+  let appId: string;
   let actor: Actor;
 
   beforeEach(async () => {
     await truncateAll();
     const { id } = await createTestUser();
     userId = id;
-    const { org } = await createTestOrg(userId);
+    const { org, defaultAppId } = await createTestOrg(userId);
     orgId = org.id;
+    appId = defaultAppId;
     actor = { type: "member", id: userId };
   });
 
@@ -81,18 +83,21 @@ describe("Cascade Deletion", () => {
   });
 
   describe("when org profile is deleted", () => {
-    it("nullifies package_configs.orgProfileId via FK SET NULL", async () => {
+    it("nullifies application_packages.orgProfileId via FK SET NULL", async () => {
       const orgProfile = await seedConnectionProfile({ orgId, name: "Org Profile" });
 
       const agent = await seedAgent({ id: "@testorg/org-agent", orgId, createdBy: userId });
 
       // Set org profile on the agent config
-      await setAgentOverride(orgId, agent.id, "orgProfileId", orgProfile.id);
+      await setAgentOverride(appId, agent.id, "orgProfileId", orgProfile.id);
 
       // Verify orgProfileId is set
       const configBefore = await getDbRow(
-        packageConfigs,
-        and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, agent.id))!,
+        applicationPackages,
+        and(
+          eq(applicationPackages.applicationId, appId),
+          eq(applicationPackages.packageId, agent.id),
+        )!,
       );
       expect(configBefore.orgProfileId).toBe(orgProfile.id);
 
@@ -101,8 +106,11 @@ describe("Cascade Deletion", () => {
 
       // orgProfileId should be nullified (SET NULL)
       const configAfter = await getDbRow(
-        packageConfigs,
-        and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, agent.id))!,
+        applicationPackages,
+        and(
+          eq(applicationPackages.applicationId, appId),
+          eq(applicationPackages.packageId, agent.id),
+        )!,
       );
       expect(configAfter.orgProfileId).toBeNull();
     });
@@ -156,20 +164,26 @@ describe("Cascade Deletion", () => {
       const agent1 = await seedAgent({ id: "@testorg/agent-a", orgId, createdBy: userId });
       const agent2 = await seedAgent({ id: "@testorg/agent-b", orgId, createdBy: userId });
 
-      await setAgentOverride(orgId, agent1.id, "orgProfileId", orgProfile.id);
-      await setAgentOverride(orgId, agent2.id, "orgProfileId", orgProfile.id);
+      await setAgentOverride(appId, agent1.id, "orgProfileId", orgProfile.id);
+      await setAgentOverride(appId, agent2.id, "orgProfileId", orgProfile.id);
 
       // Delete the org profile
       await db.delete(connectionProfiles).where(eq(connectionProfiles.id, orgProfile.id));
 
       // Both agents should have orgProfileId nullified
       const config1 = await getDbRow(
-        packageConfigs,
-        and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, agent1.id))!,
+        applicationPackages,
+        and(
+          eq(applicationPackages.applicationId, appId),
+          eq(applicationPackages.packageId, agent1.id),
+        )!,
       );
       const config2 = await getDbRow(
-        packageConfigs,
-        and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, agent2.id))!,
+        applicationPackages,
+        and(
+          eq(applicationPackages.applicationId, appId),
+          eq(applicationPackages.packageId, agent2.id),
+        )!,
       );
       expect(config1.orgProfileId).toBeNull();
       expect(config2.orgProfileId).toBeNull();

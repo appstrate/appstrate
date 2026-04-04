@@ -34,6 +34,7 @@ export async function buildRunContext(params: {
   agent: LoadedPackage;
   providerProfiles: ProviderProfileMap;
   orgId: string;
+  applicationId: string;
   actor: Actor | null;
   input?: Record<string, unknown>;
   files?: FileReference[];
@@ -49,7 +50,7 @@ export async function buildRunContext(params: {
   modelLabel: string | null;
   modelSource: string | null;
 }> {
-  const { runId, agent, providerProfiles, orgId, actor, input, files } = params;
+  const { runId, agent, providerProfiles, orgId, applicationId, actor, input, files } = params;
   const manifestProviders = resolveManifestProviders(agent.manifest);
 
   // Skip getPackageConfig when all values are already provided by the caller (from preflight)
@@ -67,7 +68,7 @@ export async function buildRunContext(params: {
     memories,
   ] = await Promise.all([
     buildProviderTokens(manifestProviders, providerProfiles, orgId),
-    skipConfigFetch ? null : getPackageConfig(orgId, agent.id),
+    skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
     getLastRunState(agent.id, actor, orgId),
     resolveProviderDefs(orgId, manifestProviders),
     buildAgentPackage(agent, orgId),
@@ -76,7 +77,7 @@ export async function buildRunContext(params: {
       : agent.source !== "system"
         ? getLatestVersionWithManifest(agent.id).catch(() => null)
         : null,
-    getPackageMemories(agent.id, orgId),
+    getPackageMemories(agent.id, applicationId),
   ]);
 
   const config = params.config ?? configFull?.config ?? {};

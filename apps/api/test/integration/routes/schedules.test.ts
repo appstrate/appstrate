@@ -41,6 +41,7 @@ describe("Schedules API", () => {
       await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
         name: "Hourly",
@@ -198,6 +199,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
         name: "Old Name",
@@ -223,6 +225,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
       });
@@ -243,6 +246,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
         name: "Hourly Run",
@@ -278,6 +282,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: otherCtx.orgId,
+        applicationId: otherCtx.defaultAppId,
         connectionProfileId: otherProfile.id,
         cronExpression: "0 * * * *",
       });
@@ -296,6 +301,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
       });
@@ -304,6 +310,7 @@ describe("Schedules API", () => {
       await seedRun({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         scheduleId: schedule.id,
         status: "success",
@@ -327,6 +334,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
       });
@@ -371,6 +379,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
       });

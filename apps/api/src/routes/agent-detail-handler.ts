@@ -31,6 +31,7 @@ import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 
 export async function agentDetailHandler(c: Context<AppEnv>) {
   const orgId = c.get("orgId");
+  const appId = c.get("appId");
   const actor = getActor(c);
   const itemId = getItemId(c);
 
@@ -50,9 +51,9 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   // Load org profile, actor profile context, and package config in parallel
   const [agentOrgProfile, { defaultUserProfileId, userProviderOverrides }, packageConfig] =
     await Promise.all([
-      getAgentOrgProfile(orgId, agent.id),
+      getAgentOrgProfile(appId, orgId, agent.id),
       resolveActorProfileContext(actor, agent.id),
-      getPackageConfig(orgId, agent.id),
+      getPackageConfig(appId, agent.id),
     ]);
   const agentOrgProfileId = agentOrgProfile?.id ?? null;
   const agentOrgProfileName = agentOrgProfile?.name ?? null;

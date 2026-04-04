@@ -87,8 +87,8 @@ export function createAgentsRouter() {
 
       const config = mergeWithDefaults(asJSONSchemaObject(schema), body);
 
-      const orgId = c.get("orgId");
-      await setPackageConfig(orgId, agent.id, config);
+      const appId = c.get("appId");
+      await setPackageConfig(appId, agent.id, config);
 
       return c.json({
         config,
@@ -150,8 +150,8 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/proxy — get agent proxy configuration
   router.get("/:scope{@[^/]+}/:name/proxy", requireAgent(), async (c) => {
     const agent = c.get("agent");
-    const orgId = c.get("orgId");
-    const { proxyId } = await getPackageConfig(orgId, agent.id);
+    const appId = c.get("appId");
+    const { proxyId } = await getPackageConfig(appId, agent.id);
 
     return c.json({ proxyId, resolved: proxyId !== "none" });
   });
@@ -163,11 +163,11 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("agent");
-      const orgId = c.get("orgId");
+      const appId = c.get("appId");
       const body = await c.req.json();
       const data = parseBody(proxyIdSchema, body);
 
-      await setAgentOverride(orgId, agent.id, "proxyId", data.proxyId);
+      await setAgentOverride(appId, agent.id, "proxyId", data.proxyId);
 
       return c.json({ success: true });
     },
@@ -176,8 +176,8 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/model — get agent model configuration
   router.get("/:scope{@[^/]+}/:name/model", requireAgent(), async (c) => {
     const agent = c.get("agent");
-    const orgId = c.get("orgId");
-    const { modelId } = await getPackageConfig(orgId, agent.id);
+    const appId = c.get("appId");
+    const { modelId } = await getPackageConfig(appId, agent.id);
 
     return c.json({ modelId });
   });
@@ -189,11 +189,11 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("agent");
-      const orgId = c.get("orgId");
+      const appId = c.get("appId");
       const body = await c.req.json();
       const data = parseBody(modelIdSchema, body);
 
-      await setAgentOverride(orgId, agent.id, "modelId", data.modelId);
+      await setAgentOverride(appId, agent.id, "modelId", data.modelId);
 
       return c.json({ success: true });
     },
@@ -206,11 +206,11 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("agent");
-      const orgId = c.get("orgId");
+      const appId = c.get("appId");
       const body = await c.req.json();
       const data = parseBody(orgProfileIdSchema, body);
 
-      await setAgentOverride(orgId, agent.id, "orgProfileId", data.orgProfileId);
+      await setAgentOverride(appId, agent.id, "orgProfileId", data.orgProfileId);
 
       return c.json({ success: true });
     },
@@ -219,8 +219,8 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/memories — list agent memories
   router.get("/:scope{@[^/]+}/:name/memories", requireAgent(), async (c) => {
     const agent = c.get("agent");
-    const orgId = c.get("orgId");
-    const memories = await getPackageMemories(agent.id, orgId);
+    const appId = c.get("appId");
+    const memories = await getPackageMemories(agent.id, appId);
     return c.json({
       memories: memories.map((m) => ({
         id: m.id,
@@ -238,8 +238,8 @@ export function createAgentsRouter() {
     requirePermission("memories", "delete"),
     async (c) => {
       const agent = c.get("agent");
-      const orgId = c.get("orgId");
-      const deleted = await deleteAllPackageMemories(agent.id, orgId);
+      const appId = c.get("appId");
+      const deleted = await deleteAllPackageMemories(agent.id, appId);
       return c.json({ deleted });
     },
   );
@@ -251,13 +251,13 @@ export function createAgentsRouter() {
     requirePermission("memories", "delete"),
     async (c) => {
       const agent = c.get("agent");
-      const orgId = c.get("orgId");
+      const appId = c.get("appId");
       const result = z.coerce.number().int().min(1).safeParse(c.req.param("memoryId"));
       if (!result.success) {
         throw invalidRequest("Invalid memory ID", "memoryId");
       }
       const memoryId = result.data;
-      const deleted = await deletePackageMemory(memoryId, agent.id, orgId);
+      const deleted = await deletePackageMemory(memoryId, agent.id, appId);
       if (!deleted) {
         throw notFound("Memory not found");
       }

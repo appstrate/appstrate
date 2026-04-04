@@ -7,6 +7,7 @@ import type {
   packageVersions,
   packageDistTags,
   packageVersionDependencies,
+  applicationPackages,
 } from "./packages.ts";
 import type { runs, runLogs, packageSchedules } from "./runs.ts";
 import type { connectionProfiles, orgProfileProviderBindings } from "./connections.ts";
@@ -35,3 +36,5 @@ export type OrgProfileProviderBinding = InferSelectModel<typeof orgProfileProvid
 export type Application = InferSelectModel<typeof applications>;
 
 export type EndUser = InferSelectModel<typeof endUsers>;
+
+export type ApplicationPackage = InferSelectModel<typeof applicationPackages>;

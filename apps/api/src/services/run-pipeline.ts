@@ -34,8 +34,8 @@ export interface RunPipelineParams {
   scheduleId?: string;
   /** Connection profile ID used to create the run. */
   connectionProfileId?: string;
-  /** Application ID for webhook scoping. */
-  applicationId?: string | null;
+  /** Application ID — required for all runs. */
+  applicationId: string;
   /** Uploaded files to inject into the container. */
   uploadedFiles?: UploadedFile[];
 }
@@ -92,6 +92,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         agent,
         providerProfiles,
         orgId,
+        applicationId,
         actor,
         input: input ?? undefined,
         files,
@@ -138,6 +139,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     agent.id,
     actor,
     orgId,
+    applicationId,
     input ?? null,
     scheduleId,
     packageVersionId ?? undefined,
@@ -145,7 +147,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     proxyLabel ?? undefined,
     modelLabel ?? undefined,
     modelSource ?? undefined,
-    applicationId ?? undefined,
     profileIdMap,
   );
 
@@ -155,9 +156,9 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     orgId,
     agent,
     promptContext,
+    applicationId,
     agentPackage,
     uploadedFiles,
-    applicationId,
     modelSource,
   ).catch((err) => {
     logger.error("Unhandled error in background run", {

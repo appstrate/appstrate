@@ -99,6 +99,7 @@ export function createSchedulesRouter() {
         agent.id,
         data.connectionProfileId,
         c.get("orgId"),
+        c.get("appId"),
         data,
       );
       return c.json(schedule, 201);

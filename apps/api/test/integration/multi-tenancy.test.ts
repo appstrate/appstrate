@@ -99,6 +99,7 @@ describe("Multi-tenancy isolation", () => {
       const run = await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
+        applicationId: orgA.defaultAppId,
         userId: orgA.user.id,
         status: "success",
       });
@@ -115,6 +116,7 @@ describe("Multi-tenancy isolation", () => {
       const run = await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
+        applicationId: orgA.defaultAppId,
         userId: orgA.user.id,
         status: "success",
       });
@@ -131,6 +133,7 @@ describe("Multi-tenancy isolation", () => {
       const run = await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
+        applicationId: orgA.defaultAppId,
         userId: orgA.user.id,
         status: "running",
       });
@@ -148,6 +151,7 @@ describe("Multi-tenancy isolation", () => {
       await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
+        applicationId: orgA.defaultAppId,
         userId: orgA.user.id,
         status: "success",
       });

@@ -11,6 +11,7 @@ import { createShutdownHandler } from "./lib/shutdown.ts";
 import { validateApiKey } from "./services/api-keys.ts";
 import { ensureDefaultProfile } from "./services/connection-profiles.ts";
 import { requireOrgContext } from "./middleware/org-context.ts";
+import { requireAppContext } from "./middleware/app-context.ts";
 import { requestId } from "./middleware/request-id.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
 import { createAgentsRouter } from "./routes/agents.ts";
@@ -228,6 +229,26 @@ app.use("*", async (c, next) => {
     c.set("permissions", resolvePermissions(orgRole));
   }
   return next();
+});
+
+// App context middleware: resolve X-App-Id for app-scoped routes
+function requiresAppContext(path: string): boolean {
+  if (path.startsWith("/api/agents")) return true;
+  if (path.startsWith("/api/runs")) return true;
+  if (path.startsWith("/api/schedules")) return true;
+  if (path.startsWith("/api/webhooks")) return true;
+  if (path.startsWith("/api/end-users")) return true;
+  if (path.startsWith("/api/api-keys")) return true;
+  if (path.startsWith("/api/realtime")) return true;
+  if (path.startsWith("/api/packages")) return true;
+  return false;
+}
+
+app.use("*", async (c, next) => {
+  if (skipAuth(c.req.path)) return next();
+  if (!c.get("user")) return next();
+  if (!requiresAppContext(c.req.path)) return next();
+  return requireAppContext()(c, next);
 });
 
 // API versioning: resolve Appstrate-Version header > org setting > default

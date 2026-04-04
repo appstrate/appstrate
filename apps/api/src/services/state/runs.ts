@@ -15,6 +15,7 @@ export async function createRun(
   packageId: string,
   actor: Actor | null,
   orgId: string,
+  applicationId: string,
   input: Record<string, unknown> | null,
   scheduleId?: string,
   packageVersionId?: number,
@@ -22,7 +23,6 @@ export async function createRun(
   proxyLabel?: string,
   modelLabel?: string,
   modelSource?: string,
-  applicationId?: string | null,
   providerProfileIds?: Record<string, string>,
 ): Promise<void> {
   const [maxRow] = await db
@@ -60,6 +60,7 @@ export async function createFailedRun(
   packageId: string,
   actor: Actor | null,
   orgId: string,
+  applicationId: string,
   error: string,
   scheduleId?: string,
   connectionProfileId?: string,
@@ -76,6 +77,7 @@ export async function createFailedRun(
     packageId,
     ...(actor ? actorInsert(actor) : { userId: null, endUserId: null }),
     orgId,
+    applicationId,
     status: "failed",
     input: null,
     error,

@@ -59,9 +59,9 @@ export async function executeAgentInBackground(
   orgId: string,
   agent: LoadedPackage,
   promptContext: PromptContext,
+  applicationId: string,
   agentPackage?: Buffer | null,
   inputFiles?: UploadedFile[],
-  applicationId?: string | null,
   modelSource?: string | null,
 ) {
   const startTime = Date.now();
@@ -74,7 +74,7 @@ export async function executeAgentInBackground(
   try {
     // Update status to running
     await updateRun(runId, orgId, { status: "running" });
-    dispatchRunWebhook(orgId, "started", runId, agent.id, undefined, applicationId);
+    dispatchRunWebhook(orgId, applicationId, "started", runId, agent.id);
 
     // Execute via adapter
     const adapter = new PiAdapter();
@@ -187,7 +187,7 @@ export async function executeAgentInBackground(
           },
           "error",
         );
-        dispatchRunWebhook(orgId, "timeout", runId, agent.id, { duration }, applicationId);
+        dispatchRunWebhook(orgId, applicationId, "timeout", runId, agent.id, { duration });
         return;
       }
       throw err;
@@ -225,7 +225,7 @@ export async function executeAgentInBackground(
         { runId, status: "failed", error },
         "error",
       );
-      dispatchRunWebhook(orgId, "failed", runId, agent.id, { error, duration }, applicationId);
+      dispatchRunWebhook(orgId, applicationId, "failed", runId, agent.id, { error, duration });
     } else {
       // --- Success path (with or without structured output) ---
 
@@ -263,7 +263,7 @@ export async function executeAgentInBackground(
       };
 
       if (memories.length > 0) {
-        await addPackageMemories(agent.id, orgId, memories, runId);
+        await addPackageMemories(agent.id, orgId, applicationId, memories, runId);
       }
 
       let metadata: Record<string, unknown> | undefined;
@@ -307,7 +307,7 @@ export async function executeAgentInBackground(
         { runId, status: "success" },
         "info",
       );
-      dispatchRunWebhook(orgId, "completed", runId, agent.id, { result, duration }, applicationId);
+      dispatchRunWebhook(orgId, applicationId, "completed", runId, agent.id, { result, duration });
     }
   } catch (err) {
     // If aborted (cancelled), the cancel route already wrote DB status
@@ -335,14 +335,10 @@ export async function executeAgentInBackground(
       },
       "error",
     );
-    dispatchRunWebhook(
-      orgId,
-      "failed",
-      runId,
-      agent.id,
-      { error: errorMessage, duration },
-      applicationId,
-    );
+    dispatchRunWebhook(orgId, applicationId, "failed", runId, agent.id, {
+      error: errorMessage,
+      duration,
+    });
   } finally {
     untrackRun(runId);
   }
@@ -387,7 +383,7 @@ export function createRunsRouter() {
 
       // Resolve org profile and actor profile context in parallel
       const [agentOrgProfile, { defaultUserProfileId, userProviderOverrides }] = await Promise.all([
-        getAgentOrgProfile(orgId, packageId),
+        getAgentOrgProfile(c.get("appId"), orgId, packageId),
         resolveActorProfileContext(actor, packageId),
       ]);
       const agentOrgProfileId = agentOrgProfile?.id ?? null;
@@ -403,7 +399,7 @@ export function createRunsRouter() {
           agentOrgProfileId,
           orgId,
         ),
-        getPackageConfig(orgId, packageId),
+        getPackageConfig(c.get("appId"), packageId),
         parseRequestInput(
           c,
           effectiveAgent.manifest.input?.schema
@@ -454,7 +450,7 @@ export function createRunsRouter() {
         proxyId: proxyIdOverride ?? preflightProxyId,
         overrideVersionId,
         connectionProfileId: defaultUserProfileId ?? undefined,
-        applicationId: c.get("applicationId") ?? null,
+        applicationId: c.get("appId"),
         uploadedFiles,
       });
 
@@ -608,14 +604,7 @@ export function createRunsRouter() {
       .stopByRunId(runId)
       .catch(() => {});
 
-    dispatchRunWebhook(
-      orgId,
-      "cancelled",
-      runId,
-      run.packageId,
-      undefined,
-      c.get("applicationId") ?? null,
-    );
+    dispatchRunWebhook(orgId, c.get("appId"), "cancelled", runId, run.packageId);
 
     return c.json({ ok: true });
   });

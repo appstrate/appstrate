@@ -163,7 +163,22 @@ export async function addOrgMember(
  * Build authentication headers for test requests.
  * Combines the session cookie and org ID from a TestContext.
  */
+/**
+ * Build authentication headers for test requests.
+ * Includes session cookie, org ID, and app ID from a TestContext.
+ * For org-only routes that don't need X-App-Id, use orgOnlyHeaders() instead.
+ */
 export function authHeaders(
+  ctx: TestContext,
+  extra?: Record<string, string>,
+): Record<string, string> {
+  return { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId, "X-App-Id": ctx.defaultAppId, ...extra };
+}
+
+/**
+ * Build authentication headers WITHOUT X-App-Id — for org-scoped routes only.
+ */
+export function orgOnlyHeaders(
   ctx: TestContext,
   extra?: Record<string, string>,
 ): Record<string, string> {

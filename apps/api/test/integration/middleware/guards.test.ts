@@ -67,6 +67,7 @@ describe("requireMutableAgent (via agent skills route)", () => {
     await seedRun({
       packageId: "@testorg/busy-agent",
       orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
       userId: ctx.user.id,
       status: "running",
     });

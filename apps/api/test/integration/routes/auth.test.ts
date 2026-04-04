@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestUser, createTestContext } from "../../helpers/auth.ts";
+import { createTestUser, createTestContext, authHeaders } from "../../helpers/auth.ts";
 
 const app = getTestApp();
 
@@ -36,10 +36,7 @@ describe("Authentication", () => {
       const ctx = await createTestContext();
 
       const res = await app.request("/api/agents", {
-        headers: {
-          Cookie: ctx.cookie,
-          "X-Org-Id": ctx.orgId,
-        },
+        headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);

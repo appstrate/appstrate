@@ -14,7 +14,7 @@
 import { describe, expect, it, beforeEach, beforeAll } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { sql } from "drizzle-orm";
 import { initRealtime } from "../../../src/services/realtime.ts";
@@ -65,7 +65,11 @@ describe("realtime SSE routes (integration)", () => {
     await truncateAll();
     ctx = await createTestContext();
     agentPkg = await seedAgent({ orgId: ctx.orgId });
-    run = await seedRun({ packageId: agentPkg.id, orgId: ctx.orgId });
+    run = await seedRun({
+      packageId: agentPkg.id,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+    });
   });
 
   // ── GET /api/realtime/runs/:id ────────────────────────
@@ -134,7 +138,11 @@ describe("realtime SSE routes (integration)", () => {
     });
 
     it("filters events by runId — ignores other runs", async () => {
-      const otherExec = await seedRun({ packageId: agentPkg.id, orgId: ctx.orgId });
+      const otherExec = await seedRun({
+        packageId: agentPkg.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+      });
 
       const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
       expect(res.body).not.toBeNull();
@@ -368,7 +376,11 @@ describe("realtime SSE routes (integration)", () => {
 
     it("receives events from multiple agents", async () => {
       const agent2 = await seedAgent({ orgId: ctx.orgId });
-      const exec2 = await seedRun({ packageId: agent2.id, orgId: ctx.orgId });
+      const exec2 = await seedRun({
+        packageId: agent2.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+      });
 
       const res = await sseRequest("/api/realtime/runs", ctx);
       expect(res.body).not.toBeNull();
@@ -416,8 +428,7 @@ describe("realtime SSE routes (integration)", () => {
       const res = await app.request("/api/api-keys", {
         method: "POST",
         headers: {
-          Cookie: ctx.cookie,
-          "X-Org-Id": ctx.orgId,
+          ...authHeaders(ctx),
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -449,7 +460,7 @@ describe("realtime SSE routes (integration)", () => {
       // Create a second org context
       const ctxB = await createTestContext();
       const agentB = await seedAgent({ orgId: ctxB.orgId });
-      await seedRun({ packageId: agentB.id, orgId: ctxB.orgId });
+      await seedRun({ packageId: agentB.id, orgId: ctxB.orgId, applicationId: ctxB.defaultAppId });
 
       // Open SSE for org B (all runs)
       const resB = await sseRequest("/api/realtime/runs", ctxB);

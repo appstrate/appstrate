@@ -43,6 +43,7 @@ interface ScheduleJobData {
   packageId: string;
   connectionProfileId: string;
   orgId: string;
+  applicationId: string;
   input?: Record<string, unknown>;
 }
 
@@ -80,6 +81,7 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
     packageId: schedule.packageId,
     connectionProfileId: schedule.connectionProfileId,
     orgId,
+    applicationId: schedule.applicationId,
     input: asRecordOrNull(schedule.input) ?? undefined,
   };
 
@@ -99,9 +101,16 @@ async function removeScheduleJob(scheduleId: string): Promise<void> {
 
 /** Process a scheduled job. */
 async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> {
-  const { scheduleId, packageId, connectionProfileId, orgId, input } = job.data;
+  const { scheduleId, packageId, connectionProfileId, orgId, applicationId, input } = job.data;
 
-  await triggerScheduledRun(scheduleId, packageId, connectionProfileId, orgId, input);
+  await triggerScheduledRun(
+    scheduleId,
+    packageId,
+    connectionProfileId,
+    orgId,
+    applicationId,
+    input,
+  );
 
   // Update schedule timestamps
   const schedule = await getSchedule(scheduleId);
@@ -172,14 +181,24 @@ async function triggerScheduledRun(
   packageId: string,
   connectionProfileId: string,
   orgId: string,
+  applicationId: string,
   input: Record<string, unknown> | undefined,
 ) {
   /** Create a failed run record + dispatch webhook so the user is notified. */
   async function failSchedule(error: string, actor: Actor | null = null): Promise<void> {
     const runId = `run_${crypto.randomUUID()}`;
     try {
-      await createFailedRun(runId, packageId, actor, orgId, error, scheduleId, connectionProfileId);
-      dispatchRunWebhook(orgId, "failed", runId, packageId, { error });
+      await createFailedRun(
+        runId,
+        packageId,
+        actor,
+        orgId,
+        applicationId,
+        error,
+        scheduleId,
+        connectionProfileId,
+      );
+      dispatchRunWebhook(orgId, applicationId, "failed", runId, packageId, { error });
     } catch (err) {
       logger.error("Failed to create failed schedule run record", {
         scheduleId,
@@ -211,7 +230,7 @@ async function triggerScheduledRun(
     const actor: Actor | null = actorFromIds(profile.userId, profile.endUserId);
 
     // Load the agent's admin-configured org profile (validates it still exists)
-    const agentOrgProfile = await getAgentOrgProfile(orgId, packageId);
+    const agentOrgProfile = await getAgentOrgProfile(applicationId, orgId, packageId);
     const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
       profile,
       connectionProfileId,
@@ -235,7 +254,7 @@ async function triggerScheduledRun(
           orgProfileId,
           orgId,
         ),
-        getPackageConfig(orgId, packageId),
+        getPackageConfig(applicationId, packageId),
       ]);
 
       await validateAgentReadiness({
@@ -304,6 +323,7 @@ async function triggerScheduledRun(
       proxyId: preflightProxyId,
       scheduleId,
       connectionProfileId,
+      applicationId,
     });
 
     if (!result.ok) {
@@ -505,6 +525,7 @@ export async function createSchedule(
   packageId: string,
   connectionProfileId: string,
   orgId: string,
+  applicationId: string,
   data: {
     name?: string;
     cronExpression: string;
@@ -525,6 +546,7 @@ export async function createSchedule(
       packageId,
       connectionProfileId,
       orgId,
+      applicationId,
       name: data.name ?? null,
       enabled: true,
       cronExpression: data.cronExpression,

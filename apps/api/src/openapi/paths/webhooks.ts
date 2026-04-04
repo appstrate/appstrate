@@ -10,6 +10,7 @@ export const webhooksPaths = {
         "Create a webhook endpoint. The secret is returned once in the response. Max 20 webhooks per org.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { $ref: "#/components/parameters/IdempotencyKey" },
       ],
       requestBody: {
@@ -20,17 +21,6 @@ export const webhooksPaths = {
               type: "object",
               required: ["url", "events"],
               properties: {
-                scope: {
-                  type: "string",
-                  enum: ["organization", "application"],
-                  default: "application",
-                  description:
-                    "Webhook scope. 'organization' fires for all runs; 'application' fires only for runs via the linked application's API key",
-                },
-                applicationId: {
-                  type: "string",
-                  description: "Application ID (app_ prefix). Required when scope is 'application'",
-                },
                 url: { type: "string", format: "uri", description: "HTTPS endpoint URL" },
                 events: {
                   type: "array",
@@ -103,23 +93,11 @@ export const webhooksPaths = {
       operationId: "listWebhooks",
       tags: ["Webhooks"],
       summary: "List webhooks",
-      description: "List all webhooks for the organization.",
+      description:
+        "List all webhooks for the current application (resolved from X-App-Id header or API key).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "applicationId",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "Filter webhooks by application ID",
-        },
-        {
-          name: "scope",
-          in: "query",
-          required: false,
-          schema: { type: "string", enum: ["organization", "application"] },
-          description: "Filter webhooks by scope",
-        },
+        { $ref: "#/components/parameters/XAppId" },
       ],
       responses: {
         "200": {
@@ -153,6 +131,7 @@ export const webhooksPaths = {
       description: "Get a single webhook by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -179,6 +158,7 @@ export const webhooksPaths = {
         "Update webhook URL, events, filters, or active status. Cannot change the secret.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -220,6 +200,7 @@ export const webhooksPaths = {
       description: "Delete a webhook and all its delivery history.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -243,6 +224,7 @@ export const webhooksPaths = {
       description: "Send a synthetic test.ping event to verify webhook connectivity.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -279,6 +261,7 @@ export const webhooksPaths = {
         "Generate a new secret. The previous secret remains valid for 24 hours (grace period). During rotation, signatures are emitted with both secrets.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -313,6 +296,7 @@ export const webhooksPaths = {
       description: "List recent delivery attempts for a webhook (status, latency, response code).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
           name: "limit",

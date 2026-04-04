@@ -7,20 +7,11 @@ import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Spinner } from "./spinner";
 import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleEvent } from "../hooks/use-webhooks";
 import { SecretRevealModal } from "./secret-reveal-modal";
 import { useCreateWebhook } from "../hooks/use-webhooks";
-import { useApplications } from "../hooks/use-applications";
 
 interface Props {
   open: boolean;
@@ -34,11 +25,8 @@ type FormData = {
 export function WebhookCreateModal({ open, onClose }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateWebhook();
-  const { data: applications } = useApplications();
 
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
-  const [scope, setScope] = useState<"organization" | "application">("organization");
-  const [applicationId, setApplicationId] = useState<string>("");
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
   const [payloadMode, setPayloadMode] = useState<"full" | "summary">("full");
 
@@ -55,8 +43,6 @@ export function WebhookCreateModal({ open, onClose }: Props) {
   const handleClose = () => {
     reset({ url: "" });
     setCreatedSecret(null);
-    setScope("organization");
-    setApplicationId("");
     setSelectedEvents([]);
     setPayloadMode("full");
     createMutation.reset();
@@ -69,15 +55,8 @@ export function WebhookCreateModal({ open, onClose }: Props) {
       return;
     }
 
-    if (scope === "application" && !applicationId) {
-      setError("root", { message: t("settings:webhooks.applicationRequired") });
-      return;
-    }
-
     createMutation.mutate(
       {
-        scope,
-        ...(scope === "application" ? { applicationId } : {}),
         url: data.url.trim(),
         events: selectedEvents,
         payloadMode,
@@ -125,57 +104,6 @@ export function WebhookCreateModal({ open, onClose }: Props) {
       }
     >
       <form id="create-webhook-form" onSubmit={onSubmit} className="space-y-4">
-        {/* Scope */}
-        <div className="space-y-2">
-          <Label>{t("settings:webhooks.scopeLabel")}</Label>
-          <RadioGroup
-            value={scope}
-            onValueChange={(v) => setScope(v as "organization" | "application")}
-          >
-            <div className="flex items-start gap-2">
-              <RadioGroupItem value="organization" id="scope-org" className="mt-0.5" />
-              <div>
-                <Label htmlFor="scope-org" className="cursor-pointer font-normal">
-                  {t("settings:webhooks.scopeOrganization")}
-                </Label>
-                <p className="text-muted-foreground text-xs">
-                  {t("settings:webhooks.scopeOrganizationDesc")}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-start gap-2">
-              <RadioGroupItem value="application" id="scope-app" className="mt-0.5" />
-              <div>
-                <Label htmlFor="scope-app" className="cursor-pointer font-normal">
-                  {t("settings:webhooks.scopeApplication")}
-                </Label>
-                <p className="text-muted-foreground text-xs">
-                  {t("settings:webhooks.scopeApplicationDesc")}
-                </p>
-              </div>
-            </div>
-          </RadioGroup>
-        </div>
-
-        {/* Application selector (only when scope = application) */}
-        {scope === "application" && (
-          <div className="space-y-2">
-            <Label>{t("settings:webhooks.applicationLabel")}</Label>
-            <Select value={applicationId} onValueChange={setApplicationId}>
-              <SelectTrigger>
-                <SelectValue placeholder={t("settings:webhooks.applicationLabel")} />
-              </SelectTrigger>
-              <SelectContent>
-                {(applications ?? []).map((app) => (
-                  <SelectItem key={app.id} value={app.id}>
-                    {app.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-
         <div className="space-y-2">
           <Label htmlFor="webhook-url">{t("settings:webhooks.urlLabel")}</Label>
           <Input

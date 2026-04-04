@@ -2,6 +2,9 @@
 
 /**
  * Webhooks API — CRUD + test ping + secret rotation + delivery history.
+ *
+ * All webhooks are application-scoped. The application context comes from
+ * the X-App-Id header (resolved by app-context middleware).
  */
 
 import { Hono } from "hono";
@@ -21,7 +24,6 @@ import {
 } from "../services/webhooks.ts";
 import { parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { getApplication } from "../services/applications.ts";
 
 const webhookEventsEnum = z.enum([
   "run.started",
@@ -31,22 +33,13 @@ const webhookEventsEnum = z.enum([
   "run.cancelled",
 ]);
 
-const webhookScopeEnum = z.enum(["organization", "application"]);
-
-const createWebhookSchema = z
-  .object({
-    scope: webhookScopeEnum.optional().default("application"),
-    applicationId: z.string().min(1).optional(),
-    url: z.url("url must be a valid URL"),
-    events: z.array(webhookEventsEnum).min(1, "events is required"),
-    packageId: z.string().nullable().optional(),
-    payloadMode: z.enum(["full", "summary"]).optional(),
-    active: z.boolean().optional(),
-  })
-  .refine(
-    (data) => data.scope !== "application" || (data.applicationId && data.applicationId.length > 0),
-    { message: "applicationId is required when scope is 'application'", path: ["applicationId"] },
-  );
+const createWebhookSchema = z.object({
+  url: z.url("url must be a valid URL"),
+  events: z.array(webhookEventsEnum).min(1, "events is required"),
+  packageId: z.string().nullable().optional(),
+  payloadMode: z.enum(["full", "summary"]).optional(),
+  active: z.boolean().optional(),
+});
 
 const updateWebhookSchema = z.object({
   url: z.url().optional(),
@@ -67,17 +60,11 @@ export function createWebhooksRouter() {
     requirePermission("webhooks", "write"),
     async (c) => {
       const orgId = c.get("orgId");
+      const appId = c.get("appId");
       const body = await c.req.json();
       const data = parseBody(createWebhookSchema, body);
 
-      // Verify applicationId belongs to this org when scope is "application"
-      if (data.scope === "application" && data.applicationId) {
-        await getApplication(orgId, data.applicationId);
-      }
-
-      const result = await createWebhook(orgId, {
-        scope: data.scope,
-        applicationId: data.applicationId,
+      const result = await createWebhook(orgId, appId, {
         url: data.url,
         events: data.events,
         packageId: data.packageId,
@@ -88,12 +75,11 @@ export function createWebhooksRouter() {
     },
   );
 
-  // GET /api/webhooks — list webhooks (optionally filtered by scope/applicationId)
+  // GET /api/webhooks — list webhooks for the current application
   router.get("/", rateLimit(300), requirePermission("webhooks", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const applicationId = c.req.query("applicationId");
-    const scope = c.req.query("scope");
-    const result = await listWebhooks(orgId, { applicationId, scope });
+    const appId = c.get("appId");
+    const result = await listWebhooks(orgId, appId);
     return c.json({ object: "list", data: result });
   });
 

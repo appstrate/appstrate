@@ -49,16 +49,9 @@ export const schemas = {
     properties: {
       id: { type: "string", description: "Webhook ID (wh_ prefix)" },
       object: { type: "string", enum: ["webhook"] },
-      scope: {
-        type: "string",
-        enum: ["organization", "application"],
-        description:
-          "Webhook scope. 'organization' fires for all runs; 'application' fires only for runs via the linked application's API key",
-      },
       applicationId: {
-        type: ["string", "null"],
-        description:
-          "Application ID (app_ prefix). Required when scope is 'application', null otherwise",
+        type: "string",
+        description: "Application ID (app_ prefix). All webhooks are application-scoped.",
       },
       url: { type: "string", format: "uri" },
       events: { type: "array", items: { type: "string" } },

@@ -61,7 +61,8 @@ export type AppEnv = {
     permissions?: Set<string>;
     authMethod: "session" | "api_key";
     apiKeyId: string | null;
-    applicationId: string | null;
+    applicationId: string | null; // from API key auth
+    appId: string; // resolved by app-context middleware (from X-App-Id or API key)
     requestId: string;
     apiVersion: string;
   };

@@ -2,9 +2,9 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, packageConfigs } from "@appstrate/db/schema";
+import { packages, applicationPackages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
@@ -147,9 +147,9 @@ export function createConnectionProfilesRouter() {
         id: packages.id,
         displayName: sql<string>`${packages.draftManifest}->>'displayName'`,
       })
-      .from(packageConfigs)
-      .innerJoin(packages, eq(packages.id, packageConfigs.packageId))
-      .where(and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.orgProfileId, profileId)));
+      .from(applicationPackages)
+      .innerJoin(packages, eq(packages.id, applicationPackages.packageId))
+      .where(eq(applicationPackages.orgProfileId, profileId));
 
     return c.json({ agents: rows });
   });

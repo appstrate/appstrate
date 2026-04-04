@@ -443,8 +443,7 @@ export interface EndUserListResponse {
 export interface WebhookInfo {
   id: string;
   object: "webhook";
-  scope: "organization" | "application";
-  applicationId: string | null;
+  applicationId: string;
   url: string;
   events: string[];
   packageId: string | null;
