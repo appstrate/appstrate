@@ -106,7 +106,7 @@ function skipOrgContext(path: string): boolean {
   if (path === "/api/orgs" || path === "/api/orgs/") return true; // list/create orgs
   if (path.startsWith("/api/orgs/")) return true; // /api/orgs/:id/* handle their own auth
   if (path === "/api/profile" || path === "/api/profile/") return true;
-  if (path === "/api/profiles/batch") return true;
+
   if (path === "/api/welcome/setup") return true;
   return false;
 }

@@ -2,7 +2,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
@@ -21,6 +21,7 @@ const updateToolsSchema = z.object({
 
 /** Update a dep section (skills or tools) in the manifest. */
 async function updateManifestDeps(
+  orgId: string,
   packageId: string,
   depKey: "skills" | "tools",
   ids: string[],
@@ -28,7 +29,7 @@ async function updateManifestDeps(
   const [row] = await db
     .select({ draftManifest: packages.draftManifest })
     .from(packages)
-    .where(eq(packages.id, packageId))
+    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
     .limit(1);
   if (!row) return;
 
@@ -42,7 +43,7 @@ async function updateManifestDeps(
   await db
     .update(packages)
     .set({ draftManifest: manifest, updatedAt: new Date() })
-    .where(eq(packages.id, packageId));
+    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
 }
 
 export function createUserAgentsRouter() {
@@ -65,7 +66,7 @@ export function createUserAgentsRouter() {
       );
     }
 
-    await updateManifestDeps(packageId, "skills", skillIds);
+    await updateManifestDeps(c.get("orgId"), packageId, "skills", skillIds);
 
     return c.json({ packageId, skillIds, message: "Skill references updated" });
   });
@@ -87,7 +88,7 @@ export function createUserAgentsRouter() {
       );
     }
 
-    await updateManifestDeps(packageId, "tools", toolIds);
+    await updateManifestDeps(c.get("orgId"), packageId, "tools", toolIds);
 
     return c.json({ packageId, toolIds, message: "Tool references updated" });
   });

@@ -101,21 +101,6 @@ if (existsSync(envPath)) {
   console.log(`  ${CHECK} .env created from .env.example ${DIM}(dev-ready defaults)${RESET}`);
 }
 
-// ── Step 2b: Link local @appstrate/core (optional) ───────────
-
-const coreDir = root + "/../core";
-if (existsSync(coreDir + "/package.json")) {
-  try {
-    execSync("bun link", { stdio: "pipe", cwd: coreDir });
-    execSync("bun link @appstrate/core", { stdio: "pipe", cwd: root });
-    console.log(`  ${CHECK} @appstrate/core linked from ../core ${DIM}(local dev)${RESET}`);
-  } catch {
-    console.log(`  ${DIM}  ⊘ @appstrate/core local linking skipped (using npm version)${RESET}`);
-  }
-} else {
-  console.log(`  ${DIM}  ⊘ ../core not found — using npm @appstrate/core${RESET}`);
-}
-
 // ── Step 3: Docker infrastructure ─────────────────────────────
 
 console.log("");

@@ -306,9 +306,9 @@ export const schemas = {
         description: "Display name of the admin-configured org connection profile",
       },
       forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
-      hasUnpublishedChanges: {
+      hasUnarchivedChanges: {
         type: "boolean",
-        description: "Whether the agent has local changes not yet published as a version",
+        description: "Whether the active version has changes not yet archived as a version",
       },
       populatedProviders: {
         type: "object",
@@ -359,6 +359,10 @@ export const schemas = {
       packageVersionId: { type: "integer" },
       proxyLabel: { type: ["string", "null"], description: "Proxy label used at run time" },
       modelLabel: { type: ["string", "null"], description: "Model label used at run time" },
+      modelSource: {
+        type: ["string", "null"],
+        description: "Model source: 'system' (platform-provided) or 'org' (user-configured)",
+      },
       cost: { type: ["number", "null"], description: "Run cost in dollars" },
       endUserId: {
         type: ["string", "null"],
@@ -367,6 +371,11 @@ export const schemas = {
       applicationId: {
         type: ["string", "null"],
         description: "Application ID (app_ prefix) that owns this run",
+      },
+      metadata: {
+        type: ["object", "null"],
+        description: "Additional metadata (e.g. creditsUsed in cloud mode)",
+        additionalProperties: true,
       },
     },
   },
@@ -596,6 +605,14 @@ export const schemas = {
       manifestName: {
         type: ["string", "null"],
         description: "Manifest name (@scope/name) — may differ from package ID",
+      },
+      versionCount: {
+        type: "integer",
+        description: "Number of published versions",
+      },
+      hasUnarchivedChanges: {
+        type: "boolean",
+        description: "Whether the active version has changes not yet archived as a version",
       },
       forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
       agents: {

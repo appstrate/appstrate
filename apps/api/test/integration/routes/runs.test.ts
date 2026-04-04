@@ -352,7 +352,7 @@ describe("Runs API", () => {
       expect(res.status).toBe(404);
     });
 
-    it("returns 403 for run from another org", async () => {
+    it("returns 404 for run from another org", async () => {
       const otherCtx = await createTestContext({ orgSlug: "otherorg" });
       await seedAgent({ id: "@otherorg/cancel-agent", orgId: otherCtx.orgId });
       const run = await seedRun({
@@ -367,7 +367,7 @@ describe("Runs API", () => {
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(404);
     });
 
     it("returns 401 without authentication", async () => {

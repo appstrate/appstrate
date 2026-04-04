@@ -3,7 +3,6 @@
 [![CI](https://github.com/appstrate/appstrate/actions/workflows/test.yml/badge.svg)](https://github.com/appstrate/appstrate/actions/workflows/test.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![Docker Image](https://img.shields.io/badge/Docker-ghcr.io%2Fappstrate%2Fappstrate-blue)](https://github.com/appstrate/appstrate/pkgs/container/appstrate)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/appstrate/appstrate/badge)](https://scorecard.dev/viewer/?uri=github.com/appstrate/appstrate)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
 An open-source platform for running autonomous AI agents in sandboxed Docker containers. Each agent receives its full context (prompt, config, input, credentials) and runs to completion without human interaction — then returns structured results. Connect OAuth/API key services, click "Run" or schedule via cron, and let the AI handle the rest.
@@ -48,7 +47,7 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 - **Realtime** — SSE-based run monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member)
 - **API keys** — Programmatic access via `ask_*` prefixed API keys
-- **OpenAPI documentation** — 181 endpoints documented at `/api/openapi.json` + Swagger UI at `/api/docs`
+- **OpenAPI documentation** — 182 endpoints documented at `/api/openapi.json` + Swagger UI at `/api/docs`
 - **Connection profiles** — Share connection sets across agents
 - **Proxy system** — Org-level and agent-level outbound HTTP proxy support
 
@@ -99,7 +98,7 @@ appstrate/
 │   ├── api/src/              # Hono API server (:3000)
 │   │   ├── routes/           # Route handlers (one file per domain)
 │   │   ├── services/         # Business logic, Docker, adapters, scheduler, marketplace
-│   │   ├── openapi/          # OpenAPI 3.1 spec (181 endpoints)
+│   │   ├── openapi/          # OpenAPI 3.1 spec (182 endpoints)
 │   │   └── middleware/       # Auth, rate-limit, guards (requireAdmin, requireAgent)
 │   │
 │   └── web/src/              # React 19 SPA (Vite + React Query v5 + Zustand)
@@ -109,6 +108,7 @@ appstrate/
 │       └── stores/           # Zustand stores (auth, org, profile)
 │
 ├── packages/
+│   ├── core/                 # @appstrate/core — shared validation, storage, utilities
 │   ├── db/                   # @appstrate/db — Drizzle ORM (31 tables, 5 enums) + Better Auth
 │   ├── env/                  # @appstrate/env — Zod env validation
 │   ├── shared-types/         # @appstrate/shared-types — Drizzle InferSelectModel re-exports
@@ -123,11 +123,9 @@ appstrate/
 └── scripts/verify-openapi.ts # OpenAPI validation (coverage + structure + lint)
 ```
 
-**External dependency**: `@appstrate/core` (npm) — manifest schemas, naming helpers, dependency extraction, ZIP parsing, semver, integrity.
-
 ## API Overview
 
-The API is organized into 25 route domains with 181 documented endpoints:
+The API is organized into 24 route domains with 182 documented endpoints:
 
 | Domain                  | Description                                              |
 | ----------------------- | -------------------------------------------------------- |
@@ -147,7 +145,6 @@ The API is organized into 25 route domains with 181 documented endpoints:
 | **Organizations**       | Org CRUD, members, invitations                           |
 | **Profile**             | User profile management                                  |
 | **Invitations**         | Magic link invitation acceptance                         |
-| **Share**               | Public share tokens for one-time run                     |
 | **Welcome**             | Post-invite profile setup                                |
 | **Internal**            | Container-to-host routes (credentials, run history)      |
 | **Meta**                | OpenAPI spec + Swagger UI                                |

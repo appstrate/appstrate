@@ -38,7 +38,7 @@ async function dockerFetch(
 /**
  * Check if an image exists locally.
  */
-export async function imageExists(image: string): Promise<boolean> {
+async function imageExists(image: string): Promise<boolean> {
   const res = await dockerFetch(`/images/${encodeURIComponent(image)}/json`);
   return res.ok;
 }
