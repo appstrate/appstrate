@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { mkdir, unlink } from "node:fs/promises";
-import { join, dirname, normalize } from "node:path";
+import { join, dirname, normalize, resolve as resolvePath } from "node:path";
 import type { Storage } from "./storage.ts";
 
 /** Configuration for the filesystem storage backend. */
@@ -19,17 +19,22 @@ export interface FileSystemStorageConfig {
  * @returns A Storage instance backed by the local filesystem
  */
 export function createFileSystemStorage(config: FileSystemStorageConfig): Storage {
-  const base = config.basePath;
+  const base = resolvePath(config.basePath);
 
   function makeKey(bucket: string, filePath: string): string {
     // Check raw input for traversal before normalization (matches S3 storage behavior)
     const raw = `${bucket}/${filePath}`;
-    if (raw.includes("..")) throw new Error("Path traversal detected");
+    if (raw.includes("..") || raw.includes("\0")) throw new Error("Path traversal detected");
     return normalize(join(bucket, filePath));
   }
 
   function resolve(bucket: string, filePath: string): string {
-    return join(base, makeKey(bucket, filePath));
+    const fullPath = normalize(join(base, makeKey(bucket, filePath)));
+    // Post-resolution containment check — prevent absolute path escapes (e.g. /etc/passwd)
+    if (!fullPath.startsWith(base + "/") && fullPath !== base) {
+      throw new Error("Path traversal detected");
+    }
+    return fullPath;
   }
 
   return {

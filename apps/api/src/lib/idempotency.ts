@@ -90,9 +90,9 @@ export async function storeIdempotencyResult(
   const ck = cacheKey(orgId, key);
   const value = JSON.stringify(result);
 
-  (await getCache()).set(ck, value, { ttlSeconds: TTL });
+  await (await getCache()).set(ck, value, { ttlSeconds: TTL });
 }
 
 export async function releaseIdempotencyLock(orgId: string, key: string): Promise<void> {
-  (await getCache()).del(cacheKey(orgId, key));
+  await (await getCache()).del(cacheKey(orgId, key));
 }

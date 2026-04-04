@@ -10,18 +10,20 @@ export class RedisCache implements KeyValueCache {
 
   async set(key: string, value: string, opts?: CacheSetOptions): Promise<boolean> {
     const redis = getRedisConnection();
-    const args: (string | number)[] = [key, value];
 
+    if (opts?.ttlSeconds && opts?.nx) {
+      const result = await redis.set(key, value, "EX", opts.ttlSeconds, "NX");
+      return result === "OK";
+    }
     if (opts?.ttlSeconds) {
-      args.push("EX", opts.ttlSeconds);
+      const result = await redis.set(key, value, "EX", opts.ttlSeconds);
+      return result === "OK";
     }
     if (opts?.nx) {
-      args.push("NX");
+      const result = await redis.set(key, value, "NX");
+      return result === "OK";
     }
-
-    const result = await (
-      redis as never as { call: (...a: unknown[]) => Promise<string | null> }
-    ).call("SET", ...args);
+    const result = await redis.set(key, value);
     return result === "OK";
   }
 

@@ -21,7 +21,7 @@ import type {
   StopResult,
 } from "./types.ts";
 
-const DATA_DIR = "./data/runs";
+const DATA_DIR = resolve("./data/runs");
 const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
 const AGENT_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/entrypoint.ts");
 
@@ -63,14 +63,25 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
   }
 
   async shutdown(): Promise<void> {
-    for (const [id, handle] of this.processes) {
-      try {
-        handle.proc?.kill("SIGTERM");
-      } catch {
-        // Already dead
-      }
-      this.processes.delete(id);
-    }
+    const handles = [...this.processes.entries()];
+    // Stop all processes in parallel with SIGTERM → SIGKILL escalation
+    await Promise.all(
+      handles.map(async ([_id, handle]) => {
+        if (!handle.proc) return;
+        try {
+          handle.proc.kill("SIGTERM");
+          const exited = await Promise.race([
+            handle.proc.exited.then(() => true),
+            new Promise<false>((r) => setTimeout(() => r(false), 5000)),
+          ]);
+          if (!exited) handle.proc.kill("SIGKILL");
+        } catch {
+          // Already dead
+        }
+      }),
+    );
+    this.processes.clear();
+    this.pendingSpecs.clear();
     this.sidecarPorts.clear();
   }
 
@@ -274,7 +285,7 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       }
       await new Promise((r) => setTimeout(r, 100));
     }
-    logger.warn("Sidecar health check timed out", { url, timeoutMs });
+    throw new Error(`Sidecar health check timed out after ${timeoutMs}ms (${url})`);
   }
 
   /** Drain stderr from a subprocess and log each line. */
@@ -305,6 +316,6 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
         reader.releaseLock();
       }
     };
-    drain();
+    drain().catch(() => {});
   }
 }

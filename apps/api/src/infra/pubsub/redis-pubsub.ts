@@ -51,7 +51,8 @@ export class RedisPubSub implements PubSub {
   }
 
   async shutdown(): Promise<void> {
-    for (const channel of this.handlers.keys()) {
+    const channels = [...this.handlers.keys()];
+    for (const channel of channels) {
       await this.unsubscribe(channel);
     }
   }
