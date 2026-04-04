@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { Routes, Route, Outlet, useLocation, Navigate, Link } from "react-router-dom";
 import { PackageList } from "./pages/package-list";
+import { CatalogPage } from "./pages/catalog-page";
 import { UnifiedPackageDetailPage } from "./pages/unified-package-detail";
 import { PackageEditorPage } from "./pages/package-editor";
 import { RunDetailPage } from "./pages/run-detail";
@@ -221,6 +222,7 @@ export function App() {
           >
             <Route path="/" element={<DashboardPage />} />
             <Route path="/agents" element={<PackageList />} />
+            <Route path="/catalog" element={<CatalogPage />} />
             <Route path="/agents/new" element={<PackageEditorPage type="agent" />} />
             <Route path="/agents/:scope/:name/edit" element={<PackageEditorPage type="agent" />} />
             <Route

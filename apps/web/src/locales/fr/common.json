@@ -31,6 +31,7 @@
   "nav.endUsers": "End-Users",
   "nav.apiKeys": "Clés API",
   "nav.webhooks": "Webhooks",
+  "nav.catalog": "Catalogue",
   "nav.appSettings": "Paramètres app",
   "nav.credits": "Crédits",
   "btn.cancel": "Annuler",
