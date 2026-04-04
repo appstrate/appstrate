@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { closeDb } from "@appstrate/db/client";
-import { closeRedis } from "./redis.ts";
 import { logger } from "./logger.ts";
+import { shutdownInfra } from "../infra/index.ts";
+import { hasRedis } from "../infra/mode.ts";
 import { shutdownScheduleWorker } from "../services/scheduler.ts";
 import { shutdownWebhookWorker } from "../services/webhooks.ts";
 import {
@@ -44,8 +45,14 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
       }
     }
 
-    logger.info("Closing database and Redis connections...");
-    await Promise.all([closeDb(), closeRedis()]);
+    logger.info("Closing database and infrastructure connections...");
+    await shutdownInfra();
+    const closeOps: Promise<void>[] = [closeDb()];
+    if (hasRedis()) {
+      const { closeRedis } = await import("./redis.ts");
+      closeOps.push(closeRedis());
+    }
+    await Promise.all(closeOps);
 
     logger.info("Shutdown complete");
     process.exit(0);

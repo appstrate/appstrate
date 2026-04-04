@@ -35,7 +35,7 @@ const exists = (p: string) =>
 
 // --- 1. Init workspace ---
 
-const WORKSPACE = "/workspace";
+const WORKSPACE = process.env.WORKSPACE_DIR || "/workspace";
 
 /** Create a minimal valid git repo via filesystem (avoids 3 subprocess spawns). */
 async function initGitWorkspace(): Promise<void> {

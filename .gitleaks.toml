@@ -1,0 +1,8 @@
+# Gitleaks configuration — allowlist for test fixtures and dev-only secrets.
+# These are intentionally fake/dev-only values, not real credentials.
+
+[allowlist]
+  paths = [
+    '''test/setup/.*\.ts''',
+    '''\.env\.example''',
+  ]

@@ -12,7 +12,9 @@ let redis: Redis | null = null;
 
 export function getRedis(): Redis {
   if (!redis) {
-    redis = new Redis(getEnv().REDIS_URL, { maxRetriesPerRequest: null });
+    const url = getEnv().REDIS_URL;
+    if (!url) throw new Error("REDIS_URL is required for Redis tests");
+    redis = new Redis(url, { maxRetriesPerRequest: null });
   }
   return redis;
 }

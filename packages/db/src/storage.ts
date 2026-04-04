@@ -2,6 +2,7 @@
 
 import { getEnv } from "@appstrate/env";
 import { createS3Storage } from "@appstrate/core/storage-s3";
+import { createFileSystemStorage } from "@appstrate/core/storage-fs";
 import type { Storage } from "@appstrate/core/storage";
 
 let store: Storage | null = null;
@@ -9,13 +10,18 @@ let store: Storage | null = null;
 function getStore(): Storage {
   if (store) return store;
   const env = getEnv();
-  const s = createS3Storage({
-    bucket: env.S3_BUCKET,
-    region: env.S3_REGION,
-    endpoint: env.S3_ENDPOINT,
-  });
-  store = s;
-  return s;
+
+  if (env.S3_BUCKET) {
+    store = createS3Storage({
+      bucket: env.S3_BUCKET,
+      region: env.S3_REGION!,
+      endpoint: env.S3_ENDPOINT,
+    });
+  } else {
+    store = createFileSystemStorage({ basePath: env.FS_STORAGE_PATH });
+  }
+
+  return store;
 }
 
 export function uploadFile(

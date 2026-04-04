@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Queue, Worker } from "bullmq";
-import type { Job, ConnectionOptions } from "bullmq";
+import { createQueue } from "../infra/queue/index.ts";
+import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { eq, and, asc, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
@@ -33,7 +33,6 @@ import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
 import { validateInput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-import { getRedisConnection } from "../lib/redis.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { getRunningRunCountForOrg } from "./state/index.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
@@ -69,22 +68,17 @@ function toSchedule(row: typeof packageSchedules.$inferSelect): Schedule {
 
 const QUEUE_NAME = "schedules";
 
-let scheduleQueue: Queue | null = null;
-let scheduleWorker: Worker | null = null;
+let scheduleQueue: JobQueue<ScheduleJobData> | null = null;
 
-function getQueue(): Queue {
+async function getQueue(): Promise<JobQueue<ScheduleJobData>> {
   if (!scheduleQueue) {
-    scheduleQueue = new Queue(QUEUE_NAME, {
-      connection: getRedisConnection() as unknown as ConnectionOptions,
-    });
+    scheduleQueue = await createQueue<ScheduleJobData>(QUEUE_NAME);
   }
   return scheduleQueue;
 }
 
-/** Upsert a BullMQ repeatable job scheduler for a schedule. */
+/** Upsert a repeatable job scheduler for a schedule. */
 async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<void> {
-  const queue = getQueue();
-
   const jobData: ScheduleJobData = {
     scheduleId: schedule.id,
     packageId: schedule.packageId,
@@ -93,27 +87,22 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
     input: asRecordOrNull(schedule.input) ?? undefined,
   };
 
-  await queue.upsertJobScheduler(
+  await (
+    await getQueue()
+  ).upsertScheduler(
     schedule.id,
-    {
-      pattern: schedule.cronExpression,
-      tz: schedule.timezone ?? "UTC",
-    },
-    {
-      name: "execute-agent",
-      data: jobData,
-    },
+    { pattern: schedule.cronExpression, tz: schedule.timezone ?? "UTC" },
+    { name: "execute-agent", data: jobData },
   );
 }
 
-/** Remove a BullMQ repeatable job scheduler. */
+/** Remove a repeatable job scheduler. */
 async function removeScheduleJob(scheduleId: string): Promise<void> {
-  const queue = getQueue();
-  await queue.removeJobScheduler(scheduleId);
+  await (await getQueue()).removeScheduler(scheduleId);
 }
 
-/** Process a scheduled job via BullMQ worker. */
-async function handleScheduleJob(job: Job<ScheduleJobData>): Promise<void> {
+/** Process a scheduled job. */
+async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> {
   const { scheduleId, packageId, connectionProfileId, orgId, input } = job.data;
 
   await triggerScheduledRun(scheduleId, packageId, connectionProfileId, orgId, input);
@@ -138,38 +127,18 @@ async function handleScheduleJob(job: Job<ScheduleJobData>): Promise<void> {
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-/** Initialize the BullMQ worker and sync existing schedules from DB. */
+/** Initialize the schedule worker and sync existing schedules from DB. */
 export async function initScheduleWorker(): Promise<void> {
-  scheduleWorker = new Worker<ScheduleJobData>(
-    QUEUE_NAME,
+  const queue = await getQueue();
+
+  queue.process(
     async (job) => {
       await handleScheduleJob(job);
     },
-    {
-      connection: getRedisConnection() as unknown as ConnectionOptions,
-      // concurrency: 1 ensures this worker processes one job at a time.
-      // Combined with the group limiter below, this caps throughput per instance.
-      concurrency: 1,
-      limiter: {
-        // NOTE: BullMQ limiter is per-worker, not global across instances.
-        // With N instances running N workers, the effective global rate is N × max.
-        // This is acceptable: each instance handles its own share of the queue,
-        // and BullMQ's distributed locking prevents duplicate processing.
-        max: 5,
-        duration: 60_000,
-      },
-    },
+    { concurrency: 1, limiter: { max: 5, duration: 60_000 } },
   );
 
-  scheduleWorker.on("failed", (job, err) => {
-    logger.error("Schedule job failed", {
-      jobId: job?.id,
-      scheduleId: job?.data?.scheduleId,
-      error: err.message,
-    });
-  });
-
-  // Sync all enabled schedules from DB to BullMQ
+  // Sync all enabled schedules from DB to queue
   const rows = await db.select().from(packageSchedules).where(eq(packageSchedules.enabled, true));
 
   let synced = 0;
@@ -187,15 +156,13 @@ export async function initScheduleWorker(): Promise<void> {
   }
 
   if (synced > 0) {
-    logger.info("BullMQ scheduler initialized", { schedulersSynced: synced });
+    logger.info("Schedule worker initialized", { schedulersSynced: synced });
   }
 }
 
-/** Shutdown BullMQ worker and queue. */
+/** Shutdown schedule worker and queue. */
 export async function shutdownScheduleWorker(): Promise<void> {
-  await scheduleWorker?.close();
-  await scheduleQueue?.close();
-  scheduleWorker = null;
+  await scheduleQueue?.shutdown();
   scheduleQueue = null;
   logger.info("Schedule worker stopped");
 }
@@ -302,7 +269,16 @@ async function triggerScheduledRun(
         await failSchedule(err.message, actor);
         return;
       }
-      throw err;
+      logger.error("Unexpected error during schedule preflight", {
+        scheduleId,
+        packageId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await failSchedule(
+        `Preflight error: ${err instanceof Error ? err.message : String(err)}`,
+        actor,
+      );
+      return;
     }
 
     // Validate input against agent's input schema (schema may have changed since schedule creation)
@@ -355,7 +331,16 @@ async function triggerScheduledRun(
         await failSchedule("No model configured", actor);
         return;
       }
-      throw err;
+      logger.error("Unexpected error building run context for schedule", {
+        scheduleId,
+        packageId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await failSchedule(
+        `Run context error: ${err instanceof Error ? err.message : String(err)}`,
+        actor,
+      );
+      return;
     }
 
     // Pre-run quota check (Cloud only — skip silently if quota exceeded)
@@ -375,7 +360,16 @@ async function triggerScheduledRun(
           await failSchedule(err.message, actor);
           return;
         }
-        throw err;
+        logger.error("Unexpected error during quota check for schedule", {
+          scheduleId,
+          packageId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        await failSchedule(
+          `Quota check error: ${err instanceof Error ? err.message : String(err)}`,
+          actor,
+        );
+        return;
       }
     }
 

@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Webhooks service — CRUD, signing (Standard Webhooks), and BullMQ delivery.
+ * Webhooks service — CRUD, signing (Standard Webhooks), and queue-based delivery.
  */
 
 import { z } from "zod";
 import { eq, and, or, desc } from "drizzle-orm";
-import { Queue, Worker, UnrecoverableError } from "bullmq";
-import type { Job } from "bullmq";
 import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
@@ -16,7 +14,8 @@ import type { WebhookInfo, WebhookCreateResponse } from "@appstrate/shared-types
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { toISORequired } from "../lib/date-helpers.ts";
 import { buildUpdateSet } from "../lib/db-helpers.ts";
-import { getRedisConnection } from "../lib/redis.ts";
+import { createQueue, PermanentJobError } from "../infra/queue/index.ts";
+import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { isDevEnvironment, LOCALHOST_HOSTS } from "./redirect-validation.ts";
 import { prefixedId } from "../lib/ids.ts";
 
@@ -298,6 +297,9 @@ export async function deleteWebhook(orgId: string, webhookId: string): Promise<v
   await db.delete(webhooks).where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)));
 }
 
+/** Grace period for the previous secret after rotation (24 hours). */
+const SECRET_ROTATION_GRACE_MS = 24 * 60 * 60 * 1000;
+
 export async function rotateSecret(orgId: string, webhookId: string): Promise<{ secret: string }> {
   const [row] = await db
     .select({ id: webhooks.id, secret: webhooks.secret })
@@ -312,8 +314,8 @@ export async function rotateSecret(orgId: string, webhookId: string): Promise<{ 
     .update(webhooks)
     .set({
       secret: newSecret,
-      previousSecret: null,
-      previousSecretExpiresAt: null,
+      previousSecret: row.secret,
+      previousSecretExpiresAt: new Date(Date.now() + SECRET_ROTATION_GRACE_MS),
       updatedAt: new Date(),
     })
     .where(eq(webhooks.id, webhookId));
@@ -401,22 +403,18 @@ export function buildEventEnvelope(params: {
 }
 
 // ---------------------------------------------------------------------------
-// BullMQ delivery queue
+// Delivery queue
 // ---------------------------------------------------------------------------
 
-let deliveryQueue: Queue<DeliveryJobData> | null = null;
-let deliveryWorker: Worker<DeliveryJobData> | null = null;
+let deliveryQueue: JobQueue<DeliveryJobData> | null = null;
 
-function getDeliveryQueue(): Queue<DeliveryJobData> {
+async function getDeliveryQueue(): Promise<JobQueue<DeliveryJobData>> {
   if (!deliveryQueue) {
-    deliveryQueue = new Queue<DeliveryJobData>("webhook-delivery", {
-      connection: getRedisConnection() as never,
-      defaultJobOptions: {
-        attempts: MAX_ATTEMPTS,
-        backoff: { type: "custom" },
-        removeOnComplete: 1000,
-        removeOnFail: 5000,
-      },
+    deliveryQueue = await createQueue<DeliveryJobData>("webhook-delivery", {
+      attempts: MAX_ATTEMPTS,
+      backoff: { type: "custom" },
+      removeOnComplete: 1000,
+      removeOnFail: 5000,
     });
   }
   return deliveryQueue;
@@ -454,7 +452,7 @@ export async function dispatchWebhookEvents(
     .from(webhooks)
     .where(and(eq(webhooks.orgId, orgId), eq(webhooks.active, true), or(...scopeConditions)));
 
-  const queue = getDeliveryQueue();
+  const queue = await getDeliveryQueue();
 
   for (const wh of rows) {
     if (!wh.events?.includes(eventType)) continue;
@@ -477,10 +475,10 @@ export async function dispatchWebhookEvents(
 
 /**
  * Process a single webhook delivery attempt.
- * Throws on failure — BullMQ handles retry scheduling via backoffStrategy.
- * Throws UnrecoverableError for permanent failures (4xx except 408/429).
+ * Throws on failure — queue handles retry scheduling via backoffStrategy.
+ * Throws PermanentJobError for permanent failures (4xx except 408/429).
  */
-async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
+async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
   const { webhookId, eventId, eventType, payload } = job.data;
   const attempt = job.attemptsMade + 1; // attemptsMade is 0-based before this attempt
 
@@ -488,6 +486,8 @@ async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
     .select({
       url: webhooks.url,
       secret: webhooks.secret,
+      previousSecret: webhooks.previousSecret,
+      previousSecretExpiresAt: webhooks.previousSecretExpiresAt,
     })
     .from(webhooks)
     .where(eq(webhooks.id, webhookId))
@@ -500,7 +500,13 @@ async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
 
   const timestamp = Math.floor(Date.now() / 1000);
 
+  // Sign with current secret; during grace period, include previous secret signature too
   const headers = await buildSignedHeaders(eventId, timestamp, payload, wh.secret);
+  if (wh.previousSecret && wh.previousSecretExpiresAt && wh.previousSecretExpiresAt > new Date()) {
+    const content = `${eventId}.${timestamp}.${payload}`;
+    const prevSig = await sign(wh.previousSecret, content);
+    headers["webhook-signature"] = `${headers["webhook-signature"]} ${prevSig}`;
+  }
   headers["webhook-attempt"] = String(attempt);
 
   const start = Date.now();
@@ -563,10 +569,10 @@ async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
   // Permanent failure (4xx except 408/429) — do not retry
   if (isPermanentFailure) {
     logger.warn("Webhook delivery permanently failed", failContext);
-    throw new UnrecoverableError(`Permanent failure: HTTP ${statusCode}`);
+    throw new PermanentJobError(`Permanent failure: HTTP ${statusCode}`);
   }
 
-  // Transient failure — throw to trigger BullMQ retry with backoff
+  // Transient failure — throw to trigger retry with backoff
   logger.warn("Webhook delivery failed, will retry", failContext);
   throw new Error(errorMessage ?? `HTTP ${statusCode}`);
 }
@@ -574,30 +580,15 @@ async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
 /**
  * Initialize the webhook delivery worker. Called at boot.
  */
-export function initWebhookWorker(): void {
-  if (deliveryWorker) return;
+export async function initWebhookWorker(): Promise<void> {
+  const queue = await getDeliveryQueue();
 
-  deliveryWorker = new Worker<DeliveryJobData>("webhook-delivery", processDelivery, {
-    connection: getRedisConnection() as never,
+  queue.process(processDelivery, {
     concurrency: 10,
-    limiter: {
-      max: 100,
-      duration: 1000, // 100 deliveries/sec
+    limiter: { max: 100, duration: 1000 },
+    backoffStrategy: (attemptsMade: number) => {
+      return RETRY_DELAYS_MS[attemptsMade - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]!;
     },
-    settings: {
-      backoffStrategy: (attemptsMade: number) => {
-        // attemptsMade is 1-based here (1 = first retry after first failure)
-        return RETRY_DELAYS_MS[attemptsMade - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]!;
-      },
-    },
-  });
-
-  deliveryWorker.on("failed", (job, err) => {
-    if (err instanceof UnrecoverableError) return; // Already logged in processDelivery
-    logger.error("Webhook delivery job failed", {
-      jobId: job?.id,
-      error: err.message,
-    });
   });
 
   logger.info("Webhook delivery worker started");
@@ -607,8 +598,6 @@ export function initWebhookWorker(): void {
  * Shutdown the webhook delivery worker. Called during graceful shutdown.
  */
 export async function shutdownWebhookWorker(): Promise<void> {
-  await deliveryWorker?.close();
-  await deliveryQueue?.close();
-  deliveryWorker = null;
+  await deliveryQueue?.shutdown();
   deliveryQueue = null;
 }

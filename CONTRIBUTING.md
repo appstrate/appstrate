@@ -31,25 +31,32 @@ Use the [feature request template](https://github.com/appstrate/appstrate/issues
 
 ### Prerequisites
 
-- [Bun](https://bun.sh/) (v1.3+)
-- [Docker](https://docs.docker.com/get-docker/) (with Compose v2)
+- [Bun](https://bun.sh/) (v1.3+) — that's it for Tier 0
+- [Docker](https://docs.docker.com/get-docker/) (with Compose v2) — only needed for Tier 1+ or testing Docker agent execution
 
 ### Development Setup
 
+**Tier 0 (zero-install, recommended for most development):**
+
 ```sh
-# 1. Fork and clone
 git clone https://github.com/<your-username>/appstrate.git
 cd appstrate
-
-# 2. Install dependencies
 bun install
-
-# 3. One-command setup (copies .env, starts Docker infra, migrates DB, builds frontend)
-bun run setup
-
-# 4. Start platform
+cp .env.example .env
 bun run dev         # → http://localhost:3000
 ```
+
+No Docker, no PostgreSQL, no Redis. Appstrate boots with PGlite (embedded database), filesystem storage, and in-memory adapters. This is sufficient for frontend work, API development, and most backend changes.
+
+**Tier 3 (full stack, for Docker execution or production-like testing):**
+
+```sh
+bun install
+bun run setup       # starts Docker infra, runs migrations, builds frontend
+bun run dev         # → http://localhost:3000
+```
+
+See the [Progressive Infrastructure](./README.md#progressive-infrastructure) section in the README for all 4 tiers.
 
 The `.env.example` ships with dev-ready defaults — no manual secret generation needed. For production, regenerate all secrets (see comments in `.env`).
 

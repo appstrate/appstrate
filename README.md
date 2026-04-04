@@ -53,38 +53,53 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 
 ## Quick Start
 
-Prerequisites: [Bun](https://bun.sh/) (v1.3+) and [Docker](https://docs.docker.com/get-docker/) (with Compose v2).
+Prerequisites: [Bun](https://bun.sh/) (v1.3+). Docker is optional.
 
 ```sh
 git clone https://github.com/appstrate/appstrate.git
 cd appstrate
 bun install
-bun run setup     # copies .env, starts Docker infra, runs migrations, builds frontend
+cp .env.example .env
 bun run dev       # → http://localhost:3000
 ```
 
+No Docker, no PostgreSQL, no Redis — just Bun. Appstrate uses **progressive infrastructure**: it starts with an embedded database (PGlite) and local storage, then scales up to PostgreSQL, Redis, and S3 as you need them.
+
 First signup creates an organization automatically. See [Contributing](./CONTRIBUTING.md) for the full development guide.
 
-<details>
-<summary>Manual setup (step by step)</summary>
+### Progressive Infrastructure
+
+Appstrate adapts to your infrastructure. Add services when you need them — never before.
+
+| Tier  | Name             | Prerequisites | Database                | Storage    | Queue     | Execution         |
+| ----- | ---------------- | ------------- | ----------------------- | ---------- | --------- | ----------------- |
+| **0** | **Zero-Install** | Bun           | PGlite (embedded)       | Filesystem | In-memory | Bun subprocess    |
+| **1** | **Minimal**      | Bun + Docker  | PostgreSQL              | Filesystem | In-memory | Bun subprocess    |
+| **2** | **Standard**     | Bun + Docker  | PostgreSQL + Redis      | Filesystem | BullMQ    | Bun subprocess    |
+| **3** | **Full**         | Bun + Docker  | PostgreSQL + Redis + S3 | S3         | BullMQ    | Docker containers |
+
+**Tier 0** is the default — `bun run dev` works immediately after install. To scale up:
 
 ```sh
-# 1. Install dependencies
+# Tier 1: add PostgreSQL (persistent data, multi-user)
+bun run docker:dev:minimal    # starts PostgreSQL
+# → uncomment DATABASE_URL in .env
+
+# Tier 2: add Redis (persistent scheduling, multi-instance)
+bun run docker:dev:standard   # starts PostgreSQL + Redis
+# → uncomment DATABASE_URL + REDIS_URL in .env
+
+# Tier 3: full production stack
+bun run docker:dev            # starts PostgreSQL + Redis + MinIO
+# → uncomment DATABASE_URL + REDIS_URL + S3_BUCKET in .env
+```
+
+<details>
+<summary>Full setup with Docker (Tier 3)</summary>
+
+```sh
 bun install
-
-# 2. Copy environment file (all dev secrets pre-configured)
-cp .env.example .env
-
-# 3. Start infrastructure (PostgreSQL, Redis, MinIO)
-docker compose -f docker-compose.dev.yml up -d
-
-# 4. Run database migrations
-bun run db:migrate
-
-# 5. Build frontend + shared packages
-bun run build
-
-# 6. Start platform
+bun run setup     # copies .env, starts all Docker services, runs migrations, builds frontend
 bun run dev       # → http://localhost:3000
 ```
 
@@ -188,12 +203,14 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 
 | Variable                    | Required | Default                                       | Description                                                        |
 | --------------------------- | -------- | --------------------------------------------- | ------------------------------------------------------------------ |
-| `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                       |
+| `DATABASE_URL`              | No       | —                                             | PostgreSQL connection. Absent = PGlite (embedded)                  |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                             |
 | `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes base64, encrypts stored credentials                       |
-| `REDIS_URL`                 | Yes      | —                                             | Redis connection string                                            |
-| `S3_BUCKET`                 | Yes      | —                                             | S3 bucket name for storage                                         |
-| `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                                       |
+| `REDIS_URL`                 | No       | —                                             | Redis connection. Absent = in-memory adapters (single-instance)    |
+| `S3_BUCKET`                 | No       | —                                             | S3 bucket. Absent = filesystem storage (`FS_STORAGE_PATH`)         |
+| `S3_REGION`                 | No       | —                                             | S3 region. Required when `S3_BUCKET` is set                        |
+| `FS_STORAGE_PATH`           | No       | `./data/storage`                              | Filesystem storage path (used when `S3_BUCKET` is absent)          |
+| `PGLITE_DATA_DIR`           | No       | `./data/pglite`                               | PGlite data directory (used when `DATABASE_URL` is absent)         |
 | `RUN_TOKEN_SECRET`          | No       | —                                             | Run token signing secret                                           |
 | `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                     |
 | `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins (comma-separated)                                     |
@@ -204,7 +221,7 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 | `SYSTEM_PROXIES`            | No       | `[]`                                          | JSON array of system proxy definitions                             |
 | `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy for sidecar containers                         |
 | `LOG_LEVEL`                 | No       | `info`                                        | `debug` \| `info` \| `warn` \| `error`                             |
-| `RUN_ADAPTER`               | No       | `pi`                                          | Adapter type for agent run                                         |
+| `RUN_ADAPTER`               | No       | `docker`                                      | Execution backend: `docker` or `process`                           |
 | `SIDECAR_POOL_SIZE`         | No       | `2`                                           | Pre-warmed sidecar containers (0 = disabled)                       |
 | `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2)                                  |
 | `PI_IMAGE`                  | No       | `appstrate-pi:latest`                         | Docker image for the Pi agent runtime                              |

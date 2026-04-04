@@ -48,6 +48,16 @@ export function idempotency() {
 
     const lockResult = await acquireIdempotencyLock(orgId, key, bodyHash);
 
+    if (lockResult.status === "body_mismatch") {
+      throw new ApiError({
+        status: 422,
+        code: "idempotency_conflict",
+        title: "Idempotency Conflict",
+        detail: "This idempotency key was already used with a different request body.",
+        param: "Idempotency-Key",
+      });
+    }
+
     if (lockResult.status === "processing") {
       throw new ApiError({
         status: 409,
@@ -59,18 +69,8 @@ export function idempotency() {
     }
 
     if (lockResult.status === "cached") {
+      // Replay the cached response (body hash already verified in acquireIdempotencyLock)
       const cached = lockResult.result;
-      if (cached.bodyHash !== bodyHash) {
-        throw new ApiError({
-          status: 422,
-          code: "idempotency_conflict",
-          title: "Idempotency Conflict",
-          detail: "This idempotency key was already used with a different request body.",
-          param: "Idempotency-Key",
-        });
-      }
-
-      // Replay the cached response
       const headers = new Headers(cached.headers);
       headers.set("Idempotent-Replayed", "true");
       return new Response(cached.body, {
@@ -96,7 +96,11 @@ export function idempotency() {
       // On thrown error (including ApiError 4xx), release the lock so client can retry.
       // Thrown errors don't produce a c.res — they go through errorHandler which builds
       // a new Response. We can't cache that here, so releasing is the safe choice.
-      await releaseIdempotencyLock(orgId, key);
+      try {
+        await releaseIdempotencyLock(orgId, key);
+      } catch {
+        // Best-effort release — lock will expire via TTL (24h) if release fails
+      }
       throw err;
     }
 
