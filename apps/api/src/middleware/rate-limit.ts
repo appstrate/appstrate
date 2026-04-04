@@ -1,19 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { RateLimiterRedis } from "rate-limiter-flexible";
 import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { getRedisConnection } from "../lib/redis.ts";
+import { getRateLimiterFactory } from "../infra/index.ts";
 import { ApiError } from "../lib/errors.ts";
 
 function createLimiter(points: number, duration: number, keyPrefix: string): RateLimiterAbstract {
-  return new RateLimiterRedis({
-    storeClient: getRedisConnection(),
-    points,
-    duration,
-    keyPrefix,
-  });
+  return getRateLimiterFactory().create(points, duration, keyPrefix);
 }
 
 /** Limiter cache keyed by category + maxPerMinute. */

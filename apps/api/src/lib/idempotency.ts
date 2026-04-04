@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Idempotency key storage — Redis-backed.
+ * Idempotency key storage — backed by KeyValueCache adapter.
  *
- * Pattern: Stripe `Idempotency-Key` header. Redis key format: `idem:{orgId}:{key}`.
+ * Pattern: Stripe `Idempotency-Key` header. Cache key format: `idem:{orgId}:{key}`.
  * TTL: 24 hours. Body hash SHA-256 for conflict detection.
  */
 
-import { getRedisConnection } from "./redis.ts";
+import { getCache } from "../infra/index.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,7 +32,7 @@ type LockResult =
 const TTL = 86_400; // 24 hours
 const MAX_CACHED_BODY = 1_048_576; // 1 MB
 
-function redisKey(orgId: string, key: string): string {
+function cacheKey(orgId: string, key: string): string {
   return `idem:${orgId}:${key}`;
 }
 
@@ -51,24 +51,23 @@ export async function acquireIdempotencyLock(
   key: string,
   bodyHash: string,
 ): Promise<LockResult> {
-  const rk = redisKey(orgId, key);
+  const ck = cacheKey(orgId, key);
   const processingValue = JSON.stringify({ status: "processing", bodyHash });
+  const cache = getCache();
 
-  // Redis: SET NX EX (atomic lock)
-  const redis = getRedisConnection();
-  const set = await redis.set(rk, processingValue, "EX", TTL, "NX");
+  // Atomic SET NX with TTL
+  const acquired = await cache.set(ck, processingValue, { ttlSeconds: TTL, nx: true });
 
-  if (set === "OK") {
+  if (acquired) {
     return { status: "acquired" };
   }
 
   // Key exists — read the current value
-  const existing = await redis.get(rk);
+  const existing = await cache.get(ck);
   if (!existing) {
-    // Race: key expired between SET and GET — retry the atomic SET NX
-    const retrySet = await redis.set(rk, processingValue, "EX", TTL, "NX");
-    if (retrySet === "OK") return { status: "acquired" };
-    // Another process won — treat as concurrent
+    // Race: key expired between SET and GET — retry
+    const retryAcquired = await cache.set(ck, processingValue, { ttlSeconds: TTL, nx: true });
+    if (retryAcquired) return { status: "acquired" };
     return { status: "processing" };
   }
 
@@ -88,14 +87,12 @@ export async function storeIdempotencyResult(
     return;
   }
 
-  const rk = redisKey(orgId, key);
+  const ck = cacheKey(orgId, key);
   const value = JSON.stringify(result);
 
-  await getRedisConnection().set(rk, value, "EX", TTL);
+  await getCache().set(ck, value, { ttlSeconds: TTL });
 }
 
 export async function releaseIdempotencyLock(orgId: string, key: string): Promise<void> {
-  const rk = redisKey(orgId, key);
-
-  await getRedisConnection().del(rk);
+  await getCache().del(cacheKey(orgId, key));
 }

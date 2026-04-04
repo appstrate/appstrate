@@ -28,19 +28,23 @@ import { initWebhookWorker } from "../services/webhooks.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
+import { logInfraMode } from "../infra/index.ts";
 
 export async function boot(): Promise<void> {
   // Attempt to load cloud module (no-op in OSS — sets _cloud to null)
   await loadCloud();
 
-  // Verify storage backend is accessible (fail-fast if misconfigured)
-  await ensureBucket();
+  // Log infrastructure mode (storage, queue, pubsub, cache, rate-limit)
   const env = (await import("@appstrate/env")).getEnv();
   if (env.S3_BUCKET) {
     logger.info("Storage: S3", { bucket: env.S3_BUCKET, endpoint: env.S3_ENDPOINT ?? "AWS" });
   } else {
     logger.info("Storage: filesystem", { path: env.FS_STORAGE_PATH });
   }
+  logInfraMode();
+
+  // Verify storage backend is accessible (fail-fast if misconfigured)
+  await ensureBucket();
 
   // Load system proxies from SYSTEM_PROXIES env var
   initSystemProxies();

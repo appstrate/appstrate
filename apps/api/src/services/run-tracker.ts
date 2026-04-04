@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Tracks in-flight runs for graceful shutdown and cancellation.
-// Cross-instance cancel signaling via Redis Pub/Sub.
+// Cross-instance cancel signaling via PubSub adapter (Redis or local EventEmitter).
 
-import { getRedisConnection, getRedisSubscriber } from "../lib/redis.ts";
+import { getPubSub } from "../infra/index.ts";
 import { logger } from "../lib/logger.ts";
 
 const CANCEL_CHANNEL = "runs:cancel";
@@ -29,7 +29,7 @@ export function abortRun(runId: string): void {
 
   // Cross-instance: publish cancel signal with retry
   publishCancelWithRetry(runId).catch((err) => {
-    logger.error("Failed to publish run cancel to Redis after retries", {
+    logger.error("Failed to publish run cancel after retries", {
       runId,
       retries: PUBLISH_MAX_RETRIES,
       error: err instanceof Error ? err.message : String(err),
@@ -38,9 +38,10 @@ export function abortRun(runId: string): void {
 }
 
 async function publishCancelWithRetry(runId: string): Promise<void> {
+  const pubsub = getPubSub();
   for (let attempt = 0; attempt < PUBLISH_MAX_RETRIES; attempt++) {
     try {
-      await getRedisConnection().publish(CANCEL_CHANNEL, runId);
+      await pubsub.publish(CANCEL_CHANNEL, runId);
       return;
     } catch (err) {
       if (attempt === PUBLISH_MAX_RETRIES - 1) throw err;
@@ -58,41 +59,28 @@ export function getInFlightCount(): number {
   return inFlight.size;
 }
 
-/** Subscribe to Redis cancel channel so this instance can abort runs triggered by other instances. */
-export function initCancelSubscriber(): void {
-  const subscriber = getRedisSubscriber();
-
-  subscriber.subscribe(CANCEL_CHANNEL, (err) => {
-    if (err) {
-      logger.error("Failed to subscribe to run cancel channel", {
-        channel: CANCEL_CHANNEL,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return;
-    }
-    logger.info("Subscribed to run cancel channel", {
-      channel: CANCEL_CHANNEL,
+/** Subscribe to cancel channel so this instance can abort runs triggered by other instances. */
+export async function initCancelSubscriber(): Promise<void> {
+  try {
+    await getPubSub().subscribe(CANCEL_CHANNEL, (runId) => {
+      const controller = inFlight.get(runId);
+      if (controller) {
+        logger.info("Aborting run via cross-instance cancel", { runId });
+        controller.abort();
+      }
     });
-  });
-
-  subscriber.on("message", (channel, runId) => {
-    if (channel !== CANCEL_CHANNEL) return;
-
-    const controller = inFlight.get(runId);
-    if (controller) {
-      logger.info("Aborting run via cross-instance cancel", {
-        runId,
-      });
-      controller.abort();
-    }
-  });
+  } catch (err) {
+    logger.error("Failed to subscribe to run cancel channel", {
+      channel: CANCEL_CHANNEL,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /** Unsubscribe from the cancel channel. Call before draining in-flight runs during shutdown. */
 export async function stopCancelSubscriber(): Promise<void> {
   try {
-    const subscriber = getRedisSubscriber();
-    await subscriber.unsubscribe(CANCEL_CHANNEL);
+    await getPubSub().unsubscribe(CANCEL_CHANNEL);
     logger.info("Unsubscribed from run cancel channel");
   } catch (err) {
     logger.warn("Error unsubscribing from cancel channel", {

@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Webhooks service — CRUD, signing (Standard Webhooks), and BullMQ delivery.
+ * Webhooks service — CRUD, signing (Standard Webhooks), and queue-based delivery.
  */
 
 import { z } from "zod";
 import { eq, and, or, desc } from "drizzle-orm";
-import { Queue, Worker, UnrecoverableError } from "bullmq";
-import type { Job } from "bullmq";
 import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
@@ -16,7 +14,8 @@ import type { WebhookInfo, WebhookCreateResponse } from "@appstrate/shared-types
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { toISORequired } from "../lib/date-helpers.ts";
 import { buildUpdateSet } from "../lib/db-helpers.ts";
-import { getRedisConnection } from "../lib/redis.ts";
+import { createQueue, PermanentJobError } from "../infra/queue/index.ts";
+import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { isDevEnvironment, LOCALHOST_HOSTS } from "./redirect-validation.ts";
 import { prefixedId } from "../lib/ids.ts";
 
@@ -401,22 +400,18 @@ export function buildEventEnvelope(params: {
 }
 
 // ---------------------------------------------------------------------------
-// BullMQ delivery queue
+// Delivery queue
 // ---------------------------------------------------------------------------
 
-let deliveryQueue: Queue<DeliveryJobData> | null = null;
-let deliveryWorker: Worker<DeliveryJobData> | null = null;
+let deliveryQueue: JobQueue<DeliveryJobData> | null = null;
 
-function getDeliveryQueue(): Queue<DeliveryJobData> {
+function getDeliveryQueue(): JobQueue<DeliveryJobData> {
   if (!deliveryQueue) {
-    deliveryQueue = new Queue<DeliveryJobData>("webhook-delivery", {
-      connection: getRedisConnection() as never,
-      defaultJobOptions: {
-        attempts: MAX_ATTEMPTS,
-        backoff: { type: "custom" },
-        removeOnComplete: 1000,
-        removeOnFail: 5000,
-      },
+    deliveryQueue = createQueue<DeliveryJobData>("webhook-delivery", {
+      attempts: MAX_ATTEMPTS,
+      backoff: { type: "custom" },
+      removeOnComplete: 1000,
+      removeOnFail: 5000,
     });
   }
   return deliveryQueue;
@@ -477,10 +472,10 @@ export async function dispatchWebhookEvents(
 
 /**
  * Process a single webhook delivery attempt.
- * Throws on failure — BullMQ handles retry scheduling via backoffStrategy.
- * Throws UnrecoverableError for permanent failures (4xx except 408/429).
+ * Throws on failure — queue handles retry scheduling via backoffStrategy.
+ * Throws PermanentJobError for permanent failures (4xx except 408/429).
  */
-async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
+async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
   const { webhookId, eventId, eventType, payload } = job.data;
   const attempt = job.attemptsMade + 1; // attemptsMade is 0-based before this attempt
 
@@ -563,10 +558,10 @@ async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
   // Permanent failure (4xx except 408/429) — do not retry
   if (isPermanentFailure) {
     logger.warn("Webhook delivery permanently failed", failContext);
-    throw new UnrecoverableError(`Permanent failure: HTTP ${statusCode}`);
+    throw new PermanentJobError(`Permanent failure: HTTP ${statusCode}`);
   }
 
-  // Transient failure — throw to trigger BullMQ retry with backoff
+  // Transient failure — throw to trigger retry with backoff
   logger.warn("Webhook delivery failed, will retry", failContext);
   throw new Error(errorMessage ?? `HTTP ${statusCode}`);
 }
@@ -575,29 +570,14 @@ async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
  * Initialize the webhook delivery worker. Called at boot.
  */
 export function initWebhookWorker(): void {
-  if (deliveryWorker) return;
+  const queue = getDeliveryQueue();
 
-  deliveryWorker = new Worker<DeliveryJobData>("webhook-delivery", processDelivery, {
-    connection: getRedisConnection() as never,
+  queue.process(processDelivery, {
     concurrency: 10,
-    limiter: {
-      max: 100,
-      duration: 1000, // 100 deliveries/sec
+    limiter: { max: 100, duration: 1000 },
+    backoffStrategy: (attemptsMade: number) => {
+      return RETRY_DELAYS_MS[attemptsMade - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]!;
     },
-    settings: {
-      backoffStrategy: (attemptsMade: number) => {
-        // attemptsMade is 1-based here (1 = first retry after first failure)
-        return RETRY_DELAYS_MS[attemptsMade - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]!;
-      },
-    },
-  });
-
-  deliveryWorker.on("failed", (job, err) => {
-    if (err instanceof UnrecoverableError) return; // Already logged in processDelivery
-    logger.error("Webhook delivery job failed", {
-      jobId: job?.id,
-      error: err.message,
-    });
   });
 
   logger.info("Webhook delivery worker started");
@@ -607,8 +587,6 @@ export function initWebhookWorker(): void {
  * Shutdown the webhook delivery worker. Called during graceful shutdown.
  */
 export async function shutdownWebhookWorker(): Promise<void> {
-  await deliveryWorker?.close();
-  await deliveryQueue?.close();
-  deliveryWorker = null;
+  await deliveryQueue?.shutdown();
   deliveryQueue = null;
 }
