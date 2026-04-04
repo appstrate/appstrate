@@ -257,7 +257,6 @@ async function loadAndSyncSystemPackages(): Promise<void> {
 async function applyEmbeddedMigrations(): Promise<void> {
   const { resolve, join } = await import("node:path");
   const { readFileSync, existsSync } = await import("node:fs");
-  const { sql: rawSql } = await import("drizzle-orm");
 
   const migrationsDir = resolve(import.meta.dir, "../../../../packages/db/drizzle");
   const journalPath = join(migrationsDir, "meta/_journal.json");
@@ -267,8 +266,10 @@ async function applyEmbeddedMigrations(): Promise<void> {
     return;
   }
 
+  const pg = getPGliteClient()!;
+
   // Create migrations tracking table
-  await db.execute(rawSql`
+  await pg.exec(`
     CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (
       id SERIAL PRIMARY KEY,
       hash TEXT NOT NULL,
@@ -282,13 +283,8 @@ async function applyEmbeddedMigrations(): Promise<void> {
   };
 
   // Get already-applied migrations
-  const applied = new Set(
-    (
-      (await db.execute(rawSql`SELECT hash FROM "__drizzle_migrations"`)) as {
-        rows: { hash: string }[];
-      }
-    ).rows.map((r) => r.hash),
-  );
+  const { rows } = await pg.query<{ hash: string }>('SELECT hash FROM "__drizzle_migrations"');
+  const applied = new Set(rows.map((r) => r.hash));
 
   for (const entry of journal.entries) {
     if (applied.has(entry.tag)) continue;
@@ -300,12 +296,10 @@ async function applyEmbeddedMigrations(): Promise<void> {
     }
 
     const content = readFileSync(sqlFile, "utf-8");
-    // Use PGlite's exec() which supports multi-statement SQL natively
-    const client = getPGliteClient()!;
-    await client.exec(content.replaceAll("--> statement-breakpoint", ""));
-
+    // PGlite exec() supports multi-statement SQL natively
+    await pg.exec(content.replaceAll("--> statement-breakpoint", ""));
     // Record migration as applied
-    await db.execute(rawSql`INSERT INTO "__drizzle_migrations" (hash) VALUES (${entry.tag})`);
+    await pg.query('INSERT INTO "__drizzle_migrations" (hash) VALUES ($1)', [entry.tag]);
   }
 
   logger.info("PGlite migrations applied", { count: journal.entries.length - applied.size });

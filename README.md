@@ -210,6 +210,7 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 | `S3_BUCKET`                 | No       | —                                             | S3 bucket. Absent = filesystem storage (`FS_STORAGE_PATH`)         |
 | `S3_REGION`                 | No       | —                                             | S3 region. Required when `S3_BUCKET` is set                        |
 | `FS_STORAGE_PATH`           | No       | `./data/storage`                              | Filesystem storage path (used when `S3_BUCKET` is absent)          |
+| `PGLITE_DATA_DIR`           | No       | `./data/pglite`                               | PGlite data directory (used when `DATABASE_URL` is absent)         |
 | `RUN_TOKEN_SECRET`          | No       | —                                             | Run token signing secret                                           |
 | `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                     |
 | `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins (comma-separated)                                     |

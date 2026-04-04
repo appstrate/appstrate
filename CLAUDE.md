@@ -4,38 +4,30 @@ Appstrate is an open-source platform for running autonomous AI agents in sandbox
 
 ## Quick Start
 
+**Tier 0 (zero-install — recommended for development):**
+
 ```sh
-# 1. Setup dev Docker Compose override
-cp docker-compose.override.example.yml docker-compose.override.yml
-
-# 2. Start infrastructure + build runtime images
-docker compose up -d          # PostgreSQL 16 + builds appstrate-pi & appstrate-sidecar images
-
-# 3. Configure .env (copy .env.example, set Pi adapter keys + DB URL + Better Auth secret)
-
-# 4. Run database migrations
-bun run db:generate           # Generate Drizzle migrations from schema
-bun run db:migrate            # Apply migrations to PostgreSQL
-
-# 5. Build everything (shared-types + frontend)
-bun run build                 # turbo build → apps/web/dist/
-
-# 6. Start platform (API + Vite build --watch in parallel)
-bun run dev                   # turbo dev → Hono on :3000
-
-# 7. First signup creates an organization automatically
-
-# 8. Run tests (requires Docker from step 2)
-bun test                          # All 1000+ tests across all packages
+cp .env.example .env
+bun run dev                   # PGlite + filesystem + in-memory → :3000
 ```
 
-### Docker Compose Structure
+No Docker, no PostgreSQL, no Redis. First signup creates an organization automatically.
 
-- **`docker-compose.yml`** — Self-hosting file (images from GHCR). Also the base for dev.
-- **`docker-compose.override.yml`** — Dev override (gitignored, auto-merged by Compose). Copy from `docker-compose.override.example.yml`. Adds local image builds, disables migrate/appstrate services (run manually via `bun run db:migrate` / `bun run dev`).
-- **`docker:dev`** script — `docker compose up -d` (postgres + runtime image builds with override).
-- **`docker:prod`** script — `docker compose --profile prod up -d` (full stack built locally, for testing).
-- **Self-hosting** — Without override: `docker compose up -d` pulls GHCR images and starts everything.
+**Tier 3 (full stack with Docker):**
+
+```sh
+bun run setup                 # Interactive tier selection, starts Docker, migrates DB, builds
+bun run dev
+```
+
+### Docker Compose (Tier 1-3)
+
+- **`docker-compose.dev.yml`** — Development services with profiles:
+  - `bun run docker:dev:minimal` — Tier 1: PostgreSQL only
+  - `bun run docker:dev:standard` — Tier 2: PostgreSQL + Redis
+  - `bun run docker:dev` — Tier 3: PostgreSQL + Redis + MinIO
+- **`docker-compose.yml`** — Self-hosting / production (images from GHCR)
+- **`docker:prod`** script — `docker compose --profile prod up -d` (full stack)
 
 ## Stack — Critical Constraints
 
@@ -432,6 +424,7 @@ Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Mig
 | `S3_BUCKET`                 | No       | —                                             | S3 bucket name. When absent, falls back to filesystem storage (`FS_STORAGE_PATH`)                          |
 | `S3_REGION`                 | No       | —                                             | S3 region (e.g. `us-east-1`). Required when `S3_BUCKET` is set                                             |
 | `FS_STORAGE_PATH`           | No       | `./data/storage`                              | Filesystem storage path (used when `S3_BUCKET` is absent)                                                  |
+| `PGLITE_DATA_DIR`           | No       | `./data/pglite`                               | PGlite data directory (used when `DATABASE_URL` is absent)                                                 |
 | `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2/other S3-compatible)                                                      |
 | `RUN_TOKEN_SECRET`          | No       | —                                             | Run token signing secret (if unset, tokens are unsigned)                                                   |
 | `GOOGLE_CLIENT_ID`          | No       | —                                             | Google OAuth client ID (enables Google sign-in when both Google vars are set)                              |
