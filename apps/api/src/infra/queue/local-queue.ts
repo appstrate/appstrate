@@ -235,7 +235,7 @@ export class LocalQueue<T> implements JobQueue<T> {
         this.matchField(fields[1]!, hour, 0, 23) &&
         this.matchField(fields[2]!, day, 1, 31) &&
         this.matchField(fields[3]!, month, 1, 12) &&
-        this.matchField(fields[4]!, dow, 0, 7)
+        this.matchField(fields[4]!, dow, 0, 6, true)
       );
     } catch {
       return false;
@@ -243,7 +243,14 @@ export class LocalQueue<T> implements JobQueue<T> {
   }
 
   // Match a single cron field against a value. Supports *, star/N, N-M, comma lists.
-  private matchField(field: string, value: number, _min: number, _max: number): boolean {
+  // For day-of-week: normalizes 7 → 0 (both represent Sunday in standard cron).
+  private matchField(
+    field: string,
+    value: number,
+    _min: number,
+    _max: number,
+    isDow = false,
+  ): boolean {
     if (field === "*") return true;
 
     return field.split(",").some((part) => {
@@ -255,17 +262,23 @@ export class LocalQueue<T> implements JobQueue<T> {
         return value % step === 0;
       }
 
-      // Range: N-M
+      // Range: N-M — normalize 7 → 0 for day-of-week bounds
       if (range!.includes("-")) {
-        const [lo, hi] = range!.split("-").map(Number);
+        let [lo, hi] = range!.split("-").map(Number);
+        if (isDow) {
+          if (lo === 7) lo = 0;
+          if (hi === 7) hi = 0;
+        }
         if (step) {
           return value >= lo! && value <= hi! && (value - lo!) % step === 0;
         }
         return value >= lo! && value <= hi!;
       }
 
-      // Exact value
-      return parseInt(range!) === value;
+      // Exact value — normalize 7 → 0 for day-of-week
+      let parsed = parseInt(range!);
+      if (isDow && parsed === 7) parsed = 0;
+      return parsed === value;
     });
   }
 }

@@ -51,10 +51,14 @@ export class LocalCache implements KeyValueCache {
 
   private purge(): void {
     const now = Date.now();
+    const expired: string[] = [];
     for (const [key, entry] of this.store) {
       if (entry.expiresAt !== null && now > entry.expiresAt) {
-        this.store.delete(key);
+        expired.push(key);
       }
+    }
+    for (const key of expired) {
+      this.store.delete(key);
     }
   }
 }

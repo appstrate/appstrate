@@ -266,12 +266,14 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
   // Internal helpers
   // ---------------------------------------------------------------------------
 
-  private async findAvailablePort(): Promise<number> {
-    const server = Bun.serve({ port: 0, fetch: () => new Response() });
-    const port = server.port ?? 0;
-    server.stop(true);
-    if (!port) throw new Error("Failed to find available port");
-    return port;
+  private async findAvailablePort(retries = 3): Promise<number> {
+    for (let attempt = 0; attempt < retries; attempt++) {
+      const server = Bun.serve({ port: 0, fetch: () => new Response() });
+      const port = server.port ?? 0;
+      server.stop(true);
+      if (port) return port;
+    }
+    throw new Error("Failed to find available port after retries");
   }
 
   private async waitForHealth(url: string, timeoutMs: number): Promise<void> {

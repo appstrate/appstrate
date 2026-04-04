@@ -297,6 +297,9 @@ export async function deleteWebhook(orgId: string, webhookId: string): Promise<v
   await db.delete(webhooks).where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)));
 }
 
+/** Grace period for the previous secret after rotation (24 hours). */
+const SECRET_ROTATION_GRACE_MS = 24 * 60 * 60 * 1000;
+
 export async function rotateSecret(orgId: string, webhookId: string): Promise<{ secret: string }> {
   const [row] = await db
     .select({ id: webhooks.id, secret: webhooks.secret })
@@ -311,8 +314,8 @@ export async function rotateSecret(orgId: string, webhookId: string): Promise<{ 
     .update(webhooks)
     .set({
       secret: newSecret,
-      previousSecret: null,
-      previousSecretExpiresAt: null,
+      previousSecret: row.secret,
+      previousSecretExpiresAt: new Date(Date.now() + SECRET_ROTATION_GRACE_MS),
       updatedAt: new Date(),
     })
     .where(eq(webhooks.id, webhookId));
@@ -483,6 +486,8 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
     .select({
       url: webhooks.url,
       secret: webhooks.secret,
+      previousSecret: webhooks.previousSecret,
+      previousSecretExpiresAt: webhooks.previousSecretExpiresAt,
     })
     .from(webhooks)
     .where(eq(webhooks.id, webhookId))
@@ -495,7 +500,13 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
 
   const timestamp = Math.floor(Date.now() / 1000);
 
+  // Sign with current secret; during grace period, include previous secret signature too
   const headers = await buildSignedHeaders(eventId, timestamp, payload, wh.secret);
+  if (wh.previousSecret && wh.previousSecretExpiresAt && wh.previousSecretExpiresAt > new Date()) {
+    const content = `${eventId}.${timestamp}.${payload}`;
+    const prevSig = await sign(wh.previousSecret, content);
+    headers["webhook-signature"] = `${headers["webhook-signature"]} ${prevSig}`;
+  }
   headers["webhook-attempt"] = String(attempt);
 
   const start = Date.now();

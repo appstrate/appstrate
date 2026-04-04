@@ -23,7 +23,8 @@ export interface CachedResult {
 type LockResult =
   | { status: "acquired" }
   | { status: "processing" }
-  | { status: "cached"; result: CachedResult };
+  | { status: "cached"; result: CachedResult }
+  | { status: "body_mismatch" };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -72,8 +73,15 @@ export async function acquireIdempotencyLock(
   }
 
   const parsed = JSON.parse(existing);
-  if (parsed.status === "processing") return { status: "processing" };
-  return { status: "cached", result: parsed as CachedResult };
+  if (parsed.status === "processing") {
+    // Body hash mismatch while still processing — reject per Stripe pattern (422)
+    if (parsed.bodyHash !== bodyHash) return { status: "body_mismatch" };
+    return { status: "processing" };
+  }
+  // Completed result — verify body hash matches
+  const cached = parsed as CachedResult;
+  if (cached.bodyHash !== bodyHash) return { status: "body_mismatch" };
+  return { status: "cached", result: cached };
 }
 
 export async function storeIdempotencyResult(

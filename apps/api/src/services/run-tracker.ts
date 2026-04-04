@@ -27,7 +27,7 @@ export function abortRun(runId: string): void {
   const controller = inFlight.get(runId);
   if (controller) controller.abort();
 
-  // Cross-instance: publish cancel signal with retry
+  // Cross-instance: publish cancel signal with linear backoff retry
   publishCancelWithRetry(runId).catch((err) => {
     logger.error("Failed to publish run cancel after retries", {
       runId,
@@ -50,6 +50,7 @@ async function publishCancelWithRetry(runId: string): Promise<void> {
         attempt: attempt + 1,
         error: err instanceof Error ? err.message : String(err),
       });
+      // Linear backoff: 100ms, 200ms, 300ms
       await new Promise((r) => setTimeout(r, PUBLISH_BASE_DELAY_MS * (attempt + 1)));
     }
   }

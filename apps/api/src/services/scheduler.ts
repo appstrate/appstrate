@@ -269,7 +269,16 @@ async function triggerScheduledRun(
         await failSchedule(err.message, actor);
         return;
       }
-      throw err;
+      logger.error("Unexpected error during schedule preflight", {
+        scheduleId,
+        packageId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await failSchedule(
+        `Preflight error: ${err instanceof Error ? err.message : String(err)}`,
+        actor,
+      );
+      return;
     }
 
     // Validate input against agent's input schema (schema may have changed since schedule creation)
@@ -322,7 +331,16 @@ async function triggerScheduledRun(
         await failSchedule("No model configured", actor);
         return;
       }
-      throw err;
+      logger.error("Unexpected error building run context for schedule", {
+        scheduleId,
+        packageId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await failSchedule(
+        `Run context error: ${err instanceof Error ? err.message : String(err)}`,
+        actor,
+      );
+      return;
     }
 
     // Pre-run quota check (Cloud only — skip silently if quota exceeded)
@@ -342,7 +360,16 @@ async function triggerScheduledRun(
           await failSchedule(err.message, actor);
           return;
         }
-        throw err;
+        logger.error("Unexpected error during quota check for schedule", {
+          scheduleId,
+          packageId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        await failSchedule(
+          `Quota check error: ${err instanceof Error ? err.message : String(err)}`,
+          actor,
+        );
+        return;
       }
     }
 

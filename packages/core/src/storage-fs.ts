@@ -1,7 +1,7 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdir, unlink } from "node:fs/promises";
+import { mkdir, unlink, realpath } from "node:fs/promises";
 import { join, dirname, normalize, resolve as resolvePath } from "node:path";
 import type { Storage } from "./storage.ts";
 
@@ -37,6 +37,23 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
     return fullPath;
   }
 
+  /**
+   * Verify that a resolved path stays within the base directory after symlink resolution.
+   * Called after file creation to catch symlink-based escapes.
+   */
+  async function verifyContainment(fullPath: string): Promise<void> {
+    try {
+      const real = await realpath(fullPath);
+      const realBase = await realpath(base);
+      if (!real.startsWith(realBase + "/") && real !== realBase) {
+        throw new Error("Path traversal detected via symlink");
+      }
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return; // file doesn't exist yet
+      throw err;
+    }
+  }
+
   return {
     async ensureBucket() {
       await mkdir(base, { recursive: true });
@@ -49,12 +66,15 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
     async uploadFile(bucket, path, data) {
       const fullPath = resolve(bucket, path);
       await mkdir(dirname(fullPath), { recursive: true });
+      await verifyContainment(dirname(fullPath));
       await Bun.write(fullPath, data);
+      await verifyContainment(fullPath);
       return makeKey(bucket, path);
     },
 
     async downloadFile(bucket, path) {
       const fullPath = resolve(bucket, path);
+      await verifyContainment(fullPath);
       const file = Bun.file(fullPath);
       if (!(await file.exists())) return null;
       return new Uint8Array(await file.arrayBuffer());

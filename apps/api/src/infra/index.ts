@@ -72,7 +72,11 @@ export function getRateLimiterFactory(): Promise<RateLimiterFactory> {
 
 /** Shutdown all infrastructure adapters. */
 export async function shutdownInfra(): Promise<void> {
+  // Resolve all pending singletons before tearing down.
+  // RateLimiterFactory has no shutdown — its Redis connection is shared and closed by closeRedis().
   const [ps, ch] = await Promise.all([pubsubPromise, cachePromise]);
+  // Ensure rate limiter promise is settled (no dangling async) before nullifying
+  await rateLimiterPromise;
   await Promise.all([ps?.shutdown(), ch?.shutdown()]);
   pubsubPromise = null;
   cachePromise = null;
