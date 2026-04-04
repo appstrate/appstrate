@@ -74,6 +74,8 @@
     "docker:prod:logs": "docker compose --profile prod logs -f",
     "docker:clean": "docker compose down -v && docker compose -f docker-compose.dev.yml down -v",
     "test:integration": "bun test apps/api/test/integration/",
+    "test:integration:minimal": "bun test --preload ./test/setup/preload-minimal.ts apps/api/test/integration/services/infra-adapters.test.ts apps/api/test/integration/services/storage-adapters.test.ts",
+    "test:integration:standard": "bun test --preload ./test/setup/preload-standard.ts apps/api/test/integration/services/infra-adapters.test.ts apps/api/test/integration/services/storage-adapters.test.ts",
     "db:studio": "cd packages/db && bunx drizzle-kit studio",
     "verify:openapi": "bun scripts/verify-openapi.ts",
     "clean": "rm -rf node_modules/.cache .turbo apps/*/dist apps/web/.vite packages/*/dist coverage",

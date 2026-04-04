@@ -90,8 +90,8 @@ export class BullMQQueue<T> implements JobQueue<T> {
       },
       {
         connection: getRedisConnection() as unknown as ConnectionOptions,
-        concurrency: opts?.concurrency,
-        limiter: opts?.limiter,
+        ...(opts?.concurrency ? { concurrency: opts.concurrency } : {}),
+        ...(opts?.limiter ? { limiter: opts.limiter } : {}),
         ...(opts?.backoffStrategy
           ? {
               settings: {
