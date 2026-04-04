@@ -8,8 +8,11 @@
 import { logger } from "../lib/logger.ts";
 import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
-import { createRun, getRunningRunCountForOrg } from "./state/index.ts";
+import { createRun, getRunningRunCountForOrg, getPackageConfig } from "./state/index.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
+import { resolveProviderProfiles } from "./connection-profiles.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { validateAgentReadiness } from "./agent-readiness.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { UploadedFile, FileReference } from "./adapters/types.ts";
@@ -48,6 +51,60 @@ export type RunPipelineError =
 export type RunPipelineResult =
   | { ok: true; runId: string; modelSource: string | null }
   | { ok: false; error: RunPipelineError };
+
+// ---------------------------------------------------------------------------
+// Preflight — shared by run route and scheduler
+// ---------------------------------------------------------------------------
+
+export interface PreflightResult {
+  providerProfiles: ProviderProfileMap;
+  config: Record<string, unknown>;
+  modelId: string | null;
+  proxyId: string | null;
+}
+
+/**
+ * Resolve provider profiles, package config, and validate agent readiness.
+ * Shared by the POST /run route and the scheduler's triggerScheduledRun.
+ */
+export async function resolveRunPreflight(params: {
+  agent: LoadedPackage;
+  applicationId: string;
+  orgId: string;
+  defaultUserProfileId: string | null;
+  userProviderOverrides?: Record<string, string>;
+  orgProfileId: string | null;
+}): Promise<PreflightResult> {
+  const { agent, applicationId, orgId, defaultUserProfileId, userProviderOverrides, orgProfileId } =
+    params;
+
+  const manifestProviders = resolveManifestProviders(agent.manifest);
+
+  const [providerProfiles, packageConfig] = await Promise.all([
+    resolveProviderProfiles(
+      manifestProviders,
+      defaultUserProfileId,
+      userProviderOverrides,
+      orgProfileId,
+      orgId,
+    ),
+    getPackageConfig(applicationId, agent.id),
+  ]);
+
+  await validateAgentReadiness({
+    agent,
+    providerProfiles,
+    orgId,
+    config: packageConfig.config,
+  });
+
+  return {
+    providerProfiles,
+    config: packageConfig.config,
+    modelId: packageConfig.modelId,
+    proxyId: packageConfig.proxyId,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Pipeline

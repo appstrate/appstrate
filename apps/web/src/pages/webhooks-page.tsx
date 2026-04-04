@@ -53,8 +53,8 @@ export function WebhooksPage() {
                 <div className="min-w-0 flex-1">
                   <div className="mb-1 flex items-center gap-2">
                     <span className="truncate font-mono text-sm">{wh.url}</span>
-                    <Badge variant={wh.active ? "success" : "secondary"}>
-                      {wh.active ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
+                    <Badge variant={wh.enabled ? "success" : "secondary"}>
+                      {wh.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
                     </Badge>
                   </div>
                   <p className="text-muted-foreground font-mono text-xs">{wh.events.join(", ")}</p>

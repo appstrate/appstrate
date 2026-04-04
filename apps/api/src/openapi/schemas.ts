@@ -75,7 +75,7 @@ export const schemas = {
       events: { type: "array", items: { type: "string" } },
       packageId: { type: ["string", "null"] },
       payloadMode: { type: "string", enum: ["full", "summary"] },
-      active: { type: "boolean" },
+      enabled: { type: "boolean" },
       createdAt: { type: "string", format: "date-time" },
     },
   },

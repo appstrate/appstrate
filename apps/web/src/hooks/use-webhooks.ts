@@ -37,10 +37,11 @@ export function useWebhooks() {
 
 export function useWebhook(webhookId: string) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["webhooks", orgId, webhookId],
+    queryKey: ["webhooks", orgId, appId, webhookId],
     queryFn: () => api<WebhookInfo>(`/webhooks/${webhookId}`),
-    enabled: !!orgId && !!webhookId,
+    enabled: !!orgId && !!appId && !!webhookId,
   });
 }
 
@@ -52,7 +53,7 @@ export function useCreateWebhook() {
       events: string[];
       packageId?: string | null;
       payloadMode?: "full" | "summary";
-      active?: boolean;
+      enabled?: boolean;
     }) => {
       return api<WebhookCreateResponse>("/webhooks", {
         method: "POST",
@@ -78,7 +79,7 @@ export function useUpdateWebhook() {
         events?: string[];
         packageId?: string | null;
         payloadMode?: "full" | "summary";
-        active?: boolean;
+        enabled?: boolean;
       };
     }) => {
       return api<WebhookInfo>(`/webhooks/${id}`, {

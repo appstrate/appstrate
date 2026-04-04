@@ -3,7 +3,7 @@
 import { Check, ChevronsUpDown, Star } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useApplications } from "../hooks/use-applications";
-import { useCurrentApplicationId, setCurrentApplicationId } from "../hooks/use-current-application";
+import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-application";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +15,7 @@ export function AppBreadcrumbSwitcher() {
   const { t } = useTranslation();
   const { data: applications } = useApplications();
   const currentAppId = useCurrentApplicationId();
+  const { switchApp } = useAppSwitcher();
   const currentApp = applications?.find((a) => a.id === currentAppId);
 
   return (
@@ -31,7 +32,7 @@ export function AppBreadcrumbSwitcher() {
               key={app.id}
               className="flex items-center justify-between gap-2"
               onSelect={() => {
-                if (!isActive) setCurrentApplicationId(app.id);
+                if (!isActive) switchApp(app.id);
               }}
             >
               <span className="flex items-center gap-1.5 truncate">

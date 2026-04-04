@@ -216,7 +216,6 @@ CREATE TABLE "package_versions" (
 	"integrity" text NOT NULL,
 	"artifact_size" integer NOT NULL,
 	"manifest" jsonb NOT NULL,
-	"org_id" uuid,
 	"yanked" boolean DEFAULT false NOT NULL,
 	"yanked_reason" text,
 	"created_by" text,
@@ -406,7 +405,7 @@ CREATE TABLE "webhooks" (
 	"events" text[] NOT NULL,
 	"package_id" text,
 	"payload_mode" text DEFAULT 'full' NOT NULL,
-	"active" boolean DEFAULT true NOT NULL,
+	"enabled" boolean DEFAULT true NOT NULL,
 	"secret" text NOT NULL,
 	"previous_secret" text,
 	"previous_secret_expires_at" timestamp,
@@ -445,7 +444,7 @@ ALTER TABLE "package_dist_tags" ADD CONSTRAINT "package_dist_tags_package_id_pac
 ALTER TABLE "package_dist_tags" ADD CONSTRAINT "package_dist_tags_version_id_package_versions_id_fk" FOREIGN KEY ("version_id") REFERENCES "public"."package_versions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "package_version_dependencies" ADD CONSTRAINT "package_version_dependencies_version_id_package_versions_id_fk" FOREIGN KEY ("version_id") REFERENCES "public"."package_versions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "package_versions" ADD CONSTRAINT "package_versions_package_id_packages_id_fk" FOREIGN KEY ("package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "package_versions" ADD CONSTRAINT "package_versions_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+--> statement-breakpoint
 ALTER TABLE "package_versions" ADD CONSTRAINT "package_versions_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "packages" ADD CONSTRAINT "packages_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "packages" ADD CONSTRAINT "packages_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -504,7 +503,7 @@ CREATE UNIQUE INDEX "idx_end_users_external_id" ON "end_users" USING btree ("app
 CREATE UNIQUE INDEX "idx_end_users_app_email" ON "end_users" USING btree ("application_id","email") WHERE email IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "idx_end_users_application_id" ON "end_users" USING btree ("application_id");--> statement-breakpoint
 CREATE INDEX "idx_end_users_org_id" ON "end_users" USING btree ("org_id");--> statement-breakpoint
-CREATE INDEX "idx_application_packages_app_id" ON "application_packages" USING btree ("application_id");--> statement-breakpoint
+--> statement-breakpoint
 CREATE INDEX "idx_application_packages_package_id" ON "application_packages" USING btree ("package_id");--> statement-breakpoint
 CREATE INDEX "idx_application_packages_org_profile_id" ON "application_packages" USING btree ("org_profile_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "pkg_ver_deps_unique" ON "package_version_dependencies" USING btree ("version_id","dep_scope","dep_name","dep_type");--> statement-breakpoint
@@ -550,4 +549,4 @@ CREATE INDEX "idx_webhook_deliveries_event_id" ON "webhook_deliveries" USING btr
 CREATE INDEX "idx_webhook_deliveries_status" ON "webhook_deliveries" USING btree ("webhook_id","status");--> statement-breakpoint
 CREATE INDEX "idx_webhooks_org_id" ON "webhooks" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_webhooks_application_id" ON "webhooks" USING btree ("application_id");--> statement-breakpoint
-CREATE INDEX "idx_webhooks_app_active" ON "webhooks" USING btree ("application_id","active");
+CREATE INDEX "idx_webhooks_app_enabled" ON "webhooks" USING btree ("application_id","enabled");

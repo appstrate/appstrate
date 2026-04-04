@@ -17,7 +17,7 @@ export function requireAgent() {
     const name = c.req.param("name");
     const packageId = `${scope}/${name}`;
     const orgId = c.get("orgId");
-    const appId = c.get("appId");
+    const appId = c.get("applicationId");
     const appIsDefault = c.get("appIsDefault");
     const agent = await getPackage(packageId, orgId);
     if (!agent) {

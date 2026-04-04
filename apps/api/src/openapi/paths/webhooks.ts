@@ -46,7 +46,7 @@ export const webhooksPaths = {
                   default: "full",
                   description: "Payload mode: full includes result/input, summary omits them",
                 },
-                active: { type: "boolean", default: true },
+                enabled: { type: "boolean", default: true },
               },
             },
           },
@@ -155,7 +155,7 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "Update a webhook",
       description:
-        "Update webhook URL, events, filters, or active status. Cannot change the secret.",
+        "Update webhook URL, events, filters, or enabled status. Cannot change the secret.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -171,7 +171,7 @@ export const webhooksPaths = {
                 events: { type: "array", items: { type: "string" } },
                 packageId: { type: ["string", "null"] },
                 payloadMode: { type: "string", enum: ["full", "summary"] },
-                active: { type: "boolean" },
+                enabled: { type: "boolean" },
               },
             },
           },

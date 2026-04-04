@@ -15,11 +15,6 @@ export function useCurrentApplicationId(): string | null {
   return useStore(appStore, (s) => s.id);
 }
 
-/** Set the current application ID in the store (no cache invalidation). */
-export function setCurrentApplicationId(id: string | null): void {
-  appStore.getState().setId(id);
-}
-
 /** App-scoped query key prefixes — invalidated on app switch. */
 const APP_SCOPED_KEYS = [
   "packages",

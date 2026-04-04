@@ -128,23 +128,6 @@ export async function getInstalledPackage(applicationId: string, packageId: stri
   return row ?? null;
 }
 
-export async function isPackageInstalled(
-  applicationId: string,
-  packageId: string,
-): Promise<boolean> {
-  const [row] = await db
-    .select({ packageId: applicationPackages.packageId })
-    .from(applicationPackages)
-    .where(
-      and(
-        eq(applicationPackages.applicationId, applicationId),
-        eq(applicationPackages.packageId, packageId),
-      ),
-    )
-    .limit(1);
-  return !!row;
-}
-
 /**
  * Check if an application has access to a package.
  *
@@ -156,7 +139,19 @@ export async function hasPackageAccess(
   packageId: string,
   isDefault: boolean,
 ): Promise<boolean> {
-  return isDefault || isPackageInstalled(applicationId, packageId);
+  if (isDefault) return true;
+
+  const [row] = await db
+    .select({ packageId: applicationPackages.packageId })
+    .from(applicationPackages)
+    .where(
+      and(
+        eq(applicationPackages.applicationId, applicationId),
+        eq(applicationPackages.packageId, packageId),
+      ),
+    )
+    .limit(1);
+  return !!row;
 }
 
 /**
@@ -212,18 +207,21 @@ export async function updateInstalledPackage(
   if (updates.versionId !== undefined) set.versionId = updates.versionId;
   if (updates.enabled !== undefined) set.enabled = updates.enabled;
 
-  const updated = await db
-    .update(applicationPackages)
-    .set(set)
-    .where(
-      and(
-        eq(applicationPackages.applicationId, applicationId),
-        eq(applicationPackages.packageId, packageId),
-      ),
-    )
-    .returning({ packageId: applicationPackages.packageId });
-
-  if (updated.length === 0) {
-    throw notFound(`Package '${packageId}' is not installed in this application`);
-  }
+  await db
+    .insert(applicationPackages)
+    .values({
+      applicationId,
+      packageId,
+      config: updates.config ?? {},
+      ...(updates.modelId !== undefined ? { modelId: updates.modelId } : {}),
+      ...(updates.proxyId !== undefined ? { proxyId: updates.proxyId } : {}),
+      ...(updates.orgProfileId !== undefined ? { orgProfileId: updates.orgProfileId } : {}),
+      ...(updates.versionId !== undefined ? { versionId: updates.versionId } : {}),
+      ...(updates.enabled !== undefined ? { enabled: updates.enabled } : {}),
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [applicationPackages.applicationId, applicationPackages.packageId],
+      set,
+    });
 }

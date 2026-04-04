@@ -31,6 +31,19 @@ export function useRun(runId: string | undefined) {
   });
 }
 
+export function useAllRuns(page: number, limit = 20) {
+  const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
+  const offset = page * limit;
+  return useQuery({
+    queryKey: ["all-runs", orgId, appId, page, limit],
+    queryFn: async () => {
+      return api<{ runs: Run[]; total: number }>(`/runs?limit=${limit}&offset=${offset}`);
+    },
+    enabled: !!orgId && !!appId,
+  });
+}
+
 export function useRunLogs(runId: string | undefined) {
   const orgId = useCurrentOrgId();
   const appId = useCurrentApplicationId();

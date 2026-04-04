@@ -13,7 +13,10 @@ import {
   setUserAgentProviderOverride,
 } from "../../../src/services/connection-profiles.ts";
 import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
-import { setAgentOverride } from "../../../src/services/state/package-config.ts";
+import {
+  updateInstalledPackage,
+  installPackage,
+} from "../../../src/services/application-packages.ts";
 import { resolveManifestProviders } from "../../../src/lib/manifest-utils.ts";
 import { getPackageConfig } from "../../../src/services/state/index.ts";
 import { validateAgentReadiness } from "../../../src/services/agent-readiness.ts";
@@ -308,8 +311,9 @@ describe("Run with provider profiles", () => {
 
       await bindOrgProfileProvider(orgProfile.id, "@system/gmail", boundProfile.id, userId);
 
-      // Set org profile on the agent (simulates PUT /api/agents/:id/org-profile)
-      await setAgentOverride(appId, agentId, "orgProfileId", orgProfile.id);
+      // Install the agent in the application, then set org profile
+      await installPackage(appId, orgId, agentId);
+      await updateInstalledPackage(appId, agentId, { orgProfileId: orgProfile.id });
 
       const { providerProfiles } = await runPreflight({
         agent,
@@ -333,7 +337,8 @@ describe("Run with provider profiles", () => {
 
       // Create org profile with no bindings
       const orgProfile = await seedConnectionProfile({ orgId, name: "Empty Org" });
-      await setAgentOverride(appId, agentId, "orgProfileId", orgProfile.id);
+      await installPackage(appId, orgId, agentId);
+      await updateInstalledPackage(appId, agentId, { orgProfileId: orgProfile.id });
 
       const { providerProfiles } = await runPreflight({
         agent,

@@ -1625,21 +1625,6 @@
         }
       },
       "indexes": {
-        "idx_application_packages_app_id": {
-          "name": "idx_application_packages_app_id",
-          "columns": [
-            {
-              "expression": "application_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_application_packages_package_id": {
           "name": "idx_application_packages_package_id",
           "columns": [
@@ -1931,12 +1916,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "org_id": {
-          "name": "org_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "yanked": {
           "name": "yanked",
           "type": "boolean",
@@ -2008,15 +1987,6 @@
           "tableFrom": "package_versions",
           "tableTo": "packages",
           "columnsFrom": ["package_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "package_versions_org_id_organizations_id_fk": {
-          "name": "package_versions_org_id_organizations_id_fk",
-          "tableFrom": "package_versions",
-          "tableTo": "organizations",
-          "columnsFrom": ["org_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -4061,13 +4031,6 @@
           "notNull": true,
           "default": "'full'"
         },
-        "active": {
-          "name": "active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
         "secret": {
           "name": "secret",
           "type": "text",
@@ -4099,6 +4062,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
         }
       },
       "indexes": {
@@ -4132,8 +4102,8 @@
           "method": "btree",
           "with": {}
         },
-        "idx_webhooks_app_active": {
-          "name": "idx_webhooks_app_active",
+        "idx_webhooks_app_enabled": {
+          "name": "idx_webhooks_app_enabled",
           "columns": [
             {
               "expression": "application_id",
@@ -4142,7 +4112,7 @@
               "nulls": "last"
             },
             {
-              "expression": "active",
+              "expression": "enabled",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

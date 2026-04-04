@@ -130,7 +130,7 @@ export function getTestApp(): Hono<AppEnv> {
       c.set("permissions", resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole));
       c.set("authMethod", "api_key");
       c.set("apiKeyId", keyInfo.keyId);
-      c.set("applicationId", keyInfo.applicationId);
+      c.set("apiKeyApplicationId", keyInfo.applicationId);
 
       // Appstrate-User header
       const targetEndUserId = c.req.header("Appstrate-User");

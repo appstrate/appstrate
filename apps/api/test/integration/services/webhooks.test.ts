@@ -11,7 +11,6 @@ import {
   rotateSecret,
   listDeliveries,
   buildEventEnvelope,
-  validateEvents,
 } from "../../../src/services/webhooks.ts";
 import { webhookDeliveries } from "@appstrate/db/schema";
 
@@ -47,7 +46,7 @@ describe("webhooks service", () => {
       expect(wh.id).toStartWith("wh_");
       expect(wh.url).toBe("https://example.com/hook");
       expect(wh.events).toContain("run.completed");
-      expect(wh.active).toBe(true);
+      expect(wh.enabled).toBe(true);
       expect(wh.object).toBe("webhook");
       expect(wh.applicationId).toBe(defaultAppId);
     });
@@ -68,10 +67,10 @@ describe("webhooks service", () => {
       expect(wh.secret).toStartWith("whsec_");
     });
 
-    it("respects active=false override", async () => {
-      const wh = await createWebhook(orgId, defaultAppId, appWebhookParams({ active: false }));
+    it("respects enabled=false override", async () => {
+      const wh = await createWebhook(orgId, defaultAppId, appWebhookParams({ enabled: false }));
 
-      expect(wh.active).toBe(false);
+      expect(wh.enabled).toBe(false);
     });
 
     it("supports packageId filter", async () => {
@@ -92,12 +91,6 @@ describe("webhooks service", () => {
       );
 
       expect(wh.payloadMode).toBe("summary");
-    });
-
-    it("throws for invalid event types", async () => {
-      await expect(
-        createWebhook(orgId, defaultAppId, appWebhookParams({ events: ["invalid.event"] })),
-      ).rejects.toThrow(/Invalid event type/);
     });
 
     it("throws for non-HTTPS URLs (when not localhost)", async () => {
@@ -329,27 +322,6 @@ describe("webhooks service", () => {
       expect(data.object.result).toBeUndefined();
       expect(data.object.input).toBeUndefined();
       expect(data.object.status).toBe("success");
-    });
-  });
-
-  // ── validateEvents ────────────────────────────────────────
-
-  describe("validateEvents", () => {
-    it("accepts valid event types", () => {
-      const result = validateEvents(["run.completed", "run.failed"]);
-      expect(result).toEqual(["run.completed", "run.failed"]);
-    });
-
-    it("throws for empty array", () => {
-      expect(() => validateEvents([])).toThrow(/non-empty/i);
-    });
-
-    it("throws for invalid event types", () => {
-      expect(() => validateEvents(["bogus.event"])).toThrow(/Invalid event type/i);
-    });
-
-    it("throws for non-array input", () => {
-      expect(() => validateEvents("not-an-array")).toThrow(/non-empty/i);
     });
   });
 });

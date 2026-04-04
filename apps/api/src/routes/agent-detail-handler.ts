@@ -31,7 +31,7 @@ import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 
 export async function agentDetailHandler(c: Context<AppEnv>) {
   const orgId = c.get("orgId");
-  const appId = c.get("appId");
+  const appId = c.get("applicationId");
   const actor = getActor(c);
   const itemId = getItemId(c);
 

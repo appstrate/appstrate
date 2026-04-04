@@ -42,7 +42,6 @@ describe("package-versions service", () => {
         integrity: "sha256-abc123",
         artifactSize: 2048,
         manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
-        orgId,
         createdBy: userId,
       });
 
@@ -60,7 +59,6 @@ describe("package-versions service", () => {
         integrity: "sha256-abc",
         artifactSize: 1024,
         manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
-        orgId,
         createdBy: userId,
       });
 
@@ -77,7 +75,6 @@ describe("package-versions service", () => {
         integrity: "sha256-abc",
         artifactSize: 1024,
         manifest: { name: pkg.id, version: "not-semver", type: "agent" },
-        orgId,
         createdBy: userId,
       });
 
@@ -92,7 +89,6 @@ describe("package-versions service", () => {
         integrity: "sha256-abc",
         artifactSize: 1024,
         manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
-        orgId,
         createdBy: userId,
       };
 
@@ -111,7 +107,6 @@ describe("package-versions service", () => {
         integrity: "sha256-abc",
         artifactSize: 1024,
         manifest: { name: pkg.id, type: "agent" } as Record<string, unknown>,
-        orgId,
         createdBy: userId,
       };
 
@@ -141,7 +136,6 @@ describe("package-versions service", () => {
         integrity: "sha256-abc",
         artifactSize: 1024,
         manifest: { name: pkg.id, type: "agent" } as Record<string, unknown>,
-        orgId,
         createdBy: userId,
       };
 
@@ -185,7 +179,6 @@ describe("package-versions service", () => {
         integrity: "sha256-abc",
         artifactSize: 1024,
         manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
-        orgId,
         createdBy: userId,
       });
 
@@ -221,7 +214,6 @@ describe("package-versions service", () => {
         integrity: "sha256-abc",
         artifactSize: 1024,
         manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
-        orgId,
         createdBy: userId,
       });
 
@@ -243,7 +235,6 @@ describe("package-versions service", () => {
         integrity: "sha256-abc",
         artifactSize: 1024,
         manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
-        orgId,
         createdBy: userId,
       });
 
@@ -287,7 +278,6 @@ describe("package-versions service", () => {
         integrity: "sha256-abc",
         artifactSize: 1024,
         manifest: { name: pkg.id, version: "1.0.0", type: "agent" },
-        orgId,
         createdBy: userId,
       });
 
@@ -325,7 +315,6 @@ describe("package-versions service", () => {
         integrity: "sha256-abc",
         artifactSize: 1024,
         manifest: { name: pkg.id, type: "agent" } as Record<string, unknown>,
-        orgId,
         createdBy: userId,
       };
 

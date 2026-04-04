@@ -132,7 +132,7 @@ app.use("*", async (c, next) => {
     c.set("permissions", resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole));
     c.set("authMethod", "api_key");
     c.set("apiKeyId", keyInfo.keyId);
-    c.set("applicationId", keyInfo.applicationId);
+    c.set("apiKeyApplicationId", keyInfo.applicationId);
 
     // Appstrate-User header: resolve end-user context (API key only)
     const targetEndUserId = c.req.header("Appstrate-User");

@@ -44,7 +44,7 @@ export function createSchedulesRouter() {
   // GET /api/schedules — list all schedules (app-scoped)
   router.get("/schedules", async (c) => {
     const orgId = c.get("orgId");
-    const schedules = await listSchedules(orgId, c.get("appId"));
+    const schedules = await listSchedules(orgId, c.get("applicationId"));
     return c.json(schedules);
   });
 
@@ -52,7 +52,7 @@ export function createSchedulesRouter() {
   router.get("/agents/:scope{@[^/]+}/:name/schedules", requireAgent(), async (c) => {
     const agent = c.get("agent");
     const orgId = c.get("orgId");
-    const schedules = await listPackageSchedules(agent.id, orgId, c.get("appId"));
+    const schedules = await listPackageSchedules(agent.id, orgId, c.get("applicationId"));
     return c.json(schedules);
   });
 
@@ -99,7 +99,7 @@ export function createSchedulesRouter() {
         agent.id,
         data.connectionProfileId,
         c.get("orgId"),
-        c.get("appId"),
+        c.get("applicationId"),
         data,
       );
       return c.json(schedule, 201);
@@ -111,7 +111,11 @@ export function createSchedulesRouter() {
     const id = c.req.param("id");
     const orgId = c.get("orgId");
     const schedule = await getSchedule(id);
-    if (!schedule || schedule.orgId !== orgId || schedule.applicationId !== c.get("appId")) {
+    if (
+      !schedule ||
+      schedule.orgId !== orgId ||
+      schedule.applicationId !== c.get("applicationId")
+    ) {
       throw notFound(`Schedule '${id}' not found`);
     }
     return c.json(schedule);
@@ -122,7 +126,11 @@ export function createSchedulesRouter() {
     const id = c.req.param("id")!;
     const orgId = c.get("orgId");
     const existing = await getSchedule(id);
-    if (!existing || existing.orgId !== orgId || existing.applicationId !== c.get("appId")) {
+    if (
+      !existing ||
+      existing.orgId !== orgId ||
+      existing.applicationId !== c.get("applicationId")
+    ) {
       throw notFound(`Schedule '${id}' not found`);
     }
 
@@ -152,7 +160,11 @@ export function createSchedulesRouter() {
     const id = c.req.param("id")!;
     const orgId = c.get("orgId");
     const existing = await getSchedule(id);
-    if (!existing || existing.orgId !== orgId || existing.applicationId !== c.get("appId")) {
+    if (
+      !existing ||
+      existing.orgId !== orgId ||
+      existing.applicationId !== c.get("applicationId")
+    ) {
       throw notFound(`Schedule '${id}' not found`);
     }
     await deleteSchedule(id);

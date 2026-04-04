@@ -45,7 +45,6 @@ export const applicationPackages = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.applicationId, table.packageId] }),
-    index("idx_application_packages_app_id").on(table.applicationId),
     index("idx_application_packages_package_id").on(table.packageId),
     index("idx_application_packages_org_profile_id").on(table.orgProfileId),
   ],
@@ -85,7 +84,6 @@ export const packageVersions = pgTable(
     integrity: text("integrity").notNull(),
     artifactSize: integer("artifact_size").notNull(),
     manifest: jsonb("manifest").notNull(),
-    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
     yanked: boolean("yanked").notNull().default(false),
     yankedReason: text("yanked_reason"),
     createdBy: text("created_by").references(() => user.id),

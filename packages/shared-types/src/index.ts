@@ -463,7 +463,7 @@ export interface WebhookInfo {
   events: string[];
   packageId: string | null;
   payloadMode: "full" | "summary";
-  active: boolean;
+  enabled: boolean;
   createdAt: string;
   updatedAt: string;
 }

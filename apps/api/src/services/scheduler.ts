@@ -7,18 +7,15 @@ import { db } from "@appstrate/db/client";
 import {
   packageSchedules,
   connectionProfiles as connectionProfilesTable,
-  userProviderConnections,
 } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/index.ts";
 import { dispatchRunWebhook } from "./webhooks.ts";
-import { prepareAndExecuteRun } from "./run-pipeline.ts";
+import { prepareAndExecuteRun, resolveRunPreflight } from "./run-pipeline.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
 import { getPackage, packageExists } from "./agent-service.ts";
-import { getPackageConfig } from "./state/index.ts";
-import { validateAgentReadiness } from "./agent-readiness.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import {
   getProfileByIdUnsafe,
@@ -26,6 +23,7 @@ import {
   resolveScheduleProfileArgs,
   getAgentOrgProfile,
 } from "./connection-profiles.ts";
+import { resolveProviderStatuses } from "./connection-manager/index.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
@@ -237,37 +235,24 @@ async function triggerScheduledRun(
       agentOrgProfile?.id ?? null,
     );
 
-    // Resolve provider profiles, config, and validate readiness (inlined preflight).
-    // Schedules don't support per-provider overrides.
+    // Shared preflight: resolve providers, config, validate readiness
     let providerProfiles: ProviderProfileMap;
     let config: Record<string, unknown>;
     let preflightModelId: string | null;
     let preflightProxyId: string | null;
     try {
-      const manifestProviders = resolveManifestProviders(agent.manifest);
-
-      const [resolvedProfiles, packageConfig] = await Promise.all([
-        resolveProviderProfiles(
-          manifestProviders,
-          defaultUserProfileId,
-          undefined,
-          orgProfileId,
-          orgId,
-        ),
-        getPackageConfig(applicationId, packageId),
-      ]);
-
-      await validateAgentReadiness({
+      const preflight = await resolveRunPreflight({
         agent,
-        providerProfiles: resolvedProfiles,
+        applicationId,
         orgId,
-        config: packageConfig.config,
+        defaultUserProfileId,
+        orgProfileId,
       });
 
-      providerProfiles = resolvedProfiles;
-      config = packageConfig.config;
-      preflightModelId = packageConfig.modelId;
-      preflightProxyId = packageConfig.proxyId;
+      providerProfiles = preflight.providerProfiles;
+      config = preflight.config;
+      preflightModelId = preflight.modelId;
+      preflightProxyId = preflight.proxyId;
     } catch (err) {
       if (err instanceof ApiError) {
         logger.warn("Agent readiness check failed, skipping schedule", {
@@ -437,40 +422,11 @@ async function computeScheduleReadiness(
     orgId,
   );
 
-  // Batch-fetch all connections for resolved profile IDs in one query
-  const resolvedProfileIds = [
-    ...new Set(
-      providers.map((p) => providerProfiles[p.id]?.profileId).filter((id): id is string => !!id),
-    ),
-  ];
+  // Reuse the shared provider status resolution (batch-fetches connections)
+  const statuses = await resolveProviderStatuses(providers, providerProfiles, orgId);
 
-  const connectionMap = new Map<string, boolean>();
-  if (resolvedProfileIds.length > 0) {
-    const connRows = await db
-      .select({
-        profileId: userProviderConnections.profileId,
-        providerId: userProviderConnections.providerId,
-      })
-      .from(userProviderConnections)
-      .where(
-        and(
-          inArray(userProviderConnections.profileId, resolvedProfileIds),
-          eq(userProviderConnections.orgId, orgId),
-        ),
-      );
-    for (const row of connRows) {
-      connectionMap.set(`${row.profileId}:${row.providerId}`, true);
-    }
-  }
-
-  const results = providers.map((p) => {
-    const sourceProfileId = providerProfiles[p.id]?.profileId;
-    if (!sourceProfileId) return { id: p.id, connected: false };
-    return { id: p.id, connected: connectionMap.has(`${sourceProfileId}:${p.id}`) };
-  });
-
-  const missing = results.filter((r) => !r.connected).map((r) => r.id);
-  const connected = results.filter((r) => r.connected).length;
+  const missing = statuses.filter((s) => s.status !== "connected").map((s) => s.id);
+  const connected = statuses.filter((s) => s.status === "connected").length;
 
   return {
     status: missing.length === 0 ? "ready" : connected > 0 ? "degraded" : "not_ready",

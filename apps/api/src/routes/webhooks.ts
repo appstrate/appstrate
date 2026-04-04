@@ -21,32 +21,25 @@ import {
   rotateSecret,
   listDeliveries,
   buildEventEnvelope,
+  webhookEventSchema,
 } from "../services/webhooks.ts";
 import { parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 
-const webhookEventsEnum = z.enum([
-  "run.started",
-  "run.completed",
-  "run.failed",
-  "run.timeout",
-  "run.cancelled",
-]);
-
 const createWebhookSchema = z.object({
   url: z.url("url must be a valid URL"),
-  events: z.array(webhookEventsEnum).min(1, "events is required"),
+  events: z.array(webhookEventSchema).min(1, "events is required"),
   packageId: z.string().nullable().optional(),
   payloadMode: z.enum(["full", "summary"]).optional(),
-  active: z.boolean().optional(),
+  enabled: z.boolean().optional(),
 });
 
 const updateWebhookSchema = z.object({
   url: z.url().optional(),
-  events: z.array(webhookEventsEnum).min(1).optional(),
+  events: z.array(webhookEventSchema).min(1).optional(),
   packageId: z.string().nullable().optional(),
   payloadMode: z.enum(["full", "summary"]).optional(),
-  active: z.boolean().optional(),
+  enabled: z.boolean().optional(),
 });
 
 export function createWebhooksRouter() {
@@ -60,7 +53,7 @@ export function createWebhooksRouter() {
     requirePermission("webhooks", "write"),
     async (c) => {
       const orgId = c.get("orgId");
-      const appId = c.get("appId");
+      const appId = c.get("applicationId");
       const body = await c.req.json();
       const data = parseBody(createWebhookSchema, body);
 
@@ -69,7 +62,7 @@ export function createWebhooksRouter() {
         events: data.events,
         packageId: data.packageId,
         payloadMode: data.payloadMode,
-        active: data.active,
+        enabled: data.enabled,
       });
       return c.json(result, 201);
     },
@@ -78,7 +71,7 @@ export function createWebhooksRouter() {
   // GET /api/webhooks — list webhooks for the current application
   router.get("/", rateLimit(300), requirePermission("webhooks", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const appId = c.get("appId");
+    const appId = c.get("applicationId");
     const result = await listWebhooks(orgId, appId);
     return c.json({ object: "list", data: result });
   });

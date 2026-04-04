@@ -5,7 +5,7 @@ import { streamSSE } from "hono/streaming";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { auth } from "@appstrate/db/auth";
-import { organizationMembers } from "@appstrate/db/schema";
+import { organizationMembers, applications } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
 import type { RealtimeEvent } from "../services/realtime.ts";
 import { unauthorized } from "../lib/errors.ts";
@@ -79,6 +79,17 @@ async function validateSSEAuth(c: {
   if (!rows[0]) return null;
 
   const applicationId = c.req.query("appId");
+
+  // Validate application belongs to org (if provided)
+  if (applicationId) {
+    const [app] = await db
+      .select({ id: applications.id })
+      .from(applications)
+      .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
+      .limit(1);
+    if (!app) return null;
+  }
+
   return { userId: session.user.id, orgId, role: rows[0].role, applicationId };
 }
 

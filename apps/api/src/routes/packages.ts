@@ -259,7 +259,6 @@ async function createVersionSafe(params: {
     await createVersionAndUpload({
       packageId: params.packageId,
       version,
-      orgId: params.orgId,
       createdBy: params.userId,
       zipBuffer,
       manifest: params.manifest,
@@ -465,7 +464,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       });
 
       // Auto-install in the current application (non-fatal)
-      const appId = c.get("appId");
+      const appId = c.get("applicationId");
       if (appId) {
         await installPackage(appId, orgId, packageId).catch((e: unknown) =>
           logger.debug("auto-install skipped", { packageId, appId, err: String(e) }),
@@ -562,7 +561,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     });
 
     // Auto-install in the current application (non-fatal)
-    const appId = c.get("appId");
+    const appId = c.get("applicationId");
     if (appId) {
       await installPackage(appId, orgId, item.id).catch((e: unknown) =>
         logger.debug("auto-install skipped", { packageId: item.id, appId, err: String(e) }),
@@ -1311,7 +1310,7 @@ export function createPackagesRouter() {
     }
 
     // Auto-install in the current application (non-fatal, skip if already installed)
-    const appId = c.get("appId");
+    const appId = c.get("applicationId");
     if (appId) {
       await installPackage(appId, orgId, packageId).catch((e: unknown) =>
         logger.debug("auto-install skipped", { packageId, appId, err: String(e) }),

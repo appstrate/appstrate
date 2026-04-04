@@ -9,7 +9,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useApplications } from "../hooks/use-applications";
-import { setCurrentApplicationId } from "../hooks/use-current-application";
+import { useAppSwitcher } from "../hooks/use-current-application";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ApplicationCreateModal } from "../components/application-create-modal";
@@ -20,11 +20,12 @@ export function ApplicationsPage() {
   const { data: applications, isLoading, error } = useApplications();
   const [createOpen, setCreateOpen] = useState(false);
   const navigate = useNavigate();
+  const { switchApp } = useAppSwitcher();
 
   if (!isAdmin) return null;
 
   const handleAppClick = (appId: string) => {
-    setCurrentApplicationId(appId);
+    switchApp(appId);
     navigate("/app-settings");
   };
 

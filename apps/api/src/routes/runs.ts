@@ -15,15 +15,8 @@ import {
   listScheduleRuns,
   listRunLogs,
   addPackageMemories,
-  getPackageConfig,
 } from "../services/state/index.ts";
-import {
-  resolveActorProfileContext,
-  getAgentOrgProfile,
-  resolveProviderProfiles,
-} from "../services/connection-profiles.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { validateAgentReadiness } from "../services/agent-readiness.ts";
+import { resolveActorProfileContext, getAgentOrgProfile } from "../services/connection-profiles.ts";
 import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
@@ -40,7 +33,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
 import { dispatchRunWebhook } from "../services/webhooks.ts";
-import { prepareAndExecuteRun } from "../services/run-pipeline.ts";
+import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
 
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
@@ -381,44 +374,34 @@ export function createRunsRouter() {
         };
       }
 
-      // Resolve org profile and actor profile context in parallel
-      const [agentOrgProfile, { defaultUserProfileId, userProviderOverrides }] = await Promise.all([
-        getAgentOrgProfile(c.get("appId"), orgId, packageId),
-        resolveActorProfileContext(actor, packageId),
-      ]);
-      const agentOrgProfileId = agentOrgProfile?.id ?? null;
+      // Resolve org profile, actor profile context, and input in parallel
+      const [agentOrgProfile, { defaultUserProfileId, userProviderOverrides }, inputResult] =
+        await Promise.all([
+          getAgentOrgProfile(c.get("applicationId"), orgId, packageId),
+          resolveActorProfileContext(actor, packageId),
+          parseRequestInput(
+            c,
+            effectiveAgent.manifest.input?.schema
+              ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
+              : undefined,
+            effectiveAgent.manifest.input?.fileConstraints,
+          ),
+        ]);
 
-      // Resolve provider profiles, config, and validate agent readiness (inlined preflight)
-      const manifestProviders = resolveManifestProviders(effectiveAgent.manifest);
-
-      const [providerProfiles, packageConfig, inputResult] = await Promise.all([
-        resolveProviderProfiles(
-          manifestProviders,
-          defaultUserProfileId,
-          userProviderOverrides,
-          agentOrgProfileId,
-          orgId,
-        ),
-        getPackageConfig(c.get("appId"), packageId),
-        parseRequestInput(
-          c,
-          effectiveAgent.manifest.input?.schema
-            ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
-            : undefined,
-          effectiveAgent.manifest.input?.fileConstraints,
-        ),
-      ]);
-
-      await validateAgentReadiness({
-        agent: effectiveAgent,
+      // Shared preflight: resolve providers, config, validate readiness
+      const {
         providerProfiles,
+        config,
+        modelId: preflightModelId,
+        proxyId: preflightProxyId,
+      } = await resolveRunPreflight({
+        agent: effectiveAgent,
+        applicationId: c.get("applicationId"),
         orgId,
-        config: packageConfig.config,
+        defaultUserProfileId,
+        userProviderOverrides,
+        orgProfileId: agentOrgProfile?.id ?? null,
       });
-
-      const config = packageConfig.config;
-      const preflightModelId = packageConfig.modelId;
-      const preflightProxyId = packageConfig.proxyId;
 
       const {
         input: parsedInput,
@@ -450,7 +433,7 @@ export function createRunsRouter() {
         proxyId: proxyIdOverride ?? preflightProxyId,
         overrideVersionId,
         connectionProfileId: defaultUserProfileId ?? undefined,
-        applicationId: c.get("appId"),
+        applicationId: c.get("applicationId"),
         uploadedFiles,
       });
 
@@ -500,7 +483,7 @@ export function createRunsRouter() {
     const result = await listPackageRuns(agent.id, orgId, {
       limit,
       offset,
-      applicationId: c.get("appId"),
+      applicationId: c.get("applicationId"),
       endUserId: endUser?.id,
     });
     return c.json(result);
@@ -526,7 +509,7 @@ export function createRunsRouter() {
     const result = await listScheduleRuns(scheduleId, orgId, {
       limit,
       offset,
-      applicationId: c.get("appId"),
+      applicationId: c.get("applicationId"),
     });
     return c.json(result);
   });
@@ -540,7 +523,7 @@ export function createRunsRouter() {
       throw notFound("Run not found");
     }
     // Application scoping
-    if (row.applicationId !== c.get("appId")) {
+    if (row.applicationId !== c.get("applicationId")) {
       throw notFound("Run not found");
     }
     // End-user scoping: end-users can only see their own runs
@@ -560,7 +543,7 @@ export function createRunsRouter() {
       throw notFound("Run not found");
     }
     // Application scoping
-    if (exec.applicationId !== c.get("appId")) {
+    if (exec.applicationId !== c.get("applicationId")) {
       throw notFound("Run not found");
     }
     // End-user scoping: end-users can only see their own run logs
@@ -584,7 +567,7 @@ export function createRunsRouter() {
     }
 
     // Application scoping
-    if (run.applicationId !== c.get("appId")) {
+    if (run.applicationId !== c.get("applicationId")) {
       throw notFound("Run not found");
     }
 
@@ -622,7 +605,7 @@ export function createRunsRouter() {
       .stopByRunId(runId)
       .catch(() => {});
 
-    dispatchRunWebhook(orgId, c.get("appId"), "cancelled", runId, run.packageId);
+    dispatchRunWebhook(orgId, c.get("applicationId"), "cancelled", runId, run.packageId);
 
     return c.json({ ok: true });
   });

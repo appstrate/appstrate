@@ -15,12 +15,12 @@ import { invalidRequest, notFound } from "../lib/errors.ts";
  * 2. applicationId from API key (already set by auth middleware)
  *
  * Validates that the application belongs to the current org.
- * Sets c.set("appId") and c.set("appIsDefault") on success.
+ * Sets c.set("applicationId") and c.set("appIsDefault") on success.
  */
 export function requireAppContext() {
   return async (c: Context<AppEnv>, next: Next) => {
-    // For API key auth, applicationId is already resolved
-    const appId = c.req.header("X-App-Id") ?? c.get("applicationId");
+    // For API key auth, apiKeyApplicationId is already resolved
+    const appId = c.req.header("X-App-Id") ?? c.get("apiKeyApplicationId");
 
     if (!appId) {
       throw invalidRequest(
@@ -41,7 +41,7 @@ export function requireAppContext() {
       throw notFound(`Application '${appId}' not found in this organization`);
     }
 
-    c.set("appId", appId);
+    c.set("applicationId", appId);
     c.set("appIsDefault", app.isDefault);
     return next();
   };

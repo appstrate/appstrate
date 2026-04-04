@@ -13,7 +13,10 @@ import {
   userAgentProviderProfiles,
 } from "@appstrate/db/schema";
 import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
-import { setAgentOverride } from "../../../src/services/state/package-config.ts";
+import {
+  updateInstalledPackage,
+  installPackage,
+} from "../../../src/services/application-packages.ts";
 import { setUserAgentProviderOverride } from "../../../src/services/connection-profiles.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 
@@ -87,9 +90,10 @@ describe("Cascade Deletion", () => {
       const orgProfile = await seedConnectionProfile({ orgId, name: "Org Profile" });
 
       const agent = await seedAgent({ id: "@testorg/org-agent", orgId, createdBy: userId });
+      await installPackage(appId, orgId, agent.id);
 
       // Set org profile on the agent config
-      await setAgentOverride(appId, agent.id, "orgProfileId", orgProfile.id);
+      await updateInstalledPackage(appId, agent.id, { orgProfileId: orgProfile.id });
 
       // Verify orgProfileId is set
       const configBefore = await getDbRow(
@@ -163,9 +167,11 @@ describe("Cascade Deletion", () => {
 
       const agent1 = await seedAgent({ id: "@testorg/agent-a", orgId, createdBy: userId });
       const agent2 = await seedAgent({ id: "@testorg/agent-b", orgId, createdBy: userId });
+      await installPackage(appId, orgId, agent1.id);
+      await installPackage(appId, orgId, agent2.id);
 
-      await setAgentOverride(appId, agent1.id, "orgProfileId", orgProfile.id);
-      await setAgentOverride(appId, agent2.id, "orgProfileId", orgProfile.id);
+      await updateInstalledPackage(appId, agent1.id, { orgProfileId: orgProfile.id });
+      await updateInstalledPackage(appId, agent2.id, { orgProfileId: orgProfile.id });
 
       // Delete the org profile
       await db.delete(connectionProfiles).where(eq(connectionProfiles.id, orgProfile.id));
