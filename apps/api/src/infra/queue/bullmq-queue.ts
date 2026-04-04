@@ -19,16 +19,14 @@ import type {
 import { PermanentJobError } from "./interface.ts";
 
 export class BullMQQueue<T> implements JobQueue<T> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private queue: Queue<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private worker: Worker<any> | null = null;
+  private queue: Queue<Record<string, unknown>, unknown, string>;
+  private worker: Worker<Record<string, unknown>, unknown, string> | null = null;
 
   constructor(
     private readonly name: string,
     defaultJobOptions?: JobAddOptions,
   ) {
-    this.queue = new Queue(name, {
+    this.queue = new Queue<Record<string, unknown>, unknown, string>(name, {
       connection: getRedisConnection() as unknown as ConnectionOptions,
       ...(defaultJobOptions
         ? {
@@ -44,7 +42,7 @@ export class BullMQQueue<T> implements JobQueue<T> {
   }
 
   async add(name: string, data: T, opts?: JobAddOptions): Promise<string> {
-    const job = await this.queue.add(name, data, {
+    const job = await this.queue.add(name, data as Record<string, unknown>, {
       attempts: opts?.attempts,
       backoff: opts?.backoff,
       removeOnComplete: opts?.removeOnComplete,
@@ -61,7 +59,7 @@ export class BullMQQueue<T> implements JobQueue<T> {
     await this.queue.upsertJobScheduler(
       schedulerId,
       { pattern: pattern.pattern, tz: pattern.tz ?? "UTC" },
-      { name: jobTemplate.name, data: jobTemplate.data },
+      { name: jobTemplate.name, data: jobTemplate.data as Record<string, unknown> },
     );
   }
 
@@ -72,13 +70,13 @@ export class BullMQQueue<T> implements JobQueue<T> {
   process(handler: JobHandler<T>, opts?: WorkerOptions): void {
     if (this.worker) return;
 
-    this.worker = new Worker<T>(
+    this.worker = new Worker<Record<string, unknown>, unknown, string>(
       this.name,
       async (bullJob) => {
         const job: QueueJob<T> = {
           id: bullJob.id ?? bullJob.name,
           name: bullJob.name,
-          data: bullJob.data,
+          data: bullJob.data as T,
           attemptsMade: bullJob.attemptsMade,
         };
         try {
