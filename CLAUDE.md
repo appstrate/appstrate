@@ -163,10 +163,23 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 
 ## Key Conventions & Gotchas
 
+### Progressive Infrastructure
+
+Appstrate uses a tiered infrastructure model — every external dependency is optional with a built-in fallback:
+
+| Component                     | When absent                     | Fallback                       | Tier required |
+| ----------------------------- | ------------------------------- | ------------------------------ | ------------- |
+| PostgreSQL (`DATABASE_URL`)   | PGlite (embedded WASM Postgres) | `./data/pglite/`               | 1+            |
+| Redis (`REDIS_URL`)           | In-memory adapters              | EventEmitter, Map, local queue | 2+            |
+| S3/MinIO (`S3_BUCKET`)        | Filesystem storage              | `./data/storage/`              | 3             |
+| Docker (`RUN_ADAPTER=docker`) | Bun subprocesses                | No container isolation         | 3             |
+
+Tier 0 (zero-install) requires only Bun. Infrastructure adapters are in `apps/api/src/infra/` with dynamic imports to avoid loading Redis/BullMQ when not configured.
+
 ### Development Workflow
 
 - **New API route**: Create route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi` to validate.
-- **DB migration**: Edit `packages/db/src/schema.ts` → `bun run db:generate` → `bun run db:migrate`.
+- **DB migration**: Edit `packages/db/src/schema.ts` → `bun run db:generate` → `bun run db:migrate` (requires `DATABASE_URL` for drizzle-kit CLI). PGlite applies migrations automatically at boot.
 - **Quality gate**: `bun run check` (turbo check = TypeScript across all packages + `verify-openapi` structural/lint validation).
 - **Tests**: `bun test` from monorepo root runs all 1000+ tests across all packages in a single process. See **Testing** section below for structure, conventions, and patterns.
 
@@ -400,7 +413,7 @@ Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Mig
 | Variable                    | Required | Default                                       | Notes                                                                                                      |
 | --------------------------- | -------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `REDIS_URL`                 | No       | —                                             | Redis connection string. When absent, falls back to in-memory adapters (single-instance only)              |
-| `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                                                               |
+| `DATABASE_URL`              | No       | —                                             | PostgreSQL connection. When absent, falls back to PGlite (embedded PostgreSQL)                             |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                                                                     |
 | `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes, base64-encoded. Encrypts stored credentials                                                      |
 | `PLATFORM_API_URL`          | No       | —                                             | How sidecar reaches the host platform. Fallback computed at runtime (`http://host.docker.internal:{PORT}`) |

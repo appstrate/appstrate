@@ -1,20 +1,24 @@
-# Appstrate — Development Services
+# Appstrate — Development Infrastructure (Tier 1-3)
 #
-# Starts infrastructure for local development with profile support:
+# Tier 0 (zero-install) needs NO Docker — just run `bun run dev` directly.
 #
-#   bun run dev:minimal    → PostgreSQL only (filesystem storage, in-memory queue, process execution)
-#   bun run dev:standard   → PostgreSQL + Redis (persistent scheduling, multi-instance support)
-#   bun run dev            → PostgreSQL + Redis + MinIO (full stack, Docker execution)
+# Profiles map to infrastructure tiers:
+#   minimal  = Tier 1: PostgreSQL only
+#   standard = Tier 2: PostgreSQL + Redis
+#   full     = Tier 3: PostgreSQL + Redis + MinIO (S3)
 #
-# Manual usage:
-#   docker compose -f docker-compose.dev.yml --profile minimal up -d
-#   docker compose -f docker-compose.dev.yml --profile standard up -d
-#   docker compose -f docker-compose.dev.yml --profile full up -d
+# Usage:
+#   bun run docker:dev:minimal    # Tier 1
+#   bun run docker:dev:standard   # Tier 2
+#   bun run docker:dev            # Tier 3 (default)
+#
+# Then configure .env (uncomment DATABASE_URL, REDIS_URL, S3_BUCKET as needed)
+# and run: bun run dev
 
 name: appstrate-dev
 
 services:
-  # ─── PostgreSQL — all profiles ──────────────────────────────────
+  # ─── PostgreSQL — Tier 1, 2, 3 ─────────────────────────────
   postgres:
     image: postgres:16.8-alpine
     profiles: ["minimal", "standard", "full"]
@@ -33,7 +37,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # ─── Redis — standard + full ────────────────────────────────────
+  # ─── Redis — Tier 2, 3 ─────────────────────────────────────
   redis:
     image: redis:7.4-alpine
     profiles: ["standard", "full"]
@@ -49,7 +53,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # ─── MinIO (S3) — full only ────────────────────────────────────
+  # ─── MinIO (S3-compatible) — Tier 3 ────────────────────────
   minio:
     image: minio/minio:RELEASE.2025-03-12T18-04-18Z
     profiles: ["full"]

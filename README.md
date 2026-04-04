@@ -53,52 +53,53 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 
 ## Quick Start
 
-Prerequisites: [Bun](https://bun.sh/) (v1.3+) and [Docker](https://docs.docker.com/get-docker/) (with Compose v2).
+Prerequisites: [Bun](https://bun.sh/) (v1.3+). Docker is optional.
 
 ```sh
 git clone https://github.com/appstrate/appstrate.git
 cd appstrate
 bun install
-bun run setup     # copies .env, starts Docker infra, runs migrations, builds frontend
+cp .env.example .env
 bun run dev       # → http://localhost:3000
 ```
 
+No Docker, no PostgreSQL, no Redis — just Bun. Appstrate uses **progressive infrastructure**: it starts with an embedded database (PGlite) and local storage, then scales up to PostgreSQL, Redis, and S3 as you need them.
+
 First signup creates an organization automatically. See [Contributing](./CONTRIBUTING.md) for the full development guide.
 
-### Development Profiles
+### Progressive Infrastructure
 
-Appstrate supports three infrastructure profiles for local development. Only PostgreSQL is required — Redis, MinIO, and Docker are optional.
+Appstrate adapts to your infrastructure. Add services when you need them — never before.
 
-| Profile      | Command                       | Infrastructure             | Storage    | Queue     | Execution         |
-| ------------ | ----------------------------- | -------------------------- | ---------- | --------- | ----------------- |
-| **Minimal**  | `bun run docker:dev:minimal`  | PostgreSQL                 | Filesystem | In-memory | Bun subprocess    |
-| **Standard** | `bun run docker:dev:standard` | PostgreSQL + Redis         | Filesystem | BullMQ    | Bun subprocess    |
-| **Full**     | `bun run docker:dev`          | PostgreSQL + Redis + MinIO | S3         | BullMQ    | Docker containers |
+| Tier  | Name             | Prerequisites | Database                | Storage    | Queue     | Execution         |
+| ----- | ---------------- | ------------- | ----------------------- | ---------- | --------- | ----------------- |
+| **0** | **Zero-Install** | Bun           | PGlite (embedded)       | Filesystem | In-memory | Bun subprocess    |
+| **1** | **Minimal**      | Bun + Docker  | PostgreSQL              | Filesystem | In-memory | Bun subprocess    |
+| **2** | **Standard**     | Bun + Docker  | PostgreSQL + Redis      | Filesystem | BullMQ    | Bun subprocess    |
+| **3** | **Full**         | Bun + Docker  | PostgreSQL + Redis + S3 | S3         | BullMQ    | Docker containers |
 
-After starting infrastructure with the desired profile, configure your `.env` accordingly and run `bun run dev`.
-
-<details>
-<summary>Manual setup (step by step)</summary>
+**Tier 0** is the default — `bun run dev` works immediately after install. To scale up:
 
 ```sh
-# 1. Install dependencies
+# Tier 1: add PostgreSQL (persistent data, multi-user)
+bun run docker:dev:minimal    # starts PostgreSQL
+# → uncomment DATABASE_URL in .env
+
+# Tier 2: add Redis (persistent scheduling, multi-instance)
+bun run docker:dev:standard   # starts PostgreSQL + Redis
+# → uncomment DATABASE_URL + REDIS_URL in .env
+
+# Tier 3: full production stack
+bun run docker:dev            # starts PostgreSQL + Redis + MinIO
+# → uncomment DATABASE_URL + REDIS_URL + S3_BUCKET in .env
+```
+
+<details>
+<summary>Full setup with Docker (Tier 3)</summary>
+
+```sh
 bun install
-
-# 2. Copy environment file (all dev secrets pre-configured)
-cp .env.example .env
-
-# 3. Start infrastructure — pick a profile:
-bun run docker:dev:minimal    # PostgreSQL only (lightweight)
-bun run docker:dev:standard   # PostgreSQL + Redis
-bun run docker:dev            # Full stack (PostgreSQL + Redis + MinIO)
-
-# 4. Run database migrations
-bun run db:migrate
-
-# 5. Build frontend + shared packages
-bun run build
-
-# 6. Start platform
+bun run setup     # copies .env, starts all Docker services, runs migrations, builds frontend
 bun run dev       # → http://localhost:3000
 ```
 
@@ -202,7 +203,7 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 
 | Variable                    | Required | Default                                       | Description                                                        |
 | --------------------------- | -------- | --------------------------------------------- | ------------------------------------------------------------------ |
-| `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                       |
+| `DATABASE_URL`              | No       | —                                             | PostgreSQL connection. Absent = PGlite (embedded)                  |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                             |
 | `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes base64, encrypts stored credentials                       |
 | `REDIS_URL`                 | No       | —                                             | Redis connection. Absent = in-memory adapters (single-instance)    |
