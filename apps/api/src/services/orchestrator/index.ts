@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { getExecutionMode } from "../../infra/mode.ts";
 import type { ContainerOrchestrator } from "./interface.ts";
 import { DockerOrchestrator } from "./docker-orchestrator.ts";
+import { ProcessOrchestrator } from "./process-orchestrator.ts";
 
 export type { ContainerOrchestrator } from "./interface.ts";
 export type * from "./types.ts";
@@ -16,6 +18,7 @@ export function getOrchestrator(): ContainerOrchestrator {
 }
 
 function createOrchestrator(): ContainerOrchestrator {
-  // Future: switch on env var for K8s support
+  const mode = getExecutionMode();
+  if (mode === "process") return new ProcessOrchestrator();
   return new DockerOrchestrator();
 }
