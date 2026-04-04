@@ -63,11 +63,19 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
 }
 
 /** Resolve dependency refs from a package's manifest. */
-async function resolveDepRefs(manifest: unknown): Promise<NonNullable<DbPackageRow["depRefs"]>> {
+async function resolveDepRefs(
+  manifest: unknown,
+  orgId?: string,
+): Promise<NonNullable<DbPackageRow["depRefs"]>> {
   const m = asRecord(manifest) as Partial<Manifest>;
   const { skillIds, toolIds, providerIds } = extractDepsFromManifest(m);
   const allDepIds = [...skillIds, ...toolIds, ...providerIds];
   if (allDepIds.length === 0) return [];
+
+  const conditions = [inArray(packages.id, allDepIds)];
+  if (orgId) {
+    conditions.push(orgOrSystemFilter(orgId));
+  }
 
   const rows = await db
     .select({
@@ -76,7 +84,7 @@ async function resolveDepRefs(manifest: unknown): Promise<NonNullable<DbPackageR
       draftManifest: packages.draftManifest,
     })
     .from(packages)
-    .where(inArray(packages.id, allDepIds));
+    .where(and(...conditions));
 
   return rows.map((r) => ({
     dependencyId: r.id,
@@ -106,7 +114,7 @@ export async function getPackage(id: string, orgId?: string): Promise<LoadedPack
   const pkgRow = pkgRows[0];
   if (!pkgRow) return null;
 
-  const depRefs = await resolveDepRefs(pkgRow.draftManifest);
+  const depRefs = await resolveDepRefs(pkgRow.draftManifest, orgId);
 
   return dbRowToLoadedPackage({
     id: pkgRow.id,

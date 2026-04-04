@@ -6,7 +6,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
-import { eq, inArray } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { postInstallPackage } from "../services/post-install-package.ts";
@@ -676,6 +676,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     }
 
     const updated = await updateOrgItem(
+      orgId,
       itemId,
       { manifest: manifest as Record<string, unknown>, content },
       body.lockVersion,
@@ -725,7 +726,7 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
 
     // For agents, check running runs
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId, orgId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -836,7 +837,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 
     // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId, orgId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -894,7 +895,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 
     // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId, orgId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -925,6 +926,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     const updated = await updateOrgItem(
+      orgId,
       itemId,
       { manifest: detail.manifest, content },
       existing.lockVersion,
@@ -942,7 +944,10 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       detail.createdAt &&
       new Date(detail.createdAt).getTime() === latestDate.getTime()
     ) {
-      await db.update(packages).set({ updatedAt: latestDate }).where(eq(packages.id, itemId));
+      await db
+        .update(packages)
+        .set({ updatedAt: latestDate })
+        .where(and(eq(packages.id, itemId), eq(packages.orgId, orgId)));
     }
 
     // Re-upload storage files from the version ZIP
@@ -969,6 +974,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 
 function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
+    const orgId = c.get("orgId");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
@@ -976,8 +982,14 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
       throw forbidden(`${label} '${itemId}' is a system package`);
     }
 
+    // Verify org ownership before deletion
+    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
+    if (!existing) {
+      throw notFound(`${label} '${itemId}' not found`);
+    }
+
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId, orgId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",

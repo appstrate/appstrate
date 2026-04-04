@@ -6,7 +6,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, providerCredentials } from "@appstrate/db/schema";
 import { getPackage } from "../services/agent-service.ts";
-import { getPackageById } from "../services/package-items/index.ts";
+import { getOrgItem, AGENT_CONFIG } from "../services/package-items/index.ts";
 import {
   getVersionCount,
   getLatestVersionCreatedAt,
@@ -36,7 +36,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
 
   const [agent, rawItem, versionCount, latestVersionDate] = await Promise.all([
     getPackage(itemId, orgId),
-    getPackageById(itemId),
+    getOrgItem(orgId, itemId, AGENT_CONFIG),
     getVersionCount(itemId),
     getLatestVersionCreatedAt(itemId),
   ]);
@@ -120,7 +120,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
 
   const [lastRun, runningCount] = await Promise.all([
     getLastRun(agent.id, null, orgId),
-    getRunningRunsForPackage(agent.id),
+    getRunningRunsForPackage(agent.id, orgId),
   ]);
 
   const configWithDefaults = m.config?.schema
@@ -132,7 +132,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   const hasUnarchivedChanges = computeHasUnpublishedChanges(
     agent.source,
     versionCount,
-    rawItem?.updatedAt ?? null,
+    rawItem?.updatedAt ? new Date(rawItem.updatedAt) : null,
     latestVersionDate,
   );
 

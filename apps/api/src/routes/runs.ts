@@ -37,7 +37,7 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { trackRun, untrackRun, abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { ApiError, notFound, forbidden, conflict } from "../lib/errors.ts";
+import { ApiError, notFound, conflict } from "../lib/errors.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -610,8 +610,8 @@ export function createRunsRouter() {
   router.get("/runs/:id", async (c) => {
     const runId = c.req.param("id");
     const orgId = c.get("orgId");
-    const row = await getRunFull(runId);
-    if (!row || row.orgId !== orgId) {
+    const row = await getRunFull(runId, orgId);
+    if (!row) {
       throw notFound("Run not found");
     }
     // End-user scoping: end-users can only see their own runs
@@ -626,8 +626,8 @@ export function createRunsRouter() {
   router.get("/runs/:id/logs", async (c) => {
     const runId = c.req.param("id");
     const orgId = c.get("orgId");
-    const exec = await getRun(runId);
-    if (!exec || exec.orgId !== orgId) {
+    const exec = await getRun(runId, orgId);
+    if (!exec) {
       throw notFound("Run not found");
     }
     // End-user scoping: end-users can only see their own run logs
@@ -645,14 +645,9 @@ export function createRunsRouter() {
     const runId = c.req.param("id")!;
     const orgId = c.get("orgId");
 
-    const run = await getRun(runId);
+    const run = await getRun(runId, orgId);
     if (!run) {
       throw notFound("Run not found");
-    }
-
-    // Verify ownership (same org)
-    if (run.orgId !== orgId) {
-      throw forbidden("Not authorized");
     }
 
     // Verify cancellable
@@ -710,7 +705,7 @@ export function createRunsRouter() {
       const agent = c.get("agent");
       const orgId = c.get("orgId");
 
-      const running = await getRunningRunsForPackage(agent.id);
+      const running = await getRunningRunsForPackage(agent.id, orgId);
       if (running > 0) {
         throw conflict("run_in_progress", `${running} run(s) still running`);
       }
