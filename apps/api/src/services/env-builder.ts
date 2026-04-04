@@ -48,6 +48,7 @@ export async function buildRunContext(params: {
   packageVersionId: number | null;
   proxyLabel: string | null;
   modelLabel: string | null;
+  modelSource: string | null;
 }> {
   const { runId, agent, providerProfiles, orgId, actor, input, files } = params;
   const manifestProviders = resolveManifestProviders(agent.manifest);
@@ -99,6 +100,7 @@ export async function buildRunContext(params: {
   const proxyUrl = proxyResult?.url ?? null;
   const proxyLabel = proxyResult?.label ?? null;
   const modelLabel = modelResult.label;
+  const modelSource = modelResult.isSystemModel ? "system" : "org";
   const llmConfig: PromptContext["llmConfig"] = {
     api: modelResult.api,
     baseUrl: modelResult.baseUrl,
@@ -167,7 +169,7 @@ export async function buildRunContext(params: {
     toolDocs,
   };
 
-  return { promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel };
+  return { promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel, modelSource };
 }
 
 /** Resolve unique provider definitions for prompt context. */
