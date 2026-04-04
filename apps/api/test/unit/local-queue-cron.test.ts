@@ -9,15 +9,9 @@ import { describe, it, expect } from "bun:test";
 import { LocalQueue } from "../../src/infra/queue/local-queue.ts";
 import type { QueueJob } from "../../src/infra/queue/interface.ts";
 
-// Access private methods for unit testing via type assertion
-type LocalQueueInternal = LocalQueue<{ v: string }> & {
-  shouldFire(cronExpr: string, tz: string, now: Date): boolean;
-  matchField(field: string, value: number, min: number, max: number, isDow?: boolean): boolean;
-  evaluateCron(): void;
-};
-
-function createQueue(): LocalQueueInternal {
-  return new LocalQueue<{ v: string }>("test-cron") as LocalQueueInternal;
+ 
+function createQueue(): any {
+  return new LocalQueue<{ v: string }>("test-cron");
 }
 
 // ---------------------------------------------------------------------------
