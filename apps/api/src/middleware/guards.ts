@@ -18,6 +18,7 @@ export function requireAgent() {
     const packageId = `${scope}/${name}`;
     const orgId = c.get("orgId");
     const appId = c.get("appId");
+    const appIsDefault = c.get("appIsDefault");
     const agent = await getPackage(packageId, orgId);
     if (!agent) {
       throw new ApiError({
@@ -28,7 +29,7 @@ export function requireAgent() {
       });
     }
     // Check application-level access (default app = all, custom app = explicit binding)
-    if (appId && !(await hasPackageAccess(appId, packageId))) {
+    if (appId && !(await hasPackageAccess(appId, packageId, appIsDefault))) {
       throw new ApiError({
         status: 404,
         code: "agent_not_found",

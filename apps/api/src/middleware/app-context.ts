@@ -15,7 +15,7 @@ import { invalidRequest, notFound } from "../lib/errors.ts";
  * 2. applicationId from API key (already set by auth middleware)
  *
  * Validates that the application belongs to the current org.
- * Sets c.set("appId") on success.
+ * Sets c.set("appId") and c.set("appIsDefault") on success.
  */
 export function requireAppContext() {
   return async (c: Context<AppEnv>, next: Next) => {
@@ -32,7 +32,7 @@ export function requireAppContext() {
     const orgId = c.get("orgId");
 
     const [app] = await db
-      .select({ id: applications.id })
+      .select({ id: applications.id, isDefault: applications.isDefault })
       .from(applications)
       .where(and(eq(applications.id, appId), eq(applications.orgId, orgId)))
       .limit(1);
@@ -42,6 +42,7 @@ export function requireAppContext() {
     }
 
     c.set("appId", appId);
+    c.set("appIsDefault", app.isDefault);
     return next();
   };
 }

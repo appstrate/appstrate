@@ -16,6 +16,7 @@ import { validateApiKey } from "../../src/services/api-keys.ts";
 import { ensureDefaultProfile } from "../../src/services/connection-profiles.ts";
 import { requireOrgContext } from "../../src/middleware/org-context.ts";
 import { requireAppContext } from "../../src/middleware/app-context.ts";
+import { requiresAppContext } from "../../src/lib/app-scoped-routes.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { isEndUserInApp } from "../../src/services/end-users.ts";
@@ -209,19 +210,7 @@ export function getTestApp(): Hono<AppEnv> {
     return next();
   });
 
-  // App context middleware (same as production)
-  function requiresAppContext(path: string): boolean {
-    if (path.startsWith("/api/agents")) return true;
-    if (path.startsWith("/api/runs")) return true;
-    if (path.startsWith("/api/schedules")) return true;
-    if (path.startsWith("/api/webhooks")) return true;
-    if (path.startsWith("/api/end-users")) return true;
-    if (path.startsWith("/api/api-keys")) return true;
-    if (path.startsWith("/api/realtime")) return true;
-    if (path.startsWith("/api/packages")) return true;
-    return false;
-  }
-
+  // App context middleware (shared with production)
   app.use("*", async (c, next) => {
     if (skipAuth(c.req.path)) return next();
     if (!c.get("user")) return next();

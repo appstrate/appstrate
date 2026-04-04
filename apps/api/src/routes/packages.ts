@@ -467,7 +467,9 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       // Auto-install in the current application (non-fatal)
       const appId = c.get("appId");
       if (appId) {
-        await installPackage(appId, orgId, packageId).catch(() => {});
+        await installPackage(appId, orgId, packageId).catch((e: unknown) =>
+          logger.debug("auto-install skipped", { packageId, appId, err: String(e) }),
+        );
       }
 
       return c.json(
@@ -562,7 +564,9 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     // Auto-install in the current application (non-fatal)
     const appId = c.get("appId");
     if (appId) {
-      await installPackage(appId, orgId, item.id).catch(() => {});
+      await installPackage(appId, orgId, item.id).catch((e: unknown) =>
+        logger.debug("auto-install skipped", { packageId: item.id, appId, err: String(e) }),
+      );
     }
 
     return c.json(
@@ -1309,7 +1313,9 @@ export function createPackagesRouter() {
     // Auto-install in the current application (non-fatal, skip if already installed)
     const appId = c.get("appId");
     if (appId) {
-      await installPackage(appId, orgId, packageId).catch(() => {});
+      await installPackage(appId, orgId, packageId).catch((e: unknown) =>
+        logger.debug("auto-install skipped", { packageId, appId, err: String(e) }),
+      );
     }
 
     // Force import: replace existing version content if integrity differs

@@ -5,7 +5,7 @@
  * packages within an application context.
  */
 
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, applications, packages } from "@appstrate/db/schema";
 import { notFound, conflict } from "../lib/errors.ts";
@@ -162,9 +162,18 @@ export async function isPackageInstalled(
  *
  * Default application → access to ALL packages in the org (no binding required).
  * Custom application → access only to explicitly installed packages.
+ *
+ * When `isDefault` is already known (from app-context middleware), pass it to skip a DB query.
  */
-export async function hasPackageAccess(applicationId: string, packageId: string): Promise<boolean> {
-  // Check if this is the default app — default app has access to everything
+export async function hasPackageAccess(
+  applicationId: string,
+  packageId: string,
+  isDefault?: boolean,
+): Promise<boolean> {
+  if (isDefault !== undefined) {
+    return isDefault || isPackageInstalled(applicationId, packageId);
+  }
+
   const [app] = await db
     .select({ isDefault: applications.isDefault })
     .from(applications)
@@ -174,6 +183,45 @@ export async function hasPackageAccess(applicationId: string, packageId: string)
   if (app?.isDefault) return true;
 
   return isPackageInstalled(applicationId, packageId);
+}
+
+/**
+ * Batch check which packages an application has access to.
+ * Returns the set of accessible package IDs.
+ *
+ * Default application → all packageIds returned.
+ * Custom application → only explicitly installed packages.
+ */
+export async function filterAccessiblePackages(
+  applicationId: string,
+  packageIds: string[],
+  isDefault?: boolean,
+): Promise<Set<string>> {
+  if (packageIds.length === 0) return new Set();
+  if (isDefault) return new Set(packageIds);
+
+  // If isDefault is unknown, check
+  if (isDefault === undefined) {
+    const [app] = await db
+      .select({ isDefault: applications.isDefault })
+      .from(applications)
+      .where(eq(applications.id, applicationId))
+      .limit(1);
+    if (app?.isDefault) return new Set(packageIds);
+  }
+
+  // Custom app — single query for all package IDs
+  const rows = await db
+    .select({ packageId: applicationPackages.packageId })
+    .from(applicationPackages)
+    .where(
+      and(
+        eq(applicationPackages.applicationId, applicationId),
+        inArray(applicationPackages.packageId, packageIds),
+      ),
+    );
+
+  return new Set(rows.map((r) => r.packageId));
 }
 
 // ---------------------------------------------------------------------------
