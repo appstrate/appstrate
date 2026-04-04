@@ -4,21 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-
-export interface InstalledPackage {
-  packageId: string;
-  config: Record<string, unknown>;
-  modelId: string | null;
-  proxyId: string | null;
-  orgProfileId: string | null;
-  versionId: number | null;
-  enabled: boolean;
-  installedAt: string;
-  updatedAt: string;
-  packageType: string;
-  packageSource: string;
-  draftManifest: Record<string, unknown> | null;
-}
+import type { InstalledPackage } from "@appstrate/shared-types";
 
 export function useInstalledPackages(type?: string) {
   const orgId = useCurrentOrgId();

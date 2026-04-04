@@ -132,7 +132,7 @@ describe("scheduler service", () => {
         cronExpression: "*/30 * * * *",
       });
 
-      const schedules = await listSchedules(orgId);
+      const schedules = await listSchedules(orgId, defaultAppId);
 
       expect(schedules).toHaveLength(2);
       const names = schedules.map((s) => s.name);
@@ -166,17 +166,17 @@ describe("scheduler service", () => {
         cronExpression: "0 * * * *",
       });
 
-      const schedules = await listSchedules(orgId);
+      const schedules = await listSchedules(orgId, defaultAppId);
       expect(schedules).toHaveLength(1);
       expect(schedules[0]!.name).toBe("My Schedule");
 
-      const otherSchedules = await listSchedules(otherOrg.id);
+      const otherSchedules = await listSchedules(otherOrg.id, otherDefaultAppId);
       expect(otherSchedules).toHaveLength(1);
       expect(otherSchedules[0]!.name).toBe("Other Schedule");
     });
 
     it("returns an empty array when no schedules exist", async () => {
-      const schedules = await listSchedules(orgId);
+      const schedules = await listSchedules(orgId, defaultAppId);
       expect(schedules).toBeArray();
       expect(schedules).toHaveLength(0);
     });
@@ -206,17 +206,17 @@ describe("scheduler service", () => {
         cronExpression: "*/15 * * * *",
       });
 
-      const schedules = await listPackageSchedules(packageId, orgId);
+      const schedules = await listPackageSchedules(packageId, orgId, defaultAppId);
       expect(schedules).toHaveLength(1);
       expect(schedules[0]!.name).toBe("Agent 1 Schedule");
 
-      const schedules2 = await listPackageSchedules(pkg2.id, orgId);
+      const schedules2 = await listPackageSchedules(pkg2.id, orgId, defaultAppId);
       expect(schedules2).toHaveLength(1);
       expect(schedules2[0]!.name).toBe("Agent 2 Schedule");
     });
 
     it("returns empty array for package with no schedules", async () => {
-      const schedules = await listPackageSchedules(packageId, orgId);
+      const schedules = await listPackageSchedules(packageId, orgId, defaultAppId);
       expect(schedules).toBeArray();
       expect(schedules).toHaveLength(0);
     });
@@ -366,7 +366,7 @@ describe("scheduler service", () => {
 
       await deleteSchedule(schedule2.id);
 
-      const remaining = await listSchedules(orgId);
+      const remaining = await listSchedules(orgId, defaultAppId);
       expect(remaining).toHaveLength(1);
       expect(remaining[0]!.id).toBe(schedule1.id);
       expect(remaining[0]!.name).toBe("Keep This");
@@ -404,7 +404,7 @@ describe("scheduler service", () => {
         cronExpression: "0 * * * *",
       });
 
-      const schedules = await listSchedules(orgId);
+      const schedules = await listSchedules(orgId, defaultAppId);
 
       expect(schedules).toHaveLength(1);
       const s = schedules[0]!;
@@ -439,7 +439,7 @@ describe("scheduler service", () => {
         cronExpression: "0 * * * *",
       });
 
-      const schedules = await listSchedules(orgId);
+      const schedules = await listSchedules(orgId, defaultAppId);
       const s = schedules.find((s) => s.name === "Missing Connection")!;
 
       expect(s.readiness.status).toBe("not_ready");
@@ -470,7 +470,7 @@ describe("scheduler service", () => {
         cronExpression: "0 * * * *",
       });
 
-      const schedules = await listSchedules(orgId);
+      const schedules = await listSchedules(orgId, defaultAppId);
       const s = schedules.find((s) => s.name === "Connected Schedule")!;
 
       expect(s.readiness.status).toBe("ready");
@@ -495,7 +495,7 @@ describe("scheduler service", () => {
       const found = await getSchedule(schedule.id);
       expect(found).toBeNull();
 
-      const schedules = await listSchedules(orgId);
+      const schedules = await listSchedules(orgId, defaultAppId);
       expect(schedules.find((s) => s.name === "Deleted Profile")).toBeUndefined();
     });
   });

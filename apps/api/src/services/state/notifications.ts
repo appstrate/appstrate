@@ -22,21 +22,20 @@ export async function markNotificationRead(
   runId: string,
   actorId: string,
   orgId: string,
-  applicationId?: string,
+  applicationId: string,
 ): Promise<boolean> {
-  const conditions = [
-    eq(runs.id, runId),
-    eq(runs.orgId, orgId),
-    isNotNull(runs.notifiedAt),
-    actorOrOrgFilter(actorId),
-  ];
-  if (applicationId) {
-    conditions.push(eq(runs.applicationId, applicationId));
-  }
   const updated = await db
     .update(runs)
     .set({ readAt: new Date() })
-    .where(and(...conditions))
+    .where(
+      and(
+        eq(runs.id, runId),
+        eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
+        isNotNull(runs.notifiedAt),
+        actorOrOrgFilter(actorId),
+      ),
+    )
     .returning({ id: runs.id });
   return updated.length > 0;
 }
@@ -56,21 +55,20 @@ function actorOrOrgFilter(actorId: string): SQL {
 export async function markAllNotificationsRead(
   actorId: string,
   orgId: string,
-  applicationId?: string,
+  applicationId: string,
 ): Promise<number> {
-  const conditions = [
-    actorOrOrgFilter(actorId),
-    eq(runs.orgId, orgId),
-    isNotNull(runs.notifiedAt),
-    isNull(runs.readAt),
-  ];
-  if (applicationId) {
-    conditions.push(eq(runs.applicationId, applicationId));
-  }
   const updated = await db
     .update(runs)
     .set({ readAt: new Date() })
-    .where(and(...conditions))
+    .where(
+      and(
+        actorOrOrgFilter(actorId),
+        eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
+        isNotNull(runs.notifiedAt),
+        isNull(runs.readAt),
+      ),
+    )
     .returning({ id: runs.id });
   return updated.length;
 }
@@ -78,46 +76,44 @@ export async function markAllNotificationsRead(
 export async function getUnreadNotificationCount(
   actorId: string,
   orgId: string,
-  applicationId?: string,
+  applicationId: string,
 ): Promise<number> {
-  const conditions = [
-    actorOrOrgFilter(actorId),
-    eq(runs.orgId, orgId),
-    isNotNull(runs.notifiedAt),
-    isNull(runs.readAt),
-  ];
-  if (applicationId) {
-    conditions.push(eq(runs.applicationId, applicationId));
-  }
   const [row] = await db
     .select({ count: count() })
     .from(runs)
-    .where(and(...conditions));
+    .where(
+      and(
+        actorOrOrgFilter(actorId),
+        eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
+        isNotNull(runs.notifiedAt),
+        isNull(runs.readAt),
+      ),
+    );
   return row?.count ?? 0;
 }
 
 export async function getUnreadCountsByAgent(
   actorId: string,
   orgId: string,
-  applicationId?: string,
+  applicationId: string,
 ): Promise<Record<string, number>> {
-  const conditions = [
-    actorOrOrgFilter(actorId),
-    eq(runs.orgId, orgId),
-    isNotNull(runs.notifiedAt),
-    isNull(runs.readAt),
-    isNotNull(runs.packageId),
-  ];
-  if (applicationId) {
-    conditions.push(eq(runs.applicationId, applicationId));
-  }
   const rows = await db
     .select({
       packageId: runs.packageId,
       count: count(),
     })
     .from(runs)
-    .where(and(...conditions))
+    .where(
+      and(
+        actorOrOrgFilter(actorId),
+        eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
+        isNotNull(runs.notifiedAt),
+        isNull(runs.readAt),
+        isNotNull(runs.packageId),
+      ),
+    )
     .groupBy(runs.packageId);
 
   const result: Record<string, number> = {};
@@ -129,25 +125,25 @@ export async function getUnreadCountsByAgent(
 
 export async function listOrgRuns(
   orgId: string,
-  options: { limit?: number; offset?: number; applicationId?: string } = {},
+  options: { limit?: number; offset?: number; applicationId: string },
 ) {
   const { limit = 20, offset = 0, applicationId } = options;
-  const conditions = [eq(runs.orgId, orgId)];
-  if (applicationId) {
-    conditions.push(eq(runs.applicationId, applicationId));
-  }
-  return listRunsWithFilter(and(...conditions)!, limit, offset);
+  return listRunsWithFilter(
+    and(eq(runs.orgId, orgId), eq(runs.applicationId, applicationId))!,
+    limit,
+    offset,
+  );
 }
 
 export async function listUserRuns(
   actorId: string,
   orgId: string,
-  options: { limit?: number; offset?: number; applicationId?: string } = {},
+  options: { limit?: number; offset?: number; applicationId: string },
 ) {
   const { limit = 20, offset = 0, applicationId } = options;
-  const conditions = [actorOrOrgFilter(actorId), eq(runs.orgId, orgId)];
-  if (applicationId) {
-    conditions.push(eq(runs.applicationId, applicationId));
-  }
-  return listRunsWithFilter(and(...conditions)!, limit, offset);
+  return listRunsWithFilter(
+    and(actorOrOrgFilter(actorId), eq(runs.orgId, orgId), eq(runs.applicationId, applicationId))!,
+    limit,
+    offset,
+  );
 }

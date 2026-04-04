@@ -7,7 +7,7 @@
 
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applicationPackages, applications, packages } from "@appstrate/db/schema";
+import { applicationPackages, packages } from "@appstrate/db/schema";
 import { notFound, conflict } from "../lib/errors.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import type { PackageType } from "@appstrate/core/validation";
@@ -84,6 +84,21 @@ export async function uninstallPackage(applicationId: string, packageId: string)
 // Query
 // ---------------------------------------------------------------------------
 
+const installedPackageSelect = {
+  packageId: applicationPackages.packageId,
+  config: applicationPackages.config,
+  modelId: applicationPackages.modelId,
+  proxyId: applicationPackages.proxyId,
+  orgProfileId: applicationPackages.orgProfileId,
+  versionId: applicationPackages.versionId,
+  enabled: applicationPackages.enabled,
+  installedAt: applicationPackages.installedAt,
+  updatedAt: applicationPackages.updatedAt,
+  packageType: packages.type,
+  packageSource: packages.source,
+  draftManifest: packages.draftManifest,
+};
+
 export async function listInstalledPackages(applicationId: string, type?: PackageType) {
   const conditions = [eq(applicationPackages.applicationId, applicationId)];
   if (type) {
@@ -91,21 +106,7 @@ export async function listInstalledPackages(applicationId: string, type?: Packag
   }
 
   return db
-    .select({
-      packageId: applicationPackages.packageId,
-      config: applicationPackages.config,
-      modelId: applicationPackages.modelId,
-      proxyId: applicationPackages.proxyId,
-      orgProfileId: applicationPackages.orgProfileId,
-      versionId: applicationPackages.versionId,
-      enabled: applicationPackages.enabled,
-      installedAt: applicationPackages.installedAt,
-      updatedAt: applicationPackages.updatedAt,
-      // Package info from catalog
-      packageType: packages.type,
-      packageSource: packages.source,
-      draftManifest: packages.draftManifest,
-    })
+    .select(installedPackageSelect)
     .from(applicationPackages)
     .innerJoin(packages, eq(packages.id, applicationPackages.packageId))
     .where(and(...conditions));
@@ -113,20 +114,7 @@ export async function listInstalledPackages(applicationId: string, type?: Packag
 
 export async function getInstalledPackage(applicationId: string, packageId: string) {
   const [row] = await db
-    .select({
-      packageId: applicationPackages.packageId,
-      config: applicationPackages.config,
-      modelId: applicationPackages.modelId,
-      proxyId: applicationPackages.proxyId,
-      orgProfileId: applicationPackages.orgProfileId,
-      versionId: applicationPackages.versionId,
-      enabled: applicationPackages.enabled,
-      installedAt: applicationPackages.installedAt,
-      updatedAt: applicationPackages.updatedAt,
-      packageType: packages.type,
-      packageSource: packages.source,
-      draftManifest: packages.draftManifest,
-    })
+    .select(installedPackageSelect)
     .from(applicationPackages)
     .innerJoin(packages, eq(packages.id, applicationPackages.packageId))
     .where(
@@ -162,27 +150,13 @@ export async function isPackageInstalled(
  *
  * Default application → access to ALL packages in the org (no binding required).
  * Custom application → access only to explicitly installed packages.
- *
- * When `isDefault` is already known (from app-context middleware), pass it to skip a DB query.
  */
 export async function hasPackageAccess(
   applicationId: string,
   packageId: string,
-  isDefault?: boolean,
+  isDefault: boolean,
 ): Promise<boolean> {
-  if (isDefault !== undefined) {
-    return isDefault || isPackageInstalled(applicationId, packageId);
-  }
-
-  const [app] = await db
-    .select({ isDefault: applications.isDefault })
-    .from(applications)
-    .where(eq(applications.id, applicationId))
-    .limit(1);
-
-  if (app?.isDefault) return true;
-
-  return isPackageInstalled(applicationId, packageId);
+  return isDefault || isPackageInstalled(applicationId, packageId);
 }
 
 /**
@@ -195,20 +169,10 @@ export async function hasPackageAccess(
 export async function filterAccessiblePackages(
   applicationId: string,
   packageIds: string[],
-  isDefault?: boolean,
+  isDefault: boolean,
 ): Promise<Set<string>> {
   if (packageIds.length === 0) return new Set();
   if (isDefault) return new Set(packageIds);
-
-  // If isDefault is unknown, check
-  if (isDefault === undefined) {
-    const [app] = await db
-      .select({ isDefault: applications.isDefault })
-      .from(applications)
-      .where(eq(applications.id, applicationId))
-      .limit(1);
-    if (app?.isDefault) return new Set(packageIds);
-  }
 
   // Custom app — single query for all package IDs
   const rows = await db

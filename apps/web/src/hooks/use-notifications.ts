@@ -49,20 +49,22 @@ export function useAllRuns(page: number, limit = 20) {
   });
 }
 
+function invalidateRunQueries(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["unread-count"] });
+  qc.invalidateQueries({ queryKey: ["unread-counts-by-agent"] });
+  qc.invalidateQueries({ queryKey: ["all-runs"] });
+  qc.invalidateQueries({ queryKey: ["paginated-runs"] });
+  qc.invalidateQueries({ queryKey: ["runs"] });
+  qc.invalidateQueries({ queryKey: ["run"] });
+}
+
 export function useMarkRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (runId: string) => {
       return api<{ ok: boolean }>(`/notifications/read/${runId}`, { method: "PUT" });
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["unread-count"] });
-      qc.invalidateQueries({ queryKey: ["unread-counts-by-agent"] });
-      qc.invalidateQueries({ queryKey: ["all-runs"] });
-      qc.invalidateQueries({ queryKey: ["paginated-runs"] });
-      qc.invalidateQueries({ queryKey: ["runs"] });
-      qc.invalidateQueries({ queryKey: ["run"] });
-    },
+    onSuccess: () => invalidateRunQueries(qc),
   });
 }
 
@@ -72,13 +74,6 @@ export function useMarkAllRead() {
     mutationFn: async () => {
       return api<{ updated: number }>("/notifications/read-all", { method: "PUT" });
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["unread-count"] });
-      qc.invalidateQueries({ queryKey: ["unread-counts-by-agent"] });
-      qc.invalidateQueries({ queryKey: ["all-runs"] });
-      qc.invalidateQueries({ queryKey: ["paginated-runs"] });
-      qc.invalidateQueries({ queryKey: ["runs"] });
-      qc.invalidateQueries({ queryKey: ["run"] });
-    },
+    onSuccess: () => invalidateRunQueries(qc),
   });
 }

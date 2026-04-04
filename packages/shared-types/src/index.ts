@@ -417,6 +417,21 @@ export interface ApplicationInfo {
   updatedAt: string;
 }
 
+export interface InstalledPackage {
+  packageId: string;
+  config: Record<string, unknown>;
+  modelId: string | null;
+  proxyId: string | null;
+  orgProfileId: string | null;
+  versionId: number | null;
+  enabled: boolean;
+  installedAt: string;
+  updatedAt: string;
+  packageType: string;
+  packageSource: string;
+  draftManifest: Record<string, unknown> | null;
+}
+
 // --- End-User Types ---
 
 export interface EndUserInfo {

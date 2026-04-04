@@ -360,16 +360,14 @@ async function triggerScheduledRun(
 
 export async function listSchedules(
   orgId: string,
-  applicationId?: string,
+  applicationId: string,
 ): Promise<EnrichedSchedule[]> {
-  const conditions = [eq(packageSchedules.orgId, orgId)];
-  if (applicationId) {
-    conditions.push(eq(packageSchedules.applicationId, applicationId));
-  }
   const rows = await db
     .select()
     .from(packageSchedules)
-    .where(and(...conditions))
+    .where(
+      and(eq(packageSchedules.orgId, orgId), eq(packageSchedules.applicationId, applicationId)),
+    )
     .orderBy(asc(packageSchedules.createdAt));
   return enrichSchedules(rows.map(toSchedule), orgId);
 }
@@ -377,16 +375,18 @@ export async function listSchedules(
 export async function listPackageSchedules(
   packageId: string,
   orgId: string,
-  applicationId?: string,
+  applicationId: string,
 ): Promise<EnrichedSchedule[]> {
-  const conditions = [eq(packageSchedules.packageId, packageId), eq(packageSchedules.orgId, orgId)];
-  if (applicationId) {
-    conditions.push(eq(packageSchedules.applicationId, applicationId));
-  }
   const rows = await db
     .select()
     .from(packageSchedules)
-    .where(and(...conditions))
+    .where(
+      and(
+        eq(packageSchedules.packageId, packageId),
+        eq(packageSchedules.orgId, orgId),
+        eq(packageSchedules.applicationId, applicationId),
+      ),
+    )
     .orderBy(asc(packageSchedules.createdAt));
   return enrichSchedules(rows.map(toSchedule), orgId);
 }

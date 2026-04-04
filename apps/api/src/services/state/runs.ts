@@ -10,6 +10,14 @@ import { toISO } from "../../lib/date-helpers.ts";
 
 // --- Runs ---
 
+async function nextRunNumber(packageId: string, orgId: string): Promise<number> {
+  const [maxRow] = await db
+    .select({ maxNum: max(runs.runNumber) })
+    .from(runs)
+    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)));
+  return (maxRow?.maxNum ?? 0) + 1;
+}
+
 export async function createRun(
   id: string,
   packageId: string,
@@ -25,11 +33,7 @@ export async function createRun(
   modelSource?: string,
   providerProfileIds?: Record<string, string>,
 ): Promise<void> {
-  const [maxRow] = await db
-    .select({ maxNum: max(runs.runNumber) })
-    .from(runs)
-    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)));
-  const runNumber = (maxRow?.maxNum ?? 0) + 1;
+  const runNumber = await nextRunNumber(packageId, orgId);
 
   await db.insert(runs).values({
     id,
@@ -65,11 +69,7 @@ export async function createFailedRun(
   scheduleId?: string,
   connectionProfileId?: string,
 ): Promise<void> {
-  const [maxRow] = await db
-    .select({ maxNum: max(runs.runNumber) })
-    .from(runs)
-    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)));
-  const runNumber = (maxRow?.maxNum ?? 0) + 1;
+  const runNumber = await nextRunNumber(packageId, orgId);
   const now = new Date();
 
   await db.insert(runs).values({
@@ -211,12 +211,13 @@ export async function getLastRun(
   packageId: string,
   actor: Actor | null,
   orgId: string,
-  applicationId?: string,
+  applicationId: string,
 ) {
-  const conditions = [eq(runs.packageId, packageId), eq(runs.orgId, orgId)];
-  if (applicationId) {
-    conditions.push(eq(runs.applicationId, applicationId));
-  }
+  const conditions = [
+    eq(runs.packageId, packageId),
+    eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
+  ];
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
@@ -370,15 +371,16 @@ export async function listPackageRuns(
   options: {
     limit?: number;
     offset?: number;
-    applicationId?: string | null;
+    applicationId: string;
     endUserId?: string | null;
-  } = {},
+  },
 ) {
   const { limit = 50, offset = 0, applicationId, endUserId } = options;
-  const conditions = [eq(runs.packageId, packageId), eq(runs.orgId, orgId)];
-  if (applicationId) {
-    conditions.push(eq(runs.applicationId, applicationId));
-  }
+  const conditions = [
+    eq(runs.packageId, packageId),
+    eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
+  ];
   if (endUserId) {
     conditions.push(eq(runs.endUserId, endUserId));
   }
@@ -388,14 +390,18 @@ export async function listPackageRuns(
 export async function listScheduleRuns(
   scheduleId: string,
   orgId: string,
-  options: { limit?: number; offset?: number; applicationId?: string } = {},
+  options: { limit?: number; offset?: number; applicationId: string },
 ) {
   const { limit = 20, offset = 0, applicationId } = options;
-  const conditions = [eq(runs.scheduleId, scheduleId), eq(runs.orgId, orgId)];
-  if (applicationId) {
-    conditions.push(eq(runs.applicationId, applicationId));
-  }
-  return listRunsWithFilter(and(...conditions)!, limit, offset);
+  return listRunsWithFilter(
+    and(
+      eq(runs.scheduleId, scheduleId),
+      eq(runs.orgId, orgId),
+      eq(runs.applicationId, applicationId),
+    )!,
+    limit,
+    offset,
+  );
 }
 
 export async function getRunFull(id: string, orgId: string) {

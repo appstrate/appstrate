@@ -123,7 +123,7 @@ describe("scheduler org-profile readiness", () => {
       cronExpression: "0 * * * *",
     });
 
-    const schedules = await listSchedules(orgId);
+    const schedules = await listSchedules(orgId, defaultAppId);
     const s = schedules.find((s) => s.name === "Org Bound Schedule")!;
 
     expect(s.profileType).toBe("org");
@@ -155,7 +155,7 @@ describe("scheduler org-profile readiness", () => {
       cronExpression: "0 * * * *",
     });
 
-    const schedules = await listSchedules(orgId);
+    const schedules = await listSchedules(orgId, defaultAppId);
     const s = schedules.find((s) => s.name === "Org Unbound Schedule")!;
 
     expect(s.profileType).toBe("org");
