@@ -6,6 +6,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { providerCredentials, packages, userProviderConnections } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
+import { getItemId } from "./packages.ts";
 import type { ProviderConfig } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { getOAuthCallbackUrl } from "../services/connection-manager/oauth.ts";
@@ -333,7 +334,7 @@ export function createProvidersRouter() {
   // PUT /api/providers/:scope/:name — update a provider
   router.put("/:scope{@[^/]+}/:name", requirePermission("providers", "write"), async (c) => {
     const orgId = c.get("orgId");
-    const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const providerId = getItemId(c);
     const body = await c.req.json();
     const data = parseBody(updateProviderSchema, body);
 
@@ -416,7 +417,7 @@ export function createProvidersRouter() {
     requirePermission("providers", "write"),
     async (c) => {
       const orgId = c.get("orgId");
-      const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
+      const providerId = getItemId(c);
       const body = await c.req.json();
 
       const credSchema = z.object({
@@ -430,7 +431,9 @@ export function createProvidersRouter() {
       const [pkg] = await db
         .select({ id: packages.id, draftManifest: packages.draftManifest })
         .from(packages)
-        .where(and(eq(packages.id, providerId), eq(packages.type, "provider")))
+        .where(
+          and(orgOrSystemFilter(orgId), eq(packages.id, providerId), eq(packages.type, "provider")),
+        )
         .limit(1);
 
       if (!pkg) {
@@ -502,7 +505,7 @@ export function createProvidersRouter() {
     requirePermission("providers", "delete"),
     async (c) => {
       const orgId = c.get("orgId");
-      const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
+      const providerId = getItemId(c);
 
       await db
         .update(providerCredentials)
@@ -518,7 +521,7 @@ export function createProvidersRouter() {
   // DELETE /api/providers/:scope/:name — delete provider
   router.delete("/:scope{@[^/]+}/:name", requirePermission("providers", "delete"), async (c) => {
     const orgId = c.get("orgId");
-    const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const providerId = getItemId(c);
 
     // Block deleting system providers (DB-based guard)
     if (await isSystemProviderInDb(providerId)) {

@@ -144,6 +144,7 @@ export async function createOrgItem(
 
 /** Update a package item with optimistic locking. Returns null on version mismatch (409). */
 export async function updateOrgItem(
+  orgId: string,
   id: string,
   payload: {
     manifest: Record<string, unknown>;
@@ -159,7 +160,13 @@ export async function updateOrgItem(
       updatedAt: new Date(),
       lockVersion: sql`${packages.lockVersion} + 1`,
     })
-    .where(and(eq(packages.id, id), eq(packages.lockVersion, expectedVersion)))
+    .where(
+      and(
+        eq(packages.id, id),
+        eq(packages.orgId, orgId),
+        eq(packages.lockVersion, expectedVersion),
+      ),
+    )
     .returning();
 
   return rows[0] ?? null;

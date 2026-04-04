@@ -39,11 +39,23 @@ async function fetchCredentials(providerId: string): Promise<CredentialsResponse
   return res.json() as Promise<CredentialsResponse>;
 }
 
+async function refreshCredentials(providerId: string): Promise<CredentialsResponse> {
+  const res = await fetch(`${config.platformApiUrl}/internal/credentials/${providerId}/refresh`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${config.runToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to refresh credentials for ${providerId}: ${res.status}`);
+  }
+  return res.json() as Promise<CredentialsResponse>;
+}
+
 const proxy = createForwardProxy({ config });
 const preConfigured = Boolean(process.env.RUN_TOKEN);
 const app = createApp({
   config,
   fetchCredentials,
+  refreshCredentials,
   cookieJar,
   isReady: () => proxy.readySync,
   configSecret: process.env.CONFIG_SECRET || undefined,

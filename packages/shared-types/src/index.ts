@@ -235,10 +235,8 @@ export interface AgentDetail {
   /** Org profile ID configured for this agent. Used for per-provider org bindings. */
   agentOrgProfileId: string | null;
   agentOrgProfileName: string | null;
-  versions?: PackageVersionInfo[];
-  distTags?: DistTagInfo[];
   versionCount?: number;
-  hasUnpublishedChanges?: boolean;
+  hasUnarchivedChanges?: boolean;
   forkedFrom: string | null;
 }
 
@@ -261,15 +259,14 @@ export interface OrgPackageItem {
 
 export interface OrgPackageItemDetail extends OrgPackageItem {
   content: string;
+  /** Secondary source file content (e.g. .ts for tools). */
+  sourceCode?: string | null;
   agents: { id: string; displayName: string }[];
   manifest?: Record<string, unknown>;
   manifestName?: string | null;
   lockVersion?: number;
-
-  versions?: PackageVersionInfo[];
-  distTags?: DistTagInfo[];
   versionCount?: number;
-  hasUnpublishedChanges?: boolean;
+  hasUnarchivedChanges?: boolean;
 }
 
 // --- Model Cost Types ---
@@ -303,14 +300,11 @@ export interface VersionListItem extends Omit<PackageVersionInfo, "createdAt"> {
 export interface VersionDetailResponse extends Omit<PackageVersionInfo, "createdAt"> {
   manifest: Record<string, unknown>;
   content?: string | null;
+  /** Secondary source file content (e.g. .ts for tools). */
+  sourceCode?: string | null;
   yankedReason: string | null;
   createdAt: string | null;
   distTags: string[];
-}
-
-export interface DistTagInfo {
-  tag: string;
-  version: string;
 }
 
 // --- Agent Memory Types ---

@@ -7,22 +7,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 export function VersionBanners({
   isHistorical,
   versionDetail,
-  hasDraftChanges,
-  latestUrl,
-  latestVersion,
+  activeUrl,
 }: {
   isHistorical: boolean;
   versionDetail: { version: string; yanked?: boolean; yankedReason?: string | null } | undefined;
-  hasDraftChanges: boolean;
-  latestUrl: string;
-  latestVersion?: string | null;
+  activeUrl: string;
 }) {
   const { t } = useTranslation("agents");
   if (!isHistorical || !versionDetail) return null;
-
-  const linkLabel = hasDraftChanges
-    ? t("version.goToDraft")
-    : t("version.goToLatest", { latest: latestVersion ?? "—" });
 
   return (
     <>
@@ -36,9 +28,9 @@ export function VersionBanners({
       )}
       <Alert className="mb-3">
         <AlertDescription>
-          {t("version.viewingHistorical", { version: versionDetail.version })}{" "}
-          <Link to={latestUrl} className="font-medium underline">
-            {linkLabel}
+          {t("version.viewingArchive", { version: versionDetail.version })}{" "}
+          <Link to={activeUrl} className="font-medium underline">
+            {t("version.goToActive")}
           </Link>
         </AlertDescription>
       </Alert>

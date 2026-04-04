@@ -6,13 +6,14 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
-import { eq, inArray } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/agent-service.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
+import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { getVersionForDownload, replaceVersionContent } from "../services/package-versions.ts";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -43,13 +44,14 @@ import {
   listPackageVersions,
   getVersionInfo,
   getLatestVersionCreatedAt,
+  computeHasUnpublishedChanges,
   createVersionFromDraft,
   createVersionAndUpload,
   deletePackageVersion,
 } from "../services/package-versions.ts";
 import { agentDetailHandler } from "./agent-detail-handler.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requireOwnedPackage, checkScopeMatch } from "../middleware/guards.ts";
+import { requireOwnedPackage, requireOrgPackage, checkScopeMatch } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getRunningRunsForPackage } from "../services/state/index.ts";
 import { logger } from "../lib/logger.ts";
@@ -276,7 +278,11 @@ interface PackageRouteConfig {
   };
   responseKey: string;
   validateContent?: (content: string) => { valid: boolean; errors: string[]; warnings: string[] };
+  /** Validates the secondary source file (e.g. .ts for tools). */
+  validateSource?: (source: string) => { valid: boolean; errors: string[]; warnings: string[] };
   storageFileName: (id: string) => string;
+  /** Secondary source file name (e.g. {name}.ts for tools). */
+  sourceFileName?: (id: string) => string;
   /** Hook called after a new package is created. */
   afterCreate?: (params: {
     packageId: string;
@@ -293,6 +299,8 @@ interface PackageRouteConfig {
   requireMutableForVersionOps?: boolean;
   /** If true, this type uses JSON body for create (not ZIP upload parsing). */
   jsonBodyCreate?: boolean;
+  /** If true, content is required when creating via JSON body. */
+  requireContent?: boolean;
   /** Custom GET detail handler, replaces makeGetHandler when provided. */
   getHandler?: (c: Context<AppEnv>) => Promise<Response>;
 }
@@ -303,13 +311,17 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
     responseKey: "skill",
     storageFileName: () => "SKILL.md",
+    jsonBodyCreate: true,
+    requireContent: true,
   },
   tools: {
     cfg: TOOL_CONFIG,
     parseOpts: { requiredFile: null, contentFileExt: ".ts" },
     responseKey: "tool",
-    validateContent: validateToolSource,
-    storageFileName: (id) => `${parseScopedName(id)?.name ?? id}.ts`,
+    validateSource: validateToolSource,
+    storageFileName: () => "TOOL.md",
+    sourceFileName: (id) => `${parseScopedName(id)?.name ?? id}.ts`,
+    jsonBodyCreate: true,
   },
   agents: {
     cfg: AGENT_CONFIG,
@@ -317,6 +329,7 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     responseKey: "agent",
     storageFileName: () => "prompt.md",
     jsonBodyCreate: true,
+    requireContent: true,
     requireMutableForVersionOps: true,
     getHandler: agentDetailHandler,
   },
@@ -324,7 +337,7 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     cfg: PROVIDER_CONFIG,
     parseOpts: { requiredFile: null, contentFileExt: null },
     responseKey: "provider",
-    storageFileName: () => "definition.json",
+    storageFileName: () => "PROVIDER.md",
     jsonBodyCreate: true,
   },
 };
@@ -346,15 +359,17 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
-    // Agent create uses JSON body with { manifest, content }
+    // JSON body create path: { manifest, content?, source? }
     if (rcfg.jsonBodyCreate) {
       const body = await c.req.json<{
         manifest: Record<string, unknown>;
         content?: string;
+        sourceCode?: string;
       }>();
 
       const manifest = body.manifest;
       const content = body.content ?? "";
+      const sourceCode = body.sourceCode ?? "";
 
       // Validate manifest
       const manifestResult = validateManifest(manifest);
@@ -368,8 +383,26 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       }
       const validatedManifest = manifestResult.manifest;
 
-      if (!content.trim()) {
+      if (rcfg.requireContent && !content.trim()) {
         throw invalidRequest("Content cannot be empty", "content");
+      }
+
+      if (rcfg.validateContent) {
+        const validation = rcfg.validateContent(content);
+        if (!validation.valid) {
+          throw invalidRequest(validation.errors[0] ?? "Validation failed");
+        }
+      }
+
+      if (rcfg.sourceFileName && !sourceCode.trim()) {
+        throw invalidRequest("Source is required", "sourceCode");
+      }
+
+      if (rcfg.validateSource && sourceCode) {
+        const validation = rcfg.validateSource(sourceCode);
+        if (!validation.valid) {
+          throw invalidRequest(validation.errors[0] ?? "Validation failed");
+        }
       }
 
       const packageId = validatedManifest.name;
@@ -400,14 +433,22 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         await rcfg.afterCreate({ packageId, orgId, manifest: validatedManifest });
       }
 
+      // Upload files to S3 storage
+      const normalizedFiles: Record<string, Uint8Array> = {
+        [rcfg.storageFileName(packageId)]: new TextEncoder().encode(content),
+      };
+      if (rcfg.sourceFileName && sourceCode) {
+        normalizedFiles[rcfg.sourceFileName(packageId)] = new TextEncoder().encode(sourceCode);
+      }
+      await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, packageId, normalizedFiles);
+
       // Create initial version (non-fatal)
-      const contentFileName = rcfg.storageFileName(packageId);
       await createVersionSafe({
         packageId,
         orgId,
         userId: user.id,
         manifest: validatedManifest,
-        normalizedFiles: { [contentFileName]: new TextEncoder().encode(content) },
+        normalizedFiles,
       });
 
       return c.json(
@@ -533,20 +574,27 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 
-    const hasUnpublishedChanges =
-      item.source === "local"
-        ? versionCount === 0
-          ? true // No versions yet — entire package is unpublished
-          : latestVersionDate
-            ? new Date(item.updatedAt ?? Date.now()) > latestVersionDate
-            : false
-        : false;
+    // Extract secondary source file from S3 storage (e.g. .ts for tools)
+    let sourceText: string | null = null;
+    if (rcfg.sourceFileName) {
+      const files = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
+      const sourceData = files?.[rcfg.sourceFileName(itemId)];
+      if (sourceData) {
+        sourceText = new TextDecoder().decode(sourceData);
+      }
+    }
 
     return c.json({
       [rcfg.responseKey]: {
         ...item,
+        ...(sourceText != null ? { sourceCode: sourceText } : {}),
         versionCount,
-        hasUnpublishedChanges,
+        hasUnarchivedChanges: computeHasUnpublishedChanges(
+          item.source,
+          versionCount,
+          item.updatedAt ? new Date(item.updatedAt) : null,
+          latestVersionDate,
+        ),
       },
     });
   };
@@ -570,6 +618,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const body = await c.req.json<{
       manifest?: Record<string, unknown>;
       content?: string;
+      sourceCode?: string;
       lockVersion?: number;
     }>();
 
@@ -580,6 +629,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const manifest =
       body.manifest ?? (existing as { manifest?: Record<string, unknown> }).manifest ?? {};
     const content = body.content ?? existing.content ?? "";
+    const sourceCode = body.sourceCode;
 
     // Validate manifest
     const manifestResult = validateManifest(manifest);
@@ -598,12 +648,12 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       throw invalidRequest("name cannot change", "name");
     }
 
-    // Content cannot be empty (all types)
-    if (!content.trim()) {
+    // Content required check
+    if (rcfg.requireContent && !content.trim()) {
       throw invalidRequest("Content cannot be empty", "content");
     }
 
-    // Content validation (tools)
+    // Content validation
     let warnings: string[] = [];
     if (rcfg.validateContent && content) {
       const validation = rcfg.validateContent(content);
@@ -613,7 +663,21 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       warnings = validation.warnings;
     }
 
+    // Source validation (tools)
+    if (rcfg.sourceFileName && sourceCode !== undefined) {
+      if (!sourceCode.trim()) {
+        throw invalidRequest("Source cannot be empty", "sourceCode");
+      }
+      if (rcfg.validateSource) {
+        const validation = rcfg.validateSource(sourceCode);
+        if (!validation.valid) {
+          throw invalidRequest(validation.errors[0] ?? "Validation failed");
+        }
+      }
+    }
+
     const updated = await updateOrgItem(
+      orgId,
       itemId,
       { manifest: manifest as Record<string, unknown>, content },
       body.lockVersion,
@@ -625,10 +689,14 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 
     // Update storage files (merge with existing to preserve ancillary files)
     const existingFiles = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
-    await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, {
+    const updatedFiles: Record<string, Uint8Array> = {
       ...(existingFiles ?? {}),
       [rcfg.storageFileName(itemId)]: new TextEncoder().encode(content),
-    });
+    };
+    if (rcfg.sourceFileName && sourceCode !== undefined) {
+      updatedFiles[rcfg.sourceFileName(itemId)] = new TextEncoder().encode(sourceCode);
+    }
+    await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, updatedFiles);
 
     // After-update hook (e.g. agent junction table sync)
     if (rcfg.afterUpdate) {
@@ -659,7 +727,7 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
 
     // For agents, check running runs
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId, orgId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -713,11 +781,18 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
 
     // Extract primary content file from the ZIP
     let content: string | null = null;
+    let sourceText: string | null = null;
     if (detail.content) {
       const fileName = rcfg.storageFileName(itemId);
       const fileData = detail.content[fileName];
       if (fileData) {
         content = new TextDecoder().decode(fileData);
+      }
+      if (rcfg.sourceFileName) {
+        const sourceData = detail.content[rcfg.sourceFileName(itemId)];
+        if (sourceData) {
+          sourceText = new TextDecoder().decode(sourceData);
+        }
       }
     }
 
@@ -726,6 +801,7 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
       version: detail.version,
       manifest: detail.manifest,
       content,
+      ...(sourceText != null ? { sourceCode: sourceText } : {}),
       yanked: detail.yanked,
       yankedReason: detail.yankedReason,
       integrity: detail.integrity,
@@ -744,7 +820,7 @@ function makeVersionInfoHandler(rcfg: PackageRouteConfig) {
     if (!item) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
-    const info = await getVersionInfo(itemId);
+    const info = await getVersionInfo(itemId, orgId);
     return c.json(info);
   };
 }
@@ -762,7 +838,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 
     // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId, orgId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -794,7 +870,10 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       version: versionOverride,
     });
 
-    if (!result) {
+    if ("error" in result) {
+      if (result.error === "no_changes") {
+        throw conflict("no_changes", "No changes since the last version");
+      }
       throw invalidRequest("Failed to create version (invalid or duplicate)");
     }
 
@@ -817,7 +896,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 
     // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId, orgId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -848,6 +927,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     const updated = await updateOrgItem(
+      orgId,
       itemId,
       { manifest: detail.manifest, content },
       existing.lockVersion,
@@ -865,7 +945,10 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       detail.createdAt &&
       new Date(detail.createdAt).getTime() === latestDate.getTime()
     ) {
-      await db.update(packages).set({ updatedAt: latestDate }).where(eq(packages.id, itemId));
+      await db
+        .update(packages)
+        .set({ updatedAt: latestDate })
+        .where(and(eq(packages.id, itemId), eq(packages.orgId, orgId)));
     }
 
     // Re-upload storage files from the version ZIP
@@ -892,6 +975,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 
 function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
+    const orgId = c.get("orgId");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
@@ -899,8 +983,14 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
       throw forbidden(`${label} '${itemId}' is a system package`);
     }
 
+    // Verify org ownership before deletion
+    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
+    if (!existing) {
+      throw notFound(`${label} '${itemId}' not found`);
+    }
+
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId, orgId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -968,19 +1058,19 @@ export function createPackagesRouter() {
     );
     router.delete(
       `/${path}/:scope{@[^/]+}/:name`,
-      requireOwnedPackage(),
+      requireOrgPackage(),
       deleteGuard,
       makeDeleteHandler(rcfg),
     );
     // Unscoped IDs
     router.get(`/${path}/:id`, rcfg.getHandler ?? makeGetHandler(rcfg));
     router.put(`/${path}/:id`, requireOwnedPackage(), writeGuard, makeUpdateHandler(rcfg));
-    router.delete(`/${path}/:id`, requireOwnedPackage(), deleteGuard, makeDeleteHandler(rcfg));
+    router.delete(`/${path}/:id`, requireOrgPackage(), deleteGuard, makeDeleteHandler(rcfg));
   }
 
   // --- Fork route ---
   router.post("/:scope{@[^/]+}/:name/fork", requirePermission("agents", "write"), async (c) => {
-    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const packageId = getItemId(c);
     const orgId = c.get("orgId");
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
@@ -1016,7 +1106,7 @@ export function createPackagesRouter() {
 
   // --- Provider versions (standalone — providers use their own CRUD in routes/providers.ts) ---
   router.get("/providers/:scope{@[^/]+}/:name/versions", async (c) => {
-    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const packageId = getItemId(c);
     const versions = await listPackageVersions(packageId);
     return c.json({ versions });
   });
@@ -1106,11 +1196,14 @@ export function createPackagesRouter() {
           getVersionCount(packageId),
           getLatestVersionCreatedAt(packageId),
         ]);
-        const hasUnpublishedChanges =
-          existing.source === "local" && vCount > 0 && latestDate
-            ? (existing.updatedAt ?? new Date()) > latestDate
-            : false;
-        if (hasUnpublishedChanges) {
+        if (
+          computeHasUnpublishedChanges(
+            existing.source,
+            vCount,
+            existing.updatedAt ?? null,
+            latestDate,
+          )
+        ) {
           throw conflict(
             "draft_overwrite",
             "This package has unpublished changes that will be overwritten by the import.",
@@ -1137,7 +1230,7 @@ export function createPackagesRouter() {
       await db
         .update(packages)
         .set({ draftManifest: manifest, draftContent: content, updatedAt: new Date() })
-        .where(eq(packages.id, packageId));
+        .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
     } else {
       // New package — insert
       const cfg = ROUTE_CONFIGS[packageType + "s"]?.cfg;
@@ -1252,8 +1345,19 @@ export function createPackagesRouter() {
 
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP
   router.get("/:scope{@[^/]+}/:name/:version/download", rateLimit(50), async (c) => {
-    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
     const versionQuery = c.req.param("version")!;
+
+    // Verify org ownership (or system package)
+    const [pkg] = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
+      .limit(1);
+    if (!pkg) {
+      throw notFound("Package not found");
+    }
 
     const ver = await getVersionForDownload(packageId, versionQuery);
     if (!ver) {

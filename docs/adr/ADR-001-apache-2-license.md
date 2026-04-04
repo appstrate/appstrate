@@ -17,7 +17,7 @@ Alternatives considered: MIT (no patent grant), AGPLv3 (too restrictive for ente
 
 ## Decision
 
-Use **Apache License 2.0** for all open-source components in the `appstrate/` repository, including the API, web frontend, runtime images, sidecar proxy, and the `@appstrate/core` library published on npm.
+Use **Apache License 2.0** for all open-source components in the `appstrate/` repository, including the API, web frontend, runtime images, sidecar proxy, and the `@appstrate/core` library.
 
 Proprietary components (`cloud/`, `registry/`) remain under separate private licenses and live in their own repositories.
 
@@ -41,4 +41,3 @@ A `NOTICE` file is maintained at the repository root as required by the license.
 **Neutral:**
 
 - Compatible with most other open-source licenses for dependency consumption
-- The `@appstrate/core` npm package inherits the same Apache 2.0 license

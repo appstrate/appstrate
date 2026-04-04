@@ -331,8 +331,9 @@ async function triggerScheduledRun(
     let packageVersionId: number | null;
     let proxyLabel: string | null;
     let modelLabel: string | null;
+    let modelSource: string | null;
     try {
-      ({ promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel } =
+      ({ promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel, modelSource } =
         await buildRunContext({
           runId,
           agent,
@@ -395,6 +396,7 @@ async function triggerScheduledRun(
       connectionProfileId,
       proxyLabel ?? undefined,
       modelLabel ?? undefined,
+      modelSource ?? undefined,
       undefined,
       profileIdMap,
     );
@@ -408,7 +410,16 @@ async function triggerScheduledRun(
     });
 
     // Fire-and-forget (catch to prevent unhandled rejection)
-    executeAgentInBackground(runId, orgId, agent, promptContext, agentPackage).catch((err) => {
+    executeAgentInBackground(
+      runId,
+      orgId,
+      agent,
+      promptContext,
+      agentPackage,
+      undefined,
+      undefined,
+      modelSource,
+    ).catch((err) => {
       logger.error("Unhandled error in scheduled run", {
         runId,
         error: err instanceof Error ? err.message : String(err),
