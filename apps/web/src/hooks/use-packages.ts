@@ -115,12 +115,14 @@ export {
 
 export function useAgents() {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agents", orgId],
+    queryKey: ["agents", orgId, appId],
     queryFn: async () => {
       const data = await api<{ agents: AgentListItem[] }>("/agents");
       return data.agents;
     },
+    enabled: !!orgId && !!appId,
   });
 }
 
