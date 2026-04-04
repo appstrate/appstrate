@@ -7,8 +7,10 @@ import { createEnvGetter } from "@appstrate/core/env";
 
 const envSchema = z
   .object({
-    // Database
-    DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+    // Database (optional — falls back to PGlite embedded Postgres when absent)
+    DATABASE_URL: z.string().optional(),
+    // PGlite data directory (used when DATABASE_URL is absent)
+    PGLITE_DATA_DIR: z.string().default("./data/pglite"),
     BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
     // S3 storage (optional — falls back to filesystem when S3_BUCKET is absent)
     S3_BUCKET: z.string().optional(),

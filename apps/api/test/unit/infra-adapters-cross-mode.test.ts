@@ -113,7 +113,9 @@ function queueSuite(name: string, create: () => JobQueue<{ v: string }>) {
     it("processes jobs", async () => {
       const q = create();
       const processed: string[] = [];
-      q.process(async (job: QueueJob<{ v: string }>) => processed.push(job.data.v));
+      q.process(async (job: QueueJob<{ v: string }>) => {
+        processed.push(job.data.v);
+      });
       await q.add("j1", { v: "a" });
       await q.add("j2", { v: "b" });
       await new Promise((r) => setTimeout(r, 300));

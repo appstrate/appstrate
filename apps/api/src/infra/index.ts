@@ -15,7 +15,7 @@ import { LocalRateLimiterFactory } from "./rate-limit/local-rate-limit.ts";
 import { logger } from "../lib/logger.ts";
 
 // Re-exports for convenience
-export { hasRedis, hasS3, getExecutionMode } from "./mode.ts";
+export { hasRedis, hasExternalDb, hasS3, getExecutionMode } from "./mode.ts";
 export type { PubSub } from "./pubsub/interface.ts";
 export type { KeyValueCache, CacheSetOptions } from "./cache/interface.ts";
 export type { RateLimiterFactory } from "./rate-limit/interface.ts";

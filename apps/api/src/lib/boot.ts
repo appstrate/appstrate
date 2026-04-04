@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { and, eq, lt } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
+import { db, isEmbeddedDb, getPGliteClient } from "@appstrate/db/client";
 import { oauthStates, packages, packageVersions } from "@appstrate/db/schema";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
@@ -34,8 +34,17 @@ export async function boot(): Promise<void> {
   // Attempt to load cloud module (no-op in OSS — sets _cloud to null)
   await loadCloud();
 
-  // Log infrastructure mode (storage, queue, pubsub, cache, rate-limit)
+  // Log infrastructure mode
   const env = (await import("@appstrate/env")).getEnv();
+  if (isEmbeddedDb) {
+    logger.info("Database: PGlite (embedded)", { path: env.PGLITE_DATA_DIR });
+    // Apply migrations programmatically for PGlite (no external drizzle-kit CLI)
+    await applyEmbeddedMigrations();
+  } else {
+    logger.info("Database: PostgreSQL", {
+      url: env.DATABASE_URL?.replace(/\/\/.*@/, "//***@") ?? "",
+    });
+  }
   if (env.S3_BUCKET) {
     logger.info("Storage: S3", { bucket: env.S3_BUCKET, endpoint: env.S3_ENDPOINT ?? "AWS" });
   } else {
@@ -238,4 +247,66 @@ async function loadAndSyncSystemPackages(): Promise<void> {
   );
 
   logger.info("System packages synced", { packages: synced });
+}
+
+/**
+ * Apply Drizzle migrations programmatically for PGlite (embedded mode).
+ * Uses a custom migrator that splits multi-statement SQL files into individual
+ * statements, since PGlite does not support multi-statement prepared queries.
+ */
+async function applyEmbeddedMigrations(): Promise<void> {
+  const { resolve, join } = await import("node:path");
+  const { readFileSync, existsSync } = await import("node:fs");
+  const { sql: rawSql } = await import("drizzle-orm");
+
+  const migrationsDir = resolve(import.meta.dir, "../../../../packages/db/drizzle");
+  const journalPath = join(migrationsDir, "meta/_journal.json");
+
+  if (!existsSync(journalPath)) {
+    logger.warn("No migration journal found, skipping PGlite migrations");
+    return;
+  }
+
+  // Create migrations tracking table
+  await db.execute(rawSql`
+    CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (
+      id SERIAL PRIMARY KEY,
+      hash TEXT NOT NULL,
+      created_at BIGINT DEFAULT (EXTRACT(EPOCH FROM now()) * 1000)
+    )
+  `);
+
+  // Read journal to get migration order
+  const journal = JSON.parse(readFileSync(journalPath, "utf-8")) as {
+    entries: { idx: number; tag: string }[];
+  };
+
+  // Get already-applied migrations
+  const applied = new Set(
+    (
+      (await db.execute(rawSql`SELECT hash FROM "__drizzle_migrations"`)) as {
+        rows: { hash: string }[];
+      }
+    ).rows.map((r) => r.hash),
+  );
+
+  for (const entry of journal.entries) {
+    if (applied.has(entry.tag)) continue;
+
+    const sqlFile = join(migrationsDir, `${entry.tag}.sql`);
+    if (!existsSync(sqlFile)) {
+      logger.warn("Migration file not found, skipping", { tag: entry.tag });
+      continue;
+    }
+
+    const content = readFileSync(sqlFile, "utf-8");
+    // Use PGlite's exec() which supports multi-statement SQL natively
+    const client = getPGliteClient()!;
+    await client.exec(content.replaceAll("--> statement-breakpoint", ""));
+
+    // Record migration as applied
+    await db.execute(rawSql`INSERT INTO "__drizzle_migrations" (hash) VALUES (${entry.tag})`);
+  }
+
+  logger.info("PGlite migrations applied", { count: journal.entries.length - applied.size });
 }

@@ -51,6 +51,12 @@ export async function loadCloud(): Promise<CloudModule | null> {
     return null;
   }
 
+  // Step 1b: skip cloud in embedded DB mode (PGlite) — cloud needs its own PG migrations
+  if (!process.env.DATABASE_URL) {
+    _cloud = null;
+    return null;
+  }
+
   // Step 2: dynamic import of sendMail to avoid circular dep at module load time
   // (email.ts → app-config.ts → cloud-loader.ts). Safe here: loadCloud() runs at
   // boot time, all modules are already loaded.
@@ -58,7 +64,7 @@ export async function loadCloud(): Promise<CloudModule | null> {
 
   // Step 3: module found — init must succeed or crash (misconfiguration)
   await mod.initCloud({
-    databaseUrl: process.env.DATABASE_URL!,
+    databaseUrl: process.env.DATABASE_URL ?? "",
     redisUrl: process.env.REDIS_URL ?? "",
     appUrl: process.env.APP_URL ?? "http://localhost:3000",
     sendMail,
