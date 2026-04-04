@@ -33,9 +33,14 @@ export async function boot(): Promise<void> {
   // Attempt to load cloud module (no-op in OSS — sets _cloud to null)
   await loadCloud();
 
-  // Verify S3 bucket is accessible (fail-fast if misconfigured)
+  // Verify storage backend is accessible (fail-fast if misconfigured)
   await ensureBucket();
-  logger.info("S3 bucket verified");
+  const env = (await import("@appstrate/env")).getEnv();
+  if (env.S3_BUCKET) {
+    logger.info("Storage: S3", { bucket: env.S3_BUCKET, endpoint: env.S3_ENDPOINT ?? "AWS" });
+  } else {
+    logger.info("Storage: filesystem", { path: env.FS_STORAGE_PATH });
+  }
 
   // Load system proxies from SYSTEM_PROXIES env var
   initSystemProxies();

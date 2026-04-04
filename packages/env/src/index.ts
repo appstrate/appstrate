@@ -9,10 +9,12 @@ const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
-  // S3 storage (required)
-  S3_BUCKET: z.string().min(1, "S3_BUCKET is required"),
-  S3_REGION: z.string().min(1, "S3_REGION is required"),
+  // S3 storage (optional — falls back to filesystem when S3_BUCKET is absent)
+  S3_BUCKET: z.string().optional(),
+  S3_REGION: z.string().optional(),
   S3_ENDPOINT: z.string().optional(),
+  // Filesystem storage path (used when S3_BUCKET is absent)
+  FS_STORAGE_PATH: z.string().default("./data/storage"),
 
   // Connect
   CONNECTION_ENCRYPTION_KEY: z
@@ -48,15 +50,15 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
   // Run
-  RUN_ADAPTER: z.enum(["pi"]).default("pi"),
+  RUN_ADAPTER: z.enum(["pi", "process"]).default("pi"),
   SIDECAR_POOL_SIZE: z.coerce.number().int().min(0).default(2),
 
   // Docker images (override for GHCR / custom registries)
   PI_IMAGE: z.string().default("appstrate-pi:latest"),
   SIDECAR_IMAGE: z.string().default("appstrate-sidecar:latest"),
 
-  // Redis (required — used for scheduling, rate limiting, cancel signaling, OAuth state)
-  REDIS_URL: z.string().min(1, "REDIS_URL is required"),
+  // Redis (optional — falls back to in-memory adapters when absent)
+  REDIS_URL: z.string().optional(),
 
   // Outbound proxy
   PROXY_URL: z.string().optional(),
