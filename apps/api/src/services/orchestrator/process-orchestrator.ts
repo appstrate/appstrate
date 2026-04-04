@@ -55,7 +55,7 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     this.sidecarPorts.clear();
   }
 
-  async ensureImages(): Promise<void> {
+  async ensureImages(_images: string[]): Promise<void> {
     // No-op — no images needed in process mode
   }
 
