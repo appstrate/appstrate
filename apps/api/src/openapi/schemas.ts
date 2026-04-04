@@ -368,6 +368,11 @@ export const schemas = {
         type: ["string", "null"],
         description: "Application ID (app_ prefix) that owns this run",
       },
+      metadata: {
+        type: ["object", "null"],
+        description: "Additional metadata (e.g. creditsUsed in cloud mode)",
+        additionalProperties: true,
+      },
     },
   },
   RunLog: {

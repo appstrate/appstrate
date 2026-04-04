@@ -60,6 +60,7 @@ export const runs = pgTable(
     cost: doublePrecision("cost"),
     runNumber: integer("run_number"),
     providerProfileIds: jsonb("provider_profile_ids").$type<Record<string, string>>(),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   },
   (table) => [
     index("idx_runs_package_id").on(table.packageId),

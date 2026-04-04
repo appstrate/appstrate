@@ -21,7 +21,7 @@ export interface CloudModule {
   publicPaths: string[];
   cloudHooks: {
     checkQuota(orgId: string, runningRunCount: number): Promise<void>;
-    recordUsage(orgId: string, runId: string, cost: number): Promise<void>;
+    recordUsage(orgId: string, runId: string, cost: number): Promise<Record<string, unknown>>;
     onOrgCreated(orgId: string, userEmail: string): Promise<void>;
     onOrgDeleted(orgId: string): Promise<void>;
     onBeforeSignup?(email: string): void;
