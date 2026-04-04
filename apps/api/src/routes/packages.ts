@@ -7,7 +7,7 @@ import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, and, inArray } from "drizzle-orm";
-import { packages, profiles } from "@appstrate/db/schema";
+import { packages, profiles, providerCredentials } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
@@ -33,7 +33,7 @@ import {
   PackageAlreadyExistsError,
   type PackageTypeConfig,
 } from "../services/package-items/index.ts";
-import { validateToolSource, validateManifest } from "@appstrate/core/validation";
+import { validateToolSource, validateManifest, type PackageType } from "@appstrate/core/validation";
 import { parseScopedName, SLUG_REGEX } from "@appstrate/core/naming";
 import { unzipAndNormalize } from "../services/package-storage.ts";
 import { isValidVersion } from "@appstrate/core/semver";
@@ -272,6 +272,8 @@ async function createVersionSafe(params: {
 
 interface PackageRouteConfig {
   cfg: PackageTypeConfig;
+  /** URL path segment used for routing (e.g. "skills", "providers"). */
+  path: string;
   parseOpts: {
     requiredFile: string | null;
     contentFileExt: string | null;
@@ -305,17 +307,19 @@ interface PackageRouteConfig {
   getHandler?: (c: Context<AppEnv>) => Promise<Response>;
 }
 
-const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
-  skills: {
+const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
+  skill: {
     cfg: SKILL_CONFIG,
+    path: "skills",
     parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
     responseKey: "skill",
     storageFileName: () => "SKILL.md",
     jsonBodyCreate: true,
     requireContent: true,
   },
-  tools: {
+  tool: {
     cfg: TOOL_CONFIG,
+    path: "tools",
     parseOpts: { requiredFile: null, contentFileExt: ".ts" },
     responseKey: "tool",
     validateSource: validateToolSource,
@@ -323,8 +327,9 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     sourceFileName: (id) => `${parseScopedName(id)?.name ?? id}.ts`,
     jsonBodyCreate: true,
   },
-  agents: {
+  agent: {
     cfg: AGENT_CONFIG,
+    path: "agents",
     parseOpts: { requiredFile: null, contentFileExt: null },
     responseKey: "agent",
     storageFileName: () => "prompt.md",
@@ -333,12 +338,19 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     requireMutableForVersionOps: true,
     getHandler: agentDetailHandler,
   },
-  providers: {
+  provider: {
     cfg: PROVIDER_CONFIG,
+    path: "providers",
     parseOpts: { requiredFile: null, contentFileExt: null },
     responseKey: "provider",
     storageFileName: () => "PROVIDER.md",
     jsonBodyCreate: true,
+    afterCreate: async ({ packageId, orgId }) => {
+      await db
+        .insert(providerCredentials)
+        .values({ providerId: packageId, orgId, credentialsEncrypted: null, enabled: true })
+        .onConflictDoNothing();
+    },
   },
 };
 
@@ -1017,7 +1029,8 @@ export function createPackagesRouter() {
   const router = new Hono<AppEnv>();
 
   // --- Package CRUD routes (skills, tools, agents, providers) ---
-  for (const [path, rcfg] of Object.entries(ROUTE_CONFIGS)) {
+  for (const rcfg of Object.values(ROUTE_CONFIGS)) {
+    const { path } = rcfg;
     // Permission resource matches the route path (e.g. "skills", "tools", "agents", "providers")
     const resource = path as import("../lib/permissions.ts").Resource;
     const writeGuard = requirePermission(resource, "write");
@@ -1233,7 +1246,7 @@ export function createPackagesRouter() {
         .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
     } else {
       // New package — insert
-      const cfg = ROUTE_CONFIGS[packageType + "s"]?.cfg;
+      const cfg = ROUTE_CONFIGS[packageType as PackageType]?.cfg;
       if (!cfg) {
         throw invalidRequest(`Unknown package type '${packageType}'`);
       }
@@ -1272,6 +1285,12 @@ export function createPackagesRouter() {
         title: "Post-Install Failed",
         detail: message,
       });
+    }
+
+    // After-create hook (e.g. auto-enable provider)
+    const rcfg = ROUTE_CONFIGS[packageType as PackageType];
+    if (rcfg?.afterCreate) {
+      await rcfg.afterCreate({ packageId, orgId, manifest: manifest as Record<string, unknown> });
     }
 
     // Force import: replace existing version content if integrity differs

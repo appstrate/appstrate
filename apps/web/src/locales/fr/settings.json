@@ -91,6 +91,8 @@
   "services.empty": "Aucun provider configuré.",
   "services.emptyHint": "Configurez des providers pour les voir ici.",
   "providers.connected": "Connecté",
+  "providers.connectSuccess": "Provider connecté avec succès.",
+  "providers.credentialsSaved": "Configuration du provider enregistrée.",
   "services.notConnected": "Non connecté",
   "services.disconnectConfirm": "Déconnecter le provider \"{{name}}\" ?",
   "packages.title": "Packages",
