@@ -120,7 +120,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   }
 
   const [lastRun, runningCount] = await Promise.all([
-    getLastRun(agent.id, null, orgId),
+    getLastRun(agent.id, null, orgId, appId),
     getRunningRunsForPackage(agent.id, orgId),
   ]);
 

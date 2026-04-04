@@ -500,6 +500,7 @@ export function createRunsRouter() {
     const result = await listPackageRuns(agent.id, orgId, {
       limit,
       offset,
+      applicationId: c.get("appId"),
       endUserId: endUser?.id,
     });
     return c.json(result);
@@ -522,7 +523,11 @@ export function createRunsRouter() {
       .min(0)
       .catch(0)
       .parse(c.req.query("offset") ?? 0);
-    const result = await listScheduleRuns(scheduleId, orgId, { limit, offset });
+    const result = await listScheduleRuns(scheduleId, orgId, {
+      limit,
+      offset,
+      applicationId: c.get("appId"),
+    });
     return c.json(result);
   });
 
@@ -532,6 +537,10 @@ export function createRunsRouter() {
     const orgId = c.get("orgId");
     const row = await getRunFull(runId, orgId);
     if (!row) {
+      throw notFound("Run not found");
+    }
+    // Application scoping
+    if (row.applicationId !== c.get("appId")) {
       throw notFound("Run not found");
     }
     // End-user scoping: end-users can only see their own runs
@@ -548,6 +557,10 @@ export function createRunsRouter() {
     const orgId = c.get("orgId");
     const exec = await getRun(runId, orgId);
     if (!exec) {
+      throw notFound("Run not found");
+    }
+    // Application scoping
+    if (exec.applicationId !== c.get("appId")) {
       throw notFound("Run not found");
     }
     // End-user scoping: end-users can only see their own run logs
@@ -567,6 +580,11 @@ export function createRunsRouter() {
 
     const run = await getRun(runId, orgId);
     if (!run) {
+      throw notFound("Run not found");
+    }
+
+    // Application scoping
+    if (run.applicationId !== c.get("appId")) {
       throw notFound("Run not found");
     }
 

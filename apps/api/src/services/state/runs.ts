@@ -207,8 +207,16 @@ export async function getRecentRuns(
   });
 }
 
-export async function getLastRun(packageId: string, actor: Actor | null, orgId: string) {
+export async function getLastRun(
+  packageId: string,
+  actor: Actor | null,
+  orgId: string,
+  applicationId?: string,
+) {
   const conditions = [eq(runs.packageId, packageId), eq(runs.orgId, orgId)];
+  if (applicationId) {
+    conditions.push(eq(runs.applicationId, applicationId));
+  }
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
@@ -312,6 +320,7 @@ export async function getRun(id: string, orgId: string) {
       endUserId: runs.endUserId,
       orgId: runs.orgId,
       packageId: runs.packageId,
+      applicationId: runs.applicationId,
     })
     .from(runs)
     .where(and(eq(runs.id, id), eq(runs.orgId, orgId)))
@@ -379,14 +388,14 @@ export async function listPackageRuns(
 export async function listScheduleRuns(
   scheduleId: string,
   orgId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: { limit?: number; offset?: number; applicationId?: string } = {},
 ) {
-  const { limit = 20, offset = 0 } = options;
-  return listRunsWithFilter(
-    and(eq(runs.scheduleId, scheduleId), eq(runs.orgId, orgId))!,
-    limit,
-    offset,
-  );
+  const { limit = 20, offset = 0, applicationId } = options;
+  const conditions = [eq(runs.scheduleId, scheduleId), eq(runs.orgId, orgId)];
+  if (applicationId) {
+    conditions.push(eq(runs.applicationId, applicationId));
+  }
+  return listRunsWithFilter(and(...conditions)!, limit, offset);
 }
 
 export async function getRunFull(id: string, orgId: string) {

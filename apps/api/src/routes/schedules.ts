@@ -41,10 +41,10 @@ const updateScheduleSchema = z.object({
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/schedules — list all schedules (org-scoped)
+  // GET /api/schedules — list all schedules (app-scoped)
   router.get("/schedules", async (c) => {
     const orgId = c.get("orgId");
-    const schedules = await listSchedules(orgId);
+    const schedules = await listSchedules(orgId, c.get("appId"));
     return c.json(schedules);
   });
 
@@ -52,7 +52,7 @@ export function createSchedulesRouter() {
   router.get("/agents/:scope{@[^/]+}/:name/schedules", requireAgent(), async (c) => {
     const agent = c.get("agent");
     const orgId = c.get("orgId");
-    const schedules = await listPackageSchedules(agent.id, orgId);
+    const schedules = await listPackageSchedules(agent.id, orgId, c.get("appId"));
     return c.json(schedules);
   });
 
@@ -111,7 +111,7 @@ export function createSchedulesRouter() {
     const id = c.req.param("id");
     const orgId = c.get("orgId");
     const schedule = await getSchedule(id);
-    if (!schedule || schedule.orgId !== orgId) {
+    if (!schedule || schedule.orgId !== orgId || schedule.applicationId !== c.get("appId")) {
       throw notFound(`Schedule '${id}' not found`);
     }
     return c.json(schedule);
@@ -122,7 +122,7 @@ export function createSchedulesRouter() {
     const id = c.req.param("id")!;
     const orgId = c.get("orgId");
     const existing = await getSchedule(id);
-    if (!existing || existing.orgId !== orgId) {
+    if (!existing || existing.orgId !== orgId || existing.applicationId !== c.get("appId")) {
       throw notFound(`Schedule '${id}' not found`);
     }
 
@@ -152,7 +152,7 @@ export function createSchedulesRouter() {
     const id = c.req.param("id")!;
     const orgId = c.get("orgId");
     const existing = await getSchedule(id);
-    if (!existing || existing.orgId !== orgId) {
+    if (!existing || existing.orgId !== orgId || existing.applicationId !== c.get("appId")) {
       throw notFound(`Schedule '${id}' not found`);
     }
     await deleteSchedule(id);
