@@ -117,6 +117,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/my-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -138,6 +139,7 @@ describe("Runs API", () => {
       await seedRun({
         packageId: "@otherorg/secret-agent",
         orgId: otherCtx.orgId,
+        applicationId: otherCtx.defaultAppId,
         userId: otherCtx.user.id,
         status: "success",
       });
@@ -164,6 +166,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/detail-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -192,6 +195,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@otherorg/other-agent",
         orgId: otherCtx.orgId,
+        applicationId: otherCtx.defaultAppId,
         userId: otherCtx.user.id,
         status: "success",
       });
@@ -217,6 +221,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/log-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -248,6 +253,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/nolog-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "pending",
       });
@@ -268,6 +274,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@otherorg/log-agent",
         orgId: otherCtx.orgId,
+        applicationId: otherCtx.defaultAppId,
         userId: otherCtx.user.id,
         status: "success",
       });
@@ -293,6 +300,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/cancel-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -312,6 +320,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/cancel-pending",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "pending",
       });
@@ -331,6 +340,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/done-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -358,6 +368,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@otherorg/cancel-agent",
         orgId: otherCtx.orgId,
+        applicationId: otherCtx.defaultAppId,
         userId: otherCtx.user.id,
         status: "running",
       });
@@ -386,12 +397,14 @@ describe("Runs API", () => {
       await seedRun({
         packageId: "@runorg/del-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@runorg/del-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "failed",
       });
@@ -411,6 +424,7 @@ describe("Runs API", () => {
       await seedRun({
         packageId: "@runorg/running-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "running",
       });

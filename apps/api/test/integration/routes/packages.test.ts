@@ -654,7 +654,7 @@ describe("Packages API", () => {
 
       const res = await app.request("/api/packages/import", {
         method: "POST",
-        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+        headers: authHeaders(ctx),
         body: formData,
       });
 
@@ -667,7 +667,7 @@ describe("Packages API", () => {
 
       const res = await app.request("/api/packages/import", {
         method: "POST",
-        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+        headers: authHeaders(ctx),
         body: formData,
       });
 
@@ -681,7 +681,7 @@ describe("Packages API", () => {
 
       const res = await app.request("/api/packages/import", {
         method: "POST",
-        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+        headers: authHeaders(ctx),
         body: formData,
       });
 
@@ -735,10 +735,7 @@ describe("Packages API", () => {
 
       // User from isolatedorg should only see their own agents
       const res2 = await app.request("/api/packages/agents", {
-        headers: {
-          Cookie: otherCtx.cookie,
-          "X-Org-Id": otherCtx.orgId,
-        },
+        headers: authHeaders(otherCtx),
       });
       expect(res2.status).toBe(200);
       const body2 = (await res2.json()) as any;

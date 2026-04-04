@@ -225,7 +225,6 @@ async function loadAndSyncSystemPackages(): Promise<void> {
     await createVersionAndUpload({
       packageId: id,
       version,
-      orgId: null,
       createdBy: null,
       zipBuffer,
       manifest: manifest as unknown as Record<string, unknown>,

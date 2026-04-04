@@ -10,11 +10,20 @@ import { toISO } from "../../lib/date-helpers.ts";
 
 // --- Runs ---
 
+async function nextRunNumber(packageId: string, orgId: string): Promise<number> {
+  const [maxRow] = await db
+    .select({ maxNum: max(runs.runNumber) })
+    .from(runs)
+    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)));
+  return (maxRow?.maxNum ?? 0) + 1;
+}
+
 export async function createRun(
   id: string,
   packageId: string,
   actor: Actor | null,
   orgId: string,
+  applicationId: string,
   input: Record<string, unknown> | null,
   scheduleId?: string,
   packageVersionId?: number,
@@ -22,14 +31,9 @@ export async function createRun(
   proxyLabel?: string,
   modelLabel?: string,
   modelSource?: string,
-  applicationId?: string | null,
   providerProfileIds?: Record<string, string>,
 ): Promise<void> {
-  const [maxRow] = await db
-    .select({ maxNum: max(runs.runNumber) })
-    .from(runs)
-    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)));
-  const runNumber = (maxRow?.maxNum ?? 0) + 1;
+  const runNumber = await nextRunNumber(packageId, orgId);
 
   await db.insert(runs).values({
     id,
@@ -60,15 +64,12 @@ export async function createFailedRun(
   packageId: string,
   actor: Actor | null,
   orgId: string,
+  applicationId: string,
   error: string,
   scheduleId?: string,
   connectionProfileId?: string,
 ): Promise<void> {
-  const [maxRow] = await db
-    .select({ maxNum: max(runs.runNumber) })
-    .from(runs)
-    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)));
-  const runNumber = (maxRow?.maxNum ?? 0) + 1;
+  const runNumber = await nextRunNumber(packageId, orgId);
   const now = new Date();
 
   await db.insert(runs).values({
@@ -76,6 +77,7 @@ export async function createFailedRun(
     packageId,
     ...(actor ? actorInsert(actor) : { userId: null, endUserId: null }),
     orgId,
+    applicationId,
     status: "failed",
     input: null,
     error,
@@ -205,8 +207,17 @@ export async function getRecentRuns(
   });
 }
 
-export async function getLastRun(packageId: string, actor: Actor | null, orgId: string) {
-  const conditions = [eq(runs.packageId, packageId), eq(runs.orgId, orgId)];
+export async function getLastRun(
+  packageId: string,
+  actor: Actor | null,
+  orgId: string,
+  applicationId: string,
+) {
+  const conditions = [
+    eq(runs.packageId, packageId),
+    eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
+  ];
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
@@ -310,6 +321,7 @@ export async function getRun(id: string, orgId: string) {
       endUserId: runs.endUserId,
       orgId: runs.orgId,
       packageId: runs.packageId,
+      applicationId: runs.applicationId,
     })
     .from(runs)
     .where(and(eq(runs.id, id), eq(runs.orgId, orgId)))
@@ -359,15 +371,16 @@ export async function listPackageRuns(
   options: {
     limit?: number;
     offset?: number;
-    applicationId?: string | null;
+    applicationId: string;
     endUserId?: string | null;
-  } = {},
+  },
 ) {
   const { limit = 50, offset = 0, applicationId, endUserId } = options;
-  const conditions = [eq(runs.packageId, packageId), eq(runs.orgId, orgId)];
-  if (applicationId) {
-    conditions.push(eq(runs.applicationId, applicationId));
-  }
+  const conditions = [
+    eq(runs.packageId, packageId),
+    eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
+  ];
   if (endUserId) {
     conditions.push(eq(runs.endUserId, endUserId));
   }
@@ -377,11 +390,15 @@ export async function listPackageRuns(
 export async function listScheduleRuns(
   scheduleId: string,
   orgId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: { limit?: number; offset?: number; applicationId: string },
 ) {
-  const { limit = 20, offset = 0 } = options;
+  const { limit = 20, offset = 0, applicationId } = options;
   return listRunsWithFilter(
-    and(eq(runs.scheduleId, scheduleId), eq(runs.orgId, orgId))!,
+    and(
+      eq(runs.scheduleId, scheduleId),
+      eq(runs.orgId, orgId),
+      eq(runs.applicationId, applicationId),
+    )!,
     limit,
     offset,
   );

@@ -417,6 +417,21 @@ export interface ApplicationInfo {
   updatedAt: string;
 }
 
+export interface InstalledPackage {
+  packageId: string;
+  config: Record<string, unknown>;
+  modelId: string | null;
+  proxyId: string | null;
+  orgProfileId: string | null;
+  versionId: number | null;
+  enabled: boolean;
+  installedAt: string;
+  updatedAt: string;
+  packageType: string;
+  packageSource: string;
+  draftManifest: Record<string, unknown> | null;
+}
+
 // --- End-User Types ---
 
 export interface EndUserInfo {
@@ -443,13 +458,12 @@ export interface EndUserListResponse {
 export interface WebhookInfo {
   id: string;
   object: "webhook";
-  scope: "organization" | "application";
-  applicationId: string | null;
+  applicationId: string;
   url: string;
   events: string[];
   packageId: string | null;
   payloadMode: "full" | "summary";
-  active: boolean;
+  enabled: boolean;
   createdAt: string;
   updatedAt: string;
 }

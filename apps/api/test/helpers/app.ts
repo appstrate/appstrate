@@ -15,6 +15,8 @@ import { auth } from "@appstrate/db/auth";
 import { validateApiKey } from "../../src/services/api-keys.ts";
 import { ensureDefaultProfile } from "../../src/services/connection-profiles.ts";
 import { requireOrgContext } from "../../src/middleware/org-context.ts";
+import { requireAppContext } from "../../src/middleware/app-context.ts";
+import { requiresAppContext } from "../../src/lib/app-scoped-routes.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { isEndUserInApp } from "../../src/services/end-users.ts";
@@ -128,7 +130,7 @@ export function getTestApp(): Hono<AppEnv> {
       c.set("permissions", resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole));
       c.set("authMethod", "api_key");
       c.set("apiKeyId", keyInfo.keyId);
-      c.set("applicationId", keyInfo.applicationId);
+      c.set("apiKeyApplicationId", keyInfo.applicationId);
 
       // Appstrate-User header
       const targetEndUserId = c.req.header("Appstrate-User");
@@ -206,6 +208,14 @@ export function getTestApp(): Hono<AppEnv> {
       c.set("permissions", resolvePermissions(orgRole));
     }
     return next();
+  });
+
+  // App context middleware (shared with production)
+  app.use("*", async (c, next) => {
+    if (skipAuth(c.req.path)) return next();
+    if (!c.get("user")) return next();
+    if (!requiresAppContext(c.req.path)) return next();
+    return requireAppContext()(c, next);
   });
 
   // API versioning

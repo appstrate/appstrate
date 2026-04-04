@@ -25,7 +25,7 @@ const ALL_TABLES = [
   "package_memories",
   "package_version_dependencies",
   "package_dist_tags",
-  "package_configs",
+  "application_packages",
   "user_agent_provider_profiles",
   "org_profile_provider_bindings",
   "user_provider_connections",

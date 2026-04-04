@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Users, KeyRound, Settings, Check, Star, ChevronsUpDown } from "lucide-react";
+import { ChevronsUpDown, Check, Star, Settings, AppWindow } from "lucide-react";
 import { useApplications } from "../hooks/use-applications";
-import { useCurrentApplicationId, setCurrentApplicationId } from "../hooks/use-current-application";
-import { usePermissions } from "../hooks/use-permissions";
+import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-application";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,48 +14,44 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  SidebarGroup,
-  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
 
-export function NavApp() {
+export function AppSwitcher() {
   const { t } = useTranslation();
   const { data: applications } = useApplications();
   const currentAppId = useCurrentApplicationId();
-  const location = useLocation();
+  const { switchApp } = useAppSwitcher();
   const { isMobile } = useSidebar();
 
-  const { isAdmin } = usePermissions();
   const currentApp = applications?.find((a) => a.id === currentAppId) ?? null;
 
-  if (!currentApp || !isAdmin) return null;
+  if (!currentApp) return null;
 
-  const items = [
-    { path: "/end-users", label: t("nav.endUsers"), icon: Users },
-    { path: "/api-keys", label: t("nav.apiKeys"), icon: KeyRound },
-  ];
+  // Hide switcher when there's only one app (transparent for basic users)
+  const hasMultipleApps = (applications?.length ?? 0) > 1;
 
   return (
-    <SidebarGroup>
-      <SidebarGroupLabel className="group-data-[collapsible=icon]:hidden">
-        <span className="flex-1">{t("nav.appSection")}</span>
+    <SidebarMenu>
+      <SidebarMenuItem>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button
+            <SidebarMenuButton
+              size="sm"
               aria-label={t("switcher.appAriaLabel")}
-              className="text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-colors"
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              <span className="max-w-20 truncate">{currentApp.name}</span>
-              <ChevronsUpDown className="size-3 shrink-0 opacity-50" />
-            </button>
+              <AppWindow className="size-4" />
+              <span className="flex-1 truncate text-sm">{currentApp.name}</span>
+              {hasMultipleApps && <ChevronsUpDown className="ml-auto size-4" />}
+            </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            className="min-w-56 rounded-lg"
-            align="end"
+            className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
+            align="start"
             side={isMobile ? "bottom" : "right"}
             sideOffset={4}
           >
@@ -70,7 +65,7 @@ export function NavApp() {
                   key={app.id}
                   className="flex items-center justify-between gap-2"
                   onSelect={() => {
-                    if (!isActive) setCurrentApplicationId(app.id);
+                    if (!isActive) switchApp(app.id);
                   }}
                 >
                   <span className="flex items-center gap-1.5 truncate">
@@ -92,23 +87,7 @@ export function NavApp() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </SidebarGroupLabel>
-      <SidebarMenu>
-        {items.map((item) => (
-          <SidebarMenuItem key={item.path}>
-            <SidebarMenuButton
-              asChild
-              isActive={location.pathname.startsWith(item.path)}
-              tooltip={item.label}
-            >
-              <Link to={item.path}>
-                <item.icon />
-                <span>{item.label}</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        ))}
-      </SidebarMenu>
-    </SidebarGroup>
+      </SidebarMenuItem>
+    </SidebarMenu>
   );
 }

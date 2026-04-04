@@ -12,7 +12,7 @@ import {
   userProviderConnections,
   orgProfileProviderBindings,
   organizationMembers,
-  packageConfigs,
+  applicationPackages,
 } from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
@@ -236,10 +236,11 @@ export async function getOrgProfile(
  * or if the referenced profile was deleted.
  */
 export async function getAgentOrgProfile(
+  applicationId: string,
   orgId: string,
   packageId: string,
 ): Promise<{ id: string; name: string } | null> {
-  const { orgProfileId } = await getPackageConfig(orgId, packageId);
+  const { orgProfileId } = await getPackageConfig(applicationId, packageId);
   if (!orgProfileId) return null;
   const profile = await getOrgProfile(orgProfileId, orgId);
   return profile ? { id: orgProfileId, name: profile.name } : null;
@@ -268,12 +269,12 @@ export async function deleteOrgProfile(profileId: string, orgId: string): Promis
 
   if (!profile) throw notFound("Profile not found");
 
-  // Clear stale orgProfileId references in package_configs before deleting the profile.
+  // Clear stale orgProfileId references in application_packages before deleting the profile.
   // The FK has onDelete: "set null", but we clear explicitly as defense-in-depth.
   await db
-    .update(packageConfigs)
+    .update(applicationPackages)
     .set({ orgProfileId: null, updatedAt: new Date() })
-    .where(eq(packageConfigs.orgProfileId, profileId));
+    .where(eq(applicationPackages.orgProfileId, profileId));
 
   await db
     .delete(connectionProfiles)

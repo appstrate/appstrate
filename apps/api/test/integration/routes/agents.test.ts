@@ -22,7 +22,7 @@ describe("Agents API", () => {
   describe("GET /api/agents", () => {
     it("returns empty list when no agents exist", async () => {
       const res = await app.request("/api/agents", {
-        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+        headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
@@ -35,7 +35,7 @@ describe("Agents API", () => {
       await seedAgent({ id: "@myorg/test-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
 
       const res = await app.request("/api/agents", {
-        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+        headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
@@ -51,7 +51,7 @@ describe("Agents API", () => {
       await seedAgent({ id: "@otherorg/secret-agent", orgId: otherCtx.orgId });
 
       const res = await app.request("/api/agents", {
-        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+        headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
@@ -71,7 +71,7 @@ describe("Agents API", () => {
       await seedAgent({ id: "@myorg/detail-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
 
       const res = await app.request("/api/packages/agents/@myorg/detail-agent", {
-        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+        headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
@@ -82,7 +82,7 @@ describe("Agents API", () => {
 
     it("returns 404 for non-existent agent", async () => {
       const res = await app.request("/api/packages/agents/@myorg/nonexistent", {
-        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+        headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(404);
@@ -93,7 +93,7 @@ describe("Agents API", () => {
       await seedAgent({ id: "@otherorg2/private-agent", orgId: otherCtx.orgId });
 
       const res = await app.request("/api/packages/agents/@otherorg2/private-agent", {
-        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+        headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(404);
@@ -120,8 +120,7 @@ describe("Agents API", () => {
       const res = await app.request("/api/agents/@myorg/config-agent/config", {
         method: "PUT",
         headers: {
-          Cookie: ctx.cookie,
-          "X-Org-Id": ctx.orgId,
+          ...authHeaders(ctx),
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ key: "value" }),
@@ -140,12 +139,14 @@ describe("Agents API", () => {
       await seedRun({
         packageId: "@myorg/counted-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@myorg/counted-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -159,7 +160,7 @@ describe("Agents API", () => {
 
       // Verify running count in agent list
       const res = await app.request("/api/agents", {
-        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+        headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;

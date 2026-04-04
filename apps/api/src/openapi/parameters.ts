@@ -59,4 +59,11 @@ export const parameters = {
       "API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
     schema: { type: "string" },
   },
+  XAppId: {
+    name: "X-App-Id",
+    in: "header" as const,
+    description:
+      "Application ID. Required for app-scoped routes (agents, runs, schedules, webhooks). Not needed for API key auth (app resolved from key).",
+    schema: { type: "string" },
+  },
 } as const;

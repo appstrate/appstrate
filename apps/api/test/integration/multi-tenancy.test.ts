@@ -99,6 +99,7 @@ describe("Multi-tenancy isolation", () => {
       const run = await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
+        applicationId: orgA.defaultAppId,
         userId: orgA.user.id,
         status: "success",
       });
@@ -115,6 +116,7 @@ describe("Multi-tenancy isolation", () => {
       const run = await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
+        applicationId: orgA.defaultAppId,
         userId: orgA.user.id,
         status: "success",
       });
@@ -131,6 +133,7 @@ describe("Multi-tenancy isolation", () => {
       const run = await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
+        applicationId: orgA.defaultAppId,
         userId: orgA.user.id,
         status: "running",
       });
@@ -148,6 +151,7 @@ describe("Multi-tenancy isolation", () => {
       await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
+        applicationId: orgA.defaultAppId,
         userId: orgA.user.id,
         status: "success",
       });
@@ -167,7 +171,7 @@ describe("Multi-tenancy isolation", () => {
   describe("Package versions", () => {
     it("cannot access another org's package versions", async () => {
       await seedAgent({ id: "@org-a/agent", orgId: orgA.orgId });
-      await seedPackageVersion({ packageId: "@org-a/agent", orgId: orgA.orgId });
+      await seedPackageVersion({ packageId: "@org-a/agent" });
 
       const res = await app.request("/api/packages/agents/@org-a/agent/versions", {
         headers: authHeaders(orgB),
@@ -183,7 +187,7 @@ describe("Multi-tenancy isolation", () => {
 
     it("cannot delete another org's package version", async () => {
       await seedAgent({ id: "@org-a/agent", orgId: orgA.orgId });
-      await seedPackageVersion({ packageId: "@org-a/agent", orgId: orgA.orgId, version: "1.0.0" });
+      await seedPackageVersion({ packageId: "@org-a/agent", version: "1.0.0" });
 
       const res = await app.request("/api/packages/agents/@org-a/agent/versions/1.0.0", {
         method: "DELETE",

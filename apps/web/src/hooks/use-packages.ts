@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { api, uploadFormData, apiBlob } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
 // Profile resolution is now per-provider (server-side), no global profileId needed
 import type {
   OrgPackageItem,
@@ -36,13 +37,15 @@ type PackageDetailMap = {
 
 function usePackageList(type: PackageType) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   const cfg = PACKAGE_CONFIG[type];
   return useQuery({
-    queryKey: ["packages", cfg.path, orgId],
+    queryKey: ["packages", cfg.path, orgId, appId],
     queryFn: async () => {
       const data = await api<Record<string, OrgPackageItem[]>>(`/packages/${cfg.path}`);
       return data[cfg.listKey] as OrgPackageItem[];
     },
+    enabled: !!orgId && !!appId,
   });
 }
 
@@ -112,12 +115,14 @@ export {
 
 export function useAgents() {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agents", orgId],
+    queryKey: ["agents", orgId, appId],
     queryFn: async () => {
       const data = await api<{ agents: AgentListItem[] }>("/agents");
       return data.agents;
     },
+    enabled: !!orgId && !!appId,
   });
 }
 

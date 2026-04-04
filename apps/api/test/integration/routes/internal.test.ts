@@ -29,6 +29,7 @@ describe("Internal API", () => {
     const exec = await seedRun({
       packageId: pkgId,
       orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
       userId: ctx.user.id,
       status: "running",
     });
@@ -65,6 +66,7 @@ describe("Internal API", () => {
       const doneRun = await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -92,6 +94,7 @@ describe("Internal API", () => {
       await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
         state: { counter: 1 },
@@ -99,6 +102,7 @@ describe("Internal API", () => {
       await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
         state: { counter: 2 },
@@ -120,6 +124,7 @@ describe("Internal API", () => {
         await seedRun({
           packageId: pkgId,
           orgId: ctx.orgId,
+          applicationId: ctx.defaultAppId,
           userId: ctx.user.id,
           status: "success",
           state: { i },
@@ -172,6 +177,7 @@ describe("Internal API", () => {
       await seedRun({
         packageId: "@otherorg/test-agent",
         orgId: other.orgId,
+        applicationId: other.defaultAppId,
         userId: other.user.id,
         status: "success",
         state: { foreign: true },
@@ -190,6 +196,7 @@ describe("Internal API", () => {
       await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
         state: { key: "value" },
@@ -228,6 +235,7 @@ describe("Internal API", () => {
       const doneRun = await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "failed",
       });

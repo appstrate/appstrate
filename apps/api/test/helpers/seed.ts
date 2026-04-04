@@ -89,6 +89,7 @@ export async function seedPackageVersion(
 type RunInsert = Partial<InferInsertModel<typeof runs>> & {
   packageId: string;
   orgId: string;
+  applicationId: string;
 };
 
 export async function seedRun(overrides: RunInsert): Promise<InferSelectModel<typeof runs>> {
@@ -169,6 +170,7 @@ export async function seedEndUser(
 
 type WebhookInsert = Partial<InferInsertModel<typeof webhooks>> & {
   orgId: string;
+  applicationId: string;
 };
 
 export async function seedWebhook(
@@ -192,6 +194,7 @@ type ScheduleInsert = Partial<InferInsertModel<typeof packageSchedules>> & {
   packageId: string;
   connectionProfileId: string;
   orgId: string;
+  applicationId: string;
 };
 
 export async function seedSchedule(

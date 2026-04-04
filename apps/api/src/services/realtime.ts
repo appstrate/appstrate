@@ -14,6 +14,7 @@ type Subscriber = {
     runId?: string;
     packageId?: string;
     orgId: string;
+    applicationId?: string;
     isAdmin?: boolean;
   };
   send: (event: RealtimeEvent) => void;
@@ -46,6 +47,7 @@ export async function initRealtime(): Promise<void> {
       const data = snakeToCamel(raw);
       for (const sub of subscribers.values()) {
         if (sub.filter.orgId !== raw.org_id) continue;
+        if (sub.filter.applicationId && sub.filter.applicationId !== raw.application_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.id) continue;
         if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
         sub.send({ event: "run_update", data });
@@ -63,6 +65,7 @@ export async function initRealtime(): Promise<void> {
       const data = snakeToCamel(raw);
       for (const sub of subscribers.values()) {
         if (sub.filter.orgId !== raw.org_id) continue;
+        if (sub.filter.applicationId && sub.filter.applicationId !== raw.application_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
         if (!sub.filter.isAdmin && raw.level === "debug") continue;
         sub.send({ event: "run_log", data });

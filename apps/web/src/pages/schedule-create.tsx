@@ -37,6 +37,7 @@ export function ScheduleCreatePage() {
         title={t("schedule.titleNew")}
         emoji="📅"
         breadcrumbs={[
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("schedule.breadcrumbList"), href: "/schedules" },
           { label: t("schedule.breadcrumbNew") },
         ]}

@@ -11,15 +11,14 @@ export const webhooks = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    scope: text("scope").notNull().default("application"), // "organization" | "application"
-    applicationId: text("application_id").references(() => applications.id, {
-      onDelete: "cascade",
-    }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
     url: text("url").notNull(),
     events: text("events").array().notNull(), // ["run.completed", "run.failed"]
     packageId: text("package_id"), // null = all packages
     payloadMode: text("payload_mode").notNull().default("full"), // "full" | "summary"
-    active: boolean("active").notNull().default(true),
+    enabled: boolean("enabled").notNull().default(true),
     secret: text("secret").notNull(), // whsec_ prefix, plaintext (needed for HMAC signing)
     previousSecret: text("previous_secret"), // for rotation grace period
     previousSecretExpiresAt: timestamp("previous_secret_expires_at"),
@@ -28,9 +27,8 @@ export const webhooks = pgTable(
   },
   (table) => [
     index("idx_webhooks_org_id").on(table.orgId),
-    index("idx_webhooks_scope_org").on(table.scope, table.orgId, table.active),
     index("idx_webhooks_application_id").on(table.applicationId),
-    index("idx_webhooks_app_active").on(table.applicationId, table.active),
+    index("idx_webhooks_app_enabled").on(table.applicationId, table.enabled),
   ],
 );
 

@@ -53,6 +53,7 @@ describe("scheduler org-profile readiness", () => {
   let userId: string;
   let orgId: string;
   let orgSlug: string;
+  let defaultAppId: string;
   let userProfileId: string;
 
   beforeEach(async () => {
@@ -60,9 +61,10 @@ describe("scheduler org-profile readiness", () => {
     await flushRedis();
     const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
-    const { org } = await createTestOrg(userId, { slug: "testorg" });
+    const { org, defaultAppId: appId } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
     orgSlug = org.slug;
+    defaultAppId = appId;
 
     // Use ensureDefaultProfile to avoid racing with the fire-and-forget
     // triggered by auth middleware during createTestUser sign-up
@@ -116,12 +118,12 @@ describe("scheduler org-profile readiness", () => {
       },
     });
 
-    await createSchedule(agent.id, orgProfile.id, orgId, {
+    await createSchedule(agent.id, orgProfile.id, orgId, defaultAppId, {
       name: "Org Bound Schedule",
       cronExpression: "0 * * * *",
     });
 
-    const schedules = await listSchedules(orgId);
+    const schedules = await listSchedules(orgId, defaultAppId);
     const s = schedules.find((s) => s.name === "Org Bound Schedule")!;
 
     expect(s.profileType).toBe("org");
@@ -148,12 +150,12 @@ describe("scheduler org-profile readiness", () => {
       },
     });
 
-    await createSchedule(agent.id, orgProfile.id, orgId, {
+    await createSchedule(agent.id, orgProfile.id, orgId, defaultAppId, {
       name: "Org Unbound Schedule",
       cronExpression: "0 * * * *",
     });
 
-    const schedules = await listSchedules(orgId);
+    const schedules = await listSchedules(orgId, defaultAppId);
     const s = schedules.find((s) => s.name === "Org Unbound Schedule")!;
 
     expect(s.profileType).toBe("org");

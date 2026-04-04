@@ -3,9 +3,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import {
-  setPackageConfig,
   getPackageConfig,
-  setAgentOverride,
   getRunningRunCounts,
   getPackageMemories,
   deletePackageMemory,
@@ -13,6 +11,10 @@ import {
 } from "../services/state/index.ts";
 import { validateConfig } from "../services/schema.ts";
 import { listPackages } from "../services/agent-service.ts";
+import {
+  filterAccessiblePackages,
+  updateInstalledPackage,
+} from "../services/application-packages.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
@@ -35,15 +37,25 @@ const orgProfileIdSchema = z.object({ orgProfileId: z.uuid().nullable() });
 export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/agents — list all loaded agents
+  // GET /api/agents — list agents accessible to the current application
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
+    const appId = c.get("applicationId");
+    const appIsDefault = c.get("appIsDefault");
     const [allAgents, runningCounts] = await Promise.all([
       listPackages(orgId),
       getRunningRunCounts(orgId),
     ]);
 
-    const agentList = allAgents.map((f) => {
+    // Filter by application access (default app = all, custom app = single batch query)
+    const accessibleIds = await filterAccessiblePackages(
+      appId,
+      allAgents.map((f) => f.id),
+      appIsDefault,
+    );
+    const visibleAgents = allAgents.filter((f) => accessibleIds.has(f.id));
+
+    const agentList = visibleAgents.map((f) => {
       const parsed = parseScopedName(f.manifest.name);
       return {
         id: f.id,
@@ -87,8 +99,8 @@ export function createAgentsRouter() {
 
       const config = mergeWithDefaults(asJSONSchemaObject(schema), body);
 
-      const orgId = c.get("orgId");
-      await setPackageConfig(orgId, agent.id, config);
+      const appId = c.get("applicationId");
+      await updateInstalledPackage(appId, agent.id, { config });
 
       return c.json({
         config,
@@ -150,8 +162,8 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/proxy — get agent proxy configuration
   router.get("/:scope{@[^/]+}/:name/proxy", requireAgent(), async (c) => {
     const agent = c.get("agent");
-    const orgId = c.get("orgId");
-    const { proxyId } = await getPackageConfig(orgId, agent.id);
+    const appId = c.get("applicationId");
+    const { proxyId } = await getPackageConfig(appId, agent.id);
 
     return c.json({ proxyId, resolved: proxyId !== "none" });
   });
@@ -163,11 +175,11 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("agent");
-      const orgId = c.get("orgId");
+      const appId = c.get("applicationId");
       const body = await c.req.json();
       const data = parseBody(proxyIdSchema, body);
 
-      await setAgentOverride(orgId, agent.id, "proxyId", data.proxyId);
+      await updateInstalledPackage(appId, agent.id, { proxyId: data.proxyId });
 
       return c.json({ success: true });
     },
@@ -176,8 +188,8 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/model — get agent model configuration
   router.get("/:scope{@[^/]+}/:name/model", requireAgent(), async (c) => {
     const agent = c.get("agent");
-    const orgId = c.get("orgId");
-    const { modelId } = await getPackageConfig(orgId, agent.id);
+    const appId = c.get("applicationId");
+    const { modelId } = await getPackageConfig(appId, agent.id);
 
     return c.json({ modelId });
   });
@@ -189,11 +201,11 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("agent");
-      const orgId = c.get("orgId");
+      const appId = c.get("applicationId");
       const body = await c.req.json();
       const data = parseBody(modelIdSchema, body);
 
-      await setAgentOverride(orgId, agent.id, "modelId", data.modelId);
+      await updateInstalledPackage(appId, agent.id, { modelId: data.modelId });
 
       return c.json({ success: true });
     },
@@ -206,11 +218,11 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("agent");
-      const orgId = c.get("orgId");
+      const appId = c.get("applicationId");
       const body = await c.req.json();
       const data = parseBody(orgProfileIdSchema, body);
 
-      await setAgentOverride(orgId, agent.id, "orgProfileId", data.orgProfileId);
+      await updateInstalledPackage(appId, agent.id, { orgProfileId: data.orgProfileId });
 
       return c.json({ success: true });
     },
@@ -219,8 +231,8 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/memories — list agent memories
   router.get("/:scope{@[^/]+}/:name/memories", requireAgent(), async (c) => {
     const agent = c.get("agent");
-    const orgId = c.get("orgId");
-    const memories = await getPackageMemories(agent.id, orgId);
+    const appId = c.get("applicationId");
+    const memories = await getPackageMemories(agent.id, appId);
     return c.json({
       memories: memories.map((m) => ({
         id: m.id,
@@ -238,8 +250,8 @@ export function createAgentsRouter() {
     requirePermission("memories", "delete"),
     async (c) => {
       const agent = c.get("agent");
-      const orgId = c.get("orgId");
-      const deleted = await deleteAllPackageMemories(agent.id, orgId);
+      const appId = c.get("applicationId");
+      const deleted = await deleteAllPackageMemories(agent.id, appId);
       return c.json({ deleted });
     },
   );
@@ -251,13 +263,13 @@ export function createAgentsRouter() {
     requirePermission("memories", "delete"),
     async (c) => {
       const agent = c.get("agent");
-      const orgId = c.get("orgId");
+      const appId = c.get("applicationId");
       const result = z.coerce.number().int().min(1).safeParse(c.req.param("memoryId"));
       if (!result.success) {
         throw invalidRequest("Invalid memory ID", "memoryId");
       }
       const memoryId = result.data;
-      const deleted = await deletePackageMemory(memoryId, agent.id, orgId);
+      const deleted = await deletePackageMemory(memoryId, agent.id, appId);
       if (!deleted) {
         throw notFound("Memory not found");
       }

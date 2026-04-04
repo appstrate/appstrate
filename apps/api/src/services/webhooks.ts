@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import { eq, and, or, desc } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
@@ -23,7 +23,7 @@ import { prefixedId } from "../lib/ids.ts";
 // Constants
 // ---------------------------------------------------------------------------
 
-const webhookEventSchema = z.enum([
+export const webhookEventSchema = z.enum([
   "run.started",
   "run.completed",
   "run.failed",
@@ -32,8 +32,6 @@ const webhookEventSchema = z.enum([
 ]);
 
 type WebhookEventType = z.infer<typeof webhookEventSchema>;
-
-const webhookEventsSchema = z.array(webhookEventSchema).min(1);
 
 /** Delays per attempt (attempt 1 = immediate, attempt 2 = 30s, etc.) */
 const RETRY_DELAYS_MS = [30_000, 300_000, 1_800_000, 3_600_000, 7_200_000, 10_800_000, 14_400_000];
@@ -66,26 +64,24 @@ function generateSecret(): string {
 
 function toWebhookResponse(row: {
   id: string;
-  scope: string;
-  applicationId: string | null;
+  applicationId: string;
   url: string;
   events: string[];
   packageId: string | null;
   payloadMode: string;
-  active: boolean;
+  enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }): WebhookInfo {
   return {
     id: row.id,
     object: "webhook",
-    scope: row.scope as "organization" | "application",
     applicationId: row.applicationId,
     url: row.url,
     events: row.events,
     packageId: row.packageId,
     payloadMode: row.payloadMode as "summary" | "full",
-    active: row.active,
+    enabled: row.enabled,
     createdAt: toISORequired(row.createdAt),
     updatedAt: toISORequired(row.updatedAt),
   };
@@ -113,19 +109,6 @@ function validateWebhookUrl(url: string): void {
   if (isBlockedUrl(url)) {
     throw invalidRequest("URL resolves to a private or reserved network address", "url");
   }
-}
-
-export function validateEvents(events: unknown): string[] {
-  if (!Array.isArray(events) || events.length === 0) {
-    throw invalidRequest("events must be a non-empty array", "events");
-  }
-  const result = webhookEventsSchema.safeParse(events);
-  if (!result.success) {
-    // Find the first invalid value for a clear error message
-    const invalid = events.find((e) => !webhookEventSchema.safeParse(e).success);
-    throw invalidRequest(`Invalid event type: '${invalid}'`, "events");
-  }
-  return result.data;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,14 +145,13 @@ async function buildSignedHeaders(
 
 export async function createWebhook(
   orgId: string,
+  applicationId: string,
   params: {
-    scope: "organization" | "application";
-    applicationId?: string | null;
     url: string;
     events: string[];
     packageId?: string | null;
     payloadMode?: string;
-    active?: boolean;
+    enabled?: boolean;
   },
 ): Promise<WebhookCreateResponse> {
   // Check limit
@@ -187,7 +169,6 @@ export async function createWebhook(
   }
 
   validateWebhookUrl(params.url);
-  const validatedEvents = validateEvents(params.events);
 
   const id = prefixedId("wh");
   const secret = generateSecret();
@@ -197,13 +178,12 @@ export async function createWebhook(
     .values({
       id,
       orgId,
-      scope: params.scope,
-      applicationId: params.scope === "application" ? (params.applicationId ?? null) : null,
+      applicationId,
       url: params.url,
-      events: validatedEvents,
+      events: params.events,
       packageId: params.packageId ?? null,
       payloadMode: params.payloadMode ?? "full",
-      active: params.active ?? true,
+      enabled: params.enabled ?? true,
       secret,
     })
     .returning();
@@ -211,33 +191,21 @@ export async function createWebhook(
   return { ...toWebhookResponse(created!), secret };
 }
 
-export async function listWebhooks(
-  orgId: string,
-  filters?: { applicationId?: string; scope?: string },
-): Promise<WebhookInfo[]> {
-  const conditions = [eq(webhooks.orgId, orgId)];
-  if (filters?.scope) {
-    conditions.push(eq(webhooks.scope, filters.scope));
-  }
-  if (filters?.applicationId) {
-    conditions.push(eq(webhooks.applicationId, filters.applicationId));
-  }
-
+export async function listWebhooks(orgId: string, applicationId: string): Promise<WebhookInfo[]> {
   const rows = await db
     .select({
       id: webhooks.id,
-      scope: webhooks.scope,
       applicationId: webhooks.applicationId,
       url: webhooks.url,
       events: webhooks.events,
       packageId: webhooks.packageId,
       payloadMode: webhooks.payloadMode,
-      active: webhooks.active,
+      enabled: webhooks.enabled,
       createdAt: webhooks.createdAt,
       updatedAt: webhooks.updatedAt,
     })
     .from(webhooks)
-    .where(and(...conditions))
+    .where(and(eq(webhooks.orgId, orgId), eq(webhooks.applicationId, applicationId)))
     .orderBy(desc(webhooks.createdAt));
 
   return rows.map(toWebhookResponse);
@@ -247,13 +215,12 @@ export async function getWebhook(orgId: string, webhookId: string): Promise<Webh
   const [row] = await db
     .select({
       id: webhooks.id,
-      scope: webhooks.scope,
       applicationId: webhooks.applicationId,
       url: webhooks.url,
       events: webhooks.events,
       packageId: webhooks.packageId,
       payloadMode: webhooks.payloadMode,
-      active: webhooks.active,
+      enabled: webhooks.enabled,
       createdAt: webhooks.createdAt,
       updatedAt: webhooks.updatedAt,
     })
@@ -273,13 +240,12 @@ export async function updateWebhook(
     events?: string[];
     packageId?: string | null;
     payloadMode?: string;
-    active?: boolean;
+    enabled?: boolean;
   },
 ): Promise<WebhookInfo> {
   await getWebhook(orgId, webhookId);
 
   if (params.url) validateWebhookUrl(params.url);
-  if (params.events) validateEvents(params.events);
 
   const updates = buildUpdateSet(params);
 
@@ -424,24 +390,14 @@ async function getDeliveryQueue(): Promise<JobQueue<DeliveryJobData>> {
  * Dispatch webhook events for a run status change.
  * Called from the run pipeline after status transitions.
  *
- * Matches webhooks in two scopes:
- * - "organization": fires for ALL runs in the org (dashboard + API)
- * - "application": fires only for runs via a specific application's API key
+ * All webhooks are application-scoped — fires only for runs in the same application.
  */
 export async function dispatchWebhookEvents(
   orgId: string,
   eventType: WebhookEventType,
   run: Record<string, unknown>,
-  applicationId?: string | null,
+  applicationId: string,
 ): Promise<void> {
-  // Build OR condition: org-scoped webhooks always match; app-scoped only if applicationId present
-  const scopeConditions = [and(eq(webhooks.scope, "organization"))];
-  if (applicationId) {
-    scopeConditions.push(
-      and(eq(webhooks.scope, "application"), eq(webhooks.applicationId, applicationId)),
-    );
-  }
-
   const rows = await db
     .select({
       id: webhooks.id,
@@ -450,7 +406,13 @@ export async function dispatchWebhookEvents(
       payloadMode: webhooks.payloadMode,
     })
     .from(webhooks)
-    .where(and(eq(webhooks.orgId, orgId), eq(webhooks.active, true), or(...scopeConditions)));
+    .where(
+      and(
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+        eq(webhooks.enabled, true),
+      ),
+    );
 
   const queue = await getDeliveryQueue();
 
@@ -608,11 +570,11 @@ export async function shutdownWebhookWorker(): Promise<void> {
  */
 export function dispatchRunWebhook(
   orgId: string,
+  applicationId: string,
   status: string,
   runId: string,
   packageId: string,
   extra?: Record<string, unknown>,
-  applicationId?: string | null,
 ): void {
   const eventType = `run.${status}` as WebhookEventType;
   dispatchWebhookEvents(

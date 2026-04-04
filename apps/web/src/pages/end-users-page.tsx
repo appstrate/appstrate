@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useEndUsers, type EndUserInfo } from "../hooks/use-end-users";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
-import { AppBreadcrumbSwitcher } from "../components/app-breadcrumb-switcher";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
@@ -55,8 +54,7 @@ export function EndUsersPage() {
         title={t("endUsers.pageTitle")}
         emoji="👥"
         breadcrumbs={[
-          { label: t("nav.appSection", { ns: "common" }), href: "/applications" },
-          { label: "", node: <AppBreadcrumbSwitcher /> },
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("endUsers.pageTitle") },
         ]}
         actions={

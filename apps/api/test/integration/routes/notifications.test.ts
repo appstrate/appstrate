@@ -33,6 +33,7 @@ describe("Notifications API", () => {
       const run = await seedRun({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
         notifiedAt: new Date(),
@@ -77,6 +78,7 @@ describe("Notifications API", () => {
       await seedRun({
         packageId: "@notiforg/silent-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
         // notifiedAt is null by default — should not be counted
@@ -173,6 +175,7 @@ describe("Notifications API", () => {
       const run = await seedRun({
         packageId: "@notiforg/no-notif",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -231,6 +234,7 @@ describe("Notifications API", () => {
       await seedRun({
         packageId: "@notiforg/already-read",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
         notifiedAt: new Date(),
@@ -275,12 +279,14 @@ describe("Notifications API", () => {
       await seedRun({
         packageId: "@notiforg/list-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@notiforg/list-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "failed",
       });
@@ -311,12 +317,14 @@ describe("Notifications API", () => {
       await seedRun({
         packageId: "@notiforg/shared-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@notiforg/shared-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: otherUser.id,
         status: "success",
       });
@@ -346,12 +354,14 @@ describe("Notifications API", () => {
       await seedRun({
         packageId: "@notiforg/filter-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@notiforg/filter-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: otherUser.id,
         status: "success",
       });
@@ -380,6 +390,7 @@ describe("Notifications API", () => {
         await seedRun({
           packageId: "@notiforg/limit-agent",
           orgId: ctx.orgId,
+          applicationId: ctx.defaultAppId,
           userId: ctx.user.id,
           status: "success",
         });
@@ -408,6 +419,7 @@ describe("Notifications API", () => {
         await seedRun({
           packageId: "@notiforg/offset-agent",
           orgId: ctx.orgId,
+          applicationId: ctx.defaultAppId,
           userId: ctx.user.id,
           status: "success",
         });
@@ -436,6 +448,7 @@ describe("Notifications API", () => {
       await seedRun({
         packageId: "@otherotherorg/secret-agent",
         orgId: otherCtx.orgId,
+        applicationId: otherCtx.defaultAppId,
         userId: otherCtx.user.id,
         status: "success",
       });

@@ -58,6 +58,7 @@ export function ScheduleEditPage() {
         title={t("schedule.titleEdit")}
         emoji="📅"
         breadcrumbs={[
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("schedule.breadcrumbList"), href: "/schedules" },
           { label: scheduleName, href: `/schedules/${id}` },
           { label: t("schedule.breadcrumbEdit") },

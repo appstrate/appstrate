@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getCurrentOrgId } from "./hooks/use-org";
+import { getCurrentApplicationId } from "./stores/app-store";
 
 const API_BASE = "/api";
 
@@ -36,6 +37,8 @@ function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   const orgId = getCurrentOrgId();
   if (orgId) headers["X-Org-Id"] = orgId;
+  const appId = getCurrentApplicationId();
+  if (appId) headers["X-App-Id"] = appId;
   return headers;
 }
 

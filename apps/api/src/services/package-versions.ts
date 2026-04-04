@@ -39,7 +39,6 @@ interface CreateVersionParams {
   integrity: string;
   artifactSize: number;
   manifest: Record<string, unknown>;
-  orgId: string | null;
   createdBy: string | null;
 }
 
@@ -48,7 +47,7 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
   id: number;
   version: string;
 } | null> {
-  const { packageId, version, integrity, artifactSize, manifest, orgId, createdBy } = params;
+  const { packageId, version, integrity, artifactSize, manifest, createdBy } = params;
 
   if (!isValidVersion(version)) {
     logger.error("Invalid semver version", { packageId, version });
@@ -101,7 +100,7 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
 
       const [row] = await tx
         .insert(packageVersions)
-        .values({ packageId, version, integrity, artifactSize, manifest, orgId, createdBy })
+        .values({ packageId, version, integrity, artifactSize, manifest, createdBy })
         .returning({ id: packageVersions.id, version: packageVersions.version });
 
       // Auto-manage "latest" dist-tag
@@ -606,7 +605,6 @@ export async function createVersionFromDraft(params: {
   const result = await createVersionAndUpload({
     packageId,
     version,
-    orgId,
     createdBy: userId,
     zipBuffer,
     manifest: finalManifest,
@@ -661,12 +659,11 @@ export async function replaceVersionContent(params: {
 export async function createVersionAndUpload(params: {
   packageId: string;
   version: string;
-  orgId: string | null;
   createdBy: string | null;
   zipBuffer: Buffer;
   manifest: Record<string, unknown>;
 }): Promise<{ id: number; version: string } | null> {
-  const { packageId, version, orgId, createdBy, zipBuffer, manifest } = params;
+  const { packageId, version, createdBy, zipBuffer, manifest } = params;
 
   const integrity = computeIntegrity(new Uint8Array(zipBuffer));
   const artifactSize = zipBuffer.byteLength;
@@ -681,7 +678,6 @@ export async function createVersionAndUpload(params: {
       integrity,
       artifactSize,
       manifest,
-      orgId,
       createdBy,
     });
 

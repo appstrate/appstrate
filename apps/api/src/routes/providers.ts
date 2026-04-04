@@ -315,7 +315,6 @@ export function createProvidersRouter() {
         await createVersionAndUpload({
           packageId: data.id,
           version: versionStr,
-          orgId,
           createdBy: c.get("user").id,
           zipBuffer,
           manifest,

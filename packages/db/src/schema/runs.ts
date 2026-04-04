@@ -32,9 +32,9 @@ export const runs = pgTable(
     endUserId: text("end_user_id").references(() => endUsers.id, {
       onDelete: "set null",
     }),
-    applicationId: text("application_id").references(() => applications.id, {
-      onDelete: "set null",
-    }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -109,6 +109,9 @@ export const packageMemories = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
     content: text("content").notNull(),
     runId: text("run_id").references(() => runs.id, {
       onDelete: "set null",
@@ -116,8 +119,9 @@ export const packageMemories = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
-    index("idx_package_memories_package_org").on(table.packageId, table.orgId),
+    index("idx_package_memories_package_app").on(table.packageId, table.applicationId),
     index("idx_package_memories_org_id").on(table.orgId),
+    index("idx_package_memories_app_id").on(table.applicationId),
   ],
 );
 
@@ -134,6 +138,9 @@ export const packageSchedules = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
     name: text("name"),
     enabled: boolean("enabled").default(true),
     cronExpression: text("cron_expression").notNull(),
@@ -148,5 +155,6 @@ export const packageSchedules = pgTable(
     index("idx_schedules_package_id").on(table.packageId),
     index("idx_schedules_connection_profile_id").on(table.connectionProfileId),
     index("idx_package_schedules_org_id").on(table.orgId),
+    index("idx_package_schedules_app_id").on(table.applicationId),
   ],
 );

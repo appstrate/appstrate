@@ -2,13 +2,13 @@
 
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packageConfigs } from "@appstrate/db/schema";
+import { applicationPackages } from "@appstrate/db/schema";
 import { asRecord } from "../../lib/safe-json.ts";
 
-// --- Package Config (per-org) ---
+// --- Package Config (per-app) ---
 
 export async function getPackageConfig(
-  orgId: string,
+  applicationId: string,
   packageId: string,
 ): Promise<{
   config: Record<string, unknown>;
@@ -18,13 +18,18 @@ export async function getPackageConfig(
 }> {
   const [row] = await db
     .select({
-      config: packageConfigs.config,
-      modelId: packageConfigs.modelId,
-      proxyId: packageConfigs.proxyId,
-      orgProfileId: packageConfigs.orgProfileId,
+      config: applicationPackages.config,
+      modelId: applicationPackages.modelId,
+      proxyId: applicationPackages.proxyId,
+      orgProfileId: applicationPackages.orgProfileId,
     })
-    .from(packageConfigs)
-    .where(and(eq(packageConfigs.orgId, orgId), eq(packageConfigs.packageId, packageId)))
+    .from(applicationPackages)
+    .where(
+      and(
+        eq(applicationPackages.applicationId, applicationId),
+        eq(applicationPackages.packageId, packageId),
+      ),
+    )
     .limit(1);
   return {
     config: asRecord(row?.config),
@@ -32,41 +37,4 @@ export async function getPackageConfig(
     proxyId: row?.proxyId ?? null,
     orgProfileId: row?.orgProfileId ?? null,
   };
-}
-
-export async function setPackageConfig(
-  orgId: string,
-  packageId: string,
-  config: Record<string, unknown>,
-): Promise<void> {
-  await db
-    .insert(packageConfigs)
-    .values({
-      orgId,
-      packageId,
-      config,
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: [packageConfigs.orgId, packageConfigs.packageId],
-      set: {
-        config,
-        updatedAt: new Date(),
-      },
-    });
-}
-
-export async function setAgentOverride(
-  orgId: string,
-  packageId: string,
-  field: "modelId" | "proxyId" | "orgProfileId",
-  value: string | null,
-): Promise<void> {
-  await db
-    .insert(packageConfigs)
-    .values({ orgId, packageId, config: {}, [field]: value, updatedAt: new Date() })
-    .onConflictDoUpdate({
-      target: [packageConfigs.orgId, packageConfigs.packageId],
-      set: { [field]: value, updatedAt: new Date() },
-    });
 }

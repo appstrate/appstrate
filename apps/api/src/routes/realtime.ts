@@ -5,7 +5,7 @@ import { streamSSE } from "hono/streaming";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { auth } from "@appstrate/db/auth";
-import { organizationMembers } from "@appstrate/db/schema";
+import { organizationMembers, applications } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
 import type { RealtimeEvent } from "../services/realtime.ts";
 import { unauthorized } from "../lib/errors.ts";
@@ -28,6 +28,7 @@ interface SSEAuthResult {
   userId: string;
   orgId: string;
   role: string;
+  applicationId?: string;
 }
 
 /**
@@ -51,7 +52,12 @@ async function validateSSEAuth(c: {
     const keyInfo = await validateApiKey(token);
     if (!keyInfo) return null;
 
-    return { userId: keyInfo.userId, orgId: keyInfo.orgId, role: "admin" };
+    return {
+      userId: keyInfo.userId,
+      orgId: keyInfo.orgId,
+      role: "admin",
+      applicationId: keyInfo.applicationId,
+    };
   }
 
   // 2. Fallback: cookie session
@@ -72,14 +78,32 @@ async function validateSSEAuth(c: {
 
   if (!rows[0]) return null;
 
-  return { userId: session.user.id, orgId, role: rows[0].role };
+  const applicationId = c.req.query("appId");
+
+  // Validate application belongs to org (if provided)
+  if (applicationId) {
+    const [app] = await db
+      .select({ id: applications.id })
+      .from(applications)
+      .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
+      .limit(1);
+    if (!app) return null;
+  }
+
+  return { userId: session.user.id, orgId, role: rows[0].role, applicationId };
 }
 
 /** Open an SSE stream with a subscriber filter, verbose toggle, and ping keep-alive. */
 function openRealtimeStream(
   c: Parameters<typeof streamSSE>[0],
   subId: string,
-  filter: { runId?: string; packageId?: string; orgId: string; isAdmin: boolean },
+  filter: {
+    runId?: string;
+    packageId?: string;
+    orgId: string;
+    applicationId?: string;
+    isAdmin: boolean;
+  },
   verbose: boolean,
 ) {
   return streamSSE(c, async (stream) => {
@@ -154,6 +178,7 @@ export function createRealtimeRouter() {
       {
         runId,
         orgId: validated.orgId,
+        applicationId: validated.applicationId,
         isAdmin: true,
       },
       verbose,
@@ -175,6 +200,7 @@ export function createRealtimeRouter() {
       {
         packageId,
         orgId: validated.orgId,
+        applicationId: validated.applicationId,
         isAdmin: true,
       },
       verbose,
@@ -194,6 +220,7 @@ export function createRealtimeRouter() {
       subId,
       {
         orgId: validated.orgId,
+        applicationId: validated.applicationId,
         isAdmin: true,
       },
       verbose,
