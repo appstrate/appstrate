@@ -21,6 +21,7 @@ export async function createRun(
   connectionProfileId?: string,
   proxyLabel?: string,
   modelLabel?: string,
+  modelSource?: string,
   applicationId?: string | null,
   providerProfileIds?: Record<string, string>,
 ): Promise<void> {
@@ -43,6 +44,7 @@ export async function createRun(
     packageVersionId,
     proxyLabel,
     modelLabel,
+    modelSource,
     applicationId,
     providerProfileIds,
     runNumber,
