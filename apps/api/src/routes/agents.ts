@@ -13,6 +13,7 @@ import {
 } from "../services/state/index.ts";
 import { validateConfig } from "../services/schema.ts";
 import { listPackages } from "../services/agent-service.ts";
+import { hasPackageAccess } from "../services/application-packages.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
@@ -35,15 +36,22 @@ const orgProfileIdSchema = z.object({ orgProfileId: z.uuid().nullable() });
 export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/agents — list all loaded agents
+  // GET /api/agents — list agents accessible to the current application
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
+    const appId = c.get("appId");
     const [allAgents, runningCounts] = await Promise.all([
       listPackages(orgId),
       getRunningRunCounts(orgId),
     ]);
 
-    const agentList = allAgents.map((f) => {
+    // Filter by application access (default app = all, custom app = explicit bindings)
+    const accessChecks = await Promise.all(
+      allAgents.map(async (f) => ({ agent: f, allowed: await hasPackageAccess(appId, f.id) })),
+    );
+    const visibleAgents = accessChecks.filter((r) => r.allowed).map((r) => r.agent);
+
+    const agentList = visibleAgents.map((f) => {
       const parsed = parseScopedName(f.manifest.name);
       return {
         id: f.id,

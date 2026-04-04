@@ -6,17 +6,29 @@ import { isOwnedByOrg } from "@appstrate/core/naming";
 import { getPackage } from "../services/agent-service.ts";
 import { getPackageById } from "../services/package-items/crud.ts";
 import { getRunningRunsForPackage } from "../services/state/index.ts";
+import { hasPackageAccess } from "../services/application-packages.ts";
 import { ApiError, forbidden, notFound, conflict, invalidRequest } from "../lib/errors.ts";
 
-/** Middleware: load an agent by route param and set it on context, or 404. */
+/** Middleware: load an agent by route param and set it on context, or 404.
+ *  Also checks that the current application has access to the package. */
 export function requireAgent() {
   return async (c: Context<AppEnv>, next: Next) => {
     const scope = c.req.param("scope");
     const name = c.req.param("name");
     const packageId = `${scope}/${name}`;
     const orgId = c.get("orgId");
+    const appId = c.get("appId");
     const agent = await getPackage(packageId, orgId);
     if (!agent) {
+      throw new ApiError({
+        status: 404,
+        code: "agent_not_found",
+        title: "Agent Not Found",
+        detail: `Agent '${packageId}' not found`,
+      });
+    }
+    // Check application-level access (default app = all, custom app = explicit binding)
+    if (appId && !(await hasPackageAccess(appId, packageId))) {
       throw new ApiError({
         status: 404,
         code: "agent_not_found",
