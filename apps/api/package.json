@@ -23,7 +23,7 @@
     "@hono/swagger-ui": "^0.5.3",
     "ajv": "^8.18.0",
     "bullmq": "^5.71.0",
-    "cron-parser": "4",
+    "cron-parser": "5",
     "drizzle-orm": "^0.39.3",
     "hono": "^4.11.9",
     "ioredis": "^5.10.0",
