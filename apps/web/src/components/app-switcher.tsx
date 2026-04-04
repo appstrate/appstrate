@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronsUpDown, Check, Star, Settings, AppWindow } from "lucide-react";
 import { useApplications } from "../hooks/use-applications";
-import { useCurrentApplicationId, setCurrentApplicationId } from "../hooks/use-current-application";
+import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-application";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +24,7 @@ export function AppSwitcher() {
   const { t } = useTranslation();
   const { data: applications } = useApplications();
   const currentAppId = useCurrentApplicationId();
+  const { switchApp } = useAppSwitcher();
   const { isMobile } = useSidebar();
 
   const currentApp = applications?.find((a) => a.id === currentAppId) ?? null;
@@ -64,7 +65,7 @@ export function AppSwitcher() {
                   key={app.id}
                   className="flex items-center justify-between gap-2"
                   onSelect={() => {
-                    if (!isActive) setCurrentApplicationId(app.id);
+                    if (!isActive) switchApp(app.id);
                   }}
                 >
                   <span className="flex items-center gap-1.5 truncate">
