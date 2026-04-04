@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 
 const app = getTestApp();
 
@@ -80,25 +80,37 @@ describe("Profile API", () => {
   });
 
   describe("POST /api/profiles/batch", () => {
-    it("returns display names for user IDs", async () => {
-      const user2 = await createTestUser();
-
+    it("returns display names for org member IDs", async () => {
       const res = await app.request("/api/profiles/batch", {
         method: "POST",
-        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: [ctx.user.id, user2.id] }),
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ ids: [ctx.user.id] }),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.profiles).toBeArray();
-      expect(body.profiles).toHaveLength(2);
+      expect(body.profiles).toHaveLength(1);
+    });
+
+    it("does not return profiles for users outside the org", async () => {
+      const otherCtx = await createTestContext({ orgSlug: "other-org" });
+
+      const res = await app.request("/api/profiles/batch", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ ids: [otherCtx.user.id] }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.profiles).toHaveLength(0);
     });
 
     it("returns empty for unknown IDs", async () => {
       const res = await app.request("/api/profiles/batch", {
         method: "POST",
-        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({ ids: ["unknown-id"] }),
       });
 

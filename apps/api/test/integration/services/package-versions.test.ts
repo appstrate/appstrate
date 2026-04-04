@@ -459,7 +459,7 @@ describe("package-versions service", () => {
         },
       });
 
-      const info = await getVersionInfo(`@${orgSlug}/info-no-ver`);
+      const info = await getVersionInfo(`@${orgSlug}/info-no-ver`, orgId);
       expect(info.activeVersion).toBe("0.5.0");
       expect(info.latestPublishedVersion).toBeNull();
     });
@@ -485,7 +485,7 @@ describe("package-versions service", () => {
         createdBy: userId,
       });
 
-      const info = await getVersionInfo(pkg.id);
+      const info = await getVersionInfo(pkg.id, orgId);
       expect(info.activeVersion).toBe("2.0.0");
       expect(info.latestPublishedVersion).toBe("1.0.0");
     });
@@ -497,7 +497,7 @@ describe("package-versions service", () => {
         draftManifest: { name: `@${orgSlug}/info-no-manifest-ver`, type: "agent" },
       });
 
-      const info = await getVersionInfo(`@${orgSlug}/info-no-manifest-ver`);
+      const info = await getVersionInfo(`@${orgSlug}/info-no-manifest-ver`, orgId);
       expect(info.activeVersion).toBeNull();
       expect(info.latestPublishedVersion).toBeNull();
     });

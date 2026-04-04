@@ -91,6 +91,7 @@ export async function createFailedRun(
 
 export async function updateRun(
   id: string,
+  orgId: string,
   updates: {
     status?: string;
     result?: Record<string, unknown>;
@@ -120,7 +121,10 @@ export async function updateRun(
   if (updates.metadata !== undefined) set.metadata = updates.metadata;
 
   try {
-    await db.update(runs).set(set).where(eq(runs.id, id));
+    await db
+      .update(runs)
+      .set(set)
+      .where(and(eq(runs.id, id), eq(runs.orgId, orgId)));
   } catch (err) {
     logger.error("Failed to update run", {
       runId: id,
@@ -253,8 +257,16 @@ export async function appendRunLog(
   }
 }
 
-export async function getRunningRunsForPackage(packageId: string, actor?: Actor): Promise<number> {
-  const conditions = [eq(runs.packageId, packageId), inArray(runs.status, ["running", "pending"])];
+export async function getRunningRunsForPackage(
+  packageId: string,
+  orgId: string,
+  actor?: Actor,
+): Promise<number> {
+  const conditions = [
+    eq(runs.packageId, packageId),
+    eq(runs.orgId, orgId),
+    inArray(runs.status, ["running", "pending"]),
+  ];
 
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
@@ -289,7 +301,7 @@ export async function getRunningRunCounts(orgId: string): Promise<Record<string,
   return counts;
 }
 
-export async function getRun(id: string) {
+export async function getRun(id: string, orgId: string) {
   const [row] = await db
     .select({
       id: runs.id,
@@ -300,7 +312,7 @@ export async function getRun(id: string) {
       packageId: runs.packageId,
     })
     .from(runs)
-    .where(eq(runs.id, id))
+    .where(and(eq(runs.id, id), eq(runs.orgId, orgId)))
     .limit(1);
   return row ?? null;
 }
@@ -375,7 +387,7 @@ export async function listScheduleRuns(
   );
 }
 
-export async function getRunFull(id: string) {
+export async function getRunFull(id: string, orgId: string) {
   const [row] = await db
     .select({
       run: runs,
@@ -383,7 +395,7 @@ export async function getRunFull(id: string) {
     })
     .from(runs)
     .leftJoin(packageVersions, eq(runs.packageVersionId, packageVersions.id))
-    .where(eq(runs.id, id))
+    .where(and(eq(runs.id, id), eq(runs.orgId, orgId)))
     .limit(1);
   if (!row) return null;
   return { ...row.run, packageVersion: row.packageVersion };

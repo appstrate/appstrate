@@ -431,7 +431,9 @@ export function createProvidersRouter() {
       const [pkg] = await db
         .select({ id: packages.id, draftManifest: packages.draftManifest })
         .from(packages)
-        .where(and(eq(packages.id, providerId), eq(packages.type, "provider")))
+        .where(
+          and(orgOrSystemFilter(orgId), eq(packages.id, providerId), eq(packages.type, "provider")),
+        )
         .limit(1);
 
       if (!pkg) {

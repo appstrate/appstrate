@@ -27,7 +27,12 @@ async function upsertItem(
   const existing = await getOrgItem(orgId, packageId, cfg);
   if (existing && existing.lockVersion != null) {
     // Re-install: update existing package
-    await updateOrgItem(packageId, { manifest, content: item.content }, existing.lockVersion);
+    await updateOrgItem(
+      orgId,
+      packageId,
+      { manifest, content: item.content },
+      existing.lockVersion,
+    );
   } else {
     await createOrgItem(orgId, item, cfg, manifest);
   }

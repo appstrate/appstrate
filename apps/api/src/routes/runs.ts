@@ -37,7 +37,7 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { trackRun, untrackRun, abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { ApiError, notFound, forbidden, conflict } from "../lib/errors.ts";
+import { ApiError, notFound, conflict } from "../lib/errors.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -98,7 +98,7 @@ export async function executeAgentInBackground(
 
   try {
     // Update status to running
-    await updateRun(runId, { status: "running" });
+    await updateRun(runId, orgId, { status: "running" });
     dispatchWebhooks(orgId, "started", runId, agent.id, undefined, applicationId);
 
     // Execute via adapter
@@ -187,7 +187,7 @@ export async function executeAgentInBackground(
       if (err instanceof TimeoutError) {
         const duration = Date.now() - startTime;
         const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
-        await updateRun(runId, {
+        await updateRun(runId, orgId, {
           status: "timeout",
           error: `Run timed out after ${timeout}s`,
           completedAt: new Date().toISOString(),
@@ -234,7 +234,7 @@ export async function executeAgentInBackground(
     const duration = Date.now() - startTime;
 
     if (error) {
-      await updateRun(runId, {
+      await updateRun(runId, orgId, {
         status: "failed",
         error,
         completedAt: new Date().toISOString(),
@@ -307,7 +307,7 @@ export async function executeAgentInBackground(
         }
       }
 
-      await updateRun(runId, {
+      await updateRun(runId, orgId, {
         status: "success",
         result,
         ...(state ? { state } : {}),
@@ -340,7 +340,7 @@ export async function executeAgentInBackground(
 
     const duration = Date.now() - startTime;
     const errorMessage = err instanceof Error ? err.message : "Unknown error";
-    await updateRun(runId, {
+    await updateRun(runId, orgId, {
       status: "failed",
       error: errorMessage,
       completedAt: new Date().toISOString(),
@@ -619,8 +619,8 @@ export function createRunsRouter() {
   router.get("/runs/:id", async (c) => {
     const runId = c.req.param("id");
     const orgId = c.get("orgId");
-    const row = await getRunFull(runId);
-    if (!row || row.orgId !== orgId) {
+    const row = await getRunFull(runId, orgId);
+    if (!row) {
       throw notFound("Run not found");
     }
     // End-user scoping: end-users can only see their own runs
@@ -635,8 +635,8 @@ export function createRunsRouter() {
   router.get("/runs/:id/logs", async (c) => {
     const runId = c.req.param("id");
     const orgId = c.get("orgId");
-    const exec = await getRun(runId);
-    if (!exec || exec.orgId !== orgId) {
+    const exec = await getRun(runId, orgId);
+    if (!exec) {
       throw notFound("Run not found");
     }
     // End-user scoping: end-users can only see their own run logs
@@ -654,14 +654,9 @@ export function createRunsRouter() {
     const runId = c.req.param("id")!;
     const orgId = c.get("orgId");
 
-    const run = await getRun(runId);
+    const run = await getRun(runId, orgId);
     if (!run) {
       throw notFound("Run not found");
-    }
-
-    // Verify ownership (same org)
-    if (run.orgId !== orgId) {
-      throw forbidden("Not authorized");
     }
 
     // Verify cancellable
@@ -671,7 +666,7 @@ export function createRunsRouter() {
 
     // Update DB
     const now = new Date().toISOString();
-    await updateRun(runId, {
+    await updateRun(runId, orgId, {
       status: "cancelled",
       error: "Cancelled by user",
       completedAt: now,
@@ -719,7 +714,7 @@ export function createRunsRouter() {
       const agent = c.get("agent");
       const orgId = c.get("orgId");
 
-      const running = await getRunningRunsForPackage(agent.id);
+      const running = await getRunningRunsForPackage(agent.id, orgId);
       if (running > 0) {
         throw conflict("run_in_progress", `${running} run(s) still running`);
       }

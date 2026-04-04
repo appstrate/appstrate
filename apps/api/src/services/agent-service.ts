@@ -63,11 +63,16 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
 }
 
 /** Resolve dependency refs from a package's manifest. */
-async function resolveDepRefs(manifest: unknown): Promise<NonNullable<DbPackageRow["depRefs"]>> {
+async function resolveDepRefs(
+  manifest: unknown,
+  orgId: string,
+): Promise<NonNullable<DbPackageRow["depRefs"]>> {
   const m = asRecord(manifest) as Partial<Manifest>;
   const { skillIds, toolIds, providerIds } = extractDepsFromManifest(m);
   const allDepIds = [...skillIds, ...toolIds, ...providerIds];
   if (allDepIds.length === 0) return [];
+
+  const conditions = [inArray(packages.id, allDepIds), orgOrSystemFilter(orgId)];
 
   const rows = await db
     .select({
@@ -76,7 +81,7 @@ async function resolveDepRefs(manifest: unknown): Promise<NonNullable<DbPackageR
       draftManifest: packages.draftManifest,
     })
     .from(packages)
-    .where(inArray(packages.id, allDepIds));
+    .where(and(...conditions));
 
   return rows.map((r) => ({
     dependencyId: r.id,
@@ -86,11 +91,8 @@ async function resolveDepRefs(manifest: unknown): Promise<NonNullable<DbPackageR
 }
 
 /** Get a single package by ID. Queries DB filtered by orgId (includes system packages via orgId: null). */
-export async function getPackage(id: string, orgId?: string): Promise<LoadedPackage | null> {
-  const conditions = [eq(packages.id, id)];
-  if (orgId) {
-    conditions.push(orgOrSystemFilter(orgId));
-  }
+export async function getPackage(id: string, orgId: string): Promise<LoadedPackage | null> {
+  const conditions = [eq(packages.id, id), orgOrSystemFilter(orgId)];
 
   const pkgRows = await db
     .select({
@@ -106,7 +108,7 @@ export async function getPackage(id: string, orgId?: string): Promise<LoadedPack
   const pkgRow = pkgRows[0];
   if (!pkgRow) return null;
 
-  const depRefs = await resolveDepRefs(pkgRow.draftManifest);
+  const depRefs = await resolveDepRefs(pkgRow.draftManifest, orgId);
 
   return dbRowToLoadedPackage({
     id: pkgRow.id,
@@ -118,11 +120,8 @@ export async function getPackage(id: string, orgId?: string): Promise<LoadedPack
 }
 
 /** List all agents: system (orgId: null) + user packages of type "agent" (from DB, scoped by org). */
-export async function listPackages(orgId?: string): Promise<LoadedPackage[]> {
-  const conditions = [eq(packages.type, "agent")];
-  if (orgId) {
-    conditions.push(orgOrSystemFilter(orgId));
-  }
+export async function listPackages(orgId: string): Promise<LoadedPackage[]> {
+  const conditions = [eq(packages.type, "agent"), orgOrSystemFilter(orgId)];
   const rows = await db
     .select({
       id: packages.id,

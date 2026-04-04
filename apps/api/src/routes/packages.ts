@@ -6,13 +6,14 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
-import { eq, inArray } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/agent-service.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
+import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { getVersionForDownload, replaceVersionContent } from "../services/package-versions.ts";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -676,6 +677,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     }
 
     const updated = await updateOrgItem(
+      orgId,
       itemId,
       { manifest: manifest as Record<string, unknown>, content },
       body.lockVersion,
@@ -725,7 +727,7 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
 
     // For agents, check running runs
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId, orgId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -818,7 +820,7 @@ function makeVersionInfoHandler(rcfg: PackageRouteConfig) {
     if (!item) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
-    const info = await getVersionInfo(itemId);
+    const info = await getVersionInfo(itemId, orgId);
     return c.json(info);
   };
 }
@@ -836,7 +838,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 
     // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId, orgId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -894,7 +896,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 
     // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId, orgId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -925,6 +927,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     const updated = await updateOrgItem(
+      orgId,
       itemId,
       { manifest: detail.manifest, content },
       existing.lockVersion,
@@ -942,7 +945,10 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       detail.createdAt &&
       new Date(detail.createdAt).getTime() === latestDate.getTime()
     ) {
-      await db.update(packages).set({ updatedAt: latestDate }).where(eq(packages.id, itemId));
+      await db
+        .update(packages)
+        .set({ updatedAt: latestDate })
+        .where(and(eq(packages.id, itemId), eq(packages.orgId, orgId)));
     }
 
     // Re-upload storage files from the version ZIP
@@ -969,6 +975,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 
 function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
+    const orgId = c.get("orgId");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
@@ -976,8 +983,14 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
       throw forbidden(`${label} '${itemId}' is a system package`);
     }
 
+    // Verify org ownership before deletion
+    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
+    if (!existing) {
+      throw notFound(`${label} '${itemId}' not found`);
+    }
+
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId);
+      const running = await getRunningRunsForPackage(itemId, orgId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -1217,7 +1230,7 @@ export function createPackagesRouter() {
       await db
         .update(packages)
         .set({ draftManifest: manifest, draftContent: content, updatedAt: new Date() })
-        .where(eq(packages.id, packageId));
+        .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
     } else {
       // New package — insert
       const cfg = ROUTE_CONFIGS[packageType + "s"]?.cfg;
@@ -1333,7 +1346,18 @@ export function createPackagesRouter() {
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP
   router.get("/:scope{@[^/]+}/:name/:version/download", rateLimit(50), async (c) => {
     const packageId = getItemId(c);
+    const orgId = c.get("orgId");
     const versionQuery = c.req.param("version")!;
+
+    // Verify org ownership (or system package)
+    const [pkg] = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
+      .limit(1);
+    if (!pkg) {
+      throw notFound("Package not found");
+    }
 
     const ver = await getVersionForDownload(packageId, versionQuery);
     if (!ver) {
