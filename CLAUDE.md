@@ -399,7 +399,7 @@ Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Mig
 
 | Variable                    | Required | Default                                       | Notes                                                                                                      |
 | --------------------------- | -------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `REDIS_URL`                 | Yes      | —                                             | Redis connection string (required for scheduler, rate limiting, cancel signaling, OAuth PKCE)              |
+| `REDIS_URL`                 | No       | —                                             | Redis connection string. When absent, falls back to in-memory adapters (single-instance only)              |
 | `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                                                               |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                                                                     |
 | `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes, base64-encoded. Encrypts stored credentials                                                      |
@@ -416,8 +416,9 @@ Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Mig
 | `SIDECAR_POOL_SIZE`         | No       | `2`                                           | Number of pre-warmed sidecar containers (0 = disabled)                                                     |
 | `PI_IMAGE`                  | No       | `appstrate-pi:latest`                         | Docker image for the Pi agent runtime (override for GHCR / custom registries)                              |
 | `SIDECAR_IMAGE`             | No       | `appstrate-sidecar:latest`                    | Docker image for the sidecar proxy (override for GHCR / custom registries)                                 |
-| `S3_BUCKET`                 | Yes      | —                                             | S3 bucket name for storage                                                                                 |
-| `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                                                                               |
+| `S3_BUCKET`                 | No       | —                                             | S3 bucket name. When absent, falls back to filesystem storage (`FS_STORAGE_PATH`)                          |
+| `S3_REGION`                 | No       | —                                             | S3 region (e.g. `us-east-1`). Required when `S3_BUCKET` is set                                             |
+| `FS_STORAGE_PATH`           | No       | `./data/storage`                              | Filesystem storage path (used when `S3_BUCKET` is absent)                                                  |
 | `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2/other S3-compatible)                                                      |
 | `RUN_TOKEN_SECRET`          | No       | —                                             | Run token signing secret (if unset, tokens are unsigned)                                                   |
 | `GOOGLE_CLIENT_ID`          | No       | —                                             | Google OAuth client ID (enables Google sign-in when both Google vars are set)                              |

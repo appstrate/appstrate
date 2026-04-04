@@ -65,6 +65,18 @@ bun run dev       # → http://localhost:3000
 
 First signup creates an organization automatically. See [Contributing](./CONTRIBUTING.md) for the full development guide.
 
+### Development Profiles
+
+Appstrate supports three infrastructure profiles for local development. Only PostgreSQL is required — Redis, MinIO, and Docker are optional.
+
+| Profile      | Command                       | Infrastructure             | Storage    | Queue     | Execution         |
+| ------------ | ----------------------------- | -------------------------- | ---------- | --------- | ----------------- |
+| **Minimal**  | `bun run docker:dev:minimal`  | PostgreSQL                 | Filesystem | In-memory | Bun subprocess    |
+| **Standard** | `bun run docker:dev:standard` | PostgreSQL + Redis         | Filesystem | BullMQ    | Bun subprocess    |
+| **Full**     | `bun run docker:dev`          | PostgreSQL + Redis + MinIO | S3         | BullMQ    | Docker containers |
+
+After starting infrastructure with the desired profile, configure your `.env` accordingly and run `bun run dev`.
+
 <details>
 <summary>Manual setup (step by step)</summary>
 
@@ -75,8 +87,10 @@ bun install
 # 2. Copy environment file (all dev secrets pre-configured)
 cp .env.example .env
 
-# 3. Start infrastructure (PostgreSQL, Redis, MinIO)
-docker compose -f docker-compose.dev.yml up -d
+# 3. Start infrastructure — pick a profile:
+bun run docker:dev:minimal    # PostgreSQL only (lightweight)
+bun run docker:dev:standard   # PostgreSQL + Redis
+bun run docker:dev            # Full stack (PostgreSQL + Redis + MinIO)
 
 # 4. Run database migrations
 bun run db:migrate
@@ -191,9 +205,10 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 | `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                       |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                             |
 | `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes base64, encrypts stored credentials                       |
-| `REDIS_URL`                 | Yes      | —                                             | Redis connection string                                            |
-| `S3_BUCKET`                 | Yes      | —                                             | S3 bucket name for storage                                         |
-| `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                                       |
+| `REDIS_URL`                 | No       | —                                             | Redis connection. Absent = in-memory adapters (single-instance)    |
+| `S3_BUCKET`                 | No       | —                                             | S3 bucket. Absent = filesystem storage (`FS_STORAGE_PATH`)         |
+| `S3_REGION`                 | No       | —                                             | S3 region. Required when `S3_BUCKET` is set                        |
+| `FS_STORAGE_PATH`           | No       | `./data/storage`                              | Filesystem storage path (used when `S3_BUCKET` is absent)          |
 | `RUN_TOKEN_SECRET`          | No       | —                                             | Run token signing secret                                           |
 | `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                     |
 | `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins (comma-separated)                                     |
