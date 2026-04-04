@@ -102,8 +102,8 @@ export async function boot(): Promise<void> {
     });
   }
 
-  // Initialize cross-instance cancel subscriber (no-op without Redis)
-  initCancelSubscriber();
+  // Initialize cross-instance cancel subscriber
+  await initCancelSubscriber();
 
   // Parallel init: sidecar pool, scheduler, and DB cleanups are all independent
   const parallelInits: Promise<void>[] = [
