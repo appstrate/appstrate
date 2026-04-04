@@ -14,8 +14,7 @@ import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
-import { asJSONSchemaObject } from "@appstrate/core/form";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
 import type { ProviderProfileMap } from "../types/index.ts";
 import { toISO } from "../lib/date-helpers.ts";
 
@@ -135,17 +134,7 @@ export async function buildRunContext(params: {
     runApi: { url: runApiUrl, token: signRunToken(runId) },
     input: input ?? {},
     files,
-    schemas: {
-      input: agent.manifest.input?.schema
-        ? asJSONSchemaObject(agent.manifest.input.schema)
-        : undefined,
-      config: agent.manifest.config?.schema
-        ? asJSONSchemaObject(agent.manifest.config.schema)
-        : undefined,
-      output: agent.manifest.output?.schema
-        ? asJSONSchemaObject(agent.manifest.output.schema)
-        : undefined,
-    },
+    schemas: extractManifestSchemas(agent.manifest),
     providers: providerDefs,
     memories: memories.map((m) => ({
       id: m.id,

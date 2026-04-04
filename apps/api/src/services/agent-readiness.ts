@@ -8,10 +8,9 @@
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { validateAgentDependencies } from "./dependency-validation.ts";
 import { validateConfig } from "./schema.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { isPromptEmpty, findMissingDependencies } from "@appstrate/shared-types";
+import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
+import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
 import { ApiError } from "../lib/errors.ts";
-import { asJSONSchemaObject } from "@appstrate/core/form";
 
 /**
  * Validate that an agent is ready for a run.
@@ -78,11 +77,9 @@ export async function validateAgentReadiness(params: {
 
   // 5. Config validation
   if (config) {
-    const configSchema = manifest.config?.schema ?? {
-      type: "object" as const,
-      properties: {},
-    };
-    const configValidation = validateConfig(config, asJSONSchemaObject(configSchema));
+    const { config: configSchema } = extractManifestSchemas(manifest);
+    const effectiveSchema = configSchema ?? { type: "object" as const, properties: {} };
+    const configValidation = validateConfig(config, effectiveSchema);
     if (!configValidation.valid) {
       const first = configValidation.errors[0]!;
       throw new ApiError({

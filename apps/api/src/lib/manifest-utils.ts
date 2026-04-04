@@ -3,6 +3,8 @@
 import type { Manifest } from "@appstrate/core/validation";
 import type { AgentProviderRequirement } from "../types/index.ts";
 import { asRecord } from "./safe-json.ts";
+import { asJSONSchemaObject } from "@appstrate/core/form";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 
 /** Extract skill, tool, and provider IDs from a manifest's dependencies section. */
 export function extractDepsFromManifest(manifest: Partial<Manifest>) {
@@ -30,4 +32,18 @@ export function resolveManifestProviders(manifest: Partial<Manifest>): AgentProv
     id: providerId,
     scopes: config[providerId]?.scopes,
   }));
+}
+
+/** Extract input/config/output JSON schemas from a manifest, with safe narrowing. */
+export function extractManifestSchemas(manifest: Partial<Manifest>): {
+  input?: JSONSchemaObject;
+  config?: JSONSchemaObject;
+  output?: JSONSchemaObject;
+} {
+  const m = manifest as Record<string, { schema?: unknown } | undefined>;
+  return {
+    input: m.input?.schema ? asJSONSchemaObject(m.input.schema) : undefined,
+    config: m.config?.schema ? asJSONSchemaObject(m.config.schema) : undefined,
+    output: m.output?.schema ? asJSONSchemaObject(m.output.schema) : undefined,
+  };
 }

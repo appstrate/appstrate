@@ -23,7 +23,7 @@ import { prefixedId } from "../lib/ids.ts";
 // Constants
 // ---------------------------------------------------------------------------
 
-export const webhookEventSchema = z.enum([
+const webhookEventSchema = z.enum([
   "run.started",
   "run.completed",
   "run.failed",
@@ -31,9 +31,9 @@ export const webhookEventSchema = z.enum([
   "run.cancelled",
 ]);
 
-export type WebhookEventType = z.infer<typeof webhookEventSchema>;
+type WebhookEventType = z.infer<typeof webhookEventSchema>;
 
-export const webhookEventsSchema = z.array(webhookEventSchema).min(1);
+const webhookEventsSchema = z.array(webhookEventSchema).min(1);
 
 /** Delays per attempt (attempt 1 = immediate, attempt 2 = 30s, etc.) */
 const RETRY_DELAYS_MS = [30_000, 300_000, 1_800_000, 3_600_000, 7_200_000, 10_800_000, 14_400_000];
@@ -94,7 +94,7 @@ function toWebhookResponse(row: {
 /**
  * Validate webhook URL — must be HTTPS (http://localhost in dev), not SSRF.
  */
-export function validateWebhookUrl(url: string): void {
+function validateWebhookUrl(url: string): void {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -139,7 +139,7 @@ async function sign(secret: string, content: string): Promise<string> {
   return `v1,${Buffer.from(hasher.digest()).toString("base64")}`;
 }
 
-export async function buildSignedHeaders(
+async function buildSignedHeaders(
   eventId: string,
   timestamp: number,
   body: string,

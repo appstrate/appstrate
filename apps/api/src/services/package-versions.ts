@@ -241,29 +241,11 @@ export async function getVersionForDownload(
   return row ?? null;
 }
 
-/** Resolve a version query and return only the manifest (no ZIP download). */
-export async function resolveVersionManifest(
-  packageId: string,
-  versionQuery: string,
-): Promise<Record<string, unknown> | null> {
-  const versionId = await resolveVersion(packageId, versionQuery);
-  if (!versionId) return null;
-
-  const [row] = await db
-    .select({ manifest: packageVersions.manifest })
-    .from(packageVersions)
-    .where(eq(packageVersions.id, versionId))
-    .limit(1);
-
-  if (!row?.manifest) return null;
-  return asRecordOrNull(row.manifest);
-}
-
 // ─────────────────────────────────────────────
 // Version detail
 // ─────────────────────────────────────────────
 
-export interface VersionDetail {
+interface VersionDetail {
   id: number;
   version: string;
   manifest: Record<string, unknown>;
@@ -516,8 +498,8 @@ export async function getLatestVersionIntegrity(packageId: string): Promise<stri
   return row?.integrity ?? null;
 }
 
-export type CreateVersionError = "invalid_version" | "no_changes";
-export type CreateVersionResult = { id: number; version: string } | { error: CreateVersionError };
+type CreateVersionError = "invalid_version" | "no_changes";
+type CreateVersionResult = { id: number; version: string } | { error: CreateVersionError };
 
 /** Create an immutable version snapshot from the current draft (packages table).
  *  Uses manifest.version as-is — no auto-bump. Returns an error object if version is missing,

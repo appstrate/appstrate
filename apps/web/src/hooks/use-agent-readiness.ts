@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { AgentDetail, OrgModelInfo } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
-import { isPromptEmpty, findMissingDependencies } from "@appstrate/shared-types";
+import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
 
 export function useAgentReadiness(
   detail: AgentDetail | undefined,
