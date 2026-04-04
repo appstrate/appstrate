@@ -45,11 +45,18 @@ interface CreateVersionModalProps {
   onClose: () => void;
   type: PackageType;
   packageId: string;
+  hasUnarchivedChanges?: boolean;
 }
 
 type FormData = { selectedBump: BumpType };
 
-export function CreateVersionModal({ open, onClose, type, packageId }: CreateVersionModalProps) {
+export function CreateVersionModal({
+  open,
+  onClose,
+  type,
+  packageId,
+  hasUnarchivedChanges = true,
+}: CreateVersionModalProps) {
   const { t } = useTranslation("agents");
   const { data: versionInfo } = useVersionInfo(type, packageId);
   const createVersion = useCreateVersion(type, packageId);
@@ -65,20 +72,20 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
 
   const selectedBump = useWatch({ control, name: "selectedBump" });
 
-  const latestVersion = versionInfo?.latestVersion ?? null;
-  const draftVersion = versionInfo?.draftVersion ?? null;
+  const latestVersion = versionInfo?.latestPublishedVersion ?? null;
+  const activeVersion = versionInfo?.activeVersion ?? null;
 
-  // Mode A: draft === latest -> show bump selector
-  const needsBump = !!draftVersion && !!latestVersion && semverEq(draftVersion, latestVersion);
-  // Mode B: draft > latest or no latest -> direct create
+  // Mode A: active === latest -> show bump selector
+  const needsBump = !!activeVersion && !!latestVersion && semverEq(activeVersion, latestVersion);
+  // Mode B: active > latest or no latest -> direct create
   const canCreateDirect =
-    !!draftVersion && (!latestVersion || semverGt(draftVersion, latestVersion));
-  // Mode C: draft < latest (but not equal) -> blocked
-  const isBlocked = !!draftVersion && !!latestVersion && !needsBump && !canCreateDirect;
+    !!activeVersion && (!latestVersion || semverGt(activeVersion, latestVersion));
+  // Mode C: active < latest (but not equal) -> blocked
+  const isBlocked = !!activeVersion && !!latestVersion && !needsBump && !canCreateDirect;
 
-  const targetVersion = needsBump ? bumpVersion(latestVersion, selectedBump) : draftVersion;
+  const targetVersion = needsBump ? bumpVersion(latestVersion, selectedBump) : activeVersion;
 
-  const canCreate = needsBump || canCreateDirect;
+  const canCreate = (needsBump || canCreateDirect) && hasUnarchivedChanges;
 
   const handleFormSubmit = () => {
     setError("root", { message: "" });
@@ -122,8 +129,8 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
           )}
           {!needsBump && (
             <Label className="block text-sm">
-              {t("version.draftVersionLabel")}:{" "}
-              <strong>{draftVersion ?? t("version.noVersion")}</strong>
+              {t("version.activeVersionLabel")}:{" "}
+              <strong>{activeVersion ?? t("version.noVersion")}</strong>
             </Label>
           )}
         </div>
@@ -157,10 +164,11 @@ export function CreateVersionModal({ open, onClose, type, packageId }: CreateVer
           </div>
         )}
 
-        {isBlocked && draftVersion && latestVersion && (
+        {isBlocked && activeVersion && latestVersion && (
           <p className="text-warning text-sm">{t("version.mustBeHigher")}</p>
         )}
-        {!draftVersion && (
+        {!hasUnarchivedChanges && <p className="text-warning text-sm">{t("version.noChanges")}</p>}
+        {!activeVersion && (
           <p className="text-warning text-sm">{t("version.noVersionInManifest")}</p>
         )}
         {errors.root?.message && (

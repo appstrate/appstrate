@@ -100,7 +100,6 @@ export function getTestApp(): Hono<AppEnv> {
     if (path === "/api/orgs" || path === "/api/orgs/") return true;
     if (path.startsWith("/api/orgs/")) return true;
     if (path === "/api/profile" || path === "/api/profile/") return true;
-    if (path === "/api/profiles/batch") return true;
     if (path === "/api/welcome/setup") return true;
     return false;
   }

@@ -51,4 +51,12 @@ describe("hasDisconnectedProviders", () => {
     const providers = [{ status: "connected", scopesSufficient: null }];
     expect(hasDisconnectedProviders(providers)).toBe(false);
   });
+
+  it("returns true when a provider needs reconnection", () => {
+    const providers = [
+      { status: "connected", scopesSufficient: true },
+      { status: "needs_reconnection", scopesSufficient: true },
+    ];
+    expect(hasDisconnectedProviders(providers)).toBe(true);
+  });
 });

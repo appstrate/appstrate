@@ -11,7 +11,7 @@ import { parseSignedToken } from "../lib/run-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import { getRecentRuns } from "../services/state/index.ts";
 import { getPackage } from "../services/agent-service.ts";
-import { resolveCredentialsForProxy } from "@appstrate/connect";
+import { resolveCredentialsForProxy, forceRefreshCredentials } from "@appstrate/connect";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, invalidRequest, internalError } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
@@ -178,6 +178,48 @@ export function createInternalRouter() {
     });
 
     return c.json(result);
+  });
+
+  // POST /internal/credentials/:scope/:name/refresh — sidecar requests a forced token refresh on 401
+  router.post("/credentials/:scope{@[^/]+}/:name/refresh", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    const providerId = `${c.req.param("scope")}/${c.req.param("name")}`;
+
+    const profileId = run.providerProfileIds?.[providerId];
+    if (!profileId) {
+      throw notFound(`No profile resolved for provider '${providerId}'`);
+    }
+
+    try {
+      const result = await forceRefreshCredentials(db, profileId, providerId, run.orgId);
+      if (!result) {
+        throw notFound(`No credentials for provider '${providerId}'`);
+      }
+
+      logger.info("Forced credential refresh", { runId, providerId, profileId });
+      return c.json(result);
+    } catch (err) {
+      // Refresh failed (invalid_grant, network error) — flag the connection
+      await db
+        .update(userProviderConnections)
+        .set({ needsReconnection: true, updatedAt: new Date() })
+        .where(
+          and(
+            eq(userProviderConnections.profileId, profileId),
+            eq(userProviderConnections.providerId, providerId),
+            eq(userProviderConnections.orgId, run.orgId),
+          ),
+        );
+
+      logger.warn("Forced refresh failed, connection flagged for reconnection", {
+        runId,
+        providerId,
+        profileId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+
+      throw unauthorized(`Token refresh failed for provider '${providerId}'`);
+    }
   });
 
   // POST /internal/connections/report-auth-failure — sidecar reports upstream 401

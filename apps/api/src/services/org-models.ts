@@ -63,7 +63,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       createdAt: toISORequired(row.createdAt),
       updatedAt: toISORequired(row.updatedAt),
     }),
-  });
+  }).sort((a, b) => a.label.localeCompare(b.label));
 }
 
 // --- CRUD (DB models only) ---
@@ -181,6 +181,8 @@ interface ResolvedModel {
   maxTokens?: number | null;
   reasoning?: boolean | null;
   cost?: ModelCost | null;
+  /** Whether the model comes from SYSTEM_PROVIDER_KEYS (platform-provided). */
+  isSystemModel: boolean;
 }
 
 function systemDefToResolved(def: ModelDefinition): ResolvedModel {
@@ -195,6 +197,7 @@ function systemDefToResolved(def: ModelDefinition): ResolvedModel {
     maxTokens: def.maxTokens ?? null,
     reasoning: def.reasoning ?? null,
     cost: def.cost ?? null,
+    isSystemModel: true,
   };
 }
 
@@ -236,6 +239,7 @@ export async function resolveModel(
         maxTokens: dbDefault.maxTokens,
         reasoning: dbDefault.reasoning,
         cost: dbDefault.cost as ModelCost | null,
+        isSystemModel: false,
       };
     }
   }
@@ -295,6 +299,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
     maxTokens: row.maxTokens,
     reasoning: row.reasoning,
     cost: row.cost as ModelCost | null,
+    isSystemModel: false,
   };
 }
 

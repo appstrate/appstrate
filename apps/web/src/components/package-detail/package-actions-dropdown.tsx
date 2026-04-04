@@ -12,6 +12,7 @@ import {
   CalendarPlus,
   Trash2,
   FileJson,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,10 +32,11 @@ interface PackageActionsDropdownProps {
   packageId: string;
   type: PackageType;
   manifest?: Record<string, unknown>;
+  companionFile?: { name: string; content: string };
   isOwned: boolean;
+  isImported?: boolean;
   isBuiltIn: boolean;
   isHistoricalVersion: boolean;
-  hasDraftChanges: boolean;
   downloadVersion?: string;
   onDownload?: (version: string) => void;
   onCreateVersion?: () => void;
@@ -60,10 +62,11 @@ export function PackageActionsDropdown({
   packageId,
   type,
   manifest,
+  companionFile,
   isOwned,
+  isImported,
   isBuiltIn,
   isHistoricalVersion,
-  hasDraftChanges,
   downloadVersion,
   onDownload,
   onCreateVersion,
@@ -84,12 +87,14 @@ export function PackageActionsDropdown({
   const { t } = useTranslation(["agents", "common", "settings"]);
   const navigate = useNavigate();
   const { isAdmin, isMember } = usePermissions();
-  const [definitionOpen, setDefinitionOpen] = useState(false);
+  const [manifestOpen, setManifestOpen] = useState(false);
+  const [companionOpen, setCompanionOpen] = useState(false);
 
   const isAgent = type === "agent";
   const isMutable = isAdmin && !isBuiltIn && !isHistoricalVersion && isOwned;
+  const hasViewableFiles = !!manifest || !!companionFile;
 
-  if (!isAgent && !manifest) return null;
+  if (!isAgent && !hasViewableFiles) return null;
 
   return (
     <>
@@ -100,16 +105,23 @@ export function PackageActionsDropdown({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          {/* ── View Definition ── */}
+          {/* ── View Manifest ── */}
           {manifest && (
-            <>
-              <DropdownMenuItem onSelect={() => setDefinitionOpen(true)}>
-                <FileJson size={14} />
-                {t("viewDefinition", { ns: "common" })}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
+            <DropdownMenuItem onSelect={() => setManifestOpen(true)}>
+              <FileJson size={14} />
+              {t("viewManifest", { ns: "common" })}
+            </DropdownMenuItem>
           )}
+
+          {/* ── Companion File ── */}
+          {companionFile && (
+            <DropdownMenuItem onSelect={() => setCompanionOpen(true)}>
+              <FileText size={14} />
+              {companionFile.name}
+            </DropdownMenuItem>
+          )}
+
+          {hasViewableFiles && <DropdownMenuSeparator />}
 
           {/* ── Download ── */}
           {downloadVersion && onDownload && (
@@ -121,7 +133,7 @@ export function PackageActionsDropdown({
 
           {/* ── Create version ── */}
           {isMutable && onCreateVersion && (
-            <DropdownMenuItem onSelect={onCreateVersion} disabled={!hasDraftChanges}>
+            <DropdownMenuItem onSelect={onCreateVersion}>
               <GitBranchPlus size={14} />
               {t("version.createVersion")}
             </DropdownMenuItem>
@@ -190,7 +202,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Delete ── */}
-          {isAdmin && !isBuiltIn && isOwned && (
+          {isAdmin && !isBuiltIn && (isOwned || isImported) && (
             <>
               <DropdownMenuSeparator />
               {isAgent && onDeleteAgent && (
@@ -216,14 +228,30 @@ export function PackageActionsDropdown({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* ── Manifest Modal ── */}
       {manifest && (
         <Modal
-          open={definitionOpen}
-          onClose={() => setDefinitionOpen(false)}
-          title={t("viewDefinition", { ns: "common" })}
+          open={manifestOpen}
+          onClose={() => setManifestOpen(false)}
+          title={t("viewManifest", { ns: "common" })}
           className="max-w-2xl"
         >
           <JsonView data={manifest} />
+        </Modal>
+      )}
+
+      {/* ── Companion File Modal ── */}
+      {companionFile && (
+        <Modal
+          open={companionOpen}
+          onClose={() => setCompanionOpen(false)}
+          title={companionFile.name}
+          className="max-w-2xl"
+        >
+          <pre className="text-muted-foreground bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
+            {companionFile.content}
+          </pre>
         </Modal>
       )}
     </>
