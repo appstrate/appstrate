@@ -63,7 +63,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       createdAt: toISORequired(row.createdAt),
       updatedAt: toISORequired(row.updatedAt),
     }),
-  });
+  }).sort((a, b) => a.label.localeCompare(b.label));
 }
 
 // --- CRUD (DB models only) ---
