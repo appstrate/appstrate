@@ -97,7 +97,7 @@ export async function executeAgentInBackground(
 
   try {
     // Update status to running
-    await updateRun(runId, { status: "running" });
+    await updateRun(runId, orgId, { status: "running" });
     dispatchWebhooks(orgId, "started", runId, agent.id, undefined, applicationId);
 
     // Execute via adapter
@@ -186,7 +186,7 @@ export async function executeAgentInBackground(
       if (err instanceof TimeoutError) {
         const duration = Date.now() - startTime;
         const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
-        await updateRun(runId, {
+        await updateRun(runId, orgId, {
           status: "timeout",
           error: `Run timed out after ${timeout}s`,
           completedAt: new Date().toISOString(),
@@ -233,7 +233,7 @@ export async function executeAgentInBackground(
     const duration = Date.now() - startTime;
 
     if (error) {
-      await updateRun(runId, {
+      await updateRun(runId, orgId, {
         status: "failed",
         error,
         completedAt: new Date().toISOString(),
@@ -303,7 +303,7 @@ export async function executeAgentInBackground(
         }
       }
 
-      await updateRun(runId, {
+      await updateRun(runId, orgId, {
         status: "success",
         result,
         ...(state ? { state } : {}),
@@ -335,7 +335,7 @@ export async function executeAgentInBackground(
 
     const duration = Date.now() - startTime;
     const errorMessage = err instanceof Error ? err.message : "Unknown error";
-    await updateRun(runId, {
+    await updateRun(runId, orgId, {
       status: "failed",
       error: errorMessage,
       completedAt: new Date().toISOString(),
@@ -657,7 +657,7 @@ export function createRunsRouter() {
 
     // Update DB
     const now = new Date().toISOString();
-    await updateRun(runId, {
+    await updateRun(runId, orgId, {
       status: "cancelled",
       error: "Cancelled by user",
       completedAt: now,

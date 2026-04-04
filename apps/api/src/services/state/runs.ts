@@ -89,6 +89,7 @@ export async function createFailedRun(
 
 export async function updateRun(
   id: string,
+  orgId: string,
   updates: {
     status?: string;
     result?: Record<string, unknown>;
@@ -116,7 +117,10 @@ export async function updateRun(
   if (updates.cost !== undefined) set.cost = updates.cost;
 
   try {
-    await db.update(runs).set(set).where(eq(runs.id, id));
+    await db
+      .update(runs)
+      .set(set)
+      .where(and(eq(runs.id, id), eq(runs.orgId, orgId)));
   } catch (err) {
     logger.error("Failed to update run", {
       runId: id,
@@ -251,14 +255,14 @@ export async function appendRunLog(
 
 export async function getRunningRunsForPackage(
   packageId: string,
-  orgId?: string,
+  orgId: string,
   actor?: Actor,
 ): Promise<number> {
-  const conditions = [eq(runs.packageId, packageId), inArray(runs.status, ["running", "pending"])];
-
-  if (orgId) {
-    conditions.push(eq(runs.orgId, orgId));
-  }
+  const conditions = [
+    eq(runs.packageId, packageId),
+    eq(runs.orgId, orgId),
+    inArray(runs.status, ["running", "pending"]),
+  ];
 
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));

@@ -13,6 +13,7 @@ import { postInstallPackage } from "../services/post-install-package.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/agent-service.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
+import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { getVersionForDownload, replaceVersionContent } from "../services/package-versions.ts";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -819,7 +820,7 @@ function makeVersionInfoHandler(rcfg: PackageRouteConfig) {
     if (!item) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
-    const info = await getVersionInfo(itemId);
+    const info = await getVersionInfo(itemId, orgId);
     return c.json(info);
   };
 }
@@ -1229,7 +1230,7 @@ export function createPackagesRouter() {
       await db
         .update(packages)
         .set({ draftManifest: manifest, draftContent: content, updatedAt: new Date() })
-        .where(eq(packages.id, packageId));
+        .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
     } else {
       // New package — insert
       const cfg = ROUTE_CONFIGS[packageType + "s"]?.cfg;
@@ -1345,7 +1346,18 @@ export function createPackagesRouter() {
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP
   router.get("/:scope{@[^/]+}/:name/:version/download", rateLimit(50), async (c) => {
     const packageId = getItemId(c);
+    const orgId = c.get("orgId");
     const versionQuery = c.req.param("version")!;
+
+    // Verify org ownership (or system package)
+    const [pkg] = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
+      .limit(1);
+    if (!pkg) {
+      throw notFound("Package not found");
+    }
 
     const ver = await getVersionForDownload(packageId, versionQuery);
     if (!ver) {

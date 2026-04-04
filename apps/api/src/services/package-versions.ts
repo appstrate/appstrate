@@ -516,12 +516,13 @@ export async function getMatchingDistTags(packageId: string, version: string): P
 /** Return the latest published version and the current active version from the manifest. */
 export async function getVersionInfo(
   packageId: string,
+  orgId: string,
 ): Promise<{ latestPublishedVersion: string | null; activeVersion: string | null }> {
   const [[pkg], [latestTag]] = await Promise.all([
     db
       .select({ draftManifest: packages.draftManifest })
       .from(packages)
-      .where(eq(packages.id, packageId))
+      .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
       .limit(1),
     db
       .select({ versionId: packageDistTags.versionId })
@@ -610,7 +611,7 @@ export async function createVersionFromDraft(params: {
       type: packages.type,
     })
     .from(packages)
-    .where(eq(packages.id, packageId))
+    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
     .limit(1);
 
   if (!pkg) return { error: "invalid_version" };
@@ -629,7 +630,7 @@ export async function createVersionFromDraft(params: {
     await db
       .update(packages)
       .set({ draftManifest: { ...baseManifest, version: params.version } })
-      .where(eq(packages.id, packageId));
+      .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
   }
 
   const manifest = { ...baseManifest, version };
