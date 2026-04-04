@@ -3,12 +3,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import {
-  createTestContext,
-  createTestUser,
-  authHeaders,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 
 const app = getTestApp();
 
