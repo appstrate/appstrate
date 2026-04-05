@@ -13,7 +13,7 @@ export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
       <SidebarHeader className="border-sidebar-border h-16 justify-center border-b group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
         <OrgSwitcher />
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="gap-0">
         <NavOrg />
         <SidebarBilling />
       </SidebarContent>

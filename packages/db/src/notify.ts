@@ -37,11 +37,15 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
   await db.execute(drizzleSql`
     CREATE OR REPLACE FUNCTION notify_run_log_insert()
     RETURNS TRIGGER AS $$
+    DECLARE
+      _application_id text;
     BEGIN
+      SELECT application_id INTO _application_id FROM runs WHERE id = NEW.run_id;
       PERFORM pg_notify('run_log_insert', json_build_object(
         'id', NEW.id,
         'run_id', NEW.run_id,
         'org_id', NEW.org_id,
+        'application_id', _application_id,
         'type', NEW.type,
         'level', NEW.level,
         'event', NEW.event,
