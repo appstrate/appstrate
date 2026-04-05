@@ -9,6 +9,7 @@ import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
+import { hasPackageAccess } from "./application-packages.ts";
 
 interface DbPackageRow {
   id: string;
@@ -117,6 +118,27 @@ export async function getPackage(id: string, orgId: string): Promise<LoadedPacka
     source: pkgRow.source,
     depRefs,
   });
+}
+
+/**
+ * Load an agent and verify application-level access in one operation.
+ * Default app = access to all, custom app = must be explicitly installed.
+ * Returns null if agent not found OR access denied (404 semantics — no info leak).
+ */
+export async function getPackageWithAccess(
+  id: string,
+  orgId: string,
+  applicationId: string,
+  appIsDefault: boolean,
+): Promise<LoadedPackage | null> {
+  const agent = await getPackage(id, orgId);
+  if (!agent) return null;
+
+  if (!appIsDefault) {
+    if (!(await hasPackageAccess(applicationId, id, false))) return null;
+  }
+
+  return agent;
 }
 
 /** List all agents: system (orgId: null) + user packages of type "agent" (from DB, scoped by org). */

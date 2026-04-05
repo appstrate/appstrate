@@ -11,8 +11,6 @@ import { createShutdownHandler } from "./lib/shutdown.ts";
 import { validateApiKey } from "./services/api-keys.ts";
 import { ensureDefaultProfile } from "./services/connection-profiles.ts";
 import { requireOrgContext } from "./middleware/org-context.ts";
-import { requireAppContext } from "./middleware/app-context.ts";
-import { requiresAppContext } from "./lib/app-scoped-routes.ts";
 import { requestId } from "./middleware/request-id.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
 import { createAgentsRouter } from "./routes/agents.ts";
@@ -132,7 +130,7 @@ app.use("*", async (c, next) => {
     c.set("permissions", resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole));
     c.set("authMethod", "api_key");
     c.set("apiKeyId", keyInfo.keyId);
-    c.set("apiKeyApplicationId", keyInfo.applicationId);
+    c.set("applicationId", keyInfo.applicationId);
 
     // Appstrate-User header: resolve end-user context (API key only)
     const targetEndUserId = c.req.header("Appstrate-User");
@@ -232,13 +230,7 @@ app.use("*", async (c, next) => {
   return next();
 });
 
-// App context middleware: resolve X-App-Id for app-scoped routes
-app.use("*", async (c, next) => {
-  if (skipAuth(c.req.path)) return next();
-  if (!c.get("user")) return next();
-  if (!requiresAppContext(c.req.path)) return next();
-  return requireAppContext()(c, next);
-});
+// App context middleware: app-scoped routers call requireAppContext() directly.
 
 // API versioning: resolve Appstrate-Version header > org setting > default
 const apiVersionMiddleware = apiVersion(async (orgId) => {

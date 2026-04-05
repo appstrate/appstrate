@@ -3,10 +3,9 @@
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { isOwnedByOrg } from "@appstrate/core/naming";
-import { getPackage } from "../services/agent-service.ts";
+import { getPackageWithAccess } from "../services/agent-service.ts";
 import { getPackageById } from "../services/package-items/crud.ts";
 import { getRunningRunsForPackage } from "../services/state/index.ts";
-import { hasPackageAccess } from "../services/application-packages.ts";
 import { ApiError, forbidden, notFound, conflict, invalidRequest } from "../lib/errors.ts";
 
 /** Middleware: load an agent by route param and set it on context, or 404.
@@ -19,17 +18,9 @@ export function requireAgent() {
     const orgId = c.get("orgId");
     const appId = c.get("applicationId");
     const appIsDefault = c.get("appIsDefault");
-    const agent = await getPackage(packageId, orgId);
+
+    const agent = await getPackageWithAccess(packageId, orgId, appId, appIsDefault);
     if (!agent) {
-      throw new ApiError({
-        status: 404,
-        code: "agent_not_found",
-        title: "Agent Not Found",
-        detail: `Agent '${packageId}' not found`,
-      });
-    }
-    // Check application-level access (default app = all, custom app = explicit binding)
-    if (appId && !(await hasPackageAccess(appId, packageId, appIsDefault))) {
       throw new ApiError({
         status: 404,
         code: "agent_not_found",

@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
+import { invalidateRunAndNotificationQueries } from "./use-notifications";
 import type { Run } from "@appstrate/shared-types";
 
 const TERMINAL_STATUSES = new Set(["success", "failed", "timeout", "cancelled"]);
@@ -43,9 +44,7 @@ function handleSSEMessage(qc: QueryClient, orgId: string, appId: string, raw: st
     }
 
     if (TERMINAL_STATUSES.has(status)) {
-      qc.invalidateQueries({ queryKey: ["run", orgId, appId, runId] });
-      qc.invalidateQueries({ queryKey: ["unread-count", orgId, appId] });
-      qc.invalidateQueries({ queryKey: ["unread-counts-by-agent", orgId, appId] });
+      invalidateRunAndNotificationQueries(qc);
       qc.invalidateQueries({ queryKey: ["billing", orgId] });
     }
   } catch {

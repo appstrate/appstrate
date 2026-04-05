@@ -12,9 +12,13 @@ import {
   listUserRuns,
   listOrgRuns,
 } from "../services/state/index.ts";
+import { requireAppContext } from "../middleware/app-context.ts";
 
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();
+  router.use("/notifications/*", requireAppContext());
+  router.use("/runs", requireAppContext());
+  router.use("/runs/*", requireAppContext());
 
   // GET /api/notifications/unread-count
   router.get("/notifications/unread-count", async (c) => {

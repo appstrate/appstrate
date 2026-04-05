@@ -18,6 +18,7 @@ import {
 } from "../services/end-users.ts";
 import { invalidRequest, parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
+import { requireAppContext } from "../middleware/app-context.ts";
 
 const createEndUserSchema = z.object({
   applicationId: z.string().optional(),
@@ -48,6 +49,7 @@ const updateEndUserSchema = z.object({
 
 export function createEndUsersRouter() {
   const router = new Hono<AppEnv>();
+  router.use("*", requireAppContext());
 
   // POST /api/end-users — create an end-user
   router.post(

@@ -20,6 +20,7 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
+import { requireAppContext } from "../middleware/app-context.ts";
 
 const createScheduleSchema = z.object({
   name: z.string().optional(),
@@ -40,6 +41,9 @@ const updateScheduleSchema = z.object({
 
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
+  router.use("/schedules/*", requireAppContext());
+  router.use("/schedules", requireAppContext());
+  router.use("/agents/*", requireAppContext());
 
   // GET /api/schedules — list all schedules (app-scoped)
   router.get("/schedules", async (c) => {

@@ -35,7 +35,7 @@ export function useUnreadCountsByAgent() {
   });
 }
 
-function invalidateNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
+export function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["unread-count"] });
   qc.invalidateQueries({ queryKey: ["unread-counts-by-agent"] });
   qc.invalidateQueries({ queryKey: ["all-runs"] });
@@ -50,7 +50,7 @@ export function useMarkRead() {
     mutationFn: async (runId: string) => {
       return api<{ ok: boolean }>(`/notifications/read/${runId}`, { method: "PUT" });
     },
-    onSuccess: () => invalidateNotificationQueries(qc),
+    onSuccess: () => invalidateRunAndNotificationQueries(qc),
   });
 }
 
@@ -60,6 +60,6 @@ export function useMarkAllRead() {
     mutationFn: async () => {
       return api<{ updated: number }>("/notifications/read-all", { method: "PUT" });
     },
-    onSuccess: () => invalidateNotificationQueries(qc),
+    onSuccess: () => invalidateRunAndNotificationQueries(qc),
   });
 }

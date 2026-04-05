@@ -35,6 +35,7 @@ import { getCloudModule } from "../lib/cloud-loader.ts";
 import { dispatchRunWebhook } from "../services/webhooks.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
+import { requireAppContext } from "../middleware/app-context.ts";
 
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens;
@@ -341,6 +342,9 @@ export async function executeAgentInBackground(
 
 export function createRunsRouter() {
   const router = new Hono<AppEnv>();
+  router.use("/agents/*", requireAppContext());
+  router.use("/runs/*", requireAppContext());
+  router.use("/schedules/*", requireAppContext());
 
   // POST /api/agents/:scope/:name/run — execute an agent (fire-and-forget, returns JSON)
   router.post(

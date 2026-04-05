@@ -19,8 +19,8 @@ import { invalidRequest, notFound } from "../lib/errors.ts";
  */
 export function requireAppContext() {
   return async (c: Context<AppEnv>, next: Next) => {
-    // For API key auth, apiKeyApplicationId is already resolved
-    const appId = c.req.header("X-App-Id") ?? c.get("apiKeyApplicationId");
+    // Resolution order: X-App-Id header (session auth) → applicationId from API key auth
+    const appId = c.req.header("X-App-Id") ?? c.get("applicationId");
 
     if (!appId) {
       throw invalidRequest(

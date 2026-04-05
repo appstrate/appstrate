@@ -29,6 +29,7 @@ import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { z } from "zod";
 import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
+import { requireAppContext } from "../middleware/app-context.ts";
 
 const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 const modelIdSchema = z.object({ modelId: z.string().nullable() });
@@ -36,6 +37,7 @@ const orgProfileIdSchema = z.object({ orgProfileId: z.uuid().nullable() });
 
 export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
+  router.use("*", requireAppContext());
 
   // GET /api/agents — list agents accessible to the current application
   router.get("/", async (c) => {

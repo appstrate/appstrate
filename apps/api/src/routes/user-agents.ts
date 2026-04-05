@@ -10,6 +10,7 @@ import { scopedNameRegex } from "@appstrate/core/validation";
 import { requireAgent, requireMutableAgent } from "../middleware/guards.ts";
 import { invalidRequest, parseBody } from "../lib/errors.ts";
 import { asRecord } from "../lib/safe-json.ts";
+import { requireAppContext } from "../middleware/app-context.ts";
 
 const updateSkillsSchema = z.object({
   skillIds: z.array(z.string()).max(50),
@@ -48,6 +49,7 @@ async function updateManifestDeps(
 
 export function createUserAgentsRouter() {
   const router = new Hono<AppEnv>();
+  router.use("*", requireAppContext());
 
   // PUT /api/agents/:scope/:name/skills — set skill references for an agent
   router.put("/:scope{@[^/]+}/:name/skills", requireAgent(), requireMutableAgent(), async (c) => {
