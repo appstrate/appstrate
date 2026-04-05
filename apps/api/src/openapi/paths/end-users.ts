@@ -10,6 +10,7 @@ export const endUsersPaths = {
         "Create a new end-user within an application. At least one of name, email, or externalId should be provided for identification.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { $ref: "#/components/parameters/IdempotencyKey" },
       ],
       requestBody: {
@@ -79,6 +80,7 @@ export const endUsersPaths = {
         "List end-users with cursor-based pagination. Filter by applicationId, externalId, or email.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "applicationId",
           in: "query",
@@ -158,6 +160,7 @@ export const endUsersPaths = {
       description: "Get a single end-user by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -185,6 +188,7 @@ export const endUsersPaths = {
       description: "Update end-user name, email, externalId, or metadata.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -243,6 +247,7 @@ export const endUsersPaths = {
       description: "Permanently delete an end-user.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {

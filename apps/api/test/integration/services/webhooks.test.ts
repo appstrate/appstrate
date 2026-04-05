@@ -189,13 +189,13 @@ describe("webhooks service", () => {
         appWebhookParams({ url: "https://example.com/single" }),
       );
 
-      const wh = await getWebhook(orgId, created.id);
+      const wh = await getWebhook(orgId, defaultAppId, created.id);
       expect(wh.id).toBe(created.id);
       expect(wh.url).toBe("https://example.com/single");
     });
 
     it("throws not found for non-existent webhook", async () => {
-      await expect(getWebhook(orgId, "wh_nonexistent")).rejects.toThrow(/not found/i);
+      await expect(getWebhook(orgId, defaultAppId, "wh_nonexistent")).rejects.toThrow(/not found/i);
     });
   });
 
@@ -209,9 +209,9 @@ describe("webhooks service", () => {
         appWebhookParams({ url: "https://example.com/deleteme" }),
       );
 
-      await deleteWebhook(orgId, created.id);
+      await deleteWebhook(orgId, defaultAppId, created.id);
 
-      await expect(getWebhook(orgId, created.id)).rejects.toThrow(/not found/i);
+      await expect(getWebhook(orgId, defaultAppId, created.id)).rejects.toThrow(/not found/i);
     });
   });
 
@@ -225,7 +225,7 @@ describe("webhooks service", () => {
         appWebhookParams({ url: "https://example.com/rotate" }),
       );
 
-      const { secret: newSecret } = await rotateSecret(orgId, created.id);
+      const { secret: newSecret } = await rotateSecret(orgId, defaultAppId, created.id);
 
       expect(newSecret).toBeDefined();
       expect(newSecret).toStartWith("whsec_");
@@ -266,7 +266,7 @@ describe("webhooks service", () => {
         },
       ]);
 
-      const deliveries = await listDeliveries(orgId, created.id);
+      const deliveries = await listDeliveries(orgId, defaultAppId, created.id);
 
       expect(deliveries).toHaveLength(2);
       const statuses = deliveries.map((d) => d.status);
@@ -281,7 +281,7 @@ describe("webhooks service", () => {
         appWebhookParams({ url: "https://example.com/empty-deliveries" }),
       );
 
-      const deliveries = await listDeliveries(orgId, created.id);
+      const deliveries = await listDeliveries(orgId, defaultAppId, created.id);
       expect(deliveries).toHaveLength(0);
     });
   });

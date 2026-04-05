@@ -211,7 +211,11 @@ export async function listWebhooks(orgId: string, applicationId: string): Promis
   return rows.map(toWebhookResponse);
 }
 
-export async function getWebhook(orgId: string, webhookId: string): Promise<WebhookInfo> {
+export async function getWebhook(
+  orgId: string,
+  applicationId: string,
+  webhookId: string,
+): Promise<WebhookInfo> {
   const [row] = await db
     .select({
       id: webhooks.id,
@@ -225,7 +229,13 @@ export async function getWebhook(orgId: string, webhookId: string): Promise<Webh
       updatedAt: webhooks.updatedAt,
     })
     .from(webhooks)
-    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)))
+    .where(
+      and(
+        eq(webhooks.id, webhookId),
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+      ),
+    )
     .limit(1);
 
   if (!row) throw notFound(`Webhook '${webhookId}' not found`);
@@ -234,6 +244,7 @@ export async function getWebhook(orgId: string, webhookId: string): Promise<Webh
 
 export async function updateWebhook(
   orgId: string,
+  applicationId: string,
   webhookId: string,
   params: {
     url?: string;
@@ -243,7 +254,7 @@ export async function updateWebhook(
     enabled?: boolean;
   },
 ): Promise<WebhookInfo> {
-  await getWebhook(orgId, webhookId);
+  await getWebhook(orgId, applicationId, webhookId);
 
   if (params.url) validateWebhookUrl(params.url);
 
@@ -252,25 +263,53 @@ export async function updateWebhook(
   const [updated] = await db
     .update(webhooks)
     .set(updates)
-    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)))
+    .where(
+      and(
+        eq(webhooks.id, webhookId),
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+      ),
+    )
     .returning();
 
   return toWebhookResponse(updated!);
 }
 
-export async function deleteWebhook(orgId: string, webhookId: string): Promise<void> {
-  await getWebhook(orgId, webhookId);
-  await db.delete(webhooks).where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)));
+export async function deleteWebhook(
+  orgId: string,
+  applicationId: string,
+  webhookId: string,
+): Promise<void> {
+  await getWebhook(orgId, applicationId, webhookId);
+  await db
+    .delete(webhooks)
+    .where(
+      and(
+        eq(webhooks.id, webhookId),
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+      ),
+    );
 }
 
 /** Grace period for the previous secret after rotation (24 hours). */
 const SECRET_ROTATION_GRACE_MS = 24 * 60 * 60 * 1000;
 
-export async function rotateSecret(orgId: string, webhookId: string): Promise<{ secret: string }> {
+export async function rotateSecret(
+  orgId: string,
+  applicationId: string,
+  webhookId: string,
+): Promise<{ secret: string }> {
   const [row] = await db
     .select({ id: webhooks.id, secret: webhooks.secret })
     .from(webhooks)
-    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)))
+    .where(
+      and(
+        eq(webhooks.id, webhookId),
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+      ),
+    )
     .limit(1);
 
   if (!row) throw notFound(`Webhook '${webhookId}' not found`);
@@ -291,6 +330,7 @@ export async function rotateSecret(orgId: string, webhookId: string): Promise<{ 
 
 export async function listDeliveries(
   orgId: string,
+  applicationId: string,
   webhookId: string,
   limit = 20,
 ): Promise<
@@ -306,7 +346,7 @@ export async function listDeliveries(
     createdAt: string;
   }[]
 > {
-  await getWebhook(orgId, webhookId);
+  await getWebhook(orgId, applicationId, webhookId);
 
   const rows = await db
     .select()

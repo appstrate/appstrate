@@ -17,7 +17,6 @@ import {
 } from "../services/api-keys.ts";
 
 const createApiKeySchema = z.object({
-  applicationId: z.string().min(1, "applicationId is required"),
   name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
   expiresAt: z.iso
     .datetime({ message: "expiresAt must be a valid ISO 8601 date" })
@@ -54,7 +53,8 @@ export function createApiKeysRouter() {
     const body = await c.req.json();
     const data = parseBody(createApiKeySchema, body);
 
-    const { applicationId, name, expiresAt } = data;
+    const applicationId = c.get("applicationId");
+    const { name, expiresAt } = data;
     const orgRole = c.get("orgRole");
     // If scopes omitted or empty, grant all API-key-allowed scopes for the creator's role
     const validatedScopes =

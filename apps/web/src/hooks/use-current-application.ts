@@ -19,6 +19,7 @@ export function useCurrentApplicationId(): string | null {
 const APP_SCOPED_KEYS = [
   "packages",
   "agents",
+  "agent-memories",
   "runs",
   "run",
   "run-logs",

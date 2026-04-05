@@ -8,7 +8,10 @@ export const providersPaths = {
       summary: "List all providers",
       description:
         "List all provider configurations (built-in + custom) for the organization. Available to all org members.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Provider list",
@@ -39,7 +42,10 @@ export const providersPaths = {
       tags: ["Providers"],
       summary: "Create a custom provider",
       description: "Create a new provider configuration.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       requestBody: {
         required: true,
         content: {
@@ -78,6 +84,7 @@ export const providersPaths = {
       description: "Update a custom provider configuration. Built-in providers cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -115,6 +122,7 @@ export const providersPaths = {
         "Delete a custom provider. Built-in providers cannot be deleted. Cannot delete if used by agents.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -144,6 +152,7 @@ export const providersPaths = {
       description: "Remove admin credentials for a provider.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -179,6 +188,7 @@ export const providersPaths = {
       description: "Set OAuth client credentials for a provider.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
