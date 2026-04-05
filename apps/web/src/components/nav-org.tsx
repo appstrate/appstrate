@@ -10,7 +10,6 @@ import {
   Wrench,
   Puzzle,
   Plug,
-  Settings,
   Webhook,
   Loader2,
   Users,
@@ -124,27 +123,6 @@ export function NavOrg() {
         <SidebarGroupLabel>{t("nav.integrationsSection")}</SidebarGroupLabel>
         <SidebarMenu>{renderItems(integrationItems)}</SidebarMenu>
       </SidebarGroup>
-
-      {/* Organisation (admin) */}
-      {isAdmin && (
-        <SidebarGroup>
-          <SidebarGroupLabel>{t("nav.orgSection")}</SidebarGroupLabel>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                isActive={location.pathname.startsWith("/org-settings")}
-                tooltip={t("nav.settings")}
-              >
-                <Link to="/org-settings">
-                  <Settings />
-                  <span>{t("nav.settings")}</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroup>
-      )}
     </>
   );
 }

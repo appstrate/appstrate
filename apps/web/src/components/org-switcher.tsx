@@ -6,6 +6,7 @@ import { ChevronsUpDown, Check, Plus, Star, Settings } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useApplications } from "../hooks/use-applications";
 import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-application";
+import { usePermissions } from "../hooks/use-permissions";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +47,7 @@ export function OrgSwitcher() {
   const { data: applications } = useApplications();
   const currentAppId = useCurrentApplicationId();
   const { switchApp } = useAppSwitcher();
+  const { isAdmin } = usePermissions();
 
   const currentApp = applications?.find((a) => a.id === currentAppId) ?? null;
   const hasMultipleApps = (applications?.length ?? 0) > 1;
@@ -156,6 +158,14 @@ export function OrgSwitcher() {
                 {t("switcher.manageApps")}
               </Link>
             </DropdownMenuItem>
+            {isAdmin && (
+              <DropdownMenuItem asChild>
+                <Link to="/org-settings" className="text-primary flex items-center gap-2">
+                  <Settings size={14} />
+                  {t("nav.settings")}
+                </Link>
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
