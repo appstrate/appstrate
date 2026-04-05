@@ -7,7 +7,7 @@ import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, and, inArray } from "drizzle-orm";
-import { packages, profiles, providerCredentials } from "@appstrate/db/schema";
+import { packages, profiles, applicationProviderCredentials } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { installPackage } from "../services/application-packages.ts";
@@ -290,6 +290,7 @@ interface PackageRouteConfig {
     packageId: string;
     orgId: string;
     manifest: Record<string, unknown>;
+    applicationId?: string;
   }) => Promise<void>;
   /** Hook called after a package is updated. */
   afterUpdate?: (params: {
@@ -345,11 +346,18 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     responseKey: "provider",
     storageFileName: () => "PROVIDER.md",
     jsonBodyCreate: true,
-    afterCreate: async ({ packageId, orgId }) => {
-      await db
-        .insert(providerCredentials)
-        .values({ providerId: packageId, orgId, credentialsEncrypted: null, enabled: true })
-        .onConflictDoNothing();
+    afterCreate: async ({ packageId, applicationId }) => {
+      if (applicationId) {
+        await db
+          .insert(applicationProviderCredentials)
+          .values({
+            applicationId,
+            providerId: packageId,
+            credentialsEncrypted: null,
+            enabled: true,
+          })
+          .onConflictDoNothing();
+      }
     },
   },
 };
@@ -440,9 +448,14 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         validatedManifest as Record<string, unknown>,
       );
 
-      // After-create hook (e.g. agent junction table sync)
+      // After-create hook (e.g. auto-enable provider)
       if (rcfg.afterCreate) {
-        await rcfg.afterCreate({ packageId, orgId, manifest: validatedManifest });
+        await rcfg.afterCreate({
+          packageId,
+          orgId,
+          manifest: validatedManifest,
+          applicationId: c.get("applicationId"),
+        });
       }
 
       // Upload files to S3 storage
@@ -547,7 +560,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     // After-create hook
     if (rcfg.afterCreate) {
       const finalManifest = asRecord(item.draftManifest);
-      await rcfg.afterCreate({ packageId: item.id, orgId, manifest: finalManifest });
+      await rcfg.afterCreate({
+        packageId: item.id,
+        orgId,
+        manifest: finalManifest,
+        applicationId: c.get("applicationId"),
+      });
     }
 
     // Create initial version (non-fatal)
@@ -1306,7 +1324,12 @@ export function createPackagesRouter() {
     // After-create hook (e.g. auto-enable provider)
     const rcfg = ROUTE_CONFIGS[packageType as PackageType];
     if (rcfg?.afterCreate) {
-      await rcfg.afterCreate({ packageId, orgId, manifest: manifest as Record<string, unknown> });
+      await rcfg.afterCreate({
+        packageId,
+        orgId,
+        manifest: manifest as Record<string, unknown>,
+        applicationId: c.get("applicationId"),
+      });
     }
 
     // Auto-install in the current application (non-fatal, skip if already installed)

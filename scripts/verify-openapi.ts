@@ -259,6 +259,11 @@ const expectedEndpoints = [
   "PUT /api/applications/{appId}/packages/{scope}/{name}",
   "DELETE /api/applications/{appId}/packages/{scope}/{name}",
 
+  // Application Providers
+  "GET /api/applications/{appId}/providers",
+  "PUT /api/applications/{appId}/providers/{scope}/{name}/credentials",
+  "DELETE /api/applications/{appId}/providers/{scope}/{name}/credentials",
+
   // End-Users
   "POST /api/end-users",
   "GET /api/end-users",

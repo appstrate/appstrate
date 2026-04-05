@@ -45,7 +45,7 @@ describe("validateAgentDependencies", () => {
     const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     try {
-      await validateAgentDependencies(providers, profiles, "org-1", deps);
+      await validateAgentDependencies(providers, profiles, "org-1", deps, "app-1");
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -187,7 +187,7 @@ describe("validateAgentDependencies", () => {
     const providers = [{ id: "@test/gmail" }, { id: "@test/clickup" }];
     const profiles = profileMap({ "@test/gmail": "p1", "@test/clickup": "p2" });
 
-    await validateAgentDependencies(providers, profiles, "org-1", deps);
+    await validateAgentDependencies(providers, profiles, "org-1", deps, "app-1");
     expect(enabledCallCount).toBe(2);
   });
 

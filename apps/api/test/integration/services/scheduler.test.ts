@@ -17,7 +17,7 @@ import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
 import { saveConnection } from "@appstrate/connect";
-import { connectionProfiles, providerCredentials } from "@appstrate/db/schema";
+import { connectionProfiles, applicationProviderCredentials } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import {
   createSchedule,
@@ -390,9 +390,9 @@ describe("scheduler service", () => {
           definition: { authMode: "api_key" },
         },
       });
-      await db.insert(providerCredentials).values({
+      await db.insert(applicationProviderCredentials).values({
+        applicationId: defaultAppId,
         providerId: id,
-        orgId,
         credentialsEncrypted: "{}",
         enabled: true,
       });

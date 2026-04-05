@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, providerCredentials } from "@appstrate/db/schema";
+import { packages, applicationProviderCredentials } from "@appstrate/db/schema";
 import { getPackage } from "../services/agent-service.ts";
 import { getOrgItem, AGENT_CONFIG } from "../services/package-items/index.ts";
 import {
@@ -94,19 +94,21 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
             inArray(packages.id, providerIds),
           ),
         ),
-      db
-        .select({
-          providerId: providerCredentials.providerId,
-          credentialsEncrypted: providerCredentials.credentialsEncrypted,
-          enabled: providerCredentials.enabled,
-        })
-        .from(providerCredentials)
-        .where(
-          and(
-            eq(providerCredentials.orgId, orgId),
-            inArray(providerCredentials.providerId, providerIds),
-          ),
-        ),
+      appId
+        ? db
+            .select({
+              providerId: applicationProviderCredentials.providerId,
+              credentialsEncrypted: applicationProviderCredentials.credentialsEncrypted,
+              enabled: applicationProviderCredentials.enabled,
+            })
+            .from(applicationProviderCredentials)
+            .where(
+              and(
+                eq(applicationProviderCredentials.applicationId, appId),
+                inArray(applicationProviderCredentials.providerId, providerIds),
+              ),
+            )
+        : Promise.resolve([]),
     ]);
     const credMap = new Map(providerCreds.map((r) => [r.providerId, r]));
     populatedProviders = Object.fromEntries(

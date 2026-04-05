@@ -38,7 +38,7 @@ import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
 import { saveConnection } from "@appstrate/connect";
-import { providerCredentials } from "@appstrate/db/schema";
+import { applicationProviderCredentials } from "@appstrate/db/schema";
 import { createSchedule, listSchedules } from "../../../src/services/scheduler.ts";
 import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
 import {
@@ -90,9 +90,9 @@ describe("scheduler org-profile readiness", () => {
         definition: { authMode: "api_key" },
       },
     });
-    await db.insert(providerCredentials).values({
+    await db.insert(applicationProviderCredentials).values({
+      applicationId: defaultAppId,
       providerId: id,
-      orgId,
       credentialsEncrypted: "{}",
       enabled: true,
     });

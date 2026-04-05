@@ -5,7 +5,7 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedConnectionProfile, seedAgent, seedPackage } from "../../helpers/seed.ts";
 import { saveConnection } from "@appstrate/connect";
-import { providerCredentials } from "@appstrate/db/schema";
+import { applicationProviderCredentials } from "@appstrate/db/schema";
 import {
   resolveProviderProfiles,
   getDefaultProfileId,
@@ -61,9 +61,9 @@ describe("Run with provider profiles", () => {
           definition: { authMode: "api_key" },
         },
       });
-      await db.insert(providerCredentials).values({
+      await db.insert(applicationProviderCredentials).values({
+        applicationId: appId,
         providerId: pid,
-        orgId,
         credentialsEncrypted: "{}",
         enabled: true,
       });

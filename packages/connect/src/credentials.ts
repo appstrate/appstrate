@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { eq, and } from "drizzle-orm";
-import { userProviderConnections, providerCredentials, packages } from "@appstrate/db/schema";
+import {
+  userProviderConnections,
+  applicationProviderCredentials,
+  packages,
+} from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { ConnectionRecord, DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
@@ -75,6 +79,7 @@ export async function getCredentials(
   profileId: string,
   providerId: string,
   orgId: string,
+  applicationId: string,
 ): Promise<{
   credentials: Record<string, string>;
   connection: ConnectionRecord;
@@ -89,7 +94,7 @@ export async function getCredentials(
   let decrypted: DecryptedCredentials;
 
   if (authMode === "oauth2") {
-    const refreshContext = await buildRefreshContext(db, def, providerId, orgId);
+    const refreshContext = await buildRefreshContext(db, def, providerId, orgId, applicationId);
     decrypted = await refreshIfNeeded(
       db,
       connection.id,
@@ -121,12 +126,13 @@ export async function resolveCredentialsForProxy(
   profileId: string,
   providerId: string,
   orgId: string,
+  applicationId: string,
 ): Promise<{
   credentials: Record<string, string>;
   authorizedUris: string[] | null;
   allowAllUris: boolean;
 } | null> {
-  const result = await getCredentials(db, profileId, providerId, orgId);
+  const result = await getCredentials(db, profileId, providerId, orgId, applicationId);
   if (!result) return null;
 
   const def = result.definition;
@@ -149,6 +155,7 @@ export async function forceRefreshCredentials(
   profileId: string,
   providerId: string,
   orgId: string,
+  applicationId: string,
 ): Promise<{
   credentials: Record<string, string>;
   authorizedUris: string[] | null;
@@ -163,7 +170,7 @@ export async function forceRefreshCredentials(
   let decrypted: DecryptedCredentials;
 
   if (authMode === "oauth2") {
-    const refreshContext = await buildRefreshContext(db, def, providerId, orgId);
+    const refreshContext = await buildRefreshContext(db, def, providerId, orgId, applicationId);
     decrypted = await forceRefresh(
       db,
       connection.id,
@@ -277,28 +284,33 @@ function rowToConnection(row: typeof userProviderConnections.$inferSelect): Conn
   };
 }
 
-/** Build OAuth2 refresh context from provider definition and admin credentials. */
+/** Build OAuth2 refresh context from provider definition and admin credentials.
+ * Queries applicationProviderCredentials keyed by (applicationId, providerId). */
 async function buildRefreshContext(
   db: Db,
   def: Record<string, unknown>,
   providerId: string,
-  orgId: string,
+  _orgId: string,
+  applicationId: string,
 ): Promise<RefreshContext | undefined> {
   const oauth2 = (def.oauth2 as Record<string, unknown>) ?? {};
   const tokenUrl = (oauth2.refreshUrl as string) ?? (oauth2.tokenUrl as string);
   if (!tokenUrl) return undefined;
 
-  const [cred] = await db
-    .select({ credentialsEncrypted: providerCredentials.credentialsEncrypted })
-    .from(providerCredentials)
+  const [appRow] = await db
+    .select({ credentialsEncrypted: applicationProviderCredentials.credentialsEncrypted })
+    .from(applicationProviderCredentials)
     .where(
-      and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
+      and(
+        eq(applicationProviderCredentials.applicationId, applicationId),
+        eq(applicationProviderCredentials.providerId, providerId),
+      ),
     )
     .limit(1);
 
-  if (!cred?.credentialsEncrypted) return undefined;
+  if (!appRow?.credentialsEncrypted) return undefined;
+  const adminCreds = decryptCredentials<Record<string, string>>(appRow.credentialsEncrypted);
 
-  const adminCreds = decryptCredentials<Record<string, string>>(cred.credentialsEncrypted);
   if (!adminCreds.clientId || !adminCreds.clientSecret) return undefined;
 
   return {

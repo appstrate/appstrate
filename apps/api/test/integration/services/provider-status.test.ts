@@ -5,21 +5,23 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedConnectionProfile, seedPackage } from "../../helpers/seed.ts";
 import { saveConnection } from "@appstrate/connect";
-import { providerCredentials } from "@appstrate/db/schema";
+import { applicationProviderCredentials } from "@appstrate/db/schema";
 import { resolveProviderStatuses } from "../../../src/services/connection-manager/status.ts";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../../../src/types/index.ts";
 
 describe("resolveProviderStatuses", () => {
   let userId: string;
   let orgId: string;
+  let appId: string;
   let profileId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const { id } = await createTestUser({ name: "Alice" });
     userId = id;
-    const { org } = await createTestOrg(userId);
+    const { org, defaultAppId } = await createTestOrg(userId);
     orgId = org.id;
+    appId = defaultAppId;
 
     const profile = await seedConnectionProfile({ userId, name: "Alice Profile" });
     profileId = profile.id;
@@ -39,9 +41,9 @@ describe("resolveProviderStatuses", () => {
         definition: { authMode: "api_key" },
       },
     });
-    await db.insert(providerCredentials).values({
+    await db.insert(applicationProviderCredentials).values({
+      applicationId: appId,
       providerId: id,
-      orgId,
       credentialsEncrypted: "{}",
       enabled: true,
     });

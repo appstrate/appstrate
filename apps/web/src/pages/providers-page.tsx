@@ -6,7 +6,9 @@ import { Link } from "react-router-dom";
 import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useProviders } from "../hooks/use-providers";
+import { useProviders, useAppProviderOverrides } from "../hooks/use-providers";
+import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { useApplications } from "../hooks/use-applications";
 import { ProfileSelector } from "../components/profile-selector";
 import { Modal } from "../components/modal";
 import { ProviderCredentialsModal } from "../components/provider-credentials-modal";
@@ -23,6 +25,17 @@ export function ProvidersPage() {
   const [showAll, setShowAll] = useState(false);
   const [profileId, setProfileId] = useState<string | null>(null);
   const { data: providersData } = useProviders();
+  const appId = useCurrentApplicationId();
+  const { data: apps } = useApplications();
+  const isDefaultApp = apps?.find((a) => a.id === appId)?.isDefault ?? true;
+  const { data: appOverrides } = useAppProviderOverrides(isDefaultApp ? null : appId);
+  const overrideMap = useMemo(() => {
+    const m = new Map<string, { hasAppCredentials: boolean; appEnabled: boolean }>();
+    if (appOverrides?.data) {
+      for (const o of appOverrides.data) m.set(o.providerId, o);
+    }
+    return m;
+  }, [appOverrides]);
 
   const [configurePickerOpen, setConfigurePickerOpen] = useState(false);
   const [configureProvider, setConfigureProvider] = useState<ProviderConfig | null>(null);
@@ -36,7 +49,10 @@ export function ProvidersPage() {
       for (const p of providersData.providers) {
         if (p.iconUrl) icons.set(p.id, p.iconUrl);
 
-        badges.set(p.id, <ProviderConfigBadge enabled={p.enabled} />);
+        badges.set(
+          p.id,
+          <ProviderConfigBadge enabled={p.enabled} appOverride={overrideMap.get(p.id)} />,
+        );
 
         const configButton = (
           <ProviderConfigureButton provider={p} callbackUrl={providersData.callbackUrl} />
@@ -52,7 +68,7 @@ export function ProvidersPage() {
       }
     }
     return { badgeMap: badges, actionsMap: actions, iconMap: icons };
-  }, [providersData]);
+  }, [providersData, overrideMap]);
 
   // Filter: enabled providers (default) or all
   const enabledIds = new Set<string>();

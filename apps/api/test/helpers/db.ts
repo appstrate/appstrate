@@ -30,7 +30,7 @@ const ALL_TABLES = [
   "org_profile_provider_bindings",
   "user_provider_connections",
   "oauth_states",
-  "provider_credentials",
+  "application_provider_credentials",
   "package_schedules",
   "org_models",
   "org_provider_keys",

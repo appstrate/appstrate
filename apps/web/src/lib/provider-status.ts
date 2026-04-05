@@ -9,12 +9,14 @@ export function isProviderStatusConnected(status: string): boolean {
 
 /**
  * Check whether a provider is connected within a given connection profile.
+ * Returns false if the connection exists but needs reconnection.
  */
 export function isProviderConnectedInProfile(
   providerId: string,
-  profileConnections?: Array<{ providerId: string }>,
+  profileConnections?: Array<{ providerId: string; needsReconnection?: boolean }>,
 ): boolean {
-  return profileConnections?.some((c) => c.providerId === providerId) ?? false;
+  const conn = profileConnections?.find((c) => c.providerId === providerId);
+  return !!conn && !conn.needsReconnection;
 }
 
 /**

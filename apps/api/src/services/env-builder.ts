@@ -68,7 +68,7 @@ export async function buildRunContext(params: {
     latestVersion,
     memories,
   ] = await Promise.all([
-    buildProviderTokens(manifestProviders, providerProfiles, orgId),
+    buildProviderTokens(manifestProviders, providerProfiles, orgId, applicationId),
     skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
     getLastRunState(agent.id, actor, orgId),
     resolveProviderDefs(orgId, manifestProviders),
@@ -126,7 +126,11 @@ export async function buildRunContext(params: {
 
   // Step 4: assemble prompt context
   const apiEnv = getEnv();
-  const runApiUrl = apiEnv.PLATFORM_API_URL ?? `http://host.docker.internal:${apiEnv.PORT}`;
+  const runApiUrl =
+    apiEnv.PLATFORM_API_URL ??
+    (apiEnv.RUN_ADAPTER === "process"
+      ? `http://localhost:${apiEnv.PORT}`
+      : `http://host.docker.internal:${apiEnv.PORT}`);
 
   const promptContext: PromptContext = {
     rawPrompt: agent.prompt,

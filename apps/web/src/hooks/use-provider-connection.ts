@@ -48,6 +48,8 @@ export function useProviderConnection({
   const statusProfileId = viewProfileId ?? effectiveProfileId;
   const { data: profileConnections } = useProfileConnections(statusProfileId);
   const isConnected = isProviderConnectedInProfile(providerId, profileConnections);
+  const needsReconnection =
+    profileConnections?.some((c) => c.providerId === providerId && c.needsReconnection) ?? false;
 
   // Binding status (only when orgProfileId is provided)
   const { data: bindings } = useOrgProfileBindings(orgProfileId);
@@ -100,6 +102,7 @@ export function useProviderConnection({
     effectiveProfileId,
     overrideProfileId,
     isConnected,
+    needsReconnection,
     profileConnections,
     binding,
     isBound,

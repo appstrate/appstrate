@@ -13,7 +13,7 @@ import type { AgentProviderRequirement, ProviderProfileMap } from "../types/inde
 import { ApiError } from "../lib/errors.ts";
 
 export interface DependencyValidationDeps {
-  isProviderEnabled: (orgId: string, providerId: string) => Promise<boolean>;
+  isProviderEnabled: (orgId: string, providerId: string, applicationId: string) => Promise<boolean>;
   getConnectionStatus: (
     provider: string,
     connectionProfileId: string,
@@ -26,7 +26,8 @@ export interface DependencyValidationDeps {
 }
 
 const defaultDeps: DependencyValidationDeps = {
-  isProviderEnabled: (orgId, providerId) => isProviderEnabled(db, orgId, providerId),
+  isProviderEnabled: (orgId, providerId, applicationId) =>
+    isProviderEnabled(db, orgId, providerId, applicationId),
   getConnectionStatus,
   validateScopes,
 };
@@ -41,18 +42,21 @@ export async function validateAgentDependencies(
   providerProfiles: ProviderProfileMap,
   orgId: string,
   deps: DependencyValidationDeps = defaultDeps,
+  applicationId?: string,
 ): Promise<void> {
-  // Check provider enabled status
-  const uniqueProviders = [...new Set(providers.map((s) => s.id))];
-  for (const providerId of uniqueProviders) {
-    const enabled = await deps.isProviderEnabled(orgId, providerId);
-    if (!enabled) {
-      throw new ApiError({
-        status: 400,
-        code: "provider_not_enabled",
-        title: "Provider Not Enabled",
-        detail: `Provider '${providerId}' is not configured`,
-      });
+  // Check provider enabled status (only when applicationId is available)
+  if (applicationId) {
+    const uniqueProviders = [...new Set(providers.map((s) => s.id))];
+    for (const providerId of uniqueProviders) {
+      const enabled = await deps.isProviderEnabled(orgId, providerId, applicationId);
+      if (!enabled) {
+        throw new ApiError({
+          status: 400,
+          code: "provider_not_enabled",
+          title: "Provider Not Enabled",
+          detail: `Provider '${providerId}' is not configured`,
+        });
+      }
     }
   }
 

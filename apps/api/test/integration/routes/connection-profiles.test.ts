@@ -11,7 +11,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedConnectionProfile, seedAgent, seedPackage } from "../../helpers/seed.ts";
-import { providerCredentials } from "@appstrate/db/schema";
+import { applicationProviderCredentials } from "@appstrate/db/schema";
 
 const app = getTestApp();
 
@@ -19,7 +19,12 @@ const app = getTestApp();
  * Seed a provider package and enable it for an org.
  * Required for connect route tests where `isProviderEnabled` is checked before ownership.
  */
-async function seedEnabledProvider(providerId: string, orgId: string, createdBy: string) {
+async function seedEnabledProvider(
+  providerId: string,
+  orgId: string,
+  createdBy: string,
+  applicationId: string,
+) {
   await seedPackage({
     id: providerId,
     orgId,
@@ -47,9 +52,9 @@ async function seedEnabledProvider(providerId: string, orgId: string, createdBy:
       },
     },
   });
-  await db.insert(providerCredentials).values({
+  await db.insert(applicationProviderCredentials).values({
+    applicationId,
     providerId,
-    orgId,
     credentialsEncrypted: "{}",
     enabled: true,
   });
@@ -485,7 +490,7 @@ describe("Connection Profiles API", () => {
   describe("POST /api/connections/connect/:provider (ownership)", () => {
     it("rejects connecting on another user's profile with 403", async () => {
       const providerId = "@testorg/test-provider";
-      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id);
+      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id, ctx.defaultAppId);
 
       // user1 (ctx) owns the profile
       const user1Profile = await seedConnectionProfile({
@@ -518,7 +523,7 @@ describe("Connection Profiles API", () => {
 
     it("accepts connecting on an org profile", async () => {
       const providerId = "@testorg/test-provider-org";
-      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id);
+      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id, ctx.defaultAppId);
 
       const orgProfile = await seedConnectionProfile({
         orgId: ctx.orgId,
@@ -537,7 +542,7 @@ describe("Connection Profiles API", () => {
 
     it("does not return 403 when connecting on own profile", async () => {
       const providerId = "@testorg/test-provider-own";
-      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id);
+      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id, ctx.defaultAppId);
 
       const ownProfile = await seedConnectionProfile({
         userId: ctx.user.id,
@@ -561,7 +566,7 @@ describe("Connection Profiles API", () => {
   describe("POST /api/connections/connect/:provider/api-key (ownership)", () => {
     it("rejects saving an API key on another user's profile with 403", async () => {
       const providerId = "@testorg/apikey-provider";
-      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id);
+      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id, ctx.defaultAppId);
 
       const user1Profile = await seedConnectionProfile({
         userId: ctx.user.id,
@@ -591,7 +596,7 @@ describe("Connection Profiles API", () => {
 
     it("accepts saving an API key on an org profile", async () => {
       const providerId = "@testorg/apikey-provider-org";
-      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id);
+      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id, ctx.defaultAppId);
 
       const orgProfile = await seedConnectionProfile({
         orgId: ctx.orgId,
@@ -611,7 +616,7 @@ describe("Connection Profiles API", () => {
   describe("POST /api/connections/connect/:provider/credentials (ownership)", () => {
     it("rejects saving credentials on another user's profile with 403", async () => {
       const providerId = "@testorg/creds-provider";
-      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id);
+      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id, ctx.defaultAppId);
 
       const user1Profile = await seedConnectionProfile({
         userId: ctx.user.id,
@@ -644,7 +649,7 @@ describe("Connection Profiles API", () => {
 
     it("accepts saving credentials on an org profile", async () => {
       const providerId = "@testorg/creds-provider-org";
-      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id);
+      await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id, ctx.defaultAppId);
 
       const orgProfile = await seedConnectionProfile({
         orgId: ctx.orgId,

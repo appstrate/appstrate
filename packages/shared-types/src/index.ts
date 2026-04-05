@@ -106,6 +106,7 @@ export interface ConnectionInfo {
   providerId: string;
   orgId: string;
   scopesGranted?: string[];
+  needsReconnection: boolean;
   createdAt: string;
   updatedAt: string;
 }

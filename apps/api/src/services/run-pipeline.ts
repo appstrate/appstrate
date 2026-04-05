@@ -97,6 +97,7 @@ export async function resolveRunPreflight(params: {
     providerProfiles,
     orgId,
     config: packageConfig.config,
+    applicationId,
   });
 
   return {

@@ -4,7 +4,11 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { providerCredentials, packages, userProviderConnections } from "@appstrate/db/schema";
+import {
+  applicationProviderCredentials,
+  packages,
+  userProviderConnections,
+} from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { getItemId } from "./packages.ts";
 import type { ProviderConfig } from "@appstrate/shared-types";
@@ -177,15 +181,18 @@ export function createProvidersRouter() {
       }
     }
 
-    // Direct Drizzle query on providerCredentials (bypass LEFT JOIN issue)
-    const allCreds = await db
-      .select({
-        providerId: providerCredentials.providerId,
-        credentialsEncrypted: providerCredentials.credentialsEncrypted,
-        enabled: providerCredentials.enabled,
-      })
-      .from(providerCredentials)
-      .where(eq(providerCredentials.orgId, orgId));
+    // Query application-level provider credentials
+    const appId = c.get("applicationId");
+    const allCreds = appId
+      ? await db
+          .select({
+            providerId: applicationProviderCredentials.providerId,
+            credentialsEncrypted: applicationProviderCredentials.credentialsEncrypted,
+            enabled: applicationProviderCredentials.enabled,
+          })
+          .from(applicationProviderCredentials)
+          .where(eq(applicationProviderCredentials.applicationId, appId))
+      : [];
 
     const credMap = new Map(allCreds.map((r) => [r.providerId, r]));
 
@@ -265,27 +272,33 @@ export function createProvidersRouter() {
           })
           .onConflictDoNothing();
 
-        // 2. UPSERT providerCredentials (providerId, orgId) with credentials if provided
-        const adminCreds: Record<string, string> = {};
-        if (data.clientId) adminCreds.clientId = data.clientId;
-        if (data.clientSecret) adminCreds.clientSecret = data.clientSecret;
-        const hasAdminCreds = Object.keys(adminCreds).length > 0;
-        await tx
-          .insert(providerCredentials)
-          .values({
-            providerId: data.id,
-            orgId,
-            credentialsEncrypted: hasAdminCreds ? encryptCredentials(adminCreds) : null,
-            enabled: true,
-          })
-          .onConflictDoUpdate({
-            target: [providerCredentials.providerId, providerCredentials.orgId],
-            set: {
-              ...(hasAdminCreds ? { credentialsEncrypted: encryptCredentials(adminCreds) } : {}),
+        // 2. UPSERT applicationProviderCredentials (applicationId, providerId) with credentials if provided
+        const appId = c.get("applicationId");
+        if (appId) {
+          const adminCreds: Record<string, string> = {};
+          if (data.clientId) adminCreds.clientId = data.clientId;
+          if (data.clientSecret) adminCreds.clientSecret = data.clientSecret;
+          const hasAdminCreds = Object.keys(adminCreds).length > 0;
+          await tx
+            .insert(applicationProviderCredentials)
+            .values({
+              applicationId: appId,
+              providerId: data.id,
+              credentialsEncrypted: hasAdminCreds ? encryptCredentials(adminCreds) : null,
               enabled: true,
-              updatedAt: new Date(),
-            },
-          });
+            })
+            .onConflictDoUpdate({
+              target: [
+                applicationProviderCredentials.applicationId,
+                applicationProviderCredentials.providerId,
+              ],
+              set: {
+                ...(hasAdminCreds ? { credentialsEncrypted: encryptCredentials(adminCreds) } : {}),
+                enabled: true,
+                updatedAt: new Date(),
+              },
+            });
+        }
       });
     } catch (err) {
       logger.error("Provider create failed", {
@@ -381,20 +394,25 @@ export function createProvidersRouter() {
           .where(and(eq(packages.id, providerId), eq(packages.orgId, orgId)));
 
         // 2. Handle credentials: update with new values if provided
-        if (data.clientId || data.clientSecret) {
+        const appId = c.get("applicationId");
+        if ((data.clientId || data.clientSecret) && appId) {
           const adminCreds: Record<string, string> = {};
           if (data.clientId) adminCreds.clientId = data.clientId;
           if (data.clientSecret) adminCreds.clientSecret = data.clientSecret;
 
           await tx
-            .insert(providerCredentials)
+            .insert(applicationProviderCredentials)
             .values({
+              applicationId: appId,
               providerId,
-              orgId,
               credentialsEncrypted: encryptCredentials(adminCreds),
+              enabled: true,
             })
             .onConflictDoUpdate({
-              target: [providerCredentials.providerId, providerCredentials.orgId],
+              target: [
+                applicationProviderCredentials.applicationId,
+                applicationProviderCredentials.providerId,
+              ],
               set: { credentialsEncrypted: encryptCredentials(adminCreds), updatedAt: new Date() },
             });
         }
@@ -457,6 +475,11 @@ export function createProvidersRouter() {
         }
       }
 
+      const appId = c.get("applicationId");
+      if (!appId) {
+        throw invalidRequest("Application context required to configure provider credentials");
+      }
+
       const setClause: Record<string, unknown> = { updatedAt: new Date() };
       if (hasCredentials) {
         setClause.credentialsEncrypted = encryptCredentials(data.credentials!);
@@ -466,15 +489,18 @@ export function createProvidersRouter() {
       }
 
       await db
-        .insert(providerCredentials)
+        .insert(applicationProviderCredentials)
         .values({
+          applicationId: appId,
           providerId,
-          orgId,
           credentialsEncrypted: hasCredentials ? encryptCredentials(data.credentials!) : null,
-          enabled: data.enabled ?? false,
+          enabled: data.enabled ?? true,
         })
         .onConflictDoUpdate({
-          target: [providerCredentials.providerId, providerCredentials.orgId],
+          target: [
+            applicationProviderCredentials.applicationId,
+            applicationProviderCredentials.providerId,
+          ],
           set: setClause,
         });
 
@@ -503,15 +529,19 @@ export function createProvidersRouter() {
     "/credentials/:scope{@[^/]+}/:name",
     requirePermission("providers", "delete"),
     async (c) => {
-      const orgId = c.get("orgId");
+      const appId = c.get("applicationId");
       const providerId = getItemId(c);
 
-      await db
-        .update(providerCredentials)
-        .set({ credentialsEncrypted: null, enabled: false, updatedAt: new Date() })
-        .where(
-          and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
-        );
+      if (appId) {
+        await db
+          .delete(applicationProviderCredentials)
+          .where(
+            and(
+              eq(applicationProviderCredentials.applicationId, appId),
+              eq(applicationProviderCredentials.providerId, providerId),
+            ),
+          );
+      }
 
       return c.json({ configured: false });
     },
@@ -546,7 +576,7 @@ export function createProvidersRouter() {
     }
 
     try {
-      // Delete packages row (providerCredentials will cascade)
+      // Delete packages row (applicationProviderCredentials will cascade)
       await db.delete(packages).where(and(eq(packages.orgId, orgId), eq(packages.id, providerId)));
     } catch (err) {
       logger.error("Provider delete failed", {

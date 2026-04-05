@@ -268,10 +268,19 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
 
   private async findAvailablePort(retries = 3): Promise<number> {
     for (let attempt = 0; attempt < retries; attempt++) {
-      const server = Bun.serve({ port: 0, fetch: () => new Response() });
-      const port = server.port ?? 0;
-      server.stop(true);
-      if (port) return port;
+      // Allocate two consecutive ports (sidecar + forward proxy at port+1)
+      const s1 = Bun.serve({ port: 0, fetch: () => new Response() });
+      const port = s1.port ?? 0;
+      s1.stop(true);
+      if (!port) continue;
+      // Verify port+1 is also free (forward proxy will bind there)
+      try {
+        const s2 = Bun.serve({ port: port + 1, fetch: () => new Response() });
+        s2.stop(true);
+        return port;
+      } catch {
+        continue; // port+1 in use, retry
+      }
     }
     throw new Error("Failed to find available port after retries");
   }

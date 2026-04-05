@@ -25,16 +25,26 @@ export async function initiateConnection(
   actor: Actor,
   profileId: string,
   requestedScopes?: string[],
+  applicationId?: string | null,
 ): Promise<{ authUrl: string; state: string }> {
   const redirectUri = getOAuthCallbackUrl();
 
   // Route to OAuth1 if the provider uses it
   const providerDef = await getProvider(db, orgId, provider);
   if (providerDef?.authMode === "oauth1") {
-    return initiateOAuth1(db, orgId, actor, profileId, provider, redirectUri);
+    return initiateOAuth1(db, orgId, actor, profileId, provider, redirectUri, applicationId);
   }
 
-  return initiateOAuth(db, orgId, actor, profileId, provider, redirectUri, requestedScopes);
+  return initiateOAuth(
+    db,
+    orgId,
+    actor,
+    profileId,
+    provider,
+    redirectUri,
+    requestedScopes,
+    applicationId,
+  );
 }
 
 export async function handleCallback(code: string, state: string): Promise<OAuthCallbackResult> {

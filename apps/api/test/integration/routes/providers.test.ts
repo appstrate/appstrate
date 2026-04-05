@@ -300,7 +300,7 @@ describe("Providers API", () => {
 
       await seedProviderCredentials({
         providerId,
-        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
       });
 
       const profile = await seedConnectionProfile({

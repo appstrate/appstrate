@@ -50,7 +50,8 @@ async function refreshCredentials(providerId: string): Promise<CredentialsRespon
   return res.json() as Promise<CredentialsResponse>;
 }
 
-const proxy = createForwardProxy({ config });
+const port = parseInt(process.env.PORT || "8080", 10);
+const proxy = createForwardProxy({ config, listenPort: port + 1 });
 const preConfigured = Boolean(process.env.RUN_TOKEN);
 const app = createApp({
   config,
@@ -62,7 +63,6 @@ const app = createApp({
   preConfigured,
 });
 
-const port = parseInt(process.env.PORT || "8080", 10);
 console.log(`Sidecar proxy listening on :${port}`);
 
 export default { port, fetch: app.fetch };

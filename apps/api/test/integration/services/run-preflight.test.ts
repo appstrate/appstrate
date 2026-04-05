@@ -5,7 +5,7 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedAgent, seedConnectionProfile, seedPackage } from "../../helpers/seed.ts";
 import { saveConnection } from "@appstrate/connect";
-import { providerCredentials } from "@appstrate/db/schema";
+import { applicationProviderCredentials } from "@appstrate/db/schema";
 import { resolveProviderProfiles } from "../../../src/services/connection-profiles.ts";
 import { resolveManifestProviders } from "../../../src/lib/manifest-utils.ts";
 import { getPackageConfig } from "../../../src/services/application-packages.ts";
@@ -19,6 +19,7 @@ import type { LoadedPackage, ProviderProfileMap } from "../../../src/types/index
 describe("run preflight — provider profile resolution", () => {
   let userId: string;
   let orgId: string;
+  let appId: string;
   let actor: Actor;
   let defaultProfileId: string;
   let altProfileId: string;
@@ -29,8 +30,9 @@ describe("run preflight — provider profile resolution", () => {
     await truncateAll();
     const { id } = await createTestUser();
     userId = id;
-    const { org } = await createTestOrg(userId);
+    const { org, defaultAppId } = await createTestOrg(userId);
     orgId = org.id;
+    appId = defaultAppId;
     actor = { type: "member", id: userId };
 
     // Seed provider packages + enable them
@@ -48,9 +50,9 @@ describe("run preflight — provider profile resolution", () => {
           definition: { authMode: "api_key" },
         },
       });
-      await db.insert(providerCredentials).values({
+      await db.insert(applicationProviderCredentials).values({
+        applicationId: appId,
         providerId: pid,
-        orgId,
         credentialsEncrypted: "{}",
         enabled: true,
       });

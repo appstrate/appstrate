@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, invalidRequest, internalError, parseBody } from "../lib/errors.ts";
+import { ApiError, invalidRequest, notFound, internalError, parseBody } from "../lib/errors.ts";
 import {
   createApplication,
   listApplications,
@@ -23,6 +23,11 @@ import {
 import { validateDomainList } from "../services/redirect-validation.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import type { PackageType } from "@appstrate/core/validation";
+import { eq, and } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { applicationProviderCredentials, packages } from "@appstrate/db/schema";
+import { encryptCredentials } from "@appstrate/connect";
+import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 
 const createApplicationSchema = z.object({
   name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
@@ -228,6 +233,113 @@ export function createApplicationsRouter() {
       return c.body(null, 204);
     },
   );
+
+  // ─── Application-level provider credentials ──────────────────────────
+
+  // Middleware: validate app exists for provider routes
+  router.use("/:appId/providers/*", async (c, next) => {
+    await getApplication(c.get("orgId"), c.req.param("appId")!);
+    return next();
+  });
+
+  const appProviderCredentialsSchema = z.object({
+    credentials: z.record(z.string(), z.string().min(1)).optional(),
+    enabled: z.boolean().optional(),
+  });
+
+  // PUT /api/applications/:appId/providers/:scope/:name/credentials — set app-level credentials
+  router.put(
+    "/:appId/providers/:scope{@[^/]+}/:name/credentials",
+    requirePermission("providers", "write"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const appId = c.req.param("appId")!;
+      const providerId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
+      const body = await c.req.json();
+      const data = parseBody(appProviderCredentialsSchema, body);
+
+      // Verify provider exists
+      const [pkg] = await db
+        .select({ id: packages.id })
+        .from(packages)
+        .where(
+          and(orgOrSystemFilter(orgId), eq(packages.id, providerId), eq(packages.type, "provider")),
+        )
+        .limit(1);
+
+      if (!pkg) throw notFound("Provider not found");
+
+      const hasCredentials = data.credentials && Object.keys(data.credentials).length > 0;
+      const setClause: Record<string, unknown> = { updatedAt: new Date() };
+      if (hasCredentials) {
+        setClause.credentialsEncrypted = encryptCredentials(data.credentials!);
+      }
+      if (data.enabled !== undefined) {
+        setClause.enabled = data.enabled;
+      }
+
+      await db
+        .insert(applicationProviderCredentials)
+        .values({
+          applicationId: appId,
+          providerId,
+          credentialsEncrypted: hasCredentials ? encryptCredentials(data.credentials!) : null,
+          enabled: data.enabled ?? true,
+        })
+        .onConflictDoUpdate({
+          target: [
+            applicationProviderCredentials.applicationId,
+            applicationProviderCredentials.providerId,
+          ],
+          set: setClause,
+        });
+
+      return c.json({ configured: true });
+    },
+  );
+
+  // DELETE /api/applications/:appId/providers/:scope/:name/credentials — remove app-level override
+  router.delete(
+    "/:appId/providers/:scope{@[^/]+}/:name/credentials",
+    requirePermission("providers", "write"),
+    async (c) => {
+      const appId = c.req.param("appId")!;
+      const providerId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
+
+      await db
+        .delete(applicationProviderCredentials)
+        .where(
+          and(
+            eq(applicationProviderCredentials.applicationId, appId),
+            eq(applicationProviderCredentials.providerId, providerId),
+          ),
+        );
+
+      return c.body(null, 204);
+    },
+  );
+
+  // GET /api/applications/:appId/providers — list providers with app-level override status
+  router.get("/:appId/providers", async (c) => {
+    const appId = c.req.param("appId")!;
+
+    const appCreds = await db
+      .select({
+        providerId: applicationProviderCredentials.providerId,
+        hasCredentials: applicationProviderCredentials.credentialsEncrypted,
+        enabled: applicationProviderCredentials.enabled,
+      })
+      .from(applicationProviderCredentials)
+      .where(eq(applicationProviderCredentials.applicationId, appId));
+
+    const overrides = appCreds.map((row) => ({
+      providerId: row.providerId,
+      hasAppCredentials: row.hasCredentials !== null,
+      appEnabled: row.enabled,
+    }));
+
+    return c.json({ object: "list", data: overrides });
+  });
 
   return router;
 }

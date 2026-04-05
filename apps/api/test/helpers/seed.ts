@@ -23,7 +23,7 @@ import {
   userProviderConnections,
   orgInvitations,
   packageVersions,
-  providerCredentials,
+  applicationProviderCredentials,
 } from "@appstrate/db/schema";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
@@ -342,24 +342,29 @@ export async function seedUserConnection(
 
 // ─── Provider Credentials ────────────────────────────────
 
-type ProviderCredentialsInsert = Partial<InferInsertModel<typeof providerCredentials>> & {
+type ProviderCredentialsInsert = Partial<
+  InferInsertModel<typeof applicationProviderCredentials>
+> & {
+  applicationId: string;
   providerId: string;
-  orgId: string;
 };
 
 export async function seedProviderCredentials(
   overrides: ProviderCredentialsInsert,
-): Promise<InferInsertModel<typeof providerCredentials>> {
+): Promise<InferInsertModel<typeof applicationProviderCredentials>> {
   const values = {
     enabled: true,
     credentialsEncrypted: "test-admin-encrypted",
     ...overrides,
   };
   await db
-    .insert(providerCredentials)
+    .insert(applicationProviderCredentials)
     .values(values)
     .onConflictDoUpdate({
-      target: [providerCredentials.providerId, providerCredentials.orgId],
+      target: [
+        applicationProviderCredentials.applicationId,
+        applicationProviderCredentials.providerId,
+      ],
       set: values,
     });
   return values;

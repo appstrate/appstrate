@@ -43,13 +43,17 @@ export async function initiateOAuth(
   providerId: string,
   redirectUri: string,
   requestedScopes?: string[],
+  applicationId?: string | null,
 ): Promise<InitiateOAuthResult> {
   const provider = await getProviderOrThrow(db, orgId, providerId, "oauth2");
   if (!provider.authorizationUrl) {
     throw new Error(`Provider '${providerId}' has no authorization URL configured`);
   }
 
-  const oauthCreds = await getProviderOAuthCredentialsOrThrow(db, orgId, providerId);
+  if (!applicationId) {
+    throw new Error("Application context is required for OAuth2 connection");
+  }
+  const oauthCreds = await getProviderOAuthCredentialsOrThrow(db, orgId, providerId, applicationId);
 
   // Generate PKCE values
   const state = crypto.randomUUID();
@@ -69,6 +73,7 @@ export async function initiateOAuth(
     ...actorToColumns(actor),
     profileId,
     providerId,
+    applicationId: applicationId ?? null,
     codeVerifier,
     scopesRequested: uniqueScopes,
     redirectUri,
@@ -162,10 +167,14 @@ export async function handleOAuthCallback(
     throw new Error(`Provider '${stateRow.providerId}' has no token URL configured`);
   }
 
+  if (!rawRow.applicationId) {
+    throw new Error("Application context is required for OAuth2 callback");
+  }
   const oauthCreds = await getProviderOAuthCredentialsOrThrow(
     db,
     stateRow.orgId,
     stateRow.providerId,
+    rawRow.applicationId,
   );
 
   // Exchange code for tokens

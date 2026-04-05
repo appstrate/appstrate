@@ -241,6 +241,8 @@ const APP_SCOPED_PREFIXES = [
   "/api/api-keys",
   "/api/notifications",
   "/api/packages",
+  "/api/providers",
+  "/api/connections/connect",
 ];
 
 const appContextMiddleware = requireAppContext();

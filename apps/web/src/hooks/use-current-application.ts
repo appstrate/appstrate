@@ -30,6 +30,9 @@ const APP_SCOPED_KEYS = [
   "webhooks",
   "api-keys",
   "end-users",
+  "providers",
+  "available-providers",
+  "app-provider-overrides",
 ];
 
 /**

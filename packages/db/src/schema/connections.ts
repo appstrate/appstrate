@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
-import { endUsers } from "./applications.ts";
+import { applications, endUsers } from "./applications.ts";
 import { organizations } from "./organizations.ts";
 import { packages } from "./packages.ts";
 
@@ -111,21 +111,25 @@ export const orgProfileProviderBindings = pgTable(
   ],
 );
 
-// ─── Provider credentials (per-org secrets, keyed by providerId) ────
-export const providerCredentials = pgTable(
-  "provider_credentials",
+// ─── Application provider credentials (per-app admin credentials) ──
+export const applicationProviderCredentials = pgTable(
+  "application_provider_credentials",
   {
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
     providerId: text("provider_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
     credentialsEncrypted: text("credentials_encrypted"),
-    enabled: boolean("enabled").notNull().default(false),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (table) => [primaryKey({ columns: [table.providerId, table.orgId] })],
+  (table) => [
+    primaryKey({ columns: [table.applicationId, table.providerId] }),
+    index("idx_app_provider_creds_provider").on(table.providerId),
+  ],
 );
 
 // ─── User provider connections (user-level OAuth/API tokens, org-scoped) ──
@@ -175,6 +179,9 @@ export const oauthStates = pgTable(
       .notNull()
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     providerId: text("provider_id").notNull(),
+    applicationId: text("application_id").references(() => applications.id, {
+      onDelete: "cascade",
+    }),
     codeVerifier: text("code_verifier").notNull(),
     oauthTokenSecret: text("oauth_token_secret"),
     authMode: text("auth_mode").notNull().default("oauth2"),

@@ -219,6 +219,8 @@ export function getTestApp(): Hono<AppEnv> {
     "/api/api-keys",
     "/api/notifications",
     "/api/packages",
+    "/api/providers",
+    "/api/connections/connect",
   ];
 
   const appContextMiddleware = requireAppContext();

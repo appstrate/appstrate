@@ -53,6 +53,7 @@ export function ProviderConnectionCard({
     hasMultipleProfiles,
     effectiveProfileId,
     isConnected,
+    needsReconnection,
     profileConnections,
     binding,
     isBoundButDisconnected,
@@ -160,7 +161,12 @@ export function ProviderConnectionCard({
         ) : (
           /* ─── User-managed mode: profile selector + connect/disconnect ── */
           <>
-            {isConnected ? (
+            {needsReconnection ? (
+              <span className="inline-flex shrink-0 items-center gap-1 text-xs text-amber-500">
+                <AlertTriangle className="size-3" />
+                {t("providers.needsReconnection")}
+              </span>
+            ) : isConnected ? (
               <div className="flex shrink-0 items-center gap-2">
                 {hasMissingScopes ? (
                   <span className="inline-flex items-center gap-1 text-xs text-amber-500">

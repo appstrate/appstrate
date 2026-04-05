@@ -385,6 +385,7 @@ function invalidateProviderQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ["packages", cfg.detailKey] });
   qc.invalidateQueries({ queryKey: ["version-info"] });
   qc.invalidateQueries({ queryKey: ["available-providers"] });
+  qc.invalidateQueries({ queryKey: ["app-provider-overrides"] });
 }
 
 export function useConfigureProviderCredentials() {

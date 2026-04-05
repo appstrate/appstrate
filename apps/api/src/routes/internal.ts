@@ -27,6 +27,7 @@ async function verifyRunToken(c: Context): Promise<{
     userId: string | null;
     endUserId: string | null;
     orgId: string;
+    applicationId: string;
     status: string;
     connectionProfileId: string | null;
     providerProfileIds: Record<string, string> | null;
@@ -54,6 +55,7 @@ async function verifyRunToken(c: Context): Promise<{
       userId: runs.userId,
       endUserId: runs.endUserId,
       orgId: runs.orgId,
+      applicationId: runs.applicationId,
       status: runs.status,
       connectionProfileId: runs.connectionProfileId,
       providerProfileIds: runs.providerProfileIds,
@@ -78,6 +80,7 @@ async function verifyRunToken(c: Context): Promise<{
       userId: run.userId,
       endUserId: run.endUserId,
       orgId: run.orgId,
+      applicationId: run.applicationId,
       status: run.status,
       connectionProfileId: run.connectionProfileId,
       providerProfileIds: run.providerProfileIds ?? null,
@@ -164,7 +167,13 @@ export function createInternalRouter() {
       throw notFound(`No profile resolved for provider '${providerId}'`);
     }
 
-    const result = await resolveCredentialsForProxy(db, profileId, provider.id, run.orgId);
+    const result = await resolveCredentialsForProxy(
+      db,
+      profileId,
+      provider.id,
+      run.orgId,
+      run.applicationId,
+    );
 
     if (!result) {
       throw notFound(`No credentials for provider '${providerId}'`);
@@ -191,7 +200,13 @@ export function createInternalRouter() {
     }
 
     try {
-      const result = await forceRefreshCredentials(db, profileId, providerId, run.orgId);
+      const result = await forceRefreshCredentials(
+        db,
+        profileId,
+        providerId,
+        run.orgId,
+        run.applicationId,
+      );
       if (!result) {
         throw notFound(`No credentials for provider '${providerId}'`);
       }

@@ -67,7 +67,8 @@ export function createConnectionsRouter() {
       const actor = getActor(c);
       const orgId = c.get("orgId");
 
-      if (!(await isProviderEnabled(db, orgId, provider))) {
+      const applicationId = c.get("applicationId");
+      if (applicationId && !(await isProviderEnabled(db, orgId, provider, applicationId))) {
         throw forbidden(`Provider '${provider}' is not configured`);
       }
 
@@ -89,7 +90,14 @@ export function createConnectionsRouter() {
           throw forbidden("Cannot connect on a profile you do not own");
         }
 
-        const result = await initiateConnection(provider, orgId, actor, effectiveProfileId, scopes);
+        const result = await initiateConnection(
+          provider,
+          orgId,
+          actor,
+          effectiveProfileId,
+          scopes,
+          applicationId,
+        );
         return c.json({ authUrl: result.authUrl, state: result.state });
       } catch (err: unknown) {
         if (err instanceof ApiError) throw err;
@@ -107,7 +115,8 @@ export function createConnectionsRouter() {
       const actor = getActor(c);
       const orgId = c.get("orgId");
 
-      if (!(await isProviderEnabled(db, orgId, provider))) {
+      const applicationId = c.get("applicationId");
+      if (applicationId && !(await isProviderEnabled(db, orgId, provider, applicationId))) {
         throw forbidden(`Provider '${provider}' is not configured`);
       }
 
@@ -147,7 +156,8 @@ export function createConnectionsRouter() {
       const actor = getActor(c);
       const orgId = c.get("orgId");
 
-      if (!(await isProviderEnabled(db, orgId, provider))) {
+      const applicationId = c.get("applicationId");
+      if (applicationId && !(await isProviderEnabled(db, orgId, provider, applicationId))) {
         throw forbidden(`Provider '${provider}' is not configured`);
       }
 
