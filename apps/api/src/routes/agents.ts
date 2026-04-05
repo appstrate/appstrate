@@ -40,17 +40,15 @@ export function createAgentsRouter() {
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
     const appId = c.get("applicationId");
-    const appIsDefault = c.get("appIsDefault");
     const [allAgents, runningCounts] = await Promise.all([
       listPackages(orgId),
       getRunningRunCounts(orgId),
     ]);
 
-    // Filter by application access (default app = all, custom app = single batch query)
+    // Filter by application access — all apps check application_packages
     const accessibleIds = await filterAccessiblePackages(
       appId,
       allAgents.map((f) => f.id),
-      appIsDefault,
     );
     const visibleAgents = allAgents.filter((f) => accessibleIds.has(f.id));
 

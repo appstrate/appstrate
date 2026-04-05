@@ -62,7 +62,6 @@ export type AppEnv = {
     authMethod: "session" | "api_key";
     apiKeyId: string | null;
     applicationId: string; // from API key auth or resolved by app-context middleware (X-App-Id)
-    appIsDefault: boolean; // true if the resolved app is the org's default application
     requestId: string;
     apiVersion: string;
   };

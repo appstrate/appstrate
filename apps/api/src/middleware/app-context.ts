@@ -32,7 +32,7 @@ export async function validateApplicationInOrg(
  * 2. applicationId from API key (already set by auth middleware)
  *
  * Validates that the application belongs to the current org.
- * Sets c.set("applicationId") and c.set("appIsDefault") on success.
+ * Sets c.set("applicationId") on success.
  */
 export function requireAppContext() {
   return async (c: Context<AppEnv>, next: Next) => {
@@ -54,7 +54,6 @@ export function requireAppContext() {
     }
 
     c.set("applicationId", appId);
-    c.set("appIsDefault", app.isDefault);
     return next();
   };
 }

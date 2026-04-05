@@ -179,6 +179,7 @@ export async function seedWebhook(
   const [wh] = await db
     .insert(webhooks)
     .values({
+      id: `wh_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
       url: "https://example.com/webhook",
       events: ["run.completed"],
       secret: crypto.randomUUID(),

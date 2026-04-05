@@ -16,7 +16,7 @@ import {
   updateEndUser,
   deleteEndUser,
 } from "../services/end-users.ts";
-import { invalidRequest, parseBody } from "../lib/errors.ts";
+import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 const createEndUserSchema = z.object({
   applicationId: z.string().optional(),
@@ -59,7 +59,8 @@ export function createEndUsersRouter() {
       const body = await c.req.json();
       const data = parseBody(createEndUserSchema, body);
 
-      const created = await createEndUser(orgId, data.applicationId ?? null, {
+      const appId = c.get("applicationId");
+      const created = await createEndUser(orgId, data.applicationId ?? appId, {
         name: data.name,
         email: data.email,
         externalId: data.externalId,
@@ -75,7 +76,7 @@ export function createEndUsersRouter() {
     const limit = c.req.query("limit") ? Number(c.req.query("limit")) : undefined;
     const startingAfter = c.req.query("startingAfter");
     const endingBefore = c.req.query("endingBefore");
-    const applicationId = c.req.query("applicationId");
+    const applicationId = c.req.query("applicationId") ?? c.get("applicationId");
     const externalId = c.req.query("externalId");
     const email = c.req.query("email");
 
@@ -98,18 +99,29 @@ export function createEndUsersRouter() {
   // GET /api/end-users/:id — get a single end-user
   router.get("/:id", rateLimit(300), async (c) => {
     const orgId = c.get("orgId");
+    const appId = c.get("applicationId");
     const endUserId = c.req.param("id")!;
     const result = await getEndUser(orgId, endUserId);
+    if (result.applicationId !== appId) {
+      throw notFound(`End-user '${endUserId}' not found`);
+    }
     return c.json(result);
   });
 
   // PATCH /api/end-users/:id — update an end-user
   router.patch("/:id", rateLimit(60), requirePermission("end-users", "write"), async (c) => {
     const orgId = c.get("orgId");
+    const appId = c.get("applicationId");
     const endUserId = c.req.param("id")!;
+
+    // Verify end-user belongs to the current application
+    const existing = await getEndUser(orgId, endUserId);
+    if (existing.applicationId !== appId) {
+      throw notFound(`End-user '${endUserId}' not found`);
+    }
+
     const body = await c.req.json();
     const data = parseBody(updateEndUserSchema, body);
-
     const result = await updateEndUser(orgId, endUserId, data);
     return c.json(result);
   });
@@ -117,7 +129,15 @@ export function createEndUsersRouter() {
   // DELETE /api/end-users/:id — delete an end-user and all connections
   router.delete("/:id", rateLimit(60), requirePermission("end-users", "delete"), async (c) => {
     const orgId = c.get("orgId");
+    const appId = c.get("applicationId");
     const endUserId = c.req.param("id")!;
+
+    // Verify end-user belongs to the current application
+    const existing = await getEndUser(orgId, endUserId);
+    if (existing.applicationId !== appId) {
+      throw notFound(`End-user '${endUserId}' not found`);
+    }
+
     await deleteEndUser(orgId, endUserId);
     return c.body(null, 204);
   });

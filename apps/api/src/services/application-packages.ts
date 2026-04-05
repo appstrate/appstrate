@@ -135,12 +135,8 @@ export async function getInstalledPackage(applicationId: string, packageId: stri
  * Default application → access to ALL packages in the org (no binding required).
  * Custom application → access only to explicitly installed packages.
  */
-export async function hasPackageAccess(
-  applicationId: string,
-  packageId: string,
-  isDefault: boolean,
-): Promise<boolean> {
-  const accessible = await filterAccessiblePackages(applicationId, [packageId], isDefault);
+export async function hasPackageAccess(applicationId: string, packageId: string): Promise<boolean> {
+  const accessible = await filterAccessiblePackages(applicationId, [packageId]);
   return accessible.has(packageId);
 }
 
@@ -154,12 +150,10 @@ export async function hasPackageAccess(
 export async function filterAccessiblePackages(
   applicationId: string,
   packageIds: string[],
-  isDefault: boolean,
 ): Promise<Set<string>> {
   if (packageIds.length === 0) return new Set();
-  if (isDefault) return new Set(packageIds);
 
-  // Custom app — single query for all package IDs
+  // Query application_packages for all apps (no default app bypass)
   const rows = await db
     .select({ packageId: applicationPackages.packageId })
     .from(applicationPackages)

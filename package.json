@@ -45,7 +45,7 @@
   "engines": {
     "bun": ">=1.3.9"
   },
-  "packageManager": "bun@1.3.9",
+  "packageManager": "bun@1.3.11",
   "private": true,
   "scripts": {
     "dev": "turbo dev",
@@ -53,6 +53,9 @@
     "test": "bun test",
     "test:unit": "bun test apps/api/test/unit/",
     "test:watch": "bun test --watch apps/api/test/unit/",
+    "test:e2e": "cd e2e && npx playwright test",
+    "test:e2e:api": "cd e2e && npx playwright test --project=api",
+    "test:e2e:ui": "cd e2e && npx playwright test --project=ui",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix && prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
     "format": "prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
@@ -83,7 +86,8 @@
     "apps/*",
     "packages/*",
     "runtime-pi",
-    "runtime-pi/sidecar"
+    "runtime-pi/sidecar",
+    "e2e"
   ],
   "lint-staged": {
     "*.{ts,tsx}": "eslint --fix",

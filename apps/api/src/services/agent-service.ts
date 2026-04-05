@@ -129,14 +129,11 @@ export async function getPackageWithAccess(
   id: string,
   orgId: string,
   applicationId: string,
-  appIsDefault: boolean,
 ): Promise<LoadedPackage | null> {
   const agent = await getPackage(id, orgId);
   if (!agent) return null;
 
-  if (!appIsDefault) {
-    if (!(await hasPackageAccess(applicationId, id, false))) return null;
-  }
+  if (!(await hasPackageAccess(applicationId, id))) return null;
 
   return agent;
 }

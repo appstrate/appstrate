@@ -5,6 +5,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedRunLog } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
 
 const app = getTestApp();
 
@@ -29,7 +30,7 @@ describe("Runs API", () => {
     };
 
     async function seedAgentWithInput() {
-      return seedAgent({
+      const agent = await seedAgent({
         id: "@runorg/input-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -42,6 +43,8 @@ describe("Runs API", () => {
         },
         draftContent: "Process the email: {{email}}",
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/input-agent");
+      return agent;
     }
 
     it("returns 400 when required input field is missing", async () => {
@@ -100,6 +103,7 @@ describe("Runs API", () => {
   describe("GET /api/agents/:scope/:name/runs", () => {
     it("returns empty array when no runs exist", async () => {
       await seedAgent({ id: "@runorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/my-agent");
 
       const res = await app.request("/api/agents/@runorg/my-agent/runs", {
         headers: authHeaders(ctx),
@@ -114,6 +118,7 @@ describe("Runs API", () => {
 
     it("returns runs for an agent", async () => {
       await seedAgent({ id: "@runorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/my-agent");
       const run = await seedRun({
         packageId: "@runorg/my-agent",
         orgId: ctx.orgId,
@@ -394,6 +399,7 @@ describe("Runs API", () => {
   describe("DELETE /api/agents/:scope/:name/runs", () => {
     it("deletes all runs for an agent (admin)", async () => {
       await seedAgent({ id: "@runorg/del-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/del-agent");
       await seedRun({
         packageId: "@runorg/del-agent",
         orgId: ctx.orgId,
@@ -421,6 +427,7 @@ describe("Runs API", () => {
 
     it("returns 409 when running runs exist", async () => {
       await seedAgent({ id: "@runorg/running-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/running-agent");
       await seedRun({
         packageId: "@runorg/running-agent",
         orgId: ctx.orgId,

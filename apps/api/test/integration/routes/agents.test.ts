@@ -5,11 +5,20 @@ import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedConnectionProfile } from "../../helpers/seed.ts";
+import { seedAgent, seedRun, seedConnectionProfile, seedApplication } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { runs } from "@appstrate/db/schema";
 
 const app = getTestApp();
+
+/** Seed an agent and install it in the default app. */
+async function seedInstalledAgent(overrides: Parameters<typeof seedAgent>[0] & { appId: string }) {
+  const { appId, ...rest } = overrides;
+  const pkg = await seedAgent(rest);
+  await installPackage(appId, rest.orgId!, pkg.id);
+  return pkg;
+}
 
 describe("Agents API", () => {
   let ctx: TestContext;
@@ -31,8 +40,13 @@ describe("Agents API", () => {
       expect(body.agents).toHaveLength(0);
     });
 
-    it("returns agents owned by the org", async () => {
-      await seedAgent({ id: "@myorg/test-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+    it("returns agents installed in the current app", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/test-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
 
       const res = await app.request("/api/agents", {
         headers: authHeaders(ctx),
@@ -67,8 +81,13 @@ describe("Agents API", () => {
   });
 
   describe("GET /api/packages/agents/:scope/:name (agent detail)", () => {
-    it("returns agent detail", async () => {
-      await seedAgent({ id: "@myorg/detail-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+    it("returns agent detail when installed", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/detail-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
 
       const res = await app.request("/api/packages/agents/@myorg/detail-agent", {
         headers: authHeaders(ctx),
@@ -98,6 +117,69 @@ describe("Agents API", () => {
 
       expect(res.status).toBe(404);
     });
+
+    it("returns 404 from default app when agent is not installed (no bypass)", async () => {
+      await seedAgent({ id: "@myorg/default-hidden", orgId: ctx.orgId, createdBy: ctx.user.id });
+
+      // Agent is in the org catalog but NOT installed in the default app
+      const res = await app.request("/api/packages/agents/@myorg/default-hidden", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 200 from default app when agent is installed", async () => {
+      await seedInstalledAgent({
+        id: "@myorg/default-installed",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
+
+      const res = await app.request("/api/packages/agents/@myorg/default-installed", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.agent.id).toBe("@myorg/default-installed");
+    });
+
+    it("returns 404 from custom app when agent is not installed", async () => {
+      await seedAgent({ id: "@myorg/custom-hidden", orgId: ctx.orgId, createdBy: ctx.user.id });
+
+      const customApp = await seedApplication({
+        orgId: ctx.orgId,
+        name: "Custom App",
+        createdBy: ctx.user.id,
+      });
+
+      const res = await app.request("/api/packages/agents/@myorg/custom-hidden", {
+        headers: { ...authHeaders(ctx), "X-App-Id": customApp.id },
+      });
+
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 200 from custom app when agent is installed", async () => {
+      await seedAgent({ id: "@myorg/custom-installed", orgId: ctx.orgId, createdBy: ctx.user.id });
+
+      const customApp = await seedApplication({
+        orgId: ctx.orgId,
+        name: "Custom Installed",
+        createdBy: ctx.user.id,
+      });
+      await installPackage(customApp.id, ctx.orgId, "@myorg/custom-installed");
+
+      const res = await app.request("/api/packages/agents/@myorg/custom-installed", {
+        headers: { ...authHeaders(ctx), "X-App-Id": customApp.id },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.agent.id).toBe("@myorg/custom-installed");
+    });
   });
 
   describe("PUT /api/agents/:scope/:name/config", () => {
@@ -116,6 +198,7 @@ describe("Agents API", () => {
           },
         },
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@myorg/config-agent");
 
       const res = await app.request("/api/agents/@myorg/config-agent/config", {
         method: "PUT",
@@ -135,7 +218,12 @@ describe("Agents API", () => {
 
   describe("Multi-tenancy isolation", () => {
     it("isolates run counts per org", async () => {
-      await seedAgent({ id: "@myorg/counted-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/counted-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
       await seedRun({
         packageId: "@myorg/counted-agent",
         orgId: ctx.orgId,
@@ -174,7 +262,12 @@ describe("Agents API", () => {
 
   describe("GET /api/agents/:scope/:name/provider-profiles", () => {
     it("returns 200 with empty overrides initially", async () => {
-      await seedAgent({ id: "@myorg/pp-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/pp-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
 
       const res = await app.request("/api/agents/@myorg/pp-agent/provider-profiles", {
         headers: authHeaders(ctx),
@@ -185,14 +278,24 @@ describe("Agents API", () => {
     });
 
     it("returns 401 without auth", async () => {
-      await seedAgent({ id: "@myorg/pp-agent-noauth", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/pp-agent-noauth",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
 
       const res = await app.request("/api/agents/@myorg/pp-agent-noauth/provider-profiles");
       expect(res.status).toBe(401);
     });
 
     it("returns overrides after setting one", async () => {
-      await seedAgent({ id: "@myorg/pp-agent-set", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/pp-agent-set",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
       const profile = await seedConnectionProfile({ userId: ctx.user.id, name: "Alt" });
 
       await app.request("/api/agents/@myorg/pp-agent-set/provider-profiles", {
@@ -212,7 +315,12 @@ describe("Agents API", () => {
 
   describe("PUT /api/agents/:scope/:name/provider-profiles", () => {
     it("returns 200 on valid body", async () => {
-      await seedAgent({ id: "@myorg/pp-put", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/pp-put",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
       const profile = await seedConnectionProfile({ userId: ctx.user.id, name: "P" });
 
       const res = await app.request("/api/agents/@myorg/pp-put/provider-profiles", {
@@ -226,7 +334,12 @@ describe("Agents API", () => {
     });
 
     it("returns 400 with invalid profileId", async () => {
-      await seedAgent({ id: "@myorg/pp-put-bad", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/pp-put-bad",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
 
       const res = await app.request("/api/agents/@myorg/pp-put-bad/provider-profiles", {
         method: "PUT",
@@ -237,7 +350,12 @@ describe("Agents API", () => {
     });
 
     it("returns 400 with missing providerId", async () => {
-      await seedAgent({ id: "@myorg/pp-put-noprov", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/pp-put-noprov",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
 
       const res = await app.request("/api/agents/@myorg/pp-put-noprov/provider-profiles", {
         method: "PUT",
@@ -248,7 +366,12 @@ describe("Agents API", () => {
     });
 
     it("accepts an org profile for provider override", async () => {
-      await seedAgent({ id: "@myorg/pp-put-org", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/pp-put-org",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
       const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org" });
 
       const res = await app.request("/api/agents/@myorg/pp-put-org/provider-profiles", {
@@ -262,7 +385,12 @@ describe("Agents API", () => {
 
   describe("DELETE /api/agents/:scope/:name/provider-profiles", () => {
     it("removes an override and returns success", async () => {
-      await seedAgent({ id: "@myorg/pp-del", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/pp-del",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
       const profile = await seedConnectionProfile({ userId: ctx.user.id, name: "D" });
 
       // Set then remove
@@ -288,7 +416,12 @@ describe("Agents API", () => {
     });
 
     it("returns 400 with missing providerId", async () => {
-      await seedAgent({ id: "@myorg/pp-del-bad", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/pp-del-bad",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
 
       const res = await app.request("/api/agents/@myorg/pp-del-bad/provider-profiles", {
         method: "DELETE",
@@ -303,7 +436,12 @@ describe("Agents API", () => {
 
   describe("PUT /api/agents/:scope/:name/org-profile", () => {
     it("admin can set org profile on an agent", async () => {
-      await seedAgent({ id: "@myorg/orgp-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/orgp-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
       const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org Prof" });
 
       const res = await app.request("/api/agents/@myorg/orgp-agent/org-profile", {
@@ -318,7 +456,12 @@ describe("Agents API", () => {
     });
 
     it("admin can unset org profile with null", async () => {
-      await seedAgent({ id: "@myorg/orgp-unset", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/orgp-unset",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
 
       const res = await app.request("/api/agents/@myorg/orgp-unset/org-profile", {
         method: "PUT",
@@ -330,7 +473,12 @@ describe("Agents API", () => {
     });
 
     it("returns 400 with invalid orgProfileId", async () => {
-      await seedAgent({ id: "@myorg/orgp-bad", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/orgp-bad",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
 
       const res = await app.request("/api/agents/@myorg/orgp-bad/org-profile", {
         method: "PUT",
@@ -346,7 +494,12 @@ describe("Agents API", () => {
 
   describe("agent detail — org profile fields", () => {
     it("returns agentOrgProfileId and agentOrgProfileName when set", async () => {
-      await seedAgent({ id: "@myorg/detail-orgp", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/detail-orgp",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
       const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Prod Creds" });
 
       await app.request("/api/agents/@myorg/detail-orgp/org-profile", {
@@ -365,7 +518,12 @@ describe("Agents API", () => {
     });
 
     it("returns null agentOrgProfileId when no org profile configured", async () => {
-      await seedAgent({ id: "@myorg/detail-nop", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/detail-nop",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
 
       const res = await app.request("/api/packages/agents/@myorg/detail-nop", {
         headers: authHeaders(ctx),
@@ -377,7 +535,12 @@ describe("Agents API", () => {
     });
 
     it("returns null agentOrgProfileId when configured profile was deleted", async () => {
-      await seedAgent({ id: "@myorg/detail-del", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedInstalledAgent({
+        id: "@myorg/detail-del",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        appId: ctx.defaultAppId,
+      });
       const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Temp" });
 
       // Set then delete the profile

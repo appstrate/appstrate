@@ -10,7 +10,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { packages, profiles, applicationProviderCredentials } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { postInstallPackage } from "../services/post-install-package.ts";
-import { installPackage } from "../services/application-packages.ts";
+import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/agent-service.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
@@ -609,6 +609,7 @@ export function getItemId(c: Context<AppEnv>): string {
 function makeGetHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
+    const appId = c.get("applicationId");
     const itemId = getItemId(c);
     const [item, versionCount, latestVersionDate] = await Promise.all([
       getOrgItem(orgId, itemId, rcfg.cfg),
@@ -617,6 +618,11 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     ]);
 
     if (!item) {
+      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
+    }
+
+    // Enforce app-level access: all apps can only access installed packages
+    if (!(await hasPackageAccess(appId, itemId))) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 

@@ -41,7 +41,11 @@ export function ApplicationsPage() {
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("applications.pageTitle") },
         ]}
-        actions={<Button onClick={() => setCreateOpen(true)}>{t("applications.create")}</Button>}
+        actions={
+          <Button data-testid="create-application-button" onClick={() => setCreateOpen(true)}>
+            {t("applications.create")}
+          </Button>
+        }
       />
 
       {!applications || applications.length === 0 ? (
@@ -55,7 +59,11 @@ export function ApplicationsPage() {
       ) : (
         <div className="flex flex-col gap-3">
           {applications.map((app) => (
-            <div key={app.id} className="border-border bg-card rounded-lg border p-5">
+            <div
+              key={app.id}
+              data-testid={`application-card-${app.id}`}
+              className="border-border bg-card rounded-lg border p-5"
+            >
               <div className="flex items-center gap-3">
                 <div className="flex-1">
                   <h3 className="text-[0.95rem] font-semibold">{app.name}</h3>

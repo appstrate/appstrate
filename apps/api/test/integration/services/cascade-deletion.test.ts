@@ -4,13 +4,28 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { eq, and, sql } from "drizzle-orm";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg, addOrgMember } from "../../helpers/auth.ts";
-import { seedConnectionProfile, seedAgent } from "../../helpers/seed.ts";
+import {
+  seedConnectionProfile,
+  seedAgent,
+  seedApplication,
+  seedWebhook,
+  seedEndUser,
+  seedSchedule,
+  seedApiKey,
+  seedRun,
+} from "../../helpers/seed.ts";
 import { assertDbHas, assertDbMissing, assertDbCount, getDbRow } from "../../helpers/assertions.ts";
 import {
   orgProfileProviderBindings,
   connectionProfiles,
   applicationPackages,
   userAgentProviderProfiles,
+  applications,
+  webhooks,
+  endUsers,
+  packageSchedules,
+  apiKeys,
+  runs,
 } from "@appstrate/db/schema";
 import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
 import {
@@ -18,6 +33,7 @@ import {
   installPackage,
 } from "../../../src/services/application-packages.ts";
 import { setUserAgentProviderOverride } from "../../../src/services/connection-profiles.ts";
+import { deleteApplication } from "../../../src/services/applications.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 
 describe("Cascade Deletion", () => {
@@ -193,6 +209,72 @@ describe("Cascade Deletion", () => {
       );
       expect(config1.orgProfileId).toBeNull();
       expect(config2.orgProfileId).toBeNull();
+    });
+  });
+
+  describe("when application is deleted", () => {
+    it("cascades to webhooks, end-users, schedules, api-keys, runs, and installed packages", async () => {
+      // Create a custom (non-default) application
+      const customApp = await seedApplication({ orgId, name: "Cascade Target", createdBy: userId });
+
+      const agent = await seedAgent({ id: "@testorg/casc-agent", orgId, createdBy: userId });
+
+      // Create a connection profile for the schedule
+      const profile = await seedConnectionProfile({ userId, name: "Sched Profile" });
+
+      // Populate the app with resources
+      await installPackage(customApp.id, orgId, agent.id);
+      const wh = await seedWebhook({ orgId, applicationId: customApp.id });
+      const eu = await seedEndUser({ orgId, applicationId: customApp.id, name: "Test EU" });
+      const key = await seedApiKey({ orgId, applicationId: customApp.id, createdBy: userId });
+      const run = await seedRun({ orgId, applicationId: customApp.id, packageId: agent.id });
+      const sched = await seedSchedule({
+        orgId,
+        applicationId: customApp.id,
+        packageId: agent.id,
+        connectionProfileId: profile.id,
+      });
+
+      // Verify all resources exist
+      await assertDbHas(applicationPackages, eq(applicationPackages.applicationId, customApp.id));
+      await assertDbHas(webhooks, eq(webhooks.id, wh.id));
+      await assertDbHas(endUsers, eq(endUsers.id, eu.id));
+      await assertDbHas(apiKeys, eq(apiKeys.id, key.id));
+      await assertDbHas(runs, eq(runs.id, run.id));
+      await assertDbHas(packageSchedules, eq(packageSchedules.id, sched.id));
+
+      // Delete the application
+      await deleteApplication(orgId, customApp.id);
+
+      // All related resources should be gone via FK CASCADE
+      await assertDbMissing(applications, eq(applications.id, customApp.id));
+      await assertDbMissing(
+        applicationPackages,
+        eq(applicationPackages.applicationId, customApp.id),
+      );
+      await assertDbMissing(webhooks, eq(webhooks.id, wh.id));
+      await assertDbMissing(endUsers, eq(endUsers.id, eu.id));
+      await assertDbMissing(apiKeys, eq(apiKeys.id, key.id));
+      await assertDbMissing(runs, eq(runs.id, run.id));
+      await assertDbMissing(packageSchedules, eq(packageSchedules.id, sched.id));
+    });
+
+    it("does not affect the default application or its resources", async () => {
+      // Create webhook in the default app
+      const defaultWh = await seedWebhook({ orgId, applicationId: appId });
+
+      // Create and delete a custom app
+      const customApp = await seedApplication({ orgId, name: "Expendable", createdBy: userId });
+      await seedWebhook({ orgId, applicationId: customApp.id });
+      await deleteApplication(orgId, customApp.id);
+
+      // Default app and its webhook should still exist
+      await assertDbHas(applications, eq(applications.id, appId));
+      await assertDbHas(webhooks, eq(webhooks.id, defaultWh.id));
+    });
+
+    it("rejects deletion of the default application", async () => {
+      await expect(deleteApplication(orgId, appId)).rejects.toThrow();
     });
   });
 

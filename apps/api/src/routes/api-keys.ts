@@ -41,7 +41,7 @@ export function createApiKeysRouter() {
   // GET /api/api-keys — list active keys for the org (optionally filtered by applicationId)
   router.get("/", requirePermission("api-keys", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const applicationId = c.req.query("applicationId");
+    const applicationId = c.req.query("applicationId") ?? c.get("applicationId");
     const keys = await listApiKeys(orgId, applicationId);
     return c.json({ apiKeys: keys });
   });

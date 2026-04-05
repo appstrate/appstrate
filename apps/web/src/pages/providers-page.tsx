@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useProviders, useAppProviderOverrides } from "../hooks/use-providers";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
-import { useApplications } from "../hooks/use-applications";
 import { ProfileSelector } from "../components/profile-selector";
 import { Modal } from "../components/modal";
 import { ProviderCredentialsModal } from "../components/provider-credentials-modal";
@@ -26,9 +25,7 @@ export function ProvidersPage() {
   const [profileId, setProfileId] = useState<string | null>(null);
   const { data: providersData } = useProviders();
   const appId = useCurrentApplicationId();
-  const { data: apps } = useApplications();
-  const isDefaultApp = apps?.find((a) => a.id === appId)?.isDefault ?? true;
-  const { data: appOverrides } = useAppProviderOverrides(isDefaultApp ? null : appId);
+  const { data: appOverrides } = useAppProviderOverrides(appId);
   const overrideMap = useMemo(() => {
     const m = new Map<string, { hasAppCredentials: boolean; appEnabled: boolean }>();
     if (appOverrides?.data) {

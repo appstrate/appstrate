@@ -71,10 +71,11 @@ export function OrgSwitcher() {
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
+              data-testid="org-switcher-button"
               aria-label={t("switcher.orgAriaLabel")}
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              <OrgAvatar name={currentOrg.name} className="aspect-square size-7 text-sm" />
+              <OrgAvatar name={currentOrg.name} className="aspect-square size-8 text-sm" />
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-semibold">{currentOrg.name}</span>
                 {currentApp && (
@@ -98,6 +99,7 @@ export function OrgSwitcher() {
               return (
                 <DropdownMenuItem
                   key={org.id}
+                  data-testid={`org-item-${org.id}`}
                   className="flex items-center gap-2"
                   onSelect={() => {
                     if (!isActive) switchOrg(org.id);
@@ -112,7 +114,10 @@ export function OrgSwitcher() {
             <DropdownMenuSeparator />
             {hasMultipleApps && (
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger className="flex items-center gap-2">
+                <DropdownMenuSubTrigger
+                  data-testid="app-submenu-trigger"
+                  className="flex items-center gap-2"
+                >
                   <span className="flex-1 truncate">{currentApp?.name}</span>
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="min-w-48 rounded-lg">
@@ -124,6 +129,7 @@ export function OrgSwitcher() {
                     return (
                       <DropdownMenuItem
                         key={app.id}
+                        data-testid={`app-item-${app.id}`}
                         className="flex items-center justify-between gap-2"
                         onSelect={() => {
                           if (!isActive) switchApp(app.id);

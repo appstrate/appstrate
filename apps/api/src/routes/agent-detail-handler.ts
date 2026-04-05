@@ -5,7 +5,7 @@ import type { AppEnv } from "../types/index.ts";
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, applicationProviderCredentials } from "@appstrate/db/schema";
-import { getPackage } from "../services/agent-service.ts";
+import { getPackageWithAccess } from "../services/agent-service.ts";
 import { getOrgItem, AGENT_CONFIG } from "../services/package-items/index.ts";
 import {
   getVersionCount,
@@ -37,7 +37,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   const itemId = getItemId(c);
 
   const [agent, rawItem, versionCount, latestVersionDate] = await Promise.all([
-    getPackage(itemId, orgId),
+    getPackageWithAccess(itemId, orgId, appId),
     getOrgItem(orgId, itemId, AGENT_CONFIG),
     getVersionCount(itemId),
     getLatestVersionCreatedAt(itemId),

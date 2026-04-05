@@ -11,6 +11,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedConnectionProfile, seedAgent, seedPackage } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
 import { applicationProviderCredentials } from "@appstrate/db/schema";
 
 const app = getTestApp();
@@ -260,6 +261,7 @@ describe("Connection Profiles API", () => {
           displayName: "Linked Agent",
         },
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@testorg/linked-agent");
 
       // Set org profile on the agent
       const setRes = await app.request("/api/agents/@testorg/linked-agent/org-profile", {

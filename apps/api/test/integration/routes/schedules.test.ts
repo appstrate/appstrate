@@ -5,6 +5,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedSchedule, seedConnectionProfile, seedRun } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
 
 const app = getTestApp();
 
@@ -70,7 +71,7 @@ describe("Schedules API", () => {
 
     async function seedAgentWithInput() {
       const fid = agentId("input-sched");
-      return seedAgent({
+      const agent = await seedAgent({
         id: fid,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -83,6 +84,8 @@ describe("Schedules API", () => {
         },
         draftContent: "Process {{email}}",
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
+      return agent;
     }
 
     it("returns 400 when required input field is missing", async () => {
@@ -159,6 +162,7 @@ describe("Schedules API", () => {
     it("creates a schedule for an agent", async () => {
       const fid = agentId("cron-agent");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -181,6 +185,7 @@ describe("Schedules API", () => {
     it("rejects invalid cron expression", async () => {
       const fid = agentId("bad-cron");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -356,6 +361,7 @@ describe("Schedules API", () => {
       const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org Profile" });
       const fid = agentId("org-sched");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -401,6 +407,7 @@ describe("Schedules API", () => {
       });
       const fid = agentId("foreign-org");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",

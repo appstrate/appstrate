@@ -3,7 +3,7 @@
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { isOwnedByOrg } from "@appstrate/core/naming";
-import { getPackageWithAccess } from "../services/agent-service.ts";
+import { getPackage, getPackageWithAccess } from "../services/agent-service.ts";
 import { getPackageById } from "../services/package-items/crud.ts";
 import { getRunningRunsForPackage } from "../services/state/index.ts";
 import { ApiError, forbidden, notFound, conflict, invalidRequest } from "../lib/errors.ts";
@@ -17,9 +17,32 @@ export function requireAgent() {
     const packageId = `${scope}/${name}`;
     const orgId = c.get("orgId");
     const appId = c.get("applicationId");
-    const appIsDefault = c.get("appIsDefault");
 
-    const agent = await getPackageWithAccess(packageId, orgId, appId, appIsDefault);
+    const agent = await getPackageWithAccess(packageId, orgId, appId);
+    if (!agent) {
+      throw new ApiError({
+        status: 404,
+        code: "agent_not_found",
+        title: "Agent Not Found",
+        detail: `Agent '${packageId}' not found`,
+      });
+    }
+    c.set("agent", agent);
+    return next();
+  };
+}
+
+/** Middleware: load an agent by route param and set it on context, or 404.
+ *  Checks org ownership only — does NOT check app-level access.
+ *  Use for org-level operations (editing manifest, skills, tools). */
+export function requireOrgAgent() {
+  return async (c: Context<AppEnv>, next: Next) => {
+    const scope = c.req.param("scope");
+    const name = c.req.param("name");
+    const packageId = `${scope}/${name}`;
+    const orgId = c.get("orgId");
+
+    const agent = await getPackage(packageId, orgId);
     if (!agent) {
       throw new ApiError({
         status: 404,
