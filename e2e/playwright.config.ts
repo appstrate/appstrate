@@ -35,6 +35,6 @@ export default defineConfig({
     command: "cd .. && bun run dev",
     url: "http://localhost:3000",
     reuseExistingServer: true,
-    timeout: 60_000,
+    timeout: 120_000,
   },
 });
