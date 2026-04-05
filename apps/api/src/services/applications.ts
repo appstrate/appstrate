@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, asc, desc } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
@@ -69,7 +69,7 @@ export async function listApplications(orgId: string) {
     .select()
     .from(applications)
     .where(eq(applications.orgId, orgId))
-    .orderBy(desc(applications.createdAt));
+    .orderBy(desc(applications.isDefault), asc(applications.createdAt));
 }
 
 /** Get a single application by ID, verifying org ownership. Throws 404 if not found. */
