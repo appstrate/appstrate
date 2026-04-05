@@ -25,8 +25,6 @@ import {
 } from "../services/webhooks.ts";
 import { parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { requireAppContext } from "../middleware/app-context.ts";
-
 const createWebhookSchema = z.object({
   url: z.url("url must be a valid URL"),
   events: z.array(webhookEventSchema).min(1, "events is required"),
@@ -45,7 +43,6 @@ const updateWebhookSchema = z.object({
 
 export function createWebhooksRouter() {
   const router = new Hono<AppEnv>();
-  router.use("*", requireAppContext());
 
   // POST /api/webhooks — create a webhook (returns secret once)
   router.post(

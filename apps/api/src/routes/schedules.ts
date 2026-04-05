@@ -20,8 +20,6 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-import { requireAppContext } from "../middleware/app-context.ts";
-
 const createScheduleSchema = z.object({
   name: z.string().optional(),
   connectionProfileId: z.uuid(),
@@ -41,9 +39,6 @@ const updateScheduleSchema = z.object({
 
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
-  router.use("/schedules/*", requireAppContext());
-  router.use("/schedules", requireAppContext());
-  router.use("/agents/*", requireAppContext());
 
   // GET /api/schedules — list all schedules (app-scoped)
   router.get("/schedules", async (c) => {
@@ -113,13 +108,8 @@ export function createSchedulesRouter() {
   // GET /api/schedules/:id — get a single schedule
   router.get("/schedules/:id", async (c) => {
     const id = c.req.param("id");
-    const orgId = c.get("orgId");
-    const schedule = await getSchedule(id);
-    if (
-      !schedule ||
-      schedule.orgId !== orgId ||
-      schedule.applicationId !== c.get("applicationId")
-    ) {
+    const schedule = await getSchedule(id, c.get("orgId"), c.get("applicationId"));
+    if (!schedule) {
       throw notFound(`Schedule '${id}' not found`);
     }
     return c.json(schedule);
@@ -129,12 +119,8 @@ export function createSchedulesRouter() {
   router.put("/schedules/:id", requirePermission("schedules", "write"), async (c) => {
     const id = c.req.param("id")!;
     const orgId = c.get("orgId");
-    const existing = await getSchedule(id);
-    if (
-      !existing ||
-      existing.orgId !== orgId ||
-      existing.applicationId !== c.get("applicationId")
-    ) {
+    const existing = await getSchedule(id, orgId, c.get("applicationId"));
+    if (!existing) {
       throw notFound(`Schedule '${id}' not found`);
     }
 
@@ -162,13 +148,8 @@ export function createSchedulesRouter() {
   // DELETE /api/schedules/:id — delete a schedule
   router.delete("/schedules/:id", requirePermission("schedules", "delete"), async (c) => {
     const id = c.req.param("id")!;
-    const orgId = c.get("orgId");
-    const existing = await getSchedule(id);
-    if (
-      !existing ||
-      existing.orgId !== orgId ||
-      existing.applicationId !== c.get("applicationId")
-    ) {
+    const existing = await getSchedule(id, c.get("orgId"), c.get("applicationId"));
+    if (!existing) {
       throw notFound(`Schedule '${id}' not found`);
     }
     await deleteSchedule(id);

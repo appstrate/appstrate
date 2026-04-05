@@ -12,7 +12,8 @@ import {
   getLatestVersionCreatedAt,
   computeHasUnpublishedChanges,
 } from "../services/package-versions.ts";
-import { getPackageConfig, getLastRun, getRunningRunsForPackage } from "../services/state/index.ts";
+import { getLastRun, getRunningRunsForPackage } from "../services/state/index.ts";
+import { getPackageConfig } from "../services/application-packages.ts";
 import {
   resolveProviderProfiles,
   resolveActorProfileContext,

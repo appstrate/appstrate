@@ -376,8 +376,20 @@ export async function listPackageSchedules(
   return enrichSchedules(rows.map(toSchedule), orgId);
 }
 
-export async function getSchedule(id: string): Promise<EnrichedSchedule | null> {
-  const rows = await db.select().from(packageSchedules).where(eq(packageSchedules.id, id)).limit(1);
+export async function getSchedule(
+  id: string,
+  orgId?: string,
+  applicationId?: string,
+): Promise<EnrichedSchedule | null> {
+  const conditions = [eq(packageSchedules.id, id)];
+  if (orgId) conditions.push(eq(packageSchedules.orgId, orgId));
+  if (applicationId) conditions.push(eq(packageSchedules.applicationId, applicationId));
+
+  const rows = await db
+    .select()
+    .from(packageSchedules)
+    .where(and(...conditions))
+    .limit(1);
   if (!rows[0]) return null;
   const schedule = toSchedule(rows[0]);
   const [enriched] = await enrichSchedules([schedule], schedule.orgId);

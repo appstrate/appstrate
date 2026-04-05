@@ -18,7 +18,7 @@ import {
   installPackage,
 } from "../../../src/services/application-packages.ts";
 import { resolveManifestProviders } from "../../../src/lib/manifest-utils.ts";
-import { getPackageConfig } from "../../../src/services/state/index.ts";
+import { getPackageConfig } from "../../../src/services/application-packages.ts";
 import { validateAgentReadiness } from "../../../src/services/agent-readiness.ts";
 import { getPackage } from "../../../src/services/agent-service.ts";
 import type { Actor } from "../../../src/lib/actor.ts";

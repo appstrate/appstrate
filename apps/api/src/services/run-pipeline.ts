@@ -8,7 +8,8 @@
 import { logger } from "../lib/logger.ts";
 import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
-import { createRun, getRunningRunCountForOrg, getPackageConfig } from "./state/index.ts";
+import { createRun, getRunningRunCountForOrg } from "./state/index.ts";
+import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
 import { resolveProviderProfiles } from "./connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";

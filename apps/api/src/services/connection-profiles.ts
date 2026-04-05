@@ -17,7 +17,7 @@ import {
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
 import { getOrgProfileBindings } from "./state/index.ts";
-import { getPackageConfig } from "./state/package-config.ts";
+import { getPackageConfig } from "./application-packages.ts";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { notFound, invalidRequest } from "../lib/errors.ts";
 

@@ -152,12 +152,19 @@ export function createApplicationsRouter() {
     enabled: z.boolean().optional(),
   });
 
+  // Guard: validate that the application belongs to the org (once for all /:appId/packages/* routes)
+  router.use("/:appId/packages/*", async (c, next) => {
+    await getApplication(c.get("orgId"), c.req.param("appId")!);
+    return next();
+  });
+  router.use("/:appId/packages", async (c, next) => {
+    await getApplication(c.get("orgId"), c.req.param("appId")!);
+    return next();
+  });
+
   // GET /api/applications/:appId/packages — list installed packages
   router.get("/:appId/packages", async (c) => {
-    const orgId = c.get("orgId");
     const appId = c.req.param("appId")!;
-    await getApplication(orgId, appId);
-
     const type = c.req.query("type") as PackageType | undefined;
     const rows = await listInstalledPackages(appId, type);
     return c.json({
@@ -170,7 +177,6 @@ export function createApplicationsRouter() {
   router.post("/:appId/packages", requirePermission("applications", "write"), async (c) => {
     const orgId = c.get("orgId");
     const appId = c.req.param("appId")!;
-    await getApplication(orgId, appId);
 
     const body = await c.req.json();
     const data = parseBody(installPackageSchema, body);
@@ -181,10 +187,7 @@ export function createApplicationsRouter() {
 
   // GET /api/applications/:appId/packages/:packageId — get installed package detail
   router.get("/:appId/packages/:scope{@[^/]+}/:name", async (c) => {
-    const orgId = c.get("orgId");
     const appId = c.req.param("appId")!;
-    await getApplication(orgId, appId);
-
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
     const row = await getInstalledPackage(appId, packageId);
     if (!row) {
@@ -203,10 +206,7 @@ export function createApplicationsRouter() {
     "/:appId/packages/:scope{@[^/]+}/:name",
     requirePermission("applications", "write"),
     async (c) => {
-      const orgId = c.get("orgId");
       const appId = c.req.param("appId")!;
-      await getApplication(orgId, appId);
-
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
       const body = await c.req.json();
       const data = parseBody(updatePackageSchema, body);
@@ -222,10 +222,7 @@ export function createApplicationsRouter() {
     "/:appId/packages/:scope{@[^/]+}/:name",
     requirePermission("applications", "write"),
     async (c) => {
-      const orgId = c.get("orgId");
       const appId = c.req.param("appId")!;
-      await getApplication(orgId, appId);
-
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
       await uninstallPackage(appId, packageId);
       return c.body(null, 204);

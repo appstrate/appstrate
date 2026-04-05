@@ -8,7 +8,7 @@ import { saveConnection } from "@appstrate/connect";
 import { providerCredentials } from "@appstrate/db/schema";
 import { resolveProviderProfiles } from "../../../src/services/connection-profiles.ts";
 import { resolveManifestProviders } from "../../../src/lib/manifest-utils.ts";
-import { getPackageConfig } from "../../../src/services/state/index.ts";
+import { getPackageConfig } from "../../../src/services/application-packages.ts";
 import { validateAgentReadiness } from "../../../src/services/agent-readiness.ts";
 import { getPackage } from "../../../src/services/agent-service.ts";
 import { getDefaultProfileId } from "../../../src/services/connection-profiles.ts";

@@ -8,6 +8,23 @@ import { applications } from "@appstrate/db/schema";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 
 /**
+ * Validate that an application belongs to the given org.
+ * Returns `{ id, isDefault }` or null if not found.
+ * Shared by the app-context middleware and SSE auth.
+ */
+export async function validateApplicationInOrg(
+  appId: string,
+  orgId: string,
+): Promise<{ id: string; isDefault: boolean } | null> {
+  const [app] = await db
+    .select({ id: applications.id, isDefault: applications.isDefault })
+    .from(applications)
+    .where(and(eq(applications.id, appId), eq(applications.orgId, orgId)))
+    .limit(1);
+  return app ?? null;
+}
+
+/**
  * Middleware: resolve application context for app-scoped routes.
  *
  * Resolution order:
@@ -30,12 +47,7 @@ export function requireAppContext() {
     }
 
     const orgId = c.get("orgId");
-
-    const [app] = await db
-      .select({ id: applications.id, isDefault: applications.isDefault })
-      .from(applications)
-      .where(and(eq(applications.id, appId), eq(applications.orgId, orgId)))
-      .limit(1);
+    const app = await validateApplicationInOrg(appId, orgId);
 
     if (!app) {
       throw notFound(`Application '${appId}' not found in this organization`);

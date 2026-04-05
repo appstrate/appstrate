@@ -312,7 +312,10 @@ export async function getRunningRunCounts(orgId: string): Promise<Record<string,
   return counts;
 }
 
-export async function getRun(id: string, orgId: string) {
+export async function getRun(id: string, orgId: string, applicationId?: string) {
+  const conditions = [eq(runs.id, id), eq(runs.orgId, orgId)];
+  if (applicationId) conditions.push(eq(runs.applicationId, applicationId));
+
   const [row] = await db
     .select({
       id: runs.id,
@@ -324,7 +327,7 @@ export async function getRun(id: string, orgId: string) {
       applicationId: runs.applicationId,
     })
     .from(runs)
-    .where(and(eq(runs.id, id), eq(runs.orgId, orgId)))
+    .where(and(...conditions))
     .limit(1);
   return row ?? null;
 }
@@ -404,7 +407,10 @@ export async function listScheduleRuns(
   );
 }
 
-export async function getRunFull(id: string, orgId: string) {
+export async function getRunFull(id: string, orgId: string, applicationId?: string) {
+  const conditions = [eq(runs.id, id), eq(runs.orgId, orgId)];
+  if (applicationId) conditions.push(eq(runs.applicationId, applicationId));
+
   const [row] = await db
     .select({
       run: runs,
@@ -412,7 +418,7 @@ export async function getRunFull(id: string, orgId: string) {
     })
     .from(runs)
     .leftJoin(packageVersions, eq(runs.packageVersionId, packageVersions.id))
-    .where(and(eq(runs.id, id), eq(runs.orgId, orgId)))
+    .where(and(...conditions))
     .limit(1);
   if (!row) return null;
   return { ...row.run, packageVersion: row.packageVersion };

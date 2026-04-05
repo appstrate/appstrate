@@ -10,6 +10,7 @@ import { db } from "@appstrate/db/client";
 import { applicationPackages, packages } from "@appstrate/db/schema";
 import { notFound, conflict } from "../lib/errors.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
+import { asRecord } from "../lib/safe-json.ts";
 import type { PackageType } from "@appstrate/core/validation";
 
 // ---------------------------------------------------------------------------
@@ -139,19 +140,8 @@ export async function hasPackageAccess(
   packageId: string,
   isDefault: boolean,
 ): Promise<boolean> {
-  if (isDefault) return true;
-
-  const [row] = await db
-    .select({ packageId: applicationPackages.packageId })
-    .from(applicationPackages)
-    .where(
-      and(
-        eq(applicationPackages.applicationId, applicationId),
-        eq(applicationPackages.packageId, packageId),
-      ),
-    )
-    .limit(1);
-  return !!row;
+  const accessible = await filterAccessiblePackages(applicationId, [packageId], isDefault);
+  return accessible.has(packageId);
 }
 
 /**
@@ -184,7 +174,43 @@ export async function filterAccessiblePackages(
 }
 
 // ---------------------------------------------------------------------------
-// Config
+// Package Config (per-app) — single source of truth for config/model/proxy/profile
+// ---------------------------------------------------------------------------
+
+export async function getPackageConfig(
+  applicationId: string,
+  packageId: string,
+): Promise<{
+  config: Record<string, unknown>;
+  modelId: string | null;
+  proxyId: string | null;
+  orgProfileId: string | null;
+}> {
+  const [row] = await db
+    .select({
+      config: applicationPackages.config,
+      modelId: applicationPackages.modelId,
+      proxyId: applicationPackages.proxyId,
+      orgProfileId: applicationPackages.orgProfileId,
+    })
+    .from(applicationPackages)
+    .where(
+      and(
+        eq(applicationPackages.applicationId, applicationId),
+        eq(applicationPackages.packageId, packageId),
+      ),
+    )
+    .limit(1);
+  return {
+    config: asRecord(row?.config),
+    modelId: row?.modelId ?? null,
+    proxyId: row?.proxyId ?? null,
+    orgProfileId: row?.orgProfileId ?? null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Config Updates
 // ---------------------------------------------------------------------------
 
 export async function updateInstalledPackage(

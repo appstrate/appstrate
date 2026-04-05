@@ -7,7 +7,6 @@ import { logger } from "../lib/logger.ts";
 import { ApiError, internalError, notFound, parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { validateScopes, resolvePermissions, API_KEY_ALLOWED_SCOPES } from "../lib/permissions.ts";
-import { requireAppContext } from "../middleware/app-context.ts";
 import {
   generateApiKey,
   hashApiKey,
@@ -30,7 +29,6 @@ const createApiKeySchema = z.object({
 
 export function createApiKeysRouter() {
   const router = new Hono<AppEnv>();
-  router.use("*", requireAppContext());
 
   // GET /api/api-keys/available-scopes — list scopes available for the current user's role
   // MUST be registered BEFORE /:id routes

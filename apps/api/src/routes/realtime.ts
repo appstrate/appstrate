@@ -5,11 +5,12 @@ import { streamSSE } from "hono/streaming";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { auth } from "@appstrate/db/auth";
-import { organizationMembers, applications } from "@appstrate/db/schema";
+import { organizationMembers } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
 import type { RealtimeEvent } from "../services/realtime.ts";
 import { unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
+import { validateApplicationInOrg } from "../middleware/app-context.ts";
 
 /** Strip large user-content fields from SSE payloads for non-verbose consumers. */
 function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
@@ -82,11 +83,7 @@ async function validateSSEAuth(c: {
 
   // Validate application belongs to org (if provided)
   if (applicationId) {
-    const [app] = await db
-      .select({ id: applications.id })
-      .from(applications)
-      .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
-      .limit(1);
+    const app = await validateApplicationInOrg(applicationId, orgId);
     if (!app) return null;
   }
 

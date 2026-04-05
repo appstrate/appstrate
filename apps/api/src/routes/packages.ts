@@ -60,7 +60,6 @@ import { asRecord } from "../lib/safe-json.ts";
 import { forkPackage } from "../services/package-fork.ts";
 import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
-import { requireAppContext } from "../middleware/app-context.ts";
 import {
   ApiError,
   invalidRequest,
@@ -1044,7 +1043,6 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
 
 export function createPackagesRouter() {
   const router = new Hono<AppEnv>();
-  router.use("*", requireAppContext());
 
   // --- Package CRUD routes (skills, tools, agents, providers) ---
   for (const rcfg of Object.values(ROUTE_CONFIGS)) {

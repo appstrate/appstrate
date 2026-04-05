@@ -35,8 +35,6 @@ import { getCloudModule } from "../lib/cloud-loader.ts";
 import { dispatchRunWebhook } from "../services/webhooks.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
-import { requireAppContext } from "../middleware/app-context.ts";
-
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens;
   total.output_tokens += addition.output_tokens;
@@ -342,9 +340,6 @@ export async function executeAgentInBackground(
 
 export function createRunsRouter() {
   const router = new Hono<AppEnv>();
-  router.use("/agents/*", requireAppContext());
-  router.use("/runs/*", requireAppContext());
-  router.use("/schedules/*", requireAppContext());
 
   // POST /api/agents/:scope/:name/run — execute an agent (fire-and-forget, returns JSON)
   router.post(
@@ -522,12 +517,8 @@ export function createRunsRouter() {
   router.get("/runs/:id", async (c) => {
     const runId = c.req.param("id");
     const orgId = c.get("orgId");
-    const row = await getRunFull(runId, orgId);
+    const row = await getRunFull(runId, orgId, c.get("applicationId"));
     if (!row) {
-      throw notFound("Run not found");
-    }
-    // Application scoping
-    if (row.applicationId !== c.get("applicationId")) {
       throw notFound("Run not found");
     }
     // End-user scoping: end-users can only see their own runs
@@ -542,12 +533,8 @@ export function createRunsRouter() {
   router.get("/runs/:id/logs", async (c) => {
     const runId = c.req.param("id");
     const orgId = c.get("orgId");
-    const exec = await getRun(runId, orgId);
+    const exec = await getRun(runId, orgId, c.get("applicationId"));
     if (!exec) {
-      throw notFound("Run not found");
-    }
-    // Application scoping
-    if (exec.applicationId !== c.get("applicationId")) {
       throw notFound("Run not found");
     }
     // End-user scoping: end-users can only see their own run logs
@@ -565,13 +552,8 @@ export function createRunsRouter() {
     const runId = c.req.param("id")!;
     const orgId = c.get("orgId");
 
-    const run = await getRun(runId, orgId);
+    const run = await getRun(runId, orgId, c.get("applicationId"));
     if (!run) {
-      throw notFound("Run not found");
-    }
-
-    // Application scoping
-    if (run.applicationId !== c.get("applicationId")) {
       throw notFound("Run not found");
     }
 
