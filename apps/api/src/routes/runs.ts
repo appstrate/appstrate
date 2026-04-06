@@ -65,7 +65,7 @@ export async function executeAgentInBackground(
 
   try {
     // Update status to running
-    await updateRun(runId, orgId, { status: "running" });
+    await updateRun(runId, orgId, applicationId, { status: "running" });
     dispatchRunWebhook(orgId, applicationId, "started", runId, agent.id);
 
     // Execute via adapter
@@ -154,7 +154,7 @@ export async function executeAgentInBackground(
       if (err instanceof TimeoutError) {
         const duration = Date.now() - startTime;
         const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
-        await updateRun(runId, orgId, {
+        await updateRun(runId, orgId, applicationId, {
           status: "timeout",
           error: `Run timed out after ${timeout}s`,
           completedAt: new Date().toISOString(),
@@ -201,7 +201,7 @@ export async function executeAgentInBackground(
     const duration = Date.now() - startTime;
 
     if (error) {
-      await updateRun(runId, orgId, {
+      await updateRun(runId, orgId, applicationId, {
         status: "failed",
         error,
         completedAt: new Date().toISOString(),
@@ -274,7 +274,7 @@ export async function executeAgentInBackground(
         }
       }
 
-      await updateRun(runId, orgId, {
+      await updateRun(runId, orgId, applicationId, {
         status: "success",
         result,
         ...(state ? { state } : {}),
@@ -307,7 +307,7 @@ export async function executeAgentInBackground(
 
     const duration = Date.now() - startTime;
     const errorMessage = err instanceof Error ? err.message : "Unknown error";
-    await updateRun(runId, orgId, {
+    await updateRun(runId, orgId, applicationId, {
       status: "failed",
       error: errorMessage,
       completedAt: new Date().toISOString(),
@@ -564,7 +564,7 @@ export function createRunsRouter() {
 
     // Update DB
     const now = new Date().toISOString();
-    await updateRun(runId, orgId, {
+    await updateRun(runId, orgId, c.get("applicationId"), {
       status: "cancelled",
       error: "Cancelled by user",
       completedAt: now,

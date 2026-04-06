@@ -150,7 +150,7 @@ export async function handleOAuthCallback(
     codeVerifier: rawRow.codeVerifier,
     scopesRequested: (rawRow.scopesRequested as string[]) ?? [],
     redirectUri: rawRow.redirectUri,
-    createdAt: rawRow.createdAt?.toISOString() ?? "",
+    createdAt: rawRow.createdAt!.toISOString(),
     expiresAt: rawRow.expiresAt.toISOString(),
     authMode: rawRow.authMode,
     oauthTokenSecret: rawRow.oauthTokenSecret ?? undefined,

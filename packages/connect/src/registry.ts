@@ -69,7 +69,6 @@ export async function getProviderOrThrow(
  */
 async function getProviderAdminCredentials(
   db: Db,
-  _orgId: string,
   providerId: string,
   applicationId: string,
 ): Promise<Record<string, string> | null> {
@@ -94,11 +93,11 @@ async function getProviderAdminCredentials(
  */
 export async function getProviderOAuthCredentialsOrThrow(
   db: Db,
-  orgId: string,
+  _orgId: string,
   providerId: string,
   applicationId: string,
 ): Promise<{ clientId: string; clientSecret: string }> {
-  const creds = await getProviderAdminCredentials(db, orgId, providerId, applicationId);
+  const creds = await getProviderAdminCredentials(db, providerId, applicationId);
   if (!creds?.clientId || !creds?.clientSecret) {
     throw new Error(
       `No OAuth credentials configured for provider '${providerId}'. Configure via admin settings.`,
@@ -113,11 +112,11 @@ export async function getProviderOAuthCredentialsOrThrow(
  */
 export async function getProviderOAuth1CredentialsOrThrow(
   db: Db,
-  orgId: string,
+  _orgId: string,
   providerId: string,
   applicationId: string,
 ): Promise<{ consumerKey: string; consumerSecret: string }> {
-  const creds = await getProviderAdminCredentials(db, orgId, providerId, applicationId);
+  const creds = await getProviderAdminCredentials(db, providerId, applicationId);
   if (!creds?.consumerKey || !creds?.consumerSecret) {
     throw new Error(
       `No OAuth1 consumer credentials configured for provider '${providerId}'. Configure via admin settings.`,

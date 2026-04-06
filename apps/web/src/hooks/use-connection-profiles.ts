@@ -20,13 +20,14 @@ interface ProfileWithConnections extends ConnectionProfile {
 /** List connections for a specific profile (user or org). */
 export function useProfileConnections(profileId: string | null | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["profile-connections", orgId, profileId],
+    queryKey: ["profile-connections", orgId, appId, profileId],
     queryFn: () =>
       api<{ connections: ConnectionInfo[] }>(`/connection-profiles/${profileId}/connections`).then(
         (r) => r.connections,
       ),
-    enabled: !!profileId,
+    enabled: !!profileId && !!appId,
     staleTime: 30_000,
   });
 }

@@ -106,7 +106,12 @@ export function ProviderConnectionCard({
   };
 
   const handleDisconnect = () => {
-    disconnectMutation.mutate({ provider: providerId, ...profileParam });
+    const conn = profileConnections?.find((c) => c.providerId === providerId);
+    disconnectMutation.mutate({
+      provider: providerId,
+      ...profileParam,
+      ...(conn?.id ? { connectionId: conn.id } : {}),
+    });
   };
 
   // ─── Determine active mode: org-bound or user-managed ────

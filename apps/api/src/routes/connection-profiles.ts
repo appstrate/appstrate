@@ -69,7 +69,8 @@ export function createConnectionProfilesRouter() {
   // GET /api/connection-profiles/connections — all connections across all profiles
   router.get("/connections", async (c) => {
     const actor = getActor(c);
-    const result = await listAllActorConnections(actor);
+    const applicationId = c.get("applicationId");
+    const result = await listAllActorConnections(actor, applicationId);
     return c.json(result);
   });
 
@@ -282,10 +283,8 @@ export function createConnectionProfilesRouter() {
     if (!profile) {
       throw notFound("Profile not found");
     }
-    // When app context is available, scope connections to that application's credentials
-    const credentialIds = applicationId
-      ? await listProviderCredentialIds(db, applicationId)
-      : undefined;
+    // Scope connections to the application's credentials
+    const credentialIds = applicationId ? await listProviderCredentialIds(db, applicationId) : [];
     const connections = await listConnections(db, profileId, orgId, credentialIds);
     return c.json({ connections });
   });

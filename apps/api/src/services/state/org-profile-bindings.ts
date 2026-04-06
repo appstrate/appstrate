@@ -76,11 +76,15 @@ export async function getOrgProfileBindingsEnriched(
       eq(connectionProfiles.id, orgProfileProviderBindings.sourceProfileId),
     )
     .leftJoin(user, eq(user.id, orgProfileProviderBindings.boundByUserId))
+    // NOTE: This matches connections across all apps (no providerCredentialId filter)
+    // because org-level bindings are app-agnostic. We filter out unhealthy connections
+    // so the binding shows "connected" only when at least one app has a working connection.
     .leftJoin(
       userProviderConnections,
       and(
         eq(userProviderConnections.profileId, orgProfileProviderBindings.sourceProfileId),
         eq(userProviderConnections.providerId, orgProfileProviderBindings.providerId),
+        eq(userProviderConnections.needsReconnection, false),
       ),
     )
     .where(eq(orgProfileProviderBindings.orgProfileId, orgProfileId));

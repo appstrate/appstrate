@@ -2,7 +2,7 @@
 
 import { db } from "@appstrate/db/client";
 import type { UserConnectionProviderGroup, AvailableProvider } from "@appstrate/shared-types";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   userProviderConnections,
   connectionProfiles,
@@ -13,6 +13,7 @@ import {
 import {
   listConnections as listConnectionsRaw,
   listProviderCredentialIds,
+  listConfiguredProviderIds,
   listProviders,
   getProviderAuthMode as getProviderAuthModeRaw,
 } from "@appstrate/connect";
@@ -34,42 +35,67 @@ export async function getAvailableProvidersWithStatus(
   orgId: string,
   applicationId: string,
 ): Promise<AvailableProvider[]> {
-  const [providers, credentialIds] = await Promise.all([
+  const [providers, credentialIds, configuredProviderIds] = await Promise.all([
     listProviders(db, orgId),
     listProviderCredentialIds(db, applicationId),
+    listConfiguredProviderIds(db, applicationId),
   ]);
   const connections = await listConnectionsRaw(db, profileId, orgId, credentialIds);
+  const configuredSet = new Set(configuredProviderIds);
 
-  return providers.map((provider) => {
-    const conn = connections.find((c) => c.providerId === provider.id);
-    if (conn) {
+  return providers
+    .filter((provider) => configuredSet.has(provider.id))
+    .map((provider) => {
+      const conn = connections.find((c) => c.providerId === provider.id);
+      if (conn) {
+        return {
+          uniqueKey: provider.id,
+          provider: provider.id,
+          displayName: provider.displayName,
+          logo: provider.iconUrl ?? "",
+          status: conn.needsReconnection ? ("needs_reconnection" as const) : ("connected" as const),
+          authMode: authModeLabel(provider.authMode),
+          connectionId: conn.id,
+          connectedAt: conn.createdAt,
+          scopesGranted: conn.scopesGranted,
+        };
+      }
       return {
         uniqueKey: provider.id,
         provider: provider.id,
         displayName: provider.displayName,
         logo: provider.iconUrl ?? "",
-        status: conn.needsReconnection ? ("needs_reconnection" as const) : ("connected" as const),
+        status: "not_connected" as const,
         authMode: authModeLabel(provider.authMode),
-        connectionId: conn.id,
-        connectedAt: conn.createdAt,
-        scopesGranted: conn.scopesGranted,
       };
-    }
-    return {
-      uniqueKey: provider.id,
-      provider: provider.id,
-      displayName: provider.displayName,
-      logo: provider.iconUrl ?? "",
-      status: "not_connected" as const,
-      authMode: authModeLabel(provider.authMode),
-    };
-  });
+    });
 }
 
 export async function listAllActorConnections(
   actor: Actor,
+  applicationId?: string,
 ): Promise<{ providers: UserConnectionProviderGroup[] }> {
+  // Resolve credential IDs if app-scoped
+  const credentialIds = applicationId
+    ? await listProviderCredentialIds(db, applicationId)
+    : undefined;
+
+  // If app-scoped but no credentials configured, no connections can exist
+  if (credentialIds && credentialIds.length === 0) {
+    return { providers: [] };
+  }
+
   // 1. Fetch all actor connections with org info
+  const conditions = [
+    actorFilter(actor, {
+      userId: connectionProfiles.userId,
+      endUserId: connectionProfiles.endUserId,
+    }),
+  ];
+  if (credentialIds) {
+    conditions.push(inArray(userProviderConnections.providerCredentialId, credentialIds));
+  }
+
   const rows = await db
     .select({
       connectionId: userProviderConnections.id,
@@ -83,12 +109,7 @@ export async function listAllActorConnections(
     })
     .from(userProviderConnections)
     .innerJoin(connectionProfiles, eq(userProviderConnections.profileId, connectionProfiles.id))
-    .where(
-      actorFilter(actor, {
-        userId: connectionProfiles.userId,
-        endUserId: connectionProfiles.endUserId,
-      }),
-    );
+    .where(and(...conditions));
 
   if (rows.length === 0) return { providers: [] };
 

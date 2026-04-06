@@ -41,28 +41,26 @@ export async function getConnection(
 
 /**
  * List connections for a profile within an org.
- * When providerCredentialIds is provided, only connections created with those
- * application credentials are returned (per-app isolation).
+ * Only connections created with the given application credentials are returned (per-app isolation).
  */
 export async function listConnections(
   db: Db,
   profileId: string,
   orgId: string,
-  providerCredentialIds?: string[],
+  providerCredentialIds: string[],
 ): Promise<ConnectionRecord[]> {
-  const conditions = [
-    eq(userProviderConnections.profileId, profileId),
-    eq(userProviderConnections.orgId, orgId),
-  ];
-
-  if (providerCredentialIds && providerCredentialIds.length > 0) {
-    conditions.push(inArray(userProviderConnections.providerCredentialId, providerCredentialIds));
-  }
+  if (providerCredentialIds.length === 0) return [];
 
   const rows = await db
     .select()
     .from(userProviderConnections)
-    .where(and(...conditions));
+    .where(
+      and(
+        eq(userProviderConnections.profileId, profileId),
+        eq(userProviderConnections.orgId, orgId),
+        inArray(userProviderConnections.providerCredentialId, providerCredentialIds),
+      ),
+    );
 
   return rows.map(rowToConnection);
 }
@@ -295,6 +293,22 @@ export async function listProviderCredentialIds(db: Db, applicationId: string): 
     .from(applicationProviderCredentials)
     .where(eq(applicationProviderCredentials.applicationId, applicationId));
   return rows.map((r) => r.id);
+}
+
+/**
+ * List provider IDs that have enabled credentials configured for an application.
+ */
+export async function listConfiguredProviderIds(db: Db, applicationId: string): Promise<string[]> {
+  const rows = await db
+    .select({ providerId: applicationProviderCredentials.providerId })
+    .from(applicationProviderCredentials)
+    .where(
+      and(
+        eq(applicationProviderCredentials.applicationId, applicationId),
+        eq(applicationProviderCredentials.enabled, true),
+      ),
+    );
+  return rows.map((r) => r.providerId);
 }
 
 /**

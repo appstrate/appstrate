@@ -168,6 +168,7 @@ export const userProviderConnections = pgTable(
     index("idx_user_provider_connections_profile").on(table.profileId),
     index("idx_user_provider_connections_org_id").on(table.orgId),
     index("idx_user_provider_connections_cred_id").on(table.providerCredentialId),
+    index("idx_user_provider_connections_org_provider").on(table.orgId, table.providerId),
   ],
 );
 

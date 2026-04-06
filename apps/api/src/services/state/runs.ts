@@ -10,11 +10,21 @@ import { toISO } from "../../lib/date-helpers.ts";
 
 // --- Runs ---
 
-async function nextRunNumber(packageId: string, orgId: string): Promise<number> {
+async function nextRunNumber(
+  packageId: string,
+  orgId: string,
+  applicationId: string,
+): Promise<number> {
   const [maxRow] = await db
     .select({ maxNum: max(runs.runNumber) })
     .from(runs)
-    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)));
+    .where(
+      and(
+        eq(runs.packageId, packageId),
+        eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
+      ),
+    );
   return (maxRow?.maxNum ?? 0) + 1;
 }
 
@@ -33,7 +43,7 @@ export async function createRun(
   modelSource?: string,
   providerProfileIds?: Record<string, string>,
 ): Promise<void> {
-  const runNumber = await nextRunNumber(packageId, orgId);
+  const runNumber = await nextRunNumber(packageId, orgId, applicationId);
 
   await db.insert(runs).values({
     id,
@@ -69,7 +79,7 @@ export async function createFailedRun(
   scheduleId?: string,
   connectionProfileId?: string,
 ): Promise<void> {
-  const runNumber = await nextRunNumber(packageId, orgId);
+  const runNumber = await nextRunNumber(packageId, orgId, applicationId);
   const now = new Date();
 
   await db.insert(runs).values({
@@ -94,6 +104,7 @@ export async function createFailedRun(
 export async function updateRun(
   id: string,
   orgId: string,
+  applicationId: string,
   updates: {
     status?: string;
     result?: Record<string, unknown>;
@@ -126,7 +137,7 @@ export async function updateRun(
     await db
       .update(runs)
       .set(set)
-      .where(and(eq(runs.id, id), eq(runs.orgId, orgId)));
+      .where(and(eq(runs.id, id), eq(runs.orgId, orgId), eq(runs.applicationId, applicationId)));
   } catch (err) {
     logger.error("Failed to update run", {
       runId: id,
@@ -468,6 +479,11 @@ export async function listRunLogs(runId: string, orgId: string) {
     .orderBy(runLogs.id);
 }
 
+/**
+ * Mark all in-flight runs as failed on server restart.
+ * ⚠️ Single-instance only — in multi-instance deployments, this will fail ALL
+ * instances' in-flight runs. Multi-instance support requires per-instance run tracking.
+ */
 export async function markOrphanRunsFailed(): Promise<{
   count: number;
   runIds: string[];

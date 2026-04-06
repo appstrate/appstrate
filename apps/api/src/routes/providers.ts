@@ -20,6 +20,8 @@ import {
   systemEntityForbidden,
 } from "../lib/errors.ts";
 import { getDefaultAdminCredentialSchema } from "@appstrate/core/validation";
+import { getProviderCredentialId } from "@appstrate/connect";
+import { db } from "@appstrate/db/client";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import {
@@ -329,7 +331,10 @@ export function createProvidersRouter() {
       await configureCredentials(appId, providerId, data.credentials, data.enabled);
 
       if (hasCredentials && data.invalidateConnections) {
-        await invalidateConnections(orgId, providerId);
+        const credentialId = await getProviderCredentialId(db, appId, providerId);
+        if (credentialId) {
+          await invalidateConnections(orgId, providerId, credentialId);
+        }
       }
 
       return c.json({ configured: true });

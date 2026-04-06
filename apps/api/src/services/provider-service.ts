@@ -185,17 +185,26 @@ export async function deleteCredentials(appId: string, providerId: string): Prom
     );
 }
 
-/** Invalidate all user connections for a provider in an org. */
-export async function invalidateConnections(orgId: string, providerId: string): Promise<void> {
+/** Invalidate all user connections for a provider credential in an org. */
+export async function invalidateConnections(
+  orgId: string,
+  providerId: string,
+  providerCredentialId: string,
+): Promise<void> {
   await db
     .delete(userProviderConnections)
     .where(
       and(
         eq(userProviderConnections.providerId, providerId),
         eq(userProviderConnections.orgId, orgId),
+        eq(userProviderConnections.providerCredentialId, providerCredentialId),
       ),
     );
-  logger.info("Invalidated user connections after credential update", { providerId, orgId });
+  logger.info("Invalidated user connections after credential update", {
+    providerId,
+    orgId,
+    providerCredentialId,
+  });
 }
 
 // ---------------------------------------------------------------------------
