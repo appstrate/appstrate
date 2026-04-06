@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { userProviderConnections, connectionProfiles } from "@appstrate/db/schema";
 import {
   listConnections as listConnectionsRaw,
+  listProviderCredentialIds,
   deleteConnection as deleteConnectionRaw,
   deleteConnectionById as deleteConnectionByIdRaw,
   validateScopes,
@@ -17,8 +18,10 @@ import type { ConnectionStatus } from "./status.ts";
 export async function listActorConnections(
   profileId: string,
   orgId: string,
+  applicationId: string,
 ): Promise<ConnectionStatus[]> {
-  const connections = await listConnectionsRaw(db, profileId, orgId);
+  const credentialIds = await listProviderCredentialIds(db, applicationId);
+  const connections = await listConnectionsRaw(db, profileId, orgId, credentialIds);
   return connections.map((c) => ({
     provider: c.providerId,
     status: c.needsReconnection ? ("needs_reconnection" as const) : ("connected" as const),

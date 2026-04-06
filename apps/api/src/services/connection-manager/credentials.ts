@@ -2,14 +2,8 @@
 
 import { db } from "@appstrate/db/client";
 import { logger } from "../../lib/logger.ts";
-import { saveConnection, getProviderCredentialId } from "@appstrate/connect";
-
-async function resolveProviderCredentialId(applicationId: string, provider: string) {
-  const id = await getProviderCredentialId(db, applicationId, provider);
-  if (!id)
-    throw new Error(`No provider credentials for '${provider}' in application '${applicationId}'`);
-  return id;
-}
+import { saveConnection } from "@appstrate/connect";
+import { resolveProviderCredentialId } from "./helpers.ts";
 
 export async function saveApiKeyConnection(
   provider: string,

@@ -37,7 +37,7 @@ import {
 import { getActor } from "../lib/actor.ts";
 
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { listConnections } from "@appstrate/connect";
+import { listConnections, listProviderCredentialIds } from "@appstrate/connect";
 
 const profileNameSchema = z.object({ name: z.string().min(1, "Name is required").max(100) });
 
@@ -268,10 +268,12 @@ export function createConnectionProfilesRouter() {
   });
 
   // GET /api/connection-profiles/:id/connections — list connections for a profile
+  // Optionally scoped by applicationId (from X-App-Id header or API key context).
   router.get("/:id/connections", async (c) => {
     const actor = getActor(c);
     const profileId = c.req.param("id")!;
     const orgId = c.get("orgId");
+    const applicationId = c.get("applicationId");
     // Allow access if: own profile, org profile, or profile of another org member (read-only view)
     const profile =
       (await getProfileForActor(profileId, actor)) ??
@@ -280,7 +282,11 @@ export function createConnectionProfilesRouter() {
     if (!profile) {
       throw notFound("Profile not found");
     }
-    const connections = await listConnections(db, profileId, orgId);
+    // When app context is available, scope connections to that application's credentials
+    const credentialIds = applicationId
+      ? await listProviderCredentialIds(db, applicationId)
+      : undefined;
+    const connections = await listConnections(db, profileId, orgId, credentialIds);
     return c.json({ connections });
   });
 

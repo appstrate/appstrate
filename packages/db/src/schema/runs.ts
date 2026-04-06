@@ -25,7 +25,9 @@ export const runs = pgTable(
   "runs",
   {
     id: text("id").primaryKey(),
-    packageId: text("package_id").notNull(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
     userId: text("user_id").references(() => user.id, {
       onDelete: "set null",
     }),
@@ -48,8 +50,12 @@ export const runs = pgTable(
     startedAt: timestamp("started_at").defaultNow().notNull(),
     completedAt: timestamp("completed_at"),
     duration: integer("duration"),
-    connectionProfileId: uuid("connection_profile_id"),
-    scheduleId: text("schedule_id"),
+    connectionProfileId: uuid("connection_profile_id").references(() => connectionProfiles.id, {
+      onDelete: "set null",
+    }),
+    scheduleId: text("schedule_id").references(() => packageSchedules.id, {
+      onDelete: "set null",
+    }),
     packageVersionId: integer("package_version_id").references(() => packageVersions.id, {
       onDelete: "set null",
     }),

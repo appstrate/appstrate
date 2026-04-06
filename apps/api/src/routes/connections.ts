@@ -42,10 +42,11 @@ async function resolveProfileId(c: Context<AppEnv>, actor: Actor): Promise<strin
 export function createConnectionsRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/connections — list connections for current actor's profile
+  // GET /api/connections — list connections for current actor's profile (app-scoped)
   router.get("/", async (c) => {
     const actor = getActor(c);
     const orgId = c.get("orgId");
+    const applicationId = c.get("applicationId");
     const profileId = await resolveProfileId(c, actor);
 
     // Validate ownership — user can use their own profiles or org profiles
@@ -54,7 +55,7 @@ export function createConnectionsRouter() {
       throw forbidden("Cannot view connections for a profile you do not own");
     }
 
-    const connections = await listActorConnections(profileId, orgId);
+    const connections = await listActorConnections(profileId, orgId, applicationId);
     return c.json({ connections });
   });
 
@@ -68,8 +69,8 @@ export function createConnectionsRouter() {
       const orgId = c.get("orgId");
 
       const applicationId = c.get("applicationId");
-      if (applicationId && !(await isProviderEnabled(db, orgId, provider, applicationId))) {
-        throw forbidden(`Provider '${provider}' is not configured`);
+      if (!(await isProviderEnabled(db, orgId, provider, applicationId))) {
+        throw forbidden(`Provider '${provider}' is not configured in the current application`);
       }
 
       try {
@@ -116,8 +117,8 @@ export function createConnectionsRouter() {
       const orgId = c.get("orgId");
 
       const applicationId = c.get("applicationId");
-      if (applicationId && !(await isProviderEnabled(db, orgId, provider, applicationId))) {
-        throw forbidden(`Provider '${provider}' is not configured`);
+      if (!(await isProviderEnabled(db, orgId, provider, applicationId))) {
+        throw forbidden(`Provider '${provider}' is not configured in the current application`);
       }
 
       try {
@@ -157,8 +158,8 @@ export function createConnectionsRouter() {
       const orgId = c.get("orgId");
 
       const applicationId = c.get("applicationId");
-      if (applicationId && !(await isProviderEnabled(db, orgId, provider, applicationId))) {
-        throw forbidden(`Provider '${provider}' is not configured`);
+      if (!(await isProviderEnabled(db, orgId, provider, applicationId))) {
+        throw forbidden(`Provider '${provider}' is not configured in the current application`);
       }
 
       try {
@@ -254,10 +255,11 @@ export function createConnectionsRouter() {
     }
   });
 
-  // GET /api/connections/integrations — list all available providers with connection status for current actor
+  // GET /api/connections/integrations — list all available providers with connection status (app-scoped)
   router.get("/integrations", async (c) => {
     const actor = getActor(c);
     const orgId = c.get("orgId");
+    const applicationId = c.get("applicationId");
     const profileId = await resolveProfileId(c, actor);
 
     // Validate ownership — user can use their own profiles or org profiles
@@ -266,7 +268,7 @@ export function createConnectionsRouter() {
       throw forbidden("Cannot view integrations for a profile you do not own");
     }
 
-    const integrations = await getAvailableProvidersWithStatus(profileId, orgId);
+    const integrations = await getAvailableProvidersWithStatus(profileId, orgId, applicationId);
     return c.json({ integrations });
   });
 
@@ -293,9 +295,7 @@ export function createConnectionsRouter() {
           if (!profile) {
             throw forbidden("Cannot disconnect from a profile you do not own");
           }
-          const credentialId = applicationId
-            ? await getProviderCredentialId(db, applicationId, provider)
-            : null;
+          const credentialId = await getProviderCredentialId(db, applicationId, provider);
           if (!credentialId) {
             throw invalidRequest(
               `Provider '${provider}' is not configured in the current application`,

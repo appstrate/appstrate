@@ -12,6 +12,7 @@ import {
 } from "@appstrate/db/schema";
 import {
   listConnections as listConnectionsRaw,
+  listProviderCredentialIds,
   listProviders,
   getProviderAuthMode as getProviderAuthModeRaw,
 } from "@appstrate/connect";
@@ -31,11 +32,13 @@ export async function getProviderAuthMode(
 export async function getAvailableProvidersWithStatus(
   profileId: string,
   orgId: string,
+  applicationId: string,
 ): Promise<AvailableProvider[]> {
-  const [providers, connections] = await Promise.all([
+  const [providers, credentialIds] = await Promise.all([
     listProviders(db, orgId),
-    listConnectionsRaw(db, profileId, orgId),
+    listProviderCredentialIds(db, applicationId),
   ]);
+  const connections = await listConnectionsRaw(db, profileId, orgId, credentialIds);
 
   return providers.map((provider) => {
     const conn = connections.find((c) => c.providerId === provider.id);

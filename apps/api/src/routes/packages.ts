@@ -8,6 +8,7 @@ import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/z
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, and, inArray } from "drizzle-orm";
 import { packages, profiles, applicationProviderCredentials } from "@appstrate/db/schema";
+import { encryptCredentials } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
@@ -353,7 +354,7 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
           .values({
             applicationId,
             providerId: packageId,
-            credentialsEncrypted: null,
+            credentialsEncrypted: encryptCredentials({}),
             enabled: true,
           })
           .onConflictDoNothing();

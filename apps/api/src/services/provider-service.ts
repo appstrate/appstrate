@@ -159,7 +159,9 @@ export async function configureCredentials(
     .values({
       applicationId: appId,
       providerId,
-      credentialsEncrypted: hasCredentials ? encryptCredentials(credentials) : null,
+      credentialsEncrypted: hasCredentials
+        ? encryptCredentials(credentials)
+        : encryptCredentials({}),
       enabled: enabled ?? true,
     })
     .onConflictDoUpdate({
@@ -278,7 +280,9 @@ async function upsertAppCredentials(
     .values({
       applicationId: appId,
       providerId,
-      credentialsEncrypted: hasAdminCreds ? encryptCredentials(adminCredentials) : null,
+      credentialsEncrypted: hasAdminCreds
+        ? encryptCredentials(adminCredentials)
+        : encryptCredentials({}),
       enabled: enabled ?? true,
     })
     .onConflictDoUpdate({

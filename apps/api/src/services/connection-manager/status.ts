@@ -146,11 +146,11 @@ async function batchGetConnectionStatuses(
     eq(userProviderConnections.orgId, orgId),
   ];
 
-  // If we have credential IDs, filter to only connections created with those credentials
+  // Filter to only connections created with the application's credentials.
+  // If no credentials are configured for any provider, return empty — no connections can exist.
   const credentialIds = [...credentialIdMap.values()];
-  if (credentialIds.length > 0) {
-    conditions.push(inArray(userProviderConnections.providerCredentialId, credentialIds));
-  }
+  if (credentialIds.length === 0) return new Map();
+  conditions.push(inArray(userProviderConnections.providerCredentialId, credentialIds));
 
   const rows = await db
     .select({

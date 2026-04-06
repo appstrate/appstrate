@@ -15,6 +15,13 @@
       "when": 1775481474926,
       "tag": "0001_marvelous_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1775488192480,
+      "tag": "0002_many_madame_hydra",
+      "breakpoints": true
     }
   ]
 }

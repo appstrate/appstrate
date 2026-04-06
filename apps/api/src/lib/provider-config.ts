@@ -7,7 +7,19 @@ import {
   getDefaultAdminCredentialSchema,
   buildProviderDefinitionFromManifest,
 } from "@appstrate/core/validation";
+import { decryptCredentials } from "@appstrate/connect";
 import { asRecord } from "./safe-json.ts";
+
+/** Check if encrypted credentials contain actual data (not just an empty object). */
+export function hasActualCredentials(encrypted: string | undefined): boolean {
+  if (!encrypted) return false;
+  try {
+    const decrypted = decryptCredentials<Record<string, unknown>>(encrypted);
+    return Object.keys(decrypted).length > 0;
+  } catch {
+    return false;
+  }
+}
 
 export function packageToProviderConfig(
   pkg: {
@@ -15,7 +27,7 @@ export function packageToProviderConfig(
     manifest: unknown;
     source: string | null;
   },
-  credRow?: { credentialsEncrypted: string | null; enabled: boolean } | null,
+  credRow?: { credentialsEncrypted: string; enabled: boolean } | null,
 ): ProviderConfig {
   const manifest = asRecord(pkg.manifest);
   const def = asRecord(manifest.definition);
@@ -35,7 +47,7 @@ export function packageToProviderConfig(
     description: (manifest.description as string) ?? undefined,
     author: (manifest.author as string) ?? undefined,
     source: isSystem ? "built-in" : "custom",
-    hasCredentials: !!credRow?.credentialsEncrypted,
+    hasCredentials: hasActualCredentials(credRow?.credentialsEncrypted),
     enabled: !!credRow?.enabled,
     adminCredentialSchema,
     setupGuide: (manifest.setupGuide as ProviderSetupGuide) ?? undefined,

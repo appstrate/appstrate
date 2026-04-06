@@ -122,7 +122,7 @@ export const applicationProviderCredentials = pgTable(
     providerId: text("provider_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    credentialsEncrypted: text("credentials_encrypted"),
+    credentialsEncrypted: text("credentials_encrypted").notNull(),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -130,6 +130,7 @@ export const applicationProviderCredentials = pgTable(
   (table) => [
     primaryKey({ columns: [table.applicationId, table.providerId] }),
     index("idx_app_provider_creds_provider").on(table.providerId),
+    index("idx_app_provider_creds_app_id").on(table.applicationId),
   ],
 );
 
@@ -185,9 +186,9 @@ export const oauthStates = pgTable(
       .notNull()
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     providerId: text("provider_id").notNull(),
-    applicationId: text("application_id").references(() => applications.id, {
-      onDelete: "cascade",
-    }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
     codeVerifier: text("code_verifier").notNull(),
     oauthTokenSecret: text("oauth_token_secret"),
     authMode: text("auth_mode").notNull().default("oauth2"),

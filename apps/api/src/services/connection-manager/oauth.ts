@@ -10,20 +10,11 @@ import {
   handleOAuth1Callback,
   saveConnection,
   getProvider,
-  getProviderCredentialId,
   type OAuthCallbackResult,
   type OAuth1CallbackResult,
 } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
-
-async function resolveProviderCredentialId(applicationId: string, providerId: string) {
-  const id = await getProviderCredentialId(db, applicationId, providerId);
-  if (!id)
-    throw new Error(
-      `No provider credentials for '${providerId}' in application '${applicationId}'`,
-    );
-  return id;
-}
+import { resolveProviderCredentialId } from "./helpers.ts";
 
 export function getOAuthCallbackUrl(): string {
   return `${getEnv().APP_URL}/api/connections/callback`;

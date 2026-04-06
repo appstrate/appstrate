@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import {
   userProviderConnections,
   applicationProviderCredentials,
@@ -40,22 +40,29 @@ export async function getConnection(
 }
 
 /**
- * List all connections for a profile within an org.
+ * List connections for a profile within an org.
+ * When providerCredentialIds is provided, only connections created with those
+ * application credentials are returned (per-app isolation).
  */
 export async function listConnections(
   db: Db,
   profileId: string,
   orgId: string,
+  providerCredentialIds?: string[],
 ): Promise<ConnectionRecord[]> {
+  const conditions = [
+    eq(userProviderConnections.profileId, profileId),
+    eq(userProviderConnections.orgId, orgId),
+  ];
+
+  if (providerCredentialIds && providerCredentialIds.length > 0) {
+    conditions.push(inArray(userProviderConnections.providerCredentialId, providerCredentialIds));
+  }
+
   const rows = await db
     .select()
     .from(userProviderConnections)
-    .where(
-      and(
-        eq(userProviderConnections.profileId, profileId),
-        eq(userProviderConnections.orgId, orgId),
-      ),
-    );
+    .where(and(...conditions));
 
   return rows.map(rowToConnection);
 }
@@ -276,6 +283,18 @@ function rowToConnection(row: typeof userProviderConnections.$inferSelect): Conn
     createdAt: row.createdAt!.toISOString(),
     updatedAt: row.updatedAt!.toISOString(),
   };
+}
+
+/**
+ * List all credential IDs for a given application.
+ * Used to scope connection queries to a specific app.
+ */
+export async function listProviderCredentialIds(db: Db, applicationId: string): Promise<string[]> {
+  const rows = await db
+    .select({ id: applicationProviderCredentials.id })
+    .from(applicationProviderCredentials)
+    .where(eq(applicationProviderCredentials.applicationId, applicationId));
+  return rows.map((r) => r.id);
 }
 
 /**

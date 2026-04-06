@@ -27,6 +27,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applicationProviderCredentials, packages } from "@appstrate/db/schema";
 import { encryptCredentials } from "@appstrate/connect";
+import { hasActualCredentials } from "../lib/provider-config.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 
 const createApplicationSchema = z.object({
@@ -283,7 +284,9 @@ export function createApplicationsRouter() {
         .values({
           applicationId: appId,
           providerId,
-          credentialsEncrypted: hasCredentials ? encryptCredentials(data.credentials!) : null,
+          credentialsEncrypted: hasCredentials
+            ? encryptCredentials(data.credentials!)
+            : encryptCredentials({}),
           enabled: data.enabled ?? true,
         })
         .onConflictDoUpdate({
@@ -334,7 +337,7 @@ export function createApplicationsRouter() {
 
     const overrides = appCreds.map((row) => ({
       providerId: row.providerId,
-      hasAppCredentials: row.hasCredentials !== null,
+      hasAppCredentials: hasActualCredentials(row.hasCredentials),
       appEnabled: row.enabled,
     }));
 

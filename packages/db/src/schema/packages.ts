@@ -47,6 +47,7 @@ export const applicationPackages = pgTable(
     primaryKey({ columns: [table.applicationId, table.packageId] }),
     index("idx_application_packages_package_id").on(table.packageId),
     index("idx_application_packages_org_profile_id").on(table.orgProfileId),
+    index("idx_application_packages_app_id").on(table.applicationId),
   ],
 );
 
