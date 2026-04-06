@@ -55,13 +55,14 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-lifecycle" },
+        filter: { orgId: "org-lifecycle", applicationId: "app-lifecycle" },
         send,
       });
 
       // Subscriber should receive matching events.
       await pgNotify("run_update", {
         org_id: "org-lifecycle",
+        application_id: "app-lifecycle",
         id: "exec1",
         status: "running",
       });
@@ -74,6 +75,7 @@ describe("realtime service (integration)", () => {
 
       await pgNotify("run_update", {
         org_id: "org-lifecycle",
+        application_id: "app-lifecycle",
         id: "exec2",
         status: "running",
       });
@@ -85,15 +87,16 @@ describe("realtime service (integration)", () => {
   // ── run_update dispatching ────────────────────────────
 
   describe("run_update", () => {
-    it("dispatches to subscriber matching orgId", async () => {
+    it("dispatches to subscriber matching orgId and applicationId", async () => {
       const send = mock((_e: RealtimeEvent) => {});
       const id = "sub-org-match";
       trackSubscriber(id);
 
-      addSubscriber({ id, filter: { orgId: "org1" }, send });
+      addSubscriber({ id, filter: { orgId: "org1", applicationId: "app1" }, send });
 
       await pgNotify("run_update", {
         org_id: "org1",
+        application_id: "app1",
         id: "exec-1",
         status: "running",
         package_id: "pkg-1",
@@ -106,6 +109,7 @@ describe("realtime service (integration)", () => {
       // Verify snake_case is converted to camelCase.
       expect(call.data).toEqual({
         orgId: "org1",
+        applicationId: "app1",
         id: "exec-1",
         status: "running",
         packageId: "pkg-1",
@@ -120,17 +124,18 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id: "sub-org1",
-        filter: { orgId: "org-alpha" },
+        filter: { orgId: "org-alpha", applicationId: "app-alpha" },
         send: sendOrg1,
       });
       addSubscriber({
         id: "sub-org2",
-        filter: { orgId: "org-beta" },
+        filter: { orgId: "org-beta", applicationId: "app-beta" },
         send: sendOrg2,
       });
 
       await pgNotify("run_update", {
         org_id: "org-alpha",
+        application_id: "app-alpha",
         id: "exec-x",
         status: "success",
       });
@@ -140,6 +145,35 @@ describe("realtime service (integration)", () => {
       expect(sendOrg2).not.toHaveBeenCalled();
     });
 
+    it("does not dispatch to subscriber with different applicationId (cross-app isolation)", async () => {
+      const sendApp1 = mock((_e: RealtimeEvent) => {});
+      const sendApp2 = mock((_e: RealtimeEvent) => {});
+      trackSubscriber("sub-app1");
+      trackSubscriber("sub-app2");
+
+      addSubscriber({
+        id: "sub-app1",
+        filter: { orgId: "org-shared", applicationId: "app-one" },
+        send: sendApp1,
+      });
+      addSubscriber({
+        id: "sub-app2",
+        filter: { orgId: "org-shared", applicationId: "app-two" },
+        send: sendApp2,
+      });
+
+      await pgNotify("run_update", {
+        org_id: "org-shared",
+        application_id: "app-one",
+        id: "exec-iso",
+        status: "running",
+      });
+      await wait();
+
+      expect(sendApp1).toHaveBeenCalledTimes(1);
+      expect(sendApp2).not.toHaveBeenCalled();
+    });
+
     it("filters by runId when set", async () => {
       const send = mock((_e: RealtimeEvent) => {});
       const id = "sub-exec-filter";
@@ -147,13 +181,14 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-ef", runId: "target-exec" },
+        filter: { orgId: "org-ef", applicationId: "app-ef", runId: "target-exec" },
         send,
       });
 
       // Non-matching run ID should be filtered out.
       await pgNotify("run_update", {
         org_id: "org-ef",
+        application_id: "app-ef",
         id: "other-exec",
         status: "running",
       });
@@ -163,6 +198,7 @@ describe("realtime service (integration)", () => {
       // Matching run ID should be dispatched.
       await pgNotify("run_update", {
         org_id: "org-ef",
+        application_id: "app-ef",
         id: "target-exec",
         status: "success",
       });
@@ -178,13 +214,14 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-pf", packageId: "target-pkg" },
+        filter: { orgId: "org-pf", applicationId: "app-pf", packageId: "target-pkg" },
         send,
       });
 
       // Non-matching package ID should be filtered out.
       await pgNotify("run_update", {
         org_id: "org-pf",
+        application_id: "app-pf",
         id: "exec-a",
         status: "running",
         package_id: "wrong-pkg",
@@ -195,6 +232,7 @@ describe("realtime service (integration)", () => {
       // Matching package ID should be dispatched.
       await pgNotify("run_update", {
         org_id: "org-pf",
+        application_id: "app-pf",
         id: "exec-b",
         status: "running",
         package_id: "target-pkg",
@@ -215,12 +253,13 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-log", isAdmin: false },
+        filter: { orgId: "org-log", applicationId: "app-log", isAdmin: false },
         send,
       });
 
       await pgNotify("run_log_insert", {
         org_id: "org-log",
+        application_id: "app-log",
         run_id: "exec-log-1",
         level: "debug",
         message: "debug info",
@@ -232,6 +271,7 @@ describe("realtime service (integration)", () => {
       // Non-debug logs should still be received.
       await pgNotify("run_log_insert", {
         org_id: "org-log",
+        application_id: "app-log",
         run_id: "exec-log-1",
         level: "info",
         message: "info log",
@@ -249,12 +289,13 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-log-admin", isAdmin: true },
+        filter: { orgId: "org-log-admin", applicationId: "app-log-admin", isAdmin: true },
         send,
       });
 
       await pgNotify("run_log_insert", {
         org_id: "org-log-admin",
+        application_id: "app-log-admin",
         run_id: "exec-log-2",
         level: "debug",
         message: "debug for admin",
@@ -273,13 +314,14 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-lef", runId: "target-log-exec" },
+        filter: { orgId: "org-lef", applicationId: "app-lef", runId: "target-log-exec" },
         send,
       });
 
       // Non-matching run_id.
       await pgNotify("run_log_insert", {
         org_id: "org-lef",
+        application_id: "app-lef",
         run_id: "other-exec",
         level: "info",
         message: "wrong exec",
@@ -290,6 +332,7 @@ describe("realtime service (integration)", () => {
       // Matching run_id.
       await pgNotify("run_log_insert", {
         org_id: "org-lef",
+        application_id: "app-lef",
         run_id: "target-log-exec",
         level: "info",
         message: "right exec",
@@ -306,12 +349,13 @@ describe("realtime service (integration)", () => {
       // isAdmin omitted (undefined) — should behave as non-admin.
       addSubscriber({
         id,
-        filter: { orgId: "org-default" },
+        filter: { orgId: "org-default", applicationId: "app-default" },
         send,
       });
 
       await pgNotify("run_log_insert", {
         org_id: "org-default",
+        application_id: "app-default",
         run_id: "exec-d",
         level: "debug",
         message: "debug hidden",
@@ -321,6 +365,7 @@ describe("realtime service (integration)", () => {
 
       await pgNotify("run_log_insert", {
         org_id: "org-default",
+        application_id: "app-default",
         run_id: "exec-d",
         level: "warn",
         message: "warn visible",
@@ -342,10 +387,11 @@ describe("realtime service (integration)", () => {
       const id = "sub-idempotent";
       trackSubscriber(id);
 
-      addSubscriber({ id, filter: { orgId: "org-idem" }, send });
+      addSubscriber({ id, filter: { orgId: "org-idem", applicationId: "app-idem" }, send });
 
       await pgNotify("run_update", {
         org_id: "org-idem",
+        application_id: "app-idem",
         id: "exec-idem",
         status: "running",
       });

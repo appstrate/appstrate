@@ -11,10 +11,7 @@ export function useApiKeys() {
   const appId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["api-keys", orgId, appId],
-    queryFn: () =>
-      api<{ apiKeys: ApiKeyInfo[] }>(`/api-keys${appId ? `?applicationId=${appId}` : ""}`).then(
-        (d) => d.apiKeys,
-      ),
+    queryFn: () => api<{ apiKeys: ApiKeyInfo[] }>("/api-keys").then((d) => d.apiKeys),
     enabled: !!orgId && !!appId,
   });
 }

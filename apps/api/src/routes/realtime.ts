@@ -29,7 +29,7 @@ interface SSEAuthResult {
   userId: string;
   orgId: string;
   role: string;
-  applicationId?: string;
+  applicationId: string;
 }
 
 /**
@@ -97,7 +97,7 @@ function openRealtimeStream(
     runId?: string;
     packageId?: string;
     orgId: string;
-    applicationId?: string;
+    applicationId: string;
     isAdmin: boolean;
   },
   verbose: boolean,

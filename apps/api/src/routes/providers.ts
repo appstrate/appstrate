@@ -218,7 +218,7 @@ export function createProvidersRouter() {
           docsUrl: data.docsUrl,
           definition,
         },
-        c.get("applicationId") ?? null,
+        c.get("applicationId"),
         c.get("user").id,
         Object.keys(adminCreds).length > 0 ? adminCreds : undefined,
       );
@@ -267,7 +267,7 @@ export function createProvidersRouter() {
           docsUrl: data.docsUrl,
           definition,
         },
-        c.get("applicationId") ?? null,
+        c.get("applicationId"),
         Object.keys(adminCreds).length > 0 ? adminCreds : undefined,
       );
     } catch (err) {

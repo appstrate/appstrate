@@ -93,6 +93,7 @@ describe("run preflight — provider profile resolution", () => {
     agent: LoadedPackage;
     packageId: string;
     orgId: string;
+    applicationId: string;
     defaultUserProfileId: string | null;
     userProviderOverrides?: Record<string, string>;
     orgProfileId?: string | null;
@@ -106,6 +107,7 @@ describe("run preflight — provider profile resolution", () => {
       agent,
       packageId,
       orgId: oid,
+      applicationId: aid,
       defaultUserProfileId,
       userProviderOverrides,
       orgProfileId,
@@ -120,7 +122,7 @@ describe("run preflight — provider profile resolution", () => {
         orgProfileId,
         oid,
       ),
-      getPackageConfig(oid, packageId),
+      getPackageConfig(aid, packageId),
     ]);
 
     await validateAgentReadiness({
@@ -146,6 +148,7 @@ describe("run preflight — provider profile resolution", () => {
       agent,
       packageId: agentId,
       orgId,
+      applicationId: appId,
       defaultUserProfileId: defaultProfileId,
     });
 
@@ -163,6 +166,7 @@ describe("run preflight — provider profile resolution", () => {
       agent,
       packageId: agentId,
       orgId,
+      applicationId: appId,
       defaultUserProfileId: defaultProfileId,
       userProviderOverrides: { "@system/gmail": altProfileId },
     });
@@ -184,6 +188,7 @@ describe("run preflight — provider profile resolution", () => {
       agent,
       packageId: agentId,
       orgId,
+      applicationId: appId,
       defaultUserProfileId: defaultProfileId,
       userProviderOverrides: { "@system/gmail": defaultProfileId },
       orgProfileId: orgProfile.id,
@@ -211,6 +216,7 @@ describe("run preflight — provider profile resolution", () => {
       agent,
       packageId: agentId,
       orgId,
+      applicationId: appId,
       defaultUserProfileId: defaultProfileId,
       userProviderOverrides: { "@system/clickup": altProfileId },
       orgProfileId: orgProfile.id,

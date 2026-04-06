@@ -51,6 +51,14 @@ export const parameters = {
       "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours.",
     schema: { type: "string", maxLength: 255 },
   },
+  SseAppId: {
+    name: "appId",
+    in: "query" as const,
+    required: false,
+    description:
+      "Application ID. Required for cookie auth (SSE cannot send X-App-Id header). Not needed for API key auth (app resolved from key).",
+    schema: { type: "string" },
+  },
   SseToken: {
     name: "token",
     in: "query" as const,

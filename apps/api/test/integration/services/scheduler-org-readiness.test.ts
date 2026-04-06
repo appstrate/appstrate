@@ -169,7 +169,7 @@ describe("scheduler org-profile readiness", () => {
 
   it("resolves providers via org bindings without agentOrgProfileId (run path)", async () => {
     // This is the exact scenario that caused the production bug:
-    // schedule uses org profile, no agentOrgProfileId in package_configs,
+    // schedule uses org profile, no agentOrgProfileId in application_packages,
     // providers connected only via org profile bindings.
     const providerId = "@system/org-exec-path";
     await seedProviderPackage(providerId);
@@ -183,7 +183,7 @@ describe("scheduler org-profile readiness", () => {
     const profile = await getProfileByIdUnsafe(orgProfile.id);
     expect(profile).not.toBeNull();
 
-    // 2. Resolve args with NO agentOrgProfileId (not configured in package_configs)
+    // 2. Resolve args with NO agentOrgProfileId (not configured in application_packages)
     const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
       profile!,
       orgProfile.id,

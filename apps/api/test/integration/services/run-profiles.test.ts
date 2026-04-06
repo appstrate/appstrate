@@ -301,7 +301,7 @@ describe("Run with provider profiles", () => {
   });
 
   describe("full preflight with org profile on agent config", () => {
-    it("reads orgProfileId from package_configs and applies org bindings", async () => {
+    it("reads orgProfileId from application_packages and applies org bindings", async () => {
       const agentId = "@testorg/preflight-config";
       const agent = await seedAgentWithProviders(agentId);
 
