@@ -26,6 +26,7 @@ import { createProviderKeysRouter } from "./routes/provider-keys.ts";
 import { createInternalRouter } from "./routes/internal.ts";
 import { createApplicationsRouter } from "./routes/applications.ts";
 import { createConnectionProfilesRouter } from "./routes/connection-profiles.ts";
+import { createAppProfilesRouter } from "./routes/app-profiles.ts";
 import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
@@ -243,7 +244,7 @@ const APP_SCOPED_PREFIXES = [
   "/api/packages",
   "/api/providers",
   "/api/connections",
-  "/api/connection-profiles",
+  "/api/app-profiles",
 ];
 
 const appContextMiddleware = requireAppContext();
@@ -302,6 +303,7 @@ app.route("/api/models", createModelsRouter());
 app.route("/api/provider-keys", createProviderKeysRouter());
 app.route("/api/applications", createApplicationsRouter());
 app.route("/api/connection-profiles", createConnectionProfilesRouter());
+app.route("/api/app-profiles", createAppProfilesRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
 app.route("/api/connections", createConnectionsRouter());

@@ -81,23 +81,25 @@ const expectedEndpoints = [
   "PUT /api/providers/credentials/{scope}/{name}",
   "DELETE /api/providers/credentials/{scope}/{name}",
 
-  // Connection Profiles
+  // Connection Profiles (org-scoped user profiles)
   "GET /api/connection-profiles",
   "POST /api/connection-profiles",
-  "GET /api/connection-profiles/connections",
-  "DELETE /api/connection-profiles/connections",
-  "GET /api/connection-profiles/my-app-bindings",
-  "GET /api/connection-profiles/app",
-  "POST /api/connection-profiles/app",
-  "PUT /api/connection-profiles/app/{id}",
-  "DELETE /api/connection-profiles/app/{id}",
-  "GET /api/connection-profiles/app/{id}/agents",
-  "GET /api/connection-profiles/app/{id}/bindings",
-  "POST /api/connection-profiles/app/{id}/bind",
-  "DELETE /api/connection-profiles/app/{id}/bind/{providerScope}/{providerName}",
   "PUT /api/connection-profiles/{id}",
   "DELETE /api/connection-profiles/{id}",
-  "GET /api/connection-profiles/{id}/connections",
+
+  // App Profiles (app-scoped)
+  "GET /api/app-profiles",
+  "POST /api/app-profiles",
+  "GET /api/app-profiles/connections",
+  "DELETE /api/app-profiles/connections",
+  "GET /api/app-profiles/my-bindings",
+  "PUT /api/app-profiles/{id}",
+  "DELETE /api/app-profiles/{id}",
+  "GET /api/app-profiles/{id}/agents",
+  "GET /api/app-profiles/{id}/bindings",
+  "POST /api/app-profiles/{id}/bind",
+  "DELETE /api/app-profiles/{id}/bind/{providerScope}/{providerName}",
+  "GET /api/app-profiles/{id}/connections",
 
   // Agent Provider Profiles
   "GET /api/agents/{scope}/{name}/provider-profiles",

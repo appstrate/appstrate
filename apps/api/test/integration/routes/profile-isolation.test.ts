@@ -34,7 +34,7 @@ describe("Multi-org profile isolation", () => {
       });
 
       // Org A lists app profiles — should not see Beta's profile
-      const res = await app.request("/api/connection-profiles/app", {
+      const res = await app.request("/api/app-profiles", {
         headers: authHeaders(ctxA),
       });
 
@@ -50,7 +50,7 @@ describe("Multi-org profile isolation", () => {
         name: "Beta Secret",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${profileB.id}/bindings`, {
+      const res = await app.request(`/api/app-profiles/${profileB.id}/bindings`, {
         headers: authHeaders(ctxA),
       });
 
@@ -64,7 +64,7 @@ describe("Multi-org profile isolation", () => {
         name: "Beta Agents",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${profileB.id}/agents`, {
+      const res = await app.request(`/api/app-profiles/${profileB.id}/agents`, {
         headers: authHeaders(ctxA),
       });
 
@@ -77,7 +77,7 @@ describe("Multi-org profile isolation", () => {
         name: "Beta To Delete",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${profileB.id}`, {
+      const res = await app.request(`/api/app-profiles/${profileB.id}`, {
         method: "DELETE",
         headers: authHeaders(ctxA),
       });
@@ -86,7 +86,7 @@ describe("Multi-org profile isolation", () => {
       expect([400, 404]).toContain(res.status);
 
       // Verify the profile still exists via org B
-      const checkRes = await app.request("/api/connection-profiles/app", {
+      const checkRes = await app.request("/api/app-profiles", {
         headers: authHeaders(ctxB),
       });
       const checkBody = (await checkRes.json()) as any;
@@ -100,7 +100,7 @@ describe("Multi-org profile isolation", () => {
         name: "Beta Original",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${profileB.id}`, {
+      const res = await app.request(`/api/app-profiles/${profileB.id}`, {
         method: "PUT",
         headers: { ...authHeaders(ctxA), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Hacked" }),
@@ -123,7 +123,7 @@ describe("Multi-org profile isolation", () => {
         name: "Alpha User",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${profileB.id}/bind`, {
+      const res = await app.request(`/api/app-profiles/${profileB.id}/bind`, {
         method: "POST",
         headers: { ...authHeaders(ctxA), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -142,13 +142,10 @@ describe("Multi-org profile isolation", () => {
         name: "Beta App Profile",
       });
 
-      const res = await app.request(
-        `/api/connection-profiles/app/${profileB.id}/bind/@appstrate/gmail`,
-        {
-          method: "DELETE",
-          headers: authHeaders(ctxA),
-        },
-      );
+      const res = await app.request(`/api/app-profiles/${profileB.id}/bind/@appstrate/gmail`, {
+        method: "DELETE",
+        headers: authHeaders(ctxA),
+      });
 
       // Should return 404 because the profile does not belong to org A
       expect(res.status).toBe(404);
@@ -164,7 +161,7 @@ describe("Multi-org profile isolation", () => {
         name: "Beta User",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${appProfileA.id}/bind`, {
+      const res = await app.request(`/api/app-profiles/${appProfileA.id}/bind`, {
         method: "POST",
         headers: { ...authHeaders(ctxA), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -223,10 +220,10 @@ describe("Multi-org profile isolation", () => {
       });
 
       // Both owner and member should see the app profile
-      const ownerRes = await app.request("/api/connection-profiles/app", {
+      const ownerRes = await app.request("/api/app-profiles", {
         headers: authHeaders(ctxA),
       });
-      const memberRes = await app.request("/api/connection-profiles/app", {
+      const memberRes = await app.request("/api/app-profiles", {
         headers: authHeaders(memberCtx),
       });
 

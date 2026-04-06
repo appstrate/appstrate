@@ -95,20 +95,20 @@ describe("RBAC — App profile binding ownership", () => {
     it("member can unbind their own binding", async () => {
       await seedBinding(memberAProfileId, memberA.user.id);
 
-      const res = await app.request(
-        `/api/connection-profiles/app/${appProfileId}/bind/${PROVIDER_ID}`,
-        { method: "DELETE", headers: authHeaders(memberA) },
-      );
+      const res = await app.request(`/api/app-profiles/${appProfileId}/bind/${PROVIDER_ID}`, {
+        method: "DELETE",
+        headers: authHeaders(memberA),
+      });
       expect(res.status).toBe(200);
     });
 
     it("member CANNOT unbind another member's binding", async () => {
       await seedBinding(memberAProfileId, memberA.user.id);
 
-      const res = await app.request(
-        `/api/connection-profiles/app/${appProfileId}/bind/${PROVIDER_ID}`,
-        { method: "DELETE", headers: authHeaders(memberB) },
-      );
+      const res = await app.request(`/api/app-profiles/${appProfileId}/bind/${PROVIDER_ID}`, {
+        method: "DELETE",
+        headers: authHeaders(memberB),
+      });
       expect(res.status).toBe(403);
       const body = (await res.json()) as { detail: string };
       expect(body.detail).toContain("another member");
@@ -117,10 +117,10 @@ describe("RBAC — App profile binding ownership", () => {
     it("admin CAN unbind another member's binding", async () => {
       await seedBinding(memberAProfileId, memberA.user.id);
 
-      const res = await app.request(
-        `/api/connection-profiles/app/${appProfileId}/bind/${PROVIDER_ID}`,
-        { method: "DELETE", headers: authHeaders(admin) },
-      );
+      const res = await app.request(`/api/app-profiles/${appProfileId}/bind/${PROVIDER_ID}`, {
+        method: "DELETE",
+        headers: authHeaders(admin),
+      });
       expect(res.status).toBe(200);
     });
   });
@@ -129,7 +129,7 @@ describe("RBAC — App profile binding ownership", () => {
     it("member CANNOT overwrite another member's binding", async () => {
       await seedBinding(memberAProfileId, memberA.user.id);
 
-      const res = await app.request(`/api/connection-profiles/app/${appProfileId}/bind`, {
+      const res = await app.request(`/api/app-profiles/${appProfileId}/bind`, {
         method: "POST",
         headers: authHeaders(memberB, { "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -151,7 +151,7 @@ describe("RBAC — App profile binding ownership", () => {
         name: "Admin Profile",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${appProfileId}/bind`, {
+      const res = await app.request(`/api/app-profiles/${appProfileId}/bind`, {
         method: "POST",
         headers: authHeaders(admin, { "Content-Type": "application/json" }),
         body: JSON.stringify({

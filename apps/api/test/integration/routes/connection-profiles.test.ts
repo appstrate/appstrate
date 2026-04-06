@@ -147,9 +147,9 @@ describe("Connection Profiles API", () => {
 
   // ─── App Profile Routes ──────────────────────────────────
 
-  describe("GET /api/connection-profiles/app", () => {
+  describe("GET /api/app-profiles", () => {
     it("returns empty list initially", async () => {
-      const res = await app.request("/api/connection-profiles/app", {
+      const res = await app.request("/api/app-profiles", {
         headers: authHeaders(ctx),
       });
 
@@ -162,7 +162,7 @@ describe("Connection Profiles API", () => {
     it("returns created app profiles", async () => {
       await seedConnectionProfile({ applicationId: ctx.defaultAppId, name: "App Profile 1" });
 
-      const res = await app.request("/api/connection-profiles/app", {
+      const res = await app.request("/api/app-profiles", {
         headers: authHeaders(ctx),
       });
 
@@ -173,9 +173,9 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("POST /api/connection-profiles/app", () => {
+  describe("POST /api/app-profiles", () => {
     it("creates an app profile (admin/owner)", async () => {
-      const res = await app.request("/api/connection-profiles/app", {
+      const res = await app.request("/api/app-profiles", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Production" }),
@@ -189,7 +189,7 @@ describe("Connection Profiles API", () => {
     });
 
     it("rejects empty name", async () => {
-      const res = await app.request("/api/connection-profiles/app", {
+      const res = await app.request("/api/app-profiles", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "" }),
@@ -199,14 +199,14 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("PUT /api/connection-profiles/app/:id", () => {
+  describe("PUT /api/app-profiles/:id", () => {
     it("renames an app profile", async () => {
       const profile = await seedConnectionProfile({
         applicationId: ctx.defaultAppId,
         name: "Old App Name",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${profile.id}`, {
+      const res = await app.request(`/api/app-profiles/${profile.id}`, {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "New App Name" }),
@@ -218,14 +218,14 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("DELETE /api/connection-profiles/app/:id", () => {
+  describe("DELETE /api/app-profiles/:id", () => {
     it("deletes an app profile", async () => {
       const profile = await seedConnectionProfile({
         applicationId: ctx.defaultAppId,
         name: "To Delete",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${profile.id}`, {
+      const res = await app.request(`/api/app-profiles/${profile.id}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
@@ -242,7 +242,7 @@ describe("Connection Profiles API", () => {
         name: "Other App",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${otherProfile.id}`, {
+      const res = await app.request(`/api/app-profiles/${otherProfile.id}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
@@ -252,7 +252,7 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("GET /api/connection-profiles/app/:id/agents", () => {
+  describe("GET /api/app-profiles/:id/agents", () => {
     it("returns agents configured with the app profile", async () => {
       const appProfile = await seedConnectionProfile({
         applicationId: ctx.defaultAppId,
@@ -280,7 +280,7 @@ describe("Connection Profiles API", () => {
       });
       expect(setRes.status).toBe(200);
 
-      const res = await app.request(`/api/connection-profiles/app/${appProfile.id}/agents`, {
+      const res = await app.request(`/api/app-profiles/${appProfile.id}/agents`, {
         headers: authHeaders(ctx),
       });
 
@@ -298,7 +298,7 @@ describe("Connection Profiles API", () => {
         name: "Unused",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${appProfile.id}/agents`, {
+      const res = await app.request(`/api/app-profiles/${appProfile.id}/agents`, {
         headers: authHeaders(ctx),
       });
 
@@ -309,7 +309,7 @@ describe("Connection Profiles API", () => {
 
     it("returns 404 for non-existent profile", async () => {
       const res = await app.request(
-        "/api/connection-profiles/app/00000000-0000-0000-0000-000000000000/agents",
+        "/api/app-profiles/00000000-0000-0000-0000-000000000000/agents",
         { headers: authHeaders(ctx) },
       );
 
@@ -317,14 +317,14 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("GET /api/connection-profiles/app/:id/bindings", () => {
+  describe("GET /api/app-profiles/:id/bindings", () => {
     it("returns empty bindings for a new app profile", async () => {
       const profile = await seedConnectionProfile({
         applicationId: ctx.defaultAppId,
         name: "App Profile",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${profile.id}/bindings`, {
+      const res = await app.request(`/api/app-profiles/${profile.id}/bindings`, {
         headers: authHeaders(ctx),
       });
 
@@ -336,7 +336,7 @@ describe("Connection Profiles API", () => {
 
     it("returns 404 for unknown profile", async () => {
       const res = await app.request(
-        `/api/connection-profiles/app/00000000-0000-0000-0000-000000000000/bindings`,
+        `/api/app-profiles/00000000-0000-0000-0000-000000000000/bindings`,
         { headers: authHeaders(ctx) },
       );
 
@@ -344,7 +344,7 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("POST /api/connection-profiles/app/:id/bind", () => {
+  describe("POST /api/app-profiles/:id/bind", () => {
     it("rejects bind with missing providerId", async () => {
       const appProfile = await seedConnectionProfile({
         applicationId: ctx.defaultAppId,
@@ -355,7 +355,7 @@ describe("Connection Profiles API", () => {
         name: "User Profile",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${appProfile.id}/bind`, {
+      const res = await app.request(`/api/app-profiles/${appProfile.id}/bind`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ sourceProfileId: userProfile.id }),
@@ -375,7 +375,7 @@ describe("Connection Profiles API", () => {
         name: "Other User",
       });
 
-      const res = await app.request(`/api/connection-profiles/app/${appProfile.id}/bind`, {
+      const res = await app.request(`/api/app-profiles/${appProfile.id}/bind`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -388,10 +388,10 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("DELETE /api/connection-profiles/app/:id/bind/:provider", () => {
+  describe("DELETE /api/app-profiles/:id/bind/:provider", () => {
     it("returns 404 for unknown app profile", async () => {
       const res = await app.request(
-        `/api/connection-profiles/app/00000000-0000-0000-0000-000000000000/bind/@appstrate/gmail`,
+        `/api/app-profiles/00000000-0000-0000-0000-000000000000/bind/@appstrate/gmail`,
         {
           method: "DELETE",
           headers: authHeaders(ctx),
@@ -407,13 +407,10 @@ describe("Connection Profiles API", () => {
         name: "App",
       });
 
-      const res = await app.request(
-        `/api/connection-profiles/app/${appProfile.id}/bind/@appstrate/gmail`,
-        {
-          method: "DELETE",
-          headers: authHeaders(ctx),
-        },
-      );
+      const res = await app.request(`/api/app-profiles/${appProfile.id}/bind/@appstrate/gmail`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
@@ -423,7 +420,7 @@ describe("Connection Profiles API", () => {
 
   // ─── Cross-Member Profile Connection Viewing ─────────────
 
-  describe("GET /api/connection-profiles/:id/connections (cross-member)", () => {
+  describe("GET /api/app-profiles/:id/connections (cross-member)", () => {
     it("returns connections for another org member's profile", async () => {
       // user1 (ctx) is the profile owner
       const user1Profile = await seedConnectionProfile({
@@ -443,7 +440,7 @@ describe("Connection Profiles API", () => {
       };
 
       // user2 views user1's profile connections
-      const res = await app.request(`/api/connection-profiles/${user1Profile.id}/connections`, {
+      const res = await app.request(`/api/app-profiles/${user1Profile.id}/connections`, {
         headers: authHeaders(user2Ctx),
       });
 
@@ -464,7 +461,7 @@ describe("Connection Profiles API", () => {
       });
 
       // User from org2 tries to view org1 user's profile connections
-      const res = await app.request(`/api/connection-profiles/${org1Profile.id}/connections`, {
+      const res = await app.request(`/api/app-profiles/${org1Profile.id}/connections`, {
         headers: authHeaders(org2Ctx),
       });
 
@@ -477,7 +474,7 @@ describe("Connection Profiles API", () => {
         name: "My Profile",
       });
 
-      const res = await app.request(`/api/connection-profiles/${ownProfile.id}/connections`, {
+      const res = await app.request(`/api/app-profiles/${ownProfile.id}/connections`, {
         headers: authHeaders(ctx),
       });
 
@@ -492,7 +489,7 @@ describe("Connection Profiles API", () => {
         name: "App Shared Profile",
       });
 
-      const res = await app.request(`/api/connection-profiles/${appProfile.id}/connections`, {
+      const res = await app.request(`/api/app-profiles/${appProfile.id}/connections`, {
         headers: authHeaders(ctx),
       });
 
@@ -503,7 +500,7 @@ describe("Connection Profiles API", () => {
 
     it("returns 404 for a non-existent profile", async () => {
       const res = await app.request(
-        "/api/connection-profiles/00000000-0000-0000-0000-000000000000/connections",
+        "/api/app-profiles/00000000-0000-0000-0000-000000000000/connections",
         { headers: authHeaders(ctx) },
       );
 

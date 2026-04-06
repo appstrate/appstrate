@@ -561,7 +561,7 @@ describe("Agents API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ appProfileId: appProfile.id }),
       });
-      await app.request(`/api/connection-profiles/app/${appProfile.id}`, {
+      await app.request(`/api/app-profiles/${appProfile.id}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });

@@ -40,6 +40,7 @@ import { createProviderKeysRouter } from "../../src/routes/provider-keys.ts";
 import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createApplicationsRouter } from "../../src/routes/applications.ts";
 import { createConnectionProfilesRouter } from "../../src/routes/connection-profiles.ts";
+import { createAppProfilesRouter } from "../../src/routes/app-profiles.ts";
 import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
@@ -221,7 +222,7 @@ export function getTestApp(): Hono<AppEnv> {
     "/api/packages",
     "/api/providers",
     "/api/connections",
-    "/api/connection-profiles",
+    "/api/app-profiles",
   ];
 
   const appContextMiddleware = requireAppContext();
@@ -265,6 +266,7 @@ export function getTestApp(): Hono<AppEnv> {
   app.route("/api/provider-keys", createProviderKeysRouter());
   app.route("/api/applications", createApplicationsRouter());
   app.route("/api/connection-profiles", createConnectionProfilesRouter());
+  app.route("/api/app-profiles", createAppProfilesRouter());
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/connections", createConnectionsRouter());
