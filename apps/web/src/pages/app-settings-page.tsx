@@ -6,11 +6,13 @@ import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { AppWindow, Plus, X } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
+import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useApplication,
   useUpdateApplication,
@@ -20,42 +22,27 @@ import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
+import { AppProfilesTab } from "../components/app-profiles-tab";
 
 interface SettingsFormData {
   name: string;
 }
 
+const TABS = ["general", "profiles"] as const;
+type Tab = (typeof TABS)[number];
+
 export function AppSettingsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
-  const navigate = useNavigate();
   const appId = useCurrentApplicationId();
-
   const { data: application, isLoading, error } = useApplication(appId ?? "");
-  const updateMutation = useUpdateApplication();
-  const deleteMutation = useDeleteApplication();
-
-  const domains = application?.settings?.allowedRedirectDomains ?? [];
-  const [editedDomains, setEditedDomains] = useState<string[] | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const activeDomains = editedDomains ?? domains;
-
-  const { register, handleSubmit, showError } = useAppForm<SettingsFormData>({
-    values: { name: application?.name ?? "" },
-  });
+  const [tab, setTab] = useTabWithHash<Tab>(TABS, "general");
 
   if (!isAdmin) return null;
   if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
   if (!application) return <ErrorState />;
-
-  const onSubmit = (data: SettingsFormData) => {
-    updateMutation.mutate({
-      id: appId,
-      data: { name: data.name.trim(), settings: { allowedRedirectDomains: activeDomains } },
-    });
-  };
 
   return (
     <>
@@ -72,8 +59,55 @@ export function AppSettingsPage() {
             <Badge variant="running">{t("applications.default")}</Badge>
           ) : undefined
         }
-      />
+      >
+        <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="mt-2">
+          <TabsList>
+            <TabsTrigger value="general">{t("orgSettings.tabGeneral")}</TabsTrigger>
+            <TabsTrigger value="profiles">{t("orgSettings.tabProfiles")}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </PageHeader>
 
+      {tab === "general" && <GeneralTab appId={appId} application={application} />}
+      {tab === "profiles" && <AppProfilesTab />}
+    </>
+  );
+}
+
+function GeneralTab({
+  appId,
+  application,
+}: {
+  appId: string;
+  application: {
+    name: string;
+    isDefault: boolean;
+    settings?: { allowedRedirectDomains?: string[] };
+  };
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+  const navigate = useNavigate();
+  const updateMutation = useUpdateApplication();
+  const deleteMutation = useDeleteApplication();
+
+  const domains = application.settings?.allowedRedirectDomains ?? [];
+  const [editedDomains, setEditedDomains] = useState<string[] | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const activeDomains = editedDomains ?? domains;
+
+  const { register, handleSubmit, showError } = useAppForm<SettingsFormData>({
+    values: { name: application.name },
+  });
+
+  const onSubmit = (data: SettingsFormData) => {
+    updateMutation.mutate({
+      id: appId,
+      data: { name: data.name.trim(), settings: { allowedRedirectDomains: activeDomains } },
+    });
+  };
+
+  return (
+    <>
       <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-6">
         <div className="space-y-2">
           <Label htmlFor="app-name">{t("applications.nameLabel")}</Label>

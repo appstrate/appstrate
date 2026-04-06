@@ -76,7 +76,7 @@ export function AppProfileDetailPage() {
         title={profile.name}
         breadcrumbs={[
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("orgSettings.pageTitle"), href: "/org-settings#profiles" },
+          { label: t("applications.pageTitle"), href: "/app-settings#profiles" },
           { label: profile.name },
         ]}
         actions={

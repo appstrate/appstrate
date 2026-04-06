@@ -242,7 +242,7 @@ export function App() {
             <Route path="/providers" element={<ProvidersPage />} />
             <Route
               path="/app-profiles"
-              element={<Navigate to="/org-settings#profiles" replace />}
+              element={<Navigate to="/app-settings#profiles" replace />}
             />
             <Route path="/app-profiles/:id" element={<AppProfileDetailPage />} />
             <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
