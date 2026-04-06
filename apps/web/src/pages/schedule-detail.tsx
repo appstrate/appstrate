@@ -280,7 +280,7 @@ function ScheduleProviders({
       <AppProfileProvidersBlock
         appProfileId={appProfileId}
         appProfileName={schedule.profileName ?? "-"}
-        providerIds={agentProviders}
+        providers={agentProviders}
       />
     );
   }

@@ -6,32 +6,46 @@ import { Badge as UIBadge } from "@/components/ui/badge";
 import { ProviderConnectionCard } from "./provider-connection-card";
 import { useAppProfileBindings } from "../hooks/use-connection-profiles";
 
+export interface ProviderEntry {
+  id: string;
+  scopesRequired?: string[];
+  scopesMissing?: string[];
+}
+
 interface AppProfileProvidersBlockProps {
   /** App profile ID */
   appProfileId: string;
   /** App profile display name */
   appProfileName: string;
-  /** Provider IDs to display */
-  providerIds: string[];
+  /** Providers to display — either simple IDs or rich entries with scope info */
+  providers: string[] | ProviderEntry[];
+  /** Agent package ID (enables per-provider profile overrides) */
+  packageId?: string;
 }
 
 /**
  * Shared block showing an app profile header + provider connection cards.
- * Used by schedule detail (providers tab).
+ * Used by schedule detail (providers tab) and agent connectors tab.
  */
 export function AppProfileProvidersBlock({
   appProfileId,
   appProfileName,
-  providerIds,
+  providers,
+  packageId,
 }: AppProfileProvidersBlockProps) {
   const { t } = useTranslation(["agents"]);
   const { data: bindings } = useAppProfileBindings(appProfileId);
 
-  if (providerIds.length === 0) return null;
+  if (providers.length === 0) return null;
+
+  const entries: ProviderEntry[] =
+    typeof providers[0] === "string"
+      ? (providers as string[]).map((id) => ({ id }))
+      : (providers as ProviderEntry[]);
 
   const hasUnboundProviders =
     bindings !== undefined &&
-    providerIds.some((pid) => !bindings.find((b) => b.providerId === pid && b.connected));
+    entries.some((e) => !bindings.find((b) => b.providerId === e.id && b.connected));
 
   return (
     <div className="border-border bg-card mb-4 rounded-lg border">
@@ -47,18 +61,18 @@ export function AppProfileProvidersBlock({
         <UIBadge variant="outline" className="px-1 py-0 text-[10px]">
           {t("providerCard.orgBadge", { ns: "settings" })}
         </UIBadge>
-        <span className="text-muted-foreground ml-auto text-xs">
-          {t("detail.orgProvidersHint")}
-        </span>
       </div>
 
       <div className="space-y-2 p-2">
-        {providerIds.map((providerId) => (
+        {entries.map((entry) => (
           <ProviderConnectionCard
-            key={providerId}
-            providerId={providerId}
+            key={entry.id}
+            providerId={entry.id}
+            packageId={packageId}
             appProfileId={appProfileId}
             appProfileName={appProfileName}
+            scopesRequired={entry.scopesRequired}
+            scopesMissing={entry.scopesMissing}
           />
         ))}
       </div>
