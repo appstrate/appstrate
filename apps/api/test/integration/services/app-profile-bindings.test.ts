@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq, and } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { userProviderConnections, applicationProviderCredentials } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import {
@@ -103,6 +106,43 @@ describe("app-profile-bindings", () => {
       const enriched = await getAppProfileBindingsEnriched(appProfileId, defaultAppId);
       expect(enriched).toHaveLength(1); // NOT 2
       expect(enriched[0]!.providerId).toBe("@test/gmail");
+      expect(enriched[0]!.connected).toBe(true);
+    });
+
+    it("shows connected when one app has healthy connection and another needs reconnection", async () => {
+      await bindAppProfileProvider(appProfileId, "@test/gmail", userProfileId, userId);
+
+      // App A: healthy connection
+      await seedConnectionForApp(userProfileId, "@test/gmail", orgId, defaultAppId, {
+        access_token: "tok-healthy",
+      });
+
+      // App B: connection that needs reconnection (won't match the LEFT JOIN filter)
+      const { id: secondAppId } = await seedApplication({ orgId, name: "Second App" });
+      await seedConnectionForApp(userProfileId, "@test/gmail", orgId, secondAppId, {
+        access_token: "tok-broken",
+      });
+
+      // Find app B's credential and flag its connection as needing reconnection
+      const [credB] = await db
+        .select({ id: applicationProviderCredentials.id })
+        .from(applicationProviderCredentials)
+        .where(eq(applicationProviderCredentials.applicationId, secondAppId));
+      await db
+        .update(userProviderConnections)
+        .set({ needsReconnection: true, updatedAt: new Date() })
+        .where(
+          and(
+            eq(userProviderConnections.profileId, userProfileId),
+            eq(userProviderConnections.providerId, "@test/gmail"),
+            eq(userProviderConnections.providerCredentialId, credB!.id),
+          ),
+        );
+
+      // The LEFT JOIN produces 2 rows: one with connectionId (healthy), one without (broken).
+      // ORDER BY ... NULLS LAST ensures the healthy row wins the dedup.
+      const enriched = await getAppProfileBindingsEnriched(appProfileId, defaultAppId);
+      expect(enriched).toHaveLength(1);
       expect(enriched[0]!.connected).toBe(true);
     });
   });

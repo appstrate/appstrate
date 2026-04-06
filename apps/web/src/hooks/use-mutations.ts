@@ -172,7 +172,7 @@ export function useDisconnect() {
 export function useDeleteAllConnections() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api("/connection-profiles/connections", { method: "DELETE" }),
+    mutationFn: () => api("/app-profiles/connections", { method: "DELETE" }),
     onSuccess: () => {
       invalidateConnectionRelated(qc);
       qc.invalidateQueries({ queryKey: ["connection-profiles"] });

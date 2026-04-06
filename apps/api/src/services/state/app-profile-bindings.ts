@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   appProfileProviderBindings,
@@ -98,11 +98,14 @@ export async function getAppProfileBindingsEnriched(
         eq(userProviderConnections.needsReconnection, false),
       ),
     )
-    .where(eq(appProfileProviderBindings.appProfileId, appProfileId));
+    .where(eq(appProfileProviderBindings.appProfileId, appProfileId))
+    .orderBy(sql`${userProviderConnections.id} NULLS LAST`);
 
   // Deduplicate: the LEFT JOIN on userProviderConnections can produce multiple rows
   // per binding when the user has connections from several apps (one per providerCredentialId).
-  // We only need to know if at least one healthy connection exists.
+  // We only need to know if at least one healthy connection exists. ORDER BY ... NULLS LAST
+  // ensures connected rows (non-null connectionId) come first, so the first row per provider
+  // always reflects the best known state.
   const seen = new Set<string>();
   const result: EnrichedBinding[] = [];
   for (const r of rows) {

@@ -457,6 +457,7 @@ export const appProfilesPaths = {
         "List all provider connections associated with a connection profile. Accessible for own profiles, org-level profiles, and other org members' profiles (read-only).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "id",
           in: "path",
