@@ -47,7 +47,7 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 - **Realtime** — SSE-based run monitoring with LISTEN/NOTIFY
 - **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member)
 - **API keys** — Programmatic access via `ask_*` prefixed API keys
-- **OpenAPI documentation** — 182 endpoints documented at `/api/openapi.json` + Swagger UI at `/api/docs`
+- **OpenAPI documentation** — 191 endpoints documented at `/api/openapi.json` + Swagger UI at `/api/docs`
 - **Connection profiles** — Share connection sets across agents
 - **Proxy system** — Org-level and agent-level outbound HTTP proxy support
 
@@ -113,14 +113,14 @@ appstrate/
 │   ├── api/src/              # Hono API server (:3000)
 │   │   ├── routes/           # Route handlers (one file per domain)
 │   │   ├── services/         # Business logic, Docker, adapters, scheduler, marketplace
-│   │   ├── openapi/          # OpenAPI 3.1 spec (182 endpoints)
+│   │   ├── openapi/          # OpenAPI 3.1 spec (191 endpoints)
 │   │   └── middleware/       # Auth, rate-limit, guards (requireAdmin, requireAgent)
 │   │
 │   └── web/src/              # React 19 SPA (Vite + React Query v5 + Zustand)
 │       ├── pages/            # Route pages (React Router v7)
 │       ├── hooks/            # React Query + SSE realtime hooks
 │       ├── components/       # UI components (modals, forms, editors)
-│       └── stores/           # Zustand stores (auth, org, profile)
+│       └── stores/           # Zustand stores (auth, org, app, sidebar, theme)
 │
 ├── packages/
 │   ├── core/                 # @appstrate/core — shared validation, storage, utilities
@@ -140,34 +140,35 @@ appstrate/
 
 ## API Overview
 
-The API is organized into 24 route domains with 182 documented endpoints:
+The API is organized into 25 route domains with 191 documented endpoints:
 
-| Domain                  | Description                                              |
-| ----------------------- | -------------------------------------------------------- |
-| **Auth**                | Better Auth email/password + cookie sessions             |
-| **Agents**              | Agent CRUD, config, skills/extensions binding, versions  |
-| **Runs**                | Run agents, list runs, logs, cancel                      |
-| **Realtime**            | SSE streams for run monitoring                           |
-| **Schedules**           | Cron-based agent scheduling                              |
-| **Connections**         | OAuth2/API key service connections                       |
-| **Connection Profiles** | Shared connection sets across agents                     |
-| **Providers**           | Provider package configuration (OAuth2, API key, custom) |
-| **Provider Keys**       | Org-level LLM provider API key management                |
-| **Proxies**             | Org-level and agent-level HTTP proxy config              |
-| **API Keys**            | Programmatic access tokens (`ask_*`)                     |
-| **Packages**            | Organization skills/extensions CRUD, import, publish     |
-| **Notifications**       | Run notification management                              |
-| **Organizations**       | Org CRUD, members, invitations                           |
-| **Profile**             | User profile management                                  |
-| **Invitations**         | Magic link invitation acceptance                         |
-| **Welcome**             | Post-invite profile setup                                |
-| **Internal**            | Container-to-host routes (credentials, run history)      |
-| **Meta**                | OpenAPI spec + Swagger UI                                |
-| **Models**              | Org-level LLM model configuration and testing            |
-| **Health**              | Health check                                             |
-| **Applications**        | Developer application management (API key scoping)       |
-| **End-Users**           | External end-user management for headless API            |
-| **Webhooks**            | Run event webhooks with HMAC signing                     |
+| Domain                  | Description                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Auth**                | Better Auth email/password + cookie sessions                                                            |
+| **Agents**              | Agent CRUD, config, skills/extensions binding, versions                                                 |
+| **Runs**                | Run agents, list runs, logs, cancel                                                                     |
+| **Realtime**            | SSE streams for run monitoring                                                                          |
+| **Schedules**           | Cron-based agent scheduling                                                                             |
+| **Connections**         | OAuth2/API key service connections                                                                      |
+| **Connection Profiles** | Shared connection sets across agents                                                                    |
+| **Providers**           | Provider package configuration (OAuth2, API key, custom)                                                |
+| **Provider Keys**       | Org-level LLM provider API key management                                                               |
+| **Proxies**             | Org-level and agent-level HTTP proxy config                                                             |
+| **API Keys**            | Programmatic access tokens (`ask_*`)                                                                    |
+| **Packages**            | Organization skills/extensions CRUD, import, publish                                                    |
+| **Notifications**       | Run notification management                                                                             |
+| **Organizations**       | Org CRUD, members, invitations                                                                          |
+| **Profile**             | User profile management                                                                                 |
+| **Invitations**         | Magic link invitation acceptance                                                                        |
+| **Welcome**             | Post-invite profile setup                                                                               |
+| **Internal**            | Container-to-host routes (credentials, run history)                                                     |
+| **Meta**                | OpenAPI spec + Swagger UI                                                                               |
+| **Models**              | Org-level LLM model configuration and testing                                                           |
+| **Health**              | Health check                                                                                            |
+| **Applications**        | Primary workspace boundary — scopes agents, runs, schedules, webhooks, connections, packages, end-users |
+| **App Profiles**        | Application-scoped connection profile management                                                        |
+| **End-Users**           | External end-user management for headless API                                                           |
+| **Webhooks**            | Run event webhooks with HMAC signing                                                                    |
 
 ### API Documentation
 

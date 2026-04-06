@@ -238,6 +238,10 @@ export function createApplicationsRouter() {
   // ─── Application-level provider credentials ──────────────────────────
 
   // Middleware: validate app exists for provider routes
+  router.use("/:appId/providers", async (c, next) => {
+    await getApplication(c.get("orgId"), c.req.param("appId")!);
+    return next();
+  });
   router.use("/:appId/providers/*", async (c, next) => {
     await getApplication(c.get("orgId"), c.req.param("appId")!);
     return next();

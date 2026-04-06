@@ -287,6 +287,8 @@
   "welcome.subtitle": "Welcome! Set up your profile to get started.",
   "welcome.displayName": "Display name",
   "welcome.save": "Get started",
+  "appSettings.tabGeneral": "General",
+  "appSettings.tabProfiles": "Profiles",
   "orgSettings.tabApiKeys": "API Keys",
   "apiKeys.pageTitle": "API Keys",
   "apiKeys.createTitle": "Create API Key",

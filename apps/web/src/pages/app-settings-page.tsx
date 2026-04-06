@@ -62,8 +62,8 @@ export function AppSettingsPage() {
       >
         <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="mt-2">
           <TabsList>
-            <TabsTrigger value="general">{t("orgSettings.tabGeneral")}</TabsTrigger>
-            <TabsTrigger value="profiles">{t("orgSettings.tabProfiles")}</TabsTrigger>
+            <TabsTrigger value="general">{t("appSettings.tabGeneral")}</TabsTrigger>
+            <TabsTrigger value="profiles">{t("appSettings.tabProfiles")}</TabsTrigger>
           </TabsList>
         </Tabs>
       </PageHeader>

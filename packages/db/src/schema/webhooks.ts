@@ -3,6 +3,7 @@
 import { pgTable, text, timestamp, boolean, integer, uuid, index } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations.ts";
 import { applications } from "./applications.ts";
+import { packages } from "./packages.ts";
 
 export const webhooks = pgTable(
   "webhooks",
@@ -16,7 +17,7 @@ export const webhooks = pgTable(
       .references(() => applications.id, { onDelete: "cascade" }),
     url: text("url").notNull(),
     events: text("events").array().notNull(), // ["run.completed", "run.failed"]
-    packageId: text("package_id"), // null = all packages
+    packageId: text("package_id").references(() => packages.id, { onDelete: "set null" }), // null = all packages
     payloadMode: text("payload_mode").notNull().default("full"), // "full" | "summary"
     enabled: boolean("enabled").notNull().default(true),
     secret: text("secret").notNull(), // whsec_ prefix, plaintext (needed for HMAC signing)

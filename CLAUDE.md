@@ -36,7 +36,7 @@ bun run dev
 | Runtime        | **Bun** everywhere — NOT node. Bun auto-loads `.env`                                                                                                                                                                                                                                                                                                                                                |
 | API framework  | **Hono** — NOT `Bun.serve()` (need SSE via `streamSSE`, routing, middleware)                                                                                                                                                                                                                                                                                                                        |
 | Docker client  | **`fetch()` + unix socket** — NOT dockerode (socket bugs with Bun). See `services/docker.ts`                                                                                                                                                                                                                                                                                                        |
-| DB security    | **No RLS** — app-level security, all queries filter by `orgId`                                                                                                                                                                                                                                                                                                                                      |
+| DB security    | **No RLS** — app-level security, all queries filter by `orgId` (+ `applicationId` for app-scoped resources)                                                                                                                                                                                                                                                                                         |
 | Logging        | **`lib/logger.ts`** (JSON to stdout) — no `console.*` calls                                                                                                                                                                                                                                                                                                                                         |
 | Auth           | **Better Auth** cookie sessions + `X-Org-Id` header + `X-App-Id` header (app-scoped routes). Email/password + optional Google social login (opt-in via env vars). Optional email verification (opt-in via SMTP env vars). Account linking with trusted providers. API key auth (`ask_` prefix) tried first, then cookie fallback. `Appstrate-User` header for end-user impersonation (API key only) |
 | Validation     | **Zod 4** for all request body/query validation + JSONB safe narrowing. **AJV** only for dynamic manifest schemas                                                                                                                                                                                                                                                                                   |
@@ -57,14 +57,14 @@ appstrate/
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
 │   │   ├── headers.ts        # Reusable response header definitions
-│   │   └── paths/            # One file per route domain (182 endpoints)
+│   │   └── paths/            # One file per route domain (191 endpoints)
 │   └── types/                # Backend types + re-exports from shared-types
 │
 ├── apps/web/src/             # @appstrate/web — React 19 + Vite + React Query v5
 │   ├── pages/                # Route pages (React Router v7 BrowserRouter)
 │   ├── hooks/                # React Query hooks + SSE realtime hooks
 │   ├── components/           # UI components (modals, forms, editors)
-│   ├── stores/               # Zustand stores (auth-store, org-store, profile-store)
+│   ├── stores/               # Zustand stores (auth-store, org-store, app-store, sidebar-store, theme-store)
 │   ├── lib/                  # Utilities (auth-client, markdown, provider-status, strings)
 │   ├── styles.css            # Tailwind 4 CSS (dark theme, custom @theme inline)
 │   └── i18n.ts               # i18next: fr (default) + en, namespaces: common/agents/settings
@@ -188,7 +188,7 @@ Tier 0 (zero-install) requires only Bun. Infrastructure adapters are in `apps/ap
 
 ### Backend
 
-- **Multi-tenant**: All DB queries filter by `orgId`. Admins = org role `admin` or `owner`.
+- **Multi-tenant**: All DB queries filter by `orgId`. App-scoped resources (agents, runs, schedules, webhooks, connections, end-users, api-keys, notifications, packages) additionally filter by `applicationId`. Admins = org role `admin` or `owner`.
 - **Service layer**: All function-based (no classes). `state.ts` is the central data-access layer (runs, logs, config, agent provider bindings). Drizzle ORM with `import { db } from "../lib/db.ts"` and schema from `@appstrate/db/schema`.
 - **Request pipeline**: error handler → Request-Id → CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie → `Appstrate-User` resolution if present) → org context middleware (`X-Org-Id` → verify membership) → app context middleware (`X-App-Id` → verify app belongs to org, required for app-scoped routes: agents, runs, schedules, webhooks, end-users, api-keys, packages, realtime) → API version middleware (`Appstrate-Version` header) → route handler (per-route: `rateLimit()`, `idempotency()`) → cloud routes (if loaded).
 - **Platform config** (`buildAppConfig()` in `index.ts`): Computed once at boot. Serialized as `window.__APP_CONFIG__` and injected into `index.html` via `<script>` tag at serve time (`app.get("/*")`). Config is static — `useAppConfig()` reads it synchronously. In OSS: models/providerKeys visible, billing hidden. In Cloud: reversed. `googleAuth` and `emailVerification` flags are derived from env var presence (opt-in).
@@ -326,16 +326,16 @@ For testing middleware that calls services (e.g., `requireAgent` calls `getPacka
 
 ### Test Helpers (`apps/api/test/helpers/`)
 
-| Helper            | Purpose                                                                                                       |
-| ----------------- | ------------------------------------------------------------------------------------------------------------- |
-| `app.ts`          | `getTestApp()` — full Hono app replica (same middleware chain as production, without boot/Docker/scheduler)   |
-| `auth.ts`         | `createTestUser()`, `createTestOrg()`, `createTestContext()`, `authHeaders()` — real Better Auth sign-up flow |
-| `db.ts`           | `truncateAll()` — DELETE FROM all 31 tables in FK-safe order                                                  |
-| `seed.ts`         | 15+ factories: `seedPackage()`, `seedRun()`, `seedApiKey()`, `seedWebhook()`, etc. — insert real DB records   |
-| `assertions.ts`   | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`, `getDbRow()` — DB state verification                 |
-| `redis.ts`        | `getRedis()`, `flushRedis()` — test Redis client                                                              |
-| `sse.ts`          | SSE stream parsing utilities                                                                                  |
-| `oauth-server.ts` | Mock OAuth2 provider for connection tests                                                                     |
+| Helper            | Purpose                                                                                                                                                                                                                                                              |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app.ts`          | `getTestApp()` — full Hono app replica (same middleware chain as production, without boot/Docker/scheduler)                                                                                                                                                          |
+| `auth.ts`         | `createTestUser()`, `createTestOrg()`, `createTestContext()`, `authHeaders()`, `orgOnlyHeaders()` — real Better Auth sign-up flow. `TestContext` includes `defaultAppId`. `authHeaders()` auto-injects `X-App-Id`; use `orgOnlyHeaders()` for org-only routes        |
+| `db.ts`           | `truncateAll()` — DELETE FROM all 31 tables in FK-safe order                                                                                                                                                                                                         |
+| `seed.ts`         | 18+ factories: `seedPackage()`, `seedRun()`, `seedApiKey()`, `seedWebhook()`, `seedApplication()`, `seedConnectionProfile()`, `seedConnectionForApp()`, `seedProviderCredentials()`, etc. — insert real DB records. All app-scoped factories require `applicationId` |
+| `assertions.ts`   | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`, `getDbRow()` — DB state verification                                                                                                                                                                        |
+| `redis.ts`        | `getRedis()`, `flushRedis()` — test Redis client                                                                                                                                                                                                                     |
+| `sse.ts`          | SSE stream parsing utilities                                                                                                                                                                                                                                         |
+| `oauth-server.ts` | Mock OAuth2 provider for connection tests                                                                                                                                                                                                                            |
 
 ### Writing New Tests
 
@@ -386,18 +386,18 @@ describe("GET /api/my-resource", () => {
 
 ## API Reference
 
-**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 182 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
+**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 191 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
 
 - **Source files**: `apps/api/src/openapi/` — modular TypeScript files assembled at build time
 - **Live spec**: `GET /api/openapi.json` (raw JSON) — public, no auth
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `agents`, `runs`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `internal`, `welcome`, `meta`, `models`, `applications`, `end-users`, `webhooks`.
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `agents`, `runs`, `realtime`, `schedules`, `connections`, `connection-profiles`, `app-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `internal`, `welcome`, `meta`, `models`, `applications`, `end-users`, `webhooks`.
 
 ## Database
 
-Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`. Key headless tables: `applications` (app* prefix), `endUsers` (eu* prefix), `webhooks` (wh\_ prefix), `webhookDeliveries`, `applicationPackages` (installed packages per app with config, model/proxy overrides, version pinning).
+Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId` (+ `applicationId` for app-scoped resources). Key headless tables: `applications` (app* prefix), `endUsers` (eu* prefix), `webhooks` (wh\_ prefix), `webhookDeliveries`, `applicationPackages` (installed packages per app with config, model/proxy overrides, version pinning).
 
 ## Environment Variables
 
@@ -430,6 +430,9 @@ Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Mig
 | `RUN_TOKEN_SECRET`          | No       | —                                             | Run token signing secret (if unset, tokens are unsigned)                                                   |
 | `GOOGLE_CLIENT_ID`          | No       | —                                             | Google OAuth client ID (enables Google sign-in when both Google vars are set)                              |
 | `GOOGLE_CLIENT_SECRET`      | No       | —                                             | Google OAuth client secret                                                                                 |
+| `GITHUB_CLIENT_ID`          | No       | —                                             | GitHub OAuth App client ID (enables GitHub sign-in when both GitHub vars are set)                          |
+| `GITHUB_CLIENT_SECRET`      | No       | —                                             | GitHub OAuth App client secret                                                                             |
+| `COOKIE_DOMAIN`             | No       | —                                             | Cookie domain for cross-subdomain auth                                                                     |
 | `SMTP_HOST`                 | No       | —                                             | SMTP server host (enables email verification when all SMTP vars are set)                                   |
 | `SMTP_PORT`                 | No       | `587`                                         | SMTP server port                                                                                           |
 | `SMTP_USER`                 | No       | —                                             | SMTP authentication username                                                                               |
