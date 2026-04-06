@@ -76,9 +76,12 @@ export async function getOrgProfileBindingsEnriched(
       eq(connectionProfiles.id, orgProfileProviderBindings.sourceProfileId),
     )
     .leftJoin(user, eq(user.id, orgProfileProviderBindings.boundByUserId))
-    // NOTE: This matches connections across all apps (no providerCredentialId filter)
-    // because org-level bindings are app-agnostic. We filter out unhealthy connections
-    // so the binding shows "connected" only when at least one app has a working connection.
+    // NOTE: Connection profiles (user and org) are independent of applications.
+    // Connections from different apps accumulate on profiles — each tagged with a
+    // providerCredentialId linking it to one app. This LEFT JOIN matches across all
+    // apps (no providerCredentialId filter) because org bindings are app-agnostic:
+    // "connected" = at least one app has a healthy connection for this provider.
+    // Rows are deduplicated below to handle multiple matching connections.
     .leftJoin(
       userProviderConnections,
       and(
@@ -89,13 +92,23 @@ export async function getOrgProfileBindingsEnriched(
     )
     .where(eq(orgProfileProviderBindings.orgProfileId, orgProfileId));
 
-  return rows.map((r) => ({
-    providerId: r.providerId,
-    sourceProfileId: r.sourceProfileId,
-    sourceProfileName: r.sourceProfileName,
-    boundByUserName: r.boundByUserName,
-    connected: r.connectionId != null,
-  }));
+  // Deduplicate: the LEFT JOIN on userProviderConnections can produce multiple rows
+  // per binding when the user has connections from several apps (one per providerCredentialId).
+  // We only need to know if at least one healthy connection exists.
+  const seen = new Set<string>();
+  const result: EnrichedBinding[] = [];
+  for (const r of rows) {
+    if (seen.has(r.providerId)) continue;
+    seen.add(r.providerId);
+    result.push({
+      providerId: r.providerId,
+      sourceProfileId: r.sourceProfileId,
+      sourceProfileName: r.sourceProfileName,
+      boundByUserName: r.boundByUserName,
+      connected: r.connectionId != null,
+    });
+  }
+  return result;
 }
 
 /** Bind an org profile's provider slot to a user's personal profile (upsert). */

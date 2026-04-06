@@ -17,7 +17,15 @@ interface ProfileWithConnections extends ConnectionProfile {
   connectionCount: number;
 }
 
-/** List connections for a specific profile (user or org). */
+/**
+ * List connections for a specific profile (user or org).
+ *
+ * Connections are scoped to the current application via X-App-Id header:
+ * the backend filters by providerCredentialId matching the app's configured
+ * credentials. Connection profiles themselves are app-independent — connections
+ * from different apps accumulate on the same profile, but this hook only
+ * returns the current app's connections.
+ */
 export function useProfileConnections(profileId: string | null | undefined) {
   const orgId = useCurrentOrgId();
   const appId = useCurrentApplicationId();

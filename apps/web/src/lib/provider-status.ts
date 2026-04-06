@@ -10,6 +10,11 @@ export function isProviderStatusConnected(status: string): boolean {
 /**
  * Check whether a provider is connected within a given connection profile.
  * Returns false if the connection exists but needs reconnection.
+ *
+ * profileConnections is scoped to the current application via X-App-Id header
+ * (backend filters by providerCredentialId). Since each app has at most one
+ * credential per provider (PK on applicationProviderCredentials), there is at
+ * most one connection per provider in the array for the current app context.
  */
 export function isProviderConnectedInProfile(
   providerId: string,

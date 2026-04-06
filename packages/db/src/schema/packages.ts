@@ -70,6 +70,7 @@ export const packages = pgTable(
   (table) => [
     index("idx_packages_org_id").on(table.orgId),
     index("idx_packages_type").on(table.type),
+    index("idx_packages_org_type").on(table.orgId, table.type),
     check("packages_id_format", sql`${table.id} ~ '^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$'`),
   ],
 );

@@ -75,6 +75,7 @@ export const runs = pgTable(
     index("idx_runs_user_id").on(table.userId),
     index("idx_runs_end_user_id").on(table.endUserId),
     index("idx_runs_application_id").on(table.applicationId),
+    index("idx_runs_app_status_started").on(table.applicationId, table.status, table.startedAt),
     index("idx_runs_org_id").on(table.orgId),
     index("idx_runs_notification").on(table.userId, table.orgId, table.notifiedAt, table.readAt),
     check("runs_at_most_one_actor", sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`),

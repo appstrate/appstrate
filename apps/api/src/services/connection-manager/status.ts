@@ -45,6 +45,14 @@ export async function getConnectionStatus(
 /**
  * Check if any active connection exists for a provider on a profile (regardless of application).
  * Used for org profile binding validation — intentionally not app-scoped.
+ *
+ * Connection profiles (user and org) are independent of applications. Connections from
+ * different apps accumulate on the same profile — each connection is tagged with a
+ * providerCredentialId linking it to one app. This function checks across all apps:
+ * "does the user have at least one healthy connection for this provider, from any app?"
+ *
+ * At runtime, agents resolve credentials using their own app's providerCredentialId,
+ * which may differ from the app that originally created the connection checked here.
  */
 export async function hasActiveConnection(
   provider: string,

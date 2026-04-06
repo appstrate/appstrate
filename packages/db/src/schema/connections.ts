@@ -135,6 +135,11 @@ export const applicationProviderCredentials = pgTable(
 );
 
 // ─── User provider connections (user-level OAuth/API tokens, org-scoped) ──
+// Connection profiles (user and org) are independent of applications.
+// Connections from different apps accumulate on the same profile — each connection
+// is tagged with a providerCredentialId linking it to one application's credentials.
+// The unique index on (profileId, providerId, orgId, providerCredentialId) allows
+// one connection per provider per app per profile.
 export const userProviderConnections = pgTable(
   "user_provider_connections",
   {
@@ -166,6 +171,7 @@ export const userProviderConnections = pgTable(
       table.providerCredentialId,
     ),
     index("idx_user_provider_connections_profile").on(table.profileId),
+    index("idx_user_provider_connections_profile_provider").on(table.profileId, table.providerId),
     index("idx_user_provider_connections_org_id").on(table.orgId),
     index("idx_user_provider_connections_cred_id").on(table.providerCredentialId),
     index("idx_user_provider_connections_org_provider").on(table.orgId, table.providerId),
