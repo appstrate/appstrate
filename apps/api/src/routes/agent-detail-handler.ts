@@ -73,6 +73,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
     manifestProviders,
     providerProfiles,
     orgId,
+    appId,
   );
 
   // Build populatedProviders: ProviderConfig keyed by provider ID

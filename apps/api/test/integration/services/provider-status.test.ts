@@ -58,7 +58,7 @@ describe("resolveProviderStatuses", () => {
       [providerId]: { profileId, source: "user_profile" },
     };
 
-    const statuses = await resolveProviderStatuses(providers, profiles, orgId);
+    const statuses = await resolveProviderStatuses(providers, profiles, orgId, appId);
     expect(statuses).toHaveLength(1);
     const s0 = statuses[0]!;
     expect(s0.status).toBe("connected");
@@ -77,7 +77,7 @@ describe("resolveProviderStatuses", () => {
       [providerId]: { profileId, source: "org_binding" },
     };
 
-    const statuses = await resolveProviderStatuses(providers, profiles, orgId);
+    const statuses = await resolveProviderStatuses(providers, profiles, orgId, appId);
     const s0 = statuses[0]!;
     expect(s0.source).toBe("org_binding");
     expect(s0.profileName).toBe("Alice Profile");
@@ -96,7 +96,7 @@ describe("resolveProviderStatuses", () => {
       },
     };
 
-    const statuses = await resolveProviderStatuses(providers, profiles, orgId);
+    const statuses = await resolveProviderStatuses(providers, profiles, orgId, appId);
     const s0 = statuses[0]!;
     expect(s0.profileName).toBeNull();
     expect(s0.profileOwnerName).toBeNull();
@@ -109,7 +109,7 @@ describe("resolveProviderStatuses", () => {
     const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const profiles: ProviderProfileMap = {};
 
-    const statuses = await resolveProviderStatuses(providers, profiles, orgId);
+    const statuses = await resolveProviderStatuses(providers, profiles, orgId, appId);
     const s0 = statuses[0]!;
     expect(s0.status).toBe("not_connected");
     expect(s0.source).toBeNull();

@@ -20,11 +20,12 @@ function profileMap(entries: Record<string, string>): ProviderProfileMap {
 function createMockDeps(overrides?: Partial<DependencyValidationDeps>): DependencyValidationDeps {
   return {
     isProviderEnabled: async () => true,
-    getConnectionStatus: async (provider) => ({
+    getConnectionStatus: async (provider, _profileId, _orgId, _credId) => ({
       provider,
       status: "connected" as const,
       scopesGranted: ["read", "write"],
     }),
+    getProviderCredentialId: async () => "mock-credential-id",
     validateScopes: () => ({ sufficient: true, missing: [] }),
     ...overrides,
   };
@@ -72,7 +73,7 @@ describe("validateAgentDependencies", () => {
 
   it("throws when provider connection status is not_connected", async () => {
     const deps = createMockDeps({
-      getConnectionStatus: async (provider) => ({
+      getConnectionStatus: async (provider, _profileId, _orgId, _credId) => ({
         provider,
         status: "not_connected" as const,
       }),
@@ -92,7 +93,7 @@ describe("validateAgentDependencies", () => {
 
   it("throws when provider needs reconnection", async () => {
     const deps = createMockDeps({
-      getConnectionStatus: async (provider) => ({
+      getConnectionStatus: async (provider, _profileId, _orgId, _credId) => ({
         provider,
         status: "needs_reconnection" as const,
         scopesGranted: ["read"],
@@ -160,7 +161,7 @@ describe("validateAgentDependencies", () => {
   it("validates multiple providers in parallel", async () => {
     let statusCallCount = 0;
     const deps = createMockDeps({
-      getConnectionStatus: async (provider) => {
+      getConnectionStatus: async (provider, _profileId, _orgId, _credId) => {
         statusCallCount++;
         return { provider, status: "connected" as const, scopesGranted: [] };
       },

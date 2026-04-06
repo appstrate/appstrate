@@ -32,9 +32,10 @@ export async function disconnectProvider(
   provider: string,
   profileId: string,
   orgId: string,
+  providerCredentialId: string,
 ): Promise<void> {
-  await deleteConnectionRaw(db, profileId, provider, orgId);
-  logger.info("Connection deleted", { provider, profileId, orgId });
+  await deleteConnectionRaw(db, profileId, provider, orgId, providerCredentialId);
+  logger.info("Connection deleted", { provider, profileId, orgId, providerCredentialId });
 }
 
 export async function disconnectConnectionById(connectionId: string, actor: Actor): Promise<void> {

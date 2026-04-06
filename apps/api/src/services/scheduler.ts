@@ -435,7 +435,12 @@ async function computeScheduleReadiness(
   );
 
   // Reuse the shared provider status resolution (batch-fetches connections)
-  const statuses = await resolveProviderStatuses(providers, providerProfiles, orgId);
+  const statuses = await resolveProviderStatuses(
+    providers,
+    providerProfiles,
+    orgId,
+    schedule.applicationId,
+  );
 
   const missing = statuses.filter((s) => s.status !== "connected").map((s) => s.id);
   const connected = statuses.filter((s) => s.status === "connected").length;

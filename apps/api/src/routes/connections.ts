@@ -23,7 +23,7 @@ import {
 import { getDefaultProfileId, getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import type { Actor } from "../lib/actor.ts";
-import { isProviderEnabled } from "@appstrate/connect";
+import { isProviderEnabled, getProviderCredentialId } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import type { Context } from "hono";
 
@@ -288,11 +288,20 @@ export function createConnectionsRouter() {
 
           // Validate ownership — user can use their own profiles or org profiles
           const orgId = c.get("orgId");
+          const applicationId = c.get("applicationId");
           const profile = await getAccessibleProfile(profileId, actor, orgId);
           if (!profile) {
             throw forbidden("Cannot disconnect from a profile you do not own");
           }
-          await disconnectProvider(provider, profileId, orgId);
+          const credentialId = applicationId
+            ? await getProviderCredentialId(db, applicationId, provider)
+            : null;
+          if (!credentialId) {
+            throw invalidRequest(
+              `Provider '${provider}' is not configured in the current application`,
+            );
+          }
+          await disconnectProvider(provider, profileId, orgId, credentialId);
         }
         return c.json({ success: true });
       } catch (err) {

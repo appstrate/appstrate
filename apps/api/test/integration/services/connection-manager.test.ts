@@ -28,7 +28,7 @@ async function seedConnection(
   providerId: string,
   orgId: string,
   appId: string,
-): Promise<string> {
+): Promise<{ connectionId: string; credentialId: string }> {
   const encrypted = encryptCredentials({ test: "value" });
   // Ensure provider package exists (FK target for applicationProviderCredentials)
   const pkgId = providerId.startsWith("@") ? providerId : `@system/${providerId}`;
@@ -47,7 +47,7 @@ async function seedConnection(
     })
     .returning();
 
-  return row!.id;
+  return { connectionId: row!.id, credentialId: cred.id };
 }
 
 // ─── Tests ────────────────────────────────────────────────
@@ -285,10 +285,10 @@ describe("connection-manager", () => {
 
   describe("disconnectProvider", () => {
     it("removes connection for the given provider", async () => {
-      await seedConnection(profileId, "gmail", orgId, applicationId);
+      const gmail = await seedConnection(profileId, "gmail", orgId, applicationId);
       await seedConnection(profileId, "clickup", orgId, applicationId);
 
-      await disconnectProvider("@system/gmail", profileId, orgId);
+      await disconnectProvider("@system/gmail", profileId, orgId, gmail.credentialId);
 
       const connections = await listActorConnections(profileId, orgId);
       expect(connections).toHaveLength(1);
@@ -296,7 +296,12 @@ describe("connection-manager", () => {
     });
 
     it("does not throw when provider has no connection", async () => {
-      await disconnectProvider("nonexistent", profileId, orgId);
+      await disconnectProvider(
+        "nonexistent",
+        profileId,
+        orgId,
+        "00000000-0000-0000-0000-000000000000",
+      );
 
       const connections = await listActorConnections(profileId, orgId);
       expect(connections).toHaveLength(0);
@@ -307,11 +312,11 @@ describe("connection-manager", () => {
 
   describe("disconnectConnectionById", () => {
     it("removes a specific connection by ID", async () => {
-      const connId = await seedConnection(profileId, "gmail", orgId, applicationId);
+      const { connectionId } = await seedConnection(profileId, "gmail", orgId, applicationId);
       await seedConnection(profileId, "clickup", orgId, applicationId);
 
       const actor: Actor = { type: "member", id: userId };
-      await disconnectConnectionById(connId, actor);
+      await disconnectConnectionById(connectionId, actor);
 
       const connections = await listActorConnections(profileId, orgId);
       expect(connections).toHaveLength(1);
@@ -319,12 +324,12 @@ describe("connection-manager", () => {
     });
 
     it("throws when connection does not belong to the actor", async () => {
-      const connId = await seedConnection(profileId, "gmail", orgId, applicationId);
+      const { connectionId } = await seedConnection(profileId, "gmail", orgId, applicationId);
 
       const otherUser = await createTestUser({ email: "hacker@test.com" });
       const actor: Actor = { type: "member", id: otherUser.id };
 
-      await expect(disconnectConnectionById(connId, actor)).rejects.toThrow(
+      await expect(disconnectConnectionById(connectionId, actor)).rejects.toThrow(
         "Connection not found or not owned by actor",
       );
     });

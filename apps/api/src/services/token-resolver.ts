@@ -30,7 +30,7 @@ export async function buildProviderTokens(
   providers: AgentProviderRequirement[],
   providerProfiles: ProviderProfileMap,
   orgId: string,
-  applicationId?: string,
+  applicationId: string,
 ): Promise<Record<string, string>> {
   const entries = await Promise.all(
     providers
@@ -40,9 +40,11 @@ export async function buildProviderTokens(
         if (!entry) return [svc.id, null] as const;
         const connectionProfileId = entry.profileId;
 
-        const credentialId = applicationId
-          ? ((await getProviderCredentialId(db, applicationId, svc.id)) ?? undefined)
-          : undefined;
+        const credentialId = await getProviderCredentialId(db, applicationId, svc.id);
+        if (!credentialId) {
+          logger.warn("No provider credential found", { providerId: svc.id, applicationId });
+          return [svc.id, null] as const;
+        }
         const result = await getCredentials(db, connectionProfileId, svc.id, orgId, credentialId);
         const token = result
           ? (result.credentials.access_token ??

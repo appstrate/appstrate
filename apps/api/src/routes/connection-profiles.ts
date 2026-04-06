@@ -26,7 +26,7 @@ import {
 import {
   listAllActorConnections,
   deleteAllActorConnections,
-  getConnectionStatus,
+  hasActiveConnection,
 } from "../services/connection-manager/index.ts";
 import {
   getOrgProfileBindingsEnriched,
@@ -199,9 +199,9 @@ export function createConnectionProfilesRouter() {
         }
       }
 
-      // Verify the source profile has a connection for this provider
-      const conn = await getConnectionStatus(data.providerId, data.sourceProfileId, orgId);
-      if (conn.status !== "connected") {
+      // Verify the source profile has an active connection for this provider (any app)
+      const connected = await hasActiveConnection(data.providerId, data.sourceProfileId, orgId);
+      if (!connected) {
         throw invalidRequest(`No active connection for '${data.providerId}' on the source profile`);
       }
 

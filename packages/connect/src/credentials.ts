@@ -12,24 +12,22 @@ import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { forceRefresh, type RefreshContext } from "./token-refresh.ts";
 
 /**
- * Get a connection by profile + provider + org, optionally scoped to a specific provider credential.
- * When providerCredentialId is provided, only returns the connection created with that credential.
+ * Get a connection by profile + provider + org + provider credential.
+ * Returns the connection created with the given application provider credential.
  */
 export async function getConnection(
   db: Db,
   profileId: string,
   providerId: string,
   orgId: string,
-  providerCredentialId?: string,
+  providerCredentialId: string,
 ): Promise<ConnectionRecord | null> {
   const conditions = [
     eq(userProviderConnections.profileId, profileId),
     eq(userProviderConnections.providerId, providerId),
     eq(userProviderConnections.orgId, orgId),
+    eq(userProviderConnections.providerCredentialId, providerCredentialId),
   ];
-  if (providerCredentialId) {
-    conditions.push(eq(userProviderConnections.providerCredentialId, providerCredentialId));
-  }
 
   const rows = await db
     .select()
@@ -84,7 +82,7 @@ export async function getCredentials(
   profileId: string,
   providerId: string,
   orgId: string,
-  providerCredentialId?: string,
+  providerCredentialId: string,
 ): Promise<{
   credentials: Record<string, string>;
   connection: ConnectionRecord;
@@ -117,7 +115,7 @@ export async function resolveCredentialsForProxy(
   profileId: string,
   providerId: string,
   orgId: string,
-  providerCredentialId?: string,
+  providerCredentialId: string,
 ): Promise<{
   credentials: Record<string, string>;
   authorizedUris: string[] | null;
@@ -145,7 +143,7 @@ export async function forceRefreshCredentials(
   profileId: string,
   providerId: string,
   orgId: string,
-  providerCredentialId?: string,
+  providerCredentialId: string,
 ): Promise<{
   credentials: Record<string, string>;
   authorizedUris: string[] | null;
@@ -241,6 +239,7 @@ export async function deleteConnection(
   profileId: string,
   providerId: string,
   orgId: string,
+  providerCredentialId: string,
 ): Promise<void> {
   await db
     .delete(userProviderConnections)
@@ -249,6 +248,7 @@ export async function deleteConnection(
         eq(userProviderConnections.profileId, profileId),
         eq(userProviderConnections.providerId, providerId),
         eq(userProviderConnections.orgId, orgId),
+        eq(userProviderConnections.providerCredentialId, providerCredentialId),
       ),
     );
 }

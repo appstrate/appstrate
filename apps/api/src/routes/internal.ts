@@ -171,8 +171,10 @@ export function createInternalRouter() {
       throw notFound(`No profile resolved for provider '${providerId}'`);
     }
 
-    const credentialId =
-      (await getProviderCredentialId(db, run.applicationId, provider.id)) ?? undefined;
+    const credentialId = await getProviderCredentialId(db, run.applicationId, provider.id);
+    if (!credentialId) {
+      throw notFound(`No provider credentials configured for '${providerId}' in application`);
+    }
     const result = await resolveCredentialsForProxy(
       db,
       profileId,
@@ -205,9 +207,11 @@ export function createInternalRouter() {
       throw notFound(`No profile resolved for provider '${providerId}'`);
     }
 
+    const credentialId = await getProviderCredentialId(db, run.applicationId, providerId);
+    if (!credentialId) {
+      throw notFound(`No provider credentials configured for '${providerId}' in application`);
+    }
     try {
-      const credentialId =
-        (await getProviderCredentialId(db, run.applicationId, providerId)) ?? undefined;
       const result = await forceRefreshCredentials(
         db,
         profileId,
@@ -231,6 +235,7 @@ export function createInternalRouter() {
             eq(userProviderConnections.profileId, profileId),
             eq(userProviderConnections.providerId, providerId),
             eq(userProviderConnections.orgId, run.orgId),
+            eq(userProviderConnections.providerCredentialId, credentialId),
           ),
         );
 
@@ -261,6 +266,12 @@ export function createInternalRouter() {
       return c.json({ flagged: false });
     }
 
+    const credentialId = await getProviderCredentialId(db, run.applicationId, providerId);
+    if (!credentialId) {
+      logger.warn("No provider credential found for auth failure report", { runId, providerId });
+      return c.json({ flagged: false });
+    }
+
     await db
       .update(userProviderConnections)
       .set({ needsReconnection: true, updatedAt: new Date() })
@@ -269,6 +280,7 @@ export function createInternalRouter() {
           eq(userProviderConnections.profileId, profileId),
           eq(userProviderConnections.providerId, providerId),
           eq(userProviderConnections.orgId, run.orgId),
+          eq(userProviderConnections.providerCredentialId, credentialId),
         ),
       );
 
