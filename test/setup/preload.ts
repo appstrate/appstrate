@@ -115,7 +115,22 @@ Bun.spawnSync(
     "-d",
     "postgres",
     "-c",
-    "DROP DATABASE IF EXISTS appstrate_test; CREATE DATABASE appstrate_test;",
+    "DROP DATABASE IF EXISTS appstrate_test;",
+  ],
+  { stdout: "pipe", stderr: "pipe" },
+);
+Bun.spawnSync(
+  [
+    "docker",
+    "exec",
+    "setup-postgres-test-1",
+    "psql",
+    "-U",
+    "test",
+    "-d",
+    "postgres",
+    "-c",
+    "CREATE DATABASE appstrate_test;",
   ],
   { stdout: "pipe", stderr: "pipe" },
 );
@@ -124,7 +139,7 @@ Bun.spawnSync(
 // since the postgres driver is a dependency of @appstrate/db, not @appstrate/api.
 
 const dbDir = resolve(import.meta.dir, "../../packages/db");
-const result = Bun.spawnSync(["bunx", "drizzle-kit", "migrate"], {
+const result = Bun.spawnSync(["bun", "drizzle-kit", "migrate"], {
   cwd: dbDir,
   env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL },
   stdout: "pipe",
@@ -133,5 +148,8 @@ const result = Bun.spawnSync(["bunx", "drizzle-kit", "migrate"], {
 
 if (result.exitCode !== 0) {
   const stderr = result.stderr.toString();
-  throw new Error(`Migration failed (exit ${result.exitCode}): ${stderr}`);
+  const stdout = result.stdout.toString();
+  throw new Error(
+    `Migration failed (exit ${result.exitCode}):\nstderr: ${stderr}\nstdout: ${stdout}`,
+  );
 }

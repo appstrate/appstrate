@@ -42,12 +42,10 @@ export async function buildProviderTokens(
 
         const credentialId = await getProviderCredentialId(db, applicationId, svc.id);
         if (!credentialId) {
-          // Should not happen — preflight validates credentials exist. Log error for visibility.
-          logger.error("No provider credential found (should have been caught at preflight)", {
-            providerId: svc.id,
-            applicationId,
-          });
-          return [svc.id, null] as const;
+          // Should not happen — preflight validates credentials exist.
+          throw new Error(
+            `Provider '${svc.id}' credential missing for application '${applicationId}' (should have been caught at preflight)`,
+          );
         }
         const result = await getCredentials(db, connectionProfileId, svc.id, orgId, credentialId);
         const token = result

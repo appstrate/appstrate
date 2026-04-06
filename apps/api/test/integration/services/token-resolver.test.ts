@@ -212,7 +212,8 @@ describe("token-resolver", () => {
         authMode: "api_key",
       });
 
-      // No connection saved for this provider -- getCredentials returns null
+      // Credentials configured for the app, but no user connection saved
+      await seedProviderCredentials({ applicationId: defaultAppId, providerId });
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
       const tokens = await buildProviderTokens(
@@ -224,6 +225,18 @@ describe("token-resolver", () => {
 
       expect(tokens[providerId]).toBeUndefined();
       expect(Object.keys(tokens)).toHaveLength(0);
+    });
+
+    it("throws when provider credential is not configured for the application", async () => {
+      const providerId = "@system/test-no-cred";
+      await seedProvider(providerId, { authMode: "api_key" });
+
+      // No credentials seeded for defaultAppId — should throw
+
+      const providers: AgentProviderRequirement[] = [{ id: providerId }];
+      expect(
+        buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId, defaultAppId),
+      ).rejects.toThrow("credential missing for application");
     });
 
     it("resolves multiple providers in a single call", async () => {
@@ -366,6 +379,9 @@ describe("token-resolver", () => {
         },
         otherAppId,
       );
+
+      // Also configure credentials in our app so the credential lookup succeeds
+      await seedProviderCredentials({ applicationId: defaultAppId, providerId });
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
       // Try to resolve using our org but pointing to the other profile

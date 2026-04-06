@@ -135,8 +135,9 @@ export const useDeleteAppProfile = appProfileMutations.useDelete;
 
 export function useAppProfileBindings(profileId: string | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["app-profile-bindings", orgId, profileId],
+    queryKey: ["app-profile-bindings", orgId, appId, profileId],
     queryFn: () =>
       api<{ bindings: EnrichedBinding[] }>(`/app-profiles/${profileId}/bindings`).then(
         (r) => r.bindings,
@@ -202,8 +203,9 @@ export function useSetAgentAppProfile(packageId: string) {
 
 export function useAppProfileAgents(profileId: string | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["app-profile-agents", orgId, profileId],
+    queryKey: ["app-profile-agents", orgId, appId, profileId],
     queryFn: () =>
       api<{ agents: { id: string; displayName: string }[] }>(
         `/app-profiles/${profileId}/agents`,

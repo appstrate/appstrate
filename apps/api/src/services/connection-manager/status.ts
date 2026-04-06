@@ -43,22 +43,23 @@ export async function getConnectionStatus(
 }
 
 /**
- * Check if any active connection exists for a provider on a profile (regardless of application).
- * Used for org profile binding validation — intentionally not app-scoped.
+ * Check if an active connection exists for a provider on a profile, scoped to the application.
  *
- * Connection profiles (user and org) are independent of applications. Connections from
- * different apps accumulate on the same profile — each connection is tagged with a
- * providerCredentialId linking it to one app. This function checks across all apps:
- * "does the user have at least one healthy connection for this provider, from any app?"
- *
- * At runtime, agents resolve credentials using their own app's providerCredentialId,
- * which may differ from the app that originally created the connection checked here.
+ * Connection profiles are independent of applications, but connections are tagged with a
+ * providerCredentialId linking them to one application's credentials. This function validates
+ * that the user has a healthy connection specifically for the given application — not just
+ * any app. This prevents binding a connection created by App A to an app-profile in App B,
+ * which would pass validation but fail at runtime.
  */
 export async function hasActiveConnection(
   provider: string,
   connectionProfileId: string,
   orgId: string,
+  applicationId: string,
 ): Promise<boolean> {
+  const credentialId = await getProviderCredentialId(db, applicationId, provider);
+  if (!credentialId) return false;
+
   const rows = await db
     .select({ id: userProviderConnections.id })
     .from(userProviderConnections)
@@ -67,6 +68,7 @@ export async function hasActiveConnection(
         eq(userProviderConnections.profileId, connectionProfileId),
         eq(userProviderConnections.providerId, provider),
         eq(userProviderConnections.orgId, orgId),
+        eq(userProviderConnections.providerCredentialId, credentialId),
         eq(userProviderConnections.needsReconnection, false),
       ),
     )

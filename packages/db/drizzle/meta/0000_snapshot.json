@@ -1,5 +1,5 @@
 {
-  "id": "9b61cc8a-d2e0-49bd-95a5-6056d3655d5f",
+  "id": "287bf5ee-c79b-4b77-8344-84c1c2a965f9",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -3891,7 +3891,7 @@
           "name": "scopes_granted",
           "type": "text[]",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "default": "'{}'::text[]"
         },
         "needs_reconnection": {

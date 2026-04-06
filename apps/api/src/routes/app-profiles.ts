@@ -176,10 +176,17 @@ export function createAppProfilesRouter() {
       }
     }
 
-    // Verify the source profile has an active connection for this provider (any app)
-    const connected = await hasActiveConnection(data.providerId, data.sourceProfileId, orgId);
+    // Verify the source profile has an active connection for this provider in this application
+    const connected = await hasActiveConnection(
+      data.providerId,
+      data.sourceProfileId,
+      orgId,
+      applicationId,
+    );
     if (!connected) {
-      throw invalidRequest(`No active connection for '${data.providerId}' on the source profile`);
+      throw invalidRequest(
+        `No active connection for '${data.providerId}' on the source profile in this application`,
+      );
     }
 
     await bindAppProfileProvider(profileId, data.providerId, data.sourceProfileId, userId);

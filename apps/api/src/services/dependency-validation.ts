@@ -80,18 +80,22 @@ export async function validateAgentDependencies(
     providers.map((p) => deps.getProviderCredentialId(applicationId, p.id)),
   );
 
+  // Fail fast if any provider credential is missing from this application
+  for (let i = 0; i < providers.length; i++) {
+    if (!credentialIds[i]) {
+      throw new ApiError({
+        status: 400,
+        code: "provider_not_configured",
+        title: "Provider Not Configured",
+        detail: `Provider '${providers[i]!.id}' is no longer configured for this application`,
+      });
+    }
+  }
+
   const statuses = await Promise.all(
-    providers.map((p, i) => {
-      const credentialId = credentialIds[i];
-      if (!credentialId) {
-        // No credential configured for this provider in this app — treat as not connected
-        return Promise.resolve({
-          provider: p.id,
-          status: "not_connected" as const,
-        } as ConnectionStatus);
-      }
-      return deps.getConnectionStatus(p.id, providerProfiles[p.id]!.profileId, orgId, credentialId);
-    }),
+    providers.map((p, i) =>
+      deps.getConnectionStatus(p.id, providerProfiles[p.id]!.profileId, orgId, credentialIds[i]!),
+    ),
   );
 
   for (let i = 0; i < providers.length; i++) {

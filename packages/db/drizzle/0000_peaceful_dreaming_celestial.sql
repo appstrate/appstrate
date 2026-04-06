@@ -382,7 +382,7 @@ CREATE TABLE "user_provider_connections" (
 	"org_id" uuid NOT NULL,
 	"provider_credential_id" uuid NOT NULL,
 	"credentials_encrypted" text NOT NULL,
-	"scopes_granted" text[] DEFAULT '{}'::text[],
+	"scopes_granted" text[] DEFAULT '{}'::text[] NOT NULL,
 	"needs_reconnection" boolean DEFAULT false NOT NULL,
 	"expires_at" timestamp,
 	"created_at" timestamp DEFAULT now() NOT NULL,

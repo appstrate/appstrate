@@ -9,6 +9,7 @@ export const connectionsPaths = {
       description: "List active provider connections for the current user in the org.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "profileId",
           in: "query",
@@ -51,6 +52,7 @@ export const connectionsPaths = {
         "List all configured providers with current connection status and auth mode for the user.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "profileId",
           in: "query",
@@ -347,6 +349,7 @@ export const connectionsPaths = {
         "Remove a connection for a provider. If `connectionId` is provided, deletes only that specific connection. Otherwise, deletes all connections for the provider on the profile. The resolved profile must belong to the authenticated actor (returns 403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   appProfileProviderBindings,
@@ -10,6 +10,7 @@ import {
 import { user } from "@appstrate/db/schema";
 import type { EnrichedBinding } from "@appstrate/shared-types";
 import { notFound } from "../../lib/errors.ts";
+import { listProviderCredentialIds } from "@appstrate/connect";
 export type { EnrichedBinding };
 
 /** Verify that the app profile exists and belongs to the application. Throws 404 if not found. */
@@ -62,6 +63,9 @@ export async function getAppProfileBindings(
 /**
  * Get all bindings for an app profile with profile name, user name, and connection status.
  *
+ * Connection status is scoped to the application: "connected" means the user has
+ * a healthy connection specifically for this application's provider credentials.
+ *
  * CALLER CONTRACT: Same as getAppProfileBindings — caller must validate application ownership first.
  */
 export async function getAppProfileBindingsEnriched(
@@ -69,6 +73,8 @@ export async function getAppProfileBindingsEnriched(
   applicationId: string,
 ): Promise<EnrichedBinding[]> {
   await assertAppProfileOwnership(appProfileId, applicationId);
+
+  const credentialIds = await listProviderCredentialIds(db, applicationId);
 
   const rows = await db
     .select({
@@ -84,28 +90,19 @@ export async function getAppProfileBindingsEnriched(
       eq(connectionProfiles.id, appProfileProviderBindings.sourceProfileId),
     )
     .leftJoin(user, eq(user.id, appProfileProviderBindings.boundByUserId))
-    // NOTE: Connection profiles (user and app) are independent of applications.
-    // Connections from different apps accumulate on profiles — each tagged with a
-    // providerCredentialId linking it to one app. This LEFT JOIN matches across all
-    // apps (no providerCredentialId filter) because app bindings are app-agnostic:
-    // "connected" = at least one app has a healthy connection for this provider.
-    // Rows are deduplicated below to handle multiple matching connections.
     .leftJoin(
       userProviderConnections,
       and(
         eq(userProviderConnections.profileId, appProfileProviderBindings.sourceProfileId),
         eq(userProviderConnections.providerId, appProfileProviderBindings.providerId),
         eq(userProviderConnections.needsReconnection, false),
+        credentialIds.length > 0
+          ? inArray(userProviderConnections.providerCredentialId, credentialIds)
+          : sql`false`,
       ),
     )
-    .where(eq(appProfileProviderBindings.appProfileId, appProfileId))
-    .orderBy(sql`${userProviderConnections.id} NULLS LAST`);
+    .where(eq(appProfileProviderBindings.appProfileId, appProfileId));
 
-  // Deduplicate: the LEFT JOIN on userProviderConnections can produce multiple rows
-  // per binding when the user has connections from several apps (one per providerCredentialId).
-  // We only need to know if at least one healthy connection exists. ORDER BY ... NULLS LAST
-  // ensures connected rows (non-null connectionId) come first, so the first row per provider
-  // always reflects the best known state.
   const seen = new Set<string>();
   const result: EnrichedBinding[] = [];
   for (const r of rows) {
