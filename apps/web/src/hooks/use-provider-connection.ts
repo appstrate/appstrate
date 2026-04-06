@@ -9,9 +9,9 @@ import {
 import {
   useConnectionProfiles,
   useProfileConnections,
-  useOrgProfileBindings,
-  useBindOrgProvider,
-  useUnbindOrgProvider,
+  useAppProfileBindings,
+  useBindAppProvider,
+  useUnbindAppProvider,
   useAgentProviderProfiles,
   useSetAgentProviderProfile,
 } from "./use-connection-profiles";
@@ -20,7 +20,7 @@ import { isProviderConnectedInProfile } from "../lib/provider-status";
 interface UseProviderConnectionParams {
   providerId: string;
   packageId?: string;
-  orgProfileId?: string;
+  appProfileId?: string;
   readOnly?: boolean;
   /** Override the profile used to check connection status (e.g. schedule owner's profile) */
   viewProfileId?: string;
@@ -29,7 +29,7 @@ interface UseProviderConnectionParams {
 export function useProviderConnection({
   providerId,
   packageId,
-  orgProfileId,
+  appProfileId,
   readOnly: readOnlyParam,
   viewProfileId,
 }: UseProviderConnectionParams) {
@@ -51,8 +51,8 @@ export function useProviderConnection({
   const needsReconnection =
     profileConnections?.some((c) => c.providerId === providerId && c.needsReconnection) ?? false;
 
-  // Binding status (only when orgProfileId is provided)
-  const { data: bindings } = useOrgProfileBindings(orgProfileId);
+  // Binding status (only when appProfileId is provided)
+  const { data: bindings } = useAppProfileBindings(appProfileId);
   const binding = bindings?.find((b) => b.providerId === providerId);
   const isBound = !!binding;
   const isBoundButDisconnected = isBound && binding?.connected === false;
@@ -63,8 +63,8 @@ export function useProviderConnection({
   const connectApiKeyMutation = useConnectApiKey();
   const connectCredentialsMutation = useConnectCredentials();
   const disconnectMutation = useDisconnect();
-  const bindMutation = useBindOrgProvider();
-  const unbindMutation = useUnbindOrgProvider();
+  const bindMutation = useBindAppProvider();
+  const unbindMutation = useUnbindAppProvider();
 
   const isPending =
     connectMutation.isPending ||
@@ -83,17 +83,17 @@ export function useProviderConnection({
   };
 
   const doBind = () => {
-    if (!orgProfileId || !effectiveProfileId) return;
+    if (!appProfileId || !effectiveProfileId) return;
     bindMutation.mutate({
-      profileId: orgProfileId,
+      profileId: appProfileId,
       providerId,
       sourceProfileId: effectiveProfileId,
     });
   };
 
   const handleUnbind = () => {
-    if (!orgProfileId) return;
-    unbindMutation.mutate({ profileId: orgProfileId, providerId });
+    if (!appProfileId) return;
+    unbindMutation.mutate({ profileId: appProfileId, providerId });
   };
 
   return {

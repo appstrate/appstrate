@@ -17,8 +17,8 @@ export function invalidateConnectionRelated(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: ["available-providers"] });
   qc.invalidateQueries({ queryKey: ["user-connections"] });
   qc.invalidateQueries({ queryKey: ["profile-connections"] });
-  qc.invalidateQueries({ queryKey: ["org-profile-bindings"] });
-  qc.invalidateQueries({ queryKey: ["org-connection-profiles"] });
+  qc.invalidateQueries({ queryKey: ["app-profile-bindings"] });
+  qc.invalidateQueries({ queryKey: ["app-connection-profiles"] });
   qc.invalidateQueries({ queryKey: ["packages", "agent"] });
   qc.invalidateQueries({ queryKey: ["agents"] });
   qc.invalidateQueries({ queryKey: ["agent-provider-profiles"] });

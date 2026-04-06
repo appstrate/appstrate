@@ -69,7 +69,11 @@ export function createSchedulesRouter() {
       const data = parseBody(createScheduleSchema, body);
 
       // Validate ownership — user can only schedule with their own profiles
-      const profile = await getAccessibleProfile(data.connectionProfileId, actor, c.get("orgId"));
+      const profile = await getAccessibleProfile(
+        data.connectionProfileId,
+        actor,
+        c.get("applicationId"),
+      );
       if (!profile) {
         throw forbidden("Cannot use a profile you do not own");
       }
@@ -130,7 +134,11 @@ export function createSchedulesRouter() {
     // Validate ownership — only check when the profile is actually changing
     if (data.connectionProfileId && data.connectionProfileId !== existing.connectionProfileId) {
       const actor = getActor(c);
-      const profile = await getAccessibleProfile(data.connectionProfileId, actor, orgId);
+      const profile = await getAccessibleProfile(
+        data.connectionProfileId,
+        actor,
+        c.get("applicationId"),
+      );
       if (!profile) {
         throw forbidden("Cannot use a profile you do not own");
       }

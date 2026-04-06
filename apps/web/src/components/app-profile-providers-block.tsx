@@ -4,28 +4,28 @@ import { useTranslation } from "react-i18next";
 import { Building2, AlertTriangle } from "lucide-react";
 import { Badge as UIBadge } from "@/components/ui/badge";
 import { ProviderConnectionCard } from "./provider-connection-card";
-import { useOrgProfileBindings } from "../hooks/use-connection-profiles";
+import { useAppProfileBindings } from "../hooks/use-connection-profiles";
 
-interface OrgProfileProvidersBlockProps {
-  /** Org profile ID */
-  orgProfileId: string;
-  /** Org profile display name */
-  orgProfileName: string;
+interface AppProfileProvidersBlockProps {
+  /** App profile ID */
+  appProfileId: string;
+  /** App profile display name */
+  appProfileName: string;
   /** Provider IDs to display */
   providerIds: string[];
 }
 
 /**
- * Shared block showing an org profile header + provider connection cards.
+ * Shared block showing an app profile header + provider connection cards.
  * Used by schedule detail (providers tab).
  */
-export function OrgProfileProvidersBlock({
-  orgProfileId,
-  orgProfileName,
+export function AppProfileProvidersBlock({
+  appProfileId,
+  appProfileName,
   providerIds,
-}: OrgProfileProvidersBlockProps) {
+}: AppProfileProvidersBlockProps) {
   const { t } = useTranslation(["agents"]);
-  const { data: bindings } = useOrgProfileBindings(orgProfileId);
+  const { data: bindings } = useAppProfileBindings(appProfileId);
 
   if (providerIds.length === 0) return null;
 
@@ -43,7 +43,7 @@ export function OrgProfileProvidersBlock({
       )}
       <div className="border-border flex items-center gap-2 border-b px-4 py-3">
         <Building2 className="text-muted-foreground size-4" />
-        <span className="text-sm font-medium">{orgProfileName}</span>
+        <span className="text-sm font-medium">{appProfileName}</span>
         <UIBadge variant="outline" className="px-1 py-0 text-[10px]">
           {t("providerCard.orgBadge", { ns: "settings" })}
         </UIBadge>
@@ -57,8 +57,8 @@ export function OrgProfileProvidersBlock({
           <ProviderConnectionCard
             key={providerId}
             providerId={providerId}
-            orgProfileId={orgProfileId}
-            orgProfileName={orgProfileName}
+            appProfileId={appProfileId}
+            appProfileName={appProfileName}
           />
         ))}
       </div>

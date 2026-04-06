@@ -74,12 +74,12 @@ describe("resolveProviderStatuses", () => {
 
     const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const profiles: ProviderProfileMap = {
-      [providerId]: { profileId, source: "org_binding" },
+      [providerId]: { profileId, source: "app_binding" },
     };
 
     const statuses = await resolveProviderStatuses(providers, profiles, orgId, appId);
     const s0 = statuses[0]!;
-    expect(s0.source).toBe("org_binding");
+    expect(s0.source).toBe("app_binding");
     expect(s0.profileName).toBe("Alice Profile");
     expect(s0.profileOwnerName).toBe("Alice");
   });

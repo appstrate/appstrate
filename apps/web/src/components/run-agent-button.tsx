@@ -176,7 +176,7 @@ export function RunAgentButton({
             navigate(`${packageDetailPath("agent", packageId)}#connectors`);
           }}
           providers={detail.dependencies?.providers ?? []}
-          orgProfileName={detail.agentOrgProfileName}
+          appProfileName={detail.agentAppProfileName}
           isPending={runAgent.isPending}
         />
       )}

@@ -22,10 +22,10 @@ interface ProviderConnectionCardProps {
   providerId: string;
   /** Agent package ID — enables per-provider profile persistence. */
   packageId?: string;
-  /** Org profile ID — enables the org binding section. */
-  orgProfileId?: string;
-  /** Org profile display name — shown in the bind button. */
-  orgProfileName?: string;
+  /** App profile ID — enables the app binding section. */
+  appProfileId?: string;
+  /** App profile display name — shown in the bind button. */
+  appProfileName?: string;
   /** When true, hide all action buttons — card becomes purely informational. */
   readOnly?: boolean;
   /** Profile ID to check connection status for (e.g. schedule owner's profile). */
@@ -39,8 +39,8 @@ interface ProviderConnectionCardProps {
 export function ProviderConnectionCard({
   providerId,
   packageId,
-  orgProfileId,
-  orgProfileName,
+  appProfileId,
+  appProfileName,
   readOnly: readOnlyProp,
   viewProfileId,
   scopesRequired,
@@ -71,7 +71,7 @@ export function ProviderConnectionCard({
   } = useProviderConnection({
     providerId,
     packageId,
-    orgProfileId,
+    appProfileId,
     readOnly: readOnlyProp,
     viewProfileId,
   });
@@ -272,7 +272,7 @@ export function ProviderConnectionCard({
                     {t("providerCard.disconnect")}
                   </Button>
                 )}
-                {isConnected && orgProfileId && (
+                {isConnected && appProfileId && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -281,8 +281,8 @@ export function ProviderConnectionCard({
                     disabled={isPending || !effectiveProfileId}
                   >
                     <Building2 className="mr-1 size-3" />
-                    {orgProfileName
-                      ? t("providerCard.bindTo", { name: orgProfileName })
+                    {appProfileName
+                      ? t("providerCard.bindTo", { name: appProfileName })
                       : t("providerCard.bind")}
                   </Button>
                 )}

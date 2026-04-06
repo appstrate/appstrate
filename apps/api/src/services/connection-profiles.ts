@@ -10,13 +10,13 @@ import {
   connectionProfiles,
   userAgentProviderProfiles,
   userProviderConnections,
-  orgProfileProviderBindings,
+  appProfileProviderBindings,
   organizationMembers,
   applicationPackages,
 } from "@appstrate/db/schema";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import { type Actor, actorInsert, actorFilter } from "../lib/actor.ts";
-import { getOrgProfileBindings } from "./state/index.ts";
+import { getAppProfileBindings } from "./state/index.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { notFound, invalidRequest } from "../lib/errors.ts";
@@ -75,7 +75,7 @@ export async function listProfiles(
       id: connectionProfiles.id,
       userId: connectionProfiles.userId,
       endUserId: connectionProfiles.endUserId,
-      orgId: connectionProfiles.orgId,
+      applicationId: connectionProfiles.applicationId,
       name: connectionProfiles.name,
       isDefault: connectionProfiles.isDefault,
       createdAt: connectionProfiles.createdAt,
@@ -107,14 +107,16 @@ export async function getProfileForActor(
 
 /**
  * Check if an actor can use a profile: either their own (user/end-user)
- * or an org profile belonging to the actor's current org.
+ * or an app profile belonging to the actor's current application.
  */
 export async function getAccessibleProfile(
   profileId: string,
   actor: Actor,
-  orgId: string,
+  applicationId: string,
 ): Promise<ConnectionProfile | null> {
-  return (await getProfileForActor(profileId, actor)) ?? (await getOrgProfile(profileId, orgId));
+  return (
+    (await getProfileForActor(profileId, actor)) ?? (await getAppProfile(profileId, applicationId))
+  );
 }
 
 /**
@@ -176,14 +178,14 @@ export async function deleteProfile(profileId: string, actor: Actor): Promise<vo
 
 // ─── Org Profile CRUD ───────────────────────────────────────
 
-export async function listOrgProfiles(
-  orgId: string,
+export async function listAppProfiles(
+  applicationId: string,
 ): Promise<(ConnectionProfile & { bindingCount: number; boundProviderIds: string[] })[]> {
   // Fetch profiles
   const profileRows = await db
     .select()
     .from(connectionProfiles)
-    .where(eq(connectionProfiles.orgId, orgId));
+    .where(eq(connectionProfiles.applicationId, applicationId));
 
   if (profileRows.length === 0) return [];
 
@@ -191,18 +193,18 @@ export async function listOrgProfiles(
   const profileIds = profileRows.map((p) => p.id);
   const bindingRows = await db
     .select({
-      orgProfileId: orgProfileProviderBindings.orgProfileId,
-      providerId: orgProfileProviderBindings.providerId,
+      appProfileId: appProfileProviderBindings.appProfileId,
+      providerId: appProfileProviderBindings.providerId,
     })
-    .from(orgProfileProviderBindings)
-    .where(inArray(orgProfileProviderBindings.orgProfileId, profileIds));
+    .from(appProfileProviderBindings)
+    .where(inArray(appProfileProviderBindings.appProfileId, profileIds));
 
   // Group bindings by profile
   const bindingsByProfile = new Map<string, string[]>();
   for (const row of bindingRows) {
-    const list = bindingsByProfile.get(row.orgProfileId) ?? [];
+    const list = bindingsByProfile.get(row.appProfileId) ?? [];
     list.push(row.providerId);
-    bindingsByProfile.set(row.orgProfileId, list);
+    bindingsByProfile.set(row.appProfileId, list);
   }
 
   return profileRows.map((p) => {
@@ -211,22 +213,30 @@ export async function listOrgProfiles(
   });
 }
 
-export async function createOrgProfile(orgId: string, name: string): Promise<ConnectionProfile> {
+export async function createAppProfile(
+  applicationId: string,
+  name: string,
+): Promise<ConnectionProfile> {
   const [created] = await db
     .insert(connectionProfiles)
-    .values({ orgId, name, isDefault: false })
+    .values({ applicationId, name, isDefault: false })
     .returning();
   return created!;
 }
 
-export async function getOrgProfile(
+export async function getAppProfile(
   profileId: string,
-  orgId: string,
+  applicationId: string,
 ): Promise<ConnectionProfile | null> {
   const [row] = await db
     .select()
     .from(connectionProfiles)
-    .where(and(eq(connectionProfiles.id, profileId), eq(connectionProfiles.orgId, orgId)))
+    .where(
+      and(
+        eq(connectionProfiles.id, profileId),
+        eq(connectionProfiles.applicationId, applicationId),
+      ),
+    )
     .limit(1);
   return row ?? null;
 }
@@ -235,77 +245,91 @@ export async function getOrgProfile(
  * Load the org profile configured on an agent, returning null if none configured
  * or if the referenced profile was deleted.
  */
-export async function getAgentOrgProfile(
+export async function getAgentAppProfile(
   applicationId: string,
-  orgId: string,
   packageId: string,
 ): Promise<{ id: string; name: string } | null> {
-  const { orgProfileId } = await getPackageConfig(applicationId, packageId);
-  if (!orgProfileId) return null;
-  const profile = await getOrgProfile(orgProfileId, orgId);
-  return profile ? { id: orgProfileId, name: profile.name } : null;
+  const { appProfileId } = await getPackageConfig(applicationId, packageId);
+  if (!appProfileId) return null;
+  const profile = await getAppProfile(appProfileId, applicationId);
+  return profile ? { id: appProfileId, name: profile.name } : null;
 }
 
-export async function renameOrgProfile(
+export async function renameAppProfile(
   profileId: string,
-  orgId: string,
+  applicationId: string,
   name: string,
 ): Promise<void> {
   const [updated] = await db
     .update(connectionProfiles)
     .set({ name, updatedAt: new Date() })
-    .where(and(eq(connectionProfiles.id, profileId), eq(connectionProfiles.orgId, orgId)))
+    .where(
+      and(
+        eq(connectionProfiles.id, profileId),
+        eq(connectionProfiles.applicationId, applicationId),
+      ),
+    )
     .returning({ id: connectionProfiles.id });
 
   if (!updated) throw notFound("Profile not found");
 }
 
-export async function deleteOrgProfile(profileId: string, orgId: string): Promise<void> {
+export async function deleteAppProfile(profileId: string, applicationId: string): Promise<void> {
   const [profile] = await db
     .select()
     .from(connectionProfiles)
-    .where(and(eq(connectionProfiles.id, profileId), eq(connectionProfiles.orgId, orgId)))
+    .where(
+      and(
+        eq(connectionProfiles.id, profileId),
+        eq(connectionProfiles.applicationId, applicationId),
+      ),
+    )
     .limit(1);
 
   if (!profile) throw notFound("Profile not found");
 
-  // Clear stale orgProfileId references in application_packages before deleting the profile.
+  // Clear stale appProfileId references in application_packages before deleting the profile.
   // The FK has onDelete: "set null", but we clear explicitly as defense-in-depth.
   await db
     .update(applicationPackages)
-    .set({ orgProfileId: null, updatedAt: new Date() })
-    .where(eq(applicationPackages.orgProfileId, profileId));
+    .set({ appProfileId: null, updatedAt: new Date() })
+    .where(eq(applicationPackages.appProfileId, profileId));
 
   await db
     .delete(connectionProfiles)
-    .where(and(eq(connectionProfiles.id, profileId), eq(connectionProfiles.orgId, orgId)));
+    .where(
+      and(
+        eq(connectionProfiles.id, profileId),
+        eq(connectionProfiles.applicationId, applicationId),
+      ),
+    );
 }
 
 /**
  * List org profiles where a specific user has active bindings.
  * Used to show users which org profiles depend on their credentials.
  */
-export async function listOrgProfilesWithUserBindings(
+export async function listAppProfilesWithUserBindings(
   userId: string,
-  orgId: string,
+  applicationId: string,
 ): Promise<{ profile: ConnectionProfile; providerIds: string[] }[]> {
   const rows = await db
     .select({
-      orgProfileId: orgProfileProviderBindings.orgProfileId,
-      providerId: orgProfileProviderBindings.providerId,
+      appProfileId: appProfileProviderBindings.appProfileId,
+      providerId: appProfileProviderBindings.providerId,
       profileName: connectionProfiles.name,
       profileCreatedAt: connectionProfiles.createdAt,
       profileUpdatedAt: connectionProfiles.updatedAt,
     })
-    .from(orgProfileProviderBindings)
+    .from(appProfileProviderBindings)
     .innerJoin(
       connectionProfiles,
-      eq(connectionProfiles.id, orgProfileProviderBindings.orgProfileId),
+      eq(connectionProfiles.id, appProfileProviderBindings.appProfileId),
     )
     .where(
       and(
-        eq(orgProfileProviderBindings.boundByUserId, userId),
-        eq(connectionProfiles.orgId, orgId),
+        eq(appProfileProviderBindings.boundByUserId, userId),
+        eq(connectionProfiles.applicationId, applicationId),
       ),
     );
 
@@ -314,14 +338,14 @@ export async function listOrgProfilesWithUserBindings(
     { profileName: string; createdAt: Date; updatedAt: Date; providerIds: string[] }
   >();
   for (const row of rows) {
-    const entry = grouped.get(row.orgProfileId) ?? {
+    const entry = grouped.get(row.appProfileId) ?? {
       profileName: row.profileName,
       createdAt: row.profileCreatedAt,
       updatedAt: row.profileUpdatedAt,
       providerIds: [],
     };
     entry.providerIds.push(row.providerId);
-    grouped.set(row.orgProfileId, entry);
+    grouped.set(row.appProfileId, entry);
   }
 
   return Array.from(grouped.entries()).map(([profileId, data]) => ({
@@ -329,7 +353,7 @@ export async function listOrgProfilesWithUserBindings(
       id: profileId,
       userId: null,
       endUserId: null,
-      orgId,
+      applicationId,
       name: data.profileName,
       isDefault: false,
       createdAt: data.createdAt,
@@ -466,18 +490,18 @@ export async function getProfileByIdUnsafe(profileId: string): Promise<Connectio
  * Determine how to pass a schedule's connectionProfileId to resolveProviderProfiles
  * based on whether the profile is an org profile or a user profile.
  *
- * - Org profile → passed as orgProfileId (bindings loaded), no user fallback
- * - User profile → passed as defaultUserProfileId, agentOrgProfileId as org fallback
+ * - App profile → passed as appProfileId (bindings loaded), no user fallback
+ * - User profile → passed as defaultUserProfileId, agentAppProfileId as app fallback
  */
 export function resolveScheduleProfileArgs(
   profile: ConnectionProfile,
   connectionProfileId: string,
-  agentOrgProfileId?: string | null,
-): { defaultUserProfileId: string | null; orgProfileId: string | null } {
-  const isOrgProfile = !!profile.orgId;
+  agentAppProfileId?: string | null,
+): { defaultUserProfileId: string | null; appProfileId: string | null } {
+  const isAppProfile = !!profile.applicationId;
   return {
-    defaultUserProfileId: isOrgProfile ? null : connectionProfileId,
-    orgProfileId: isOrgProfile ? connectionProfileId : (agentOrgProfileId ?? null),
+    defaultUserProfileId: isAppProfile ? null : connectionProfileId,
+    appProfileId: isAppProfile ? connectionProfileId : (agentAppProfileId ?? null),
   };
 }
 
@@ -485,50 +509,53 @@ export function resolveScheduleProfileArgs(
 
 /** Dependencies for resolveProviderProfiles — injectable for testing. */
 export interface ResolveProviderProfilesDeps {
-  getOrgProfileBindings: (orgProfileId: string, orgId: string) => Promise<Record<string, string>>;
+  getAppProfileBindings: (
+    appProfileId: string,
+    applicationId: string,
+  ) => Promise<Record<string, string>>;
 }
 
 const defaultResolveProviderProfilesDeps: ResolveProviderProfilesDeps = {
-  getOrgProfileBindings,
+  getAppProfileBindings,
 };
 
 /**
  * Resolve profile IDs for each provider in a package.
  *
  * Three-layer resolution (highest priority first):
- * 1. orgProfileId binding → source: "org_binding"
+ * 1. appProfileId binding → source: "app_binding"
  * 2. Per-provider user override → source: "user_profile"
  * 3. Default user profile → source: "user_profile"
  *
  * For schedules: pass the schedule's connectionProfileId as defaultUserProfileId
- * with orgProfileId if the schedule uses an org profile. No per-provider overrides.
+ * with appProfileId if the schedule uses an app profile. No per-provider overrides.
  */
 export async function resolveProviderProfiles(
   providers: AgentProviderRequirement[],
   defaultUserProfileId: string | null,
   userProviderOverrides?: Record<string, string>,
-  orgProfileId?: string | null,
-  orgId?: string,
+  appProfileId?: string | null,
+  applicationId?: string,
   deps: ResolveProviderProfilesDeps = defaultResolveProviderProfilesDeps,
 ): Promise<ProviderProfileMap> {
   const map: ProviderProfileMap = {};
 
-  // Load org bindings if an org profile is provided
+  // Load app bindings if an app profile is provided
   let bindings: Record<string, string> = {};
-  if (orgProfileId && orgId) {
-    bindings = await deps.getOrgProfileBindings(orgProfileId, orgId);
+  if (appProfileId && applicationId) {
+    bindings = await deps.getAppProfileBindings(appProfileId, applicationId);
   }
 
   for (const svc of providers) {
-    const orgBinding = orgProfileId ? bindings[svc.id] : undefined;
-    if (orgBinding) {
-      map[svc.id] = { profileId: orgBinding, source: "org_binding" };
+    const appBinding = appProfileId ? bindings[svc.id] : undefined;
+    if (appBinding) {
+      map[svc.id] = { profileId: appBinding, source: "app_binding" };
     } else {
       const fallbackId = userProviderOverrides?.[svc.id] ?? defaultUserProfileId;
       if (fallbackId) {
         map[svc.id] = { profileId: fallbackId, source: "user_profile" };
       }
-      // If no fallback (org-only mode), provider simply not in map — dependency validation will catch it
+      // If no fallback (app-only mode), provider simply not in map — dependency validation will catch it
     }
   }
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { inArray, and, eq, or, isNull } from "drizzle-orm";
+import { inArray, and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { connectionProfiles, userProviderConnections } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../../lib/user-helpers.ts";
@@ -95,13 +95,11 @@ function buildScopeInfo(
 /**
  * Batch-fetch profile name + owner name for a set of profile IDs.
  *
- * Defense-in-depth: filters by orgId to ensure only profiles belonging to the
- * org (or user-owned profiles with orgId=null) are returned, even though
- * profileIds already come from org-scoped queries via resolveProviderProfiles().
+ * profileIds already come from org-scoped queries via resolveProviderProfiles(),
+ * so no additional filtering is needed beyond the ID match.
  */
 async function buildProfileInfoMap(
   profileIds: string[],
-  orgId: string,
 ): Promise<Map<string, { profileName: string | null; profileOwnerName: string | null }>> {
   if (profileIds.length === 0) {
     return new Map();
@@ -114,12 +112,7 @@ async function buildProfileInfoMap(
       userId: connectionProfiles.userId,
     })
     .from(connectionProfiles)
-    .where(
-      and(
-        inArray(connectionProfiles.id, profileIds),
-        or(eq(connectionProfiles.orgId, orgId), isNull(connectionProfiles.orgId)),
-      ),
-    );
+    .where(inArray(connectionProfiles.id, profileIds));
 
   const userIds = profileRows.map((r) => r.userId).filter((id): id is string => id != null);
   const userNameMap = await batchLoadUserNames(userIds);
@@ -220,7 +213,7 @@ export async function resolveProviderStatuses(
 
   // Batch-fetch profile info, connection statuses, and auth modes in parallel
   const [profileInfoMap, connectionMap, allProviders] = await Promise.all([
-    buildProfileInfoMap(profileIds, orgId),
+    buildProfileInfoMap(profileIds),
     batchGetConnectionStatuses(profileIds, orgId, credentialIdMap),
     listProviders(db, orgId),
   ]);

@@ -243,6 +243,7 @@ const APP_SCOPED_PREFIXES = [
   "/api/packages",
   "/api/providers",
   "/api/connections",
+  "/api/connection-profiles",
 ];
 
 const appContextMiddleware = requireAppContext();

@@ -26,7 +26,7 @@ export interface AgentProviderRequirement {
  * Resolved profile entry for a provider — carries both the profile ID and how it was resolved.
  *
  * Resolution order (highest priority first):
- * 1. Org profile binding (`source: "org_binding"`) — admin-configured via org_profile_provider_bindings
+ * 1. App profile binding (`source: "app_binding"`) — admin-configured via app_profile_provider_bindings
  * 2. Per-provider user override (`source: "user_profile"`) — user-selected via user_agent_provider_profiles
  * 3. Default user profile (`source: "user_profile"`) — actor's default connection profile
  */

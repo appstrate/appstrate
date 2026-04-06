@@ -14,7 +14,7 @@ import {
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
-import { organizations } from "./organizations.ts";
+import { organizations } from "./organizations.ts"; // used by userProviderConnections + oauthStates
 import { packages } from "./packages.ts";
 
 export const connectionProfiles = pgTable(
@@ -25,7 +25,7 @@ export const connectionProfiles = pgTable(
     endUserId: text("end_user_id").references(() => endUsers.id, {
       onDelete: "cascade",
     }),
-    orgId: uuid("org_id").references(() => organizations.id, {
+    applicationId: text("application_id").references(() => applications.id, {
       onDelete: "cascade",
     }),
     name: text("name").notNull(),
@@ -42,13 +42,13 @@ export const connectionProfiles = pgTable(
       .where(sql`${table.isDefault} = true AND ${table.endUserId} IS NOT NULL`),
     index("idx_connection_profiles_user_id").on(table.userId),
     index("idx_connection_profiles_end_user_id").on(table.endUserId),
-    index("idx_connection_profiles_org_id").on(table.orgId),
+    index("idx_connection_profiles_app_id").on(table.applicationId),
     check(
       "connection_profiles_exactly_one_owner",
       sql`(
-        (user_id IS NOT NULL AND end_user_id IS NULL AND org_id IS NULL) OR
-        (user_id IS NULL AND end_user_id IS NOT NULL AND org_id IS NULL) OR
-        (user_id IS NULL AND end_user_id IS NULL AND org_id IS NOT NULL)
+        (user_id IS NOT NULL AND end_user_id IS NULL AND application_id IS NULL) OR
+        (user_id IS NULL AND end_user_id IS NOT NULL AND application_id IS NULL) OR
+        (user_id IS NULL AND end_user_id IS NULL AND application_id IS NOT NULL)
       )`,
     ),
   ],
@@ -87,11 +87,11 @@ export const userAgentProviderProfiles = pgTable(
   ],
 );
 
-// ─── Org profile provider bindings (delegation: org profile → user profile) ──
-export const orgProfileProviderBindings = pgTable(
-  "org_profile_provider_bindings",
+// ─── App profile provider bindings (delegation: app profile → user profile) ──
+export const appProfileProviderBindings = pgTable(
+  "app_profile_provider_bindings",
   {
-    orgProfileId: uuid("org_profile_id")
+    appProfileId: uuid("app_profile_id")
       .notNull()
       .references(() => connectionProfiles.id, { onDelete: "cascade" }),
     providerId: text("provider_id").notNull(),
@@ -105,9 +105,9 @@ export const orgProfileProviderBindings = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.orgProfileId, table.providerId] }),
-    index("idx_org_profile_bindings_source").on(table.sourceProfileId),
-    index("idx_org_profile_bindings_user").on(table.boundByUserId),
+    primaryKey({ columns: [table.appProfileId, table.providerId] }),
+    index("idx_app_profile_bindings_source").on(table.sourceProfileId),
+    index("idx_app_profile_bindings_user").on(table.boundByUserId),
   ],
 );
 

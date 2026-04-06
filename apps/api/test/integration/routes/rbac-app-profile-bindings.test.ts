@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for org profile binding ownership checks.
+ * Integration tests for app profile binding ownership checks.
  *
  * Verifies that:
  * - A member can bind/unbind their own connections
  * - A member CANNOT overwrite/unbind another member's binding
- * - An admin CAN overwrite/unbind any binding (org-profiles:write)
+ * - An admin CAN overwrite/unbind any binding (app-profiles:write)
  *
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §3.2.1
  */
@@ -23,7 +23,7 @@ import {
 } from "../../helpers/auth.ts";
 import { seedConnectionProfile } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
-import { orgProfileProviderBindings } from "@appstrate/db/schema";
+import { appProfileProviderBindings } from "@appstrate/db/schema";
 
 const app = getTestApp();
 
@@ -38,12 +38,12 @@ async function contextForRole(
   return { ...ownerCtx, user, cookie: user.cookie };
 }
 
-describe("RBAC — Org profile binding ownership", () => {
+describe("RBAC — App profile binding ownership", () => {
   let owner: TestContext;
   let admin: TestContext;
   let memberA: TestContext;
   let memberB: TestContext;
-  let orgProfileId: string;
+  let appProfileId: string;
   let memberAProfileId: string;
   let memberBProfileId: string;
 
@@ -54,9 +54,12 @@ describe("RBAC — Org profile binding ownership", () => {
     memberA = await contextForRole(owner, "member");
     memberB = await contextForRole(owner, "member");
 
-    // Create an org profile
-    const orgProfile = await seedConnectionProfile({ orgId: owner.orgId, name: "Org Profile" });
-    orgProfileId = orgProfile.id;
+    // Create an app profile
+    const appProfile = await seedConnectionProfile({
+      applicationId: owner.defaultAppId,
+      name: "App Profile",
+    });
+    appProfileId = appProfile.id;
 
     // Create personal profiles for each member
     const profileA = await seedConnectionProfile({
@@ -75,15 +78,15 @@ describe("RBAC — Org profile binding ownership", () => {
   /** Seed a binding directly in DB (bypass route to set up test state). */
   async function seedBinding(sourceProfileId: string, boundByUserId: string) {
     await db
-      .insert(orgProfileProviderBindings)
+      .insert(appProfileProviderBindings)
       .values({
-        orgProfileId,
+        appProfileId,
         providerId: PROVIDER_ID,
         sourceProfileId,
         boundByUserId,
       })
       .onConflictDoUpdate({
-        target: [orgProfileProviderBindings.orgProfileId, orgProfileProviderBindings.providerId],
+        target: [appProfileProviderBindings.appProfileId, appProfileProviderBindings.providerId],
         set: { sourceProfileId, boundByUserId, updatedAt: new Date() },
       });
   }
@@ -93,7 +96,7 @@ describe("RBAC — Org profile binding ownership", () => {
       await seedBinding(memberAProfileId, memberA.user.id);
 
       const res = await app.request(
-        `/api/connection-profiles/org/${orgProfileId}/bind/${PROVIDER_ID}`,
+        `/api/connection-profiles/app/${appProfileId}/bind/${PROVIDER_ID}`,
         { method: "DELETE", headers: authHeaders(memberA) },
       );
       expect(res.status).toBe(200);
@@ -103,7 +106,7 @@ describe("RBAC — Org profile binding ownership", () => {
       await seedBinding(memberAProfileId, memberA.user.id);
 
       const res = await app.request(
-        `/api/connection-profiles/org/${orgProfileId}/bind/${PROVIDER_ID}`,
+        `/api/connection-profiles/app/${appProfileId}/bind/${PROVIDER_ID}`,
         { method: "DELETE", headers: authHeaders(memberB) },
       );
       expect(res.status).toBe(403);
@@ -115,7 +118,7 @@ describe("RBAC — Org profile binding ownership", () => {
       await seedBinding(memberAProfileId, memberA.user.id);
 
       const res = await app.request(
-        `/api/connection-profiles/org/${orgProfileId}/bind/${PROVIDER_ID}`,
+        `/api/connection-profiles/app/${appProfileId}/bind/${PROVIDER_ID}`,
         { method: "DELETE", headers: authHeaders(admin) },
       );
       expect(res.status).toBe(200);
@@ -126,7 +129,7 @@ describe("RBAC — Org profile binding ownership", () => {
     it("member CANNOT overwrite another member's binding", async () => {
       await seedBinding(memberAProfileId, memberA.user.id);
 
-      const res = await app.request(`/api/connection-profiles/org/${orgProfileId}/bind`, {
+      const res = await app.request(`/api/connection-profiles/app/${appProfileId}/bind`, {
         method: "POST",
         headers: authHeaders(memberB, { "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -148,7 +151,7 @@ describe("RBAC — Org profile binding ownership", () => {
         name: "Admin Profile",
       });
 
-      const res = await app.request(`/api/connection-profiles/org/${orgProfileId}/bind`, {
+      const res = await app.request(`/api/connection-profiles/app/${appProfileId}/bind`, {
         method: "POST",
         headers: authHeaders(admin, { "Content-Type": "application/json" }),
         body: JSON.stringify({

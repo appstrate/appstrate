@@ -16,7 +16,7 @@ import {
   listRunLogs,
   addPackageMemories,
 } from "../services/state/index.ts";
-import { resolveActorProfileContext, getAgentOrgProfile } from "../services/connection-profiles.ts";
+import { resolveActorProfileContext, getAgentAppProfile } from "../services/connection-profiles.ts";
 import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
@@ -374,9 +374,9 @@ export function createRunsRouter() {
       }
 
       // Resolve org profile, actor profile context, and input in parallel
-      const [agentOrgProfile, { defaultUserProfileId, userProviderOverrides }, inputResult] =
+      const [agentAppProfile, { defaultUserProfileId, userProviderOverrides }, inputResult] =
         await Promise.all([
-          getAgentOrgProfile(c.get("applicationId"), orgId, packageId),
+          getAgentAppProfile(c.get("applicationId"), packageId),
           resolveActorProfileContext(actor, packageId),
           parseRequestInput(
             c,
@@ -399,7 +399,7 @@ export function createRunsRouter() {
         orgId,
         defaultUserProfileId,
         userProviderOverrides,
-        orgProfileId: agentOrgProfile?.id ?? null,
+        appProfileId: agentAppProfile?.id ?? null,
       });
 
       const {

@@ -15,12 +15,12 @@ import {
   renameProfile,
   deleteProfile,
   getProfileForActor,
-  listOrgProfiles,
-  createOrgProfile,
-  getOrgProfile,
-  renameOrgProfile,
-  deleteOrgProfile,
-  listOrgProfilesWithUserBindings,
+  listAppProfiles,
+  createAppProfile,
+  getAppProfile,
+  renameAppProfile,
+  deleteAppProfile,
+  listAppProfilesWithUserBindings,
   getOrgMemberProfile,
 } from "../services/connection-profiles.ts";
 import {
@@ -29,9 +29,9 @@ import {
   hasActiveConnection,
 } from "../services/connection-manager/index.ts";
 import {
-  getOrgProfileBindingsEnriched,
-  bindOrgProfileProvider,
-  unbindOrgProfileProvider,
+  getAppProfileBindingsEnriched,
+  bindAppProfileProvider,
+  unbindAppProfileProvider,
   getBindingOwner,
 } from "../services/state/index.ts";
 import { getActor } from "../lib/actor.ts";
@@ -41,8 +41,8 @@ import { listConnections, listProviderCredentialIds } from "@appstrate/connect";
 
 const profileNameSchema = z.object({ name: z.string().min(1, "Name is required").max(100) });
 
-async function requireOrgProfile(profileId: string, orgId: string) {
-  const profile = await getOrgProfile(profileId, orgId);
+async function requireAppProfile(profileId: string, applicationId: string) {
+  const profile = await getAppProfile(profileId, applicationId);
   if (!profile) throw notFound("Profile not found");
   return profile;
 }
@@ -82,67 +82,67 @@ export function createConnectionProfilesRouter() {
     return c.json({ ok: true });
   });
 
-  // GET /api/connection-profiles/my-org-bindings — list org profiles where current user has bindings
-  router.get("/my-org-bindings", async (c) => {
+  // GET /api/connection-profiles/my-app-bindings — list app profiles where current user has bindings
+  router.get("/my-app-bindings", async (c) => {
     const userId = c.get("user").id;
-    const orgId = c.get("orgId");
-    const profiles = await listOrgProfilesWithUserBindings(userId, orgId);
+    const applicationId = c.get("applicationId");
+    const profiles = await listAppProfilesWithUserBindings(userId, applicationId);
     return c.json({ profiles });
   });
 
-  // ─── Org Profile Routes (before /:id to avoid param matching) ──
+  // ─── App Profile Routes (before /:id to avoid param matching) ──
 
-  // GET /api/connection-profiles/org — list org profiles
-  router.get("/org", async (c) => {
-    const orgId = c.get("orgId");
-    const profiles = await listOrgProfiles(orgId);
+  // GET /api/connection-profiles/app — list app profiles
+  router.get("/app", async (c) => {
+    const applicationId = c.get("applicationId");
+    const profiles = await listAppProfiles(applicationId);
     return c.json({ profiles });
   });
 
-  // POST /api/connection-profiles/org — create an org profile
-  router.post("/org", rateLimit(10), requirePermission("org-profiles", "write"), async (c) => {
-    const orgId = c.get("orgId");
+  // POST /api/connection-profiles/app — create an app profile
+  router.post("/app", rateLimit(10), requirePermission("app-profiles", "write"), async (c) => {
+    const applicationId = c.get("applicationId");
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
-    const profile = await createOrgProfile(orgId, data.name.trim());
+    const profile = await createAppProfile(applicationId, data.name.trim());
     return c.json({ profile }, 201);
   });
 
-  // PUT /api/connection-profiles/org/:id — rename an org profile
-  router.put("/org/:id", requirePermission("org-profiles", "write"), async (c) => {
-    const orgId = c.get("orgId");
+  // PUT /api/connection-profiles/app/:id — rename an app profile
+  router.put("/app/:id", requirePermission("app-profiles", "write"), async (c) => {
+    const applicationId = c.get("applicationId");
     const profileId = c.req.param("id")!;
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
     try {
-      await renameOrgProfile(profileId, orgId, data.name.trim());
+      await renameAppProfile(profileId, applicationId, data.name.trim());
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to rename profile";
-      logger.warn("Failed to rename org profile", { profileId, orgId, error: message });
+      logger.warn("Failed to rename app profile", { profileId, applicationId, error: message });
       throw invalidRequest(message);
     }
   });
 
-  // DELETE /api/connection-profiles/org/:id — delete an org profile
-  router.delete("/org/:id", requirePermission("org-profiles", "delete"), async (c) => {
-    const orgId = c.get("orgId");
+  // DELETE /api/connection-profiles/app/:id — delete an app profile
+  router.delete("/app/:id", requirePermission("app-profiles", "delete"), async (c) => {
+    const applicationId = c.get("applicationId");
     const profileId = c.req.param("id")!;
     try {
-      await deleteOrgProfile(profileId, orgId);
+      await deleteAppProfile(profileId, applicationId);
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete profile";
-      logger.warn("Failed to delete org profile", { profileId, orgId, error: message });
+      logger.warn("Failed to delete app profile", { profileId, applicationId, error: message });
       throw invalidRequest(message);
     }
   });
 
-  // GET /api/connection-profiles/org/:id/agents — list agents using this org profile
-  router.get("/org/:id/agents", async (c) => {
-    const orgId = c.get("orgId");
+  // GET /api/connection-profiles/app/:id/agents — list agents using this app profile
+  router.get("/app/:id/agents", async (c) => {
+    const applicationId = c.get("applicationId");
     const profileId = c.req.param("id")!;
-    await requireOrgProfile(profileId, orgId);
+    await requireAppProfile(profileId, applicationId);
 
     const rows = await db
       .select({
@@ -151,30 +151,31 @@ export function createConnectionProfilesRouter() {
       })
       .from(applicationPackages)
       .innerJoin(packages, eq(packages.id, applicationPackages.packageId))
-      .where(eq(applicationPackages.orgProfileId, profileId));
+      .where(eq(applicationPackages.appProfileId, profileId));
 
     return c.json({ agents: rows });
   });
 
-  // GET /api/connection-profiles/org/:id/bindings — list provider bindings for an org profile
-  router.get("/org/:id/bindings", async (c) => {
-    const orgId = c.get("orgId");
+  // GET /api/connection-profiles/app/:id/bindings — list provider bindings for an app profile
+  router.get("/app/:id/bindings", async (c) => {
+    const applicationId = c.get("applicationId");
     const profileId = c.req.param("id")!;
-    await requireOrgProfile(profileId, orgId);
-    const bindings = await getOrgProfileBindingsEnriched(profileId, orgId);
+    await requireAppProfile(profileId, applicationId);
+    const bindings = await getAppProfileBindingsEnriched(profileId, applicationId);
     return c.json({ bindings });
   });
 
-  // POST /api/connection-profiles/org/:id/bind — bind a provider to a user's connection
+  // POST /api/connection-profiles/app/:id/bind — bind a provider to a user's connection
   router.post(
-    "/org/:id/bind",
+    "/app/:id/bind",
     rateLimit(10),
-    requirePermission("org-profiles", "bind"),
+    requirePermission("app-profiles", "bind"),
     async (c) => {
+      const applicationId = c.get("applicationId");
       const orgId = c.get("orgId");
       const userId = c.get("user").id;
       const profileId = c.req.param("id")!;
-      await requireOrgProfile(profileId, orgId);
+      await requireAppProfile(profileId, applicationId);
 
       const body = await c.req.json();
       const data = parseBody(
@@ -192,11 +193,11 @@ export function createConnectionProfilesRouter() {
         throw invalidRequest("Source profile not found or does not belong to you");
       }
 
-      // Ownership check: can't overwrite another user's binding without org-profiles:write
+      // Ownership check: can't overwrite another user's binding without app-profiles:write
       const existingOwner = await getBindingOwner(profileId, data.providerId);
       if (existingOwner && existingOwner !== userId) {
         const perms = c.get("permissions");
-        if (!perms?.has("org-profiles:write")) {
+        if (!perms?.has("app-profiles:write")) {
           throw forbidden("Cannot overwrite a binding created by another member");
         }
       }
@@ -207,32 +208,32 @@ export function createConnectionProfilesRouter() {
         throw invalidRequest(`No active connection for '${data.providerId}' on the source profile`);
       }
 
-      await bindOrgProfileProvider(profileId, data.providerId, data.sourceProfileId, userId);
+      await bindAppProfileProvider(profileId, data.providerId, data.sourceProfileId, userId);
       return c.json({ bound: true });
     },
   );
 
-  // DELETE /api/connection-profiles/org/:id/bind/:providerScope/:providerName — unbind a provider
+  // DELETE /api/connection-profiles/app/:id/bind/:providerScope/:providerName — unbind a provider
   router.delete(
-    "/org/:id/bind/:providerScope{@[^/]+}/:providerName",
-    requirePermission("org-profiles", "bind"),
+    "/app/:id/bind/:providerScope{@[^/]+}/:providerName",
+    requirePermission("app-profiles", "bind"),
     async (c) => {
-      const orgId = c.get("orgId");
+      const applicationId = c.get("applicationId");
       const userId = c.get("user").id;
       const profileId = c.req.param("id")!;
       const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;
-      await requireOrgProfile(profileId, orgId);
+      await requireAppProfile(profileId, applicationId);
 
-      // Ownership check: can't unbind another user's binding without org-profiles:write
+      // Ownership check: can't unbind another user's binding without app-profiles:write
       const existingOwner = await getBindingOwner(profileId, providerId);
       if (existingOwner && existingOwner !== userId) {
         const perms = c.get("permissions");
-        if (!perms?.has("org-profiles:write")) {
+        if (!perms?.has("app-profiles:write")) {
           throw forbidden("Cannot unbind a connection bound by another member");
         }
       }
 
-      await unbindOrgProfileProvider(profileId, providerId);
+      await unbindAppProfileProvider(profileId, providerId);
       return c.json({ unbound: true });
     },
   );
@@ -279,7 +280,7 @@ export function createConnectionProfilesRouter() {
     // Allow access if: own profile, org profile, or profile of another org member (read-only view)
     const profile =
       (await getProfileForActor(profileId, actor)) ??
-      (await getOrgProfile(profileId, orgId)) ??
+      (await getAppProfile(profileId, applicationId)) ??
       (await getOrgMemberProfile(profileId, orgId));
     if (!profile) {
       throw notFound("Profile not found");

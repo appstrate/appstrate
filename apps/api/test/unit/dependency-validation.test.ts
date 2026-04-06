@@ -202,7 +202,7 @@ describe("validateAgentDependencies", () => {
     const providers = [{ id: "@test/gmail" }, { id: "@test/gdrive" }];
     const profiles: ProviderProfileMap = {
       "@test/gmail": { profileId: "user-profile-1", source: "user_profile" },
-      "@test/gdrive": { profileId: "admin-profile-1", source: "org_binding" },
+      "@test/gdrive": { profileId: "admin-profile-1", source: "app_binding" },
     };
 
     await validateAgentDependencies(providers, profiles, "org-1", "app-1", deps);

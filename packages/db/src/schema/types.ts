@@ -12,7 +12,7 @@ import type {
 import type { runs, runLogs, packageSchedules, packageMemories } from "./runs.ts";
 import type {
   connectionProfiles,
-  orgProfileProviderBindings,
+  appProfileProviderBindings,
   userProviderConnections,
   applicationProviderCredentials,
   oauthStates,
@@ -49,7 +49,7 @@ export type RunLog = InferSelectModel<typeof runLogs>;
 
 export type ConnectionProfile = InferSelectModel<typeof connectionProfiles>;
 
-export type OrgProfileProviderBinding = InferSelectModel<typeof orgProfileProviderBindings>;
+export type AppProfileProviderBinding = InferSelectModel<typeof appProfileProviderBindings>;
 
 export type Application = InferSelectModel<typeof applications>;
 

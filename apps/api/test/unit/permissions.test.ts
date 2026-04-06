@@ -45,7 +45,7 @@ describe("resolvePermissions", () => {
     // Can cancel runs
     expect(perms.has("runs:cancel")).toBe(true);
     // Can bind org profiles
-    expect(perms.has("org-profiles:bind")).toBe(true);
+    expect(perms.has("app-profiles:bind")).toBe(true);
     // Can write end-users
     expect(perms.has("end-users:write")).toBe(true);
     // Cannot write agents
@@ -191,10 +191,10 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "profiles:read",
       "profiles:write",
       "profiles:delete",
-      "org-profiles:read",
-      "org-profiles:write",
-      "org-profiles:delete",
-      "org-profiles:bind",
+      "app-profiles:read",
+      "app-profiles:write",
+      "app-profiles:delete",
+      "app-profiles:bind",
       "connections:read",
       "connections:connect",
       "connections:disconnect",

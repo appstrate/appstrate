@@ -59,7 +59,7 @@ export interface ScheduleReadiness {
 
 export type EnrichedSchedule = PackageSchedule & {
   profileName: string | null;
-  profileType: "user" | "org" | null;
+  profileType: "user" | "app" | null;
   profileOwnerName: string | null;
   readiness: ScheduleReadiness;
 };
@@ -146,7 +146,7 @@ export interface UserConnectionProviderGroup {
   orgs: UserConnectionOrgGroup[];
 }
 
-export type ProviderProfileSource = "org_binding" | "user_profile";
+export type ProviderProfileSource = "app_binding" | "user_profile";
 
 export interface ProviderStatus {
   id: string;
@@ -160,7 +160,7 @@ export interface ProviderStatus {
   scopesGranted?: string[];
   scopesSufficient?: boolean;
   scopesMissing?: string[];
-  /** How the connection profile was resolved — "org_binding" if via org profile delegation, "user_profile" if via personal profile. */
+  /** How the connection profile was resolved — "app_binding" if via app profile delegation, "user_profile" if via personal profile. */
   source: ProviderProfileSource | null;
   /** Name of the connection profile used for this provider. */
   profileName: string | null;
@@ -214,9 +214,9 @@ export interface AgentDetail {
 
   populatedProviders?: Record<string, ProviderConfig>;
   callbackUrl?: string;
-  /** Org profile ID configured for this agent. Used for per-provider org bindings. */
-  agentOrgProfileId: string | null;
-  agentOrgProfileName: string | null;
+  /** App profile ID configured for this agent. Used for per-provider app bindings. */
+  agentAppProfileId: string | null;
+  agentAppProfileName: string | null;
   versionCount?: number;
   hasUnarchivedChanges?: boolean;
   forkedFrom: string | null;
@@ -423,7 +423,7 @@ export interface InstalledPackage {
   config: Record<string, unknown>;
   modelId: string | null;
   proxyId: string | null;
-  orgProfileId: string | null;
+  appProfileId: string | null;
   versionId: number | null;
   enabled: boolean;
   installedAt: string;

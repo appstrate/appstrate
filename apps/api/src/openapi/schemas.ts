@@ -52,7 +52,7 @@ export const schemas = {
       config: { type: "object", description: "Application-specific configuration" },
       modelId: { type: ["string", "null"], description: "Model override for this app" },
       proxyId: { type: ["string", "null"], description: "Proxy override for this app" },
-      orgProfileId: { type: ["string", "null"], description: "Org profile override" },
+      appProfileId: { type: ["string", "null"], description: "App profile override" },
       versionId: { type: ["integer", "null"], description: "Pinned version (null = latest)" },
       enabled: { type: "boolean" },
       installedAt: { type: "string", format: "date-time" },
@@ -158,7 +158,7 @@ export const schemas = {
       scopesMissing: { type: "array", items: { type: "string" } },
       source: {
         type: "string",
-        enum: ["org_binding", "user_profile"],
+        enum: ["app_binding", "user_profile"],
         description: "How the connection profile was resolved",
       },
       profileName: {
@@ -307,14 +307,14 @@ export const schemas = {
         type: "integer",
         description: "Number of published versions (0 for built-in agents)",
       },
-      agentOrgProfileId: {
+      agentAppProfileId: {
         type: ["string", "null"],
         format: "uuid",
-        description: "Admin-configured org connection profile ID (null if none)",
+        description: "Admin-configured app connection profile ID (null if none)",
       },
-      agentOrgProfileName: {
+      agentAppProfileName: {
         type: ["string", "null"],
-        description: "Display name of the admin-configured org connection profile",
+        description: "Display name of the admin-configured app connection profile",
       },
       forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
       hasUnarchivedChanges: {
@@ -426,7 +426,7 @@ export const schemas = {
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
       profileName: { type: ["string", "null"] },
-      profileType: { type: ["string", "null"], enum: ["user", "org", null] },
+      profileType: { type: ["string", "null"], enum: ["user", "app", null] },
       readiness: {
         type: "object",
         properties: {

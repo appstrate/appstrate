@@ -145,11 +145,11 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  // ─── Org Profile Routes ──────────────────────────────────
+  // ─── App Profile Routes ──────────────────────────────────
 
-  describe("GET /api/connection-profiles/org", () => {
+  describe("GET /api/connection-profiles/app", () => {
     it("returns empty list initially", async () => {
-      const res = await app.request("/api/connection-profiles/org", {
+      const res = await app.request("/api/connection-profiles/app", {
         headers: authHeaders(ctx),
       });
 
@@ -159,23 +159,23 @@ describe("Connection Profiles API", () => {
       expect(body.profiles).toHaveLength(0);
     });
 
-    it("returns created org profiles", async () => {
-      await seedConnectionProfile({ orgId: ctx.orgId, name: "Org Profile 1" });
+    it("returns created app profiles", async () => {
+      await seedConnectionProfile({ applicationId: ctx.defaultAppId, name: "App Profile 1" });
 
-      const res = await app.request("/api/connection-profiles/org", {
+      const res = await app.request("/api/connection-profiles/app", {
         headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.profiles).toHaveLength(1);
-      expect(body.profiles[0].name).toBe("Org Profile 1");
+      expect(body.profiles[0].name).toBe("App Profile 1");
     });
   });
 
-  describe("POST /api/connection-profiles/org", () => {
-    it("creates an org profile (admin/owner)", async () => {
-      const res = await app.request("/api/connection-profiles/org", {
+  describe("POST /api/connection-profiles/app", () => {
+    it("creates an app profile (admin/owner)", async () => {
+      const res = await app.request("/api/connection-profiles/app", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Production" }),
@@ -185,11 +185,11 @@ describe("Connection Profiles API", () => {
       const body = (await res.json()) as any;
       expect(body.profile).toBeDefined();
       expect(body.profile.name).toBe("Production");
-      expect(body.profile.orgId).toBe(ctx.orgId);
+      expect(body.profile.applicationId).toBe(ctx.defaultAppId);
     });
 
     it("rejects empty name", async () => {
-      const res = await app.request("/api/connection-profiles/org", {
+      const res = await app.request("/api/connection-profiles/app", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "" }),
@@ -199,14 +199,17 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("PUT /api/connection-profiles/org/:id", () => {
-    it("renames an org profile", async () => {
-      const profile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Old Org Name" });
+  describe("PUT /api/connection-profiles/app/:id", () => {
+    it("renames an app profile", async () => {
+      const profile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "Old App Name",
+      });
 
-      const res = await app.request(`/api/connection-profiles/org/${profile.id}`, {
+      const res = await app.request(`/api/connection-profiles/app/${profile.id}`, {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "New Org Name" }),
+        body: JSON.stringify({ name: "New App Name" }),
       });
 
       expect(res.status).toBe(200);
@@ -215,11 +218,14 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("DELETE /api/connection-profiles/org/:id", () => {
-    it("deletes an org profile", async () => {
-      const profile = await seedConnectionProfile({ orgId: ctx.orgId, name: "To Delete" });
+  describe("DELETE /api/connection-profiles/app/:id", () => {
+    it("deletes an app profile", async () => {
+      const profile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "To Delete",
+      });
 
-      const res = await app.request(`/api/connection-profiles/org/${profile.id}`, {
+      const res = await app.request(`/api/connection-profiles/app/${profile.id}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
@@ -232,11 +238,11 @@ describe("Connection Profiles API", () => {
     it("returns 400 for profile from another org", async () => {
       const otherCtx = await createTestContext();
       const otherProfile = await seedConnectionProfile({
-        orgId: otherCtx.orgId,
-        name: "Other Org",
+        applicationId: otherCtx.defaultAppId,
+        name: "Other App",
       });
 
-      const res = await app.request(`/api/connection-profiles/org/${otherProfile.id}`, {
+      const res = await app.request(`/api/connection-profiles/app/${otherProfile.id}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
@@ -246,9 +252,12 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("GET /api/connection-profiles/org/:id/agents", () => {
-    it("returns agents configured with the org profile", async () => {
-      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Prod Profile" });
+  describe("GET /api/connection-profiles/app/:id/agents", () => {
+    it("returns agents configured with the app profile", async () => {
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "Prod Profile",
+      });
       await seedAgent({
         id: "@testorg/linked-agent",
         orgId: ctx.orgId,
@@ -263,15 +272,15 @@ describe("Connection Profiles API", () => {
       });
       await installPackage(ctx.defaultAppId, ctx.orgId, "@testorg/linked-agent");
 
-      // Set org profile on the agent
-      const setRes = await app.request("/api/agents/@testorg/linked-agent/org-profile", {
+      // Set app profile on the agent
+      const setRes = await app.request("/api/agents/@testorg/linked-agent/app-profile", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ orgProfileId: orgProfile.id }),
+        body: JSON.stringify({ appProfileId: appProfile.id }),
       });
       expect(setRes.status).toBe(200);
 
-      const res = await app.request(`/api/connection-profiles/org/${orgProfile.id}/agents`, {
+      const res = await app.request(`/api/connection-profiles/app/${appProfile.id}/agents`, {
         headers: authHeaders(ctx),
       });
 
@@ -284,9 +293,12 @@ describe("Connection Profiles API", () => {
     });
 
     it("returns empty array when no agents use the profile", async () => {
-      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Unused" });
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "Unused",
+      });
 
-      const res = await app.request(`/api/connection-profiles/org/${orgProfile.id}/agents`, {
+      const res = await app.request(`/api/connection-profiles/app/${appProfile.id}/agents`, {
         headers: authHeaders(ctx),
       });
 
@@ -297,7 +309,7 @@ describe("Connection Profiles API", () => {
 
     it("returns 404 for non-existent profile", async () => {
       const res = await app.request(
-        "/api/connection-profiles/org/00000000-0000-0000-0000-000000000000/agents",
+        "/api/connection-profiles/app/00000000-0000-0000-0000-000000000000/agents",
         { headers: authHeaders(ctx) },
       );
 
@@ -305,11 +317,14 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("GET /api/connection-profiles/org/:id/bindings", () => {
-    it("returns empty bindings for a new org profile", async () => {
-      const profile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org Profile" });
+  describe("GET /api/connection-profiles/app/:id/bindings", () => {
+    it("returns empty bindings for a new app profile", async () => {
+      const profile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App Profile",
+      });
 
-      const res = await app.request(`/api/connection-profiles/org/${profile.id}/bindings`, {
+      const res = await app.request(`/api/connection-profiles/app/${profile.id}/bindings`, {
         headers: authHeaders(ctx),
       });
 
@@ -321,7 +336,7 @@ describe("Connection Profiles API", () => {
 
     it("returns 404 for unknown profile", async () => {
       const res = await app.request(
-        `/api/connection-profiles/org/00000000-0000-0000-0000-000000000000/bindings`,
+        `/api/connection-profiles/app/00000000-0000-0000-0000-000000000000/bindings`,
         { headers: authHeaders(ctx) },
       );
 
@@ -329,15 +344,18 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("POST /api/connection-profiles/org/:id/bind", () => {
+  describe("POST /api/connection-profiles/app/:id/bind", () => {
     it("rejects bind with missing providerId", async () => {
-      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org" });
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App",
+      });
       const userProfile = await seedConnectionProfile({
         userId: ctx.user.id,
         name: "User Profile",
       });
 
-      const res = await app.request(`/api/connection-profiles/org/${orgProfile.id}/bind`, {
+      const res = await app.request(`/api/connection-profiles/app/${appProfile.id}/bind`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ sourceProfileId: userProfile.id }),
@@ -347,14 +365,17 @@ describe("Connection Profiles API", () => {
     });
 
     it("rejects bind with source profile that doesn't belong to the user", async () => {
-      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org" });
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App",
+      });
       const otherCtx = await createTestContext();
       const otherProfile = await seedConnectionProfile({
         userId: otherCtx.user.id,
         name: "Other User",
       });
 
-      const res = await app.request(`/api/connection-profiles/org/${orgProfile.id}/bind`, {
+      const res = await app.request(`/api/connection-profiles/app/${appProfile.id}/bind`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -367,10 +388,10 @@ describe("Connection Profiles API", () => {
     });
   });
 
-  describe("DELETE /api/connection-profiles/org/:id/bind/:provider", () => {
-    it("returns 404 for unknown org profile", async () => {
+  describe("DELETE /api/connection-profiles/app/:id/bind/:provider", () => {
+    it("returns 404 for unknown app profile", async () => {
       const res = await app.request(
-        `/api/connection-profiles/org/00000000-0000-0000-0000-000000000000/bind/@appstrate/gmail`,
+        `/api/connection-profiles/app/00000000-0000-0000-0000-000000000000/bind/@appstrate/gmail`,
         {
           method: "DELETE",
           headers: authHeaders(ctx),
@@ -381,10 +402,13 @@ describe("Connection Profiles API", () => {
     });
 
     it("succeeds on unbind even when no binding exists (idempotent)", async () => {
-      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org" });
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App",
+      });
 
       const res = await app.request(
-        `/api/connection-profiles/org/${orgProfile.id}/bind/@appstrate/gmail`,
+        `/api/connection-profiles/app/${appProfile.id}/bind/@appstrate/gmail`,
         {
           method: "DELETE",
           headers: authHeaders(ctx),
@@ -462,13 +486,13 @@ describe("Connection Profiles API", () => {
       expect(body.connections).toBeArray();
     });
 
-    it("returns connections for an org-level profile in the same org", async () => {
-      const orgProfile = await seedConnectionProfile({
-        orgId: ctx.orgId,
-        name: "Org Shared Profile",
+    it("returns connections for an app-level profile in the same org", async () => {
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App Shared Profile",
       });
 
-      const res = await app.request(`/api/connection-profiles/${orgProfile.id}/connections`, {
+      const res = await app.request(`/api/connection-profiles/${appProfile.id}/connections`, {
         headers: authHeaders(ctx),
       });
 
@@ -523,22 +547,22 @@ describe("Connection Profiles API", () => {
       expect(body.detail).toContain("profile you do not own");
     });
 
-    it("accepts connecting on an org profile", async () => {
-      const providerId = "@testorg/test-provider-org";
+    it("accepts connecting on an app profile", async () => {
+      const providerId = "@testorg/test-provider-app";
       await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id, ctx.defaultAppId);
 
-      const orgProfile = await seedConnectionProfile({
-        orgId: ctx.orgId,
-        name: "Org Profile",
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App Profile",
       });
 
       const res = await app.request(`/api/connections/connect/${providerId}`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId: orgProfile.id }),
+        body: JSON.stringify({ profileId: appProfile.id }),
       });
 
-      // Should not get 403 — ownership check passes for org profiles
+      // Should not get 403 — ownership check passes for app profiles
       expect(res.status).not.toBe(403);
     });
 
@@ -596,19 +620,19 @@ describe("Connection Profiles API", () => {
       expect(body.detail).toContain("profile you do not own");
     });
 
-    it("accepts saving an API key on an org profile", async () => {
-      const providerId = "@testorg/apikey-provider-org";
+    it("accepts saving an API key on an app profile", async () => {
+      const providerId = "@testorg/apikey-provider-app";
       await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id, ctx.defaultAppId);
 
-      const orgProfile = await seedConnectionProfile({
-        orgId: ctx.orgId,
-        name: "Org Profile",
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App Profile",
       });
 
       const res = await app.request(`/api/connections/connect/${providerId}/api-key`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: "test-key-123", profileId: orgProfile.id }),
+        body: JSON.stringify({ apiKey: "test-key-123", profileId: appProfile.id }),
       });
 
       expect(res.status).not.toBe(403);
@@ -649,13 +673,13 @@ describe("Connection Profiles API", () => {
       expect(body.detail).toContain("profile you do not own");
     });
 
-    it("accepts saving credentials on an org profile", async () => {
-      const providerId = "@testorg/creds-provider-org";
+    it("accepts saving credentials on an app profile", async () => {
+      const providerId = "@testorg/creds-provider-app";
       await seedEnabledProvider(providerId, ctx.orgId, ctx.user.id, ctx.defaultAppId);
 
-      const orgProfile = await seedConnectionProfile({
-        orgId: ctx.orgId,
-        name: "Org Profile",
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App Profile",
       });
 
       const res = await app.request(`/api/connections/connect/${providerId}/credentials`, {
@@ -663,7 +687,7 @@ describe("Connection Profiles API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           credentials: { username: "user", password: "pass" },
-          profileId: orgProfile.id,
+          profileId: appProfile.id,
         }),
       });
 
@@ -710,13 +734,13 @@ describe("Connection Profiles API", () => {
       expect(res.status).toBe(200);
     });
 
-    it("allows listing connections for an org profile", async () => {
-      const orgProfile = await seedConnectionProfile({
-        orgId: ctx.orgId,
-        name: "Org Profile",
+    it("allows listing connections for an app profile", async () => {
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App Profile",
       });
 
-      const res = await app.request(`/api/connections?profileId=${orgProfile.id}`, {
+      const res = await app.request(`/api/connections?profileId=${appProfile.id}`, {
         headers: authHeaders(ctx),
       });
 
@@ -763,13 +787,13 @@ describe("Connection Profiles API", () => {
       expect(res.status).toBe(200);
     });
 
-    it("allows listing integrations for an org profile", async () => {
-      const orgProfile = await seedConnectionProfile({
-        orgId: ctx.orgId,
-        name: "Org Profile",
+    it("allows listing integrations for an app profile", async () => {
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App Profile",
       });
 
-      const res = await app.request(`/api/connections/integrations?profileId=${orgProfile.id}`, {
+      const res = await app.request(`/api/connections/integrations?profileId=${appProfile.id}`, {
         headers: authHeaders(ctx),
       });
 

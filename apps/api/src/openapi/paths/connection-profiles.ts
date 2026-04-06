@@ -271,17 +271,20 @@ export const connectionProfilesPaths = {
     },
   },
 
-  "/api/connection-profiles/my-org-bindings": {
+  "/api/connection-profiles/my-app-bindings": {
     get: {
-      operationId: "listMyOrgBindings",
+      operationId: "listMyAppBindings",
       tags: ["Connection Profiles"],
-      summary: "List org profiles using my bindings",
+      summary: "List app profiles using my bindings",
       description:
-        "List all org-level connection profiles where the authenticated user has bound provider connections.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+        "List all application-level connection profiles where the authenticated user has bound provider connections.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
-          description: "Org profiles with user's connections",
+          description: "App profiles with user's connections",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -301,7 +304,7 @@ export const connectionProfilesPaths = {
                           properties: {
                             id: { type: "string", format: "uuid" },
                             name: { type: "string" },
-                            orgId: { type: "string", format: "uuid" },
+                            applicationId: { type: "string" },
                           },
                         },
                         providerIds: {
@@ -321,16 +324,19 @@ export const connectionProfilesPaths = {
     },
   },
 
-  "/api/connection-profiles/org": {
+  "/api/connection-profiles/app": {
     get: {
-      operationId: "listOrgConnectionProfiles",
+      operationId: "listAppConnectionProfiles",
       tags: ["Connection Profiles"],
-      summary: "List org connection profiles",
-      description: "List all organization-level shared connection profiles with connection counts.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      summary: "List app connection profiles",
+      description: "List all application-level shared connection profiles with connection counts.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
-          description: "Org profile list",
+          description: "App profile list",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -347,7 +353,7 @@ export const connectionProfilesPaths = {
                       properties: {
                         id: { type: "string", format: "uuid" },
                         name: { type: "string" },
-                        orgId: { type: "string", format: "uuid" },
+                        applicationId: { type: "string" },
                         connectionCount: { type: "integer" },
                         createdAt: { type: "string", format: "date-time" },
                         updatedAt: { type: "string", format: "date-time" },
@@ -363,11 +369,14 @@ export const connectionProfilesPaths = {
       },
     },
     post: {
-      operationId: "createOrgConnectionProfile",
+      operationId: "createAppConnectionProfile",
       tags: ["Connection Profiles"],
-      summary: "Create an org connection profile",
-      description: "Create a new organization-level shared connection profile.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      summary: "Create an app connection profile",
+      description: "Create a new application-level shared connection profile.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       requestBody: {
         required: true,
         content: {
@@ -384,7 +393,7 @@ export const connectionProfilesPaths = {
       },
       responses: {
         "201": {
-          description: "Org profile created",
+          description: "App profile created",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
@@ -396,14 +405,15 @@ export const connectionProfilesPaths = {
     },
   },
 
-  "/api/connection-profiles/org/{id}": {
+  "/api/connection-profiles/app/{id}": {
     put: {
-      operationId: "renameOrgConnectionProfile",
+      operationId: "renameAppConnectionProfile",
       tags: ["Connection Profiles"],
-      summary: "Rename an org connection profile",
-      description: "Update the name of an org-level connection profile.",
+      summary: "Rename an app connection profile",
+      description: "Update the name of an application-level connection profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
       ],
       requestBody: {
@@ -434,12 +444,13 @@ export const connectionProfilesPaths = {
       },
     },
     delete: {
-      operationId: "deleteOrgConnectionProfile",
+      operationId: "deleteAppConnectionProfile",
       tags: ["Connection Profiles"],
-      summary: "Delete an org connection profile",
-      description: "Delete an org-level connection profile.",
+      summary: "Delete an app connection profile",
+      description: "Delete an application-level connection profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
       ],
       responses: {
@@ -457,15 +468,16 @@ export const connectionProfilesPaths = {
     },
   },
 
-  "/api/connection-profiles/org/{id}/agents": {
+  "/api/connection-profiles/app/{id}/agents": {
     get: {
-      operationId: "listOrgProfileAgents",
+      operationId: "listAppProfileAgents",
       tags: ["Connection Profiles"],
-      summary: "List agents using an org profile",
+      summary: "List agents using an app profile",
       description:
-        "List all agents that are configured to use a specific org-level connection profile.",
+        "List all agents that are configured to use a specific application-level connection profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
       ],
       responses: {
@@ -501,15 +513,16 @@ export const connectionProfilesPaths = {
     },
   },
 
-  "/api/connection-profiles/org/{id}/bindings": {
+  "/api/connection-profiles/app/{id}/bindings": {
     get: {
-      operationId: "listOrgProfileBindings",
+      operationId: "listAppProfileBindings",
       tags: ["Connection Profiles"],
-      summary: "List provider bindings for an org profile",
+      summary: "List provider bindings for an app profile",
       description:
-        "List all provider bindings for an org profile. Each binding maps a provider to a user's personal connection profile.",
+        "List all provider bindings for an app profile. Each binding maps a provider to a user's personal connection profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
       ],
       responses: {
@@ -526,15 +539,16 @@ export const connectionProfilesPaths = {
     },
   },
 
-  "/api/connection-profiles/org/{id}/bind": {
+  "/api/connection-profiles/app/{id}/bind": {
     post: {
-      operationId: "bindOrgProfileProvider",
+      operationId: "bindAppProfileProvider",
       tags: ["Connection Profiles"],
       summary: "Bind a provider to a user's connection",
       description:
-        "Bind an org profile's provider slot to the requesting user's personal connection profile.",
+        "Bind an app profile's provider slot to the requesting user's personal connection profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
       ],
       requestBody: {
@@ -567,14 +581,15 @@ export const connectionProfilesPaths = {
     },
   },
 
-  "/api/connection-profiles/org/{id}/bind/{providerScope}/{providerName}": {
+  "/api/connection-profiles/app/{id}/bind/{providerScope}/{providerName}": {
     delete: {
-      operationId: "unbindOrgProfileProvider",
+      operationId: "unbindAppProfileProvider",
       tags: ["Connection Profiles"],
-      summary: "Unbind a provider from an org profile",
-      description: "Remove a provider binding from an org profile.",
+      summary: "Unbind a provider from an app profile",
+      description: "Remove a provider binding from an app profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
         {
           name: "providerScope",

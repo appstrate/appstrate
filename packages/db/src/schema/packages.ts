@@ -36,7 +36,7 @@ export const applicationPackages = pgTable(
     config: jsonb("config").notNull().default({}),
     modelId: text("model_id"),
     proxyId: text("proxy_id"),
-    orgProfileId: uuid("org_profile_id").references(() => connectionProfiles.id, {
+    appProfileId: uuid("app_profile_id").references(() => connectionProfiles.id, {
       onDelete: "set null",
     }),
     enabled: boolean("enabled").notNull().default(true),
@@ -46,7 +46,7 @@ export const applicationPackages = pgTable(
   (table) => [
     primaryKey({ columns: [table.applicationId, table.packageId] }),
     index("idx_application_packages_package_id").on(table.packageId),
-    index("idx_application_packages_org_profile_id").on(table.orgProfileId),
+    index("idx_application_packages_app_profile_id").on(table.appProfileId),
     index("idx_application_packages_app_id").on(table.applicationId),
   ],
 );

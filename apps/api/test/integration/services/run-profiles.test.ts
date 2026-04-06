@@ -16,7 +16,7 @@ import {
   resolveActorProfileContext,
   setUserAgentProviderOverride,
 } from "../../../src/services/connection-profiles.ts";
-import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
+import { bindAppProfileProvider } from "../../../src/services/state/app-profile-bindings.ts";
 import {
   updateInstalledPackage,
   installPackage,
@@ -110,7 +110,7 @@ describe("Run with provider profiles", () => {
     applicationId: string;
     defaultUserProfileId: string | null;
     userProviderOverrides?: Record<string, string>;
-    orgProfileId?: string | null;
+    appProfileId?: string | null;
   }): Promise<{
     providerProfiles: ProviderProfileMap;
     config: Record<string, unknown>;
@@ -124,7 +124,7 @@ describe("Run with provider profiles", () => {
       applicationId: aid,
       defaultUserProfileId,
       userProviderOverrides,
-      orgProfileId,
+      appProfileId,
     } = params;
     const manifestProviders = resolveManifestProviders(agent.manifest);
 
@@ -133,8 +133,8 @@ describe("Run with provider profiles", () => {
         manifestProviders,
         defaultUserProfileId,
         userProviderOverrides,
-        orgProfileId,
-        oid,
+        appProfileId,
+        aid,
       ),
       getPackageConfig(aid, packageId),
     ]);
@@ -178,14 +178,14 @@ describe("Run with provider profiles", () => {
       expect(map["@system/clickup"]!.source).toBe("user_profile");
     });
 
-    it("uses org profile bindings when orgProfileId is provided", async () => {
-      const orgProfile = await seedConnectionProfile({ orgId, name: "Org Profile" });
+    it("uses app profile bindings when appProfileId is provided", async () => {
+      const appProfile = await seedConnectionProfile({ applicationId: appId, name: "App Profile" });
       const altProfile = await seedConnectionProfile({ userId, name: "Bound Source" });
       await seedConnectionForApp(altProfile.id, "@system/gmail", orgId, appId, {
         api_key: "org-key",
       });
 
-      await bindOrgProfileProvider(orgProfile.id, "@system/gmail", altProfile.id, userId);
+      await bindAppProfileProvider(appProfile.id, "@system/gmail", altProfile.id, userId);
 
       const providers = makeProviders(["@system/gmail", "@system/clickup"]);
 
@@ -193,19 +193,19 @@ describe("Run with provider profiles", () => {
         providers,
         defaultProfileId,
         {},
-        orgProfile.id,
-        orgId,
+        appProfile.id,
+        appId,
       );
 
-      // gmail is bound in org profile -> uses org binding
+      // gmail is bound in app profile -> uses app binding
       expect(map["@system/gmail"]!.profileId).toBe(altProfile.id);
-      expect(map["@system/gmail"]!.source).toBe("org_binding");
+      expect(map["@system/gmail"]!.source).toBe("app_binding");
       // clickup is not bound -> falls back to default
       expect(map["@system/clickup"]!.profileId).toBe(defaultProfileId);
       expect(map["@system/clickup"]!.source).toBe("user_profile");
     });
 
-    it("falls back to default user profile when no overrides and no org profile", async () => {
+    it("falls back to default user profile when no overrides and no app profile", async () => {
       const providers = makeProviders(providerIds);
 
       const map = await resolveProviderProfiles(
@@ -222,19 +222,19 @@ describe("Run with provider profiles", () => {
       }
     });
 
-    it("org binding takes priority over per-provider user override", async () => {
+    it("app binding takes priority over per-provider user override", async () => {
       const userOverrideProfile = await seedConnectionProfile({ userId, name: "User Override" });
-      const orgBoundProfile = await seedConnectionProfile({ userId, name: "Org Bound" });
-      const orgProfile = await seedConnectionProfile({ orgId, name: "Org Profile" });
+      const appBoundProfile = await seedConnectionProfile({ userId, name: "App Bound" });
+      const appProfile = await seedConnectionProfile({ applicationId: appId, name: "App Profile" });
 
       await seedConnectionForApp(userOverrideProfile.id, "@system/gmail", orgId, appId, {
         api_key: "u",
       });
-      await seedConnectionForApp(orgBoundProfile.id, "@system/gmail", orgId, appId, {
+      await seedConnectionForApp(appBoundProfile.id, "@system/gmail", orgId, appId, {
         api_key: "o",
       });
 
-      await bindOrgProfileProvider(orgProfile.id, "@system/gmail", orgBoundProfile.id, userId);
+      await bindAppProfileProvider(appProfile.id, "@system/gmail", appBoundProfile.id, userId);
 
       const providers = makeProviders(["@system/gmail"]);
 
@@ -242,17 +242,17 @@ describe("Run with provider profiles", () => {
         providers,
         defaultProfileId,
         { "@system/gmail": userOverrideProfile.id },
-        orgProfile.id,
-        orgId,
+        appProfile.id,
+        appId,
       );
 
-      // Org binding wins over user override
-      expect(map["@system/gmail"]!.profileId).toBe(orgBoundProfile.id);
-      expect(map["@system/gmail"]!.source).toBe("org_binding");
+      // App binding wins over user override
+      expect(map["@system/gmail"]!.profileId).toBe(appBoundProfile.id);
+      expect(map["@system/gmail"]!.source).toBe("app_binding");
     });
 
-    it("handles multiple providers with mixed org bindings and user overrides", async () => {
-      const orgProfile = await seedConnectionProfile({ orgId, name: "Mixed Org" });
+    it("handles multiple providers with mixed app bindings and user overrides", async () => {
+      const appProfile = await seedConnectionProfile({ applicationId: appId, name: "Mixed App" });
       const gmailBound = await seedConnectionProfile({ userId, name: "Gmail Bound" });
       const notionOverride = await seedConnectionProfile({ userId, name: "Notion Override" });
 
@@ -261,8 +261,8 @@ describe("Run with provider profiles", () => {
         api_key: "n",
       });
 
-      // Bind gmail in org profile
-      await bindOrgProfileProvider(orgProfile.id, "@system/gmail", gmailBound.id, userId);
+      // Bind gmail in app profile
+      await bindAppProfileProvider(appProfile.id, "@system/gmail", gmailBound.id, userId);
 
       const providers = makeProviders(["@system/gmail", "@system/clickup", "@system/notion"]);
 
@@ -270,23 +270,23 @@ describe("Run with provider profiles", () => {
         providers,
         defaultProfileId,
         { "@system/notion": notionOverride.id },
-        orgProfile.id,
-        orgId,
+        appProfile.id,
+        appId,
       );
 
-      // gmail: org binding
+      // gmail: app binding
       expect(map["@system/gmail"]!.profileId).toBe(gmailBound.id);
-      expect(map["@system/gmail"]!.source).toBe("org_binding");
-      // clickup: no org binding, no user override -> default
+      expect(map["@system/gmail"]!.source).toBe("app_binding");
+      // clickup: no app binding, no user override -> default
       expect(map["@system/clickup"]!.profileId).toBe(defaultProfileId);
       expect(map["@system/clickup"]!.source).toBe("user_profile");
-      // notion: no org binding, but has user override
+      // notion: no app binding, but has user override
       expect(map["@system/notion"]!.profileId).toBe(notionOverride.id);
       expect(map["@system/notion"]!.source).toBe("user_profile");
     });
 
     it("returns empty map when no providers are required", async () => {
-      const map = await resolveProviderProfiles([], defaultProfileId, undefined, undefined, orgId);
+      const map = await resolveProviderProfiles([], defaultProfileId, undefined, undefined, appId);
       expect(map).toEqual({});
     });
   });
@@ -315,20 +315,23 @@ describe("Run with provider profiles", () => {
     });
   });
 
-  describe("full preflight with org profile on agent config", () => {
-    it("reads orgProfileId from application_packages and applies org bindings", async () => {
+  describe("full preflight with app profile on agent config", () => {
+    it("reads appProfileId from application_packages and applies app bindings", async () => {
       const agentId = "@testorg/preflight-config";
       const agent = await seedAgentWithProviders(agentId);
 
-      const orgProfile = await seedConnectionProfile({ orgId, name: "Configured Org" });
+      const appProfile = await seedConnectionProfile({
+        applicationId: appId,
+        name: "Configured App",
+      });
       const boundProfile = await seedConnectionProfile({ userId, name: "Bound" });
       await seedConnectionForApp(boundProfile.id, "@system/gmail", orgId, appId, { api_key: "b" });
 
-      await bindOrgProfileProvider(orgProfile.id, "@system/gmail", boundProfile.id, userId);
+      await bindAppProfileProvider(appProfile.id, "@system/gmail", boundProfile.id, userId);
 
-      // Install the agent in the application, then set org profile
+      // Install the agent in the application, then set app profile
       await installPackage(appId, orgId, agentId);
-      await updateInstalledPackage(appId, agentId, { orgProfileId: orgProfile.id });
+      await updateInstalledPackage(appId, agentId, { appProfileId: appProfile.id });
 
       const { providerProfiles } = await runPreflight({
         agent,
@@ -336,24 +339,24 @@ describe("Run with provider profiles", () => {
         orgId,
         applicationId: appId,
         defaultUserProfileId: defaultProfileId,
-        orgProfileId: orgProfile.id,
+        appProfileId: appProfile.id,
       });
 
       expect(providerProfiles["@system/gmail"]!.profileId).toBe(boundProfile.id);
-      expect(providerProfiles["@system/gmail"]!.source).toBe("org_binding");
+      expect(providerProfiles["@system/gmail"]!.source).toBe("app_binding");
       // Other providers fall back to default
       expect(providerProfiles["@system/clickup"]!.profileId).toBe(defaultProfileId);
       expect(providerProfiles["@system/notion"]!.profileId).toBe(defaultProfileId);
     });
 
-    it("falls back to user defaults when org profile has no bindings", async () => {
-      const agentId = "@testorg/preflight-empty-org";
+    it("falls back to user defaults when app profile has no bindings", async () => {
+      const agentId = "@testorg/preflight-empty-app";
       const agent = await seedAgentWithProviders(agentId);
 
-      // Create org profile with no bindings
-      const orgProfile = await seedConnectionProfile({ orgId, name: "Empty Org" });
+      // Create app profile with no bindings
+      const appProfile = await seedConnectionProfile({ applicationId: appId, name: "Empty App" });
       await installPackage(appId, orgId, agentId);
-      await updateInstalledPackage(appId, agentId, { orgProfileId: orgProfile.id });
+      await updateInstalledPackage(appId, agentId, { appProfileId: appProfile.id });
 
       const { providerProfiles } = await runPreflight({
         agent,
@@ -361,7 +364,7 @@ describe("Run with provider profiles", () => {
         orgId,
         applicationId: appId,
         defaultUserProfileId: defaultProfileId,
-        orgProfileId: orgProfile.id,
+        appProfileId: appProfile.id,
       });
 
       // All providers fall back to user default

@@ -673,13 +673,13 @@ export const agentsPaths = {
       },
     },
   },
-  "/api/agents/{scope}/{name}/org-profile": {
+  "/api/agents/{scope}/{name}/app-profile": {
     put: {
-      operationId: "setAgentOrgProfile",
+      operationId: "setAgentAppProfile",
       tags: ["Agents"],
-      summary: "Set org profile for an agent",
+      summary: "Set app profile for an agent",
       description:
-        "Set or clear the org-level connection profile for this agent. Pass a profile ID to set, or null to clear.",
+        "Set or clear the application-level connection profile for this agent. Pass a profile ID to set, or null to clear.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -697,12 +697,12 @@ export const agentsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["orgProfileId"],
+              required: ["appProfileId"],
               properties: {
-                orgProfileId: {
+                appProfileId: {
                   type: ["string", "null"],
                   format: "uuid",
-                  description: "Org profile ID or null to clear",
+                  description: "App profile ID or null to clear",
                 },
               },
             },
@@ -711,7 +711,7 @@ export const agentsPaths = {
       },
       responses: {
         "200": {
-          description: "Org profile updated",
+          description: "App profile updated",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },

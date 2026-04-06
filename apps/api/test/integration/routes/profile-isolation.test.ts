@@ -24,17 +24,17 @@ describe("Multi-org profile isolation", () => {
     ctxB = await createTestContext({ orgSlug: "org-beta" });
   });
 
-  // ─── Org Profile Isolation ──────────────────────────────────
+  // ─── App Profile Isolation ──────────────────────────────────
 
-  describe("org profile visibility", () => {
-    it("org A cannot see org B's org profiles", async () => {
+  describe("app profile visibility", () => {
+    it("org A cannot see org B's app profiles", async () => {
       const profileB = await seedConnectionProfile({
-        orgId: ctxB.orgId,
+        applicationId: ctxB.defaultAppId,
         name: "Beta Production",
       });
 
-      // Org A lists org profiles — should not see Beta's profile
-      const res = await app.request("/api/connection-profiles/org", {
+      // Org A lists app profiles — should not see Beta's profile
+      const res = await app.request("/api/connection-profiles/app", {
         headers: authHeaders(ctxA),
       });
 
@@ -46,11 +46,11 @@ describe("Multi-org profile isolation", () => {
 
     it("org A cannot access org B's profile detail via bindings endpoint", async () => {
       const profileB = await seedConnectionProfile({
-        orgId: ctxB.orgId,
+        applicationId: ctxB.defaultAppId,
         name: "Beta Secret",
       });
 
-      const res = await app.request(`/api/connection-profiles/org/${profileB.id}/bindings`, {
+      const res = await app.request(`/api/connection-profiles/app/${profileB.id}/bindings`, {
         headers: authHeaders(ctxA),
       });
 
@@ -60,11 +60,11 @@ describe("Multi-org profile isolation", () => {
 
     it("org A cannot access org B's profile agents endpoint", async () => {
       const profileB = await seedConnectionProfile({
-        orgId: ctxB.orgId,
+        applicationId: ctxB.defaultAppId,
         name: "Beta Agents",
       });
 
-      const res = await app.request(`/api/connection-profiles/org/${profileB.id}/agents`, {
+      const res = await app.request(`/api/connection-profiles/app/${profileB.id}/agents`, {
         headers: authHeaders(ctxA),
       });
 
@@ -73,11 +73,11 @@ describe("Multi-org profile isolation", () => {
 
     it("org A cannot delete org B's profile", async () => {
       const profileB = await seedConnectionProfile({
-        orgId: ctxB.orgId,
+        applicationId: ctxB.defaultAppId,
         name: "Beta To Delete",
       });
 
-      const res = await app.request(`/api/connection-profiles/org/${profileB.id}`, {
+      const res = await app.request(`/api/connection-profiles/app/${profileB.id}`, {
         method: "DELETE",
         headers: authHeaders(ctxA),
       });
@@ -86,7 +86,7 @@ describe("Multi-org profile isolation", () => {
       expect([400, 404]).toContain(res.status);
 
       // Verify the profile still exists via org B
-      const checkRes = await app.request("/api/connection-profiles/org", {
+      const checkRes = await app.request("/api/connection-profiles/app", {
         headers: authHeaders(ctxB),
       });
       const checkBody = (await checkRes.json()) as any;
@@ -96,11 +96,11 @@ describe("Multi-org profile isolation", () => {
 
     it("org A cannot rename org B's profile", async () => {
       const profileB = await seedConnectionProfile({
-        orgId: ctxB.orgId,
+        applicationId: ctxB.defaultAppId,
         name: "Beta Original",
       });
 
-      const res = await app.request(`/api/connection-profiles/org/${profileB.id}`, {
+      const res = await app.request(`/api/connection-profiles/app/${profileB.id}`, {
         method: "PUT",
         headers: { ...authHeaders(ctxA), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Hacked" }),
@@ -110,20 +110,20 @@ describe("Multi-org profile isolation", () => {
     });
   });
 
-  // ─── Org Profile Binding Isolation ──────────────────────────
+  // ─── App Profile Binding Isolation ──────────────────────────
 
-  describe("org profile binding isolation", () => {
-    it("org A cannot bind using org B's org profile", async () => {
+  describe("app profile binding isolation", () => {
+    it("org A cannot bind using org B's app profile", async () => {
       const profileB = await seedConnectionProfile({
-        orgId: ctxB.orgId,
-        name: "Beta Org Profile",
+        applicationId: ctxB.defaultAppId,
+        name: "Beta App Profile",
       });
       const userProfileA = await seedConnectionProfile({
         userId: ctxA.user.id,
         name: "Alpha User",
       });
 
-      const res = await app.request(`/api/connection-profiles/org/${profileB.id}/bind`, {
+      const res = await app.request(`/api/connection-profiles/app/${profileB.id}/bind`, {
         method: "POST",
         headers: { ...authHeaders(ctxA), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -136,14 +136,14 @@ describe("Multi-org profile isolation", () => {
       expect([400, 404]).toContain(res.status);
     });
 
-    it("org A cannot unbind from org B's org profile", async () => {
+    it("org A cannot unbind from org B's app profile", async () => {
       const profileB = await seedConnectionProfile({
-        orgId: ctxB.orgId,
-        name: "Beta Org Profile",
+        applicationId: ctxB.defaultAppId,
+        name: "Beta App Profile",
       });
 
       const res = await app.request(
-        `/api/connection-profiles/org/${profileB.id}/bind/@appstrate/gmail`,
+        `/api/connection-profiles/app/${profileB.id}/bind/@appstrate/gmail`,
         {
           method: "DELETE",
           headers: authHeaders(ctxA),
@@ -155,16 +155,16 @@ describe("Multi-org profile isolation", () => {
     });
 
     it("org A cannot bind with org B's user profile as source", async () => {
-      const orgProfileA = await seedConnectionProfile({
-        orgId: ctxA.orgId,
-        name: "Alpha Org Profile",
+      const appProfileA = await seedConnectionProfile({
+        applicationId: ctxA.defaultAppId,
+        name: "Alpha App Profile",
       });
       const userProfileB = await seedConnectionProfile({
         userId: ctxB.user.id,
         name: "Beta User",
       });
 
-      const res = await app.request(`/api/connection-profiles/org/${orgProfileA.id}/bind`, {
+      const res = await app.request(`/api/connection-profiles/app/${appProfileA.id}/bind`, {
         method: "POST",
         headers: { ...authHeaders(ctxA), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -206,7 +206,7 @@ describe("Multi-org profile isolation", () => {
       expect(leaked).toBeUndefined();
     });
 
-    it("both members can see shared org profiles", async () => {
+    it("both members can see shared app profiles", async () => {
       const member = await createTestUser({ email: "member2@test.com" });
       await addOrgMember(ctxA.orgId, member.id, "member");
       const memberCtx: TestContext = {
@@ -217,16 +217,16 @@ describe("Multi-org profile isolation", () => {
         defaultAppId: ctxA.defaultAppId,
       };
 
-      const orgProfile = await seedConnectionProfile({
-        orgId: ctxA.orgId,
-        name: "Shared Org",
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctxA.defaultAppId,
+        name: "Shared App",
       });
 
-      // Both owner and member should see the org profile
-      const ownerRes = await app.request("/api/connection-profiles/org", {
+      // Both owner and member should see the app profile
+      const ownerRes = await app.request("/api/connection-profiles/app", {
         headers: authHeaders(ctxA),
       });
-      const memberRes = await app.request("/api/connection-profiles/org", {
+      const memberRes = await app.request("/api/connection-profiles/app", {
         headers: authHeaders(memberCtx),
       });
 
@@ -236,8 +236,8 @@ describe("Multi-org profile isolation", () => {
       const ownerBody = (await ownerRes.json()) as any;
       const memberBody = (await memberRes.json()) as any;
 
-      const ownerSees = ownerBody.profiles.find((p: { id: string }) => p.id === orgProfile.id);
-      const memberSees = memberBody.profiles.find((p: { id: string }) => p.id === orgProfile.id);
+      const ownerSees = ownerBody.profiles.find((p: { id: string }) => p.id === appProfile.id);
+      const memberSees = memberBody.profiles.find((p: { id: string }) => p.id === appProfile.id);
 
       expect(ownerSees).toBeDefined();
       expect(memberSees).toBeDefined();

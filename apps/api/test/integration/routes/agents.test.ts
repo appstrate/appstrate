@@ -365,19 +365,22 @@ describe("Agents API", () => {
       expect(res.status).toBe(400);
     });
 
-    it("accepts an org profile for provider override", async () => {
+    it("accepts an app profile for provider override", async () => {
       await seedInstalledAgent({
-        id: "@myorg/pp-put-org",
+        id: "@myorg/pp-put-app",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         appId: ctx.defaultAppId,
       });
-      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org" });
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App",
+      });
 
-      const res = await app.request("/api/agents/@myorg/pp-put-org/provider-profiles", {
+      const res = await app.request("/api/agents/@myorg/pp-put-app/provider-profiles", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: "@system/gmail", profileId: orgProfile.id }),
+        body: JSON.stringify({ providerId: "@system/gmail", profileId: appProfile.id }),
       });
       expect(res.status).toBe(200);
     });
@@ -432,22 +435,25 @@ describe("Agents API", () => {
     });
   });
 
-  // ─── Org Profile on Agent ─────────────────────────────────
+  // ─── App Profile on Agent ─────────────────────────────────
 
-  describe("PUT /api/agents/:scope/:name/org-profile", () => {
-    it("admin can set org profile on an agent", async () => {
+  describe("PUT /api/agents/:scope/:name/app-profile", () => {
+    it("admin can set app profile on an agent", async () => {
       await seedInstalledAgent({
-        id: "@myorg/orgp-agent",
+        id: "@myorg/appp-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         appId: ctx.defaultAppId,
       });
-      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org Prof" });
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App Prof",
+      });
 
-      const res = await app.request("/api/agents/@myorg/orgp-agent/org-profile", {
+      const res = await app.request("/api/agents/@myorg/appp-agent/app-profile", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ orgProfileId: orgProfile.id }),
+        body: JSON.stringify({ appProfileId: appProfile.id }),
       });
 
       expect(res.status).toBe(200);
@@ -455,69 +461,72 @@ describe("Agents API", () => {
       expect(body.success).toBe(true);
     });
 
-    it("admin can unset org profile with null", async () => {
+    it("admin can unset app profile with null", async () => {
       await seedInstalledAgent({
-        id: "@myorg/orgp-unset",
+        id: "@myorg/appp-unset",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         appId: ctx.defaultAppId,
       });
 
-      const res = await app.request("/api/agents/@myorg/orgp-unset/org-profile", {
+      const res = await app.request("/api/agents/@myorg/appp-unset/app-profile", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ orgProfileId: null }),
+        body: JSON.stringify({ appProfileId: null }),
       });
 
       expect(res.status).toBe(200);
     });
 
-    it("returns 400 with invalid orgProfileId", async () => {
+    it("returns 400 with invalid appProfileId", async () => {
       await seedInstalledAgent({
-        id: "@myorg/orgp-bad",
+        id: "@myorg/appp-bad",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         appId: ctx.defaultAppId,
       });
 
-      const res = await app.request("/api/agents/@myorg/orgp-bad/org-profile", {
+      const res = await app.request("/api/agents/@myorg/appp-bad/app-profile", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ orgProfileId: "not-a-uuid" }),
+        body: JSON.stringify({ appProfileId: "not-a-uuid" }),
       });
 
       expect(res.status).toBe(400);
     });
   });
 
-  // ─── Agent Detail — Org Profile Fields ─────────────────────
+  // ─── Agent Detail — App Profile Fields ─────────────────────
 
-  describe("agent detail — org profile fields", () => {
-    it("returns agentOrgProfileId and agentOrgProfileName when set", async () => {
+  describe("agent detail — app profile fields", () => {
+    it("returns agentAppProfileId and agentAppProfileName when set", async () => {
       await seedInstalledAgent({
-        id: "@myorg/detail-orgp",
+        id: "@myorg/detail-appp",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         appId: ctx.defaultAppId,
       });
-      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Prod Creds" });
-
-      await app.request("/api/agents/@myorg/detail-orgp/org-profile", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ orgProfileId: orgProfile.id }),
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "Prod Creds",
       });
 
-      const res = await app.request("/api/packages/agents/@myorg/detail-orgp", {
+      await app.request("/api/agents/@myorg/detail-appp/app-profile", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ appProfileId: appProfile.id }),
+      });
+
+      const res = await app.request("/api/packages/agents/@myorg/detail-appp", {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agent.agentOrgProfileId).toBe(orgProfile.id);
-      expect(body.agent.agentOrgProfileName).toBe("Prod Creds");
+      expect(body.agent.agentAppProfileId).toBe(appProfile.id);
+      expect(body.agent.agentAppProfileName).toBe("Prod Creds");
     });
 
-    it("returns null agentOrgProfileId when no org profile configured", async () => {
+    it("returns null agentAppProfileId when no app profile configured", async () => {
       await seedInstalledAgent({
         id: "@myorg/detail-nop",
         orgId: ctx.orgId,
@@ -530,26 +539,29 @@ describe("Agents API", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agent.agentOrgProfileId).toBeNull();
-      expect(body.agent.agentOrgProfileName).toBeNull();
+      expect(body.agent.agentAppProfileId).toBeNull();
+      expect(body.agent.agentAppProfileName).toBeNull();
     });
 
-    it("returns null agentOrgProfileId when configured profile was deleted", async () => {
+    it("returns null agentAppProfileId when configured profile was deleted", async () => {
       await seedInstalledAgent({
         id: "@myorg/detail-del",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         appId: ctx.defaultAppId,
       });
-      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Temp" });
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "Temp",
+      });
 
       // Set then delete the profile
-      await app.request("/api/agents/@myorg/detail-del/org-profile", {
+      await app.request("/api/agents/@myorg/detail-del/app-profile", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ orgProfileId: orgProfile.id }),
+        body: JSON.stringify({ appProfileId: appProfile.id }),
       });
-      await app.request(`/api/connection-profiles/org/${orgProfile.id}`, {
+      await app.request(`/api/connection-profiles/app/${appProfile.id}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
@@ -559,8 +571,8 @@ describe("Agents API", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.agent.agentOrgProfileId).toBeNull();
-      expect(body.agent.agentOrgProfileName).toBeNull();
+      expect(body.agent.agentAppProfileId).toBeNull();
+      expect(body.agent.agentAppProfileName).toBeNull();
     });
   });
 });

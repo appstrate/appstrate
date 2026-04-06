@@ -58,7 +58,7 @@ import { LoadingState, ErrorState, EmptyState } from "../components/page-states"
 import { Spinner } from "../components/spinner";
 import { useBilling, useCheckout, usePortal, getUsageBarColor } from "../hooks/use-billing";
 import { PlanGrid } from "../components/plan-card";
-import { OrgProfilesTab } from "../components/org-profiles-tab";
+import { AppProfilesTab } from "../components/app-profiles-tab";
 import { toast } from "sonner";
 import type {
   OrganizationMember,
@@ -575,7 +575,7 @@ export function OrgSettingsPage() {
         </>
       )}
 
-      {tab === "profiles" && <OrgProfilesTab />}
+      {tab === "profiles" && <AppProfilesTab />}
 
       {tab === "models" && features.models && (
         <>

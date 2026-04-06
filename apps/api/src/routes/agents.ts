@@ -31,7 +31,7 @@ import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 const modelIdSchema = z.object({ modelId: z.string().nullable() });
-const orgProfileIdSchema = z.object({ orgProfileId: z.uuid().nullable() });
+const appProfileIdSchema = z.object({ appProfileId: z.uuid().nullable() });
 
 export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
@@ -126,7 +126,7 @@ export function createAgentsRouter() {
       );
 
       // Validate ownership — user can only set overrides to their own profiles
-      const profile = await getAccessibleProfile(data.profileId, actor, c.get("orgId"));
+      const profile = await getAccessibleProfile(data.profileId, actor, c.get("applicationId"));
       if (!profile) {
         throw forbidden("Cannot use a profile you do not own");
       }
@@ -204,18 +204,18 @@ export function createAgentsRouter() {
     },
   );
 
-  // PUT /api/agents/:scope/:name/org-profile — set org profile for this agent (admin-only)
+  // PUT /api/agents/:scope/:name/app-profile — set app profile for this agent (admin-only)
   router.put(
-    "/:scope{@[^/]+}/:name/org-profile",
+    "/:scope{@[^/]+}/:name/app-profile",
     requireAgent(),
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("agent");
       const appId = c.get("applicationId");
       const body = await c.req.json();
-      const data = parseBody(orgProfileIdSchema, body);
+      const data = parseBody(appProfileIdSchema, body);
 
-      await updateInstalledPackage(appId, agent.id, { orgProfileId: data.orgProfileId });
+      await updateInstalledPackage(appId, agent.id, { appProfileId: data.appProfileId });
 
       return c.json({ success: true });
     },

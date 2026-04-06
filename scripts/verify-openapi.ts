@@ -86,15 +86,15 @@ const expectedEndpoints = [
   "POST /api/connection-profiles",
   "GET /api/connection-profiles/connections",
   "DELETE /api/connection-profiles/connections",
-  "GET /api/connection-profiles/my-org-bindings",
-  "GET /api/connection-profiles/org",
-  "POST /api/connection-profiles/org",
-  "PUT /api/connection-profiles/org/{id}",
-  "DELETE /api/connection-profiles/org/{id}",
-  "GET /api/connection-profiles/org/{id}/agents",
-  "GET /api/connection-profiles/org/{id}/bindings",
-  "POST /api/connection-profiles/org/{id}/bind",
-  "DELETE /api/connection-profiles/org/{id}/bind/{providerScope}/{providerName}",
+  "GET /api/connection-profiles/my-app-bindings",
+  "GET /api/connection-profiles/app",
+  "POST /api/connection-profiles/app",
+  "PUT /api/connection-profiles/app/{id}",
+  "DELETE /api/connection-profiles/app/{id}",
+  "GET /api/connection-profiles/app/{id}/agents",
+  "GET /api/connection-profiles/app/{id}/bindings",
+  "POST /api/connection-profiles/app/{id}/bind",
+  "DELETE /api/connection-profiles/app/{id}/bind/{providerScope}/{providerName}",
   "PUT /api/connection-profiles/{id}",
   "DELETE /api/connection-profiles/{id}",
   "GET /api/connection-profiles/{id}/connections",
@@ -104,8 +104,8 @@ const expectedEndpoints = [
   "PUT /api/agents/{scope}/{name}/provider-profiles",
   "DELETE /api/agents/{scope}/{name}/provider-profiles",
 
-  // Agent Org Profile
-  "PUT /api/agents/{scope}/{name}/org-profile",
+  // Agent App Profile
+  "PUT /api/agents/{scope}/{name}/app-profile",
 
   // Agent Proxy
   "GET /api/agents/{scope}/{name}/proxy",

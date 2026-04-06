@@ -305,7 +305,7 @@ export async function seedOrgModel(
 // ─── Connection Profiles ──────────────────────────────────
 
 type ConnectionProfileInsert = Partial<InferInsertModel<typeof connectionProfiles>> &
-  ({ userId: string } | { orgId: string });
+  ({ userId: string } | { applicationId: string });
 
 export async function seedConnectionProfile(
   overrides: ConnectionProfileInsert,

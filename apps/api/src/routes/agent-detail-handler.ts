@@ -17,7 +17,7 @@ import { getPackageConfig } from "../services/application-packages.ts";
 import {
   resolveProviderProfiles,
   resolveActorProfileContext,
-  getAgentOrgProfile,
+  getAgentAppProfile,
 } from "../services/connection-profiles.ts";
 import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
@@ -49,24 +49,24 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
 
   const m = agent.manifest;
 
-  // Load org profile, actor profile context, and package config in parallel
-  const [agentOrgProfile, { defaultUserProfileId, userProviderOverrides }, packageConfig] =
+  // Load app profile, actor profile context, and package config in parallel
+  const [agentAppProfile, { defaultUserProfileId, userProviderOverrides }, packageConfig] =
     await Promise.all([
-      getAgentOrgProfile(appId, orgId, agent.id),
+      getAgentAppProfile(appId, agent.id),
       resolveActorProfileContext(actor, agent.id),
       getPackageConfig(appId, agent.id),
     ]);
-  const agentOrgProfileId = agentOrgProfile?.id ?? null;
-  const agentOrgProfileName = agentOrgProfile?.name ?? null;
+  const agentAppProfileId = agentAppProfile?.id ?? null;
+  const agentAppProfileName = agentAppProfile?.name ?? null;
 
-  // Build providerProfiles map: org bindings → per-provider overrides → default
+  // Build providerProfiles map: app bindings → per-provider overrides → default
   const manifestProviders = resolveManifestProviders(m);
   const providerProfiles = await resolveProviderProfiles(
     manifestProviders,
     defaultUserProfileId,
     userProviderOverrides,
-    agentOrgProfileId,
-    orgId,
+    agentAppProfileId,
+    appId,
   );
 
   const providerStatuses = await resolveProviderStatuses(
@@ -183,8 +183,8 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
       callbackUrl: getOAuthCallbackUrl(),
       versionCount,
       hasUnarchivedChanges,
-      agentOrgProfileId,
-      agentOrgProfileName,
+      agentAppProfileId,
+      agentAppProfileName,
       forkedFrom: rawItem?.forkedFrom ?? null,
       ...(agent.source !== "system" && rawItem
         ? {

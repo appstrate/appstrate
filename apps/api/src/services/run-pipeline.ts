@@ -74,9 +74,9 @@ export async function resolveRunPreflight(params: {
   orgId: string;
   defaultUserProfileId: string | null;
   userProviderOverrides?: Record<string, string>;
-  orgProfileId: string | null;
+  appProfileId: string | null;
 }): Promise<PreflightResult> {
-  const { agent, applicationId, orgId, defaultUserProfileId, userProviderOverrides, orgProfileId } =
+  const { agent, applicationId, orgId, defaultUserProfileId, userProviderOverrides, appProfileId } =
     params;
 
   const manifestProviders = resolveManifestProviders(agent.manifest);
@@ -86,8 +86,8 @@ export async function resolveRunPreflight(params: {
       manifestProviders,
       defaultUserProfileId,
       userProviderOverrides,
-      orgProfileId,
-      orgId,
+      appProfileId,
+      applicationId,
     ),
     getPackageConfig(applicationId, agent.id),
   ]);

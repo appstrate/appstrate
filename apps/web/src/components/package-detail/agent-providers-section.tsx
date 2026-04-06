@@ -35,8 +35,8 @@ export function AgentProvidersSection({
     );
   }
 
-  const agentOrgProfileId = detail.agentOrgProfileId;
-  const agentOrgProfileName = detail.agentOrgProfileName;
+  const agentAppProfileId = detail.agentAppProfileId;
+  const agentAppProfileName = detail.agentAppProfileName;
 
   return (
     <div className="mb-4 space-y-2">
@@ -45,8 +45,8 @@ export function AgentProvidersSection({
           key={svc.id}
           providerId={svc.id}
           packageId={packageId}
-          orgProfileId={agentOrgProfileId ?? undefined}
-          orgProfileName={agentOrgProfileName ?? undefined}
+          appProfileId={agentAppProfileId ?? undefined}
+          appProfileName={agentAppProfileName ?? undefined}
           scopesRequired={svc.scopesRequired}
           scopesMissing={svc.scopesMissing}
         />

@@ -8,14 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "./page-states";
 import { Spinner } from "./spinner";
-import { useOrgProfiles, useCreateOrgProfile } from "../hooks/use-connection-profiles";
+import { useAppProfiles, useCreateAppProfile } from "../hooks/use-connection-profiles";
 
-export function OrgProfilesTab() {
+export function AppProfilesTab() {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: orgProfiles, isLoading } = useOrgProfiles();
+  const { data: appProfiles, isLoading } = useAppProfiles();
 
   const [newName, setNewName] = useState("");
-  const createMutation = useCreateOrgProfile();
+  const createMutation = useCreateAppProfile();
 
   const handleCreate = () => {
     const name = newName.trim();
@@ -34,8 +34,8 @@ export function OrgProfilesTab() {
         <Input
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
-          placeholder={t("orgProfiles.namePlaceholder")}
-          aria-label={t("orgProfiles.namePlaceholder")}
+          placeholder={t("appProfiles.namePlaceholder")}
+          aria-label={t("appProfiles.namePlaceholder")}
           className="h-9 w-64"
           onKeyDown={(e) => e.key === "Enter" && handleCreate()}
         />
@@ -45,28 +45,28 @@ export function OrgProfilesTab() {
           disabled={!newName.trim() || createMutation.isPending}
         >
           <Plus className="mr-1 size-4" />
-          {t("orgProfiles.create")}
+          {t("appProfiles.create")}
         </Button>
       </div>
 
-      {orgProfiles && orgProfiles.length === 0 ? (
+      {appProfiles && appProfiles.length === 0 ? (
         <EmptyState
-          message={t("orgProfiles.empty")}
-          hint={t("orgProfiles.emptyHint")}
+          message={t("appProfiles.empty")}
+          hint={t("appProfiles.emptyHint")}
           icon={FolderOpen}
         />
       ) : (
         <div className="space-y-2">
-          {orgProfiles?.map((profile) => (
+          {appProfiles?.map((profile) => (
             <Link
               key={profile.id}
-              to={`/org-profiles/${profile.id}`}
+              to={`/app-profiles/${profile.id}`}
               className="border-border bg-card hover:bg-accent/50 flex items-center gap-3 rounded-lg border p-3 transition-colors"
             >
               <Building2 className="text-muted-foreground size-4 shrink-0" />
               <span className="font-medium">{profile.name}</span>
               <span className="text-muted-foreground text-xs">
-                {t("orgProfiles.bindingCount", { count: profile.bindingCount })}
+                {t("appProfiles.bindingCount", { count: profile.bindingCount })}
               </span>
             </Link>
           ))}

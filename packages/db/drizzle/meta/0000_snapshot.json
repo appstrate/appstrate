@@ -1,5 +1,5 @@
 {
-  "id": "bccd6f44-ff90-47ff-a4b5-297d51b3000f",
+  "id": "9b61cc8a-d2e0-49bd-95a5-6056d3655d5f",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1596,8 +1596,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "org_profile_id": {
-          "name": "org_profile_id",
+        "app_profile_id": {
+          "name": "app_profile_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
@@ -1640,11 +1640,11 @@
           "method": "btree",
           "with": {}
         },
-        "idx_application_packages_org_profile_id": {
-          "name": "idx_application_packages_org_profile_id",
+        "idx_application_packages_app_profile_id": {
+          "name": "idx_application_packages_app_profile_id",
           "columns": [
             {
-              "expression": "org_profile_id",
+              "expression": "app_profile_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1699,11 +1699,11 @@
           "onDelete": "set null",
           "onUpdate": "no action"
         },
-        "application_packages_org_profile_id_connection_profiles_id_fk": {
-          "name": "application_packages_org_profile_id_connection_profiles_id_fk",
+        "application_packages_app_profile_id_connection_profiles_id_fk": {
+          "name": "application_packages_app_profile_id_connection_profiles_id_fk",
           "tableFrom": "application_packages",
           "tableTo": "connection_profiles",
-          "columnsFrom": ["org_profile_id"],
+          "columnsFrom": ["app_profile_id"],
           "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
@@ -2125,6 +2125,27 @@
         "idx_packages_type": {
           "name": "idx_packages_type",
           "columns": [
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_packages_org_type": {
+          "name": "idx_packages_org_type",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
             {
               "expression": "type",
               "isExpression": false,
@@ -2906,6 +2927,33 @@
           "method": "btree",
           "with": {}
         },
+        "idx_runs_app_status_started": {
+          "name": "idx_runs_app_status_started",
+          "columns": [
+            {
+              "expression": "application_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "idx_runs_org_id": {
           "name": "idx_runs_org_id",
           "columns": [
@@ -3038,6 +3086,121 @@
           "value": "NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.app_profile_provider_bindings": {
+      "name": "app_profile_provider_bindings",
+      "schema": "",
+      "columns": {
+        "app_profile_id": {
+          "name": "app_profile_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_profile_id": {
+          "name": "source_profile_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bound_by_user_id": {
+          "name": "bound_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_app_profile_bindings_source": {
+          "name": "idx_app_profile_bindings_source",
+          "columns": [
+            {
+              "expression": "source_profile_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_app_profile_bindings_user": {
+          "name": "idx_app_profile_bindings_user",
+          "columns": [
+            {
+              "expression": "bound_by_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "app_profile_provider_bindings_app_profile_id_connection_profiles_id_fk": {
+          "name": "app_profile_provider_bindings_app_profile_id_connection_profiles_id_fk",
+          "tableFrom": "app_profile_provider_bindings",
+          "tableTo": "connection_profiles",
+          "columnsFrom": ["app_profile_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "app_profile_provider_bindings_source_profile_id_connection_profiles_id_fk": {
+          "name": "app_profile_provider_bindings_source_profile_id_connection_profiles_id_fk",
+          "tableFrom": "app_profile_provider_bindings",
+          "tableTo": "connection_profiles",
+          "columnsFrom": ["source_profile_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "app_profile_provider_bindings_bound_by_user_id_user_id_fk": {
+          "name": "app_profile_provider_bindings_bound_by_user_id_user_id_fk",
+          "tableFrom": "app_profile_provider_bindings",
+          "tableTo": "user",
+          "columnsFrom": ["bound_by_user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "app_profile_provider_bindings_app_profile_id_provider_id_pk": {
+          "name": "app_profile_provider_bindings_app_profile_id_provider_id_pk",
+          "columns": ["app_profile_id", "provider_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.application_provider_credentials": {
@@ -3183,9 +3346,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "org_id": {
-          "name": "org_id",
-          "type": "uuid",
+        "application_id": {
+          "name": "application_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -3280,11 +3443,11 @@
           "method": "btree",
           "with": {}
         },
-        "idx_connection_profiles_org_id": {
-          "name": "idx_connection_profiles_org_id",
+        "idx_connection_profiles_app_id": {
+          "name": "idx_connection_profiles_app_id",
           "columns": [
             {
-              "expression": "org_id",
+              "expression": "application_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -3315,11 +3478,11 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "connection_profiles_org_id_organizations_id_fk": {
-          "name": "connection_profiles_org_id_organizations_id_fk",
+        "connection_profiles_application_id_applications_id_fk": {
+          "name": "connection_profiles_application_id_applications_id_fk",
           "tableFrom": "connection_profiles",
-          "tableTo": "organizations",
-          "columnsFrom": ["org_id"],
+          "tableTo": "applications",
+          "columnsFrom": ["application_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -3331,7 +3494,7 @@
       "checkConstraints": {
         "connection_profiles_exactly_one_owner": {
           "name": "connection_profiles_exactly_one_owner",
-          "value": "(\n        (user_id IS NOT NULL AND end_user_id IS NULL AND org_id IS NULL) OR\n        (user_id IS NULL AND end_user_id IS NOT NULL AND org_id IS NULL) OR\n        (user_id IS NULL AND end_user_id IS NULL AND org_id IS NOT NULL)\n      )"
+          "value": "(\n        (user_id IS NOT NULL AND end_user_id IS NULL AND application_id IS NULL) OR\n        (user_id IS NULL AND end_user_id IS NOT NULL AND application_id IS NULL) OR\n        (user_id IS NULL AND end_user_id IS NULL AND application_id IS NOT NULL)\n      )"
         }
       },
       "isRLSEnabled": false
@@ -3502,121 +3665,6 @@
           "value": "(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.org_profile_provider_bindings": {
-      "name": "org_profile_provider_bindings",
-      "schema": "",
-      "columns": {
-        "org_profile_id": {
-          "name": "org_profile_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "provider_id": {
-          "name": "provider_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_profile_id": {
-          "name": "source_profile_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "bound_by_user_id": {
-          "name": "bound_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_org_profile_bindings_source": {
-          "name": "idx_org_profile_bindings_source",
-          "columns": [
-            {
-              "expression": "source_profile_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_org_profile_bindings_user": {
-          "name": "idx_org_profile_bindings_user",
-          "columns": [
-            {
-              "expression": "bound_by_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "org_profile_provider_bindings_org_profile_id_connection_profiles_id_fk": {
-          "name": "org_profile_provider_bindings_org_profile_id_connection_profiles_id_fk",
-          "tableFrom": "org_profile_provider_bindings",
-          "tableTo": "connection_profiles",
-          "columnsFrom": ["org_profile_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "org_profile_provider_bindings_source_profile_id_connection_profiles_id_fk": {
-          "name": "org_profile_provider_bindings_source_profile_id_connection_profiles_id_fk",
-          "tableFrom": "org_profile_provider_bindings",
-          "tableTo": "connection_profiles",
-          "columnsFrom": ["source_profile_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "org_profile_provider_bindings_bound_by_user_id_user_id_fk": {
-          "name": "org_profile_provider_bindings_bound_by_user_id_user_id_fk",
-          "tableFrom": "org_profile_provider_bindings",
-          "tableTo": "user",
-          "columnsFrom": ["bound_by_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "org_profile_provider_bindings_org_profile_id_provider_id_pk": {
-          "name": "org_profile_provider_bindings_org_profile_id_provider_id_pk",
-          "columns": ["org_profile_id", "provider_id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.user_agent_provider_profiles": {
@@ -3913,6 +3961,27 @@
           "columns": [
             {
               "expression": "profile_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_user_provider_connections_profile_provider": {
+          "name": "idx_user_provider_connections_profile_provider",
+          "columns": [
+            {
+              "expression": "profile_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

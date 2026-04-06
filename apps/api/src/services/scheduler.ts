@@ -21,7 +21,7 @@ import {
   getProfileByIdUnsafe,
   resolveProviderProfiles,
   resolveScheduleProfileArgs,
-  getAgentOrgProfile,
+  getAgentAppProfile,
 } from "./connection-profiles.ts";
 import { resolveProviderStatuses } from "./connection-manager/index.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
@@ -227,12 +227,12 @@ async function triggerScheduledRun(
 
     const actor: Actor | null = actorFromIds(profile.userId, profile.endUserId);
 
-    // Load the agent's admin-configured org profile (validates it still exists)
-    const agentOrgProfile = await getAgentOrgProfile(applicationId, orgId, packageId);
-    const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
+    // Load the agent's admin-configured app profile (validates it still exists)
+    const agentAppProfile = await getAgentAppProfile(applicationId, packageId);
+    const { defaultUserProfileId, appProfileId } = resolveScheduleProfileArgs(
       profile,
       connectionProfileId,
-      agentOrgProfile?.id ?? null,
+      agentAppProfile?.id ?? null,
     );
 
     // Shared preflight: resolve providers, config, validate readiness
@@ -246,7 +246,7 @@ async function triggerScheduledRun(
         applicationId,
         orgId,
         defaultUserProfileId,
-        orgProfileId,
+        appProfileId,
       });
 
       providerProfiles = preflight.providerProfiles;
@@ -422,7 +422,7 @@ async function computeScheduleReadiness(
     return { status: "ready", totalProviders: 0, connectedProviders: 0, missingProviders: [] };
   }
 
-  const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
+  const { defaultUserProfileId, appProfileId } = resolveScheduleProfileArgs(
     profile,
     schedule.connectionProfileId,
   );
@@ -430,8 +430,8 @@ async function computeScheduleReadiness(
     providers,
     defaultUserProfileId,
     undefined,
-    orgProfileId,
-    orgId,
+    appProfileId,
+    schedule.applicationId,
   );
 
   // Reuse the shared provider status resolution (batch-fetches connections)
@@ -485,11 +485,11 @@ async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<En
       const agent = agentMap.get(schedule.packageId);
 
       let profileName: string | null = null;
-      let profileType: "user" | "org" | null = null;
+      let profileType: "user" | "app" | null = null;
       let profileOwnerName: string | null = null;
       if (profile) {
         profileName = profile.name;
-        profileType = profile.orgId ? "org" : "user";
+        profileType = profile.applicationId ? "app" : "user";
         if (profile.userId) {
           profileOwnerName = userNameMap.get(profile.userId) ?? null;
         }
