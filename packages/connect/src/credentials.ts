@@ -9,7 +9,7 @@ import {
 import type { Db } from "@appstrate/db/client";
 import type { ConnectionRecord, DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
-import { refreshIfNeeded, forceRefresh, type RefreshContext } from "./token-refresh.ts";
+import { forceRefresh, type RefreshContext } from "./token-refresh.ts";
 
 /**
  * Get a connection by profile + provider + org.
@@ -79,7 +79,6 @@ export async function getCredentials(
   profileId: string,
   providerId: string,
   orgId: string,
-  applicationId: string,
 ): Promise<{
   credentials: Record<string, string>;
   connection: ConnectionRecord;
@@ -89,23 +88,9 @@ export async function getCredentials(
   if (!connection) return null;
 
   const def = await getProviderDefinition(db, providerId);
-  const authMode = def.authMode as string | undefined;
 
-  let decrypted: DecryptedCredentials;
-
-  if (authMode === "oauth2") {
-    const refreshContext = await buildRefreshContext(db, def, providerId, orgId, applicationId);
-    decrypted = await refreshIfNeeded(
-      db,
-      connection.id,
-      connection.providerId,
-      connection.credentialsEncrypted,
-      connection.expiresAt,
-      refreshContext,
-    );
-  } else {
-    decrypted = decryptCredentials<DecryptedCredentials>(connection.credentialsEncrypted);
-  }
+  // Return current credentials as-is. The sidecar handles 401 → refresh → retry.
+  const decrypted = decryptCredentials<DecryptedCredentials>(connection.credentialsEncrypted);
 
   const credentials: Record<string, string> = {};
   for (const [key, value] of Object.entries(decrypted)) {
@@ -126,13 +111,12 @@ export async function resolveCredentialsForProxy(
   profileId: string,
   providerId: string,
   orgId: string,
-  applicationId: string,
 ): Promise<{
   credentials: Record<string, string>;
   authorizedUris: string[] | null;
   allowAllUris: boolean;
 } | null> {
-  const result = await getCredentials(db, profileId, providerId, orgId, applicationId);
+  const result = await getCredentials(db, profileId, providerId, orgId);
   if (!result) return null;
 
   const def = result.definition;

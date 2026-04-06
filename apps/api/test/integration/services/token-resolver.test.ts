@@ -20,16 +20,14 @@ function pm(entries: Record<string, string>): ProviderProfileMap {
 describe("token-resolver", () => {
   let userId: string;
   let orgId: string;
-  let appId: string;
   let profileId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
-    const { org, defaultAppId } = await createTestOrg(userId, { slug: "testorg" });
+    const { org } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
-    appId = defaultAppId;
 
     // Create a default connection profile for this user
     const profile = await seedConnectionProfile({ userId, name: "Default", isDefault: true });
@@ -58,7 +56,7 @@ describe("token-resolver", () => {
 
   describe("buildProviderTokens", () => {
     it("returns an empty map when no providers are required", async () => {
-      const tokens = await buildProviderTokens([], {}, orgId, appId);
+      const tokens = await buildProviderTokens([], {}, orgId);
 
       expect(tokens).toEqual({});
     });
@@ -67,7 +65,7 @@ describe("token-resolver", () => {
       const providers: AgentProviderRequirement[] = [{ id: "@system/gmail" }];
 
       // providerProfiles is empty -- no profile assigned
-      const tokens = await buildProviderTokens(providers, {}, orgId, appId);
+      const tokens = await buildProviderTokens(providers, {}, orgId);
 
       expect(tokens).toEqual({});
     });
@@ -85,12 +83,7 @@ describe("token-resolver", () => {
       });
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
-      const tokens = await buildProviderTokens(
-        providers,
-        pm({ [providerId]: profileId }),
-        orgId,
-        appId,
-      );
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       expect(tokens[providerId]).toBe("oauth-token-abc123");
     });
@@ -106,12 +99,7 @@ describe("token-resolver", () => {
       });
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
-      const tokens = await buildProviderTokens(
-        providers,
-        pm({ [providerId]: profileId }),
-        orgId,
-        appId,
-      );
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       expect(tokens[providerId]).toBe("key-secret-456");
     });
@@ -128,12 +116,7 @@ describe("token-resolver", () => {
       });
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
-      const tokens = await buildProviderTokens(
-        providers,
-        pm({ [providerId]: profileId }),
-        orgId,
-        appId,
-      );
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       expect(tokens[providerId]).toBe("preferred-token");
     });
@@ -157,12 +140,7 @@ describe("token-resolver", () => {
       });
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
-      const tokens = await buildProviderTokens(
-        providers,
-        pm({ [providerId]: profileId }),
-        orgId,
-        appId,
-      );
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       expect(tokens[providerId]).toBe("__connected__");
     });
@@ -179,12 +157,7 @@ describe("token-resolver", () => {
       });
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
-      const tokens = await buildProviderTokens(
-        providers,
-        pm({ [providerId]: profileId }),
-        orgId,
-        appId,
-      );
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       expect(tokens[providerId]).toBe("__connected__");
     });
@@ -198,12 +171,7 @@ describe("token-resolver", () => {
       // No connection saved for this provider -- getCredentials returns null
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
-      const tokens = await buildProviderTokens(
-        providers,
-        pm({ [providerId]: profileId }),
-        orgId,
-        appId,
-      );
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       expect(tokens[providerId]).toBeUndefined();
       expect(Object.keys(tokens)).toHaveLength(0);
@@ -238,7 +206,6 @@ describe("token-resolver", () => {
         providers,
         pm({ [providerA]: profileId, [providerB]: profileId, [providerC]: profileId }),
         orgId,
-        appId,
       );
 
       expect(Object.keys(tokens)).toHaveLength(3);
@@ -270,7 +237,6 @@ describe("token-resolver", () => {
         providers,
         pm({ [providerMapped]: profileId }),
         orgId,
-        appId,
       );
 
       expect(tokens[providerMapped]).toBe("mapped-key");
@@ -288,12 +254,7 @@ describe("token-resolver", () => {
       await saveConnection(db, profileId, providerId, orgId, {});
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
-      const tokens = await buildProviderTokens(
-        providers,
-        pm({ [providerId]: profileId }),
-        orgId,
-        appId,
-      );
+      const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
 
       // No access_token, no api_key, and Object.keys(credentials).length === 0 → null → excluded
       expect(tokens[providerId]).toBeUndefined();
@@ -322,7 +283,6 @@ describe("token-resolver", () => {
         providers,
         pm({ [providerA]: profileId, [providerB]: profileId2 }),
         orgId,
-        appId,
       );
 
       expect(tokens[providerA]).toBe("key-from-profile-1");
@@ -348,7 +308,6 @@ describe("token-resolver", () => {
         providers,
         pm({ [providerId]: otherProfile.id }),
         orgId,
-        appId,
       );
 
       // getCredentials filters by orgId, so the other org's connection should not resolve

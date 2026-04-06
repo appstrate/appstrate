@@ -11,8 +11,6 @@ import { extractErrorMessage } from "./utils.ts";
 /** In-memory concurrency lock: one refresh at a time per connection. */
 const inflightRefreshes = new Map<string, Promise<DecryptedCredentials>>();
 
-const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes before expiry
-
 export interface RefreshContext {
   tokenUrl: string;
   clientId: string;
@@ -22,59 +20,10 @@ export interface RefreshContext {
 }
 
 /**
- * Refresh an OAuth2 token if it's about to expire.
- * Returns the (possibly refreshed) decrypted credentials.
- * Requires a RefreshContext with OAuth config (tokenUrl, clientId/Secret).
- * If refreshContext is not provided, refresh is skipped.
- */
-export async function refreshIfNeeded(
-  db: Db,
-  connectionId: string,
-  providerId: string,
-  credentialsEncrypted: string,
-  expiresAt: string | null,
-  refreshContext?: RefreshContext,
-): Promise<DecryptedCredentials> {
-  // If not expired (or no expiry set), return current credentials
-  if (!expiresAt) {
-    return decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
-  }
-  const expiresMs = new Date(expiresAt).getTime();
-  if (!Number.isNaN(expiresMs) && expiresMs > Date.now() + REFRESH_BUFFER_MS) {
-    return decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
-  }
-
-  // If no refresh context available, return current credentials (can't refresh)
-  if (!refreshContext) {
-    return decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
-  }
-
-  // Check for in-flight refresh
-  const inflight = inflightRefreshes.get(connectionId);
-  if (inflight) return inflight;
-
-  // Start refresh
-  const refreshPromise = doRefresh(
-    db,
-    connectionId,
-    providerId,
-    credentialsEncrypted,
-    refreshContext,
-  );
-
-  inflightRefreshes.set(connectionId, refreshPromise);
-
-  try {
-    return await refreshPromise;
-  } finally {
-    inflightRefreshes.delete(connectionId);
-  }
-}
-
-/**
  * Force a token refresh regardless of expiry.
  * Returns refreshed credentials, or current credentials if no refresh token / not OAuth2.
  * Throws if the refresh request itself fails (invalid_grant, network error).
+ * Clears `needsReconnection` on success — a successful refresh proves the connection is healthy.
  */
 export async function forceRefresh(
   db: Db,
@@ -87,7 +36,7 @@ export async function forceRefresh(
     return decryptCredentials<DecryptedCredentials>(credentialsEncrypted);
   }
 
-  // Reuse inflight deduplication
+  // Deduplicate concurrent refreshes for the same connection
   const inflight = inflightRefreshes.get(connectionId);
   if (inflight) return inflight;
 
@@ -120,7 +69,6 @@ async function doRefresh(
     return creds;
   }
 
-  // Perform token refresh
   const useBasicAuth = ctx.tokenAuthMethod === "client_secret_basic";
 
   const body = new URLSearchParams({
@@ -165,13 +113,13 @@ async function doRefresh(
   };
   const newExpiresAt = parsed.expiresAt;
 
-  // Update the connection in DB — propagate error so callers can log appropriately
   const newEncrypted = encryptCredentials(newCreds);
   await db
     .update(userProviderConnections)
     .set({
       credentialsEncrypted: newEncrypted,
       expiresAt: newExpiresAt ? new Date(newExpiresAt) : null,
+      needsReconnection: false,
       updatedAt: new Date(),
     })
     .where(eq(userProviderConnections.id, connectionId));

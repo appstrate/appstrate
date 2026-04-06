@@ -167,13 +167,7 @@ export function createInternalRouter() {
       throw notFound(`No profile resolved for provider '${providerId}'`);
     }
 
-    const result = await resolveCredentialsForProxy(
-      db,
-      profileId,
-      provider.id,
-      run.orgId,
-      run.applicationId,
-    );
+    const result = await resolveCredentialsForProxy(db, profileId, provider.id, run.orgId);
 
     if (!result) {
       throw notFound(`No credentials for provider '${providerId}'`);
