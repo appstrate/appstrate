@@ -771,6 +771,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 function makeDeleteHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
+    const appId = c.get("applicationId");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
@@ -780,7 +781,7 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
 
     // For agents, check running runs
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId, orgId);
+      const running = await getRunningRunsForPackage(itemId, orgId, appId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -881,6 +882,7 @@ function makeVersionInfoHandler(rcfg: PackageRouteConfig) {
 function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
+    const appId = c.get("applicationId");
     const user = c.get("user");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
@@ -891,7 +893,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 
     // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId, orgId);
+      const running = await getRunningRunsForPackage(itemId, orgId, appId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -940,6 +942,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
+    const appId = c.get("applicationId");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
@@ -949,7 +952,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 
     // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId, orgId);
+      const running = await getRunningRunsForPackage(itemId, orgId, appId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -1029,6 +1032,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
+    const appId = c.get("applicationId");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
@@ -1043,7 +1047,7 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId, orgId);
+      const running = await getRunningRunsForPackage(itemId, orgId, appId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",

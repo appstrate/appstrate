@@ -1,5 +1,5 @@
 {
-  "id": "66d66790-540b-42c7-a260-64d630ffa6c1",
+  "id": "bb58448c-9a0f-4e5b-bfce-5b04209b0949",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -2998,6 +2998,98 @@
       },
       "isRLSEnabled": false
     },
+    "public.application_provider_credentials": {
+      "name": "application_provider_credentials",
+      "schema": "",
+      "columns": {
+        "application_id": {
+          "name": "application_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "credentials_encrypted": {
+          "name": "credentials_encrypted",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_app_provider_creds_provider": {
+          "name": "idx_app_provider_creds_provider",
+          "columns": [
+            {
+              "expression": "provider_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "application_provider_credentials_application_id_applications_id_fk": {
+          "name": "application_provider_credentials_application_id_applications_id_fk",
+          "tableFrom": "application_provider_credentials",
+          "tableTo": "applications",
+          "columnsFrom": ["application_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "application_provider_credentials_provider_id_packages_id_fk": {
+          "name": "application_provider_credentials_provider_id_packages_id_fk",
+          "tableFrom": "application_provider_credentials",
+          "tableTo": "packages",
+          "columnsFrom": ["provider_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "application_provider_credentials_application_id_provider_id_pk": {
+          "name": "application_provider_credentials_application_id_provider_id_pk",
+          "columns": ["application_id", "provider_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.connection_profiles": {
       "name": "connection_profiles",
       "schema": "",
@@ -3214,6 +3306,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "application_id": {
+          "name": "application_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "code_verifier": {
           "name": "code_verifier",
           "type": "text",
@@ -3311,6 +3409,15 @@
           "tableFrom": "oauth_states",
           "tableTo": "connection_profiles",
           "columnsFrom": ["profile_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "oauth_states_application_id_applications_id_fk": {
+          "name": "oauth_states_application_id_applications_id_fk",
+          "tableFrom": "oauth_states",
+          "tableTo": "applications",
+          "columnsFrom": ["application_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -3435,75 +3542,6 @@
         "org_profile_provider_bindings_org_profile_id_provider_id_pk": {
           "name": "org_profile_provider_bindings_org_profile_id_provider_id_pk",
           "columns": ["org_profile_id", "provider_id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.provider_credentials": {
-      "name": "provider_credentials",
-      "schema": "",
-      "columns": {
-        "provider_id": {
-          "name": "provider_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "org_id": {
-          "name": "org_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credentials_encrypted": {
-          "name": "credentials_encrypted",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "enabled": {
-          "name": "enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "provider_credentials_provider_id_packages_id_fk": {
-          "name": "provider_credentials_provider_id_packages_id_fk",
-          "tableFrom": "provider_credentials",
-          "tableTo": "packages",
-          "columnsFrom": ["provider_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "provider_credentials_org_id_organizations_id_fk": {
-          "name": "provider_credentials_org_id_organizations_id_fk",
-          "tableFrom": "provider_credentials",
-          "tableTo": "organizations",
-          "columnsFrom": ["org_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "provider_credentials_provider_id_org_id_pk": {
-          "name": "provider_credentials_provider_id_org_id_pk",
-          "columns": ["provider_id", "org_id"]
         }
       },
       "uniqueConstraints": {},
@@ -4031,6 +4069,13 @@
           "notNull": true,
           "default": "'full'"
         },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
         "secret": {
           "name": "secret",
           "type": "text",
@@ -4062,13 +4107,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "enabled": {
-          "name": "enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
         }
       },
       "indexes": {

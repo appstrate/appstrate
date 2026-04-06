@@ -279,7 +279,7 @@ export async function appendRunLog(
 export async function getRunningRunsForPackage(
   packageId: string,
   orgId: string,
-  applicationId?: string,
+  applicationId: string,
   actor?: Actor,
 ): Promise<number> {
   const conditions = [
@@ -288,9 +288,7 @@ export async function getRunningRunsForPackage(
     inArray(runs.status, ["running", "pending"]),
   ];
 
-  if (applicationId) {
-    conditions.push(eq(runs.applicationId, applicationId));
-  }
+  conditions.push(eq(runs.applicationId, applicationId));
 
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));

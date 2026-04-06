@@ -130,6 +130,7 @@ describe("run preflight — provider profile resolution", () => {
       providerProfiles,
       orgId: oid,
       config: packageConfig.config,
+      applicationId: aid,
     });
 
     return {

@@ -41,22 +41,20 @@ export async function validateAgentDependencies(
   providers: AgentProviderRequirement[],
   providerProfiles: ProviderProfileMap,
   orgId: string,
+  applicationId: string,
   deps: DependencyValidationDeps = defaultDeps,
-  applicationId?: string,
 ): Promise<void> {
-  // Check provider enabled status (only when applicationId is available)
-  if (applicationId) {
-    const uniqueProviders = [...new Set(providers.map((s) => s.id))];
-    for (const providerId of uniqueProviders) {
-      const enabled = await deps.isProviderEnabled(orgId, providerId, applicationId);
-      if (!enabled) {
-        throw new ApiError({
-          status: 400,
-          code: "provider_not_enabled",
-          title: "Provider Not Enabled",
-          detail: `Provider '${providerId}' is not configured`,
-        });
-      }
+  // Check provider enabled status
+  const uniqueProviders = [...new Set(providers.map((s) => s.id))];
+  for (const providerId of uniqueProviders) {
+    const enabled = await deps.isProviderEnabled(orgId, providerId, applicationId);
+    if (!enabled) {
+      throw new ApiError({
+        status: 400,
+        code: "provider_not_enabled",
+        title: "Provider Not Enabled",
+        detail: `Provider '${providerId}' is not configured`,
+      });
     }
   }
 

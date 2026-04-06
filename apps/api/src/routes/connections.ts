@@ -95,8 +95,8 @@ export function createConnectionsRouter() {
           orgId,
           actor,
           effectiveProfileId,
-          scopes,
           applicationId,
+          scopes,
         );
         return c.json({ authUrl: result.authUrl, state: result.state });
       } catch (err: unknown) {

@@ -29,7 +29,7 @@ export async function validateAgentReadiness(params: {
   providerProfiles: ProviderProfileMap;
   orgId: string;
   config?: Record<string, unknown>;
-  applicationId?: string | null;
+  applicationId: string;
 }): Promise<void> {
   const { agent, providerProfiles, orgId, config, applicationId } = params;
   const { manifest } = agent;
@@ -74,13 +74,7 @@ export async function validateAgentReadiness(params: {
 
   // 4. Provider dependencies
   const manifestProviders = resolveManifestProviders(manifest);
-  await validateAgentDependencies(
-    manifestProviders,
-    providerProfiles,
-    orgId,
-    undefined,
-    applicationId ?? undefined,
-  );
+  await validateAgentDependencies(manifestProviders, providerProfiles, orgId, applicationId);
 
   // 5. Config validation
   if (config) {

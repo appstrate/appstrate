@@ -24,8 +24,8 @@ export async function initiateConnection(
   orgId: string,
   actor: Actor,
   profileId: string,
+  applicationId: string,
   requestedScopes?: string[],
-  applicationId?: string | null,
 ): Promise<{ authUrl: string; state: string }> {
   const redirectUri = getOAuthCallbackUrl();
 

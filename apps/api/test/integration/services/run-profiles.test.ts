@@ -139,6 +139,7 @@ describe("Run with provider profiles", () => {
       agent: agent,
       providerProfiles,
       orgId: oid,
+      applicationId: aid,
       config: packageConfig.config,
     });
 
