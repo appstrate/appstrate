@@ -139,8 +139,14 @@ export async function getLastRunState(
   packageId: string,
   actor: Actor | null,
   orgId: string,
+  applicationId: string,
 ): Promise<Record<string, unknown> | null> {
-  const conditions = [eq(runs.packageId, packageId), eq(runs.orgId, orgId), isNotNull(runs.state)];
+  const conditions = [
+    eq(runs.packageId, packageId),
+    eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
+    isNotNull(runs.state),
+  ];
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
@@ -158,6 +164,7 @@ export async function getRecentRuns(
   packageId: string,
   actor: Actor | null,
   orgId: string,
+  applicationId: string,
   options: {
     limit?: number;
     fields?: ("state" | "result")[];
@@ -170,6 +177,7 @@ export async function getRecentRuns(
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
     eq(runs.status, "success"),
   ];
   if (actor) {
@@ -271,6 +279,7 @@ export async function appendRunLog(
 export async function getRunningRunsForPackage(
   packageId: string,
   orgId: string,
+  applicationId?: string,
   actor?: Actor,
 ): Promise<number> {
   const conditions = [
@@ -278,6 +287,10 @@ export async function getRunningRunsForPackage(
     eq(runs.orgId, orgId),
     inArray(runs.status, ["running", "pending"]),
   ];
+
+  if (applicationId) {
+    conditions.push(eq(runs.applicationId, applicationId));
+  }
 
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
@@ -298,11 +311,20 @@ export async function getRunningRunCountForOrg(orgId: string): Promise<number> {
   return row?.count ?? 0;
 }
 
-export async function getRunningRunCounts(orgId: string): Promise<Record<string, number>> {
+export async function getRunningRunCounts(
+  orgId: string,
+  applicationId: string,
+): Promise<Record<string, number>> {
   const rows = await db
     .select({ packageId: runs.packageId, count: count() })
     .from(runs)
-    .where(and(eq(runs.orgId, orgId), inArray(runs.status, ["running", "pending"])))
+    .where(
+      and(
+        eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
+        inArray(runs.status, ["running", "pending"]),
+      ),
+    )
     .groupBy(runs.packageId);
 
   const counts: Record<string, number> = {};
@@ -312,9 +334,12 @@ export async function getRunningRunCounts(orgId: string): Promise<Record<string,
   return counts;
 }
 
-export async function getRun(id: string, orgId: string, applicationId?: string) {
-  const conditions = [eq(runs.id, id), eq(runs.orgId, orgId)];
-  if (applicationId) conditions.push(eq(runs.applicationId, applicationId));
+export async function getRun(id: string, orgId: string, applicationId: string) {
+  const conditions = [
+    eq(runs.id, id),
+    eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
+  ];
 
   const [row] = await db
     .select({
@@ -332,10 +357,20 @@ export async function getRun(id: string, orgId: string, applicationId?: string) 
   return row ?? null;
 }
 
-export async function deletePackageRuns(packageId: string, orgId: string): Promise<number> {
+export async function deletePackageRuns(
+  packageId: string,
+  orgId: string,
+  applicationId: string,
+): Promise<number> {
   const deleted = await db
     .delete(runs)
-    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)))
+    .where(
+      and(
+        eq(runs.packageId, packageId),
+        eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
+      ),
+    )
     .returning({ id: runs.id });
   return deleted.length;
 }
@@ -407,9 +442,12 @@ export async function listScheduleRuns(
   );
 }
 
-export async function getRunFull(id: string, orgId: string, applicationId?: string) {
-  const conditions = [eq(runs.id, id), eq(runs.orgId, orgId)];
-  if (applicationId) conditions.push(eq(runs.applicationId, applicationId));
+export async function getRunFull(id: string, orgId: string, applicationId: string) {
+  const conditions = [
+    eq(runs.id, id),
+    eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
+  ];
 
   const [row] = await db
     .select({

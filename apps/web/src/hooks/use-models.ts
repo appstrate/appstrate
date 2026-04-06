@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
 import type { OrgModelInfo, TestResult, ModelCost } from "@appstrate/shared-types";
 import type { ModelFormData } from "../components/model-form-modal";
 import { useCreateProviderKey } from "./use-provider-keys";
@@ -136,10 +137,11 @@ export function useOpenRouterModels(search: string | undefined) {
 
 export function useAgentModel(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agent-model", orgId, packageId],
+    queryKey: ["agent-model", orgId, appId, packageId],
     queryFn: () => api<{ modelId: string | null }>(`/agents/${packageId}/model`),
-    enabled: !!orgId && !!packageId,
+    enabled: !!orgId && !!appId && !!packageId,
   });
 }
 

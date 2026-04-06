@@ -19,7 +19,6 @@ import {
 import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 const createEndUserSchema = z.object({
-  applicationId: z.string().optional(),
   name: z.string().optional(),
   email: z.string().email().optional(),
   externalId: z.string().optional(),
@@ -60,7 +59,7 @@ export function createEndUsersRouter() {
       const data = parseBody(createEndUserSchema, body);
 
       const appId = c.get("applicationId");
-      const created = await createEndUser(orgId, data.applicationId ?? appId, {
+      const created = await createEndUser(orgId, appId, {
         name: data.name,
         email: data.email,
         externalId: data.externalId,
@@ -76,7 +75,7 @@ export function createEndUsersRouter() {
     const limit = c.req.query("limit") ? Number(c.req.query("limit")) : undefined;
     const startingAfter = c.req.query("startingAfter");
     const endingBefore = c.req.query("endingBefore");
-    const applicationId = c.req.query("applicationId") ?? c.get("applicationId");
+    const applicationId = c.get("applicationId");
     const externalId = c.req.query("externalId");
     const email = c.req.query("email");
 
@@ -85,7 +84,7 @@ export function createEndUsersRouter() {
     }
 
     const result = await listEndUsers(orgId, {
-      applicationId: applicationId ?? undefined,
+      applicationId,
       externalId: externalId ?? undefined,
       email: email ?? undefined,
       limit,

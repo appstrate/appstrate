@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
 import { onMutationError } from "./use-mutations";
 import { invalidateConnectionRelated } from "./invalidation";
 import type {
@@ -211,13 +212,14 @@ export function useOrgProfileAgents(profileId: string | undefined) {
 
 export function useAgentProviderProfiles(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agent-provider-profiles", orgId, packageId],
+    queryKey: ["agent-provider-profiles", orgId, appId, packageId],
     queryFn: () =>
       api<{ overrides: Record<string, string> }>(`/agents/${packageId}/provider-profiles`).then(
         (r) => r.overrides,
       ),
-    enabled: !!packageId,
+    enabled: !!orgId && !!appId && !!packageId,
     staleTime: 30_000,
   });
 }

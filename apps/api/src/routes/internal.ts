@@ -122,7 +122,7 @@ export function createInternalRouter() {
 
     try {
       const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
-      const recentRuns = await getRecentRuns(run.packageId, actor, run.orgId, {
+      const recentRuns = await getRecentRuns(run.packageId, actor, run.orgId, run.applicationId, {
         limit,
         fields,
         excludeRunId: runId,

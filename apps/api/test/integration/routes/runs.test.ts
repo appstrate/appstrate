@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedRunLog } from "../../helpers/seed.ts";
+import { seedAgent, seedRun, seedRunLog, seedApplication } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 
 const app = getTestApp();
@@ -449,6 +449,55 @@ describe("Runs API", () => {
         method: "DELETE",
       });
       expect(res.status).toBe(401);
+    });
+
+    it("only deletes runs in the current application (cross-app isolation)", async () => {
+      // Create a second app
+      const appB = await seedApplication({ orgId: ctx.orgId, name: "AppB" });
+
+      await seedAgent({ id: "@runorg/iso-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/iso-agent");
+      await installPackage(appB.id, ctx.orgId, "@runorg/iso-agent");
+
+      // Seed runs in AppA
+      await seedRun({
+        packageId: "@runorg/iso-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      // Seed runs in AppB
+      const appBRun = await seedRun({
+        packageId: "@runorg/iso-agent",
+        orgId: ctx.orgId,
+        applicationId: appB.id,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      // Delete from AppA context
+      const res = await app.request("/api/agents/@runorg/iso-agent/runs", {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.deleted).toBe(1);
+
+      // AppB run should still exist
+      const appBHeaders = {
+        ...authHeaders(ctx),
+        "X-App-Id": appB.id,
+      };
+      const listRes = await app.request("/api/agents/@runorg/iso-agent/runs", {
+        headers: appBHeaders,
+      });
+      expect(listRes.status).toBe(200);
+      const listBody = (await listRes.json()) as any;
+      const runIds = listBody.runs.map((r: any) => r.id);
+      expect(runIds).toContain(appBRun.id);
     });
   });
 });

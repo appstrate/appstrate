@@ -376,8 +376,57 @@ test.describe("Cross-app resource isolation", () => {
 
       const bodyA = await resA.json();
       const bodyB = await resB.json();
-      expect(typeof bodyA.count).toBe("number");
-      expect(typeof bodyB.count).toBe("number");
+      // Both fresh apps should start at 0
+      expect(bodyA.count).toBe(0);
+      expect(bodyB.count).toBe(0);
+    });
+  });
+
+  // ─── End-user creation scoping ────────────
+
+  test.describe("End-user creation scoping", () => {
+    test("POST /end-users ignores applicationId in body — always uses X-App-Id", async ({
+      request,
+      apiClient: clientA,
+      orgContext,
+      orgOnlyClient,
+    }) => {
+      const appB = await createApplication(orgOnlyClient, `AppB-eu-body-${Date.now()}`);
+      const clientB = createApiClient(request, {
+        cookie: orgContext.auth.cookie,
+        orgId: orgContext.org.orgId,
+        appId: appB.id,
+      });
+
+      // Create end-user from AppA context, but sneak appB's ID in the body
+      const res = await clientA.post("/end-users", {
+        name: "Body Override Test",
+        applicationId: appB.id,
+      });
+      expect(res.status()).toBe(201);
+      const eu = await res.json();
+
+      // The end-user should belong to AppA (the X-App-Id), not AppB
+      const resA = await clientA.get(`/end-users/${eu.id}`);
+      expect(resA.status()).toBe(200);
+
+      // AppB should NOT see this end-user
+      const resB = await clientB.get(`/end-users/${eu.id}`);
+      expect(resB.status()).toBe(404);
+    });
+  });
+
+  // ─── SSE cookie auth requires appId ───────
+
+  test.describe("SSE authentication", () => {
+    test("SSE returns 401 without appId query param", async ({ request, orgContext }) => {
+      const res = await request.get(`/api/realtime/runs?orgId=${orgContext.org.orgId}`, {
+        headers: {
+          Cookie: orgContext.auth.cookie,
+          Accept: "text/event-stream",
+        },
+      });
+      expect(res.status()).toBe(401);
     });
   });
 });

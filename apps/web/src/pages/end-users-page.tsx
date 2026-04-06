@@ -24,7 +24,6 @@ export function EndUsersPage() {
   const [cursor, setCursor] = useState<string | undefined>(undefined);
 
   const { data, isLoading, error } = useEndUsers({
-    applicationId: appId ?? undefined,
     limit: 25,
     startingAfter: cursor,
   });
@@ -131,11 +130,7 @@ export function EndUsersPage() {
         </div>
       )}
 
-      <EndUserCreateModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        applicationId={appId}
-      />
+      <EndUserCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
 
       <EndUserDetailModal
         open={!!selectedUser}

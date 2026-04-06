@@ -548,6 +548,8 @@ export async function createSchedule(
 
 export async function updateSchedule(
   id: string,
+  orgId: string,
+  applicationId: string,
   data: {
     connectionProfileId?: string;
     name?: string;
@@ -557,7 +559,7 @@ export async function updateSchedule(
     enabled?: boolean;
   },
 ): Promise<Schedule | null> {
-  const existing = await getSchedule(id);
+  const existing = await getSchedule(id, orgId, applicationId);
   if (!existing) return null;
 
   const cronExpr = data.cronExpression ?? existing.cronExpression;
@@ -582,7 +584,13 @@ export async function updateSchedule(
   const [row] = await db
     .update(packageSchedules)
     .set(payload)
-    .where(eq(packageSchedules.id, id))
+    .where(
+      and(
+        eq(packageSchedules.id, id),
+        eq(packageSchedules.orgId, orgId),
+        eq(packageSchedules.applicationId, applicationId),
+      ),
+    )
     .returning();
 
   if (!row) {
@@ -591,7 +599,7 @@ export async function updateSchedule(
   const schedule = toSchedule(row);
 
   if (schedule.enabled) {
-    await upsertScheduleJob(schedule, existing.orgId);
+    await upsertScheduleJob(schedule, orgId);
   } else {
     await removeScheduleJob(id);
   }
@@ -599,12 +607,22 @@ export async function updateSchedule(
   return schedule;
 }
 
-export async function deleteSchedule(id: string): Promise<boolean> {
+export async function deleteSchedule(
+  id: string,
+  orgId: string,
+  applicationId: string,
+): Promise<boolean> {
   await removeScheduleJob(id);
 
   const deleted = await db
     .delete(packageSchedules)
-    .where(eq(packageSchedules.id, id))
+    .where(
+      and(
+        eq(packageSchedules.id, id),
+        eq(packageSchedules.orgId, orgId),
+        eq(packageSchedules.applicationId, applicationId),
+      ),
+    )
     .returning({ id: packageSchedules.id });
   return deleted.length > 0;
 }

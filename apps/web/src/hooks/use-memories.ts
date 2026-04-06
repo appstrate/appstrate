@@ -15,6 +15,6 @@ export function useAgentMemories(packageId: string | undefined) {
       const res = await api<{ memories: AgentMemoryItem[] }>(`/agents/${packageId}/memories`);
       return res.memories;
     },
-    enabled: !!packageId,
+    enabled: !!orgId && !!appId && !!packageId,
   });
 }

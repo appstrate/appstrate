@@ -42,7 +42,7 @@ export function createAgentsRouter() {
     const appId = c.get("applicationId");
     const [allAgents, runningCounts] = await Promise.all([
       listPackages(orgId),
-      getRunningRunCounts(orgId),
+      getRunningRunCounts(orgId, appId),
     ]);
 
     // Filter by application access — all apps check application_packages

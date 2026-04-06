@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
 import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
 
 export function useProxies() {
@@ -85,13 +86,14 @@ export function useTestProxy() {
 
 export function useAgentProxy(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agent-proxy", orgId, packageId],
+    queryKey: ["agent-proxy", orgId, appId, packageId],
     queryFn: () =>
       api<{ proxyId: string | null; proxyLabel?: string; resolved: boolean }>(
         `/agents/${packageId}/proxy`,
       ),
-    enabled: !!orgId && !!packageId,
+    enabled: !!orgId && !!appId && !!packageId,
   });
 }
 

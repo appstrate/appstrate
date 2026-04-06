@@ -20,6 +20,9 @@ const APP_SCOPED_KEYS = [
   "packages",
   "agents",
   "agent-memories",
+  "agent-model",
+  "agent-proxy",
+  "agent-provider-profiles",
   "runs",
   "run",
   "run-logs",
@@ -34,6 +37,11 @@ const APP_SCOPED_KEYS = [
   "providers",
   "available-providers",
   "app-provider-overrides",
+  "unread-count",
+  "unread-counts-by-agent",
+  "version-detail",
+  "package-versions",
+  "version-info",
 ];
 
 /**

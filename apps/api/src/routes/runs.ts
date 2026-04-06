@@ -605,12 +605,13 @@ export function createRunsRouter() {
       const agent = c.get("agent");
       const orgId = c.get("orgId");
 
-      const running = await getRunningRunsForPackage(agent.id, orgId);
+      const appId = c.get("applicationId");
+      const running = await getRunningRunsForPackage(agent.id, orgId, appId);
       if (running > 0) {
         throw conflict("run_in_progress", `${running} run(s) still running`);
       }
 
-      const deleted = await deletePackageRuns(agent.id, orgId);
+      const deleted = await deletePackageRuns(agent.id, orgId, appId);
       return c.json({ deleted });
     },
   );

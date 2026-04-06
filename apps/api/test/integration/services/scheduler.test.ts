@@ -256,7 +256,7 @@ describe("scheduler service", () => {
         cronExpression: "0 * * * *",
       });
 
-      const updated = await updateSchedule(created.id, {
+      const updated = await updateSchedule(created.id, orgId, defaultAppId, {
         cronExpression: "*/5 * * * *",
       });
 
@@ -272,7 +272,7 @@ describe("scheduler service", () => {
         cronExpression: "0 * * * *",
       });
 
-      const updated = await updateSchedule(created.id, {
+      const updated = await updateSchedule(created.id, orgId, defaultAppId, {
         name: "Updated Name",
       });
 
@@ -288,7 +288,7 @@ describe("scheduler service", () => {
       expect(created.enabled).toBe(true);
       expect(created.nextRunAt).not.toBeNull();
 
-      const updated = await updateSchedule(created.id, {
+      const updated = await updateSchedule(created.id, orgId, defaultAppId, {
         enabled: false,
       });
 
@@ -302,9 +302,9 @@ describe("scheduler service", () => {
         cronExpression: "0 * * * *",
       });
 
-      await updateSchedule(created.id, { enabled: false });
+      await updateSchedule(created.id, orgId, defaultAppId, { enabled: false });
 
-      const updated = await updateSchedule(created.id, { enabled: true });
+      const updated = await updateSchedule(created.id, orgId, defaultAppId, { enabled: true });
 
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(true);
@@ -318,7 +318,7 @@ describe("scheduler service", () => {
         input: { key: "original" },
       });
 
-      const updated = await updateSchedule(created.id, {
+      const updated = await updateSchedule(created.id, orgId, defaultAppId, {
         input: { key: "updated", extra: true },
       });
 
@@ -327,7 +327,7 @@ describe("scheduler service", () => {
     });
 
     it("returns null for a non-existent ID", async () => {
-      const updated = await updateSchedule("sched_nonexistent", {
+      const updated = await updateSchedule("sched_nonexistent", orgId, defaultAppId, {
         cronExpression: "*/5 * * * *",
       });
       expect(updated).toBeNull();
@@ -342,7 +342,7 @@ describe("scheduler service", () => {
         cronExpression: "0 * * * *",
       });
 
-      const deleted = await deleteSchedule(created.id);
+      const deleted = await deleteSchedule(created.id, orgId, defaultAppId);
       expect(deleted).toBe(true);
 
       const found = await getSchedule(created.id);
@@ -350,7 +350,7 @@ describe("scheduler service", () => {
     });
 
     it("returns false for a non-existent ID", async () => {
-      const deleted = await deleteSchedule("sched_nonexistent");
+      const deleted = await deleteSchedule("sched_nonexistent", orgId, defaultAppId);
       expect(deleted).toBe(false);
     });
 
@@ -364,7 +364,7 @@ describe("scheduler service", () => {
         cronExpression: "*/30 * * * *",
       });
 
-      await deleteSchedule(schedule2.id);
+      await deleteSchedule(schedule2.id, orgId, defaultAppId);
 
       const remaining = await listSchedules(orgId, defaultAppId);
       expect(remaining).toHaveLength(1);

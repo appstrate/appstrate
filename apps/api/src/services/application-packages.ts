@@ -144,8 +144,7 @@ export async function hasPackageAccess(applicationId: string, packageId: string)
  * Batch check which packages an application has access to.
  * Returns the set of accessible package IDs.
  *
- * Default application → all packageIds returned.
- * Custom application → only explicitly installed packages.
+ * All applications (including default) → only explicitly installed packages.
  */
 export async function filterAccessiblePackages(
   applicationId: string,

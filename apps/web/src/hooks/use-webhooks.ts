@@ -129,12 +129,13 @@ export function useRotateWebhookSecret() {
 
 export function useWebhookDeliveries(webhookId: string) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["webhooks", orgId, webhookId, "deliveries"],
+    queryKey: ["webhooks", orgId, appId, webhookId, "deliveries"],
     queryFn: () =>
       api<{ object: "list"; data: WebhookDelivery[] }>(`/webhooks/${webhookId}/deliveries`).then(
         (d) => d.data,
       ),
-    enabled: !!orgId && !!webhookId,
+    enabled: !!orgId && !!appId && !!webhookId,
   });
 }

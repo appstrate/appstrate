@@ -141,18 +141,20 @@ export function createSchedulesRouter() {
       throw invalidRequest("Invalid cron expression", "cronExpression");
     }
 
-    const schedule = await updateSchedule(id, data);
+    const schedule = await updateSchedule(id, orgId, c.get("applicationId"), data);
     return c.json(schedule);
   });
 
   // DELETE /api/schedules/:id — delete a schedule
   router.delete("/schedules/:id", requirePermission("schedules", "delete"), async (c) => {
     const id = c.req.param("id")!;
-    const existing = await getSchedule(id, c.get("orgId"), c.get("applicationId"));
+    const orgId = c.get("orgId");
+    const appId = c.get("applicationId");
+    const existing = await getSchedule(id, orgId, appId);
     if (!existing) {
       throw notFound(`Schedule '${id}' not found`);
     }
-    await deleteSchedule(id);
+    await deleteSchedule(id, orgId, appId);
     return c.json({ ok: true });
   });
 

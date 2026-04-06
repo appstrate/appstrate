@@ -12,7 +12,6 @@ import { useCreateEndUser } from "../hooks/use-end-users";
 interface Props {
   open: boolean;
   onClose: () => void;
-  applicationId: string;
 }
 
 type FormData = {
@@ -21,7 +20,7 @@ type FormData = {
   externalId: string;
 };
 
-export function EndUserCreateModal({ open, onClose, applicationId }: Props) {
+export function EndUserCreateModal({ open, onClose }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateEndUser();
 
@@ -42,7 +41,7 @@ export function EndUserCreateModal({ open, onClose, applicationId }: Props) {
   };
 
   const onFormSubmit = (data: FormData) => {
-    const payload: Record<string, string> = { applicationId };
+    const payload: Record<string, string> = {};
     if (data.name.trim()) payload.name = data.name.trim();
     if (data.email.trim()) payload.email = data.email.trim();
     if (data.externalId.trim()) payload.externalId = data.externalId.trim();

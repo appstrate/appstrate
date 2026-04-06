@@ -80,12 +80,11 @@ async function validateSSEAuth(c: {
   if (!rows[0]) return null;
 
   const applicationId = c.req.query("appId");
+  if (!applicationId) return null;
 
-  // Validate application belongs to org (if provided)
-  if (applicationId) {
-    const app = await validateApplicationInOrg(applicationId, orgId);
-    if (!app) return null;
-  }
+  // Validate application belongs to org
+  const app = await validateApplicationInOrg(applicationId, orgId);
+  if (!app) return null;
 
   return { userId: session.user.id, orgId, role: rows[0].role, applicationId };
 }
