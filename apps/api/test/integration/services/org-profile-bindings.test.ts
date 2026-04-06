@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { truncateAll, db } from "../../helpers/db.ts";
+import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedConnectionProfile } from "../../helpers/seed.ts";
-import { saveConnection } from "@appstrate/connect";
+import { seedConnectionProfile, seedConnectionForApp } from "../../helpers/seed.ts";
 import {
   getOrgProfileBindings,
   getOrgProfileBindingsEnriched,
@@ -15,6 +14,7 @@ import {
 describe("org-profile-bindings", () => {
   let userId: string;
   let orgId: string;
+  let defaultAppId: string;
   let orgProfileId: string;
   let userProfileId: string;
 
@@ -22,8 +22,9 @@ describe("org-profile-bindings", () => {
     await truncateAll();
     const { id } = await createTestUser({ name: "Test User" });
     userId = id;
-    const { org } = await createTestOrg(userId);
+    const { org, defaultAppId: appId } = await createTestOrg(userId);
     orgId = org.id;
+    defaultAppId = appId;
 
     const orgProfile = await seedConnectionProfile({ orgId, name: "Org Profile" });
     orgProfileId = orgProfile.id;
@@ -49,7 +50,7 @@ describe("org-profile-bindings", () => {
   describe("getOrgProfileBindingsEnriched", () => {
     it("returns connected true when source user has active connection", async () => {
       await bindOrgProfileProvider(orgProfileId, "@test/gmail", userProfileId, userId);
-      await saveConnection(db, userProfileId, "@test/gmail", orgId, {
+      await seedConnectionForApp(userProfileId, "@test/gmail", orgId, defaultAppId, {
         access_token: "tok",
       });
 

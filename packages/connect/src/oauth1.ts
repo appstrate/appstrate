@@ -180,6 +180,7 @@ export interface OAuth1CallbackResult {
   userId: string | null;
   actor: Actor;
   profileId: string;
+  applicationId: string;
   consumerKey: string;
   accessToken: string;
   accessTokenSecret: string;
@@ -294,6 +295,7 @@ export async function handleOAuth1Callback(
     userId: stateRow.userId ?? null,
     actor,
     profileId: stateRow.profileId,
+    applicationId: stateRow.applicationId!,
     consumerKey: creds.consumerKey,
     accessToken,
     accessTokenSecret,

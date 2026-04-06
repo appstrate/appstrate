@@ -68,7 +68,7 @@ export async function buildRunContext(params: {
     latestVersion,
     memories,
   ] = await Promise.all([
-    buildProviderTokens(manifestProviders, providerProfiles, orgId),
+    buildProviderTokens(manifestProviders, providerProfiles, orgId, applicationId),
     skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
     getLastRunState(agent.id, actor, orgId, applicationId),
     resolveProviderDefs(orgId, manifestProviders),

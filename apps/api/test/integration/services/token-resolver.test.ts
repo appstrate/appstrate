@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
+import { seedPackage, seedConnectionProfile, seedProviderCredentials } from "../../helpers/seed.ts";
 import { saveConnection } from "@appstrate/connect";
 import { buildProviderTokens } from "../../../src/services/token-resolver.ts";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../../../src/types/index.ts";
@@ -20,14 +20,16 @@ function pm(entries: Record<string, string>): ProviderProfileMap {
 describe("token-resolver", () => {
   let userId: string;
   let orgId: string;
+  let defaultAppId: string;
   let profileId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
-    const { org } = await createTestOrg(userId, { slug: "testorg" });
+    const { org, defaultAppId: appId } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
+    defaultAppId = appId;
 
     // Create a default connection profile for this user
     const profile = await seedConnectionProfile({ userId, name: "Default", isDefault: true });
@@ -49,6 +51,23 @@ describe("token-resolver", () => {
         description: `Provider ${id}`,
         definition,
       },
+    });
+  }
+
+  /** Seed a connection with auto-created provider credentials. */
+  async function seedConnection(
+    connProfileId: string,
+    providerId: string,
+    connOrgId: string,
+    credentials: Record<string, unknown>,
+    appId?: string,
+  ) {
+    const cred = await seedProviderCredentials({
+      applicationId: appId ?? defaultAppId,
+      providerId,
+    });
+    await saveConnection(db, connProfileId, providerId, connOrgId, credentials, {
+      providerCredentialId: cred.id,
     });
   }
 
@@ -77,7 +96,7 @@ describe("token-resolver", () => {
       });
 
       // Save a connection with an access_token
-      await saveConnection(db, profileId, providerId, orgId, {
+      await seedConnection(profileId, providerId, orgId, {
         access_token: "oauth-token-abc123",
         refresh_token: "refresh-xyz",
       });
@@ -94,7 +113,7 @@ describe("token-resolver", () => {
         authMode: "api_key",
       });
 
-      await saveConnection(db, profileId, providerId, orgId, {
+      await seedConnection(profileId, providerId, orgId, {
         api_key: "key-secret-456",
       });
 
@@ -110,7 +129,7 @@ describe("token-resolver", () => {
         authMode: "api_key",
       });
 
-      await saveConnection(db, profileId, providerId, orgId, {
+      await seedConnection(profileId, providerId, orgId, {
         access_token: "preferred-token",
         api_key: "fallback-key",
       });
@@ -134,7 +153,7 @@ describe("token-resolver", () => {
         },
       });
 
-      await saveConnection(db, profileId, providerId, orgId, {
+      await seedConnection(profileId, providerId, orgId, {
         username: "admin",
         password: "secret",
       });
@@ -151,7 +170,7 @@ describe("token-resolver", () => {
         authMode: "basic",
       });
 
-      await saveConnection(db, profileId, providerId, orgId, {
+      await seedConnection(profileId, providerId, orgId, {
         username: "user",
         password: "pass",
       });
@@ -186,13 +205,13 @@ describe("token-resolver", () => {
       await seedProvider(providerB, { authMode: "api_key" });
       await seedProvider(providerC, { authMode: "custom" });
 
-      await saveConnection(db, profileId, providerA, orgId, {
+      await seedConnection(profileId, providerA, orgId, {
         access_token: "token-a",
       });
-      await saveConnection(db, profileId, providerB, orgId, {
+      await seedConnection(profileId, providerB, orgId, {
         api_key: "key-b",
       });
-      await saveConnection(db, profileId, providerC, orgId, {
+      await seedConnection(profileId, providerC, orgId, {
         host: "example.com",
         token: "custom-c",
       });
@@ -221,10 +240,10 @@ describe("token-resolver", () => {
       await seedProvider(providerMapped, { authMode: "api_key" });
       await seedProvider(providerUnmapped, { authMode: "api_key" });
 
-      await saveConnection(db, profileId, providerMapped, orgId, {
+      await seedConnection(profileId, providerMapped, orgId, {
         api_key: "mapped-key",
       });
-      await saveConnection(db, profileId, providerUnmapped, orgId, {
+      await seedConnection(profileId, providerUnmapped, orgId, {
         api_key: "unmapped-key",
       });
 
@@ -251,7 +270,7 @@ describe("token-resolver", () => {
       });
 
       // Save a connection with empty credentials
-      await saveConnection(db, profileId, providerId, orgId, {});
+      await seedConnection(profileId, providerId, orgId, {});
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
       const tokens = await buildProviderTokens(providers, pm({ [providerId]: profileId }), orgId);
@@ -271,10 +290,10 @@ describe("token-resolver", () => {
       await seedProvider(providerA, { authMode: "api_key" });
       await seedProvider(providerB, { authMode: "api_key" });
 
-      await saveConnection(db, profileId, providerA, orgId, {
+      await seedConnection(profileId, providerA, orgId, {
         api_key: "key-from-profile-1",
       });
-      await saveConnection(db, profileId2, providerB, orgId, {
+      await seedConnection(profileId2, providerB, orgId, {
         api_key: "key-from-profile-2",
       });
 
@@ -291,16 +310,24 @@ describe("token-resolver", () => {
 
     it("does not leak tokens across orgs", async () => {
       const otherUser = await createTestUser({ email: "other@test.com" });
-      const { org: otherOrg } = await createTestOrg(otherUser.id, { slug: "otherorg" });
+      const { org: otherOrg, defaultAppId: otherAppId } = await createTestOrg(otherUser.id, {
+        slug: "otherorg",
+      });
       const otherProfile = await seedConnectionProfile({ userId: otherUser.id, name: "Other" });
 
       const providerId = "@system/cross-org";
       await seedProvider(providerId, { authMode: "api_key" });
 
       // Save connection in the OTHER org
-      await saveConnection(db, otherProfile.id, providerId, otherOrg.id, {
-        api_key: "other-org-secret",
-      });
+      await seedConnection(
+        otherProfile.id,
+        providerId,
+        otherOrg.id,
+        {
+          api_key: "other-org-secret",
+        },
+        otherAppId,
+      );
 
       const providers: AgentProviderRequirement[] = [{ id: providerId }];
       // Try to resolve using our org but pointing to the other profile

@@ -35,9 +35,8 @@ afterAll(() => {
 
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
+import { seedPackage, seedConnectionProfile, seedConnectionForApp } from "../../helpers/seed.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
-import { saveConnection } from "@appstrate/connect";
 import { applicationProviderCredentials } from "@appstrate/db/schema";
 import { createSchedule, listSchedules } from "../../../src/services/scheduler.ts";
 import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
@@ -101,7 +100,7 @@ describe("scheduler org-profile readiness", () => {
   it("returns readiness 'ready' when org profile has provider bound and connected", async () => {
     const providerId = "@system/org-readiness-bound";
     await seedProviderPackage(providerId);
-    await saveConnection(db, userProfileId, providerId, orgId, { api_key: "k" });
+    await seedConnectionForApp(userProfileId, providerId, orgId, defaultAppId, { api_key: "k" });
 
     const orgProfile = await seedConnectionProfile({ orgId, name: "Org Prod" });
     await bindOrgProfileProvider(orgProfile.id, providerId, userProfileId, userId);
@@ -173,7 +172,7 @@ describe("scheduler org-profile readiness", () => {
     // providers connected only via org profile bindings.
     const providerId = "@system/org-exec-path";
     await seedProviderPackage(providerId);
-    await saveConnection(db, userProfileId, providerId, orgId, { api_key: "k" });
+    await seedConnectionForApp(userProfileId, providerId, orgId, defaultAppId, { api_key: "k" });
 
     const orgProfile = await seedConnectionProfile({ orgId, name: "Org Exec" });
     await bindOrgProfileProvider(orgProfile.id, providerId, userProfileId, userId);

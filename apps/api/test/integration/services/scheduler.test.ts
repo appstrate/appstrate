@@ -14,9 +14,8 @@ import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 process.on("unhandledRejection", () => {});
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
+import { seedPackage, seedConnectionProfile, seedConnectionForApp } from "../../helpers/seed.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
-import { saveConnection } from "@appstrate/connect";
 import { connectionProfiles, applicationProviderCredentials } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import {
@@ -451,7 +450,7 @@ describe("scheduler service", () => {
     it("returns readiness 'ready' when provider is connected", async () => {
       const providerId = "@system/sched-connected";
       await seedProviderPackage(providerId);
-      await saveConnection(db, profileId, providerId, orgId, { api_key: "k" });
+      await seedConnectionForApp(profileId, providerId, orgId, defaultAppId, { api_key: "k" });
 
       const agentConnected = await seedPackage({
         orgId,

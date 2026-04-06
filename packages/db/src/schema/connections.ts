@@ -115,6 +115,7 @@ export const orgProfileProviderBindings = pgTable(
 export const applicationProviderCredentials = pgTable(
   "application_provider_credentials",
   {
+    id: uuid("id").defaultRandom().notNull().unique(),
     applicationId: text("application_id")
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
@@ -144,6 +145,9 @@ export const userProviderConnections = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    providerCredentialId: uuid("provider_credential_id")
+      .notNull()
+      .references(() => applicationProviderCredentials.id, { onDelete: "cascade" }),
     credentialsEncrypted: text("credentials_encrypted").notNull(),
     scopesGranted: text("scopes_granted")
       .array()
@@ -158,9 +162,11 @@ export const userProviderConnections = pgTable(
       table.profileId,
       table.providerId,
       table.orgId,
+      table.providerCredentialId,
     ),
     index("idx_user_provider_connections_profile").on(table.profileId),
     index("idx_user_provider_connections_org_id").on(table.orgId),
+    index("idx_user_provider_connections_cred_id").on(table.providerCredentialId),
   ],
 );
 

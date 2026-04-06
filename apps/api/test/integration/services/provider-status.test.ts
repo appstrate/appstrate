@@ -3,8 +3,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedConnectionProfile, seedPackage } from "../../helpers/seed.ts";
-import { saveConnection } from "@appstrate/connect";
+import { seedConnectionProfile, seedPackage, seedConnectionForApp } from "../../helpers/seed.ts";
 import { applicationProviderCredentials } from "@appstrate/db/schema";
 import { resolveProviderStatuses } from "../../../src/services/connection-manager/status.ts";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../../../src/types/index.ts";
@@ -52,7 +51,7 @@ describe("resolveProviderStatuses", () => {
   it("returns source and profileName for user_profile entry", async () => {
     const providerId = "@system/test-status";
     await seedProvider(providerId);
-    await saveConnection(db, profileId, providerId, orgId, { api_key: "k" });
+    await seedConnectionForApp(profileId, providerId, orgId, appId, { api_key: "k" });
 
     const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const profiles: ProviderProfileMap = {
@@ -71,7 +70,7 @@ describe("resolveProviderStatuses", () => {
   it("returns source org_binding with correct profile info", async () => {
     const providerId = "@system/test-org-bind";
     await seedProvider(providerId);
-    await saveConnection(db, profileId, providerId, orgId, { api_key: "k" });
+    await seedConnectionForApp(profileId, providerId, orgId, appId, { api_key: "k" });
 
     const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const profiles: ProviderProfileMap = {

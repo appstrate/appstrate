@@ -138,7 +138,7 @@ export function createConnectionsRouter() {
           throw forbidden("Cannot connect on a profile you do not own");
         }
 
-        await saveApiKeyConnection(provider, data.apiKey.trim(), profileId, orgId);
+        await saveApiKeyConnection(provider, data.apiKey.trim(), profileId, orgId, applicationId);
         return c.json({ success: true });
       } catch (err: unknown) {
         if (err instanceof ApiError) throw err;
@@ -184,7 +184,14 @@ export function createConnectionsRouter() {
           throw forbidden("Cannot connect on a profile you do not own");
         }
 
-        await saveCredentialsConnection(provider, mode, data.credentials, profileId, orgId);
+        await saveCredentialsConnection(
+          provider,
+          mode,
+          data.credentials,
+          profileId,
+          orgId,
+          applicationId,
+        );
         return c.json({ success: true });
       } catch (err: unknown) {
         if (err instanceof ApiError) throw err;

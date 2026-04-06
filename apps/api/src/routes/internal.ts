@@ -11,7 +11,11 @@ import { parseSignedToken } from "../lib/run-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import { getRecentRuns } from "../services/state/index.ts";
 import { getPackage } from "../services/agent-service.ts";
-import { resolveCredentialsForProxy, forceRefreshCredentials } from "@appstrate/connect";
+import {
+  resolveCredentialsForProxy,
+  forceRefreshCredentials,
+  getProviderCredentialId,
+} from "@appstrate/connect";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, invalidRequest, internalError } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
@@ -167,7 +171,15 @@ export function createInternalRouter() {
       throw notFound(`No profile resolved for provider '${providerId}'`);
     }
 
-    const result = await resolveCredentialsForProxy(db, profileId, provider.id, run.orgId);
+    const credentialId =
+      (await getProviderCredentialId(db, run.applicationId, provider.id)) ?? undefined;
+    const result = await resolveCredentialsForProxy(
+      db,
+      profileId,
+      provider.id,
+      run.orgId,
+      credentialId,
+    );
 
     if (!result) {
       throw notFound(`No credentials for provider '${providerId}'`);
@@ -194,12 +206,14 @@ export function createInternalRouter() {
     }
 
     try {
+      const credentialId =
+        (await getProviderCredentialId(db, run.applicationId, providerId)) ?? undefined;
       const result = await forceRefreshCredentials(
         db,
         profileId,
         providerId,
         run.orgId,
-        run.applicationId,
+        credentialId,
       );
       if (!result) {
         throw notFound(`No credentials for provider '${providerId}'`);

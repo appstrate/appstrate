@@ -107,6 +107,7 @@ export interface OAuthCallbackResult {
   userId: string | null;
   actor: Actor;
   profileId: string;
+  applicationId: string;
   accessToken: string;
   refreshToken?: string;
   expiresAt: string | null;
@@ -232,6 +233,7 @@ export async function handleOAuthCallback(
     userId: stateRow.userId ?? null,
     actor,
     profileId: stateRow.profileId,
+    applicationId: rawRow.applicationId!,
     accessToken: parsed.accessToken,
     refreshToken: parsed.refreshToken,
     expiresAt: parsed.expiresAt,

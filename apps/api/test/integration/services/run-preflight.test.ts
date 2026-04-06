@@ -3,8 +3,12 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedAgent, seedConnectionProfile, seedPackage } from "../../helpers/seed.ts";
-import { saveConnection } from "@appstrate/connect";
+import {
+  seedAgent,
+  seedConnectionProfile,
+  seedPackage,
+  seedConnectionForApp,
+} from "../../helpers/seed.ts";
 import { applicationProviderCredentials } from "@appstrate/db/schema";
 import { resolveProviderProfiles } from "../../../src/services/connection-profiles.ts";
 import { resolveManifestProviders } from "../../../src/lib/manifest-utils.ts";
@@ -61,13 +65,13 @@ describe("run preflight — provider profile resolution", () => {
     // Default profile + connections for both providers
     defaultProfileId = await getDefaultProfileId(actor);
     for (const pid of providerIds) {
-      await saveConnection(db, defaultProfileId, pid, orgId, { api_key: "default-key" });
+      await seedConnectionForApp(defaultProfileId, pid, orgId, appId, { api_key: "default-key" });
     }
 
     // Alt profile + connection for gmail only
     const alt = await seedConnectionProfile({ userId, name: "Alt" });
     altProfileId = alt.id;
-    await saveConnection(db, altProfileId, "@system/gmail", orgId, { api_key: "alt-key" });
+    await seedConnectionForApp(altProfileId, "@system/gmail", orgId, appId, { api_key: "alt-key" });
   });
 
   async function seedAgentWithProviders(agentId: string) {
@@ -211,7 +215,9 @@ describe("run preflight — provider profile resolution", () => {
     await bindOrgProfileProvider(orgProfile.id, "@system/gmail", altProfileId, userId);
 
     // Provide override for clickup
-    await saveConnection(db, altProfileId, "@system/clickup", orgId, { api_key: "alt-cu" });
+    await seedConnectionForApp(altProfileId, "@system/clickup", orgId, appId, {
+      api_key: "alt-cu",
+    });
 
     const { providerProfiles } = await runPreflight({
       agent,

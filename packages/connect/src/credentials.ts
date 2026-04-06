@@ -12,24 +12,29 @@ import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { forceRefresh, type RefreshContext } from "./token-refresh.ts";
 
 /**
- * Get a connection by profile + provider + org.
+ * Get a connection by profile + provider + org, optionally scoped to a specific provider credential.
+ * When providerCredentialId is provided, only returns the connection created with that credential.
  */
 export async function getConnection(
   db: Db,
   profileId: string,
   providerId: string,
   orgId: string,
+  providerCredentialId?: string,
 ): Promise<ConnectionRecord | null> {
+  const conditions = [
+    eq(userProviderConnections.profileId, profileId),
+    eq(userProviderConnections.providerId, providerId),
+    eq(userProviderConnections.orgId, orgId),
+  ];
+  if (providerCredentialId) {
+    conditions.push(eq(userProviderConnections.providerCredentialId, providerCredentialId));
+  }
+
   const rows = await db
     .select()
     .from(userProviderConnections)
-    .where(
-      and(
-        eq(userProviderConnections.profileId, profileId),
-        eq(userProviderConnections.providerId, providerId),
-        eq(userProviderConnections.orgId, orgId),
-      ),
-    )
+    .where(and(...conditions))
     .limit(1);
 
   if (rows.length === 0) return null;
@@ -79,12 +84,13 @@ export async function getCredentials(
   profileId: string,
   providerId: string,
   orgId: string,
+  providerCredentialId?: string,
 ): Promise<{
   credentials: Record<string, string>;
   connection: ConnectionRecord;
   definition: Record<string, unknown>;
 } | null> {
-  const connection = await getConnection(db, profileId, providerId, orgId);
+  const connection = await getConnection(db, profileId, providerId, orgId, providerCredentialId);
   if (!connection) return null;
 
   const def = await getProviderDefinition(db, providerId);
@@ -111,12 +117,13 @@ export async function resolveCredentialsForProxy(
   profileId: string,
   providerId: string,
   orgId: string,
+  providerCredentialId?: string,
 ): Promise<{
   credentials: Record<string, string>;
   authorizedUris: string[] | null;
   allowAllUris: boolean;
 } | null> {
-  const result = await getCredentials(db, profileId, providerId, orgId);
+  const result = await getCredentials(db, profileId, providerId, orgId, providerCredentialId);
   if (!result) return null;
 
   const def = result.definition;
@@ -130,8 +137,7 @@ export async function resolveCredentialsForProxy(
 
 /**
  * Force-refresh credentials for a provider connection and return the updated proxy credentials.
- * Used by the sidecar retry-on-401 flow. If the provider is not OAuth2 or has no refresh token,
- * returns the current credentials unchanged (no error).
+ * Uses the connection's providerCredentialId to look up the admin credentials that created it.
  * Throws if the refresh request itself fails (invalid_grant, network error, etc.).
  */
 export async function forceRefreshCredentials(
@@ -139,13 +145,13 @@ export async function forceRefreshCredentials(
   profileId: string,
   providerId: string,
   orgId: string,
-  applicationId: string,
+  providerCredentialId?: string,
 ): Promise<{
   credentials: Record<string, string>;
   authorizedUris: string[] | null;
   allowAllUris: boolean;
 } | null> {
-  const connection = await getConnection(db, profileId, providerId, orgId);
+  const connection = await getConnection(db, profileId, providerId, orgId, providerCredentialId);
   if (!connection) return null;
 
   const def = await getProviderDefinition(db, providerId);
@@ -154,7 +160,7 @@ export async function forceRefreshCredentials(
   let decrypted: DecryptedCredentials;
 
   if (authMode === "oauth2") {
-    const refreshContext = await buildRefreshContext(db, def, providerId, orgId, applicationId);
+    const refreshContext = await buildRefreshContext(db, def, connection.providerCredentialId);
     decrypted = await forceRefresh(
       db,
       connection.id,
@@ -180,7 +186,7 @@ export async function forceRefreshCredentials(
 }
 
 /**
- * Save a connection (upsert on profileId + providerId + orgId).
+ * Save a connection (upsert on profileId + providerId + orgId + providerCredentialId).
  */
 export async function saveConnection(
   db: Db,
@@ -188,7 +194,8 @@ export async function saveConnection(
   providerId: string,
   orgId: string,
   credentials: Record<string, unknown>,
-  options?: {
+  options: {
+    providerCredentialId: string;
     scopesGranted?: string[];
     expiresAt?: string | null;
   },
@@ -197,9 +204,10 @@ export async function saveConnection(
 
   const connectionData = {
     credentialsEncrypted: encrypted,
-    scopesGranted: options?.scopesGranted ?? [],
-    expiresAt: options?.expiresAt ? new Date(options.expiresAt) : null,
+    scopesGranted: options.scopesGranted ?? [],
+    expiresAt: options.expiresAt ? new Date(options.expiresAt) : null,
     needsReconnection: false,
+    providerCredentialId: options.providerCredentialId,
   };
 
   await db
@@ -216,6 +224,7 @@ export async function saveConnection(
         userProviderConnections.profileId,
         userProviderConnections.providerId,
         userProviderConnections.orgId,
+        userProviderConnections.providerCredentialId,
       ],
       set: {
         ...connectionData,
@@ -259,6 +268,7 @@ function rowToConnection(row: typeof userProviderConnections.$inferSelect): Conn
     profileId: row.profileId,
     providerId: row.providerId,
     orgId: row.orgId,
+    providerCredentialId: row.providerCredentialId,
     credentialsEncrypted: row.credentialsEncrypted,
     scopesGranted: (row.scopesGranted as string[]) ?? [],
     needsReconnection: row.needsReconnection,
@@ -268,14 +278,33 @@ function rowToConnection(row: typeof userProviderConnections.$inferSelect): Conn
   };
 }
 
-/** Build OAuth2 refresh context from provider definition and admin credentials.
- * Queries applicationProviderCredentials keyed by (applicationId, providerId). */
+/**
+ * Look up the `applicationProviderCredentials.id` for a given (applicationId, providerId).
+ * Returns null if no row exists.
+ */
+export async function getProviderCredentialId(
+  db: Db,
+  applicationId: string,
+  providerId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ id: applicationProviderCredentials.id })
+    .from(applicationProviderCredentials)
+    .where(
+      and(
+        eq(applicationProviderCredentials.applicationId, applicationId),
+        eq(applicationProviderCredentials.providerId, providerId),
+      ),
+    )
+    .limit(1);
+  return row?.id ?? null;
+}
+
+/** Build OAuth2 refresh context from the connection's source admin credentials. */
 async function buildRefreshContext(
   db: Db,
   def: Record<string, unknown>,
-  providerId: string,
-  _orgId: string,
-  applicationId: string,
+  providerCredentialId: string,
 ): Promise<RefreshContext | undefined> {
   const oauth2 = (def.oauth2 as Record<string, unknown>) ?? {};
   const tokenUrl = (oauth2.refreshUrl as string) ?? (oauth2.tokenUrl as string);
@@ -284,12 +313,7 @@ async function buildRefreshContext(
   const [appRow] = await db
     .select({ credentialsEncrypted: applicationProviderCredentials.credentialsEncrypted })
     .from(applicationProviderCredentials)
-    .where(
-      and(
-        eq(applicationProviderCredentials.applicationId, applicationId),
-        eq(applicationProviderCredentials.providerId, providerId),
-      ),
-    )
+    .where(eq(applicationProviderCredentials.id, providerCredentialId))
     .limit(1);
 
   if (!appRow?.credentialsEncrypted) return undefined;

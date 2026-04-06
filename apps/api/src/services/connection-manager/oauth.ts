@@ -10,10 +10,20 @@ import {
   handleOAuth1Callback,
   saveConnection,
   getProvider,
+  getProviderCredentialId,
   type OAuthCallbackResult,
   type OAuth1CallbackResult,
 } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
+
+async function resolveProviderCredentialId(applicationId: string, providerId: string) {
+  const id = await getProviderCredentialId(db, applicationId, providerId);
+  if (!id)
+    throw new Error(
+      `No provider credentials for '${providerId}' in application '${applicationId}'`,
+    );
+  return id;
+}
 
 export function getOAuthCallbackUrl(): string {
   return `${getEnv().APP_URL}/api/connections/callback`;
@@ -50,6 +60,11 @@ export async function initiateConnection(
 export async function handleCallback(code: string, state: string): Promise<OAuthCallbackResult> {
   const result = await handleOAuthCallback(db, code, state);
 
+  const providerCredentialId = await resolveProviderCredentialId(
+    result.applicationId,
+    result.providerId,
+  );
+
   await saveConnection(
     db,
     result.profileId,
@@ -62,6 +77,7 @@ export async function handleCallback(code: string, state: string): Promise<OAuth
     {
       scopesGranted: result.scopesGranted,
       expiresAt: result.expiresAt,
+      providerCredentialId,
     },
   );
 
@@ -80,11 +96,25 @@ export async function handleOAuth1CallbackAndSave(
 ): Promise<OAuth1CallbackResult> {
   const result = await handleOAuth1Callback(db, oauthToken, oauthVerifier);
 
-  await saveConnection(db, result.profileId, result.providerId, result.orgId, {
-    consumer_key: result.consumerKey,
-    access_token: result.accessToken,
-    access_token_secret: result.accessTokenSecret,
-  });
+  const providerCredentialId = await resolveProviderCredentialId(
+    result.applicationId,
+    result.providerId,
+  );
+
+  await saveConnection(
+    db,
+    result.profileId,
+    result.providerId,
+    result.orgId,
+    {
+      consumer_key: result.consumerKey,
+      access_token: result.accessToken,
+      access_token_secret: result.accessTokenSecret,
+    },
+    {
+      providerCredentialId,
+    },
+  );
 
   logger.info("OAuth1 connection established", {
     providerId: result.providerId,
