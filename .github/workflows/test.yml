@@ -90,6 +90,9 @@ jobs:
       - name: Install Playwright browsers
         run: cd e2e && npx playwright install chromium --with-deps
 
+      - name: Prepare data directory for PGlite
+        run: mkdir -p data/pglite data/storage
+
       - name: Run E2E tests
         run: bun run test:e2e
         env:
