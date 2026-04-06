@@ -6,8 +6,7 @@ import { Link } from "react-router-dom";
 import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useProviders, useAppProviderOverrides } from "../hooks/use-providers";
-import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { useProviders } from "../hooks/use-providers";
 import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { ProfileSelector } from "../components/profile-selector";
 import { Modal } from "../components/modal";
@@ -33,15 +32,6 @@ export function ProvidersPage() {
     if (!profiles?.length) return null;
     return (profiles.find((p) => p.isDefault) ?? profiles[0])?.id ?? null;
   }, [selectedProfileId, profiles]);
-  const appId = useCurrentApplicationId();
-  const { data: appOverrides } = useAppProviderOverrides(appId);
-  const overrideMap = useMemo(() => {
-    const m = new Map<string, { hasAppCredentials: boolean; appEnabled: boolean }>();
-    if (appOverrides?.data) {
-      for (const o of appOverrides.data) m.set(o.providerId, o);
-    }
-    return m;
-  }, [appOverrides]);
 
   const [configurePickerOpen, setConfigurePickerOpen] = useState(false);
   const [configureProvider, setConfigureProvider] = useState<ProviderConfig | null>(null);
@@ -55,10 +45,7 @@ export function ProvidersPage() {
       for (const p of providersData.providers) {
         if (p.iconUrl) icons.set(p.id, p.iconUrl);
 
-        badges.set(
-          p.id,
-          <ProviderConfigBadge enabled={p.enabled} appOverride={overrideMap.get(p.id)} />,
-        );
+        badges.set(p.id, <ProviderConfigBadge enabled={p.enabled} />);
 
         const configButton = (
           <ProviderConfigureButton provider={p} callbackUrl={providersData.callbackUrl} />
@@ -74,7 +61,7 @@ export function ProvidersPage() {
       }
     }
     return { badgeMap: badges, actionsMap: actions, iconMap: icons };
-  }, [providersData, overrideMap, profileId]);
+  }, [providersData, profileId]);
 
   // Filter: enabled providers (default) or all
   const enabledIds = new Set<string>();

@@ -36,7 +36,6 @@ const APP_SCOPED_KEYS = [
   "end-users",
   "providers",
   "available-providers",
-  "app-provider-overrides",
   "unread-count",
   "unread-counts-by-agent",
   "version-detail",

@@ -20,18 +20,3 @@ export function useProviders() {
     enabled: !!orgId && !!appId,
   });
 }
-
-export interface AppProviderOverride {
-  providerId: string;
-  hasAppCredentials: boolean;
-  appEnabled: boolean;
-}
-
-export function useAppProviderOverrides(appId: string | null) {
-  const orgId = useCurrentOrgId();
-  return useQuery({
-    queryKey: ["app-provider-overrides", orgId, appId],
-    queryFn: () => api<{ data: AppProviderOverride[] }>(`/applications/${appId}/providers`),
-    enabled: !!orgId && !!appId,
-  });
-}
