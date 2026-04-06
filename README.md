@@ -221,7 +221,7 @@ All variables are listed in `.env.example` with dev-ready defaults. The authorit
 | `SYSTEM_PROXIES`            | No       | `[]`                                          | JSON array of system proxy definitions                             |
 | `PROXY_URL`                 | No       | —                                             | Outbound HTTP proxy for sidecar containers                         |
 | `LOG_LEVEL`                 | No       | `info`                                        | `debug` \| `info` \| `warn` \| `error`                             |
-| `RUN_ADAPTER`               | No       | `docker`                                      | Execution backend: `docker` or `process`                           |
+| `RUN_ADAPTER`               | No       | `process`                                     | Execution backend: `docker` or `process`                           |
 | `SIDECAR_POOL_SIZE`         | No       | `2`                                           | Pre-warmed sidecar containers (0 = disabled)                       |
 | `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2)                                  |
 | `PI_IMAGE`                  | No       | `appstrate-pi:latest`                         | Docker image for the Pi agent runtime                              |
