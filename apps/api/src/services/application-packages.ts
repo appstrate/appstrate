@@ -5,7 +5,7 @@
  * packages within an application context.
  */
 
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, or, sql, isNotNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, packages } from "@appstrate/db/schema";
 import { notFound, conflict } from "../lib/errors.ts";
@@ -129,41 +129,77 @@ export async function getInstalledPackage(applicationId: string, packageId: stri
   return row ?? null;
 }
 
+// ---------------------------------------------------------------------------
+// Accessible packages — system packages + explicitly installed (single query)
+// ---------------------------------------------------------------------------
+
 /**
- * Check if an application has access to a package.
- *
- * Default application → access to ALL packages in the org (no binding required).
- * Custom application → access only to explicitly installed packages.
+ * List all packages accessible to an application, filtered by type.
+ * Accessible = system packages (always visible) + explicitly installed in application_packages.
+ * Single query via LEFT JOIN — no N+1.
  */
-export async function hasPackageAccess(applicationId: string, packageId: string): Promise<boolean> {
-  const accessible = await filterAccessiblePackages(applicationId, [packageId]);
-  return accessible.has(packageId);
+export async function listAccessiblePackages(
+  orgId: string,
+  applicationId: string,
+  type: PackageType,
+) {
+  return db
+    .select({
+      id: packages.id,
+      draftManifest: packages.draftManifest,
+      draftContent: packages.draftContent,
+      source: packages.source,
+      // application_packages columns (null for system packages)
+      appConfig: applicationPackages.config,
+      appModelId: applicationPackages.modelId,
+      appProxyId: applicationPackages.proxyId,
+      appOrgProfileId: applicationPackages.orgProfileId,
+      appVersionId: applicationPackages.versionId,
+      appEnabled: applicationPackages.enabled,
+    })
+    .from(packages)
+    .leftJoin(
+      applicationPackages,
+      and(
+        eq(applicationPackages.packageId, packages.id),
+        eq(applicationPackages.applicationId, applicationId),
+      ),
+    )
+    .where(
+      and(
+        eq(packages.type, type),
+        orgOrSystemFilter(orgId),
+        // system packages always visible, local packages only if installed
+        or(eq(packages.source, "system"), isNotNull(applicationPackages.packageId)),
+      ),
+    )
+    .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`);
 }
 
 /**
- * Batch check which packages an application has access to.
- * Returns the set of accessible package IDs.
- *
- * All applications (including default) → only explicitly installed packages.
+ * Check if an application has access to a specific package.
+ * System packages are always accessible; local packages require installation.
  */
-export async function filterAccessiblePackages(
-  applicationId: string,
-  packageIds: string[],
-): Promise<Set<string>> {
-  if (packageIds.length === 0) return new Set();
-
-  // Query application_packages for all apps (no default app bypass)
-  const rows = await db
-    .select({ packageId: applicationPackages.packageId })
-    .from(applicationPackages)
+export async function hasPackageAccess(applicationId: string, packageId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: packages.id })
+    .from(packages)
+    .leftJoin(
+      applicationPackages,
+      and(
+        eq(applicationPackages.packageId, packages.id),
+        eq(applicationPackages.applicationId, applicationId),
+      ),
+    )
     .where(
       and(
-        eq(applicationPackages.applicationId, applicationId),
-        inArray(applicationPackages.packageId, packageIds),
+        eq(packages.id, packageId),
+        or(eq(packages.source, "system"), isNotNull(applicationPackages.packageId)),
       ),
-    );
+    )
+    .limit(1);
 
-  return new Set(rows.map((r) => r.packageId));
+  return !!row;
 }
 
 // ---------------------------------------------------------------------------

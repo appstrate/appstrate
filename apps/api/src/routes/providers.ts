@@ -2,13 +2,6 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, and, sql } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import {
-  applicationProviderCredentials,
-  packages,
-  userProviderConnections,
-} from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { getItemId } from "./packages.ts";
 import type { ProviderConfig } from "@appstrate/shared-types";
@@ -26,17 +19,22 @@ import {
   parseBody,
   systemEntityForbidden,
 } from "../lib/errors.ts";
-import { encryptCredentials } from "@appstrate/connect";
-import { listPackages } from "../services/agent-service.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { createVersionAndUpload } from "../services/package-versions.ts";
-import { isValidVersion } from "@appstrate/core/semver";
-import { zipArtifact } from "@appstrate/core/zip";
-import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { getDefaultAdminCredentialSchema } from "@appstrate/core/validation";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
 import { asRecord } from "../lib/safe-json.ts";
-import { orgOrSystemFilter } from "../lib/package-helpers.ts";
+import {
+  getProvider,
+  getAppProviderCredentials,
+  createProvider,
+  updateProvider,
+  configureCredentials,
+  deleteCredentials,
+  deleteProvider,
+  invalidateConnections,
+  countAllProviderUsage,
+  isSystemProvider,
+} from "../services/provider-service.ts";
+import { listAccessiblePackages } from "../services/application-packages.ts";
 
 /** Build the nested definition object for a provider manifest from flat request data. */
 function buildProviderDefinition(data: {
@@ -105,16 +103,6 @@ function buildProviderDefinition(data: {
   return definition;
 }
 
-/** Check if a provider is a system provider via the DB source column. */
-async function isSystemProviderInDb(providerId: string): Promise<boolean> {
-  const [pkg] = await db
-    .select({ source: packages.source })
-    .from(packages)
-    .where(eq(packages.id, providerId))
-    .limit(1);
-  return pkg?.source === "system";
-}
-
 const createProviderSchema = z.object({
   id: z.string().min(1, "id is required"),
   displayName: z.string().min(1, "displayName is required"),
@@ -159,50 +147,27 @@ const updateProviderSchema = createProviderSchema.omit({ id: true });
 export function createProvidersRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/providers — list all providers (all org members)
+  // GET /api/providers — list providers accessible to the current application
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
-
-    // Query all provider packages
-    const rows = await db
-      .select({
-        pkg: { id: packages.id, draftManifest: packages.draftManifest, source: packages.source },
-      })
-      .from(packages)
-      .where(and(orgOrSystemFilter(orgId), eq(packages.type, "provider")))
-      .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`);
-
-    // Count provider usage across all agents
-    const allAgents = await listPackages(orgId);
-    const providerUsage = new Map<string, number>();
-    for (const agent of allAgents) {
-      for (const svc of resolveManifestProviders(agent.manifest)) {
-        providerUsage.set(svc.id, (providerUsage.get(svc.id) ?? 0) + 1);
-      }
-    }
-
-    // Query application-level provider credentials
     const appId = c.get("applicationId");
-    const allCreds = appId
-      ? await db
-          .select({
-            providerId: applicationProviderCredentials.providerId,
-            credentialsEncrypted: applicationProviderCredentials.credentialsEncrypted,
-            enabled: applicationProviderCredentials.enabled,
-          })
-          .from(applicationProviderCredentials)
-          .where(eq(applicationProviderCredentials.applicationId, appId))
-      : [];
+
+    // Single query (system + installed) + usage counts + app credentials in parallel
+    const [rows, providerUsage, allCreds] = await Promise.all([
+      listAccessiblePackages(orgId, appId, "provider"),
+      countAllProviderUsage(orgId),
+      getAppProviderCredentials(appId),
+    ]);
 
     const credMap = new Map(allCreds.map((r) => [r.providerId, r]));
 
-    const providers: ProviderConfig[] = rows.map(({ pkg }) => {
-      const cred = credMap.get(pkg.id) ?? null;
+    const providers: ProviderConfig[] = rows.map((row) => {
+      const cred = credMap.get(row.id) ?? null;
       const cfg = packageToProviderConfig(
-        { id: pkg.id, manifest: pkg.draftManifest, source: pkg.source },
+        { id: row.id, manifest: row.draftManifest, source: row.source },
         cred,
       );
-      cfg.usedByAgents = providerUsage.get(pkg.id) ?? 0;
+      cfg.usedByAgents = providerUsage.get(row.id) ?? 0;
       return cfg;
     });
 
@@ -219,21 +184,13 @@ export function createProvidersRouter() {
     const scopeErr = checkScopeMatch(c, data.id);
     if (scopeErr) throw scopeErr;
 
-    // Block creation if ID matches a system provider
-    if (await isSystemProviderInDb(data.id)) {
+    if (isSystemProvider(data.id)) {
       throw systemEntityForbidden("provider", data.id, "create");
     }
 
     // Check ID doesn't already exist for this org
-    const existing = await db
-      .select({ id: packages.id })
-      .from(packages)
-      .where(
-        and(eq(packages.orgId, orgId), eq(packages.id, data.id), eq(packages.type, "provider")),
-      )
-      .limit(1);
-
-    if (existing.length > 0) {
+    const existing = await getProvider(orgId, data.id);
+    if (existing) {
       throw new ApiError({
         status: 400,
         code: "name_collision",
@@ -243,101 +200,33 @@ export function createProvidersRouter() {
     }
 
     const definition = buildProviderDefinition(data);
+    const adminCreds: Record<string, string> = {};
+    if (data.clientId) adminCreds.clientId = data.clientId;
+    if (data.clientSecret) adminCreds.clientSecret = data.clientSecret;
 
     try {
-      await db.transaction(async (tx) => {
-        // 1. INSERT packages row (type: "provider") with definition in manifest
-        await tx
-          .insert(packages)
-          .values({
-            id: data.id,
-            orgId,
-            type: "provider",
-            source: "local",
-            draftManifest: {
-              $schema: AFPS_SCHEMA_URLS.provider,
-              name: data.id,
-              type: "provider",
-              version: data.version ?? "1.0.0",
-              displayName: data.displayName,
-              description: data.description,
-              author: data.author,
-              iconUrl: data.iconUrl,
-              categories: data.categories,
-              docsUrl: data.docsUrl,
-              definition,
-            },
-            draftContent: "",
-            createdBy: c.get("user").id,
-          })
-          .onConflictDoNothing();
-
-        // 2. UPSERT applicationProviderCredentials (applicationId, providerId) with credentials if provided
-        const appId = c.get("applicationId");
-        if (appId) {
-          const adminCreds: Record<string, string> = {};
-          if (data.clientId) adminCreds.clientId = data.clientId;
-          if (data.clientSecret) adminCreds.clientSecret = data.clientSecret;
-          const hasAdminCreds = Object.keys(adminCreds).length > 0;
-          await tx
-            .insert(applicationProviderCredentials)
-            .values({
-              applicationId: appId,
-              providerId: data.id,
-              credentialsEncrypted: hasAdminCreds ? encryptCredentials(adminCreds) : null,
-              enabled: true,
-            })
-            .onConflictDoUpdate({
-              target: [
-                applicationProviderCredentials.applicationId,
-                applicationProviderCredentials.providerId,
-              ],
-              set: {
-                ...(hasAdminCreds ? { credentialsEncrypted: encryptCredentials(adminCreds) } : {}),
-                enabled: true,
-                updatedAt: new Date(),
-              },
-            });
-        }
-      });
+      await createProvider(
+        orgId,
+        {
+          id: data.id,
+          version: data.version,
+          displayName: data.displayName,
+          description: data.description,
+          author: data.author,
+          iconUrl: data.iconUrl,
+          categories: data.categories,
+          docsUrl: data.docsUrl,
+          definition,
+        },
+        c.get("applicationId") ?? null,
+        c.get("user").id,
+        Object.keys(adminCreds).length > 0 ? adminCreds : undefined,
+      );
     } catch (err) {
       logger.error("Provider create failed", {
         error: err instanceof Error ? err.message : String(err),
       });
       throw internalError();
-    }
-
-    // Create initial version (non-fatal)
-    const manifest = {
-      $schema: AFPS_SCHEMA_URLS.provider,
-      name: data.id,
-      type: "provider" as const,
-      version: data.version ?? "1.0.0",
-      displayName: data.displayName,
-      description: data.description,
-      author: data.author,
-      definition,
-    };
-    const versionStr = manifest.version;
-    if (versionStr && isValidVersion(versionStr)) {
-      try {
-        const entries: Record<string, Uint8Array> = {
-          "manifest.json": new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
-        };
-        const zipBuffer = Buffer.from(zipArtifact(entries, 6));
-        await createVersionAndUpload({
-          packageId: data.id,
-          version: versionStr,
-          createdBy: c.get("user").id,
-          zipBuffer,
-          manifest,
-        });
-      } catch (error) {
-        logger.warn("Provider initial version creation failed (non-fatal)", {
-          packageId: data.id,
-          error,
-        });
-      }
     }
 
     return c.json({ id: data.id }, 201);
@@ -350,73 +239,37 @@ export function createProvidersRouter() {
     const body = await c.req.json();
     const data = parseBody(updateProviderSchema, body);
 
-    // Block editing system providers (DB-based guard)
-    if (await isSystemProviderInDb(providerId)) {
+    if (isSystemProvider(providerId)) {
       throw systemEntityForbidden("system provider", providerId);
     }
 
-    // Fetch existing package
-    const [existingPkg] = await db
-      .select({ draftManifest: packages.draftManifest })
-      .from(packages)
-      .where(
-        and(orgOrSystemFilter(orgId), eq(packages.id, providerId), eq(packages.type, "provider")),
-      )
-      .limit(1);
-
-    if (!existingPkg) {
+    const existing = await getProvider(orgId, providerId);
+    if (!existing) {
       throw notFound(`Provider '${providerId}' not found`);
     }
 
     const definition = buildProviderDefinition(data);
+    const adminCreds: Record<string, string> = {};
+    if (data.clientId) adminCreds.clientId = data.clientId;
+    if (data.clientSecret) adminCreds.clientSecret = data.clientSecret;
 
     try {
-      await db.transaction(async (tx) => {
-        // 1. Update packages manifest (complete replacement, no merge)
-        await tx
-          .update(packages)
-          .set({
-            draftManifest: {
-              $schema: AFPS_SCHEMA_URLS.provider,
-              name: providerId,
-              type: "provider",
-              version: data.version ?? "1.0.0",
-              displayName: data.displayName,
-              description: data.description,
-              author: data.author,
-              iconUrl: data.iconUrl,
-              categories: data.categories,
-              docsUrl: data.docsUrl,
-              definition,
-            },
-            updatedAt: new Date(),
-          })
-          .where(and(eq(packages.id, providerId), eq(packages.orgId, orgId)));
-
-        // 2. Handle credentials: update with new values if provided
-        const appId = c.get("applicationId");
-        if ((data.clientId || data.clientSecret) && appId) {
-          const adminCreds: Record<string, string> = {};
-          if (data.clientId) adminCreds.clientId = data.clientId;
-          if (data.clientSecret) adminCreds.clientSecret = data.clientSecret;
-
-          await tx
-            .insert(applicationProviderCredentials)
-            .values({
-              applicationId: appId,
-              providerId,
-              credentialsEncrypted: encryptCredentials(adminCreds),
-              enabled: true,
-            })
-            .onConflictDoUpdate({
-              target: [
-                applicationProviderCredentials.applicationId,
-                applicationProviderCredentials.providerId,
-              ],
-              set: { credentialsEncrypted: encryptCredentials(adminCreds), updatedAt: new Date() },
-            });
-        }
-      });
+      await updateProvider(
+        orgId,
+        providerId,
+        {
+          version: data.version,
+          displayName: data.displayName,
+          description: data.description,
+          author: data.author,
+          iconUrl: data.iconUrl,
+          categories: data.categories,
+          docsUrl: data.docsUrl,
+          definition,
+        },
+        c.get("applicationId") ?? null,
+        Object.keys(adminCreds).length > 0 ? adminCreds : undefined,
+      );
     } catch (err) {
       logger.error("Provider update failed", {
         providerId,
@@ -445,14 +298,7 @@ export function createProvidersRouter() {
       const data = parseBody(credSchema, body);
 
       // Verify the provider exists and get its admin credential schema
-      const [pkg] = await db
-        .select({ id: packages.id, draftManifest: packages.draftManifest })
-        .from(packages)
-        .where(
-          and(orgOrSystemFilter(orgId), eq(packages.id, providerId), eq(packages.type, "provider")),
-        )
-        .limit(1);
-
+      const pkg = await getProvider(orgId, providerId);
       if (!pkg) {
         throw notFound("Provider not found");
       }
@@ -480,44 +326,10 @@ export function createProvidersRouter() {
         throw invalidRequest("Application context required to configure provider credentials");
       }
 
-      const setClause: Record<string, unknown> = { updatedAt: new Date() };
-      if (hasCredentials) {
-        setClause.credentialsEncrypted = encryptCredentials(data.credentials!);
-      }
-      if (data.enabled !== undefined) {
-        setClause.enabled = data.enabled;
-      }
+      await configureCredentials(appId, providerId, data.credentials, data.enabled);
 
-      await db
-        .insert(applicationProviderCredentials)
-        .values({
-          applicationId: appId,
-          providerId,
-          credentialsEncrypted: hasCredentials ? encryptCredentials(data.credentials!) : null,
-          enabled: data.enabled ?? true,
-        })
-        .onConflictDoUpdate({
-          target: [
-            applicationProviderCredentials.applicationId,
-            applicationProviderCredentials.providerId,
-          ],
-          set: setClause,
-        });
-
-      // Invalidate all user connections when admin explicitly requests it (credential rotation)
       if (hasCredentials && data.invalidateConnections) {
-        await db
-          .delete(userProviderConnections)
-          .where(
-            and(
-              eq(userProviderConnections.providerId, providerId),
-              eq(userProviderConnections.orgId, orgId),
-            ),
-          );
-        logger.info("Invalidated user connections after credential update", {
-          providerId,
-          orgId,
-        });
+        await invalidateConnections(orgId, providerId);
       }
 
       return c.json({ configured: true });
@@ -533,14 +345,7 @@ export function createProvidersRouter() {
       const providerId = getItemId(c);
 
       if (appId) {
-        await db
-          .delete(applicationProviderCredentials)
-          .where(
-            and(
-              eq(applicationProviderCredentials.applicationId, appId),
-              eq(applicationProviderCredentials.providerId, providerId),
-            ),
-          );
+        await deleteCredentials(appId, providerId);
       }
 
       return c.json({ configured: false });
@@ -552,33 +357,20 @@ export function createProvidersRouter() {
     const orgId = c.get("orgId");
     const providerId = getItemId(c);
 
-    // Block deleting system providers (DB-based guard)
-    if (await isSystemProviderInDb(providerId)) {
+    if (isSystemProvider(providerId)) {
       throw systemEntityForbidden("system provider", providerId, "delete");
     }
 
-    // Block deleting providers that are in use by agents
-    const allAgents = await listPackages(orgId);
-    let usageCount = 0;
-    for (const agent of allAgents) {
-      for (const svc of resolveManifestProviders(agent.manifest)) {
-        if (svc.id === providerId) {
-          usageCount++;
-          break;
-        }
-      }
-    }
-    if (usageCount > 0) {
-      throw conflict(
-        "provider_in_use",
-        `Cannot delete provider '${providerId}': used by ${usageCount} agent(s)`,
-      );
-    }
-
     try {
-      // Delete packages row (applicationProviderCredentials will cascade)
-      await db.delete(packages).where(and(eq(packages.orgId, orgId), eq(packages.id, providerId)));
+      const result = await deleteProvider(orgId, providerId);
+      if (!result.ok) {
+        throw conflict(
+          "provider_in_use",
+          `Cannot delete provider '${providerId}': used by ${result.usageCount} agent(s)`,
+        );
+      }
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       logger.error("Provider delete failed", {
         providerId,
         error: err instanceof Error ? err.message : String(err),

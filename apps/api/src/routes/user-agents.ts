@@ -10,6 +10,7 @@ import { scopedNameRegex } from "@appstrate/core/validation";
 import { requireOrgAgent, requireMutableAgent } from "../middleware/guards.ts";
 import { invalidRequest, parseBody } from "../lib/errors.ts";
 import { asRecord } from "../lib/safe-json.ts";
+import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 const updateSkillsSchema = z.object({
   skillIds: z.array(z.string()).max(50),
 });
@@ -28,7 +29,7 @@ async function updateManifestDeps(
   const [row] = await db
     .select({ draftManifest: packages.draftManifest })
     .from(packages)
-    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
     .limit(1);
   if (!row) return;
 

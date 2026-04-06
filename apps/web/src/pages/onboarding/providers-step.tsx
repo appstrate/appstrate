@@ -10,6 +10,7 @@ import {
   useOnboardingGuard,
   useOnboardingNav,
 } from "../../components/onboarding-layout";
+import { useApplicationResolver } from "../../hooks/use-current-application";
 import { useProviders } from "../../hooks/use-providers";
 import { useAvailableProviders } from "../../hooks/use-available-providers";
 import { useConnect, useConnectApiKey, useConnectCredentials } from "../../hooks/use-mutations";
@@ -27,6 +28,7 @@ export function OnboardingProvidersStep() {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
   const orgId = useOnboardingGuard();
+  useApplicationResolver();
   const { nextRoute, prevRoute } = useOnboardingNav("providers");
 
   const { data: providersData, isLoading: providersLoading } = useProviders();

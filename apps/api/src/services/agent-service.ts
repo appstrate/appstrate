@@ -138,9 +138,12 @@ export async function getPackageWithAccess(
   return agent;
 }
 
-/** List all agents: system (orgId: null) + user packages of type "agent" (from DB, scoped by org). */
-export async function listPackages(orgId: string): Promise<LoadedPackage[]> {
-  const conditions = [eq(packages.type, "agent"), orgOrSystemFilter(orgId)];
+/** List packages by type: system (orgId: null) + user packages (from DB, scoped by org). Defaults to "agent". */
+export async function listPackages(
+  orgId: string,
+  type: PackageType = "agent",
+): Promise<LoadedPackage[]> {
+  const conditions = [eq(packages.type, type), orgOrSystemFilter(orgId)];
   const rows = await db
     .select({
       id: packages.id,

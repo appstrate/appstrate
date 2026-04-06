@@ -367,7 +367,8 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
 function makeListHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const items = await listOrgItems(orgId, rcfg.cfg);
+    const appId = c.get("applicationId");
+    const items = await listOrgItems(orgId, rcfg.cfg, appId);
     const enriched = await enrichWithCreatorNames(items);
     return c.json({ [rcfg.cfg.storageFolder]: enriched });
   };

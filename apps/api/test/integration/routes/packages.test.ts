@@ -43,6 +43,7 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/list-agent");
 
       const res = await app.request("/api/packages/agents", {
         headers: authHeaders(ctx),
@@ -107,6 +108,7 @@ describe("Packages API", () => {
         },
         draftContent: "# My Skill\nDo something useful.",
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/my-skill");
 
       const res = await app.request("/api/packages/skills", {
         headers: authHeaders(ctx),
@@ -777,11 +779,13 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/my-agent");
       await seedAgent({
         id: "@isolatedorg/their-agent",
         orgId: otherCtx.orgId,
         createdBy: otherCtx.user.id,
       });
+      await installPackage(otherCtx.defaultAppId, otherCtx.orgId, "@isolatedorg/their-agent");
 
       // User from pkgorg should only see their own agents
       const res1 = await app.request("/api/packages/agents", {

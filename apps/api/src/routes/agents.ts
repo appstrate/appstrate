@@ -9,12 +9,13 @@ import {
   deleteAllPackageMemories,
 } from "../services/state/index.ts";
 import { validateConfig } from "../services/schema.ts";
-import { listPackages } from "../services/agent-service.ts";
 import {
-  filterAccessiblePackages,
+  listAccessiblePackages,
   updateInstalledPackage,
   getPackageConfig,
 } from "../services/application-packages.ts";
+import { asRecord } from "../lib/safe-json.ts";
+import type { AgentManifest } from "../types/index.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
@@ -25,7 +26,6 @@ import {
   getAccessibleProfile,
 } from "../services/connection-profiles.ts";
 import { parseScopedName } from "@appstrate/core/naming";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { z } from "zod";
 import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
@@ -40,37 +40,33 @@ export function createAgentsRouter() {
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
     const appId = c.get("applicationId");
-    const [allAgents, runningCounts] = await Promise.all([
-      listPackages(orgId),
+
+    // Single query: system packages + installed packages via LEFT JOIN
+    const [rows, runningCounts] = await Promise.all([
+      listAccessiblePackages(orgId, appId, "agent"),
       getRunningRunCounts(orgId, appId),
     ]);
 
-    // Filter by application access — all apps check application_packages
-    const accessibleIds = await filterAccessiblePackages(
-      appId,
-      allAgents.map((f) => f.id),
-    );
-    const visibleAgents = allAgents.filter((f) => accessibleIds.has(f.id));
-
-    const agentList = visibleAgents.map((f) => {
-      const parsed = parseScopedName(f.manifest.name);
+    const agentList = rows.map((row) => {
+      const manifest = asRecord(row.draftManifest) as AgentManifest;
+      const parsed = parseScopedName(manifest.name);
       return {
-        id: f.id,
-        displayName: f.manifest.displayName,
-        description: f.manifest.description,
-        schemaVersion: f.manifest.schemaVersion,
-        author: f.manifest.author,
-        keywords: f.manifest.keywords ?? [],
+        id: row.id,
+        displayName: manifest.displayName,
+        description: manifest.description,
+        schemaVersion: manifest.schemaVersion,
+        author: manifest.author,
+        keywords: manifest.keywords ?? [],
         dependencies: {
-          providers: resolveManifestProviders(f.manifest).map((s) => s.id),
-          skills: Object.fromEntries(f.skills.map((s) => [s.id, s.version ?? "*"])),
-          tools: Object.fromEntries(f.tools.map((e) => [e.id, e.version ?? "*"])),
+          providers: (manifest.dependencies?.providers ?? {}) as Record<string, string>,
+          skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
+          tools: (manifest.dependencies?.tools ?? {}) as Record<string, string>,
         },
-        runningRuns: runningCounts[f.id] ?? 0,
-        source: f.source,
+        runningRuns: runningCounts[row.id] ?? 0,
+        source: row.source ?? "local",
         scope: parsed?.scope ?? null,
-        version: f.manifest.version,
-        type: f.manifest.type,
+        version: manifest.version,
+        type: manifest.type,
       };
     });
 

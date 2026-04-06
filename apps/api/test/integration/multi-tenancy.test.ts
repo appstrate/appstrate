@@ -13,6 +13,7 @@ import { getTestApp } from "../helpers/app.ts";
 import { truncateAll } from "../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../helpers/auth.ts";
 import { seedAgent, seedRun, seedPackageVersion } from "../helpers/seed.ts";
+import { installPackage } from "../../src/services/application-packages.ts";
 
 const app = getTestApp();
 
@@ -69,7 +70,9 @@ describe("Multi-tenancy isolation", () => {
 
     it("does not leak other org's agents in list", async () => {
       await seedAgent({ id: "@org-a/agent-1", orgId: orgA.orgId });
+      await installPackage(orgA.defaultAppId, orgA.orgId, "@org-a/agent-1");
       await seedAgent({ id: "@org-b/agent-1", orgId: orgB.orgId });
+      await installPackage(orgB.defaultAppId, orgB.orgId, "@org-b/agent-1");
 
       const resA = await app.request("/api/packages/agents", {
         headers: authHeaders(orgA),

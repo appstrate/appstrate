@@ -213,7 +213,7 @@ export const schemas = {
       dependencies: {
         type: "object",
         properties: {
-          providers: { type: "array", items: { type: "string" } },
+          providers: { type: "object", additionalProperties: { type: "string" } },
           skills: { type: "object", additionalProperties: { type: "string" } },
           tools: { type: "object", additionalProperties: { type: "string" } },
         },
