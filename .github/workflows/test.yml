@@ -92,6 +92,9 @@ jobs:
 
       - name: Run E2E tests
         run: bun run test:e2e
+        env:
+          BETTER_AUTH_SECRET: e2e-test-secret-at-least-32-chars-long
+          CONNECTION_ENCRYPTION_KEY: dGVzdC1lbmNyeXB0aW9uLWtleS0zMi1ieXRlcw==
 
       - name: Upload test report
         if: failure()
