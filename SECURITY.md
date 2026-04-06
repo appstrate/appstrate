@@ -445,7 +445,7 @@ All data access is scoped by organization at the application level. Every Drizzl
 | --------------------------- | -------------- | --------------------- | --------------------- | --------------------- |
 | `runs`                      | Org members    | Own user + org member | —                     | —                     |
 | `run_logs`                  | Org members    | Org members           | —                     | —                     |
-| `package_configs`           | Org members    | Org admins            | Org admins            | Org admins            |
+| `application_packages`      | App members    | App admins            | App admins            | App admins            |
 | `packages`                  | Org members    | Org admins            | Org admins            | Org admins            |
 | `package_schedules`         | Org members    | Own user + org member | Own user + org member | Own user + org member |
 | `user_provider_connections` | Own user + org | Own user + org member | Own user + org member | Own user + org member |

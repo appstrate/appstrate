@@ -37,7 +37,7 @@ type WebhookEventType = z.infer<typeof webhookEventSchema>;
 const RETRY_DELAYS_MS = [30_000, 300_000, 1_800_000, 3_600_000, 7_200_000, 10_800_000, 14_400_000];
 const MAX_ATTEMPTS = 8;
 const DELIVERY_TIMEOUT_MS = 15_000;
-const MAX_WEBHOOKS_PER_ORG = 20;
+const MAX_WEBHOOKS_PER_APP = 20;
 const MAX_PAYLOAD_SIZE = 256 * 1024; // 256KB
 
 // ---------------------------------------------------------------------------
@@ -154,17 +154,17 @@ export async function createWebhook(
     enabled?: boolean;
   },
 ): Promise<WebhookCreateResponse> {
-  // Check limit
+  // Check limit (per application, not per org)
   const existing = await db
     .select({ id: webhooks.id })
     .from(webhooks)
-    .where(eq(webhooks.orgId, orgId));
-  if (existing.length >= MAX_WEBHOOKS_PER_ORG) {
+    .where(and(eq(webhooks.orgId, orgId), eq(webhooks.applicationId, applicationId)));
+  if (existing.length >= MAX_WEBHOOKS_PER_APP) {
     throw new ApiError({
       status: 400,
       code: "webhook_limit_reached",
       title: "Webhook Limit Reached",
-      detail: `Maximum ${MAX_WEBHOOKS_PER_ORG} webhooks per organization`,
+      detail: `Maximum ${MAX_WEBHOOKS_PER_APP} webhooks per application`,
     });
   }
 

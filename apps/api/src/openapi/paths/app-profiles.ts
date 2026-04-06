@@ -8,6 +8,10 @@ export const appProfilesPaths = {
       summary: "Delete all user connections",
       description:
         "Delete all provider connections across all profiles for the authenticated user.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Connections deleted",
@@ -35,6 +39,10 @@ export const appProfilesPaths = {
       summary: "List all user connections",
       description:
         "List all provider connections across all profiles and organizations for the authenticated user, grouped by provider then by organization.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "User connections grouped by provider and organization",
