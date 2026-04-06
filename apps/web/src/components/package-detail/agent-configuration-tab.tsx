@@ -174,8 +174,8 @@ function AppProfileSection({ packageId }: { packageId: string }) {
 
   return (
     <div className="border-border bg-card space-y-3 rounded-lg border p-4">
-      <h3 className="text-sm font-medium">{t("detail.configSectionOrgProfile")}</h3>
-      <p className="text-muted-foreground text-xs">{t("detail.configOrgProfileHint")}</p>
+      <h3 className="text-sm font-medium">{t("detail.configSectionAppProfile")}</h3>
+      <p className="text-muted-foreground text-xs">{t("detail.configAppProfileHint")}</p>
       <Select
         value={currentAppProfileId ?? "__none__"}
         onValueChange={(v) => setAgentAppProfile.mutate(v === "__none__" ? null : v)}
@@ -185,13 +185,13 @@ function AppProfileSection({ packageId }: { packageId: string }) {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__none__">{t("detail.configOrgProfileNone")}</SelectItem>
+          <SelectItem value="__none__">{t("detail.configAppProfileNone")}</SelectItem>
           {appProfiles.map((p) => (
             <SelectItem key={p.id} value={p.id}>
               {p.name}
               {p.bindingCount > 0 && (
                 <span className="text-muted-foreground ml-1">
-                  ({t("detail.configOrgProfileBinding", { count: p.bindingCount })})
+                  ({t("detail.configAppProfileBinding", { count: p.bindingCount })})
                 </span>
               )}
             </SelectItem>
