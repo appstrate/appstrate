@@ -32,7 +32,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "cd .. && bun run dev",
+    command: process.env.CI ? "cd ../apps/api && bun run dev" : "cd .. && bun run dev",
     url: "http://localhost:3000",
     reuseExistingServer: true,
     timeout: 120_000,

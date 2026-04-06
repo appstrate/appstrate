@@ -84,6 +84,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Build frontend
+        run: cd apps/web && bun run build
+
       - name: Install Playwright browsers
         run: cd e2e && npx playwright install chromium --with-deps
 
