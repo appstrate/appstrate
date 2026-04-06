@@ -10,7 +10,6 @@ import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import {
   seedConnectionProfile,
   seedProviderCredentials,
-  seedPackage,
   seedConnectionForApp,
   seedApplication,
 } from "../../helpers/seed.ts";

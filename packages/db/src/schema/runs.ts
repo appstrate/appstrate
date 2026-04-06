@@ -148,7 +148,7 @@ export const packageSchedules = pgTable(
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
     name: text("name"),
-    enabled: boolean("enabled").default(true),
+    enabled: boolean("enabled").default(true).notNull(),
     cronExpression: text("cron_expression").notNull(),
     timezone: text("timezone").default("UTC"),
     input: jsonb("input"),

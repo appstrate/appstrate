@@ -153,7 +153,7 @@ export async function initiateOAuth1(
     ...actorToColumns(actor),
     profileId,
     providerId,
-    applicationId: applicationId ?? null,
+    applicationId,
     codeVerifier: "", // Not used for OAuth1, column is NOT NULL
     oauthTokenSecret,
     authMode: "oauth1",

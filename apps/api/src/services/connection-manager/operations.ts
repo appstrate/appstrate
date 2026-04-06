@@ -41,8 +41,17 @@ export async function disconnectProvider(
   logger.info("Connection deleted", { provider, profileId, orgId, providerCredentialId });
 }
 
-export async function disconnectConnectionById(connectionId: string, actor: Actor): Promise<void> {
-  // Verify the connection belongs to a profile owned by this actor
+export async function disconnectConnectionById(
+  connectionId: string,
+  actor: Actor,
+  applicationId: string,
+): Promise<void> {
+  // Verify the connection belongs to a profile owned by this actor AND to the current app
+  const credentialIds = await listProviderCredentialIds(db, applicationId);
+  if (credentialIds.length === 0) {
+    // App has no credentials configured — connection can't belong to this app
+    throw new Error("Connection not found or not owned by actor");
+  }
   const rows = await db
     .select({ id: userProviderConnections.id })
     .from(userProviderConnections)
@@ -54,6 +63,7 @@ export async function disconnectConnectionById(connectionId: string, actor: Acto
           userId: connectionProfiles.userId,
           endUserId: connectionProfiles.endUserId,
         }),
+        inArray(userProviderConnections.providerCredentialId, credentialIds),
       ),
     )
     .limit(1);
@@ -65,6 +75,7 @@ export async function disconnectConnectionById(connectionId: string, actor: Acto
   await deleteConnectionByIdRaw(db, connectionId);
   logger.info("Connection deleted by ID", {
     connectionId,
+    applicationId,
     actorType: actor.type,
     actorId: actor.id,
   });

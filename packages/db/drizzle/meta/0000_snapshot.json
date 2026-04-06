@@ -1,5 +1,5 @@
 {
-  "id": "bb58448c-9a0f-4e5b-bfce-5b04209b0949",
+  "id": "bccd6f44-ff90-47ff-a4b5-297d51b3000f",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1654,6 +1654,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_application_packages_app_id": {
+          "name": "idx_application_packages_app_id",
+          "columns": [
+            {
+              "expression": "application_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -2343,7 +2358,7 @@
           "name": "enabled",
           "type": "boolean",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "default": true
         },
         "cron_expression": {
@@ -2941,6 +2956,15 @@
         }
       },
       "foreignKeys": {
+        "runs_package_id_packages_id_fk": {
+          "name": "runs_package_id_packages_id_fk",
+          "tableFrom": "runs",
+          "tableTo": "packages",
+          "columnsFrom": ["package_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "runs_user_id_user_id_fk": {
           "name": "runs_user_id_user_id_fk",
           "tableFrom": "runs",
@@ -2977,6 +3001,24 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+        "runs_connection_profile_id_connection_profiles_id_fk": {
+          "name": "runs_connection_profile_id_connection_profiles_id_fk",
+          "tableFrom": "runs",
+          "tableTo": "connection_profiles",
+          "columnsFrom": ["connection_profile_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "runs_schedule_id_package_schedules_id_fk": {
+          "name": "runs_schedule_id_package_schedules_id_fk",
+          "tableFrom": "runs",
+          "tableTo": "package_schedules",
+          "columnsFrom": ["schedule_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
         "runs_package_version_id_package_versions_id_fk": {
           "name": "runs_package_version_id_package_versions_id_fk",
           "tableFrom": "runs",
@@ -3002,6 +3044,13 @@
       "name": "application_provider_credentials",
       "schema": "",
       "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
         "application_id": {
           "name": "application_id",
           "type": "text",
@@ -3018,7 +3067,7 @@
           "name": "credentials_encrypted",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "enabled": {
           "name": "enabled",
@@ -3057,6 +3106,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_app_provider_creds_app_id": {
+          "name": "idx_app_provider_creds_app_id",
+          "columns": [
+            {
+              "expression": "application_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -3085,7 +3149,13 @@
           "columns": ["application_id", "provider_id"]
         }
       },
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "application_provider_credentials_id_unique": {
+          "name": "application_provider_credentials_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["id"]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -3310,7 +3380,7 @@
           "name": "application_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "code_verifier": {
           "name": "code_verifier",
@@ -3757,6 +3827,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "provider_credential_id": {
+          "name": "provider_credential_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "credentials_encrypted": {
           "name": "credentials_encrypted",
           "type": "text",
@@ -3819,6 +3895,12 @@
               "isExpression": false,
               "asc": true,
               "nulls": "last"
+            },
+            {
+              "expression": "provider_credential_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
             }
           ],
           "isUnique": true,
@@ -3855,6 +3937,42 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_user_provider_connections_cred_id": {
+          "name": "idx_user_provider_connections_cred_id",
+          "columns": [
+            {
+              "expression": "provider_credential_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_user_provider_connections_org_provider": {
+          "name": "idx_user_provider_connections_org_provider",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -3872,6 +3990,15 @@
           "tableFrom": "user_provider_connections",
           "tableTo": "organizations",
           "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "user_provider_connections_provider_credential_id_application_provider_credentials_id_fk": {
+          "name": "user_provider_connections_provider_credential_id_application_provider_credentials_id_fk",
+          "tableFrom": "user_provider_connections",
+          "tableTo": "application_provider_credentials",
+          "columnsFrom": ["provider_credential_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"

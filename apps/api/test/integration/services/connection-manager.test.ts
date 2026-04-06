@@ -316,7 +316,7 @@ describe("connection-manager", () => {
       await seedConnection(profileId, "clickup", orgId, applicationId);
 
       const actor: Actor = { type: "member", id: userId };
-      await disconnectConnectionById(connectionId, actor);
+      await disconnectConnectionById(connectionId, actor, applicationId);
 
       const connections = await listActorConnections(profileId, orgId, applicationId);
       expect(connections).toHaveLength(1);
@@ -329,7 +329,7 @@ describe("connection-manager", () => {
       const otherUser = await createTestUser({ email: "hacker@test.com" });
       const actor: Actor = { type: "member", id: otherUser.id };
 
-      await expect(disconnectConnectionById(connectionId, actor)).rejects.toThrow(
+      await expect(disconnectConnectionById(connectionId, actor, applicationId)).rejects.toThrow(
         "Connection not found or not owned by actor",
       );
     });
@@ -338,7 +338,7 @@ describe("connection-manager", () => {
       const actor: Actor = { type: "member", id: userId };
       const fakeId = "00000000-0000-0000-0000-000000000000";
 
-      await expect(disconnectConnectionById(fakeId, actor)).rejects.toThrow(
+      await expect(disconnectConnectionById(fakeId, actor, applicationId)).rejects.toThrow(
         "Connection not found or not owned by actor",
       );
     });

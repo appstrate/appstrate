@@ -285,7 +285,11 @@ export function createConnectionProfilesRouter() {
     }
     // Scope connections to the application's credentials
     const credentialIds = applicationId ? await listProviderCredentialIds(db, applicationId) : [];
-    const connections = await listConnections(db, profileId, orgId, credentialIds);
+    const rawConnections = await listConnections(db, profileId, orgId, credentialIds);
+    // Strip sensitive fields — never expose encrypted credentials to the client
+    const connections = rawConnections.map(
+      ({ credentialsEncrypted: _ce, providerCredentialId: _pc, expiresAt: _ex, ...c }) => c,
+    );
     return c.json({ connections });
   });
 

@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1775456244791,
-      "tag": "0000_dapper_talon",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1775481474926,
-      "tag": "0001_marvelous_avengers",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1775488192480,
-      "tag": "0002_many_madame_hydra",
+      "when": 1775493181141,
+      "tag": "0000_pink_sway",
       "breakpoints": true
     }
   ]

@@ -107,10 +107,11 @@ export function ProviderConnectionCard({
 
   const handleDisconnect = () => {
     const conn = profileConnections?.find((c) => c.providerId === providerId);
+    if (!conn) return;
     disconnectMutation.mutate({
       provider: providerId,
       ...profileParam,
-      ...(conn?.id ? { connectionId: conn.id } : {}),
+      connectionId: conn.id,
     });
   };
 

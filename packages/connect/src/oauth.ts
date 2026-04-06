@@ -73,7 +73,7 @@ export async function initiateOAuth(
     ...actorToColumns(actor),
     profileId,
     providerId,
-    applicationId: applicationId ?? null,
+    applicationId,
     codeVerifier,
     scopesRequested: uniqueScopes,
     redirectUri,

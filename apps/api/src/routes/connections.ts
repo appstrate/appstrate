@@ -284,7 +284,8 @@ export function createConnectionsRouter() {
       const connectionId = c.req.query("connectionId");
       try {
         if (connectionId) {
-          await disconnectConnectionById(connectionId, actor);
+          const applicationId = c.get("applicationId");
+          await disconnectConnectionById(connectionId, actor, applicationId);
         } else {
           const profileId = await resolveProfileId(c, actor);
 

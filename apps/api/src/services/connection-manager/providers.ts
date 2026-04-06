@@ -73,15 +73,13 @@ export async function getAvailableProvidersWithStatus(
 
 export async function listAllActorConnections(
   actor: Actor,
-  applicationId?: string,
+  applicationId: string,
 ): Promise<{ providers: UserConnectionProviderGroup[] }> {
-  // Resolve credential IDs if app-scoped
-  const credentialIds = applicationId
-    ? await listProviderCredentialIds(db, applicationId)
-    : undefined;
+  // Resolve credential IDs scoped to the application
+  const credentialIds = await listProviderCredentialIds(db, applicationId);
 
-  // If app-scoped but no credentials configured, no connections can exist
-  if (credentialIds && credentialIds.length === 0) {
+  // No credentials configured in this app — no connections can exist
+  if (credentialIds.length === 0) {
     return { providers: [] };
   }
 
@@ -92,9 +90,7 @@ export async function listAllActorConnections(
       endUserId: connectionProfiles.endUserId,
     }),
   ];
-  if (credentialIds) {
-    conditions.push(inArray(userProviderConnections.providerCredentialId, credentialIds));
-  }
+  conditions.push(inArray(userProviderConnections.providerCredentialId, credentialIds));
 
   const rows = await db
     .select({
