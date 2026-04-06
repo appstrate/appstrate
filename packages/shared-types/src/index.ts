@@ -130,6 +130,7 @@ export interface UserConnectionEntry {
   scopesGranted: string[];
   connectedAt: string;
   profile: { id: string; name: string; isDefault: boolean };
+  application: { id: string; name: string };
 }
 
 export interface UserConnectionOrgGroup {

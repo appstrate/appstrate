@@ -2,13 +2,15 @@
 
 import { db } from "@appstrate/db/client";
 import type { UserConnectionProviderGroup, AvailableProvider } from "@appstrate/shared-types";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import {
   userProviderConnections,
   connectionProfiles,
   organizationMembers,
   organizations,
   packages,
+  applicationProviderCredentials,
+  applications,
 } from "@appstrate/db/schema";
 import {
   listConnections as listConnectionsRaw,
@@ -73,25 +75,11 @@ export async function getAvailableProvidersWithStatus(
 
 export async function listAllActorConnections(
   actor: Actor,
-  applicationId: string,
+  _applicationId: string,
 ): Promise<{ providers: UserConnectionProviderGroup[] }> {
-  // Resolve credential IDs scoped to the application
-  const credentialIds = await listProviderCredentialIds(db, applicationId);
-
-  // No credentials configured in this app — no connections can exist
-  if (credentialIds.length === 0) {
-    return { providers: [] };
-  }
-
-  // 1. Fetch all actor connections with org info
-  const conditions = [
-    actorFilter(actor, {
-      userId: connectionProfiles.userId,
-      endUserId: connectionProfiles.endUserId,
-    }),
-  ];
-  conditions.push(inArray(userProviderConnections.providerCredentialId, credentialIds));
-
+  // Fetch all actor connections across ALL apps, joining through
+  // applicationProviderCredentials → applications to get app context.
+  // The preferences page needs to show "Gmail (App A)" vs "Gmail (App B)".
   const rows = await db
     .select({
       connectionId: userProviderConnections.id,
@@ -102,14 +90,26 @@ export async function listAllActorConnections(
       profileId: connectionProfiles.id,
       profileName: connectionProfiles.name,
       isDefault: connectionProfiles.isDefault,
+      applicationId: applicationProviderCredentials.applicationId,
+      applicationName: applications.name,
     })
     .from(userProviderConnections)
     .innerJoin(connectionProfiles, eq(userProviderConnections.profileId, connectionProfiles.id))
-    .where(and(...conditions));
+    .innerJoin(
+      applicationProviderCredentials,
+      eq(userProviderConnections.providerCredentialId, applicationProviderCredentials.id),
+    )
+    .innerJoin(applications, eq(applicationProviderCredentials.applicationId, applications.id))
+    .where(
+      actorFilter(actor, {
+        userId: connectionProfiles.userId,
+        endUserId: connectionProfiles.endUserId,
+      }),
+    );
 
   if (rows.length === 0) return { providers: [] };
 
-  // 2. Fetch org names (for members, use organizationMembers; for end_users, derive from connections)
+  // Fetch org names
   const userOrgs =
     actor.type === "member"
       ? await db
@@ -130,7 +130,7 @@ export async function listAllActorConnections(
 
   const orgNameMap = new Map(userOrgs.map((o) => [o.orgId, o.orgName]));
 
-  // 3. Fetch provider display info in a single query
+  // Fetch provider display info
   const uniqueProviderIds = [...new Set(rows.map((r) => r.providerId))];
   const providerPkgs = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
@@ -146,7 +146,7 @@ export async function listAllActorConnections(
     });
   }
 
-  // 4. Group by provider → org → connections
+  // Group by provider → org → connections
   const providerMap = new Map<
     string,
     { orgMap: Map<string, typeof rows>; totalConnections: number }
@@ -168,7 +168,7 @@ export async function listAllActorConnections(
     orgConns.push(row);
   }
 
-  // 5. Build the response
+  // Build the response
   const providers: UserConnectionProviderGroup[] = [];
   for (const [providerId, pg] of providerMap) {
     const info = providerInfo.get(providerId);
@@ -183,6 +183,7 @@ export async function listAllActorConnections(
           : []) as string[],
         connectedAt: toISORequired(r.connectedAt),
         profile: { id: r.profileId, name: r.profileName, isDefault: r.isDefault },
+        application: { id: r.applicationId, name: r.applicationName },
       })),
     }));
 
