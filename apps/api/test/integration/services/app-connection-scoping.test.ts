@@ -212,6 +212,35 @@ describe("Application-scoped connection isolation", () => {
     });
   });
 
+  // ─── Token refresh per-app isolation ─────────────────────────
+
+  describe("token refresh per-app isolation", () => {
+    it("updating connection credentials in app A does not affect app B", async () => {
+      await seedConnectionForApp(profileId, providerId, ctx.orgId, appAId, { api_key: "key-a" });
+      await seedConnectionForApp(profileId, providerId, ctx.orgId, appBId, { api_key: "key-b" });
+
+      const credIdsA = await listProviderCredentialIds(db, appAId);
+      const credIdsB = await listProviderCredentialIds(db, appBId);
+
+      // Get both connections
+      const connA = await getConnection(db, profileId, providerId, ctx.orgId, credIdsA[0]!);
+      const connB = await getConnection(db, profileId, providerId, ctx.orgId, credIdsB[0]!);
+      expect(connA).not.toBeNull();
+      expect(connB).not.toBeNull();
+
+      // Update App A's connection (simulate token refresh)
+      await db
+        .update(userProviderConnections)
+        .set({ credentialsEncrypted: "refreshed-token-app-a", updatedAt: new Date() })
+        .where(eq(userProviderConnections.id, connA!.id));
+
+      // Verify App B's connection is untouched
+      const connBAfter = await getConnection(db, profileId, providerId, ctx.orgId, credIdsB[0]!);
+      expect(connBAfter!.credentialsEncrypted).not.toBe("refreshed-token-app-a");
+      expect(connBAfter!.credentialsEncrypted).toBe(connB!.credentialsEncrypted);
+    });
+  });
+
   // ─── needsReconnection scoping ──────────────────────────────
 
   describe("needsReconnection per-providerCredentialId", () => {

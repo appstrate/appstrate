@@ -3,7 +3,11 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedConnectionProfile, seedConnectionForApp } from "../../helpers/seed.ts";
+import {
+  seedConnectionProfile,
+  seedConnectionForApp,
+  seedApplication,
+} from "../../helpers/seed.ts";
 import {
   getAppProfileBindings,
   getAppProfileBindingsEnriched,
@@ -78,6 +82,28 @@ describe("app-profile-bindings", () => {
     it("returns empty array when no bindings exist", async () => {
       const enriched = await getAppProfileBindingsEnriched(appProfileId, defaultAppId);
       expect(enriched).toEqual([]);
+    });
+
+    it("deduplicates when user has connections from multiple apps", async () => {
+      // Bind gmail on the app profile
+      await bindAppProfileProvider(appProfileId, "@test/gmail", userProfileId, userId);
+
+      // Create connection from the default app
+      await seedConnectionForApp(userProfileId, "@test/gmail", orgId, defaultAppId, {
+        access_token: "tok-app1",
+      });
+
+      // Create a second app and connection for the same (profile, provider)
+      const { id: secondAppId } = await seedApplication({ orgId, name: "Second App" });
+      await seedConnectionForApp(userProfileId, "@test/gmail", orgId, secondAppId, {
+        access_token: "tok-app2",
+      });
+
+      // The LEFT JOIN would produce 2 rows without dedup
+      const enriched = await getAppProfileBindingsEnriched(appProfileId, defaultAppId);
+      expect(enriched).toHaveLength(1); // NOT 2
+      expect(enriched[0]!.providerId).toBe("@test/gmail");
+      expect(enriched[0]!.connected).toBe(true);
     });
   });
 

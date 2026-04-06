@@ -8,6 +8,7 @@ import {
   addOrgMember,
   createTestUser,
   authHeaders,
+  orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedConnectionProfile, seedAgent, seedPackage } from "../../helpers/seed.ts";
@@ -146,6 +147,17 @@ describe("Connection Profiles API", () => {
   });
 
   // ─── App Profile Routes ──────────────────────────────────
+
+  describe("app-profile routes require X-App-Id", () => {
+    it("returns 400 when X-App-Id is missing on app-profile routes", async () => {
+      const res = await app.request("/api/app-profiles", {
+        headers: orgOnlyHeaders(ctx),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.param).toBe("X-App-Id");
+    });
+  });
 
   describe("GET /api/app-profiles", () => {
     it("returns empty list initially", async () => {
