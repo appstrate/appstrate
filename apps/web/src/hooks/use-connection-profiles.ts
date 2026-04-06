@@ -48,10 +48,12 @@ export function useConnectionProfiles() {
 
 export function useAllUserConnections() {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["user-connections", orgId],
+    queryKey: ["user-connections", orgId, appId],
     queryFn: () =>
       api<{ providers: UserConnectionProviderGroup[] }>("/connection-profiles/connections"),
+    enabled: !!appId,
   });
 }
 

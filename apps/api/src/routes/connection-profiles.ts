@@ -74,10 +74,11 @@ export function createConnectionProfilesRouter() {
     return c.json(result);
   });
 
-  // DELETE /api/connection-profiles/connections — delete all actor connections
+  // DELETE /api/connection-profiles/connections — delete all actor connections (app-scoped)
   router.delete("/connections", async (c) => {
     const actor = getActor(c);
-    await deleteAllActorConnections(actor);
+    const applicationId = c.get("applicationId");
+    await deleteAllActorConnections(actor, applicationId);
     return c.json({ ok: true });
   });
 

@@ -30,18 +30,18 @@ describe("isProviderEnabled with application-level credentials", () => {
 
   it("returns true when enabled at app level", async () => {
     await seedProviderCredentials({ applicationId: ctx.defaultAppId, providerId, enabled: true });
-    const result = await isProviderEnabled(db, ctx.orgId, providerId, ctx.defaultAppId);
+    const result = await isProviderEnabled(db, providerId, ctx.defaultAppId);
     expect(result).toBe(true);
   });
 
   it("returns false when disabled at app level", async () => {
     await seedProviderCredentials({ applicationId: ctx.defaultAppId, providerId, enabled: false });
-    const result = await isProviderEnabled(db, ctx.orgId, providerId, ctx.defaultAppId);
+    const result = await isProviderEnabled(db, providerId, ctx.defaultAppId);
     expect(result).toBe(false);
   });
 
   it("returns false when no credentials row exists", async () => {
-    const result = await isProviderEnabled(db, ctx.orgId, providerId, ctx.defaultAppId);
+    const result = await isProviderEnabled(db, providerId, ctx.defaultAppId);
     expect(result).toBe(false);
   });
 
@@ -55,11 +55,11 @@ describe("isProviderEnabled with application-level credentials", () => {
     await seedProviderCredentials({ applicationId: otherApp.id, providerId, enabled: false });
 
     // Default app should still see the provider enabled
-    const resultDefault = await isProviderEnabled(db, ctx.orgId, providerId, ctx.defaultAppId);
+    const resultDefault = await isProviderEnabled(db, providerId, ctx.defaultAppId);
     expect(resultDefault).toBe(true);
 
     // Other app should see it disabled
-    const resultOther = await isProviderEnabled(db, ctx.orgId, providerId, otherApp.id);
+    const resultOther = await isProviderEnabled(db, providerId, otherApp.id);
     expect(resultOther).toBe(false);
   });
 });

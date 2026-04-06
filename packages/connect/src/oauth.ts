@@ -43,7 +43,7 @@ export async function initiateOAuth(
   providerId: string,
   redirectUri: string,
   requestedScopes?: string[],
-  applicationId?: string | null,
+  applicationId?: string,
 ): Promise<InitiateOAuthResult> {
   const provider = await getProviderOrThrow(db, orgId, providerId, "oauth2");
   if (!provider.authorizationUrl) {
@@ -53,7 +53,7 @@ export async function initiateOAuth(
   if (!applicationId) {
     throw new Error("Application context is required for OAuth2 connection");
   }
-  const oauthCreds = await getProviderOAuthCredentialsOrThrow(db, orgId, providerId, applicationId);
+  const oauthCreds = await getProviderOAuthCredentialsOrThrow(db, providerId, applicationId);
 
   // Generate PKCE values
   const state = crypto.randomUUID();
@@ -173,7 +173,6 @@ export async function handleOAuthCallback(
   }
   const oauthCreds = await getProviderOAuthCredentialsOrThrow(
     db,
-    stateRow.orgId,
     stateRow.providerId,
     rawRow.applicationId,
   );

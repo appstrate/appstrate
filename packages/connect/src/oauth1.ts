@@ -81,7 +81,7 @@ export async function initiateOAuth1(
   profileId: string,
   providerId: string,
   callbackUrl: string,
-  applicationId?: string | null,
+  applicationId?: string,
 ): Promise<InitiateOAuth1Result> {
   const provider = await getProviderOrThrow(db, orgId, providerId);
   if (!provider.requestTokenUrl) {
@@ -94,7 +94,7 @@ export async function initiateOAuth1(
   if (!applicationId) {
     throw new Error("Application context is required for OAuth1 connection");
   }
-  const creds = await getProviderOAuth1CredentialsOrThrow(db, orgId, providerId, applicationId);
+  const creds = await getProviderOAuth1CredentialsOrThrow(db, providerId, applicationId);
 
   // Build OAuth params for the request token call
   const nonce = generateNonce();
@@ -228,7 +228,6 @@ export async function handleOAuth1Callback(
   }
   const creds = await getProviderOAuth1CredentialsOrThrow(
     db,
-    stateRow.orgId,
     stateRow.providerId,
     stateRow.applicationId,
   );

@@ -356,7 +356,7 @@ describe("connection-manager", () => {
       await seedConnection(profile2.id, "slack", orgId, applicationId);
 
       const actor: Actor = { type: "member", id: userId };
-      await deleteAllActorConnections(actor);
+      await deleteAllActorConnections(actor, applicationId);
 
       const conn1 = await listActorConnections(profileId, orgId, applicationId);
       const conn2 = await listActorConnections(profile2.id, orgId, applicationId);
@@ -379,7 +379,7 @@ describe("connection-manager", () => {
       await seedConnection(otherProfile.id, "clickup", otherOrg.id, otherAppId);
 
       const actor: Actor = { type: "member", id: userId };
-      await deleteAllActorConnections(actor);
+      await deleteAllActorConnections(actor, applicationId);
 
       // Actor's connections are gone
       const actorConns = await listActorConnections(profileId, orgId, applicationId);
@@ -396,7 +396,7 @@ describe("connection-manager", () => {
       const actor: Actor = { type: "member", id: otherUser.id };
 
       // Should not throw
-      await deleteAllActorConnections(actor);
+      await deleteAllActorConnections(actor, applicationId);
     });
   });
 

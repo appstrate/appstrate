@@ -81,7 +81,10 @@ export async function disconnectConnectionById(
   });
 }
 
-export async function deleteAllActorConnections(actor: Actor): Promise<void> {
+export async function deleteAllActorConnections(
+  actor: Actor,
+  applicationId: string,
+): Promise<void> {
   const profiles = await db
     .select({ id: connectionProfiles.id })
     .from(connectionProfiles)
@@ -94,14 +97,25 @@ export async function deleteAllActorConnections(actor: Actor): Promise<void> {
 
   if (profiles.length === 0) return;
 
+  // Scope deletion to the current application's credentials only
+  const credentialIds = await listProviderCredentialIds(db, applicationId);
+  if (credentialIds.length === 0) return;
+
   await db.delete(userProviderConnections).where(
-    inArray(
-      userProviderConnections.profileId,
-      profiles.map((p) => p.id),
+    and(
+      inArray(
+        userProviderConnections.profileId,
+        profiles.map((p) => p.id),
+      ),
+      inArray(userProviderConnections.providerCredentialId, credentialIds),
     ),
   );
 
-  logger.info("All actor connections deleted", { actorType: actor.type, actorId: actor.id });
+  logger.info("All actor connections deleted for application", {
+    actorType: actor.type,
+    actorId: actor.id,
+    applicationId,
+  });
 }
 
 export { validateScopes };

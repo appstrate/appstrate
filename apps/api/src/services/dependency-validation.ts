@@ -13,7 +13,7 @@ import type { AgentProviderRequirement, ProviderProfileMap } from "../types/inde
 import { ApiError } from "../lib/errors.ts";
 
 export interface DependencyValidationDeps {
-  isProviderEnabled: (orgId: string, providerId: string, applicationId: string) => Promise<boolean>;
+  isProviderEnabled: (providerId: string, applicationId: string) => Promise<boolean>;
   getConnectionStatus: (
     provider: string,
     connectionProfileId: string,
@@ -28,8 +28,8 @@ export interface DependencyValidationDeps {
 }
 
 const defaultDeps: DependencyValidationDeps = {
-  isProviderEnabled: (orgId, providerId, applicationId) =>
-    isProviderEnabled(db, orgId, providerId, applicationId),
+  isProviderEnabled: (providerId, applicationId) =>
+    isProviderEnabled(db, providerId, applicationId),
   getConnectionStatus,
   getProviderCredentialId: (applicationId, providerId) =>
     getProviderCredentialId(db, applicationId, providerId),
@@ -51,7 +51,7 @@ export async function validateAgentDependencies(
   // Check provider enabled status
   const uniqueProviders = [...new Set(providers.map((s) => s.id))];
   for (const providerId of uniqueProviders) {
-    const enabled = await deps.isProviderEnabled(orgId, providerId, applicationId);
+    const enabled = await deps.isProviderEnabled(providerId, applicationId);
     if (!enabled) {
       throw new ApiError({
         status: 400,

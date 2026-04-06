@@ -69,7 +69,7 @@ export function createConnectionsRouter() {
       const orgId = c.get("orgId");
 
       const applicationId = c.get("applicationId");
-      if (!(await isProviderEnabled(db, orgId, provider, applicationId))) {
+      if (!(await isProviderEnabled(db, provider, applicationId))) {
         throw forbidden(`Provider '${provider}' is not configured in the current application`);
       }
 
@@ -117,7 +117,7 @@ export function createConnectionsRouter() {
       const orgId = c.get("orgId");
 
       const applicationId = c.get("applicationId");
-      if (!(await isProviderEnabled(db, orgId, provider, applicationId))) {
+      if (!(await isProviderEnabled(db, provider, applicationId))) {
         throw forbidden(`Provider '${provider}' is not configured in the current application`);
       }
 
@@ -158,7 +158,7 @@ export function createConnectionsRouter() {
       const orgId = c.get("orgId");
 
       const applicationId = c.get("applicationId");
-      if (!(await isProviderEnabled(db, orgId, provider, applicationId))) {
+      if (!(await isProviderEnabled(db, provider, applicationId))) {
         throw forbidden(`Provider '${provider}' is not configured in the current application`);
       }
 

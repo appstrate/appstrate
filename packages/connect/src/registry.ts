@@ -93,7 +93,6 @@ async function getProviderAdminCredentials(
  */
 export async function getProviderOAuthCredentialsOrThrow(
   db: Db,
-  _orgId: string,
   providerId: string,
   applicationId: string,
 ): Promise<{ clientId: string; clientSecret: string }> {
@@ -112,7 +111,6 @@ export async function getProviderOAuthCredentialsOrThrow(
  */
 export async function getProviderOAuth1CredentialsOrThrow(
   db: Db,
-  _orgId: string,
   providerId: string,
   applicationId: string,
 ): Promise<{ consumerKey: string; consumerSecret: string }> {
@@ -178,7 +176,6 @@ export function getCredentialFieldName(provider: ProviderDefinition): string {
  */
 export async function isProviderEnabled(
   db: Db,
-  _orgId: string,
   providerId: string,
   applicationId: string,
 ): Promise<boolean> {
