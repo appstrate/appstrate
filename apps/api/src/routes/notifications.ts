@@ -52,7 +52,7 @@ export function createNotificationsRouter() {
   router.get("/runs", async (c) => {
     const actor = getActor(c);
     const orgId = c.get("orgId");
-    const appId = c.get("applicationId");
+    const applicationId = c.get("applicationId");
     const limit = z.coerce
       .number()
       .int()
@@ -72,8 +72,8 @@ export function createNotificationsRouter() {
     // End-users always see only their own runs
     const result =
       userFilter === "me" || endUser
-        ? await listUserRuns(actor.id, orgId, { limit, offset, applicationId: appId })
-        : await listOrgRuns(orgId, { limit, offset, applicationId: appId });
+        ? await listUserRuns(actor.id, orgId, { limit, offset, applicationId: applicationId })
+        : await listOrgRuns(orgId, { limit, offset, applicationId: applicationId });
     return c.json(result);
   });
 

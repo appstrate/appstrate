@@ -152,13 +152,13 @@ export function createProvidersRouter() {
   // GET /api/providers — list providers accessible to the current application
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
-    const appId = c.get("applicationId");
+    const applicationId = c.get("applicationId");
 
     // Single query (system + installed) + usage counts + app credentials in parallel
     const [rows, providerUsage, allCreds] = await Promise.all([
-      listAccessiblePackages(orgId, appId, "provider"),
+      listAccessiblePackages(orgId, applicationId, "provider"),
       countAllProviderUsage(orgId),
-      getAppProviderCredentials(appId),
+      getAppProviderCredentials(applicationId),
     ]);
 
     const credMap = new Map(allCreds.map((r) => [r.providerId, r]));
@@ -323,15 +323,15 @@ export function createProvidersRouter() {
         }
       }
 
-      const appId = c.get("applicationId");
-      if (!appId) {
+      const applicationId = c.get("applicationId");
+      if (!applicationId) {
         throw invalidRequest("Application context required to configure provider credentials");
       }
 
-      await configureCredentials(appId, providerId, data.credentials, data.enabled);
+      await configureCredentials(applicationId, providerId, data.credentials, data.enabled);
 
       if (hasCredentials && data.invalidateConnections) {
-        const credentialId = await getProviderCredentialId(db, appId, providerId);
+        const credentialId = await getProviderCredentialId(db, applicationId, providerId);
         if (credentialId) {
           await invalidateConnections(orgId, providerId, credentialId);
         }
@@ -346,11 +346,11 @@ export function createProvidersRouter() {
     "/credentials/:scope{@[^/]+}/:name",
     requirePermission("providers", "delete"),
     async (c) => {
-      const appId = c.get("applicationId");
+      const applicationId = c.get("applicationId");
       const providerId = getItemId(c);
 
-      if (appId) {
-        await deleteCredentials(appId, providerId);
+      if (applicationId) {
+        await deleteCredentials(applicationId, providerId);
       }
 
       return c.json({ configured: false });

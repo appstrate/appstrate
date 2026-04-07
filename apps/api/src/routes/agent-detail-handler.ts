@@ -32,12 +32,12 @@ import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 
 export async function agentDetailHandler(c: Context<AppEnv>) {
   const orgId = c.get("orgId");
-  const appId = c.get("applicationId");
+  const applicationId = c.get("applicationId");
   const actor = getActor(c);
   const itemId = getItemId(c);
 
   const [agent, rawItem, versionCount, latestVersionDate] = await Promise.all([
-    getPackageWithAccess(itemId, orgId, appId),
+    getPackageWithAccess(itemId, orgId, applicationId),
     getOrgItem(orgId, itemId, AGENT_CONFIG),
     getVersionCount(itemId),
     getLatestVersionCreatedAt(itemId),
@@ -52,9 +52,9 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   // Load app profile, actor profile context, and package config in parallel
   const [agentAppProfile, { defaultUserProfileId, userProviderOverrides }, packageConfig] =
     await Promise.all([
-      getAgentAppProfile(appId, agent.id),
+      getAgentAppProfile(applicationId, agent.id),
       resolveActorProfileContext(actor, agent.id),
-      getPackageConfig(appId, agent.id),
+      getPackageConfig(applicationId, agent.id),
     ]);
   const agentAppProfileId = agentAppProfile?.id ?? null;
   const agentAppProfileName = agentAppProfile?.name ?? null;
@@ -66,14 +66,14 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
     defaultUserProfileId,
     userProviderOverrides,
     agentAppProfileId,
-    appId,
+    applicationId,
   );
 
   const providerStatuses = await resolveProviderStatuses(
     manifestProviders,
     providerProfiles,
     orgId,
-    appId,
+    applicationId,
   );
 
   // Build populatedProviders: ProviderConfig keyed by provider ID
@@ -95,7 +95,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
             inArray(packages.id, providerIds),
           ),
         ),
-      appId
+      applicationId
         ? db
             .select({
               providerId: applicationProviderCredentials.providerId,
@@ -105,7 +105,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
             .from(applicationProviderCredentials)
             .where(
               and(
-                eq(applicationProviderCredentials.applicationId, appId),
+                eq(applicationProviderCredentials.applicationId, applicationId),
                 inArray(applicationProviderCredentials.providerId, providerIds),
               ),
             )
@@ -124,8 +124,8 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   }
 
   const [lastRun, runningCount] = await Promise.all([
-    getLastRun(agent.id, null, orgId, appId),
-    getRunningRunsForPackage(agent.id, orgId, appId),
+    getLastRun(agent.id, null, orgId, applicationId),
+    getRunningRunsForPackage(agent.id, orgId, applicationId),
   ]);
 
   const configWithDefaults = m.config?.schema

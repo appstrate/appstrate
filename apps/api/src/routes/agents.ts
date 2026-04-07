@@ -39,12 +39,12 @@ export function createAgentsRouter() {
   // GET /api/agents — list agents accessible to the current application
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
-    const appId = c.get("applicationId");
+    const applicationId = c.get("applicationId");
 
     // Single query: system packages + installed packages via LEFT JOIN
     const [rows, runningCounts] = await Promise.all([
-      listAccessiblePackages(orgId, appId, "agent"),
-      getRunningRunCounts(orgId, appId),
+      listAccessiblePackages(orgId, applicationId, "agent"),
+      getRunningRunCounts(orgId, applicationId),
     ]);
 
     const agentList = rows.map((row) => {
@@ -92,8 +92,8 @@ export function createAgentsRouter() {
 
       const config = mergeWithDefaults(asJSONSchemaObject(schema), body);
 
-      const appId = c.get("applicationId");
-      await updateInstalledPackage(appId, agent.id, { config });
+      const applicationId = c.get("applicationId");
+      await updateInstalledPackage(applicationId, agent.id, { config });
 
       return c.json({
         config,
@@ -155,8 +155,8 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/proxy — get agent proxy configuration
   router.get("/:scope{@[^/]+}/:name/proxy", requireAgent(), async (c) => {
     const agent = c.get("agent");
-    const appId = c.get("applicationId");
-    const { proxyId } = await getPackageConfig(appId, agent.id);
+    const applicationId = c.get("applicationId");
+    const { proxyId } = await getPackageConfig(applicationId, agent.id);
 
     return c.json({ proxyId, resolved: proxyId !== "none" });
   });
@@ -168,11 +168,11 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("agent");
-      const appId = c.get("applicationId");
+      const applicationId = c.get("applicationId");
       const body = await c.req.json();
       const data = parseBody(proxyIdSchema, body);
 
-      await updateInstalledPackage(appId, agent.id, { proxyId: data.proxyId });
+      await updateInstalledPackage(applicationId, agent.id, { proxyId: data.proxyId });
 
       return c.json({ success: true });
     },
@@ -181,8 +181,8 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/model — get agent model configuration
   router.get("/:scope{@[^/]+}/:name/model", requireAgent(), async (c) => {
     const agent = c.get("agent");
-    const appId = c.get("applicationId");
-    const { modelId } = await getPackageConfig(appId, agent.id);
+    const applicationId = c.get("applicationId");
+    const { modelId } = await getPackageConfig(applicationId, agent.id);
 
     return c.json({ modelId });
   });
@@ -194,11 +194,11 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("agent");
-      const appId = c.get("applicationId");
+      const applicationId = c.get("applicationId");
       const body = await c.req.json();
       const data = parseBody(modelIdSchema, body);
 
-      await updateInstalledPackage(appId, agent.id, { modelId: data.modelId });
+      await updateInstalledPackage(applicationId, agent.id, { modelId: data.modelId });
 
       return c.json({ success: true });
     },
@@ -211,11 +211,11 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("agent");
-      const appId = c.get("applicationId");
+      const applicationId = c.get("applicationId");
       const body = await c.req.json();
       const data = parseBody(appProfileIdSchema, body);
 
-      await updateInstalledPackage(appId, agent.id, { appProfileId: data.appProfileId });
+      await updateInstalledPackage(applicationId, agent.id, { appProfileId: data.appProfileId });
 
       return c.json({ success: true });
     },
@@ -224,8 +224,8 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/memories — list agent memories
   router.get("/:scope{@[^/]+}/:name/memories", requireAgent(), async (c) => {
     const agent = c.get("agent");
-    const appId = c.get("applicationId");
-    const memories = await getPackageMemories(agent.id, appId);
+    const applicationId = c.get("applicationId");
+    const memories = await getPackageMemories(agent.id, applicationId);
     return c.json({
       memories: memories.map((m) => ({
         id: m.id,
@@ -243,8 +243,8 @@ export function createAgentsRouter() {
     requirePermission("memories", "delete"),
     async (c) => {
       const agent = c.get("agent");
-      const appId = c.get("applicationId");
-      const deleted = await deleteAllPackageMemories(agent.id, appId);
+      const applicationId = c.get("applicationId");
+      const deleted = await deleteAllPackageMemories(agent.id, applicationId);
       return c.json({ deleted });
     },
   );
@@ -256,13 +256,13 @@ export function createAgentsRouter() {
     requirePermission("memories", "delete"),
     async (c) => {
       const agent = c.get("agent");
-      const appId = c.get("applicationId");
+      const applicationId = c.get("applicationId");
       const result = z.coerce.number().int().min(1).safeParse(c.req.param("memoryId"));
       if (!result.success) {
         throw invalidRequest("Invalid memory ID", "memoryId");
       }
       const memoryId = result.data;
-      const deleted = await deletePackageMemory(memoryId, agent.id, appId);
+      const deleted = await deletePackageMemory(memoryId, agent.id, applicationId);
       if (!deleted) {
         throw notFound("Memory not found");
       }

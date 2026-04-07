@@ -157,12 +157,12 @@ export function createSchedulesRouter() {
   router.delete("/schedules/:id", requirePermission("schedules", "delete"), async (c) => {
     const id = c.req.param("id")!;
     const orgId = c.get("orgId");
-    const appId = c.get("applicationId");
-    const existing = await getSchedule(id, orgId, appId);
+    const applicationId = c.get("applicationId");
+    const existing = await getSchedule(id, orgId, applicationId);
     if (!existing) {
       throw notFound(`Schedule '${id}' not found`);
     }
-    await deleteSchedule(id, orgId, appId);
+    await deleteSchedule(id, orgId, applicationId);
     return c.json({ ok: true });
   });
 

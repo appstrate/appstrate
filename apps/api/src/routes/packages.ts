@@ -368,8 +368,8 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
 function makeListHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const appId = c.get("applicationId");
-    const items = await listOrgItems(orgId, rcfg.cfg, appId);
+    const applicationId = c.get("applicationId");
+    const items = await listOrgItems(orgId, rcfg.cfg, applicationId);
     const enriched = await enrichWithCreatorNames(items);
     return c.json({ [rcfg.cfg.storageFolder]: enriched });
   };
@@ -479,10 +479,10 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       });
 
       // Auto-install in the current application (non-fatal)
-      const appId = c.get("applicationId");
-      if (appId) {
-        await installPackage(appId, orgId, packageId).catch((e: unknown) =>
-          logger.debug("auto-install skipped", { packageId, appId, err: String(e) }),
+      const applicationId = c.get("applicationId");
+      if (applicationId) {
+        await installPackage(applicationId, orgId, packageId).catch((e: unknown) =>
+          logger.debug("auto-install skipped", { packageId, applicationId, err: String(e) }),
         );
       }
 
@@ -581,10 +581,10 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     });
 
     // Auto-install in the current application (non-fatal)
-    const appId = c.get("applicationId");
-    if (appId) {
-      await installPackage(appId, orgId, item.id).catch((e: unknown) =>
-        logger.debug("auto-install skipped", { packageId: item.id, appId, err: String(e) }),
+    const applicationId = c.get("applicationId");
+    if (applicationId) {
+      await installPackage(applicationId, orgId, item.id).catch((e: unknown) =>
+        logger.debug("auto-install skipped", { packageId: item.id, applicationId, err: String(e) }),
       );
     }
 
@@ -611,7 +611,7 @@ export function getItemId(c: Context<AppEnv>): string {
 function makeGetHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const appId = c.get("applicationId");
+    const applicationId = c.get("applicationId");
     const itemId = getItemId(c);
     const [item, versionCount, latestVersionDate] = await Promise.all([
       getOrgItem(orgId, itemId, rcfg.cfg),
@@ -624,7 +624,7 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     }
 
     // Enforce app-level access: all apps can only access installed packages
-    if (!(await hasPackageAccess(appId, itemId))) {
+    if (!(await hasPackageAccess(applicationId, itemId))) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 
@@ -772,7 +772,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 function makeDeleteHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const appId = c.get("applicationId");
+    const applicationId = c.get("applicationId");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
@@ -782,7 +782,7 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
 
     // For agents, check running runs
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId, orgId, appId);
+      const running = await getRunningRunsForPackage(itemId, orgId, applicationId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -883,7 +883,7 @@ function makeVersionInfoHandler(rcfg: PackageRouteConfig) {
 function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const appId = c.get("applicationId");
+    const applicationId = c.get("applicationId");
     const user = c.get("user");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
@@ -894,7 +894,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 
     // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId, orgId, appId);
+      const running = await getRunningRunsForPackage(itemId, orgId, applicationId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -943,7 +943,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const appId = c.get("applicationId");
+    const applicationId = c.get("applicationId");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
@@ -953,7 +953,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 
     // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId, orgId, appId);
+      const running = await getRunningRunsForPackage(itemId, orgId, applicationId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -1033,7 +1033,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const appId = c.get("applicationId");
+    const applicationId = c.get("applicationId");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
@@ -1048,7 +1048,7 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId, orgId, appId);
+      const running = await getRunningRunsForPackage(itemId, orgId, applicationId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -1345,10 +1345,10 @@ export function createPackagesRouter() {
     }
 
     // Auto-install in the current application (non-fatal, skip if already installed)
-    const appId = c.get("applicationId");
-    if (appId) {
-      await installPackage(appId, orgId, packageId).catch((e: unknown) =>
-        logger.debug("auto-install skipped", { packageId, appId, err: String(e) }),
+    const applicationId = c.get("applicationId");
+    if (applicationId) {
+      await installPackage(applicationId, orgId, packageId).catch((e: unknown) =>
+        logger.debug("auto-install skipped", { packageId, applicationId, err: String(e) }),
       );
     }
 
