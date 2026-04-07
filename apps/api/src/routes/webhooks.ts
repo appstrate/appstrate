@@ -25,7 +25,7 @@ import {
 } from "../services/webhooks.ts";
 import { parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-const createWebhookSchema = z.object({
+export const createWebhookSchema = z.object({
   url: z.url("url must be a valid URL"),
   events: z.array(webhookEventSchema).min(1, "events is required"),
   packageId: z.string().nullable().optional(),
@@ -33,7 +33,7 @@ const createWebhookSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-const updateWebhookSchema = z.object({
+export const updateWebhookSchema = z.object({
   url: z.url().optional(),
   events: z.array(webhookEventSchema).min(1).optional(),
   packageId: z.string().nullable().optional(),

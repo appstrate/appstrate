@@ -33,6 +33,16 @@ export const internalPaths = {
                   runs: { type: "array", items: { type: "object" } },
                 },
               },
+              example: {
+                runs: [
+                  {
+                    id: "run_cm9abc123",
+                    status: "success",
+                    state: { lastProcessedId: 42 },
+                    createdAt: "2026-01-14T09:00:00Z",
+                  },
+                ],
+              },
             },
           },
         },
@@ -68,12 +78,31 @@ export const internalPaths = {
                   authorizedUris: { type: "array", items: { type: "string" } },
                 },
               },
+              example: {
+                credentials: { access_token: "ya29.a0AfH6SM..." },
+                authorizedUris: ["https://gmail.googleapis.com/*"],
+              },
             },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { description: "Run not running" },
-        "404": { description: "Agent, provider, or binding not found" },
+        "403": {
+          description: "Run not running",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Forbidden",
+                status: 403,
+                detail: "Run is not in running state",
+                code: "forbidden",
+                requestId: "req_jkl012",
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -111,7 +140,7 @@ export const internalPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { description: "Provider or profile not found" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -132,6 +161,7 @@ export const internalPaths = {
               properties: {
                 providerId: {
                   type: "string",
+                  minLength: 1,
                   description: "Provider ID that returned 401",
                 },
               },

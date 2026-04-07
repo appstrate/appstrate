@@ -31,6 +31,19 @@ export const providersPaths = {
                   callbackUrl: { type: "string" },
                 },
               },
+              example: {
+                providers: [
+                  {
+                    id: "@appstrate/gmail",
+                    displayName: "Gmail",
+                    authMode: "oauth2",
+                    source: "built-in",
+                    hasCredentials: true,
+                    enabled: true,
+                  },
+                ],
+                callbackUrl: "https://app.appstrate.dev/api/connections/callback",
+              },
             },
           },
         },
@@ -97,7 +110,7 @@ export const providersPaths = {
         required: true,
         content: {
           "application/json": {
-            schema: { $ref: "#/components/schemas/ProviderConfigInput" },
+            schema: { $ref: "#/components/schemas/ProviderConfigUpdate" },
           },
         },
       },
@@ -140,7 +153,22 @@ export const providersPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "409": { description: "Provider in use by agents" },
+        "409": {
+          description: "Provider in use by agents",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Conflict",
+                status: 409,
+                detail: "Cannot delete provider: it is still referenced by active agents",
+                code: "conflict",
+                requestId: "req_ghi789",
+              },
+            },
+          },
+        },
       },
     },
   },

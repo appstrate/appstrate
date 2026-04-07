@@ -12,6 +12,12 @@ export const openApiInfo = {
       "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Deprecated API versions include a `Sunset` header (RFC 8594). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).",
     contact: {
       name: "Appstrate",
+      url: "https://appstrate.dev",
+      email: "contact@appstrate.dev",
+    },
+    license: {
+      name: "Apache-2.0",
+      url: "https://www.apache.org/licenses/LICENSE-2.0",
     },
   },
   servers: [
@@ -40,9 +46,15 @@ export const openApiInfo = {
     { name: "Internal", description: "Container-to-host internal routes" },
     { name: "Models", description: "LLM model configuration" },
     { name: "Connection Profiles", description: "Shared connection sets across agents" },
+    { name: "App Profiles", description: "Application-scoped connection profiles" },
     { name: "Proxies", description: "Org-level HTTP proxy configuration" },
     { name: "Meta", description: "API documentation and specification" },
     { name: "Applications", description: "Application management for headless API" },
+    { name: "Application Packages", description: "Manage packages installed in an application" },
+    {
+      name: "Application Providers",
+      description: "Manage provider credentials at the application level",
+    },
     { name: "End Users", description: "End-user management for headless API" },
     { name: "Provider Keys", description: "Organization provider keys and credentials" },
     { name: "Webhooks", description: "Webhook configuration and delivery" },

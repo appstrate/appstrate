@@ -38,11 +38,37 @@ export const healthPaths = {
                   },
                 },
               },
+              example: {
+                status: "healthy",
+                uptime_ms: 3600000,
+                checks: {
+                  database: { status: "healthy", latency_ms: 2.3 },
+                  agents: { status: "healthy" },
+                },
+              },
             },
           },
         },
         "503": {
           description: "Platform unhealthy (database or critical service down)",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  status: { type: "string", enum: ["unhealthy"] },
+                  checks: { type: "object" },
+                },
+              },
+              example: {
+                status: "unhealthy",
+                checks: {
+                  database: { status: "unhealthy", latency_ms: null },
+                  agents: { status: "healthy" },
+                },
+              },
+            },
+          },
         },
       },
     },

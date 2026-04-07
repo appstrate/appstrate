@@ -8,7 +8,7 @@ import { invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "../lib/ids.ts";
 
 export const appSettingsSchema = z.object({
-  allowedRedirectDomains: z.array(z.string()).optional(),
+  allowedRedirectDomains: z.array(z.string()).max(20).optional(),
 });
 
 export type AppSettings = z.infer<typeof appSettingsSchema>;

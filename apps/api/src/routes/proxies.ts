@@ -23,18 +23,18 @@ import {
   systemEntityForbidden,
 } from "../lib/errors.ts";
 
-const createProxySchema = z.object({
+export const createProxySchema = z.object({
   label: z.string().min(1, "label is required"),
   url: z.url({ error: "url must be a valid URL" }),
 });
 
-const updateProxySchema = z.object({
+export const updateProxySchema = z.object({
   label: z.string().min(1).optional(),
   url: z.url().optional(),
   enabled: z.boolean().optional(),
 });
 
-const setDefaultSchema = z.object({
+export const setDefaultSchema = z.object({
   proxyId: z.string().nullable(),
 });
 

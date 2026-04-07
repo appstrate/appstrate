@@ -29,11 +29,49 @@ export const invitationsPaths = {
                   isNewUser: { type: "boolean" },
                 },
               },
+              example: {
+                email: "newuser@example.com",
+                orgName: "Acme Corp",
+                role: "member",
+                inviterName: "Alice Martin",
+                expiresAt: "2026-02-15T10:30:00Z",
+                isNewUser: true,
+              },
             },
           },
         },
-        "404": { description: "Invitation not found" },
-        "410": { description: "Invitation already accepted, cancelled, or expired" },
+        "404": {
+          description: "Invitation not found",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Not Found",
+                status: 404,
+                detail: "Invitation not found",
+                code: "not_found",
+                requestId: "req_mno345",
+              },
+            },
+          },
+        },
+        "410": {
+          description: "Invitation already accepted, cancelled, or expired",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Gone",
+                status: 410,
+                detail: "Invitation has already been accepted",
+                code: "gone",
+                requestId: "req_pqr678",
+              },
+            },
+          },
+        },
       },
     },
   },
@@ -80,16 +118,32 @@ export const invitationsPaths = {
                   },
                 },
               },
+              example: {
+                success: true,
+                isNewUser: true,
+                orgId: "550e8400-e29b-41d4-a716-446655440000",
+              },
             },
           },
         },
-        "400": { description: "Validation error (password required for new users, min 8 chars)" },
-        "403": {
-          description:
-            "Email mismatch — authenticated user's email does not match the invitation email",
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": {
+          description: "Invitation not found",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
         },
-        "404": { description: "Invitation not found" },
-        "410": { description: "Invitation already accepted, cancelled, or expired" },
+        "410": {
+          description: "Invitation already accepted, cancelled, or expired",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

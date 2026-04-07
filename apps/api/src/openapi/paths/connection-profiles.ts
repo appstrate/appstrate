@@ -36,6 +36,18 @@ export const connectionProfilesPaths = {
                   },
                 },
               },
+              example: {
+                profiles: [
+                  {
+                    id: "550e8400-e29b-41d4-a716-446655440010",
+                    name: "Default",
+                    isDefault: true,
+                    connectionCount: 3,
+                    createdAt: "2026-01-10T08:00:00Z",
+                    updatedAt: "2026-01-10T08:00:00Z",
+                  },
+                ],
+              },
             },
           },
         },
@@ -82,6 +94,14 @@ export const connectionProfilesPaths = {
                       createdAt: { type: "string", format: "date-time" },
                     },
                   },
+                },
+              },
+              example: {
+                profile: {
+                  id: "550e8400-e29b-41d4-a716-446655440011",
+                  name: "Work Profile",
+                  isDefault: false,
+                  createdAt: "2026-01-15T10:30:00Z",
                 },
               },
             },

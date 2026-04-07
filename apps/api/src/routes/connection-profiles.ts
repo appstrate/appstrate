@@ -15,7 +15,7 @@ import { getActor } from "../lib/actor.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { z } from "zod";
 
-const profileNameSchema = z.object({ name: z.string().min(1, "Name is required").max(100) });
+export const profileNameSchema = z.object({ name: z.string().min(1, "Name is required").max(100) });
 
 export function createConnectionProfilesRouter() {
   const router = new Hono<AppEnv>();

@@ -20,7 +20,7 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-const createScheduleSchema = z.object({
+export const createScheduleSchema = z.object({
   name: z.string().optional(),
   connectionProfileId: z.uuid(),
   cronExpression: z.string().min(1, "cronExpression is required"),
@@ -28,7 +28,7 @@ const createScheduleSchema = z.object({
   input: z.record(z.string(), z.unknown()).optional(),
 });
 
-const updateScheduleSchema = z.object({
+export const updateScheduleSchema = z.object({
   connectionProfileId: z.uuid().optional(),
   name: z.string().optional(),
   cronExpression: z.string().optional(),

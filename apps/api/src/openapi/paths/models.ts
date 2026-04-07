@@ -26,6 +26,26 @@ export const modelsPaths = {
                   },
                 },
               },
+              example: {
+                models: [
+                  {
+                    id: "gpt-4o",
+                    label: "GPT-4o",
+                    api: "openai-responses",
+                    baseUrl: "https://api.openai.com/v1",
+                    modelId: "gpt-4o",
+                    source: "built-in",
+                    enabled: true,
+                    isDefault: false,
+                    providerKeyId: "pk_abc123",
+                    contextWindow: 128000,
+                    maxTokens: 16384,
+                    reasoning: false,
+                    createdAt: "2026-01-10T08:00:00Z",
+                    updatedAt: "2026-01-10T08:00:00Z",
+                  },
+                ],
+              },
             },
           },
         },
@@ -47,16 +67,27 @@ export const modelsPaths = {
               type: "object",
               required: ["label", "api", "baseUrl", "modelId", "providerKeyId"],
               properties: {
-                label: { type: "string", description: "Display name for the model" },
+                label: { type: "string", minLength: 1, description: "Display name for the model" },
                 api: {
                   type: "string",
+                  minLength: 1,
                   description:
                     "API type (openai-completions, openai-responses, anthropic-messages, google-generative-ai, google-vertex, azure-openai-responses, bedrock-converse-stream)",
                 },
-                baseUrl: { type: "string", format: "uri", description: "Provider API base URL" },
-                modelId: { type: "string", description: "Model identifier (e.g. gpt-4o)" },
+                baseUrl: {
+                  type: "string",
+                  format: "uri",
+                  minLength: 1,
+                  description: "Provider API base URL",
+                },
+                modelId: {
+                  type: "string",
+                  minLength: 1,
+                  description: "Model identifier (e.g. gpt-4o)",
+                },
                 providerKeyId: {
                   type: "string",
+                  minLength: 1,
                   description: "Provider key ID for API key credentials",
                 },
                 input: {
@@ -68,7 +99,7 @@ export const modelsPaths = {
                 maxTokens: { type: "integer", description: "Maximum output tokens" },
                 reasoning: { type: "boolean", description: "Whether the model supports reasoning" },
                 cost: {
-                  type: ["object", "null"],
+                  type: "object",
                   description: "Cost per million tokens (input/output/cacheRead/cacheWrite)",
                   properties: {
                     input: { type: "number" },
@@ -97,6 +128,7 @@ export const modelsPaths = {
                   id: { type: "string" },
                 },
               },
+              example: { id: "cm5mno345" },
             },
           },
         },
@@ -207,14 +239,56 @@ export const modelsPaths = {
                   },
                 },
               },
+              example: {
+                models: [
+                  {
+                    id: "anthropic/claude-sonnet-4",
+                    name: "Claude Sonnet 4",
+                    contextWindow: 200000,
+                    maxTokens: 16384,
+                    input: ["text", "image"],
+                    reasoning: true,
+                  },
+                ],
+              },
             },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "429": { description: "Rate limited" },
-        "502": { description: "OpenRouter API error" },
-        "504": { description: "OpenRouter request timeout" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "502": {
+          description: "OpenRouter API error",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Bad Gateway",
+                status: 502,
+                detail: "OpenRouter API returned an unexpected error",
+                code: "bad_gateway",
+                requestId: "req_abc123",
+              },
+            },
+          },
+        },
+        "504": {
+          description: "OpenRouter request timeout",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Gateway Timeout",
+                status: 504,
+                detail: "OpenRouter did not respond within the allowed time",
+                code: "gateway_timeout",
+                requestId: "req_def456",
+              },
+            },
+          },
+        },
       },
     },
   },
@@ -234,9 +308,9 @@ export const modelsPaths = {
               type: "object",
               required: ["api", "baseUrl", "modelId"],
               properties: {
-                api: { type: "string", description: "API type" },
+                api: { type: "string", minLength: 1, description: "API type" },
                 baseUrl: { type: "string", format: "uri", description: "Provider API base URL" },
-                modelId: { type: "string", description: "Model identifier" },
+                modelId: { type: "string", minLength: 1, description: "Model identifier" },
                 apiKey: { type: "string", description: "API key (required for new models)" },
                 existingModelId: {
                   type: "string",
@@ -263,7 +337,7 @@ export const modelsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "429": { description: "Rate limited" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },
@@ -284,10 +358,10 @@ export const modelsPaths = {
             schema: {
               type: "object",
               properties: {
-                label: { type: "string" },
-                api: { type: "string" },
+                label: { type: "string", minLength: 1 },
+                api: { type: "string", minLength: 1 },
                 baseUrl: { type: "string", format: "uri" },
-                modelId: { type: "string" },
+                modelId: { type: "string", minLength: 1 },
                 providerKeyId: {
                   type: "string",
                   description: "Provider key ID to change which key is used",
@@ -384,7 +458,7 @@ export const modelsPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "429": { description: "Rate limited" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },

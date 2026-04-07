@@ -24,21 +24,21 @@ import {
   systemEntityForbidden,
 } from "../lib/errors.ts";
 
-const createSchema = z.object({
+export const createSchema = z.object({
   label: z.string().min(1, "label is required"),
   api: z.string().min(1, "api is required"),
   baseUrl: z.url({ error: "baseUrl must be a valid URL" }),
   apiKey: z.string().min(1, "apiKey is required"),
 });
 
-const updateSchema = z.object({
+export const updateSchema = z.object({
   label: z.string().min(1).optional(),
   api: z.string().min(1).optional(),
   baseUrl: z.url().optional(),
   apiKey: z.string().min(1).optional(),
 });
 
-const testInlineSchema = z.object({
+export const testInlineSchema = z.object({
   api: z.string().min(1),
   baseUrl: z.url(),
   apiKey: z.string().optional(),

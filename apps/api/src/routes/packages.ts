@@ -75,11 +75,11 @@ import {
 // Shared helpers for package CRUD routes
 // ═══════════════════════════════════════════════
 
-const githubImportSchema = z.object({
+export const githubImportSchema = z.object({
   url: z.url("Missing 'url' field"),
 });
 
-const forkSchema = z
+export const forkSchema = z
   .object({
     name: z.string().regex(SLUG_REGEX, "Name must match slug format").optional(),
   })

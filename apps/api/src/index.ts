@@ -340,9 +340,10 @@ app.get("/*", async (c) => {
   return c.html(raw.replace("</head>", `${appConfigScript}\n</head>`));
 });
 
-// Start server
+// Start server — bind 0.0.0.0 so both IPv4 and IPv6 clients can connect
 export default {
   port: env.PORT,
+  hostname: "0.0.0.0",
   fetch: app.fetch,
   idleTimeout: 255,
 };

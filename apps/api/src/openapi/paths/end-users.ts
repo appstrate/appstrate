@@ -36,8 +36,9 @@ export const endUsersPaths = {
                   description: "Your system's unique identifier for this end-user",
                 },
                 metadata: {
-                  type: ["object", "null"],
-                  description: "Arbitrary key-value metadata",
+                  type: "object",
+                  description:
+                    "Key-value metadata. Max 50 keys, key length 1\u201340 chars, values: string (max 500), number, boolean, or null.",
                 },
               },
             },
@@ -57,6 +58,17 @@ export const endUsersPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/EndUserObject" },
+              example: {
+                id: "eu_cm4jkl012",
+                object: "end_user",
+                applicationId: "app_cm4jkl013",
+                name: "Alice Martin",
+                email: "alice@example.com",
+                externalId: "usr_12345",
+                metadata: { plan: "pro", region: "eu-west" },
+                createdAt: "2026-01-15T10:30:00Z",
+                updatedAt: "2026-01-15T10:30:00Z",
+              },
             },
           },
         },
@@ -130,7 +142,29 @@ export const endUsersPaths = {
                     type: "boolean",
                     description: "Whether more results exist beyond this page",
                   },
+                  limit: {
+                    type: "integer",
+                    description: "The limit that was applied to this query",
+                  },
                 },
+              },
+              example: {
+                object: "list",
+                data: [
+                  {
+                    id: "eu_cm4jkl012",
+                    object: "end_user",
+                    applicationId: "app_cm4jkl013",
+                    name: "Alice Martin",
+                    email: "alice@example.com",
+                    externalId: "usr_12345",
+                    metadata: { plan: "pro" },
+                    createdAt: "2026-01-15T10:30:00Z",
+                    updatedAt: "2026-01-15T10:30:00Z",
+                  },
+                ],
+                hasMore: false,
+                limit: 20,
               },
             },
           },
@@ -162,6 +196,17 @@ export const endUsersPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/EndUserObject" },
+              example: {
+                id: "eu_cm4jkl012",
+                object: "end_user",
+                applicationId: "app_cm4jkl013",
+                name: "Alice Martin",
+                email: "alice@example.com",
+                externalId: "usr_12345",
+                metadata: { plan: "pro", region: "eu-west" },
+                createdAt: "2026-01-15T10:30:00Z",
+                updatedAt: "2026-01-15T10:30:00Z",
+              },
             },
           },
         },
@@ -202,8 +247,9 @@ export const endUsersPaths = {
                   description: "Your system's unique identifier for this end-user",
                 },
                 metadata: {
-                  type: ["object", "null"],
-                  description: "Arbitrary key-value metadata",
+                  type: "object",
+                  description:
+                    "Key-value metadata. Max 50 keys, key length 1\u201340 chars, values: string (max 500), number, boolean, or null.",
                 },
               },
             },
@@ -220,6 +266,17 @@ export const endUsersPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/EndUserObject" },
+              example: {
+                id: "eu_cm4jkl012",
+                object: "end_user",
+                applicationId: "app_cm4jkl013",
+                name: "Alice Martin Updated",
+                email: "alice@example.com",
+                externalId: "usr_12345",
+                metadata: { plan: "enterprise", region: "eu-west" },
+                createdAt: "2026-01-15T10:30:00Z",
+                updatedAt: "2026-01-20T14:00:00Z",
+              },
             },
           },
         },

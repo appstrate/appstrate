@@ -25,7 +25,28 @@ export const authPaths = {
         },
       },
       responses: {
-        "200": { description: "Account created, session cookie set" },
+        "200": {
+          description: "Account created, session cookie set",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  user: { $ref: "#/components/schemas/User" },
+                  session: { type: "object" },
+                },
+              },
+              example: {
+                user: {
+                  id: "usr_abc123",
+                  email: "alice@example.com",
+                  name: "Alice Martin",
+                },
+                session: { token: "sess_..." },
+              },
+            },
+          },
+        },
         "400": { description: "Validation error" },
       },
     },
@@ -53,7 +74,28 @@ export const authPaths = {
         },
       },
       responses: {
-        "200": { description: "Logged in, session cookie set" },
+        "200": {
+          description: "Logged in, session cookie set",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  user: { $ref: "#/components/schemas/User" },
+                  session: { type: "object" },
+                },
+              },
+              example: {
+                user: {
+                  id: "usr_abc123",
+                  email: "alice@example.com",
+                  name: "Alice Martin",
+                },
+                session: { token: "sess_..." },
+              },
+            },
+          },
+        },
         "401": { description: "Invalid credentials" },
       },
     },
@@ -65,7 +107,19 @@ export const authPaths = {
       summary: "Log out",
       description: "Clears session cookie.",
       responses: {
-        "200": { description: "Logged out" },
+        "200": {
+          description: "Logged out",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
       },
     },

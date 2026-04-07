@@ -31,6 +31,15 @@ export const apiKeysPaths = {
                   },
                 },
               },
+              example: {
+                scopes: [
+                  "agents:read",
+                  "agents:run",
+                  "runs:read",
+                  "end-users:read",
+                  "end-users:write",
+                ],
+              },
             },
           },
         },
@@ -66,6 +75,18 @@ export const apiKeysPaths = {
                     items: { $ref: "#/components/schemas/ApiKeyInfo" },
                   },
                 },
+              },
+              example: {
+                apiKeys: [
+                  {
+                    id: "cm8vwx234",
+                    name: "Production CI",
+                    keyPrefix: "ask_prod",
+                    scopes: ["agents:run", "runs:read"],
+                    createdAt: "2026-01-10T08:00:00Z",
+                    expiresAt: null,
+                  },
+                ],
               },
             },
           },
@@ -103,8 +124,7 @@ export const apiKeysPaths = {
                 expiresAt: {
                   type: ["string", "null"],
                   format: "date-time",
-                  description:
-                    "Expiration date (must be in the future). Null or omitted for a key that never expires.",
+                  description: "ISO 8601 datetime. Must be in the future if provided.",
                 },
                 scopes: {
                   type: "array",
@@ -146,6 +166,12 @@ export const apiKeysPaths = {
                   },
                 },
               },
+              example: {
+                id: "cm8vwx235",
+                key: "ask_prod_k3x9m2pq7r4t1w6y0a5d8g",
+                keyPrefix: "ask_prod",
+                scopes: ["agents:run", "runs:read"],
+              },
             },
           },
         },
@@ -175,7 +201,7 @@ export const apiKeysPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "API key not found or already revoked" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },

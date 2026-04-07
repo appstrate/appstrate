@@ -36,6 +36,25 @@ export const connectionsPaths = {
                   },
                 },
               },
+              example: {
+                connections: [
+                  {
+                    provider: "@appstrate/gmail",
+                    status: "connected",
+                    connectionId: "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                    connectedAt: "2026-01-12T14:22:00Z",
+                    scopesGranted: [
+                      "https://www.googleapis.com/auth/gmail.readonly",
+                      "https://www.googleapis.com/auth/gmail.labels",
+                    ],
+                  },
+                  {
+                    provider: "@appstrate/clickup",
+                    status: "not_connected",
+                    scopesGranted: [],
+                  },
+                ],
+              },
             },
           },
         },
@@ -181,7 +200,7 @@ export const connectionsPaths = {
               type: "object",
               required: ["apiKey"],
               properties: {
-                apiKey: { type: "string", description: "API key value" },
+                apiKey: { type: "string", minLength: 1, description: "API key value" },
                 profileId: {
                   type: "string",
                   format: "uuid",
