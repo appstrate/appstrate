@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
 
 export interface LibraryPackageItem {
   id: string;
@@ -59,6 +61,36 @@ function updateLibraryCache(
       ]),
     ),
   };
+}
+
+/**
+ * Derive install state for a single package from the library cache.
+ * Returns which app names have it installed and whether the current app does.
+ */
+export function usePackageInstallState(packageId: string) {
+  const { data: libraryData } = useLibrary();
+  const currentAppId = useCurrentApplicationId();
+
+  return useMemo(() => {
+    const libraryPkg = libraryData
+      ? Object.values(libraryData.packages)
+          .flat()
+          .find((p) => p.id === packageId)
+      : undefined;
+
+    const installedAppNames =
+      libraryPkg && libraryData
+        ? libraryData.applications
+            .filter((a) => libraryPkg.installedIn.includes(a.id))
+            .map((a) => a.name)
+        : [];
+
+    const isInstalledInCurrentApp = !!(
+      currentAppId && libraryPkg?.installedIn.includes(currentAppId)
+    );
+
+    return { installedAppNames, isInstalledInCurrentApp };
+  }, [libraryData, packageId, currentAppId]);
 }
 
 export function useTogglePackageInstall() {
