@@ -16,6 +16,7 @@ import { ApiKeyModal } from "./api-key-modal";
 import { CustomCredentialsModal } from "./custom-credentials-modal";
 import { useProviders } from "../hooks/use-providers";
 import { useProviderConnection } from "../hooks/use-provider-connection";
+import { resolveScopeLabel } from "../lib/scope-labels";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 
 interface ProviderConnectionCardProps {
@@ -88,6 +89,7 @@ export function ProviderConnectionCard({
   const iconUrl = provider?.iconUrl;
   const authMode = provider?.authMode;
   const credentialSchema = provider?.credentialSchema as JSONSchemaObject | undefined;
+  const availableScopes = provider?.availableScopes;
 
   const hasMissingScopes = scopesMissing && scopesMissing.length > 0;
 
@@ -118,7 +120,6 @@ export function ProviderConnectionCard({
   // ─── Determine active mode: org-bound or user-managed ────
 
   const isOrgMode = isEffectivelyBound || isBoundButDisconnected;
-  const scopesGranted = profileConnections?.find((c) => c.providerId === providerId)?.scopesGranted;
 
   return (
     <>
@@ -185,31 +186,22 @@ export function ProviderConnectionCard({
                     {t("providers.connected")}
                   </span>
                 )}
-                {scopesGranted && scopesGranted.length > 0 && (
+                {scopesMissing && scopesMissing.length > 0 && (
                   <div className="flex items-center gap-1">
-                    <Shield className="text-muted-foreground size-3" />
-                    {scopesGranted.map((scope) => (
-                      <span
-                        key={scope}
-                        className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
-                          scopesMissing?.includes(scope)
-                            ? "bg-amber-500/10 text-amber-500"
-                            : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        {scope}
-                      </span>
-                    ))}
-                    {scopesMissing?.map((scope) =>
-                      !scopesGranted.includes(scope) ? (
+                    <Shield className="size-3 text-amber-500" />
+                    {scopesMissing.map((scope) => {
+                      const label = resolveScopeLabel(scope, availableScopes);
+                      const isRaw = label === scope;
+                      return (
                         <span
                           key={scope}
-                          className="rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] text-amber-500"
+                          title={isRaw ? undefined : scope}
+                          className={`rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-500 ${isRaw ? "font-mono" : ""}`}
                         >
-                          {scope}
+                          {label}
                         </span>
-                      ) : null,
-                    )}
+                      );
+                    })}
                   </div>
                 )}
               </div>
