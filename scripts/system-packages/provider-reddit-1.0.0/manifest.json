@@ -1,0 +1,63 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/reddit",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Reddit",
+  "description": "Social news aggregation and discussion platform",
+  "iconUrl": "https://cdn.simpleicons.org/reddit",
+  "categories": ["social-media", "community"],
+  "docsUrl": "https://www.reddit.com/dev/api/oauth/",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://www.reddit.com/api/v1/authorize",
+      "tokenUrl": "https://www.reddit.com/api/v1/access_token",
+      "refreshUrl": "https://www.reddit.com/api/v1/access_token",
+      "defaultScopes": ["identity", "read", "history"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_basic",
+      "authorizationParams": {
+        "duration": "permanent"
+      }
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://oauth.reddit.com/*"
+    ],
+    "availableScopes": [
+      { "value": "identity", "label": "Read user identity" },
+      { "value": "read", "label": "Read posts & comments" },
+      { "value": "submit", "label": "Submit posts & comments" },
+      { "value": "edit", "label": "Edit posts & comments" },
+      { "value": "history", "label": "Read voting & post history" },
+      { "value": "subscribe", "label": "Manage subreddit subscriptions" },
+      { "value": "mysubreddits", "label": "List subscribed subreddits" },
+      { "value": "vote", "label": "Upvote & downvote" },
+      { "value": "save", "label": "Save & unsave content" },
+      { "value": "privatemessages", "label": "Read & send private messages" },
+      { "value": "report", "label": "Report content" },
+      { "value": "flair", "label": "Manage flairs" },
+      { "value": "modposts", "label": "Moderate posts (approve/remove)" },
+      { "value": "modconfig", "label": "Manage subreddit settings" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create a Reddit app (type: web app)",
+        "url": "https://www.reddit.com/prefs/apps"
+      },
+      {
+        "label": "Set the redirect URI and note your app type"
+      },
+      {
+        "label": "Copy your Client ID (under the app name) and Client Secret"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
