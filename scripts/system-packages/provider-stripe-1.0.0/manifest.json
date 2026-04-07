@@ -5,11 +5,8 @@
   "type": "provider",
   "displayName": "Stripe",
   "description": "Payment processing platform",
-  "iconUrl": "https://cdn.simpleicons.org/stripe",
-  "categories": [
-    "payments",
-    "finance"
-  ],
+  "iconUrl": "stripe",
+  "categories": ["payments", "finance"],
   "docsUrl": "https://stripe.com/docs/api",
   "definition": {
     "authMode": "api_key",
@@ -22,16 +19,12 @@
             "description": "Stripe API key (sk_...)"
           }
         },
-        "required": [
-          "api_key"
-        ]
+        "required": ["api_key"]
       }
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://api.stripe.com/*"
-    ]
+    "authorizedUris": ["https://api.stripe.com/*"]
   },
   "setupGuide": {
     "steps": [

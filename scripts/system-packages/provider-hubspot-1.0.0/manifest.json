@@ -5,11 +5,8 @@
   "type": "provider",
   "displayName": "HubSpot",
   "description": "CRM, marketing, and sales platform",
-  "iconUrl": "https://cdn.simpleicons.org/hubspot",
-  "categories": [
-    "crm",
-    "marketing"
-  ],
+  "iconUrl": "hubspot",
+  "categories": ["crm", "marketing"],
   "docsUrl": "https://developers.hubspot.com/docs/api/overview",
   "definition": {
     "authMode": "oauth2",
@@ -17,18 +14,14 @@
       "authorizationUrl": "https://app.hubspot.com/oauth/authorize",
       "tokenUrl": "https://api.hubapi.com/oauth/v1/token",
       "refreshUrl": "https://api.hubapi.com/oauth/v1/token",
-      "defaultScopes": [
-        "crm.objects.contacts.read"
-      ],
+      "defaultScopes": ["crm.objects.contacts.read"],
       "scopeSeparator": " ",
       "pkceEnabled": false,
       "tokenAuthMethod": "client_secret_post"
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://api.hubapi.com/*"
-    ],
+    "authorizedUris": ["https://api.hubapi.com/*"],
     "availableScopes": [
       {
         "value": "crm.objects.contacts.read",
