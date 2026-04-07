@@ -59,7 +59,7 @@ export interface ScheduleReadiness {
 
 export type EnrichedSchedule = PackageSchedule & {
   profileName: string | null;
-  profileType: "user" | "org" | null;
+  profileType: "user" | "app" | null;
   profileOwnerName: string | null;
   readiness: ScheduleReadiness;
 };
@@ -106,6 +106,7 @@ export interface ConnectionInfo {
   providerId: string;
   orgId: string;
   scopesGranted?: string[];
+  needsReconnection: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -129,6 +130,7 @@ export interface UserConnectionEntry {
   scopesGranted: string[];
   connectedAt: string;
   profile: { id: string; name: string; isDefault: boolean };
+  application: { id: string; name: string };
 }
 
 export interface UserConnectionOrgGroup {
@@ -145,7 +147,7 @@ export interface UserConnectionProviderGroup {
   orgs: UserConnectionOrgGroup[];
 }
 
-export type ProviderProfileSource = "org_binding" | "user_profile";
+export type ProviderProfileSource = "app_binding" | "user_profile";
 
 export interface ProviderStatus {
   id: string;
@@ -159,7 +161,7 @@ export interface ProviderStatus {
   scopesGranted?: string[];
   scopesSufficient?: boolean;
   scopesMissing?: string[];
-  /** How the connection profile was resolved — "org_binding" if via org profile delegation, "user_profile" if via personal profile. */
+  /** How the connection profile was resolved — "app_binding" if via app profile delegation, "user_profile" if via personal profile. */
   source: ProviderProfileSource | null;
   /** Name of the connection profile used for this provider. */
   profileName: string | null;
@@ -213,9 +215,9 @@ export interface AgentDetail {
 
   populatedProviders?: Record<string, ProviderConfig>;
   callbackUrl?: string;
-  /** Org profile ID configured for this agent. Used for per-provider org bindings. */
-  agentOrgProfileId: string | null;
-  agentOrgProfileName: string | null;
+  /** App profile ID configured for this agent. Used for per-provider app bindings. */
+  agentAppProfileId: string | null;
+  agentAppProfileName: string | null;
   versionCount?: number;
   hasUnarchivedChanges?: boolean;
   forkedFrom: string | null;
@@ -417,6 +419,21 @@ export interface ApplicationInfo {
   updatedAt: string;
 }
 
+export interface InstalledPackage {
+  packageId: string;
+  config: Record<string, unknown>;
+  modelId: string | null;
+  proxyId: string | null;
+  appProfileId: string | null;
+  versionId: number | null;
+  enabled: boolean;
+  installedAt: string;
+  updatedAt: string;
+  packageType: string;
+  packageSource: string;
+  draftManifest: Record<string, unknown> | null;
+}
+
 // --- End-User Types ---
 
 export interface EndUserInfo {
@@ -443,13 +460,12 @@ export interface EndUserListResponse {
 export interface WebhookInfo {
   id: string;
   object: "webhook";
-  scope: "organization" | "application";
-  applicationId: string | null;
+  applicationId: string;
   url: string;
   events: string[];
   packageId: string | null;
   payloadMode: "full" | "summary";
-  active: boolean;
+  enabled: boolean;
   createdAt: string;
   updatedAt: string;
 }

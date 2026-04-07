@@ -2,6 +2,7 @@
 
 import { createOrgItem } from "./package-items/crud.ts";
 import { AGENT_CONFIG } from "./package-items/config.ts";
+import { installPackage } from "./application-packages.ts";
 import { logger } from "../lib/logger.ts";
 
 const HELLO_WORLD_MANIFEST = {
@@ -45,6 +46,7 @@ export async function provisionDefaultAgentForOrg(
   orgId: string,
   orgSlug: string,
   createdBy: string,
+  defaultAppId: string,
 ): Promise<void> {
   try {
     const packageId = `@${orgSlug}/hello-world`;
@@ -62,6 +64,15 @@ export async function provisionDefaultAgentForOrg(
       },
       AGENT_CONFIG,
       manifest,
+    );
+
+    // Install in the default app so it's visible immediately
+    await installPackage(defaultAppId, orgId, packageId).catch((e: unknown) =>
+      logger.warn("Failed to auto-install hello-world in default app", {
+        packageId,
+        defaultAppId,
+        err: String(e),
+      }),
     );
 
     logger.info("Provisioned default hello-world agent", { orgId, packageId });

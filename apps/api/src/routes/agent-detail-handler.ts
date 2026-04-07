@@ -4,19 +4,20 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, providerCredentials } from "@appstrate/db/schema";
-import { getPackage } from "../services/agent-service.ts";
+import { packages, applicationProviderCredentials } from "@appstrate/db/schema";
+import { getPackageWithAccess } from "../services/agent-service.ts";
 import { getOrgItem, AGENT_CONFIG } from "../services/package-items/index.ts";
 import {
   getVersionCount,
   getLatestVersionCreatedAt,
   computeHasUnpublishedChanges,
 } from "../services/package-versions.ts";
-import { getPackageConfig, getLastRun, getRunningRunsForPackage } from "../services/state/index.ts";
+import { getLastRun, getRunningRunsForPackage } from "../services/state/index.ts";
+import { getPackageConfig } from "../services/application-packages.ts";
 import {
   resolveProviderProfiles,
   resolveActorProfileContext,
-  getAgentOrgProfile,
+  getAgentAppProfile,
 } from "../services/connection-profiles.ts";
 import { resolveProviderStatuses } from "../services/connection-manager/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
@@ -31,11 +32,12 @@ import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 
 export async function agentDetailHandler(c: Context<AppEnv>) {
   const orgId = c.get("orgId");
+  const applicationId = c.get("applicationId");
   const actor = getActor(c);
   const itemId = getItemId(c);
 
   const [agent, rawItem, versionCount, latestVersionDate] = await Promise.all([
-    getPackage(itemId, orgId),
+    getPackageWithAccess(itemId, orgId, applicationId),
     getOrgItem(orgId, itemId, AGENT_CONFIG),
     getVersionCount(itemId),
     getLatestVersionCreatedAt(itemId),
@@ -47,30 +49,31 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
 
   const m = agent.manifest;
 
-  // Load org profile, actor profile context, and package config in parallel
-  const [agentOrgProfile, { defaultUserProfileId, userProviderOverrides }, packageConfig] =
+  // Load app profile, actor profile context, and package config in parallel
+  const [agentAppProfile, { defaultUserProfileId, userProviderOverrides }, packageConfig] =
     await Promise.all([
-      getAgentOrgProfile(orgId, agent.id),
+      getAgentAppProfile(applicationId, agent.id),
       resolveActorProfileContext(actor, agent.id),
-      getPackageConfig(orgId, agent.id),
+      getPackageConfig(applicationId, agent.id),
     ]);
-  const agentOrgProfileId = agentOrgProfile?.id ?? null;
-  const agentOrgProfileName = agentOrgProfile?.name ?? null;
+  const agentAppProfileId = agentAppProfile?.id ?? null;
+  const agentAppProfileName = agentAppProfile?.name ?? null;
 
-  // Build providerProfiles map: org bindings → per-provider overrides → default
+  // Build providerProfiles map: app bindings → per-provider overrides → default
   const manifestProviders = resolveManifestProviders(m);
   const providerProfiles = await resolveProviderProfiles(
     manifestProviders,
     defaultUserProfileId,
     userProviderOverrides,
-    agentOrgProfileId,
-    orgId,
+    agentAppProfileId,
+    applicationId,
   );
 
   const providerStatuses = await resolveProviderStatuses(
     manifestProviders,
     providerProfiles,
     orgId,
+    applicationId,
   );
 
   // Build populatedProviders: ProviderConfig keyed by provider ID
@@ -92,19 +95,21 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
             inArray(packages.id, providerIds),
           ),
         ),
-      db
-        .select({
-          providerId: providerCredentials.providerId,
-          credentialsEncrypted: providerCredentials.credentialsEncrypted,
-          enabled: providerCredentials.enabled,
-        })
-        .from(providerCredentials)
-        .where(
-          and(
-            eq(providerCredentials.orgId, orgId),
-            inArray(providerCredentials.providerId, providerIds),
-          ),
-        ),
+      applicationId
+        ? db
+            .select({
+              providerId: applicationProviderCredentials.providerId,
+              credentialsEncrypted: applicationProviderCredentials.credentialsEncrypted,
+              enabled: applicationProviderCredentials.enabled,
+            })
+            .from(applicationProviderCredentials)
+            .where(
+              and(
+                eq(applicationProviderCredentials.applicationId, applicationId),
+                inArray(applicationProviderCredentials.providerId, providerIds),
+              ),
+            )
+        : Promise.resolve([]),
     ]);
     const credMap = new Map(providerCreds.map((r) => [r.providerId, r]));
     populatedProviders = Object.fromEntries(
@@ -119,8 +124,8 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   }
 
   const [lastRun, runningCount] = await Promise.all([
-    getLastRun(agent.id, null, orgId),
-    getRunningRunsForPackage(agent.id, orgId),
+    getLastRun(agent.id, null, orgId, applicationId),
+    getRunningRunsForPackage(agent.id, orgId, applicationId),
   ]);
 
   const configWithDefaults = m.config?.schema
@@ -178,8 +183,8 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
       callbackUrl: getOAuthCallbackUrl(),
       versionCount,
       hasUnarchivedChanges,
-      agentOrgProfileId,
-      agentOrgProfileName,
+      agentAppProfileId,
+      agentAppProfileName,
       forkedFrom: rawItem?.forkedFrom ?? null,
       ...(agent.source !== "system" && rawItem
         ? {

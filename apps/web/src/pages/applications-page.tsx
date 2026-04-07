@@ -9,7 +9,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useApplications } from "../hooks/use-applications";
-import { setCurrentApplicationId } from "../hooks/use-current-application";
+import { useAppSwitcher } from "../hooks/use-current-application";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ApplicationCreateModal } from "../components/application-create-modal";
@@ -20,11 +20,12 @@ export function ApplicationsPage() {
   const { data: applications, isLoading, error } = useApplications();
   const [createOpen, setCreateOpen] = useState(false);
   const navigate = useNavigate();
+  const { switchApp } = useAppSwitcher();
 
   if (!isAdmin) return null;
 
   const handleAppClick = (appId: string) => {
-    setCurrentApplicationId(appId);
+    switchApp(appId);
     navigate("/app-settings");
   };
 
@@ -40,7 +41,11 @@ export function ApplicationsPage() {
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("applications.pageTitle") },
         ]}
-        actions={<Button onClick={() => setCreateOpen(true)}>{t("applications.create")}</Button>}
+        actions={
+          <Button data-testid="create-application-button" onClick={() => setCreateOpen(true)}>
+            {t("applications.create")}
+          </Button>
+        }
       />
 
       {!applications || applications.length === 0 ? (
@@ -54,7 +59,11 @@ export function ApplicationsPage() {
       ) : (
         <div className="flex flex-col gap-3">
           {applications.map((app) => (
-            <div key={app.id} className="border-border bg-card rounded-lg border p-5">
+            <div
+              key={app.id}
+              data-testid={`application-card-${app.id}`}
+              className="border-border bg-card rounded-lg border p-5"
+            >
               <div className="flex items-center gap-3">
                 <div className="flex-1">
                   <h3 className="text-[0.95rem] font-semibold">{app.name}</h3>

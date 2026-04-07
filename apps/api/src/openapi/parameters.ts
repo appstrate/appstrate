@@ -51,12 +51,27 @@ export const parameters = {
       "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours.",
     schema: { type: "string", maxLength: 255 },
   },
+  SseAppId: {
+    name: "appId",
+    in: "query" as const,
+    required: false,
+    description:
+      "Application ID. Required for cookie auth (SSE cannot send X-App-Id header). Not needed for API key auth (app resolved from key).",
+    schema: { type: "string" },
+  },
   SseToken: {
     name: "token",
     in: "query" as const,
     required: false,
     description:
       "API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
+    schema: { type: "string" },
+  },
+  XAppId: {
+    name: "X-App-Id",
+    in: "header" as const,
+    description:
+      "Application ID. Required for app-scoped routes (agents, runs, schedules, webhooks). Not needed for API key auth (app resolved from key).",
     schema: { type: "string" },
   },
 } as const;

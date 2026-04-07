@@ -10,6 +10,7 @@ export const realtimePaths = {
         "Server-Sent Events stream for all run status changes in the org. Supports cookie auth and API key auth via ?token=ask_... query parameter.",
       parameters: [
         { $ref: "#/components/parameters/SseOrgId" },
+        { $ref: "#/components/parameters/SseAppId" },
         { $ref: "#/components/parameters/SseToken" },
         { $ref: "#/components/parameters/Verbose" },
       ],
@@ -32,6 +33,7 @@ export const realtimePaths = {
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/SseOrgId" },
+        { $ref: "#/components/parameters/SseAppId" },
         { $ref: "#/components/parameters/SseToken" },
         { $ref: "#/components/parameters/Verbose" },
       ],
@@ -60,6 +62,7 @@ export const realtimePaths = {
           description: "Agent package ID",
         },
         { $ref: "#/components/parameters/SseOrgId" },
+        { $ref: "#/components/parameters/SseAppId" },
         { $ref: "#/components/parameters/SseToken" },
         { $ref: "#/components/parameters/Verbose" },
       ],

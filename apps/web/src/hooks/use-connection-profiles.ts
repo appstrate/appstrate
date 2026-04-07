@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
 import { onMutationError } from "./use-mutations";
 import { invalidateConnectionRelated } from "./invalidation";
 import type {
@@ -16,21 +17,30 @@ interface ProfileWithConnections extends ConnectionProfile {
   connectionCount: number;
 }
 
-/** List connections for a specific profile (user or org). */
+/**
+ * List connections for a specific profile (user or org).
+ *
+ * Connections are scoped to the current application via X-App-Id header:
+ * the backend filters by providerCredentialId matching the app's configured
+ * credentials. Connection profiles themselves are app-independent — connections
+ * from different apps accumulate on the same profile, but this hook only
+ * returns the current app's connections.
+ */
 export function useProfileConnections(profileId: string | null | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["profile-connections", orgId, profileId],
+    queryKey: ["profile-connections", orgId, appId, profileId],
     queryFn: () =>
-      api<{ connections: ConnectionInfo[] }>(`/connection-profiles/${profileId}/connections`).then(
+      api<{ connections: ConnectionInfo[] }>(`/app-profiles/${profileId}/connections`).then(
         (r) => r.connections,
       ),
-    enabled: !!profileId,
+    enabled: !!profileId && !!appId,
     staleTime: 30_000,
   });
 }
 
-interface OrgProfileWithBindings extends ConnectionProfile {
+interface AppProfileWithBindings extends ConnectionProfile {
   bindingCount: number;
   boundProviderIds: string[];
 }
@@ -46,10 +56,11 @@ export function useConnectionProfiles() {
 
 export function useAllUserConnections() {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["user-connections", orgId],
-    queryFn: () =>
-      api<{ providers: UserConnectionProviderGroup[] }>("/connection-profiles/connections"),
+    queryKey: ["user-connections", orgId, appId],
+    queryFn: () => api<{ providers: UserConnectionProviderGroup[] }>("/app-profiles/connections"),
+    enabled: !!appId,
   });
 }
 
@@ -106,33 +117,30 @@ export const useCreateConnectionProfile = userProfileMutations.useCreate;
 export const useRenameConnectionProfile = userProfileMutations.useRename;
 export const useDeleteConnectionProfile = userProfileMutations.useDelete;
 
-// ─── Org Profiles ────────────────────────────────────────
+// ─── App Profiles ────────────────────────────────────────
 
-export function useOrgProfiles() {
+export function useAppProfiles() {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["org-connection-profiles", orgId],
+    queryKey: ["app-connection-profiles", orgId, appId],
     queryFn: () =>
-      api<{ profiles: OrgProfileWithBindings[] }>("/connection-profiles/org").then(
-        (r) => r.profiles,
-      ),
+      api<{ profiles: AppProfileWithBindings[] }>("/app-profiles").then((r) => r.profiles),
   });
 }
 
-const orgProfileMutations = createProfileMutations(
-  "/connection-profiles/org",
-  "org-connection-profiles",
-);
-export const useCreateOrgProfile = orgProfileMutations.useCreate;
-export const useRenameOrgProfile = orgProfileMutations.useRename;
-export const useDeleteOrgProfile = orgProfileMutations.useDelete;
+const appProfileMutations = createProfileMutations("/app-profiles", "app-connection-profiles");
+export const useCreateAppProfile = appProfileMutations.useCreate;
+export const useRenameAppProfile = appProfileMutations.useRename;
+export const useDeleteAppProfile = appProfileMutations.useDelete;
 
-export function useOrgProfileBindings(profileId: string | undefined) {
+export function useAppProfileBindings(profileId: string | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["org-profile-bindings", orgId, profileId],
+    queryKey: ["app-profile-bindings", orgId, appId, profileId],
     queryFn: () =>
-      api<{ bindings: EnrichedBinding[] }>(`/connection-profiles/org/${profileId}/bindings`).then(
+      api<{ bindings: EnrichedBinding[] }>(`/app-profiles/${profileId}/bindings`).then(
         (r) => r.bindings,
       ),
     enabled: !!profileId,
@@ -140,7 +148,7 @@ export function useOrgProfileBindings(profileId: string | undefined) {
   });
 }
 
-export function useBindOrgProvider() {
+export function useBindAppProvider() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -152,7 +160,7 @@ export function useBindOrgProvider() {
       providerId: string;
       sourceProfileId: string;
     }) =>
-      api(`/connection-profiles/org/${profileId}/bind`, {
+      api(`/app-profiles/${profileId}/bind`, {
         method: "POST",
         body: JSON.stringify({ providerId, sourceProfileId }),
       }),
@@ -161,11 +169,11 @@ export function useBindOrgProvider() {
   });
 }
 
-export function useUnbindOrgProvider() {
+export function useUnbindAppProvider() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ profileId, providerId }: { profileId: string; providerId: string }) =>
-      api(`/connection-profiles/org/${profileId}/bind/${providerId}`, {
+      api(`/app-profiles/${profileId}/bind/${providerId}`, {
         method: "DELETE",
       }),
     onSuccess: () => invalidateConnectionRelated(qc),
@@ -173,15 +181,15 @@ export function useUnbindOrgProvider() {
   });
 }
 
-// ─── Agent Org Profile Override ───────────────────────────
+// ─── Agent App Profile Override ───────────────────────────
 
-export function useSetAgentOrgProfile(packageId: string) {
+export function useSetAgentAppProfile(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (orgProfileId: string | null) => {
-      return api(`/agents/${packageId}/org-profile`, {
+    mutationFn: async (appProfileId: string | null) => {
+      return api(`/agents/${packageId}/app-profile`, {
         method: "PUT",
-        body: JSON.stringify({ orgProfileId }),
+        body: JSON.stringify({ appProfileId }),
       });
     },
     onSuccess: () => {
@@ -192,15 +200,16 @@ export function useSetAgentOrgProfile(packageId: string) {
   });
 }
 
-// ─── Org Profile Linked Agents ────────────────────────────
+// ─── App Profile Linked Agents ────────────────────────────
 
-export function useOrgProfileAgents(profileId: string | undefined) {
+export function useAppProfileAgents(profileId: string | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["org-profile-agents", orgId, profileId],
+    queryKey: ["app-profile-agents", orgId, appId, profileId],
     queryFn: () =>
       api<{ agents: { id: string; displayName: string }[] }>(
-        `/connection-profiles/org/${profileId}/agents`,
+        `/app-profiles/${profileId}/agents`,
       ).then((r) => r.agents),
     enabled: !!profileId,
     staleTime: 30_000,
@@ -211,13 +220,14 @@ export function useOrgProfileAgents(profileId: string | undefined) {
 
 export function useAgentProviderProfiles(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agent-provider-profiles", orgId, packageId],
+    queryKey: ["agent-provider-profiles", orgId, appId, packageId],
     queryFn: () =>
       api<{ overrides: Record<string, string> }>(`/agents/${packageId}/provider-profiles`).then(
         (r) => r.overrides,
       ),
-    enabled: !!packageId,
+    enabled: !!orgId && !!appId && !!packageId,
     staleTime: 30_000,
   });
 }

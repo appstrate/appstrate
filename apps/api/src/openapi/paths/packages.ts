@@ -10,6 +10,7 @@ export const packagesPaths = {
         "Import a package (agent, skill, tool, or provider) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "force",
           in: "query",
@@ -116,7 +117,10 @@ export const packagesPaths = {
       summary: "Import a package from a GitHub URL",
       description:
         "Import a package (agent, skill, tool, or provider) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. The package scope does not need to match your organization — cross-org packages are imported read-only (fork to modify). Rate-limited to 10 requests/minute.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       requestBody: {
         required: true,
         content: {
@@ -246,6 +250,7 @@ export const packagesPaths = {
         "Download a specific version of a package as a ZIP file. Supports exact version, dist-tag, or semver range resolution. Rate-limited to 50 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -304,7 +309,10 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List skills",
       description: "List all skills (system + org) in the organization.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Skill list",
@@ -334,7 +342,10 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a skill",
       description: "Create a new skill in the organization packages.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       requestBody: {
         required: true,
         content: {
@@ -398,6 +409,7 @@ export const packagesPaths = {
         "Returns the latest published version and the current draft version from the manifest.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -446,6 +458,7 @@ export const packagesPaths = {
       description: "List all published versions for a skill.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -494,6 +507,7 @@ export const packagesPaths = {
         "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -560,6 +574,7 @@ export const packagesPaths = {
         "Restore a previously published version into the skill draft. Does not create a new version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -618,6 +633,7 @@ export const packagesPaths = {
         "Resolve a version query and return versioned skill data including content extracted from ZIP.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -679,6 +695,7 @@ export const packagesPaths = {
         "Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -716,6 +733,7 @@ export const packagesPaths = {
       description: "Get a skill's full details including content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -756,6 +774,7 @@ export const packagesPaths = {
         "Update a skill in the organization packages. Built-in skills cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -824,6 +843,7 @@ export const packagesPaths = {
         "Delete a skill from the organization packages. Built-in skills cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -893,7 +913,10 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List tools",
       description: "List all tools (system + org) in the organization.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Tool list",
@@ -923,7 +946,10 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a tool",
       description: "Create a new tool in the organization packages.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       requestBody: {
         required: true,
         content: {
@@ -980,6 +1006,7 @@ export const packagesPaths = {
         "Returns the latest published version and the current draft version from the manifest.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1028,6 +1055,7 @@ export const packagesPaths = {
       description: "List all published versions for a tool.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1076,6 +1104,7 @@ export const packagesPaths = {
         "Create an immutable version snapshot from the current tool draft. Version is determined by the manifest version field unless overridden.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1142,6 +1171,7 @@ export const packagesPaths = {
         "Restore a previously published version into the tool draft. Does not create a new version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1200,6 +1230,7 @@ export const packagesPaths = {
         "Resolve a version query and return versioned tool data including content extracted from ZIP.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1261,6 +1292,7 @@ export const packagesPaths = {
         "Permanently delete a tool version. Reassigns affected dist-tags to the next best stable version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1298,6 +1330,7 @@ export const packagesPaths = {
       description: "Get a tool's full details including content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1337,6 +1370,7 @@ export const packagesPaths = {
       description: "Update a tool in the organization packages. Built-in tools cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1405,6 +1439,7 @@ export const packagesPaths = {
         "Delete a tool from the organization packages. Built-in tools cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1475,7 +1510,10 @@ export const packagesPaths = {
       summary: "Create a user agent",
       description:
         "Create a new user agent from manifest and content. Creates an initial version automatically.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       requestBody: {
         required: true,
         content: {
@@ -1525,6 +1563,7 @@ export const packagesPaths = {
       description: "Returns agent detail including providers, config, state, skills, and tools.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1569,6 +1608,7 @@ export const packagesPaths = {
       description: "Update manifest and content of a user agent with optimistic locking.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1633,6 +1673,7 @@ export const packagesPaths = {
       description: "Delete a user agent. Built-in agents cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1669,6 +1710,7 @@ export const packagesPaths = {
       description: "Returns the latest published version and current draft version for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1716,6 +1758,7 @@ export const packagesPaths = {
       description: "Returns all published versions for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1764,6 +1807,7 @@ export const packagesPaths = {
         "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1830,6 +1874,7 @@ export const packagesPaths = {
       description: "Restore a published version into the draft. Requires no runs in progress.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1881,6 +1926,7 @@ export const packagesPaths = {
       description: "Returns the detail of a specific agent version including manifest and content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1936,6 +1982,7 @@ export const packagesPaths = {
         "Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -1988,6 +2035,7 @@ export const packagesPaths = {
         "Create an editable copy of a non-owned package under the current organization's scope. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -2108,7 +2156,10 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List provider packages",
       description: "List all provider packages (system + org) in the organization.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Provider package list",
@@ -2139,7 +2190,10 @@ export const packagesPaths = {
       summary: "Create a provider package",
       description:
         "Create a new provider package from manifest and content. Creates an initial version automatically.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       requestBody: {
         required: true,
         content: {
@@ -2193,6 +2247,7 @@ export const packagesPaths = {
         "Returns the latest published version and the current draft version from the manifest.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -2241,6 +2296,7 @@ export const packagesPaths = {
       description: "List all published versions for a provider package.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -2289,6 +2345,7 @@ export const packagesPaths = {
         "Create an immutable version snapshot from the current provider package draft. Version is determined by the manifest version field unless overridden.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -2355,6 +2412,7 @@ export const packagesPaths = {
         "Restore a previously published version into the provider package draft. Does not create a new version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -2413,6 +2471,7 @@ export const packagesPaths = {
         "Resolve a version query and return versioned provider data including content extracted from ZIP.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -2474,6 +2533,7 @@ export const packagesPaths = {
         "Permanently delete a provider package version. Reassigns affected dist-tags to the next best stable version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -2511,6 +2571,7 @@ export const packagesPaths = {
       description: "Get a provider package's full details including content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -2551,6 +2612,7 @@ export const packagesPaths = {
         "Update a provider package in the organization. Built-in providers cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -2615,6 +2677,7 @@ export const packagesPaths = {
         "Delete a provider package from the organization. Built-in providers cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",

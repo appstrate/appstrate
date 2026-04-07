@@ -5,7 +5,7 @@
  * Shared by runs.ts and scheduler.ts.
  */
 
-import { getCredentials } from "@appstrate/connect";
+import { getCredentials, getProviderCredentialId } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import { logger } from "../lib/logger.ts";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
@@ -30,6 +30,7 @@ export async function buildProviderTokens(
   providers: AgentProviderRequirement[],
   providerProfiles: ProviderProfileMap,
   orgId: string,
+  applicationId: string,
 ): Promise<Record<string, string>> {
   const entries = await Promise.all(
     providers
@@ -39,7 +40,14 @@ export async function buildProviderTokens(
         if (!entry) return [svc.id, null] as const;
         const connectionProfileId = entry.profileId;
 
-        const result = await getCredentials(db, connectionProfileId, svc.id, orgId);
+        const credentialId = await getProviderCredentialId(db, applicationId, svc.id);
+        if (!credentialId) {
+          // Should not happen — preflight validates credentials exist.
+          throw new Error(
+            `Provider '${svc.id}' credential missing for application '${applicationId}' (should have been caught at preflight)`,
+          );
+        }
+        const result = await getCredentials(db, connectionProfileId, svc.id, orgId, credentialId);
         const token = result
           ? (result.credentials.access_token ??
             result.credentials.api_key ??

@@ -3,7 +3,7 @@
 import { User, Building2 } from "lucide-react";
 
 interface ProfileLabelProps {
-  profileType: "user" | "org" | null;
+  profileType: "user" | "app" | null;
   profileName: string | null;
   profileOwnerName?: string | null;
   iconSize?: string;
@@ -19,7 +19,7 @@ export function ProfileLabel({
 }: ProfileLabelProps) {
   if (!profileName) return null;
 
-  const Icon = profileType === "org" ? Building2 : User;
+  const Icon = profileType === "app" ? Building2 : User;
   const label =
     profileType === "user" && profileOwnerName
       ? `${profileOwnerName} — ${profileName}`

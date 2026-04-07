@@ -81,6 +81,7 @@ export async function initiateOAuth1(
   profileId: string,
   providerId: string,
   callbackUrl: string,
+  applicationId?: string,
 ): Promise<InitiateOAuth1Result> {
   const provider = await getProviderOrThrow(db, orgId, providerId);
   if (!provider.requestTokenUrl) {
@@ -90,7 +91,10 @@ export async function initiateOAuth1(
     throw new Error(`Provider '${providerId}' has no authorizationUrl configured`);
   }
 
-  const creds = await getProviderOAuth1CredentialsOrThrow(db, orgId, providerId);
+  if (!applicationId) {
+    throw new Error("Application context is required for OAuth1 connection");
+  }
+  const creds = await getProviderOAuth1CredentialsOrThrow(db, providerId, applicationId);
 
   // Build OAuth params for the request token call
   const nonce = generateNonce();
@@ -149,6 +153,7 @@ export async function initiateOAuth1(
     ...actorToColumns(actor),
     profileId,
     providerId,
+    applicationId,
     codeVerifier: "", // Not used for OAuth1, column is NOT NULL
     oauthTokenSecret,
     authMode: "oauth1",
@@ -175,6 +180,7 @@ export interface OAuth1CallbackResult {
   userId: string | null;
   actor: Actor;
   profileId: string;
+  applicationId: string;
   consumerKey: string;
   accessToken: string;
   accessTokenSecret: string;
@@ -217,7 +223,14 @@ export async function handleOAuth1Callback(
     throw new Error(`Provider '${stateRow.providerId}' has no accessTokenUrl configured`);
   }
 
-  const creds = await getProviderOAuth1CredentialsOrThrow(db, stateRow.orgId, stateRow.providerId);
+  if (!stateRow.applicationId) {
+    throw new Error("Application context is required for OAuth1 callback");
+  }
+  const creds = await getProviderOAuth1CredentialsOrThrow(
+    db,
+    stateRow.providerId,
+    stateRow.applicationId,
+  );
 
   // Build OAuth params for the access token call
   const nonce = generateNonce();
@@ -281,6 +294,7 @@ export async function handleOAuth1Callback(
     userId: stateRow.userId ?? null,
     actor,
     profileId: stateRow.profileId,
+    applicationId: stateRow.applicationId!,
     consumerKey: creds.consumerKey,
     accessToken,
     accessTokenSecret,

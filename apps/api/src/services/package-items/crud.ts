@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, or, desc, sql, isNotNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages } from "@appstrate/db/schema";
+import { applicationPackages, packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { buildPackageId, parseScopedName } from "@appstrate/core/naming";
@@ -172,14 +172,38 @@ export async function updateOrgItem(
   return rows[0] ?? null;
 }
 
-/** List all items of a type in the org with usedByAgents count. */
-export async function listOrgItems(orgId: string, cfg: PackageTypeConfig) {
-  const orgFilter = orgOrSystemFilter(orgId);
-
+/** List items of a type accessible to an application (system + installed). */
+export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, applicationId: string) {
   const data = await db
-    .select()
+    .select({
+      id: packages.id,
+      orgId: packages.orgId,
+      type: packages.type,
+      source: packages.source,
+      draftManifest: packages.draftManifest,
+      draftContent: packages.draftContent,
+      createdBy: packages.createdBy,
+      createdAt: packages.createdAt,
+      updatedAt: packages.updatedAt,
+      autoInstalled: packages.autoInstalled,
+      forkedFrom: packages.forkedFrom,
+      lockVersion: packages.lockVersion,
+    })
     .from(packages)
-    .where(and(orgFilter, eq(packages.type, cfg.type)))
+    .leftJoin(
+      applicationPackages,
+      and(
+        eq(applicationPackages.packageId, packages.id),
+        eq(applicationPackages.applicationId, applicationId),
+      ),
+    )
+    .where(
+      and(
+        orgOrSystemFilter(orgId),
+        eq(packages.type, cfg.type),
+        or(eq(packages.source, "system"), isNotNull(applicationPackages.packageId)),
+      ),
+    )
     .orderBy(
       sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`,
       desc(packages.createdAt),

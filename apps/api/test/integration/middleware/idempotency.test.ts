@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { endUsers } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -21,8 +21,7 @@ describe("Idempotency integration (end-users)", () => {
     const res = await app.request("/api/api-keys", {
       method: "POST",
       headers: {
-        Cookie: ctx.cookie,
-        "X-Org-Id": ctx.orgId,
+        ...authHeaders(ctx),
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { eq, and, or, isNull } from "drizzle-orm";
-import { providerCredentials, packages } from "@appstrate/db/schema";
+import { applicationProviderCredentials, packages } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { ProviderDefinition } from "./types.ts";
 import { decryptCredentials } from "./encryption.ts";
@@ -64,32 +64,28 @@ export async function getProviderOrThrow(
 }
 
 /**
- * Get OAuth client credentials for a provider.
- * Reads from providerCredentials (keyed by providerId + orgId).
- */
-/**
  * Get raw decrypted admin credentials for a provider.
+ * Queries applicationProviderCredentials keyed by (applicationId, providerId).
  */
 async function getProviderAdminCredentials(
   db: Db,
-  orgId: string,
   providerId: string,
+  applicationId: string,
 ): Promise<Record<string, string> | null> {
-  const credRows = await db
+  const [appRow] = await db
     .select({
-      credentialsEncrypted: providerCredentials.credentialsEncrypted,
+      credentialsEncrypted: applicationProviderCredentials.credentialsEncrypted,
     })
-    .from(providerCredentials)
+    .from(applicationProviderCredentials)
     .where(
-      and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
+      and(
+        eq(applicationProviderCredentials.applicationId, applicationId),
+        eq(applicationProviderCredentials.providerId, providerId),
+      ),
     )
     .limit(1);
-
-  if (credRows.length === 0) return null;
-  const row = credRows[0]!;
-  if (!row.credentialsEncrypted) return null;
-
-  return decryptCredentials<Record<string, string>>(row.credentialsEncrypted);
+  if (!appRow?.credentialsEncrypted) return null;
+  return decryptCredentials<Record<string, string>>(appRow.credentialsEncrypted);
 }
 
 /**
@@ -97,10 +93,10 @@ async function getProviderAdminCredentials(
  */
 export async function getProviderOAuthCredentialsOrThrow(
   db: Db,
-  orgId: string,
   providerId: string,
+  applicationId: string,
 ): Promise<{ clientId: string; clientSecret: string }> {
-  const creds = await getProviderAdminCredentials(db, orgId, providerId);
+  const creds = await getProviderAdminCredentials(db, providerId, applicationId);
   if (!creds?.clientId || !creds?.clientSecret) {
     throw new Error(
       `No OAuth credentials configured for provider '${providerId}'. Configure via admin settings.`,
@@ -115,10 +111,10 @@ export async function getProviderOAuthCredentialsOrThrow(
  */
 export async function getProviderOAuth1CredentialsOrThrow(
   db: Db,
-  orgId: string,
   providerId: string,
+  applicationId: string,
 ): Promise<{ consumerKey: string; consumerSecret: string }> {
-  const creds = await getProviderAdminCredentials(db, orgId, providerId);
+  const creds = await getProviderAdminCredentials(db, providerId, applicationId);
   if (!creds?.consumerKey || !creds?.consumerSecret) {
     throw new Error(
       `No OAuth1 consumer credentials configured for provider '${providerId}'. Configure via admin settings.`,
@@ -174,19 +170,25 @@ export function getCredentialFieldName(provider: ProviderDefinition): string {
 }
 
 /**
- * Check if a provider is enabled for an org.
+ * Check if a provider is enabled for an application.
+ * Queries applicationProviderCredentials keyed by (applicationId, providerId).
+ * Returns false if no row exists.
  */
 export async function isProviderEnabled(
   db: Db,
-  orgId: string,
   providerId: string,
+  applicationId: string,
 ): Promise<boolean> {
-  const rows = await db
-    .select({ enabled: providerCredentials.enabled })
-    .from(providerCredentials)
+  const [row] = await db
+    .select({ enabled: applicationProviderCredentials.enabled })
+    .from(applicationProviderCredentials)
     .where(
-      and(eq(providerCredentials.providerId, providerId), eq(providerCredentials.orgId, orgId)),
+      and(
+        eq(applicationProviderCredentials.applicationId, applicationId),
+        eq(applicationProviderCredentials.providerId, providerId),
+      ),
     )
     .limit(1);
-  return rows.length > 0 && !!rows[0]!.enabled;
+
+  return row ? row.enabled : false;
 }

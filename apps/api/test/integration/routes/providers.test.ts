@@ -10,6 +10,7 @@ import {
   seedUserConnection,
   seedProviderCredentials,
 } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { userProviderConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -67,6 +68,7 @@ describe("Providers API", () => {
           },
         },
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@provorg/my-provider");
 
       const res = await app.request("/api/providers", {
         headers: authHeaders(ctx),
@@ -298,9 +300,9 @@ describe("Providers API", () => {
         },
       });
 
-      await seedProviderCredentials({
+      const cred = await seedProviderCredentials({
         providerId,
-        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
       });
 
       const profile = await seedConnectionProfile({
@@ -312,6 +314,7 @@ describe("Providers API", () => {
         profileId: profile.id,
         providerId,
         orgId: ctx.orgId,
+        providerCredentialId: cred.id,
       });
 
       return profile;

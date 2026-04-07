@@ -13,6 +13,7 @@ import { getTestApp } from "../helpers/app.ts";
 import { truncateAll } from "../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../helpers/auth.ts";
 import { seedAgent, seedRun, seedPackageVersion } from "../helpers/seed.ts";
+import { installPackage } from "../../src/services/application-packages.ts";
 
 const app = getTestApp();
 
@@ -69,7 +70,9 @@ describe("Multi-tenancy isolation", () => {
 
     it("does not leak other org's agents in list", async () => {
       await seedAgent({ id: "@org-a/agent-1", orgId: orgA.orgId });
+      await installPackage(orgA.defaultAppId, orgA.orgId, "@org-a/agent-1");
       await seedAgent({ id: "@org-b/agent-1", orgId: orgB.orgId });
+      await installPackage(orgB.defaultAppId, orgB.orgId, "@org-b/agent-1");
 
       const resA = await app.request("/api/packages/agents", {
         headers: authHeaders(orgA),
@@ -99,6 +102,7 @@ describe("Multi-tenancy isolation", () => {
       const run = await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
+        applicationId: orgA.defaultAppId,
         userId: orgA.user.id,
         status: "success",
       });
@@ -115,6 +119,7 @@ describe("Multi-tenancy isolation", () => {
       const run = await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
+        applicationId: orgA.defaultAppId,
         userId: orgA.user.id,
         status: "success",
       });
@@ -131,6 +136,7 @@ describe("Multi-tenancy isolation", () => {
       const run = await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
+        applicationId: orgA.defaultAppId,
         userId: orgA.user.id,
         status: "running",
       });
@@ -148,6 +154,7 @@ describe("Multi-tenancy isolation", () => {
       await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
+        applicationId: orgA.defaultAppId,
         userId: orgA.user.id,
         status: "success",
       });
@@ -167,7 +174,7 @@ describe("Multi-tenancy isolation", () => {
   describe("Package versions", () => {
     it("cannot access another org's package versions", async () => {
       await seedAgent({ id: "@org-a/agent", orgId: orgA.orgId });
-      await seedPackageVersion({ packageId: "@org-a/agent", orgId: orgA.orgId });
+      await seedPackageVersion({ packageId: "@org-a/agent" });
 
       const res = await app.request("/api/packages/agents/@org-a/agent/versions", {
         headers: authHeaders(orgB),
@@ -183,7 +190,7 @@ describe("Multi-tenancy isolation", () => {
 
     it("cannot delete another org's package version", async () => {
       await seedAgent({ id: "@org-a/agent", orgId: orgA.orgId });
-      await seedPackageVersion({ packageId: "@org-a/agent", orgId: orgA.orgId, version: "1.0.0" });
+      await seedPackageVersion({ packageId: "@org-a/agent", version: "1.0.0" });
 
       const res = await app.request("/api/packages/agents/@org-a/agent/versions/1.0.0", {
         method: "DELETE",

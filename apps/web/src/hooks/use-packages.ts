@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { api, uploadFormData, apiBlob } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
 // Profile resolution is now per-provider (server-side), no global profileId needed
 import type {
   OrgPackageItem,
@@ -36,27 +37,30 @@ type PackageDetailMap = {
 
 function usePackageList(type: PackageType) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   const cfg = PACKAGE_CONFIG[type];
   return useQuery({
-    queryKey: ["packages", cfg.path, orgId],
+    queryKey: ["packages", cfg.path, orgId, appId],
     queryFn: async () => {
       const data = await api<Record<string, OrgPackageItem[]>>(`/packages/${cfg.path}`);
       return data[cfg.listKey] as OrgPackageItem[];
     },
+    enabled: !!orgId && !!appId,
   });
 }
 
 function usePackageDetail<T extends PackageType>(type: T, id: string | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   const cfg = PACKAGE_CONFIG[type];
 
   return useQuery({
-    queryKey: ["packages", cfg.detailKey, orgId, id],
+    queryKey: ["packages", cfg.detailKey, orgId, appId, id],
     queryFn: async () => {
       const data = await api<Record<string, unknown>>(`/packages/${cfg.path}/${id}`);
       return data[cfg.detailKey] as PackageDetailMap[T];
     },
-    enabled: !!id,
+    enabled: !!orgId && !!appId && !!id,
   });
 }
 
@@ -112,12 +116,14 @@ export {
 
 export function useAgents() {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agents", orgId],
+    queryKey: ["agents", orgId, appId],
     queryFn: async () => {
       const data = await api<{ agents: AgentListItem[] }>("/agents");
       return data.agents;
     },
+    enabled: !!orgId && !!appId,
   });
 }
 
@@ -160,25 +166,27 @@ export function useVersionDetail(
   version: string | undefined,
 ) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["version-detail", orgId, type, packageId, version],
+    queryKey: ["version-detail", orgId, appId, type, packageId, version],
     queryFn: () =>
       api<VersionDetailResponse>(`${packageBasePath(type, packageId)}/versions/${version}`),
-    enabled: !!packageId && !!version,
+    enabled: !!orgId && !!appId && !!packageId && !!version,
   });
 }
 
 export function usePackageVersions(type: PackageType, packageId: string | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["package-versions", orgId, type, packageId],
+    queryKey: ["package-versions", orgId, appId, type, packageId],
     queryFn: async () => {
       const data = await api<{ versions: VersionListItem[] }>(
         `${packageBasePath(type, packageId)}/versions`,
       );
       return data.versions;
     },
-    enabled: !!packageId,
+    enabled: !!orgId && !!appId && !!packageId,
   });
 }
 
@@ -238,13 +246,14 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
 
 export function useVersionInfo(type: PackageType, packageId: string | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["version-info", orgId, type, packageId],
+    queryKey: ["version-info", orgId, appId, type, packageId],
     queryFn: () =>
       api<{ latestPublishedVersion: string | null; activeVersion: string | null }>(
         `${packageBasePath(type, packageId!)}/versions/info`,
       ),
-    enabled: !!packageId,
+    enabled: !!orgId && !!appId && !!packageId,
   });
 }
 

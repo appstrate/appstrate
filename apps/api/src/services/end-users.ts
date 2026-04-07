@@ -121,7 +121,7 @@ export async function createEndUser(
 export async function listEndUsers(
   orgId: string,
   params: {
-    applicationId?: string;
+    applicationId: string;
     externalId?: string;
     email?: string;
     limit?: number;
@@ -134,9 +134,7 @@ export async function listEndUsers(
 
   const conditions = [eq(endUsers.orgId, orgId)];
 
-  if (params.applicationId) {
-    conditions.push(eq(endUsers.applicationId, params.applicationId));
-  }
+  conditions.push(eq(endUsers.applicationId, params.applicationId));
   if (params.externalId) {
     conditions.push(eq(endUsers.externalId, params.externalId));
   }

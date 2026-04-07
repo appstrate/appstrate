@@ -109,7 +109,7 @@ export function PackageList() {
     source: f.source,
     runningRuns: f.runningRuns,
     keywords: f.keywords,
-    providerIds: f.dependencies.providers,
+    providerIds: Object.keys(f.dependencies.providers ?? {}),
     unreadCount: unreadCounts?.[f.id],
   }));
 

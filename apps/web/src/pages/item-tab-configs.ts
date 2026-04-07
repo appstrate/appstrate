@@ -24,7 +24,7 @@ export interface ItemTabConfig {
   emptyIcon: LucideIcon;
 }
 
-export const ITEM_TAB_CONFIGS: ItemTabConfig[] = [
+const ITEM_TAB_CONFIGS: ItemTabConfig[] = [
   {
     type: "skill",
     useData: () => usePackageList("skill"),

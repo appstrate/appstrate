@@ -7,18 +7,20 @@
 
 import { getConnectionStatus, validateScopes } from "./connection-manager/index.ts";
 import type { ConnectionStatus } from "./connection-manager/index.ts";
-import { isProviderEnabled } from "@appstrate/connect";
+import { isProviderEnabled, getProviderCredentialId } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { ApiError } from "../lib/errors.ts";
 
 export interface DependencyValidationDeps {
-  isProviderEnabled: (orgId: string, providerId: string) => Promise<boolean>;
+  isProviderEnabled: (providerId: string, applicationId: string) => Promise<boolean>;
   getConnectionStatus: (
     provider: string,
     connectionProfileId: string,
     orgId: string,
+    providerCredentialId: string,
   ) => Promise<ConnectionStatus>;
+  getProviderCredentialId: (applicationId: string, providerId: string) => Promise<string | null>;
   validateScopes: (
     granted: string[],
     required: string[],
@@ -26,8 +28,11 @@ export interface DependencyValidationDeps {
 }
 
 const defaultDeps: DependencyValidationDeps = {
-  isProviderEnabled: (orgId, providerId) => isProviderEnabled(db, orgId, providerId),
+  isProviderEnabled: (providerId, applicationId) =>
+    isProviderEnabled(db, providerId, applicationId),
   getConnectionStatus,
+  getProviderCredentialId: (applicationId, providerId) =>
+    getProviderCredentialId(db, applicationId, providerId),
   validateScopes,
 };
 
@@ -40,12 +45,13 @@ export async function validateAgentDependencies(
   providers: AgentProviderRequirement[],
   providerProfiles: ProviderProfileMap,
   orgId: string,
+  applicationId: string,
   deps: DependencyValidationDeps = defaultDeps,
 ): Promise<void> {
   // Check provider enabled status
   const uniqueProviders = [...new Set(providers.map((s) => s.id))];
   for (const providerId of uniqueProviders) {
-    const enabled = await deps.isProviderEnabled(orgId, providerId);
+    const enabled = await deps.isProviderEnabled(providerId, applicationId);
     if (!enabled) {
       throw new ApiError({
         status: 400,
@@ -69,9 +75,27 @@ export async function validateAgentDependencies(
     }
   }
 
-  // Fetch all connection statuses in parallel (all providers have profiles at this point)
+  // Resolve providerCredentialIds and fetch connection statuses in parallel
+  const credentialIds = await Promise.all(
+    providers.map((p) => deps.getProviderCredentialId(applicationId, p.id)),
+  );
+
+  // Fail fast if any provider credential is missing from this application
+  for (let i = 0; i < providers.length; i++) {
+    if (!credentialIds[i]) {
+      throw new ApiError({
+        status: 400,
+        code: "provider_not_configured",
+        title: "Provider Not Configured",
+        detail: `Provider '${providers[i]!.id}' is no longer configured for this application`,
+      });
+    }
+  }
+
   const statuses = await Promise.all(
-    providers.map((p) => deps.getConnectionStatus(p.id, providerProfiles[p.id]!.profileId, orgId)),
+    providers.map((p, i) =>
+      deps.getConnectionStatus(p.id, providerProfiles[p.id]!.profileId, orgId, credentialIds[i]!),
+    ),
   );
 
   for (let i = 0; i < providers.length; i++) {

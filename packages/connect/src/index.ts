@@ -45,4 +45,7 @@ export {
   saveConnection,
   deleteConnection,
   deleteConnectionById,
+  getProviderCredentialId,
+  listProviderCredentialIds,
+  listConfiguredProviderIds,
 } from "./credentials.ts";

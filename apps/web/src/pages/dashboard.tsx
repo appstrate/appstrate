@@ -59,7 +59,7 @@ export function DashboardPage() {
         description: f.description,
         source: f.source,
         keywords: f.keywords,
-        providerIds: f.dependencies.providers,
+        providerIds: Object.keys(f.dependencies.providers ?? {}),
         runningRuns: f.runningRuns,
       });
     }

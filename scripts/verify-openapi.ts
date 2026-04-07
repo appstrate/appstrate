@@ -81,31 +81,33 @@ const expectedEndpoints = [
   "PUT /api/providers/credentials/{scope}/{name}",
   "DELETE /api/providers/credentials/{scope}/{name}",
 
-  // Connection Profiles
+  // Connection Profiles (org-scoped user profiles)
   "GET /api/connection-profiles",
   "POST /api/connection-profiles",
-  "GET /api/connection-profiles/connections",
-  "DELETE /api/connection-profiles/connections",
-  "GET /api/connection-profiles/my-org-bindings",
-  "GET /api/connection-profiles/org",
-  "POST /api/connection-profiles/org",
-  "PUT /api/connection-profiles/org/{id}",
-  "DELETE /api/connection-profiles/org/{id}",
-  "GET /api/connection-profiles/org/{id}/agents",
-  "GET /api/connection-profiles/org/{id}/bindings",
-  "POST /api/connection-profiles/org/{id}/bind",
-  "DELETE /api/connection-profiles/org/{id}/bind/{providerScope}/{providerName}",
   "PUT /api/connection-profiles/{id}",
   "DELETE /api/connection-profiles/{id}",
-  "GET /api/connection-profiles/{id}/connections",
+
+  // App Profiles (app-scoped)
+  "GET /api/app-profiles",
+  "POST /api/app-profiles",
+  "GET /api/app-profiles/connections",
+  "DELETE /api/app-profiles/connections",
+  "GET /api/app-profiles/my-bindings",
+  "PUT /api/app-profiles/{id}",
+  "DELETE /api/app-profiles/{id}",
+  "GET /api/app-profiles/{id}/agents",
+  "GET /api/app-profiles/{id}/bindings",
+  "POST /api/app-profiles/{id}/bind",
+  "DELETE /api/app-profiles/{id}/bind/{providerScope}/{providerName}",
+  "GET /api/app-profiles/{id}/connections",
 
   // Agent Provider Profiles
   "GET /api/agents/{scope}/{name}/provider-profiles",
   "PUT /api/agents/{scope}/{name}/provider-profiles",
   "DELETE /api/agents/{scope}/{name}/provider-profiles",
 
-  // Agent Org Profile
-  "PUT /api/agents/{scope}/{name}/org-profile",
+  // Agent App Profile
+  "PUT /api/agents/{scope}/{name}/app-profile",
 
   // Agent Proxy
   "GET /api/agents/{scope}/{name}/proxy",
@@ -251,6 +253,18 @@ const expectedEndpoints = [
   "GET /api/applications/{id}",
   "PATCH /api/applications/{id}",
   "DELETE /api/applications/{id}",
+
+  // Application Packages
+  "GET /api/applications/{appId}/packages",
+  "POST /api/applications/{appId}/packages",
+  "GET /api/applications/{appId}/packages/{scope}/{name}",
+  "PUT /api/applications/{appId}/packages/{scope}/{name}",
+  "DELETE /api/applications/{appId}/packages/{scope}/{name}",
+
+  // Application Providers
+  "GET /api/applications/{appId}/providers",
+  "PUT /api/applications/{appId}/providers/{scope}/{name}/credentials",
+  "DELETE /api/applications/{appId}/providers/{scope}/{name}/credentials",
 
   // End-Users
   "POST /api/end-users",

@@ -52,8 +52,8 @@ const envSchema = z
     PLATFORM_API_URL: z.string().optional(),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
-    // Run — execution backend: "docker" (default, isolated containers) or "process" (Bun subprocesses, no isolation)
-    RUN_ADAPTER: z.enum(["docker", "process"]).default("docker"),
+    // Run — execution backend: "docker" (isolated containers) or "process" (default, Bun subprocesses, no isolation)
+    RUN_ADAPTER: z.enum(["docker", "process"]).default("process"),
     SIDECAR_POOL_SIZE: z.coerce.number().int().min(0).default(2),
 
     // Docker images (override for GHCR / custom registries)

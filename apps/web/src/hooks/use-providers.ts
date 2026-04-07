@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
 import type { ProviderConfig } from "@appstrate/shared-types";
 
 interface ProvidersResponse {
@@ -12,9 +13,10 @@ interface ProvidersResponse {
 
 export function useProviders() {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["providers", orgId],
+    queryKey: ["providers", orgId, appId],
     queryFn: () => api<ProvidersResponse>("/providers"),
-    enabled: !!orgId,
+    enabled: !!orgId && !!appId,
   });
 }

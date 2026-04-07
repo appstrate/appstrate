@@ -7,7 +7,10 @@ export const schedulesPaths = {
       tags: ["Schedules"],
       summary: "List all schedules",
       description: "List all schedules across all agents for the organization.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Schedule list",
@@ -36,6 +39,7 @@ export const schedulesPaths = {
       description: "List all cron schedules configured for a specific agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -70,6 +74,7 @@ export const schedulesPaths = {
       description: "Create a cron schedule for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -91,7 +96,7 @@ export const schedulesPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "Connection profile to use for provider credentials (user or org profile)",
+                    "Connection profile to use for provider credentials (user or app profile)",
                 },
                 cronExpression: {
                   type: "string",
@@ -133,6 +138,7 @@ export const schedulesPaths = {
       description: "Get a single schedule by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -159,6 +165,7 @@ export const schedulesPaths = {
       description: "Update a cron schedule (expression, timezone, enabled state, or input).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -198,6 +205,7 @@ export const schedulesPaths = {
       description: "Permanently delete a cron schedule.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -229,6 +237,7 @@ export const schedulesPaths = {
       description: "List recent runs triggered by a specific schedule.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
           name: "limit",

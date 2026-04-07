@@ -23,7 +23,7 @@ import {
   type JSONSchemaObject,
   type SchemaWrapper,
 } from "@appstrate/core/form";
-import { useConnectionProfiles, useOrgProfiles } from "../hooks/use-connection-profiles";
+import { useConnectionProfiles, useAppProfiles } from "../hooks/use-connection-profiles";
 import { CombinedProfileSelect, type ForeignProfile } from "./combined-profile-select";
 
 function getCronPresets(t: (key: string) => string) {
@@ -105,10 +105,10 @@ export function ScheduleForm({
   const isEdit = mode === "edit";
 
   const { data: userProfiles } = useConnectionProfiles();
-  const { data: orgProfiles } = useOrgProfiles();
+  const { data: appProfiles } = useAppProfiles();
   const allProfiles = useMemo(
-    () => [...(userProfiles ?? []), ...(orgProfiles ?? [])],
-    [userProfiles, orgProfiles],
+    () => [...(userProfiles ?? []), ...(appProfiles ?? [])],
+    [userProfiles, appProfiles],
   );
 
   const [confirmDelete, setConfirmDelete] = useState(false);

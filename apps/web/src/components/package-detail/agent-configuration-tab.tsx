@@ -16,7 +16,7 @@ import { findProviderByApiAndBaseUrl } from "@/lib/model-presets";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useModels, useAgentModel, useSetAgentModel } from "../../hooks/use-models";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
-import { useOrgProfiles, useSetAgentOrgProfile } from "../../hooks/use-connection-profiles";
+import { useAppProfiles, useSetAgentAppProfile } from "../../hooks/use-connection-profiles";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveConfig } from "../../hooks/use-mutations";
 import {
@@ -163,35 +163,35 @@ function ProxySection({ packageId }: { packageId: string }) {
 
 // ─── Org Profile Section ───────────────────────────────────────────
 
-function OrgProfileSection({ packageId }: { packageId: string }) {
+function AppProfileSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { data: orgProfiles } = useOrgProfiles();
+  const { data: appProfiles } = useAppProfiles();
   const { data: detail } = usePackageDetail("agent", packageId);
-  const setAgentOrgProfile = useSetAgentOrgProfile(packageId);
-  if (!orgProfiles || orgProfiles.length === 0) return null;
+  const setAgentAppProfile = useSetAgentAppProfile(packageId);
+  if (!appProfiles || appProfiles.length === 0) return null;
 
-  const currentOrgProfileId = detail?.agentOrgProfileId;
+  const currentAppProfileId = detail?.agentAppProfileId;
 
   return (
     <div className="border-border bg-card space-y-3 rounded-lg border p-4">
-      <h3 className="text-sm font-medium">{t("detail.configSectionOrgProfile")}</h3>
-      <p className="text-muted-foreground text-xs">{t("detail.configOrgProfileHint")}</p>
+      <h3 className="text-sm font-medium">{t("detail.configSectionAppProfile")}</h3>
+      <p className="text-muted-foreground text-xs">{t("detail.configAppProfileHint")}</p>
       <Select
-        value={currentOrgProfileId ?? "__none__"}
-        onValueChange={(v) => setAgentOrgProfile.mutate(v === "__none__" ? null : v)}
-        disabled={setAgentOrgProfile.isPending}
+        value={currentAppProfileId ?? "__none__"}
+        onValueChange={(v) => setAgentAppProfile.mutate(v === "__none__" ? null : v)}
+        disabled={setAgentAppProfile.isPending}
       >
         <SelectTrigger>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__none__">{t("detail.configOrgProfileNone")}</SelectItem>
-          {orgProfiles.map((p) => (
+          <SelectItem value="__none__">{t("detail.configAppProfileNone")}</SelectItem>
+          {appProfiles.map((p) => (
             <SelectItem key={p.id} value={p.id}>
               {p.name}
               {p.bindingCount > 0 && (
                 <span className="text-muted-foreground ml-1">
-                  ({t("detail.configOrgProfileBinding", { count: p.bindingCount })})
+                  ({t("detail.configAppProfileBinding", { count: p.bindingCount })})
                 </span>
               )}
             </SelectItem>
@@ -225,7 +225,7 @@ export function AgentConfigurationTab({
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <ModelSection packageId={packageId} />
         <ProxySection packageId={packageId} />
-        <OrgProfileSection packageId={packageId} />
+        <AppProfileSection packageId={packageId} />
       </div>
       {hasConfigSchema && schema && (
         <ConfigSection packageId={packageId} schema={schema} isHistorical={isHistorical} />

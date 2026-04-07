@@ -72,7 +72,6 @@ export async function postInstallPackage(params: {
       await createVersionAndUpload({
         packageId,
         version,
-        orgId,
         createdBy: userId,
         zipBuffer,
         manifest: versionManifest,

@@ -124,15 +124,18 @@ router.post("/", async (c) => {
     });
 
   // Create default application for the new org (non-fatal)
-  await createDefaultApplication(org.id, user.id).catch((err) => {
+  const defaultApp = await createDefaultApplication(org.id, user.id).catch((err) => {
     logger.warn("Failed to create default application for new org", {
       orgId: org.id,
       error: err instanceof Error ? err.message : String(err),
     });
+    return null;
   });
 
-  // Provision default hello-world agent for the new org (non-fatal)
-  await provisionDefaultAgentForOrg(org.id, org.slug, user.id).catch(() => {});
+  // Provision default hello-world agent + install in default app (non-fatal)
+  if (defaultApp) {
+    await provisionDefaultAgentForOrg(org.id, org.slug, user.id, defaultApp.id).catch(() => {});
+  }
 
   return c.json(
     {

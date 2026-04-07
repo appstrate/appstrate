@@ -2,3 +2,4 @@
 preload = ["./test/setup/preload.ts"]
 timeout = 15000
 coverageSkipTestFiles = true
+pathIgnorePatterns = ["e2e/**"]

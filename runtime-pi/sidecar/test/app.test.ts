@@ -1009,7 +1009,7 @@ describe("proxy retry-on-401", () => {
     expect(deps.refreshCredentials).toHaveBeenCalledTimes(1);
   });
 
-  it("flags connection when retry also returns 401", async () => {
+  it("flags connection when retry also returns 401 after propagation delay", async () => {
     let reportCalled = false;
     const deps = makeDeps({
       refreshCredentials: mock(

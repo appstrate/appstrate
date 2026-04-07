@@ -3,18 +3,45 @@
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { isOwnedByOrg } from "@appstrate/core/naming";
-import { getPackage } from "../services/agent-service.ts";
+import { getPackage, getPackageWithAccess } from "../services/agent-service.ts";
 import { getPackageById } from "../services/package-items/crud.ts";
 import { getRunningRunsForPackage } from "../services/state/index.ts";
 import { ApiError, forbidden, notFound, conflict, invalidRequest } from "../lib/errors.ts";
 
-/** Middleware: load an agent by route param and set it on context, or 404. */
+/** Middleware: load an agent by route param and set it on context, or 404.
+ *  Also checks that the current application has access to the package. */
 export function requireAgent() {
   return async (c: Context<AppEnv>, next: Next) => {
     const scope = c.req.param("scope");
     const name = c.req.param("name");
     const packageId = `${scope}/${name}`;
     const orgId = c.get("orgId");
+    const appId = c.get("applicationId");
+
+    const agent = await getPackageWithAccess(packageId, orgId, appId);
+    if (!agent) {
+      throw new ApiError({
+        status: 404,
+        code: "agent_not_found",
+        title: "Agent Not Found",
+        detail: `Agent '${packageId}' not found`,
+      });
+    }
+    c.set("agent", agent);
+    return next();
+  };
+}
+
+/** Middleware: load an agent by route param and set it on context, or 404.
+ *  Checks org ownership only — does NOT check app-level access.
+ *  Use for org-level operations (editing manifest, skills, tools). */
+export function requireOrgAgent() {
+  return async (c: Context<AppEnv>, next: Next) => {
+    const scope = c.req.param("scope");
+    const name = c.req.param("name");
+    const packageId = `${scope}/${name}`;
+    const orgId = c.get("orgId");
+
     const agent = await getPackage(packageId, orgId);
     if (!agent) {
       throw new ApiError({
@@ -93,7 +120,11 @@ export function requireMutableAgent() {
     if (agent.source === "system") {
       throw forbidden("Cannot modify a system agent");
     }
-    const running = await getRunningRunsForPackage(agent.id, c.get("orgId"));
+    const running = await getRunningRunsForPackage(
+      agent.id,
+      c.get("orgId"),
+      c.get("applicationId"),
+    );
     if (running > 0) {
       throw conflict("agent_in_use", `${running} run(s) running for this agent`);
     }

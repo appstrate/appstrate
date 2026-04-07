@@ -22,7 +22,7 @@ import { RunList } from "../components/run-list";
 import { NextRunPreview } from "../components/next-run-preview";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { ProviderConnectionCard } from "../components/provider-connection-card";
-import { OrgProfileProvidersBlock } from "../components/org-profile-providers-block";
+import { AppProfileProvidersBlock } from "../components/app-profile-providers-block";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { ProfileLabel } from "../components/profile-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
@@ -265,8 +265,8 @@ function ScheduleProviders({
   const { agentProviders } = useScheduleProviderReadiness(schedule);
   const { data: userProfiles } = useConnectionProfiles();
 
-  const isOrgProfile = schedule.profileType === "org";
-  const orgProfileId = isOrgProfile ? schedule.connectionProfileId : undefined;
+  const isAppProfile = schedule.profileType === "app";
+  const appProfileId = isAppProfile ? schedule.connectionProfileId : undefined;
 
   // For user profile schedules, only the profile owner can connect/disconnect
   const isProfileOwner = userProfiles?.some((p) => p.id === schedule.connectionProfileId) ?? false;
@@ -275,12 +275,12 @@ function ScheduleProviders({
     return <EmptyState message={t("schedule.noProviders")} icon={Calendar} compact />;
   }
 
-  if (isOrgProfile && orgProfileId) {
+  if (isAppProfile && appProfileId) {
     return (
-      <OrgProfileProvidersBlock
-        orgProfileId={orgProfileId}
-        orgProfileName={schedule.profileName ?? "-"}
-        providerIds={agentProviders}
+      <AppProfileProvidersBlock
+        appProfileId={appProfileId}
+        appProfileName={schedule.profileName ?? "-"}
+        providers={agentProviders}
       />
     );
   }

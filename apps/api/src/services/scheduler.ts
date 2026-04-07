@@ -7,25 +7,23 @@ import { db } from "@appstrate/db/client";
 import {
   packageSchedules,
   connectionProfiles as connectionProfilesTable,
-  userProviderConnections,
 } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/index.ts";
 import { dispatchRunWebhook } from "./webhooks.ts";
-import { prepareAndExecuteRun } from "./run-pipeline.ts";
+import { prepareAndExecuteRun, resolveRunPreflight } from "./run-pipeline.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
 import { getPackage, packageExists } from "./agent-service.ts";
-import { getPackageConfig } from "./state/index.ts";
-import { validateAgentReadiness } from "./agent-readiness.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import {
   getProfileByIdUnsafe,
   resolveProviderProfiles,
   resolveScheduleProfileArgs,
-  getAgentOrgProfile,
+  getAgentAppProfile,
 } from "./connection-profiles.ts";
+import { resolveProviderStatuses } from "./connection-manager/index.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
@@ -43,6 +41,7 @@ interface ScheduleJobData {
   packageId: string;
   connectionProfileId: string;
   orgId: string;
+  applicationId: string;
   input?: Record<string, unknown>;
 }
 
@@ -80,6 +79,7 @@ async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<voi
     packageId: schedule.packageId,
     connectionProfileId: schedule.connectionProfileId,
     orgId,
+    applicationId: schedule.applicationId,
     input: asRecordOrNull(schedule.input) ?? undefined,
   };
 
@@ -99,12 +99,19 @@ async function removeScheduleJob(scheduleId: string): Promise<void> {
 
 /** Process a scheduled job. */
 async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> {
-  const { scheduleId, packageId, connectionProfileId, orgId, input } = job.data;
+  const { scheduleId, packageId, connectionProfileId, orgId, applicationId, input } = job.data;
 
-  await triggerScheduledRun(scheduleId, packageId, connectionProfileId, orgId, input);
+  await triggerScheduledRun(
+    scheduleId,
+    packageId,
+    connectionProfileId,
+    orgId,
+    applicationId,
+    input,
+  );
 
   // Update schedule timestamps
-  const schedule = await getSchedule(scheduleId);
+  const schedule = await getSchedule(scheduleId, orgId, applicationId);
   const nextRun = schedule
     ? computeNextRun(schedule.cronExpression, schedule.timezone ?? "UTC")
     : null;
@@ -172,14 +179,24 @@ async function triggerScheduledRun(
   packageId: string,
   connectionProfileId: string,
   orgId: string,
+  applicationId: string,
   input: Record<string, unknown> | undefined,
 ) {
   /** Create a failed run record + dispatch webhook so the user is notified. */
   async function failSchedule(error: string, actor: Actor | null = null): Promise<void> {
     const runId = `run_${crypto.randomUUID()}`;
     try {
-      await createFailedRun(runId, packageId, actor, orgId, error, scheduleId, connectionProfileId);
-      dispatchRunWebhook(orgId, "failed", runId, packageId, { error });
+      await createFailedRun(
+        runId,
+        packageId,
+        actor,
+        orgId,
+        applicationId,
+        error,
+        scheduleId,
+        connectionProfileId,
+      );
+      dispatchRunWebhook(orgId, applicationId, "failed", runId, packageId, { error });
     } catch (err) {
       logger.error("Failed to create failed schedule run record", {
         scheduleId,
@@ -197,7 +214,7 @@ async function triggerScheduledRun(
       return;
     }
 
-    // Resolve actor from connection profile (null for org profiles)
+    // Resolve actor from connection profile (null for app profiles)
     const profile = await getProfileByIdUnsafe(connectionProfileId);
     if (!profile) {
       logger.warn("Connection profile not found, skipping schedule", {
@@ -210,45 +227,32 @@ async function triggerScheduledRun(
 
     const actor: Actor | null = actorFromIds(profile.userId, profile.endUserId);
 
-    // Load the agent's admin-configured org profile (validates it still exists)
-    const agentOrgProfile = await getAgentOrgProfile(orgId, packageId);
-    const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
+    // Load the agent's admin-configured app profile (validates it still exists)
+    const agentAppProfile = await getAgentAppProfile(applicationId, packageId);
+    const { defaultUserProfileId, appProfileId } = resolveScheduleProfileArgs(
       profile,
       connectionProfileId,
-      agentOrgProfile?.id ?? null,
+      agentAppProfile?.id ?? null,
     );
 
-    // Resolve provider profiles, config, and validate readiness (inlined preflight).
-    // Schedules don't support per-provider overrides.
+    // Shared preflight: resolve providers, config, validate readiness
     let providerProfiles: ProviderProfileMap;
     let config: Record<string, unknown>;
     let preflightModelId: string | null;
     let preflightProxyId: string | null;
     try {
-      const manifestProviders = resolveManifestProviders(agent.manifest);
-
-      const [resolvedProfiles, packageConfig] = await Promise.all([
-        resolveProviderProfiles(
-          manifestProviders,
-          defaultUserProfileId,
-          undefined,
-          orgProfileId,
-          orgId,
-        ),
-        getPackageConfig(orgId, packageId),
-      ]);
-
-      await validateAgentReadiness({
+      const preflight = await resolveRunPreflight({
         agent,
-        providerProfiles: resolvedProfiles,
+        applicationId,
         orgId,
-        config: packageConfig.config,
+        defaultUserProfileId,
+        appProfileId,
       });
 
-      providerProfiles = resolvedProfiles;
-      config = packageConfig.config;
-      preflightModelId = packageConfig.modelId;
-      preflightProxyId = packageConfig.proxyId;
+      providerProfiles = preflight.providerProfiles;
+      config = preflight.config;
+      preflightModelId = preflight.modelId;
+      preflightProxyId = preflight.proxyId;
     } catch (err) {
       if (err instanceof ApiError) {
         logger.warn("Agent readiness check failed, skipping schedule", {
@@ -304,6 +308,7 @@ async function triggerScheduledRun(
       proxyId: preflightProxyId,
       scheduleId,
       connectionProfileId,
+      applicationId,
     });
 
     if (!result.ok) {
@@ -338,11 +343,16 @@ async function triggerScheduledRun(
 // CRUD helpers
 // ---------------------------------------------------------------------------
 
-export async function listSchedules(orgId: string): Promise<EnrichedSchedule[]> {
+export async function listSchedules(
+  orgId: string,
+  applicationId: string,
+): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
     .from(packageSchedules)
-    .where(eq(packageSchedules.orgId, orgId))
+    .where(
+      and(eq(packageSchedules.orgId, orgId), eq(packageSchedules.applicationId, applicationId)),
+    )
     .orderBy(asc(packageSchedules.createdAt));
   return enrichSchedules(rows.map(toSchedule), orgId);
 }
@@ -350,17 +360,36 @@ export async function listSchedules(orgId: string): Promise<EnrichedSchedule[]> 
 export async function listPackageSchedules(
   packageId: string,
   orgId: string,
+  applicationId: string,
 ): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
     .from(packageSchedules)
-    .where(and(eq(packageSchedules.packageId, packageId), eq(packageSchedules.orgId, orgId)))
+    .where(
+      and(
+        eq(packageSchedules.packageId, packageId),
+        eq(packageSchedules.orgId, orgId),
+        eq(packageSchedules.applicationId, applicationId),
+      ),
+    )
     .orderBy(asc(packageSchedules.createdAt));
   return enrichSchedules(rows.map(toSchedule), orgId);
 }
 
-export async function getSchedule(id: string): Promise<EnrichedSchedule | null> {
-  const rows = await db.select().from(packageSchedules).where(eq(packageSchedules.id, id)).limit(1);
+export async function getSchedule(
+  id: string,
+  orgId?: string,
+  applicationId?: string,
+): Promise<EnrichedSchedule | null> {
+  const conditions = [eq(packageSchedules.id, id)];
+  if (orgId) conditions.push(eq(packageSchedules.orgId, orgId));
+  if (applicationId) conditions.push(eq(packageSchedules.applicationId, applicationId));
+
+  const rows = await db
+    .select()
+    .from(packageSchedules)
+    .where(and(...conditions))
+    .limit(1);
   if (!rows[0]) return null;
   const schedule = toSchedule(rows[0]);
   const [enriched] = await enrichSchedules([schedule], schedule.orgId);
@@ -393,7 +422,7 @@ async function computeScheduleReadiness(
     return { status: "ready", totalProviders: 0, connectedProviders: 0, missingProviders: [] };
   }
 
-  const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
+  const { defaultUserProfileId, appProfileId } = resolveScheduleProfileArgs(
     profile,
     schedule.connectionProfileId,
   );
@@ -401,44 +430,20 @@ async function computeScheduleReadiness(
     providers,
     defaultUserProfileId,
     undefined,
-    orgProfileId,
-    orgId,
+    appProfileId,
+    schedule.applicationId,
   );
 
-  // Batch-fetch all connections for resolved profile IDs in one query
-  const resolvedProfileIds = [
-    ...new Set(
-      providers.map((p) => providerProfiles[p.id]?.profileId).filter((id): id is string => !!id),
-    ),
-  ];
+  // Reuse the shared provider status resolution (batch-fetches connections)
+  const statuses = await resolveProviderStatuses(
+    providers,
+    providerProfiles,
+    orgId,
+    schedule.applicationId,
+  );
 
-  const connectionMap = new Map<string, boolean>();
-  if (resolvedProfileIds.length > 0) {
-    const connRows = await db
-      .select({
-        profileId: userProviderConnections.profileId,
-        providerId: userProviderConnections.providerId,
-      })
-      .from(userProviderConnections)
-      .where(
-        and(
-          inArray(userProviderConnections.profileId, resolvedProfileIds),
-          eq(userProviderConnections.orgId, orgId),
-        ),
-      );
-    for (const row of connRows) {
-      connectionMap.set(`${row.profileId}:${row.providerId}`, true);
-    }
-  }
-
-  const results = providers.map((p) => {
-    const sourceProfileId = providerProfiles[p.id]?.profileId;
-    if (!sourceProfileId) return { id: p.id, connected: false };
-    return { id: p.id, connected: connectionMap.has(`${sourceProfileId}:${p.id}`) };
-  });
-
-  const missing = results.filter((r) => !r.connected).map((r) => r.id);
-  const connected = results.filter((r) => r.connected).length;
+  const missing = statuses.filter((s) => s.status !== "connected").map((s) => s.id);
+  const connected = statuses.filter((s) => s.status === "connected").length;
 
   return {
     status: missing.length === 0 ? "ready" : connected > 0 ? "degraded" : "not_ready",
@@ -480,11 +485,11 @@ async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<En
       const agent = agentMap.get(schedule.packageId);
 
       let profileName: string | null = null;
-      let profileType: "user" | "org" | null = null;
+      let profileType: "user" | "app" | null = null;
       let profileOwnerName: string | null = null;
       if (profile) {
         profileName = profile.name;
-        profileType = profile.orgId ? "org" : "user";
+        profileType = profile.applicationId ? "app" : "user";
         if (profile.userId) {
           profileOwnerName = userNameMap.get(profile.userId) ?? null;
         }
@@ -505,6 +510,7 @@ export async function createSchedule(
   packageId: string,
   connectionProfileId: string,
   orgId: string,
+  applicationId: string,
   data: {
     name?: string;
     cronExpression: string;
@@ -525,6 +531,7 @@ export async function createSchedule(
       packageId,
       connectionProfileId,
       orgId,
+      applicationId,
       name: data.name ?? null,
       enabled: true,
       cronExpression: data.cronExpression,
@@ -546,6 +553,8 @@ export async function createSchedule(
 
 export async function updateSchedule(
   id: string,
+  orgId: string,
+  applicationId: string,
   data: {
     connectionProfileId?: string;
     name?: string;
@@ -555,7 +564,7 @@ export async function updateSchedule(
     enabled?: boolean;
   },
 ): Promise<Schedule | null> {
-  const existing = await getSchedule(id);
+  const existing = await getSchedule(id, orgId, applicationId);
   if (!existing) return null;
 
   const cronExpr = data.cronExpression ?? existing.cronExpression;
@@ -580,7 +589,13 @@ export async function updateSchedule(
   const [row] = await db
     .update(packageSchedules)
     .set(payload)
-    .where(eq(packageSchedules.id, id))
+    .where(
+      and(
+        eq(packageSchedules.id, id),
+        eq(packageSchedules.orgId, orgId),
+        eq(packageSchedules.applicationId, applicationId),
+      ),
+    )
     .returning();
 
   if (!row) {
@@ -589,7 +604,7 @@ export async function updateSchedule(
   const schedule = toSchedule(row);
 
   if (schedule.enabled) {
-    await upsertScheduleJob(schedule, existing.orgId);
+    await upsertScheduleJob(schedule, orgId);
   } else {
     await removeScheduleJob(id);
   }
@@ -597,12 +612,22 @@ export async function updateSchedule(
   return schedule;
 }
 
-export async function deleteSchedule(id: string): Promise<boolean> {
+export async function deleteSchedule(
+  id: string,
+  orgId: string,
+  applicationId: string,
+): Promise<boolean> {
   await removeScheduleJob(id);
 
   const deleted = await db
     .delete(packageSchedules)
-    .where(eq(packageSchedules.id, id))
+    .where(
+      and(
+        eq(packageSchedules.id, id),
+        eq(packageSchedules.orgId, orgId),
+        eq(packageSchedules.applicationId, applicationId),
+      ),
+    )
     .returning({ id: packageSchedules.id });
   return deleted.length > 0;
 }

@@ -18,6 +18,7 @@ export interface ConnectionRecord {
   profileId: string;
   providerId: string;
   orgId: string;
+  providerCredentialId: string;
   credentialsEncrypted: string;
   scopesGranted: string[];
   needsReconnection: boolean;

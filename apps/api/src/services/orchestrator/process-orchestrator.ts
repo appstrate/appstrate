@@ -6,9 +6,19 @@
  *
  * ⚠️ No container isolation: agents can access the local filesystem and network.
  *    Use only with trusted agent code.
+ *
+ * Stdout workaround (Bun ≤1.3.9): `Bun.spawn({ stdout: "pipe" })` returns a
+ * ReadableStream that signals EOF prematurely when the event loop services
+ * concurrent I/O (e.g. incoming HTTP requests while an agent run is in-flight).
+ * The subprocess keeps running but the platform sees an empty stream → 0 tokens
+ * → false "could not reach the LLM API" failure. Reproducible by opening any
+ * page while a run is active. Agent stdout is therefore redirected to a file via
+ * `Bun.file()` and tailed with a sequential read handle. Docker mode is unaffected
+ * (logs are read via the Docker HTTP API, not a Bun pipe).
+ * Re-test with `stdout: "pipe"` after upgrading Bun to check if the fix is still needed.
  */
 
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, open as fsOpen } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { logger } from "../../lib/logger.ts";
 import type { ContainerOrchestrator } from "./interface.ts";
@@ -25,6 +35,11 @@ const DATA_DIR = resolve("./data/runs");
 const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
 const AGENT_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/entrypoint.ts");
 
+/** Poll interval for tailing the stdout file (ms). */
+const TAIL_POLL_MS = 50;
+/** Read buffer size for tailing (bytes). */
+const TAIL_BUFFER_SIZE = 16_384;
+
 type BunProcess = ReturnType<typeof Bun.spawn>;
 
 interface ProcessHandle {
@@ -32,6 +47,7 @@ interface ProcessHandle {
   role: string;
   runId: string;
   workDir?: string;
+  stdoutPath?: string;
 }
 
 interface PendingSpec {
@@ -64,7 +80,6 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
 
   async shutdown(): Promise<void> {
     const handles = [...this.processes.entries()];
-    // Stop all processes in parallel with SIGTERM → SIGKILL escalation
     await Promise.all(
       handles.map(async ([_id, handle]) => {
         if (!handle.proc) return;
@@ -172,7 +187,6 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
       env.no_proxy = "localhost,127.0.0.1";
     }
 
-    // Store spec for deferred spawn in startWorkload (matches Docker create/start pattern)
     this.pendingSpecs.set(id, { entrypoint: AGENT_ENTRY, workDir, env });
     this.processes.set(id, { proc: null, role: spec.role, runId: spec.runId, workDir });
 
@@ -184,14 +198,18 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     const ph = this.processes.get(handle.id);
     if (!pending || !ph) return;
 
+    const stdoutPath = join(pending.workDir, ".stdout.jsonl");
+
     const proc = Bun.spawn(["bun", "run", pending.entrypoint], {
       cwd: pending.workDir,
       env: pending.env,
-      stdout: "pipe",
+      stdout: Bun.file(stdoutPath),
       stderr: "pipe",
     });
+
     this.drainStderr(proc, handle.id);
     ph.proc = proc;
+    ph.stdoutPath = stdoutPath;
     this.pendingSpecs.delete(handle.id);
   }
 
@@ -224,30 +242,41 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
     return ph.proc.exited;
   }
 
+  /** Tail the stdout file, yielding complete JSON lines until the process exits. */
   async *streamLogs(handle: WorkloadHandle, signal?: AbortSignal): AsyncGenerator<string> {
     const ph = this.processes.get(handle.id);
-    if (!ph?.proc?.stdout || typeof ph.proc.stdout === "number") return;
+    if (!ph?.stdoutPath || !ph?.proc) return;
 
-    const reader = (ph.proc.stdout as ReadableStream<Uint8Array>).getReader();
+    let exited = false;
+    ph.proc.exited.then(() => {
+      exited = true;
+    });
+
+    const fh = await fsOpen(ph.stdoutPath, "r");
+    const buf = Buffer.alloc(TAIL_BUFFER_SIZE);
     const decoder = new TextDecoder();
-    let buffer = "";
+    let partial = "";
 
     try {
-      while (true) {
-        if (signal?.aborted) break;
-        const { done, value } = await reader.read();
-        if (done) break;
+      while (!signal?.aborted) {
+        const { bytesRead } = await fh.read(buf, 0, buf.length);
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (line.length > 0) yield line;
+        if (bytesRead > 0) {
+          partial += decoder.decode(buf.subarray(0, bytesRead), { stream: true });
+          const lines = partial.split("\n");
+          partial = lines.pop() ?? "";
+          for (const line of lines) {
+            if (line.length > 0) yield line;
+          }
+        } else if (exited) {
+          if (partial.length > 0) yield partial;
+          break;
+        } else {
+          await new Promise((r) => setTimeout(r, TAIL_POLL_MS));
         }
       }
-      if (buffer.length > 0) yield buffer;
     } finally {
-      reader.releaseLock();
+      await fh.close();
     }
   }
 
@@ -268,10 +297,17 @@ export class ProcessOrchestrator implements ContainerOrchestrator {
 
   private async findAvailablePort(retries = 3): Promise<number> {
     for (let attempt = 0; attempt < retries; attempt++) {
-      const server = Bun.serve({ port: 0, fetch: () => new Response() });
-      const port = server.port ?? 0;
-      server.stop(true);
-      if (port) return port;
+      const s1 = Bun.serve({ port: 0, fetch: () => new Response() });
+      const port = s1.port ?? 0;
+      s1.stop(true);
+      if (!port) continue;
+      try {
+        const s2 = Bun.serve({ port: port + 1, fetch: () => new Response() });
+        s2.stop(true);
+        return port;
+      } catch {
+        continue;
+      }
     }
     throw new Error("Failed to find available port after retries");
   }

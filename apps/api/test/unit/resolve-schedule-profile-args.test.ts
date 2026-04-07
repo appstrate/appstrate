@@ -9,7 +9,7 @@ function makeProfile(overrides: Partial<ConnectionProfile> = {}): ConnectionProf
     id: "profile-1",
     userId: null,
     endUserId: null,
-    orgId: null,
+    applicationId: null,
     name: "Test",
     isDefault: false,
     createdAt: new Date(),
@@ -19,67 +19,67 @@ function makeProfile(overrides: Partial<ConnectionProfile> = {}): ConnectionProf
 }
 
 describe("resolveScheduleProfileArgs", () => {
-  it("passes org profile as orgProfileId with null user fallback", () => {
-    const profile = makeProfile({ orgId: "org-1" });
-    const result = resolveScheduleProfileArgs(profile, "org-profile-id");
+  it("passes app profile as appProfileId with null user fallback", () => {
+    const profile = makeProfile({ applicationId: "app-1" });
+    const result = resolveScheduleProfileArgs(profile, "app-profile-id");
 
     expect(result).toEqual({
       defaultUserProfileId: null,
-      orgProfileId: "org-profile-id",
+      appProfileId: "app-profile-id",
     });
   });
 
-  it("passes user profile as defaultUserProfileId with null orgProfileId", () => {
+  it("passes user profile as defaultUserProfileId with null appProfileId", () => {
     const profile = makeProfile({ userId: "user-1" });
     const result = resolveScheduleProfileArgs(profile, "user-profile-id");
 
     expect(result).toEqual({
       defaultUserProfileId: "user-profile-id",
-      orgProfileId: null,
+      appProfileId: null,
     });
   });
 
-  it("passes user profile with agentOrgProfileId as org fallback", () => {
+  it("passes user profile with agentAppProfileId as app fallback", () => {
     const profile = makeProfile({ userId: "user-1" });
-    const result = resolveScheduleProfileArgs(profile, "user-profile-id", "agent-org-profile-id");
+    const result = resolveScheduleProfileArgs(profile, "user-profile-id", "agent-app-profile-id");
 
     expect(result).toEqual({
       defaultUserProfileId: "user-profile-id",
-      orgProfileId: "agent-org-profile-id",
+      appProfileId: "agent-app-profile-id",
     });
   });
 
-  it("org profile ignores agentOrgProfileId — schedule's own org profile takes priority", () => {
-    const profile = makeProfile({ orgId: "org-1" });
+  it("app profile ignores agentAppProfileId — schedule's own app profile takes priority", () => {
+    const profile = makeProfile({ applicationId: "app-1" });
     const result = resolveScheduleProfileArgs(
       profile,
-      "schedule-org-profile",
-      "agent-org-profile-id",
+      "schedule-app-profile",
+      "agent-app-profile-id",
     );
 
     expect(result).toEqual({
       defaultUserProfileId: null,
-      orgProfileId: "schedule-org-profile",
+      appProfileId: "schedule-app-profile",
     });
   });
 
-  it("handles end-user profile as user profile (no orgId)", () => {
+  it("handles end-user profile as user profile (no applicationId)", () => {
     const profile = makeProfile({ endUserId: "eu-1" });
     const result = resolveScheduleProfileArgs(profile, "eu-profile-id");
 
     expect(result).toEqual({
       defaultUserProfileId: "eu-profile-id",
-      orgProfileId: null,
+      appProfileId: null,
     });
   });
 
-  it("handles null agentOrgProfileId for user profile", () => {
+  it("handles null agentAppProfileId for user profile", () => {
     const profile = makeProfile({ userId: "user-1" });
     const result = resolveScheduleProfileArgs(profile, "user-profile-id", null);
 
     expect(result).toEqual({
       defaultUserProfileId: "user-profile-id",
-      orgProfileId: null,
+      appProfileId: null,
     });
   });
 });

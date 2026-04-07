@@ -25,16 +25,18 @@ export const runs = pgTable(
   "runs",
   {
     id: text("id").primaryKey(),
-    packageId: text("package_id").notNull(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
     userId: text("user_id").references(() => user.id, {
       onDelete: "set null",
     }),
     endUserId: text("end_user_id").references(() => endUsers.id, {
       onDelete: "set null",
     }),
-    applicationId: text("application_id").references(() => applications.id, {
-      onDelete: "set null",
-    }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -48,8 +50,12 @@ export const runs = pgTable(
     startedAt: timestamp("started_at").defaultNow().notNull(),
     completedAt: timestamp("completed_at"),
     duration: integer("duration"),
-    connectionProfileId: uuid("connection_profile_id"),
-    scheduleId: text("schedule_id"),
+    connectionProfileId: uuid("connection_profile_id").references(() => connectionProfiles.id, {
+      onDelete: "set null",
+    }),
+    scheduleId: text("schedule_id").references(() => packageSchedules.id, {
+      onDelete: "set null",
+    }),
     packageVersionId: integer("package_version_id").references(() => packageVersions.id, {
       onDelete: "set null",
     }),
@@ -69,6 +75,7 @@ export const runs = pgTable(
     index("idx_runs_user_id").on(table.userId),
     index("idx_runs_end_user_id").on(table.endUserId),
     index("idx_runs_application_id").on(table.applicationId),
+    index("idx_runs_app_status_started").on(table.applicationId, table.status, table.startedAt),
     index("idx_runs_org_id").on(table.orgId),
     index("idx_runs_notification").on(table.userId, table.orgId, table.notifiedAt, table.readAt),
     check("runs_at_most_one_actor", sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`),
@@ -109,6 +116,9 @@ export const packageMemories = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
     content: text("content").notNull(),
     runId: text("run_id").references(() => runs.id, {
       onDelete: "set null",
@@ -116,8 +126,9 @@ export const packageMemories = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
-    index("idx_package_memories_package_org").on(table.packageId, table.orgId),
+    index("idx_package_memories_package_app").on(table.packageId, table.applicationId),
     index("idx_package_memories_org_id").on(table.orgId),
+    index("idx_package_memories_app_id").on(table.applicationId),
   ],
 );
 
@@ -134,8 +145,11 @@ export const packageSchedules = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
     name: text("name"),
-    enabled: boolean("enabled").default(true),
+    enabled: boolean("enabled").default(true).notNull(),
     cronExpression: text("cron_expression").notNull(),
     timezone: text("timezone").default("UTC"),
     input: jsonb("input"),
@@ -148,5 +162,6 @@ export const packageSchedules = pgTable(
     index("idx_schedules_package_id").on(table.packageId),
     index("idx_schedules_connection_profile_id").on(table.connectionProfileId),
     index("idx_package_schedules_org_id").on(table.orgId),
+    index("idx_package_schedules_app_id").on(table.applicationId),
   ],
 );

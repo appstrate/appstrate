@@ -8,7 +8,10 @@ export const apiKeysPaths = {
       summary: "List available scopes",
       description:
         "List permission scopes available for API key creation, based on the current user's role.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Available scopes",
@@ -42,7 +45,10 @@ export const apiKeysPaths = {
       tags: ["API Keys"],
       summary: "List API keys",
       description: "List active (non-revoked) API keys for the organization.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "API key list",
@@ -74,7 +80,10 @@ export const apiKeysPaths = {
       summary: "Create an API key",
       description:
         "Create a new API key. The raw key is returned **once** in the response and cannot be retrieved later.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       requestBody: {
         required: true,
         content: {
@@ -82,6 +91,8 @@ export const apiKeysPaths = {
             schema: {
               type: "object",
               required: ["name"],
+              description:
+                "The API key is scoped to the application specified by the X-App-Id header.",
               properties: {
                 name: {
                   type: "string",
@@ -152,6 +163,7 @@ export const apiKeysPaths = {
       description: "Revoke (soft-delete) an API key. The key will immediately stop working.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {

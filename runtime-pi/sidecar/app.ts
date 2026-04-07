@@ -330,6 +330,16 @@ export function createApp(deps: AppDeps): Hono {
       for (const [key, value] of Object.entries(rawHeaders)) {
         resolvedHeaders[key] = substituteVars(value, credentials);
       }
+      // Normalize auth headers: ensure space after scheme (e.g. "Bearertoken" → "Bearer token").
+      // LLMs sometimes generate "Bearer{{access_token}}" without a space, which produces
+      // a malformed header that providers reject with 401.
+      const authKey = Object.keys(resolvedHeaders).find((k) => k.toLowerCase() === "authorization");
+      if (authKey) {
+        resolvedHeaders[authKey] = resolvedHeaders[authKey]!.replace(
+          /^(Bearer|Basic|Token)(?=[^\s])/i,
+          "$1 ",
+        );
+      }
       // Re-inject cookies (not credential-dependent)
       const storedCookies2 = cookieJar.get(providerId);
       if (storedCookies2 && storedCookies2.length) {
@@ -355,7 +365,7 @@ export function createApp(deps: AppDeps): Hono {
     if (!result.ok) return result.errorResponse;
     let targetRes = result.response;
 
-    // 7b. Retry on 401: refresh credentials and retry once (per provider per run)
+    // 7b. Retry on 401: refresh credentials and retry once
     if (
       targetRes.status === 401 &&
       deps.refreshCredentials &&
@@ -365,18 +375,12 @@ export function createApp(deps: AppDeps): Hono {
     ) {
       try {
         const refreshed = await deps.refreshCredentials(providerId);
-        // Retry with refreshed credentials
         const retryResult = await doUpstreamRequest(refreshed.credentials);
-        if (retryResult.ok && retryResult.response.status !== 401) {
-          // Refresh+retry succeeded — use the retried response
+        if (retryResult.ok) {
           targetRes = retryResult.response;
-        } else {
-          // Retry still failed — fall through to report auth failure below
-          if (retryResult.ok) targetRes = retryResult.response;
         }
       } catch {
-        // Refresh itself failed (invalid_grant, network) — platform already flagged the connection
-        // Fall through to report auth failure
+        // Refresh itself failed (invalid_grant, revoked token) — fall through to report
       }
     }
 

@@ -18,30 +18,36 @@ import { sql } from "drizzle-orm";
 import { packageTypeEnum, packageSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
+import { applications } from "./applications.ts";
 import { connectionProfiles } from "./connections.ts";
 
-export const packageConfigs = pgTable(
-  "package_configs",
+export const applicationPackages = pgTable(
+  "application_packages",
   {
-    orgId: uuid("org_id")
+    applicationId: text("application_id")
       .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
+      .references(() => applications.id, { onDelete: "cascade" }),
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
+    versionId: integer("version_id").references(() => packageVersions.id, {
+      onDelete: "set null",
+    }),
     config: jsonb("config").notNull().default({}),
     modelId: text("model_id"),
     proxyId: text("proxy_id"),
-    orgProfileId: uuid("org_profile_id").references(() => connectionProfiles.id, {
+    appProfileId: uuid("app_profile_id").references(() => connectionProfiles.id, {
       onDelete: "set null",
     }),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    installedAt: timestamp("installed_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.orgId, table.packageId] }),
-    index("idx_package_configs_org_id").on(table.orgId),
-    index("idx_package_configs_org_profile_id").on(table.orgProfileId),
+    primaryKey({ columns: [table.applicationId, table.packageId] }),
+    index("idx_application_packages_package_id").on(table.packageId),
+    index("idx_application_packages_app_profile_id").on(table.appProfileId),
+    index("idx_application_packages_app_id").on(table.applicationId),
   ],
 );
 
@@ -64,6 +70,7 @@ export const packages = pgTable(
   (table) => [
     index("idx_packages_org_id").on(table.orgId),
     index("idx_packages_type").on(table.type),
+    index("idx_packages_org_type").on(table.orgId, table.type),
     check("packages_id_format", sql`${table.id} ~ '^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$'`),
   ],
 );
@@ -79,7 +86,6 @@ export const packageVersions = pgTable(
     integrity: text("integrity").notNull(),
     artifactSize: integer("artifact_size").notNull(),
     manifest: jsonb("manifest").notNull(),
-    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
     yanked: boolean("yanked").notNull().default(false),
     yankedReason: text("yanked_reason"),
     createdBy: text("created_by").references(() => user.id),

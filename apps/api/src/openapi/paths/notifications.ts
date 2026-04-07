@@ -7,7 +7,10 @@ export const notificationsPaths = {
       tags: ["Notifications"],
       summary: "Get unread notification count",
       description: "Returns the number of unread run notifications for the current user.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Unread count",
@@ -37,7 +40,10 @@ export const notificationsPaths = {
       tags: ["Notifications"],
       summary: "Get unread notification counts grouped by agent",
       description: "Returns the number of unread run notifications per agent for the current user.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Unread counts keyed by package ID",
@@ -73,6 +79,7 @@ export const notificationsPaths = {
       description: "Marks the notification for a specific run as read.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -104,7 +111,10 @@ export const notificationsPaths = {
       tags: ["Notifications"],
       summary: "Mark all notifications as read",
       description: "Marks all unread notifications as read for the current user.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Update result",
@@ -140,6 +150,7 @@ export const notificationsPaths = {
         "Lists all runs for the organization across all agents, ordered by most recent. Use `?user=me` to filter to the current user's runs only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "user",
           in: "query",

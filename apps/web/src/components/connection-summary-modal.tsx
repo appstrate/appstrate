@@ -24,7 +24,7 @@ interface ConnectionSummaryModalProps {
   onConfirm: () => void;
   onConfigureConnections: () => void;
   providers: ProviderStatus[];
-  orgProfileName?: string | null;
+  appProfileName?: string | null;
   isPending?: boolean;
 }
 
@@ -34,7 +34,7 @@ export function ConnectionSummaryModal({
   onConfirm,
   onConfigureConnections,
   providers,
-  orgProfileName,
+  appProfileName,
   isPending,
 }: ConnectionSummaryModalProps) {
   const { t } = useTranslation(["agents", "settings", "common"]);
@@ -68,7 +68,7 @@ export function ConnectionSummaryModal({
           const providerMeta = providersData?.providers?.find((p) => p.id === svc.id);
           const displayName = providerMeta?.displayName ?? svc.id;
           const iconUrl = providerMeta?.iconUrl;
-          const isOrg = svc.source === "org_binding";
+          const isAppBinding = svc.source === "app_binding";
           const isConnected = isProviderStatusConnected(svc.status);
 
           return (
@@ -92,10 +92,10 @@ export function ConnectionSummaryModal({
                   <AlertTriangle className="size-3" />
                   {t("run.notConnected")}
                 </span>
-              ) : isOrg ? (
+              ) : isAppBinding ? (
                 <span className="text-primary inline-flex items-center gap-1 text-xs">
                   <Building2 className="size-3" />
-                  {orgProfileName ?? t("providers.connected", { ns: "settings" })}
+                  {appProfileName ?? t("providers.connected", { ns: "settings" })}
                   {svc.profileOwnerName && svc.profileName && (
                     <span className="text-muted-foreground ml-1">
                       {svc.profileOwnerName} — {svc.profileName}

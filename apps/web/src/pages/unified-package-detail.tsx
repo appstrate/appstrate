@@ -558,7 +558,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   type="agent"
                   source={agent.source}
                   keywords={agent.keywords}
-                  providerIds={agent.dependencies.providers}
+                  providerIds={Object.keys(agent.dependencies.providers ?? {})}
                   runningRuns={agent.runningRuns}
                 />
               ))}

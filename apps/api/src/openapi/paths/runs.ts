@@ -10,6 +10,7 @@ export const runsPaths = {
         "Start an agent run (fire-and-forget). Returns the run ID. Rate-limited to 20/min. Supports JSON body or multipart/form-data with file uploads.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { $ref: "#/components/parameters/AppstrateUser" },
         { $ref: "#/components/parameters/AppstrateVersion" },
         { $ref: "#/components/parameters/IdempotencyKey" },
@@ -114,6 +115,7 @@ export const runsPaths = {
       description: "List runs for a specific agent (org-scoped, default limit 50).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -165,6 +167,7 @@ export const runsPaths = {
       description: "Delete all completed runs for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -203,6 +206,7 @@ export const runsPaths = {
       description: "Get run details including status, result, input, and duration.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -231,6 +235,7 @@ export const runsPaths = {
       description: "Get persisted log entries for a run.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -261,6 +266,7 @@ export const runsPaths = {
       description: "Cancel a running or pending run.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {

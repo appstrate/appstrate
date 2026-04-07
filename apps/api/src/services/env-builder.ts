@@ -8,7 +8,8 @@ import { db } from "@appstrate/db/client";
 import { getEnv } from "@appstrate/env";
 import { signRunToken } from "../lib/run-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";
-import { getPackageConfig, getLastRunState, getPackageMemories } from "./state/index.ts";
+import { getLastRunState, getPackageMemories } from "./state/index.ts";
+import { getPackageConfig } from "./application-packages.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionWithManifest } from "./package-versions.ts";
@@ -34,6 +35,7 @@ export async function buildRunContext(params: {
   agent: LoadedPackage;
   providerProfiles: ProviderProfileMap;
   orgId: string;
+  applicationId: string;
   actor: Actor | null;
   input?: Record<string, unknown>;
   files?: FileReference[];
@@ -49,7 +51,7 @@ export async function buildRunContext(params: {
   modelLabel: string | null;
   modelSource: string | null;
 }> {
-  const { runId, agent, providerProfiles, orgId, actor, input, files } = params;
+  const { runId, agent, providerProfiles, orgId, applicationId, actor, input, files } = params;
   const manifestProviders = resolveManifestProviders(agent.manifest);
 
   // Skip getPackageConfig when all values are already provided by the caller (from preflight)
@@ -66,9 +68,9 @@ export async function buildRunContext(params: {
     latestVersion,
     memories,
   ] = await Promise.all([
-    buildProviderTokens(manifestProviders, providerProfiles, orgId),
-    skipConfigFetch ? null : getPackageConfig(orgId, agent.id),
-    getLastRunState(agent.id, actor, orgId),
+    buildProviderTokens(manifestProviders, providerProfiles, orgId, applicationId),
+    skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
+    getLastRunState(agent.id, actor, orgId, applicationId),
     resolveProviderDefs(orgId, manifestProviders),
     buildAgentPackage(agent, orgId),
     params.overrideVersionId
@@ -76,7 +78,7 @@ export async function buildRunContext(params: {
       : agent.source !== "system"
         ? getLatestVersionWithManifest(agent.id).catch(() => null)
         : null,
-    getPackageMemories(agent.id, orgId),
+    getPackageMemories(agent.id, applicationId),
   ]);
 
   const config = params.config ?? configFull?.config ?? {};
@@ -124,7 +126,11 @@ export async function buildRunContext(params: {
 
   // Step 4: assemble prompt context
   const apiEnv = getEnv();
-  const runApiUrl = apiEnv.PLATFORM_API_URL ?? `http://host.docker.internal:${apiEnv.PORT}`;
+  const runApiUrl =
+    apiEnv.PLATFORM_API_URL ??
+    (apiEnv.RUN_ADAPTER === "process"
+      ? `http://localhost:${apiEnv.PORT}`
+      : `http://host.docker.internal:${apiEnv.PORT}`);
 
   const promptContext: PromptContext = {
     rawPrompt: agent.prompt,

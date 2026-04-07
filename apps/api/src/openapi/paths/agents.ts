@@ -12,7 +12,10 @@ export const agentsPaths = {
       summary: "List all agents",
       description:
         "Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Agent list",
@@ -46,6 +49,7 @@ export const agentsPaths = {
       description: "Save agent configuration values. Validated against manifest config schema.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -96,6 +100,7 @@ export const agentsPaths = {
         "Returns the proxy configuration for an agent (override ID and resolution status).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -135,6 +140,7 @@ export const agentsPaths = {
         'Set a proxy override for this agent. Pass a proxy ID, "none" to disable proxying, or null to use org default.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -188,6 +194,7 @@ export const agentsPaths = {
         "Returns accumulated memories for an agent (org-scoped, shared across all users).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -228,6 +235,7 @@ export const agentsPaths = {
       description: "Delete all accumulated memories for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -268,6 +276,7 @@ export const agentsPaths = {
       description: "Delete a specific memory by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -309,6 +318,7 @@ export const agentsPaths = {
       description: "Returns the LLM model override for an agent (null if using org default).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -347,6 +357,7 @@ export const agentsPaths = {
         "Set a model override for this agent. Pass a model ID or null to revert to org default.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -399,6 +410,7 @@ export const agentsPaths = {
       description: "Set the skill references for a user agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -462,6 +474,7 @@ export const agentsPaths = {
       description: "Set the tool references for a user agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -526,6 +539,7 @@ export const agentsPaths = {
         "Returns the per-provider connection profile overrides for an agent. Each key is a provider ID mapped to a profile ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -567,6 +581,7 @@ export const agentsPaths = {
       description: "Override the connection profile used for a specific provider in this agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -616,6 +631,7 @@ export const agentsPaths = {
         "Remove the connection profile override for a specific provider, reverting to the default profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -657,15 +673,16 @@ export const agentsPaths = {
       },
     },
   },
-  "/api/agents/{scope}/{name}/org-profile": {
+  "/api/agents/{scope}/{name}/app-profile": {
     put: {
-      operationId: "setAgentOrgProfile",
+      operationId: "setAgentAppProfile",
       tags: ["Agents"],
-      summary: "Set org profile for an agent",
+      summary: "Set app profile for an agent",
       description:
-        "Set or clear the org-level connection profile for this agent. Pass a profile ID to set, or null to clear.",
+        "Set or clear the application-level connection profile for this agent. Pass a profile ID to set, or null to clear.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "scope",
           in: "path",
@@ -680,12 +697,12 @@ export const agentsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["orgProfileId"],
+              required: ["appProfileId"],
               properties: {
-                orgProfileId: {
+                appProfileId: {
                   type: ["string", "null"],
                   format: "uuid",
-                  description: "Org profile ID or null to clear",
+                  description: "App profile ID or null to clear",
                 },
               },
             },
@@ -694,7 +711,7 @@ export const agentsPaths = {
       },
       responses: {
         "200": {
-          description: "Org profile updated",
+          description: "App profile updated",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },

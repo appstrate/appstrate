@@ -58,7 +58,6 @@ import { LoadingState, ErrorState, EmptyState } from "../components/page-states"
 import { Spinner } from "../components/spinner";
 import { useBilling, useCheckout, usePortal, getUsageBarColor } from "../hooks/use-billing";
 import { PlanGrid } from "../components/plan-card";
-import { OrgProfilesTab } from "../components/org-profiles-tab";
 import { toast } from "sonner";
 import type {
   OrganizationMember,
@@ -82,12 +81,11 @@ export function OrgSettingsPage() {
   const validTabs = [
     "general",
     "members",
-    "profiles",
     ...(isAdmin && features.models ? ["models" as const] : []),
     ...(isAdmin ? ["proxies" as const] : []),
     ...(features.billing ? ["billing" as const] : []),
   ] as const;
-  type Tab = "general" | "members" | "profiles" | "models" | "proxies" | "billing";
+  type Tab = "general" | "members" | "models" | "proxies" | "billing";
   const [tab, setTab] = useTabWithHash<Tab>(validTabs as readonly Tab[], "general");
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
@@ -313,7 +311,6 @@ export function OrgSettingsPage() {
             <TabsTrigger value="members">
               {t("orgSettings.tabMembers", { count: members.length })}
             </TabsTrigger>
-            <TabsTrigger value="profiles">{t("orgSettings.tabProfiles")}</TabsTrigger>
             {isAdmin && features.models && (
               <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>
             )}
@@ -574,8 +571,6 @@ export function OrgSettingsPage() {
           )}
         </>
       )}
-
-      {tab === "profiles" && <OrgProfilesTab />}
 
       {tab === "models" && features.models && (
         <>

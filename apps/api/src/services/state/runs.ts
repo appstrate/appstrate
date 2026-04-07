@@ -10,11 +10,30 @@ import { toISO } from "../../lib/date-helpers.ts";
 
 // --- Runs ---
 
+async function nextRunNumber(
+  packageId: string,
+  orgId: string,
+  applicationId: string,
+): Promise<number> {
+  const [maxRow] = await db
+    .select({ maxNum: max(runs.runNumber) })
+    .from(runs)
+    .where(
+      and(
+        eq(runs.packageId, packageId),
+        eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
+      ),
+    );
+  return (maxRow?.maxNum ?? 0) + 1;
+}
+
 export async function createRun(
   id: string,
   packageId: string,
   actor: Actor | null,
   orgId: string,
+  applicationId: string,
   input: Record<string, unknown> | null,
   scheduleId?: string,
   packageVersionId?: number,
@@ -22,14 +41,9 @@ export async function createRun(
   proxyLabel?: string,
   modelLabel?: string,
   modelSource?: string,
-  applicationId?: string | null,
   providerProfileIds?: Record<string, string>,
 ): Promise<void> {
-  const [maxRow] = await db
-    .select({ maxNum: max(runs.runNumber) })
-    .from(runs)
-    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)));
-  const runNumber = (maxRow?.maxNum ?? 0) + 1;
+  const runNumber = await nextRunNumber(packageId, orgId, applicationId);
 
   await db.insert(runs).values({
     id,
@@ -60,15 +74,12 @@ export async function createFailedRun(
   packageId: string,
   actor: Actor | null,
   orgId: string,
+  applicationId: string,
   error: string,
   scheduleId?: string,
   connectionProfileId?: string,
 ): Promise<void> {
-  const [maxRow] = await db
-    .select({ maxNum: max(runs.runNumber) })
-    .from(runs)
-    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)));
-  const runNumber = (maxRow?.maxNum ?? 0) + 1;
+  const runNumber = await nextRunNumber(packageId, orgId, applicationId);
   const now = new Date();
 
   await db.insert(runs).values({
@@ -76,6 +87,7 @@ export async function createFailedRun(
     packageId,
     ...(actor ? actorInsert(actor) : { userId: null, endUserId: null }),
     orgId,
+    applicationId,
     status: "failed",
     input: null,
     error,
@@ -92,6 +104,7 @@ export async function createFailedRun(
 export async function updateRun(
   id: string,
   orgId: string,
+  applicationId: string,
   updates: {
     status?: string;
     result?: Record<string, unknown>;
@@ -124,7 +137,7 @@ export async function updateRun(
     await db
       .update(runs)
       .set(set)
-      .where(and(eq(runs.id, id), eq(runs.orgId, orgId)));
+      .where(and(eq(runs.id, id), eq(runs.orgId, orgId), eq(runs.applicationId, applicationId)));
   } catch (err) {
     logger.error("Failed to update run", {
       runId: id,
@@ -137,8 +150,14 @@ export async function getLastRunState(
   packageId: string,
   actor: Actor | null,
   orgId: string,
+  applicationId: string,
 ): Promise<Record<string, unknown> | null> {
-  const conditions = [eq(runs.packageId, packageId), eq(runs.orgId, orgId), isNotNull(runs.state)];
+  const conditions = [
+    eq(runs.packageId, packageId),
+    eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
+    isNotNull(runs.state),
+  ];
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
@@ -156,6 +175,7 @@ export async function getRecentRuns(
   packageId: string,
   actor: Actor | null,
   orgId: string,
+  applicationId: string,
   options: {
     limit?: number;
     fields?: ("state" | "result")[];
@@ -168,6 +188,7 @@ export async function getRecentRuns(
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
     eq(runs.status, "success"),
   ];
   if (actor) {
@@ -205,8 +226,17 @@ export async function getRecentRuns(
   });
 }
 
-export async function getLastRun(packageId: string, actor: Actor | null, orgId: string) {
-  const conditions = [eq(runs.packageId, packageId), eq(runs.orgId, orgId)];
+export async function getLastRun(
+  packageId: string,
+  actor: Actor | null,
+  orgId: string,
+  applicationId: string,
+) {
+  const conditions = [
+    eq(runs.packageId, packageId),
+    eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
+  ];
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
@@ -260,6 +290,7 @@ export async function appendRunLog(
 export async function getRunningRunsForPackage(
   packageId: string,
   orgId: string,
+  applicationId: string,
   actor?: Actor,
 ): Promise<number> {
   const conditions = [
@@ -267,6 +298,8 @@ export async function getRunningRunsForPackage(
     eq(runs.orgId, orgId),
     inArray(runs.status, ["running", "pending"]),
   ];
+
+  conditions.push(eq(runs.applicationId, applicationId));
 
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
@@ -287,11 +320,20 @@ export async function getRunningRunCountForOrg(orgId: string): Promise<number> {
   return row?.count ?? 0;
 }
 
-export async function getRunningRunCounts(orgId: string): Promise<Record<string, number>> {
+export async function getRunningRunCounts(
+  orgId: string,
+  applicationId: string,
+): Promise<Record<string, number>> {
   const rows = await db
     .select({ packageId: runs.packageId, count: count() })
     .from(runs)
-    .where(and(eq(runs.orgId, orgId), inArray(runs.status, ["running", "pending"])))
+    .where(
+      and(
+        eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
+        inArray(runs.status, ["running", "pending"]),
+      ),
+    )
     .groupBy(runs.packageId);
 
   const counts: Record<string, number> = {};
@@ -301,7 +343,13 @@ export async function getRunningRunCounts(orgId: string): Promise<Record<string,
   return counts;
 }
 
-export async function getRun(id: string, orgId: string) {
+export async function getRun(id: string, orgId: string, applicationId: string) {
+  const conditions = [
+    eq(runs.id, id),
+    eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
+  ];
+
   const [row] = await db
     .select({
       id: runs.id,
@@ -310,17 +358,28 @@ export async function getRun(id: string, orgId: string) {
       endUserId: runs.endUserId,
       orgId: runs.orgId,
       packageId: runs.packageId,
+      applicationId: runs.applicationId,
     })
     .from(runs)
-    .where(and(eq(runs.id, id), eq(runs.orgId, orgId)))
+    .where(and(...conditions))
     .limit(1);
   return row ?? null;
 }
 
-export async function deletePackageRuns(packageId: string, orgId: string): Promise<number> {
+export async function deletePackageRuns(
+  packageId: string,
+  orgId: string,
+  applicationId: string,
+): Promise<number> {
   const deleted = await db
     .delete(runs)
-    .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)))
+    .where(
+      and(
+        eq(runs.packageId, packageId),
+        eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
+      ),
+    )
     .returning({ id: runs.id });
   return deleted.length;
 }
@@ -359,15 +418,16 @@ export async function listPackageRuns(
   options: {
     limit?: number;
     offset?: number;
-    applicationId?: string | null;
+    applicationId: string;
     endUserId?: string | null;
-  } = {},
+  },
 ) {
   const { limit = 50, offset = 0, applicationId, endUserId } = options;
-  const conditions = [eq(runs.packageId, packageId), eq(runs.orgId, orgId)];
-  if (applicationId) {
-    conditions.push(eq(runs.applicationId, applicationId));
-  }
+  const conditions = [
+    eq(runs.packageId, packageId),
+    eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
+  ];
   if (endUserId) {
     conditions.push(eq(runs.endUserId, endUserId));
   }
@@ -377,17 +437,27 @@ export async function listPackageRuns(
 export async function listScheduleRuns(
   scheduleId: string,
   orgId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: { limit?: number; offset?: number; applicationId: string },
 ) {
-  const { limit = 20, offset = 0 } = options;
+  const { limit = 20, offset = 0, applicationId } = options;
   return listRunsWithFilter(
-    and(eq(runs.scheduleId, scheduleId), eq(runs.orgId, orgId))!,
+    and(
+      eq(runs.scheduleId, scheduleId),
+      eq(runs.orgId, orgId),
+      eq(runs.applicationId, applicationId),
+    )!,
     limit,
     offset,
   );
 }
 
-export async function getRunFull(id: string, orgId: string) {
+export async function getRunFull(id: string, orgId: string, applicationId: string) {
+  const conditions = [
+    eq(runs.id, id),
+    eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
+  ];
+
   const [row] = await db
     .select({
       run: runs,
@@ -395,7 +465,7 @@ export async function getRunFull(id: string, orgId: string) {
     })
     .from(runs)
     .leftJoin(packageVersions, eq(runs.packageVersionId, packageVersions.id))
-    .where(and(eq(runs.id, id), eq(runs.orgId, orgId)))
+    .where(and(...conditions))
     .limit(1);
   if (!row) return null;
   return { ...row.run, packageVersion: row.packageVersion };
@@ -409,6 +479,11 @@ export async function listRunLogs(runId: string, orgId: string) {
     .orderBy(runLogs.id);
 }
 
+/**
+ * Mark all in-flight runs as failed on server restart.
+ * ⚠️ Single-instance only — in multi-instance deployments, this will fail ALL
+ * instances' in-flight runs. Multi-instance support requires per-instance run tracking.
+ */
 export async function markOrphanRunsFailed(): Promise<{
   count: number;
   runIds: string[];

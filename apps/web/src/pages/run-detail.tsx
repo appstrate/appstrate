@@ -14,6 +14,7 @@ import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
 import { useRunRealtime, useRunLogsRealtime } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
+import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { Shield } from "lucide-react";
 import { Badge } from "../components/status-badge";
 import { LogViewer } from "../components/log-viewer";
@@ -36,6 +37,7 @@ export function RunDetailPage() {
   const location = useLocation();
   const stateNumber = (location.state as { runNumber?: number } | null)?.runNumber;
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   const { data: agent } = usePackageDetail("agent", packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
@@ -65,14 +67,14 @@ export function RunDetailPage() {
     useCallback(
       (newLog: Record<string, unknown>) => {
         const log = newLog as unknown as RunLog;
-        qc.setQueryData<RunLog[]>(["run-logs", orgId, runId], (prev) => {
+        qc.setQueryData<RunLog[]>(["run-logs", orgId, appId, runId], (prev) => {
           if (!prev) return [log];
           // Deduplicate: skip if already present (race between REST fetch and SSE)
           if (prev.some((l) => l.id === log.id)) return prev;
           return [...prev, log];
         });
       },
-      [qc, orgId, runId],
+      [qc, orgId, appId, runId],
     ),
   );
 
@@ -145,11 +147,11 @@ export function RunDetailPage() {
           newStatus === "timeout" ||
           newStatus === "cancelled";
         if (terminal) {
-          qc.invalidateQueries({ queryKey: ["run", orgId, runId] });
-          qc.invalidateQueries({ queryKey: ["run-logs", orgId, runId] });
+          qc.invalidateQueries({ queryKey: ["run", orgId, appId, runId] });
+          qc.invalidateQueries({ queryKey: ["run-logs", orgId, appId, runId] });
         }
       },
-      [qc, orgId, runId],
+      [qc, orgId, appId, runId],
     ),
   );
 

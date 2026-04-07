@@ -50,3 +50,8 @@ claudedocs/
 
 # Docker Compose dev override (auto-merged, local only)
 docker-compose.override.yml
+
+# Playwright
+test-results/
+playwright-report/
+.playwright/
