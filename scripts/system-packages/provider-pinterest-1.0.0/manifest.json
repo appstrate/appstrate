@@ -1,0 +1,55 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/pinterest",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Pinterest",
+  "description": "Visual discovery and bookmarking platform",
+  "iconUrl": "https://cdn.simpleicons.org/pinterest",
+  "categories": ["social-media", "marketing"],
+  "docsUrl": "https://developers.pinterest.com/docs/api/v5/",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://www.pinterest.com/oauth/",
+      "tokenUrl": "https://api.pinterest.com/v5/oauth/token",
+      "refreshUrl": "https://api.pinterest.com/v5/oauth/token",
+      "defaultScopes": ["boards:read", "pins:read", "user_accounts:read"],
+      "scopeSeparator": ",",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_basic"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://api.pinterest.com/*"
+    ],
+    "availableScopes": [
+      { "value": "boards:read", "label": "Read boards" },
+      { "value": "boards:write", "label": "Create & edit boards" },
+      { "value": "pins:read", "label": "Read pins" },
+      { "value": "pins:write", "label": "Create & edit pins" },
+      { "value": "user_accounts:read", "label": "Read user profile" },
+      { "value": "ads:read", "label": "Read ads data" },
+      { "value": "ads:write", "label": "Manage ads campaigns" },
+      { "value": "catalogs:read", "label": "Read product catalogs" },
+      { "value": "catalogs:write", "label": "Manage product catalogs" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create a Pinterest app",
+        "url": "https://developers.pinterest.com/apps/"
+      },
+      {
+        "label": "Configure OAuth settings and redirect URI"
+      },
+      {
+        "label": "Copy your App ID and App Secret"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
