@@ -360,15 +360,41 @@ async function buildRefreshContext(
     clientSecret: adminCreds.clientSecret,
     tokenAuthMethod: (oauth2.tokenAuthMethod as string) ?? undefined,
     scopeSeparator: (oauth2.scopeSeparator as string) ?? undefined,
+    tokenContentType: (oauth2.tokenContentType as string) ?? undefined,
   };
 }
 
-/** Map decrypted credentials to the sidecar format (single named field for oauth2/api_key). */
+/**
+ * Map decrypted credentials to the sidecar format.
+ * For oauth2/api_key with a named field, maps to a single credential variable.
+ * For api_key providers with credentialEncoding, pre-encodes the credential.
+ *
+ * Supported credentialEncoding values:
+ * - "basic_api_key_x": base64(api_key:X) — Freshdesk/Teamwork pattern
+ * - "basic_email_token": base64(email/token:api_key) — Zendesk API token pattern
+ */
 function buildSidecarCredentials(
   credentials: Record<string, string>,
   def: Record<string, unknown>,
   authMode: string | undefined,
 ): Record<string, string> {
+  const credentialEncoding = def.credentialEncoding as string | undefined;
+
+  // Apply credential encoding transformations for api_key providers
+  if (authMode === "api_key" && credentialEncoding) {
+    const apiKey = credentials.api_key;
+    if (credentialEncoding === "basic_api_key_x" && apiKey) {
+      // Freshdesk/Teamwork: Basic auth with api_key as username, "X" as password
+      const encoded = Buffer.from(`${apiKey}:X`).toString("base64");
+      return { ...credentials, api_key: encoded };
+    }
+    if (credentialEncoding === "basic_email_token" && apiKey && credentials.email) {
+      // Zendesk: Basic auth with email/token as username, api_token as password
+      const encoded = Buffer.from(`${credentials.email}/token:${apiKey}`).toString("base64");
+      return { ...credentials, api_key: encoded };
+    }
+  }
+
   if (authMode === "oauth2" || authMode === "api_key") {
     const creds = (def.credentials as Record<string, unknown>) ?? {};
     const fieldName = creds.fieldName as string | undefined;

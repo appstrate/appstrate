@@ -5,7 +5,7 @@ import { userProviderConnections } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
-import { parseTokenResponse, buildTokenHeaders } from "./token-utils.ts";
+import { parseTokenResponse, buildTokenHeaders, buildTokenBody } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
 
 /** In-memory concurrency lock: one refresh at a time per connection. */
@@ -17,6 +17,7 @@ export interface RefreshContext {
   clientSecret: string;
   tokenAuthMethod?: string;
   scopeSeparator?: string;
+  tokenContentType?: string;
 }
 
 /**
@@ -71,18 +72,20 @@ async function doRefresh(
 
   const useBasicAuth = ctx.tokenAuthMethod === "client_secret_basic";
 
-  const body = new URLSearchParams({
+  const bodyParams: Record<string, string> = {
     grant_type: "refresh_token",
     refresh_token: creds.refresh_token,
     ...(useBasicAuth ? {} : { client_id: ctx.clientId, client_secret: ctx.clientSecret }),
-  });
+  };
+
+  const body = buildTokenBody(bodyParams, ctx.tokenContentType);
 
   let response: Response;
   try {
     response = await fetch(ctx.tokenUrl, {
       method: "POST",
-      headers: buildTokenHeaders(ctx.tokenAuthMethod, ctx.clientId, ctx.clientSecret),
-      body: body.toString(),
+      headers: buildTokenHeaders(ctx.tokenAuthMethod, ctx.clientId, ctx.clientSecret, ctx.tokenContentType),
+      body,
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {

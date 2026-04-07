@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { parseTokenResponse } from "../src/token-utils.ts";
+import { parseTokenResponse, buildTokenHeaders, buildTokenBody } from "../src/token-utils.ts";
 
 describe("parseTokenResponse", () => {
   const baseToken = { access_token: "tok_123" };
@@ -67,5 +67,53 @@ describe("parseTokenResponse", () => {
       "rt_old",
     );
     expect(result.refreshToken).toBe("rt_new");
+  });
+});
+
+describe("buildTokenHeaders", () => {
+  it("defaults to form-urlencoded content type", () => {
+    const headers = buildTokenHeaders(undefined, "client_id", "client_secret");
+    expect(headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+  });
+
+  it("uses JSON content type when tokenContentType is application/json", () => {
+    const headers = buildTokenHeaders(undefined, "client_id", "client_secret", "application/json");
+    expect(headers["Content-Type"]).toBe("application/json");
+  });
+
+  it("sets Basic auth header for client_secret_basic", () => {
+    const headers = buildTokenHeaders("client_secret_basic", "my_id", "my_secret");
+    expect(headers["Authorization"]).toStartWith("Basic ");
+    const decoded = Buffer.from(headers["Authorization"]!.slice(6), "base64").toString();
+    expect(decoded).toBe("my_id:my_secret");
+  });
+
+  it("combines Basic auth with JSON content type", () => {
+    const headers = buildTokenHeaders("client_secret_basic", "id", "secret", "application/json");
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers["Authorization"]).toStartWith("Basic ");
+  });
+});
+
+describe("buildTokenBody", () => {
+  it("builds form-urlencoded body by default", () => {
+    const body = buildTokenBody({ grant_type: "authorization_code", code: "abc" });
+    expect(body).toContain("grant_type=authorization_code");
+    expect(body).toContain("code=abc");
+  });
+
+  it("builds JSON body when tokenContentType is application/json", () => {
+    const body = buildTokenBody(
+      { grant_type: "authorization_code", code: "abc" },
+      "application/json",
+    );
+    const parsed = JSON.parse(body);
+    expect(parsed.grant_type).toBe("authorization_code");
+    expect(parsed.code).toBe("abc");
+  });
+
+  it("builds form-urlencoded for undefined tokenContentType", () => {
+    const body = buildTokenBody({ key: "value" }, undefined);
+    expect(body).toBe("key=value");
   });
 });

@@ -149,6 +149,7 @@ export interface ResolvedProviderDefinition {
   scopeSeparator: string;
   pkceEnabled: boolean;
   tokenAuthMethod?: string;
+  tokenContentType?: string;
   authorizationParams: Record<string, string>;
   tokenParams: Record<string, string>;
   credentialSchema?: Record<string, unknown>;
@@ -196,6 +197,7 @@ export function buildProviderDefinitionFromManifest(
     scopeSeparator: (oauth2?.scopeSeparator as string) ?? " ",
     pkceEnabled: (oauth2?.pkceEnabled as boolean) ?? true,
     tokenAuthMethod: oauth2?.tokenAuthMethod as string | undefined,
+    tokenContentType: oauth2?.tokenContentType as string | undefined,
     authorizationParams: (oauth2?.authorizationParams as Record<string, string>) ?? {},
     tokenParams: (oauth2?.tokenParams as Record<string, string>) ?? {},
     // OAuth1 fields (from definition.oauth1)

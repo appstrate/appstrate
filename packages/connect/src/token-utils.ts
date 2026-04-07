@@ -9,14 +9,17 @@
  * Build headers for an OAuth2 token endpoint request.
  * When tokenAuthMethod is "client_secret_basic", credentials are sent
  * as an Authorization: Basic header (RFC 6749 §2.3.1) instead of POST body.
+ * When tokenContentType is "application/json", the Content-Type is set to JSON
+ * (required by providers like Atlassian/Jira that don't accept form-urlencoded).
  */
 export function buildTokenHeaders(
   tokenAuthMethod: string | undefined,
   clientId: string,
   clientSecret: string,
+  tokenContentType?: string,
 ): Record<string, string> {
   const headers: Record<string, string> = {
-    "Content-Type": "application/x-www-form-urlencoded",
+    "Content-Type": tokenContentType ?? "application/x-www-form-urlencoded",
     Accept: "application/json",
   };
   if (tokenAuthMethod === "client_secret_basic") {
@@ -27,6 +30,21 @@ export function buildTokenHeaders(
     headers["Authorization"] = `Basic ${encoded}`;
   }
   return headers;
+}
+
+/**
+ * Build the token request body.
+ * When tokenContentType is "application/json", returns a JSON string.
+ * Otherwise returns a URLSearchParams string (standard form-urlencoded).
+ */
+export function buildTokenBody(
+  params: Record<string, string>,
+  tokenContentType?: string,
+): string {
+  if (tokenContentType === "application/json") {
+    return JSON.stringify(params);
+  }
+  return new URLSearchParams(params).toString();
 }
 
 export interface ParsedTokenResponse {
