@@ -5,11 +5,8 @@
   "type": "provider",
   "displayName": "ClickUp",
   "description": "Project management and productivity platform",
-  "iconUrl": "https://cdn.simpleicons.org/clickup",
-  "categories": [
-    "productivity",
-    "project-management"
-  ],
+  "iconUrl": "clickup",
+  "categories": ["productivity", "project-management"],
   "docsUrl": "https://developer.clickup.com/docs/Getting%20Started",
   "definition": {
     "authMode": "oauth2",
@@ -23,9 +20,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://api.clickup.com/*"
-    ]
+    "authorizedUris": ["https://api.clickup.com/*"]
   },
   "setupGuide": {
     "callbackUrlHint": "Set the redirect URL to: {{callbackUrl}}",

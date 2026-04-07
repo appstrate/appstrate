@@ -5,30 +5,22 @@
   "type": "provider",
   "displayName": "GitHub",
   "description": "Code hosting and collaboration platform",
-  "iconUrl": "https://cdn.simpleicons.org/github/white",
-  "categories": [
-    "development",
-    "code"
-  ],
+  "iconUrl": "github",
+  "categories": ["development", "code"],
   "docsUrl": "https://docs.github.com/en/apps/oauth-apps",
   "definition": {
     "authMode": "oauth2",
     "oauth2": {
       "authorizationUrl": "https://github.com/login/oauth/authorize",
       "tokenUrl": "https://github.com/login/oauth/access_token",
-      "defaultScopes": [
-        "repo",
-        "read:user"
-      ],
+      "defaultScopes": ["repo", "read:user"],
       "scopeSeparator": " ",
       "pkceEnabled": false,
       "tokenAuthMethod": "client_secret_post"
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://api.github.com/*"
-    ],
+    "authorizedUris": ["https://api.github.com/*"],
     "availableScopes": [
       {
         "value": "repo",

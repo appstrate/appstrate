@@ -5,11 +5,8 @@
   "type": "provider",
   "displayName": "Google Drive",
   "description": "Cloud file storage and synchronization",
-  "iconUrl": "https://cdn.simpleicons.org/googledrive",
-  "categories": [
-    "storage",
-    "productivity"
-  ],
+  "iconUrl": "googledrive",
+  "categories": ["storage", "productivity"],
   "docsUrl": "https://developers.google.com/workspace/drive/api",
   "definition": {
     "authMode": "oauth2",
@@ -17,9 +14,7 @@
       "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
       "tokenUrl": "https://oauth2.googleapis.com/token",
       "refreshUrl": "https://oauth2.googleapis.com/token",
-      "defaultScopes": [
-        "https://www.googleapis.com/auth/drive.file"
-      ],
+      "defaultScopes": ["https://www.googleapis.com/auth/drive.file"],
       "scopeSeparator": " ",
       "pkceEnabled": false,
       "tokenAuthMethod": "client_secret_post",

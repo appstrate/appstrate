@@ -5,11 +5,8 @@
   "type": "provider",
   "displayName": "Trello",
   "description": "Project management and collaboration boards",
-  "iconUrl": "https://cdn.simpleicons.org/trello",
-  "categories": [
-    "productivity",
-    "project-management"
-  ],
+  "iconUrl": "trello",
+  "categories": ["productivity", "project-management"],
   "docsUrl": "https://developer.atlassian.com/cloud/trello/guides/rest-api/authorization/",
   "definition": {
     "authMode": "oauth1",
@@ -23,9 +20,7 @@
         "expiration": "never"
       }
     },
-    "authorizedUris": [
-      "https://api.trello.com/*"
-    ]
+    "authorizedUris": ["https://api.trello.com/*"]
   },
   "setupGuide": {
     "callbackUrlHint": "Set the allowed origins to include: {{callbackUrl}}",

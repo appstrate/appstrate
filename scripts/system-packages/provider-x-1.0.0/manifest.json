@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "X (Twitter)",
   "description": "Social media platform for microblogging and real-time engagement",
-  "iconUrl": "https://cdn.simpleicons.org/x/white",
+  "iconUrl": "x",
   "categories": ["social-media", "marketing"],
   "docsUrl": "https://docs.x.com/x-api",
   "definition": {
@@ -21,9 +21,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://api.x.com/*"
-    ],
+    "authorizedUris": ["https://api.x.com/*"],
     "availableScopes": [
       { "value": "tweet.read", "label": "Read tweets" },
       { "value": "tweet.write", "label": "Post & delete tweets" },

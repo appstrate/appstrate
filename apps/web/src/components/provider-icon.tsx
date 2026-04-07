@@ -28,16 +28,15 @@ type IconComponent = ComponentType<SVGAttributes<SVGElement>>;
 
 interface IconEntry {
   icon: IconComponent;
-  /** Brand hex color (light theme). Icons with very dark colors get swapped in dark mode. */
+  /** Brand hex color (light theme). */
   color: string;
-  /** If true the color is too dark to read on dark backgrounds — use white in dark mode. */
+  /** If true the color is too dark on dark backgrounds — use white in dark mode. */
   darkInvert?: boolean;
 }
 
 /**
- * Map from `cdn.simpleicons.org` slug → local react-icons component + brand color.
- * Only icons actually used by system providers need to be listed.
- * Add entries here when new providers are added.
+ * Map from icon key → local react-icons component + brand color.
+ * Add entries here when new system providers are added.
  */
 const ICON_MAP: Record<string, IconEntry> = {
   brevo: { icon: SiBrevo, color: "#0B996E" },
@@ -59,28 +58,13 @@ const ICON_MAP: Record<string, IconEntry> = {
   youtube: { icon: SiYoutube, color: "#FF0000" },
 };
 
-/* ── Helpers ──────────────────────────────────────────────────────────── */
-
-const SIMPLEICONS_CDN = "cdn.simpleicons.org";
-
-/** Shared base classes for all icon variants (local SVG, remote img, letter fallback). */
 const ICON_BASE =
   "bg-muted/50 dark:bg-muted/50 shrink-0 rounded object-contain p-1 " +
   "drop-shadow-[0_0_0.5px_rgba(0,0,0,0.5)] dark:drop-shadow-[0_0_0.5px_rgba(255,255,255,0.6)]";
 
-/** Extract slug from `https://cdn.simpleicons.org/{slug}[/{color}]`. */
-function extractSlug(url: string): string | null {
-  try {
-    const u = new URL(url);
-    if (u.hostname !== SIMPLEICONS_CDN) return null;
-    const parts = u.pathname.split("/").filter(Boolean);
-    return parts[0] ?? null;
-  } catch {
-    return null;
-  }
+function isUrl(value: string): boolean {
+  return value.startsWith("http://") || value.startsWith("https://") || value.startsWith("data:");
 }
-
-/* ── Component ────────────────────────────────────────────────────────── */
 
 interface ProviderIconProps {
   src: string;
@@ -92,26 +76,39 @@ interface ProviderIconProps {
  * Renders a provider icon.
  *
  * Resolution order:
- * 1. Local react-icons component (if src matches a known simpleicons CDN slug)
- * 2. Remote `<img>` from the original URL
- * 3. Letter avatar fallback on load error
+ * 1. If src is a key (not a URL), look up in ICON_MAP → local SVG
+ * 2. If src is a URL, render remote `<img>`
+ * 3. Letter avatar fallback on error or unknown key
  */
 export function ProviderIcon({ src, alt = "", className }: ProviderIconProps) {
-  const slug = extractSlug(src);
-  const LocalIcon = slug ? ICON_MAP[slug] : undefined;
-
-  // ── 1. Local icon ──
-  if (LocalIcon) {
+  if (!isUrl(src)) {
+    const entry = ICON_MAP[src];
+    if (entry) {
+      return (
+        <entry.icon
+          aria-label={alt || src}
+          style={{ color: entry.color }}
+          className={cn(ICON_BASE, entry.darkInvert && "dark:[color:white]", className)}
+        />
+      );
+    }
+    // Unknown key — letter fallback
+    const label = alt || src;
     return (
-      <LocalIcon.icon
-        aria-label={alt || slug || ""}
-        style={{ color: LocalIcon.color }}
-        className={cn(ICON_BASE, LocalIcon.darkInvert && "dark:[color:white]", className)}
-      />
+      <span
+        role="img"
+        aria-label={label}
+        className={cn(
+          "bg-muted/50 dark:bg-muted/50 text-muted-foreground shrink-0 rounded",
+          "inline-flex items-center justify-center text-xs font-medium",
+          className,
+        )}
+      >
+        {label.charAt(0).toUpperCase()}
+      </span>
     );
   }
 
-  // ── 2. Remote image with error fallback ──
   return <RemoteIcon src={src} alt={alt} className={className} />;
 }
 
@@ -120,7 +117,7 @@ function RemoteIcon({ src, alt, className }: ProviderIconProps) {
   const [errored, setErrored] = useState(false);
 
   if (errored) {
-    const label = alt || extractSlug(src) || "?";
+    const label = alt || "?";
     return (
       <span
         role="img"
