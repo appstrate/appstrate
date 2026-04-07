@@ -16,6 +16,7 @@ interface DbPackageRow {
   draftManifest: unknown;
   draftContent: string;
   source?: string;
+  updatedAt?: Date;
   depRefs?: {
     dependencyId: string;
     type: string;
@@ -60,6 +61,7 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
       (manifest.dependencies?.tools ?? {}) as Record<string, string>,
     ),
     source: (row.source as "system" | "local") ?? "local",
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -101,6 +103,7 @@ export async function getPackage(id: string, orgId: string): Promise<LoadedPacka
       draftManifest: packages.draftManifest,
       draftContent: packages.draftContent,
       source: packages.source,
+      updatedAt: packages.updatedAt,
     })
     .from(packages)
     .where(and(...conditions))
@@ -116,6 +119,7 @@ export async function getPackage(id: string, orgId: string): Promise<LoadedPacka
     draftManifest: pkgRow.draftManifest,
     draftContent: pkgRow.draftContent ?? "",
     source: pkgRow.source,
+    updatedAt: pkgRow.updatedAt,
     depRefs,
   });
 }

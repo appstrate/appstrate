@@ -2,7 +2,7 @@
 
 import { eq, and, ne, desc, isNotNull, inArray, count, max, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, runLogs, packageVersions } from "@appstrate/db/schema";
+import { runs, runLogs } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
 import { type Actor, actorInsert, actorFilter } from "../../lib/actor.ts";
 import { asRecordOrNull } from "../../lib/safe-json.ts";
@@ -28,21 +28,26 @@ async function nextRunNumber(
   return (maxRow?.maxNum ?? 0) + 1;
 }
 
-export async function createRun(
-  id: string,
-  packageId: string,
-  actor: Actor | null,
-  orgId: string,
-  applicationId: string,
-  input: Record<string, unknown> | null,
-  scheduleId?: string,
-  packageVersionId?: number,
-  connectionProfileId?: string,
-  proxyLabel?: string,
-  modelLabel?: string,
-  modelSource?: string,
-  providerProfileIds?: Record<string, string>,
-): Promise<void> {
+interface CreateRunParams {
+  id: string;
+  packageId: string;
+  actor: Actor | null;
+  orgId: string;
+  applicationId: string;
+  input: Record<string, unknown> | null;
+  scheduleId?: string;
+  connectionProfileId?: string;
+  versionLabel?: string;
+  versionDirty?: boolean;
+  proxyLabel?: string;
+  modelLabel?: string;
+  modelSource?: string;
+  providerProfileIds?: Record<string, string>;
+  providerStatuses?: unknown[];
+}
+
+export async function createRun(params: CreateRunParams): Promise<void> {
+  const { id, packageId, actor, orgId, applicationId, input } = params;
   const runNumber = await nextRunNumber(packageId, orgId, applicationId);
 
   await db.insert(runs).values({
@@ -53,14 +58,16 @@ export async function createRun(
     status: "pending",
     input,
     startedAt: new Date(),
-    connectionProfileId,
-    scheduleId,
-    packageVersionId,
-    proxyLabel,
-    modelLabel,
-    modelSource,
+    connectionProfileId: params.connectionProfileId,
+    scheduleId: params.scheduleId,
+    versionLabel: params.versionLabel,
+    versionDirty: params.versionDirty ?? false,
+    proxyLabel: params.proxyLabel,
+    modelLabel: params.modelLabel,
+    modelSource: params.modelSource,
     applicationId,
-    providerProfileIds,
+    providerProfileIds: params.providerProfileIds,
+    providerStatuses: params.providerStatuses,
     runNumber,
   });
 }
@@ -392,22 +399,15 @@ export async function listRunsWithFilter(
   const [countRow] = await db.select({ count: count() }).from(runs).where(filter);
 
   const rows = await db
-    .select({
-      run: runs,
-      packageVersion: packageVersions.version,
-    })
+    .select()
     .from(runs)
-    .leftJoin(packageVersions, eq(runs.packageVersionId, packageVersions.id))
     .where(filter)
     .orderBy(desc(runs.startedAt))
     .limit(limit)
     .offset(offset);
 
   return {
-    runs: rows.map((r) => ({
-      ...r.run,
-      packageVersion: r.packageVersion,
-    })) as unknown as Record<string, unknown>[],
+    runs: rows as unknown as Record<string, unknown>[],
     total: countRow?.count ?? 0,
   };
 }
@@ -459,16 +459,11 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
   ];
 
   const [row] = await db
-    .select({
-      run: runs,
-      packageVersion: packageVersions.version,
-    })
+    .select()
     .from(runs)
-    .leftJoin(packageVersions, eq(runs.packageVersionId, packageVersions.id))
     .where(and(...conditions))
     .limit(1);
-  if (!row) return null;
-  return { ...row.run, packageVersion: row.packageVersion };
+  return row ?? null;
 }
 
 export async function listRunLogs(runId: string, orgId: string) {

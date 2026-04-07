@@ -8,6 +8,7 @@
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.52.12",
     "@mariozechner/pi-ai": "^0.52.12",
-    "@sinclair/typebox": "^0.34.0"
+    "@sinclair/typebox": "^0.34.0",
+    "ajv": "^8.18.0"
   }
 }

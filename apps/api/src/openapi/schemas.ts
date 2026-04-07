@@ -367,7 +367,14 @@ export const schemas = {
       duration: { type: "integer", description: "Duration in milliseconds" },
       connectionProfileId: { type: "string" },
       scheduleId: { type: "string" },
-      packageVersionId: { type: "integer" },
+      versionLabel: {
+        type: ["string", "null"],
+        description: "Version label at run time (e.g. '1.0.0')",
+      },
+      versionDirty: {
+        type: "boolean",
+        description: "Whether the draft had unpublished changes at run time",
+      },
       proxyLabel: { type: ["string", "null"], description: "Proxy label used at run time" },
       modelLabel: { type: ["string", "null"], description: "Model label used at run time" },
       modelSource: {

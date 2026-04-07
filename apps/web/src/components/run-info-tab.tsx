@@ -2,10 +2,13 @@
 
 import { useTranslation } from "react-i18next";
 import { Coins } from "lucide-react";
+import { cn } from "../lib/utils";
 import { JsonView } from "./json-view";
 import { SectionCard } from "./section-card";
 import { EmptyState } from "./page-states";
-import type { Run } from "@appstrate/shared-types";
+import { ProviderStatusRow } from "./provider-status-row";
+import { useProviders } from "../hooks/use-providers";
+import type { Run, RunProviderSnapshot } from "@appstrate/shared-types";
 
 interface RunInfoTabProps {
   run: Run;
@@ -21,7 +24,9 @@ function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export function RunInfoTab({ run }: RunInfoTabProps) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "settings"]);
+  const { data: providersData } = useProviders();
+  const providerStatuses = run.providerStatuses as RunProviderSnapshot[] | null;
   const input = run.input as Record<string, unknown> | null;
   const usage = run.tokenUsage as {
     input_tokens?: number;
@@ -35,6 +40,42 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
 
   return (
     <div className="space-y-4">
+      {/* Version */}
+      <InfoCard
+        label="Version"
+        value={
+          <span className={cn("font-mono", !run.versionLabel && "italic")}>
+            {run.versionLabel
+              ? `v${run.versionLabel}${run.versionDirty ? ` ${t("exec.versionDirty")}` : ""}`
+              : t("exec.draft")}
+          </span>
+        }
+      />
+
+      {/* Connections */}
+      {providerStatuses && providerStatuses.length > 0 && (
+        <SectionCard title={t("exec.infoConnections")}>
+          <div className="space-y-1.5">
+            {providerStatuses.map((svc) => {
+              const providerMeta = providersData?.providers?.find((p) => p.id === svc.id);
+              return (
+                <ProviderStatusRow
+                  key={svc.id}
+                  id={svc.id}
+                  status={svc.status}
+                  source={svc.source}
+                  profileName={svc.profileName}
+                  profileOwnerName={svc.profileOwnerName}
+                  scopesSufficient={svc.scopesSufficient}
+                  displayName={providerMeta?.displayName ?? svc.id}
+                  iconUrl={providerMeta?.iconUrl}
+                />
+              );
+            })}
+          </div>
+        </SectionCard>
+      )}
+
       {/* Input */}
       {input && Object.keys(input).length > 0 && (
         <SectionCard title={t("exec.infoInput")}>

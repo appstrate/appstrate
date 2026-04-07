@@ -18,7 +18,7 @@ import { runStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
 import { organizations } from "./organizations.ts";
-import { packages, packageVersions } from "./packages.ts";
+import { packages } from "./packages.ts";
 import { connectionProfiles } from "./connections.ts";
 
 export const runs = pgTable(
@@ -56,9 +56,8 @@ export const runs = pgTable(
     scheduleId: text("schedule_id").references(() => packageSchedules.id, {
       onDelete: "set null",
     }),
-    packageVersionId: integer("package_version_id").references(() => packageVersions.id, {
-      onDelete: "set null",
-    }),
+    versionLabel: text("version_label"),
+    versionDirty: boolean("version_dirty").default(false).notNull(),
     notifiedAt: timestamp("notified_at"),
     readAt: timestamp("read_at"),
     proxyLabel: text("proxy_label"),
@@ -67,6 +66,7 @@ export const runs = pgTable(
     cost: doublePrecision("cost"),
     runNumber: integer("run_number"),
     providerProfileIds: jsonb("provider_profile_ids").$type<Record<string, string>>(),
+    providerStatuses: jsonb("provider_statuses"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   },
   (table) => [

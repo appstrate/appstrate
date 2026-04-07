@@ -1,21 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import {
-  Building2,
-  User,
-  AlertTriangle,
-  AlertCircle,
-  CheckCircle2,
-  Plug,
-  Shield,
-} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
 import { Modal } from "./modal";
-import { ProviderIcon } from "./provider-icon";
+import { ProviderStatusRow } from "./provider-status-row";
 import { useProviders } from "../hooks/use-providers";
-import { isProviderStatusConnected } from "../lib/provider-status";
 import type { ProviderStatus } from "@appstrate/shared-types";
 
 interface ConnectionSummaryModalProps {
@@ -66,62 +56,19 @@ export function ConnectionSummaryModal({
       <div className="space-y-1.5">
         {providers.map((svc) => {
           const providerMeta = providersData?.providers?.find((p) => p.id === svc.id);
-          const displayName = providerMeta?.displayName ?? svc.id;
-          const iconUrl = providerMeta?.iconUrl;
-          const isAppBinding = svc.source === "app_binding";
-          const isConnected = isProviderStatusConnected(svc.status);
-
           return (
-            <div
+            <ProviderStatusRow
               key={svc.id}
-              className="border-border bg-muted/30 flex items-center gap-2 rounded-md border px-3 py-2"
-            >
-              <div className="flex min-w-0 shrink-0 items-center gap-2">
-                {iconUrl ? (
-                  <ProviderIcon src={iconUrl} className="size-4 shrink-0" />
-                ) : (
-                  <Plug className="text-muted-foreground size-3.5 shrink-0" />
-                )}
-                <span className="truncate text-sm font-medium">{displayName}</span>
-              </div>
-
-              <div className="flex-1" />
-
-              {!isConnected ? (
-                <span className="text-destructive inline-flex items-center gap-1 text-xs">
-                  <AlertTriangle className="size-3" />
-                  {t("run.notConnected")}
-                </span>
-              ) : isAppBinding ? (
-                <span className="text-primary inline-flex items-center gap-1 text-xs">
-                  <Building2 className="size-3" />
-                  {appProfileName ?? t("providers.connected", { ns: "settings" })}
-                  {svc.profileOwnerName && svc.profileName && (
-                    <span className="text-muted-foreground ml-1">
-                      {svc.profileOwnerName} — {svc.profileName}
-                    </span>
-                  )}
-                </span>
-              ) : (
-                <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
-                  <User className="size-3" />
-                  {svc.profileOwnerName && svc.profileName
-                    ? `${svc.profileOwnerName} — ${svc.profileName}`
-                    : (svc.profileName ?? t("providers.connected", { ns: "settings" }))}
-                </span>
-              )}
-
-              {isConnected && svc.scopesSufficient === false ? (
-                <span className="inline-flex items-center gap-1 text-xs text-amber-500">
-                  <Shield className="size-3.5 shrink-0" />
-                  {t("providerCard.scopesMissing")}
-                </span>
-              ) : isConnected && svc.status === "needs_reconnection" ? (
-                <AlertCircle className="size-3.5 shrink-0 text-amber-500" />
-              ) : isConnected ? (
-                <CheckCircle2 className="text-success size-3.5 shrink-0" />
-              ) : null}
-            </div>
+              id={svc.id}
+              status={svc.status}
+              source={svc.source}
+              profileName={svc.profileName}
+              profileOwnerName={svc.profileOwnerName}
+              scopesSufficient={svc.scopesSufficient}
+              displayName={providerMeta?.displayName ?? svc.id}
+              iconUrl={providerMeta?.iconUrl}
+              appProfileName={appProfileName}
+            />
           );
         })}
       </div>

@@ -12,7 +12,7 @@ import { getLastRunState, getPackageMemories } from "./state/index.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
-import { getLatestVersionWithManifest } from "./package-versions.ts";
+import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
 import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
@@ -42,11 +42,12 @@ export async function buildRunContext(params: {
   config?: Record<string, unknown>;
   modelId?: string | null;
   proxyId?: string | null;
-  overrideVersionId?: number;
+  overrideVersionLabel?: string;
 }): Promise<{
   promptContext: PromptContext;
   agentPackage: Buffer | null;
-  packageVersionId: number | null;
+  versionLabel: string | null;
+  versionDirty: boolean;
   proxyLabel: string | null;
   modelLabel: string | null;
   modelSource: string | null;
@@ -73,10 +74,10 @@ export async function buildRunContext(params: {
     getLastRunState(agent.id, actor, orgId, applicationId),
     resolveProviderDefs(orgId, manifestProviders),
     buildAgentPackage(agent, orgId),
-    params.overrideVersionId
-      ? Promise.resolve(params.overrideVersionId)
+    params.overrideVersionLabel
+      ? null
       : agent.source !== "system"
-        ? getLatestVersionWithManifest(agent.id).catch(() => null)
+        ? getLatestVersionInfo(agent.id).catch(() => null)
         : null,
     getPackageMemories(agent.id, applicationId),
   ]);
@@ -114,14 +115,13 @@ export async function buildRunContext(params: {
     cost: modelResult.cost,
   };
 
-  // Step 3: resolve version ID (dirty check against live manifest)
-  let packageVersionId: number | null = null;
-  if (typeof latestVersion === "number") {
-    packageVersionId = latestVersion;
-  } else if (latestVersion) {
-    const liveKey = JSON.stringify(agent.manifest);
-    const versionKey = JSON.stringify(latestVersion.manifest);
-    packageVersionId = liveKey === versionKey ? latestVersion.id : null;
+  // Step 3: resolve version label + dirty flag
+  let versionLabel: string | null = params.overrideVersionLabel ?? null;
+  let versionDirty = false;
+  if (!versionLabel && latestVersion) {
+    versionLabel = latestVersion.version;
+    const updatedAt = agent.updatedAt ?? new Date();
+    versionDirty = updatedAt > latestVersion.createdAt;
   }
 
   // Step 4: assemble prompt context
@@ -164,7 +164,15 @@ export async function buildRunContext(params: {
     toolDocs,
   };
 
-  return { promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel, modelSource };
+  return {
+    promptContext,
+    agentPackage,
+    versionLabel,
+    versionDirty,
+    proxyLabel,
+    modelLabel,
+    modelSource,
+  };
 }
 
 /** Resolve unique provider definitions for prompt context. */

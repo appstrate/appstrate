@@ -172,15 +172,19 @@ export async function getLatestVersionId(packageId: string): Promise<number | nu
   return row?.id ?? null;
 }
 
-/** Get the latest version ID + manifest for dirty-check at run time. */
-export async function getLatestVersionWithManifest(
+/** Get the latest version ID + version string + createdAt for dirty-check at run time. */
+export async function getLatestVersionInfo(
   packageId: string,
-): Promise<{ id: number; manifest: Record<string, unknown> } | null> {
+): Promise<{ id: number; version: string; createdAt: Date } | null> {
   const versionId = await getLatestVersionId(packageId);
   if (!versionId) return null;
 
   const [row] = await db
-    .select({ id: packageVersions.id, manifest: packageVersions.manifest })
+    .select({
+      id: packageVersions.id,
+      version: packageVersions.version,
+      createdAt: packageVersions.createdAt,
+    })
     .from(packageVersions)
     .where(eq(packageVersions.id, versionId))
     .limit(1);
@@ -188,7 +192,8 @@ export async function getLatestVersionWithManifest(
   if (!row) return null;
   return {
     id: row.id,
-    manifest: asRecord(row.manifest),
+    version: row.version,
+    createdAt: row.createdAt,
   };
 }
 
