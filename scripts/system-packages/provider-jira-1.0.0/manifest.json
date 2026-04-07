@@ -1,0 +1,59 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/jira",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Jira",
+  "description": "Project tracking and issue management platform by Atlassian",
+  "iconUrl": "https://cdn.simpleicons.org/jira",
+  "categories": ["project-management", "issue-tracking"],
+  "docsUrl": "https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://auth.atlassian.com/authorize",
+      "tokenUrl": "https://auth.atlassian.com/oauth/token",
+      "refreshUrl": "https://auth.atlassian.com/oauth/token",
+      "defaultScopes": ["read:jira-work", "read:jira-user", "offline_access"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "tokenContentType": "application/json",
+      "authorizationParams": {
+        "audience": "api.atlassian.com",
+        "prompt": "consent"
+      }
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://api.atlassian.com/*"
+    ],
+    "availableScopes": [
+      { "value": "read:jira-work", "label": "Read project and issue data" },
+      { "value": "write:jira-work", "label": "Create and edit issues" },
+      { "value": "read:jira-user", "label": "Read user information" },
+      { "value": "manage:jira-project", "label": "Manage project settings" },
+      { "value": "manage:jira-configuration", "label": "Manage Jira global settings" },
+      { "value": "manage:jira-webhook", "label": "Manage webhooks" },
+      { "value": "read:me", "label": "Read authenticated user profile" },
+      { "value": "offline_access", "label": "Refresh tokens for offline access" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the callback URL to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create an OAuth 2.0 (3LO) app in the Atlassian Developer Console",
+        "url": "https://developer.atlassian.com/console/myapps/"
+      },
+      {
+        "label": "Add the Jira API permissions and configure OAuth 2.0 authorization"
+      },
+      {
+        "label": "Copy your Client ID and Client Secret from Settings"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
