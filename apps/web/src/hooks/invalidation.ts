@@ -5,7 +5,7 @@ import type { QueryClient } from "@tanstack/react-query";
 /**
  * Invalidate all connection/provider-related query caches.
  *
- * Covers user connections, org profiles, bindings, agent details,
+ * Covers user connections, app profiles, bindings, agent details,
  * and provider status. Over-invalidation is negligible because
  * React Query's staleTime prevents unnecessary refetches.
  *

@@ -121,8 +121,9 @@ export const useDeleteConnectionProfile = userProfileMutations.useDelete;
 
 export function useAppProfiles() {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["app-connection-profiles", orgId],
+    queryKey: ["app-connection-profiles", orgId, appId],
     queryFn: () =>
       api<{ profiles: AppProfileWithBindings[] }>("/app-profiles").then((r) => r.profiles),
   });

@@ -58,7 +58,7 @@ export async function getProvider(orgId: string, providerId: string) {
 }
 
 /** Get application-level provider credentials for a specific app. */
-export async function getAppProviderCredentials(appId: string) {
+export async function getAppProviderCredentials(applicationId: string) {
   return db
     .select({
       providerId: applicationProviderCredentials.providerId,
@@ -66,7 +66,7 @@ export async function getAppProviderCredentials(appId: string) {
       enabled: applicationProviderCredentials.enabled,
     })
     .from(applicationProviderCredentials)
-    .where(eq(applicationProviderCredentials.applicationId, appId));
+    .where(eq(applicationProviderCredentials.applicationId, applicationId));
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ export async function getAppProviderCredentials(appId: string) {
 export async function createProvider(
   orgId: string,
   data: ProviderManifestData,
-  appId: string | null,
+  applicationId: string | null,
   createdBy: string,
   adminCredentials?: Record<string, string>,
 ): Promise<void> {
@@ -97,14 +97,14 @@ export async function createProvider(
       })
       .onConflictDoNothing();
 
-    if (appId) {
+    if (applicationId) {
       // Install in the application so it's visible via listAccessiblePackages
       await tx
         .insert(applicationPackages)
-        .values({ applicationId: appId, packageId: data.id, config: {} })
+        .values({ applicationId, packageId: data.id, config: {} })
         .onConflictDoNothing();
 
-      await upsertAppCredentials(tx, appId, data.id, adminCredentials, true);
+      await upsertAppCredentials(tx, applicationId, data.id, adminCredentials, true);
     }
   });
 
@@ -120,7 +120,7 @@ export async function updateProvider(
   orgId: string,
   providerId: string,
   data: Omit<ProviderManifestData, "id">,
-  appId: string | null,
+  applicationId: string | null,
   adminCredentials?: Record<string, string>,
 ): Promise<void> {
   const manifest = buildManifest({ ...data, id: providerId });
@@ -131,8 +131,8 @@ export async function updateProvider(
       .set({ draftManifest: manifest, updatedAt: new Date() })
       .where(and(eq(packages.id, providerId), eq(packages.orgId, orgId)));
 
-    if (adminCredentials && Object.keys(adminCredentials).length > 0 && appId) {
-      await upsertAppCredentials(tx, appId, providerId, adminCredentials, true);
+    if (adminCredentials && Object.keys(adminCredentials).length > 0 && applicationId) {
+      await upsertAppCredentials(tx, applicationId, providerId, adminCredentials, true);
     }
   });
 }
@@ -143,7 +143,7 @@ export async function updateProvider(
 
 /** Set or update provider credentials for an application. */
 export async function configureCredentials(
-  appId: string,
+  applicationId: string,
   providerId: string,
   credentials?: Record<string, string>,
   enabled?: boolean,
@@ -157,7 +157,7 @@ export async function configureCredentials(
   await db
     .insert(applicationProviderCredentials)
     .values({
-      applicationId: appId,
+      applicationId,
       providerId,
       credentialsEncrypted: hasCredentials
         ? encryptCredentials(credentials)
@@ -174,12 +174,12 @@ export async function configureCredentials(
 }
 
 /** Delete provider credentials for an application. */
-export async function deleteCredentials(appId: string, providerId: string): Promise<void> {
+export async function deleteCredentials(applicationId: string, providerId: string): Promise<void> {
   await db
     .delete(applicationProviderCredentials)
     .where(
       and(
-        eq(applicationProviderCredentials.applicationId, appId),
+        eq(applicationProviderCredentials.applicationId, applicationId),
         eq(applicationProviderCredentials.providerId, providerId),
       ),
     );
@@ -278,7 +278,7 @@ function buildManifest(data: ProviderManifestData): Record<string, unknown> {
 /** Upsert credentials into applicationProviderCredentials. Works inside a transaction. */
 async function upsertAppCredentials(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  appId: string,
+  applicationId: string,
   providerId: string,
   adminCredentials?: Record<string, string>,
   enabled?: boolean,
@@ -287,7 +287,7 @@ async function upsertAppCredentials(
   await tx
     .insert(applicationProviderCredentials)
     .values({
-      applicationId: appId,
+      applicationId,
       providerId,
       credentialsEncrypted: hasAdminCreds
         ? encryptCredentials(adminCredentials)

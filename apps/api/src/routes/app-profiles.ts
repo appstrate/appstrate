@@ -49,8 +49,7 @@ export function createAppProfilesRouter() {
   // GET /api/app-profiles/connections — all connections across all profiles
   router.get("/connections", async (c) => {
     const actor = getActor(c);
-    const applicationId = c.get("applicationId");
-    const result = await listAllActorConnections(actor, applicationId);
+    const result = await listAllActorConnections(actor);
     return c.json(result);
   });
 
@@ -224,7 +223,7 @@ export function createAppProfilesRouter() {
     const profileId = c.req.param("id")!;
     const orgId = c.get("orgId");
     const applicationId = c.get("applicationId");
-    // Allow access if: own profile, org profile, or profile of another org member (read-only view)
+    // Allow access if: own profile, app profile, or profile of another org member (read-only view)
     const profile =
       (await getProfileForActor(profileId, actor)) ??
       (await getAppProfile(profileId, applicationId)) ??

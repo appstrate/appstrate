@@ -435,43 +435,50 @@ await markOrphanRunsFailed();
 
 ---
 
-## Layer 6 — Data Isolation (Application-Level Security)
+## Layer 6 — Data Isolation (Two-Tier Scoping)
 
-**Files:** `apps/api/src/middleware/org-context.ts`, `apps/api/src/services/state.ts`, all route handlers
+**Files:** `apps/api/src/middleware/org-context.ts`, `apps/api/src/middleware/app-context.ts`, `apps/api/src/services/state.ts`, all route handlers
 
-All data access is scoped by organization at the application level. Every Drizzle query includes an `orgId` filter via `where` clauses, enforced by the org-context middleware which validates organization membership on every request.
+Data access uses a **two-tier isolation model**: all resources are scoped by `orgId`, and app-scoped resources are additionally scoped by `applicationId`. The org-context middleware (`X-Org-Id`) validates organization membership, and the app-context middleware (`X-App-Id`) validates the application belongs to the org.
 
-| Table                       | SELECT         | INSERT                | UPDATE                | DELETE                |
-| --------------------------- | -------------- | --------------------- | --------------------- | --------------------- |
-| `runs`                      | Org members    | Own user + org member | —                     | —                     |
-| `run_logs`                  | Org members    | Org members           | —                     | —                     |
-| `application_packages`      | App members    | App admins            | App admins            | App admins            |
-| `packages`                  | Org members    | Org admins            | Org admins            | Org admins            |
-| `package_schedules`         | Org members    | Own user + org member | Own user + org member | Own user + org member |
-| `user_provider_connections` | Own user + org | Own user + org member | Own user + org member | Own user + org member |
-| `share_links`               | Org members    | Org members           | Org members           | —                     |
+| Table                              | Scoping          | SELECT         | INSERT                | UPDATE                | DELETE                |
+| ---------------------------------- | ---------------- | -------------- | --------------------- | --------------------- | --------------------- |
+| `runs`                             | Org + App        | App members    | Own user + app member | —                     | —                     |
+| `run_logs`                         | Org              | Org members    | Org members           | —                     | —                     |
+| `application_packages`             | App              | App members    | App admins            | App admins            | App admins            |
+| `packages`                         | Org              | Org members    | Org admins            | Org admins            | Org admins            |
+| `package_schedules`                | Org + App        | App members    | Own user + app member | Own user + app member | Own user + app member |
+| `webhooks`                         | Org + App        | App admins     | App admins            | App admins            | App admins            |
+| `api_keys`                         | Org + App        | App admins     | App admins            | —                     | App admins            |
+| `application_provider_credentials` | App              | App members    | App admins            | App admins            | App admins            |
+| `user_provider_connections`        | Org + Credential | Own user + org | Own user + org member | Own user + org member | Own user + org member |
 
-Application-level isolation uses the org-context middleware and Drizzle `where` clauses:
+App-context middleware resolves the application from the `X-App-Id` header (session auth) or from the API key's `applicationId`:
 
 ```typescript
-// org-context.ts — verify membership on every request
-const membership = await db
-  .select({ role: organizationMembers.role })
-  .from(organizationMembers)
-  .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, user.id)))
+// app-context.ts — verify application belongs to org
+const app = await db
+  .select({ id: applications.id, isDefault: applications.isDefault })
+  .from(applications)
+  .where(and(eq(applications.id, appId), eq(applications.orgId, orgId)))
   .limit(1);
-if (!membership[0]) return c.json({ error: "FORBIDDEN" }, 403);
-c.set("orgId", orgId);
-c.set("orgRole", membership[0].role);
+if (!app) throw notFound("Application not found in this organization");
+c.set("applicationId", appId);
 
-// Every query filters by orgId — example from state.ts
+// Every app-scoped query filters by both orgId and applicationId
 const rows = await db
   .select()
   .from(runs)
-  .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId)));
+  .where(
+    and(
+      eq(runs.packageId, packageId),
+      eq(runs.orgId, orgId),
+      eq(runs.applicationId, applicationId),
+    ),
+  );
 ```
 
-**Standard:** Application-level org-scoped queries implement access control satisfying **NIST SP 800-53** controls **AC-3** (Access Enforcement) and **AC-4** (Information Flow Enforcement).
+**Standard:** Two-tier org+app-scoped queries implement access control satisfying **NIST SP 800-53** controls **AC-3** (Access Enforcement) and **AC-4** (Information Flow Enforcement).
 
 ---
 

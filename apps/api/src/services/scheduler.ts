@@ -111,7 +111,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
   );
 
   // Update schedule timestamps
-  const schedule = await getSchedule(scheduleId);
+  const schedule = await getSchedule(scheduleId, orgId, applicationId);
   const nextRun = schedule
     ? computeNextRun(schedule.cronExpression, schedule.timezone ?? "UTC")
     : null;
@@ -214,7 +214,7 @@ async function triggerScheduledRun(
       return;
     }
 
-    // Resolve actor from connection profile (null for org profiles)
+    // Resolve actor from connection profile (null for app profiles)
     const profile = await getProfileByIdUnsafe(connectionProfileId);
     if (!profile) {
       logger.warn("Connection profile not found, skipping schedule", {

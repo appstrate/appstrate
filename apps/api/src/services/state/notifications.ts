@@ -42,7 +42,7 @@ export async function markNotificationRead(
 
 /**
  * Filter: actor-owned OR schedule-triggered org-level runs (no actor).
- * Org-level runs come from schedules bound to org profiles — they have
+ * App-level runs come from schedules bound to app profiles — they have
  * no userId/endUserId but do have a scheduleId. All org members can see them.
  */
 function actorOrOrgFilter(actorId: string): SQL {

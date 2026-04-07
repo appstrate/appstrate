@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Connection Profiles — manages actor and org connection profiles and profile resolution.
+ * Connection Profiles — manages actor and app connection profiles and profile resolution.
  */
 
 import { eq, and, count, inArray, sql } from "drizzle-orm";
@@ -176,7 +176,7 @@ export async function deleteProfile(profileId: string, actor: Actor): Promise<vo
     .where(and(eq(connectionProfiles.id, profileId), actorFilter(actor, PROFILE_ACTOR_COLUMNS)));
 }
 
-// ─── Org Profile CRUD ───────────────────────────────────────
+// ─── App Profile CRUD ───────────────────────────────────────
 
 export async function listAppProfiles(
   applicationId: string,
@@ -242,7 +242,7 @@ export async function getAppProfile(
 }
 
 /**
- * Load the org profile configured on an agent, returning null if none configured
+ * Load the app profile configured on an agent, returning null if none configured
  * or if the referenced profile was deleted.
  */
 export async function getAgentAppProfile(
@@ -306,8 +306,8 @@ export async function deleteAppProfile(profileId: string, applicationId: string)
 }
 
 /**
- * List org profiles where a specific user has active bindings.
- * Used to show users which org profiles depend on their credentials.
+ * List app profiles where a specific user has active bindings.
+ * Used to show users which app profiles depend on their credentials.
  */
 export async function listAppProfilesWithUserBindings(
   userId: string,
@@ -471,7 +471,7 @@ export async function resolveActorProfileContext(
  * Get a profile by ID without actor/org scoping. Used by scheduler to load the
  * profile referenced by a schedule's connectionProfileId.
  *
- * No orgId filter: user/end-user profiles have orgId=null on the row, so filtering
+ * No applicationId filter: user/end-user profiles have applicationId=null on the row, so filtering
  * by orgId would miss them. The caller (scheduler) already validates the schedule
  * belongs to the requesting org.
  */
@@ -488,7 +488,7 @@ export async function getProfileByIdUnsafe(profileId: string): Promise<Connectio
 
 /**
  * Determine how to pass a schedule's connectionProfileId to resolveProviderProfiles
- * based on whether the profile is an org profile or a user profile.
+ * based on whether the profile is an app profile or a user profile.
  *
  * - App profile → passed as appProfileId (bindings loaded), no user fallback
  * - User profile → passed as defaultUserProfileId, agentAppProfileId as app fallback

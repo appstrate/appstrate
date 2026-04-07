@@ -20,11 +20,6 @@ export const endUsersPaths = {
             schema: {
               type: "object",
               properties: {
-                applicationId: {
-                  type: "string",
-                  description:
-                    "ID of the application this end-user belongs to (app_ prefix). Defaults to the organization's default application if omitted.",
-                },
                 name: {
                   type: ["string", "null"],
                   maxLength: 200,
@@ -81,12 +76,6 @@ export const endUsersPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "applicationId",
-          in: "query",
-          schema: { type: "string" },
-          description: "Filter by application ID",
-        },
         {
           name: "externalId",
           in: "query",

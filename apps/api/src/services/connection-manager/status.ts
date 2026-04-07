@@ -186,7 +186,7 @@ async function batchGetConnectionStatuses(
 /**
  * Resolve provider statuses for an agent's required providers.
  * providerProfiles maps each providerId to the profile holding its credentials
- * (already resolved via org profile bindings or user profile direct).
+ * (already resolved via app profile bindings or user profile direct).
  * applicationId is required to resolve per-app provider credentials.
  */
 export async function resolveProviderStatuses(

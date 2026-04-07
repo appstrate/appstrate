@@ -96,7 +96,7 @@ export const schedulesPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "Connection profile to use for provider credentials (user or org profile)",
+                    "Connection profile to use for provider credentials (user or app profile)",
                 },
                 cronExpression: {
                   type: "string",

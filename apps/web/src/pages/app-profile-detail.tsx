@@ -66,7 +66,7 @@ export function AppProfileDetailPage() {
 
   const handleDelete = () => {
     deleteMutation.mutate(profile.id, {
-      onSuccess: () => navigate("/org-settings#profiles"),
+      onSuccess: () => navigate("/app-settings#profiles"),
     });
   };
 
@@ -76,7 +76,7 @@ export function AppProfileDetailPage() {
         title={profile.name}
         breadcrumbs={[
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("applications.pageTitle"), href: "/app-settings#profiles" },
+          { label: t("appSettings.tabProfiles"), href: "/app-settings#profiles" },
           { label: profile.name },
         ]}
         actions={

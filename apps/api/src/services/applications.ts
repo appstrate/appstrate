@@ -73,11 +73,11 @@ export async function listApplications(orgId: string) {
 }
 
 /** Get a single application by ID, verifying org ownership. Throws 404 if not found. */
-export async function getApplication(orgId: string, appId: string) {
+export async function getApplication(orgId: string, applicationId: string) {
   const [app] = await db
     .select()
     .from(applications)
-    .where(and(eq(applications.id, appId), eq(applications.orgId, orgId)))
+    .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
     .limit(1);
 
   if (!app) throw notFound("Application not found");
@@ -87,7 +87,7 @@ export async function getApplication(orgId: string, appId: string) {
 /** Update an application. Throws 404 if not found. */
 export async function updateApplication(
   orgId: string,
-  appId: string,
+  applicationId: string,
   params: { name?: string; settings?: AppSettings },
 ) {
   const [app] = await db
@@ -97,7 +97,7 @@ export async function updateApplication(
       ...(params.settings !== undefined && { settings: params.settings }),
       updatedAt: new Date(),
     })
-    .where(and(eq(applications.id, appId), eq(applications.orgId, orgId)))
+    .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
     .returning();
 
   if (!app) throw notFound("Application not found");
@@ -105,12 +105,12 @@ export async function updateApplication(
 }
 
 /** Delete an application. Throws 400 if default, 404 if not found. */
-export async function deleteApplication(orgId: string, appId: string) {
+export async function deleteApplication(orgId: string, applicationId: string) {
   // Check existence and default status first
   const [app] = await db
     .select({ id: applications.id, isDefault: applications.isDefault })
     .from(applications)
-    .where(and(eq(applications.id, appId), eq(applications.orgId, orgId)))
+    .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
     .limit(1);
 
   if (!app) throw notFound("Application not found");
@@ -118,5 +118,5 @@ export async function deleteApplication(orgId: string, appId: string) {
 
   await db
     .delete(applications)
-    .where(and(eq(applications.id, appId), eq(applications.orgId, orgId)));
+    .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)));
 }

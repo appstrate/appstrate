@@ -161,10 +161,6 @@ export async function addOrgMember(
 
 /**
  * Build authentication headers for test requests.
- * Combines the session cookie and org ID from a TestContext.
- */
-/**
- * Build authentication headers for test requests.
  * Includes session cookie, org ID, and app ID from a TestContext.
  * For org-only routes that don't need X-App-Id, use orgOnlyHeaders() instead.
  */

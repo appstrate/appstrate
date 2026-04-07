@@ -153,7 +153,7 @@ export async function listAccessiblePackages(
       appConfig: applicationPackages.config,
       appModelId: applicationPackages.modelId,
       appProxyId: applicationPackages.proxyId,
-      appOrgProfileId: applicationPackages.appProfileId,
+      appProfileId: applicationPackages.appProfileId,
       appVersionId: applicationPackages.versionId,
       appEnabled: applicationPackages.enabled,
     })

@@ -75,7 +75,6 @@ export async function getAvailableProvidersWithStatus(
 
 export async function listAllActorConnections(
   actor: Actor,
-  _applicationId: string,
 ): Promise<{ providers: UserConnectionProviderGroup[] }> {
   // Fetch all actor connections across ALL apps, joining through
   // applicationProviderCredentials → applications to get app context.
