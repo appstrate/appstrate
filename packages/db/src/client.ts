@@ -34,8 +34,10 @@ async function initPGlite(): Promise<Db> {
   const { PGlite } = await import("@electric-sql/pglite");
   const { drizzle } = await import("drizzle-orm/pglite");
   const { resolve } = await import("node:path");
+  const { mkdirSync } = await import("node:fs");
 
   const dataDir = resolve(env.PGLITE_DATA_DIR);
+  mkdirSync(dataDir, { recursive: true });
   const client = new PGlite(dataDir);
 
   _pgliteClient = client;
