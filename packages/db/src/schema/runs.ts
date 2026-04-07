@@ -18,7 +18,7 @@ import { runStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
 import { organizations } from "./organizations.ts";
-import { packages, packageVersions } from "./packages.ts";
+import { packages } from "./packages.ts";
 import { connectionProfiles } from "./connections.ts";
 
 export const runs = pgTable(
@@ -54,9 +54,6 @@ export const runs = pgTable(
       onDelete: "set null",
     }),
     scheduleId: text("schedule_id").references(() => packageSchedules.id, {
-      onDelete: "set null",
-    }),
-    packageVersionId: integer("package_version_id").references(() => packageVersions.id, {
       onDelete: "set null",
     }),
     versionLabel: text("version_label"),

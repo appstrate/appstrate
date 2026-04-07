@@ -4,7 +4,7 @@ import { unzipArtifact, stripWrapperPrefix, type ParsedPackageZip } from "@appst
 import { extractSkillMeta, validateManifest } from "@appstrate/core/validation";
 import { bumpPatch } from "@appstrate/core/semver";
 import { getPackageById } from "./package-items/index.ts";
-import { getLatestVersionWithManifest } from "./package-versions.ts";
+import { getLatestVersionInfo } from "./package-versions.ts";
 
 export type SkillOnlyResult =
   | { ok: true; parsed: ParsedPackageZip }
@@ -40,8 +40,8 @@ export async function tryParseSkillOnlyZip(
     if (existing.draftContent === skillMd) {
       return { ok: false, reason: "unchanged" };
     }
-    const latestVer = await getLatestVersionWithManifest(packageId);
-    const latestStr = latestVer?.manifest?.version as string | undefined;
+    const latestVer = await getLatestVersionInfo(packageId);
+    const latestStr = latestVer?.version;
     if (latestStr) {
       version = bumpPatch(latestStr) ?? version;
     }
