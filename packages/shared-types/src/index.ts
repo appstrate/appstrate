@@ -8,8 +8,7 @@ import type {
 } from "@appstrate/core/validation";
 export type { PackageType };
 
-import type { Run as _Run } from "@appstrate/db/schema";
-export type Run = _Run & { packageVersion?: string | null };
+export type { Run } from "@appstrate/db/schema";
 
 // --- App Config Types ---
 
@@ -167,6 +166,16 @@ export interface ProviderStatus {
   profileName: string | null;
   /** Name of the user who owns the connection profile. */
   profileOwnerName: string | null;
+}
+
+/** Lightweight snapshot of a provider's connection state at run time. */
+export interface RunProviderSnapshot {
+  id: string;
+  status: ConnectionStatusValue;
+  source: ProviderProfileSource | null;
+  profileName: string | null;
+  profileOwnerName: string | null;
+  scopesSufficient?: boolean;
 }
 
 export interface AgentListItem {

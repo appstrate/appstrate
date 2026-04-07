@@ -358,13 +358,13 @@ export function createRunsRouter() {
 
       // If a specific version is requested, resolve and override agent data
       let effectiveAgent = agent;
-      let overrideVersionId: number | undefined;
+      let overrideVersionLabel: string | undefined;
       if (versionOverride && agent.source !== "system") {
         const versionDetail = await getVersionDetail(agent.id, versionOverride);
         if (!versionDetail) {
           throw notFound(`Version '${versionOverride}' not found`);
         }
-        overrideVersionId = versionDetail.id;
+        overrideVersionLabel = versionDetail.version;
         // Override manifest and content — version manifest replaces draft entirely
         effectiveAgent = {
           ...agent,
@@ -430,7 +430,7 @@ export function createRunsRouter() {
         config,
         modelId: modelIdOverride ?? preflightModelId,
         proxyId: proxyIdOverride ?? preflightProxyId,
-        overrideVersionId,
+        overrideVersionLabel,
         connectionProfileId: defaultUserProfileId ?? undefined,
         applicationId: c.get("applicationId"),
         uploadedFiles,

@@ -285,36 +285,42 @@ export function createApp(deps: AppDeps): Hono {
       }
     }
 
-    // 6. Handle body — always buffer for potential retry on 401
+    // 6. Handle body — buffer for potential retry on 401.
+    //    Use ArrayBuffer to preserve binary data (e.g. XLSX uploads).
+    //    Only decode as text when X-Substitute-Body requires placeholder replacement.
     const method = c.req.method;
-    let rawBody: string | undefined;
+    let rawBodyBytes: ArrayBuffer | undefined;
+    let rawBodyText: string | undefined; // lazily decoded only when substituteBody is set
 
     if (method !== "GET" && method !== "HEAD") {
       const contentLength = parseInt(c.req.header("content-length") || "0", 10);
       if (contentLength > MAX_SUBSTITUTE_BODY_SIZE) {
         return c.json({ error: "Request body too large" }, 413);
       }
-      rawBody = await c.req.text();
-      if (rawBody.length > MAX_SUBSTITUTE_BODY_SIZE) {
+      rawBodyBytes = await c.req.arrayBuffer();
+      if (rawBodyBytes.byteLength > MAX_SUBSTITUTE_BODY_SIZE) {
         return c.json({ error: "Request body too large" }, 413);
+      }
+      if (substituteBody) {
+        rawBodyText = new TextDecoder().decode(rawBodyBytes);
       }
     }
 
     /** Build the request body with credential substitution applied. */
-    const buildBody = (credentials: Record<string, string>): string | undefined => {
-      if (!rawBody) return undefined;
-      if (substituteBody) {
-        const substituted = substituteVars(rawBody, credentials);
+    const buildBody = (credentials: Record<string, string>): BodyInit | undefined => {
+      if (!rawBodyBytes) return undefined;
+      if (substituteBody && rawBodyText) {
+        const substituted = substituteVars(rawBodyText, credentials);
         const unresolved = findUnresolvedPlaceholders(substituted);
         if (unresolved.length) return undefined; // caller checks this
         return substituted;
       }
-      return rawBody;
+      return rawBodyBytes;
     };
 
     // Check placeholder resolution before first request
-    if (substituteBody && rawBody) {
-      const testBody = substituteVars(rawBody, creds.credentials);
+    if (substituteBody && rawBodyText) {
+      const testBody = substituteVars(rawBodyText, creds.credentials);
       const unresolvedInBody = findUnresolvedPlaceholders(testBody);
       if (unresolvedInBody.length) {
         return c.json(

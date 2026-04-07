@@ -47,6 +47,7 @@ export interface LoadedPackage {
   skills: ToolMeta[];
   tools: ToolMeta[];
   source: "system" | "local";
+  updatedAt?: Date;
 }
 
 // Hono context env — shared across all routers
