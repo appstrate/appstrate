@@ -1116,7 +1116,11 @@ describe("proxy retry-on-401", () => {
         if (authHeader.includes("old-token")) {
           return new Response("Unauthorized", { status: 401 });
         }
-        lastBody = typeof init?.body === "string" ? init.body : undefined;
+        if (init?.body instanceof ArrayBuffer) {
+          lastBody = new TextDecoder().decode(init.body);
+        } else if (typeof init?.body === "string") {
+          lastBody = init.body;
+        }
         return new Response('{"ok":true}', {
           status: 200,
           headers: { "Content-Type": "application/json" },
