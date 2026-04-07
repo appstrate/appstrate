@@ -79,6 +79,8 @@
     "test:integration": "bun test apps/api/test/integration/",
     "db:studio": "cd packages/db && bunx drizzle-kit studio",
     "verify:openapi": "bun scripts/verify-openapi.ts",
+    "openapi:baseline": "bun scripts/detect-breaking-changes.ts --update-baseline",
+    "openapi:diff": "bun scripts/detect-breaking-changes.ts",
     "clean": "rm -rf node_modules/.cache .turbo apps/*/dist apps/web/.vite packages/*/dist coverage",
     "prepare": "husky"
   },

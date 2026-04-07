@@ -58,6 +58,7 @@ export const packagesPaths = {
                   },
                 },
               },
+              example: { packageId: "@acme/email-sorter", type: "agent" },
             },
           },
         },
@@ -251,13 +252,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -331,6 +327,19 @@ export const packagesPaths = {
                   },
                 },
               },
+              example: {
+                skills: [
+                  {
+                    id: "@acme/summarize",
+                    name: "Summarize",
+                    description: "Summarizes long text into key points",
+                    source: "local",
+                    version: "1.0.0",
+                    createdAt: "2026-01-10T08:00:00Z",
+                    updatedAt: "2026-01-10T08:00:00Z",
+                  },
+                ],
+              },
             },
           },
         },
@@ -391,6 +400,11 @@ export const packagesPaths = {
                   message: { type: "string" },
                 },
               },
+              example: {
+                packageId: "@acme/summarize",
+                lockVersion: 1,
+                message: "Skill created",
+              },
             },
           },
         },
@@ -410,20 +424,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -459,20 +461,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -508,20 +498,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: false,
@@ -575,20 +553,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -634,20 +600,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -696,20 +650,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -734,20 +676,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -775,20 +705,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -844,20 +762,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {
@@ -1007,20 +913,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -1056,20 +950,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -1105,20 +987,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: false,
@@ -1172,20 +1042,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -1231,20 +1089,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -1293,20 +1139,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -1331,20 +1165,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -1371,20 +1193,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -1440,20 +1250,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {
@@ -1504,6 +1302,39 @@ export const packagesPaths = {
     },
   },
   "/api/packages/agents": {
+    get: {
+      operationId: "listAgentPackages",
+      tags: ["Packages"],
+      summary: "List agent packages",
+      description: "List all agent packages (system + org) in the organization.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
+      responses: {
+        "200": {
+          description: "Agent list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  agents: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/OrgPackageItem" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
     post: {
       operationId: "createAgent",
       tags: ["Packages"],
@@ -1564,20 +1395,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -1609,20 +1428,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -1674,20 +1481,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {
@@ -1711,20 +1506,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -1759,20 +1542,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -1808,20 +1579,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: false,
@@ -1875,20 +1634,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -1927,20 +1674,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -1983,20 +1718,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -2036,20 +1759,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @other-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*$" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: false,
@@ -2060,7 +1771,7 @@ export const packagesPaths = {
               properties: {
                 name: {
                   type: "string",
-                  pattern: "^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$",
+                  pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
                   description:
                     "Custom name for the forked package (slug format). Defaults to the source package name.",
                 },
@@ -2248,20 +1959,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -2297,20 +1996,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -2346,20 +2033,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: false,
@@ -2413,20 +2088,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -2472,20 +2135,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -2534,20 +2185,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -2572,20 +2211,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -2613,20 +2240,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -2678,19 +2293,578 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "204": {
+          description: "Provider package deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
         },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": { description: "Provider in use by agents" },
+      },
+    },
+  },
+  // --- By-ID routes (unscoped package identifiers) ---
+
+  "/api/packages/skills/{id}": {
+    get: {
+      operationId: "getSkillById",
+      tags: ["Packages"],
+      summary: "Get skill detail by ID",
+      description: "Get a skill's full details by unscoped package ID.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
-          name: "name",
+          name: "id",
           in: "path",
           required: true,
           schema: { type: "string" },
-          description: "Package name",
+          description: "Package ID (unscoped)",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Skill detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    put: {
+      operationId: "updateSkillById",
+      tags: ["Packages"],
+      summary: "Update a skill by ID",
+      description: "Update a skill by unscoped package ID. Built-in skills cannot be modified.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                name: { type: "string", description: "Display name" },
+                description: { type: "string" },
+                content: { type: "string" },
+                version: { type: "string", description: "Semver version (X.Y.Z)" },
+                scopedName: {
+                  type: "string",
+                  description: "Registry scoped name (@scope/name)",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Skill updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  lockVersion: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteSkillById",
+      tags: ["Packages"],
+      summary: "Delete a skill by ID",
+      description: "Delete a skill by unscoped package ID. Built-in skills cannot be deleted.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      responses: {
+        "204": {
+          description: "Skill deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Skill is referenced by agents or required by other packages",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  error: {
+                    type: "string",
+                    enum: ["IN_USE", "DEPENDED_ON"],
+                    description:
+                      "IN_USE: referenced by agents. DEPENDED_ON: required by other packages.",
+                  },
+                  message: { type: "string" },
+                  agents: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                    },
+                    description: "Agents referencing this skill (for IN_USE)",
+                  },
+                  dependents: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                    },
+                    description: "Packages depending on this skill (for DEPENDED_ON)",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/packages/tools/{id}": {
+    get: {
+      operationId: "getToolById",
+      tags: ["Packages"],
+      summary: "Get tool detail by ID",
+      description: "Get a tool's full details by unscoped package ID.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Tool detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    put: {
+      operationId: "updateToolById",
+      tags: ["Packages"],
+      summary: "Update a tool by ID",
+      description: "Update a tool by unscoped package ID. Built-in tools cannot be modified.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                name: { type: "string", description: "Display name" },
+                description: { type: "string" },
+                content: { type: "string" },
+                version: { type: "string", description: "Semver version (X.Y.Z)" },
+                scopedName: {
+                  type: "string",
+                  description: "Registry scoped name (@scope/name)",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Tool updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  lockVersion: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteToolById",
+      tags: ["Packages"],
+      summary: "Delete a tool by ID",
+      description: "Delete a tool by unscoped package ID. Built-in tools cannot be deleted.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      responses: {
+        "204": {
+          description: "Tool deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Tool is referenced by agents or required by other packages",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  error: {
+                    type: "string",
+                    enum: ["IN_USE", "DEPENDED_ON"],
+                    description:
+                      "IN_USE: referenced by agents. DEPENDED_ON: required by other packages.",
+                  },
+                  message: { type: "string" },
+                  agents: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                    },
+                    description: "Agents referencing this tool (for IN_USE)",
+                  },
+                  dependents: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: { id: { type: "string" }, displayName: { type: "string" } },
+                    },
+                    description: "Packages depending on this tool (for DEPENDED_ON)",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/packages/agents/{id}": {
+    get: {
+      operationId: "getAgentPackageById",
+      tags: ["Packages"],
+      summary: "Get agent detail by ID",
+      description:
+        "Returns agent detail including providers, config, state, skills, and tools by unscoped package ID.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Agent detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  agent: { $ref: "#/components/schemas/AgentDetail" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    put: {
+      operationId: "updateAgentById",
+      tags: ["Packages"],
+      summary: "Update a user agent by ID",
+      description:
+        "Update manifest and content of a user agent with optimistic locking by unscoped package ID.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["manifest", "content", "lockVersion"],
+              properties: {
+                manifest: { $ref: "#/components/schemas/AgentManifest" },
+                content: { type: "string" },
+                lockVersion: { type: "integer", description: "Optimistic lock version" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Agent updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  lockVersion: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": { description: "Concurrent modification or agent in use" },
+      },
+    },
+    delete: {
+      operationId: "deleteAgentById",
+      tags: ["Packages"],
+      summary: "Delete a user agent by ID",
+      description: "Delete a user agent by unscoped package ID. Built-in agents cannot be deleted.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      responses: {
+        "204": {
+          description: "Agent deleted",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "409": { description: "Agent in use" },
+      },
+    },
+  },
+  "/api/packages/providers/{id}": {
+    get: {
+      operationId: "getProviderPackageById",
+      tags: ["Packages"],
+      summary: "Get provider package detail by ID",
+      description: "Get a provider package's full details by unscoped package ID.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Provider package detail",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    put: {
+      operationId: "updateProviderPackageById",
+      tags: ["Packages"],
+      summary: "Update a provider package by ID",
+      description:
+        "Update a provider package by unscoped package ID. Built-in providers cannot be modified.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["manifest", "content", "lockVersion"],
+              properties: {
+                manifest: { $ref: "#/components/schemas/ProviderManifest" },
+                content: { type: "string" },
+                lockVersion: { type: "integer", description: "Optimistic lock version" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Provider package updated",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  packageId: { type: "string" },
+                  lockVersion: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    delete: {
+      operationId: "deleteProviderPackageById",
+      tags: ["Packages"],
+      summary: "Delete a provider package by ID",
+      description:
+        "Delete a provider package by unscoped package ID. Built-in providers cannot be deleted.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Package ID (unscoped)",
         },
       ],
       responses: {

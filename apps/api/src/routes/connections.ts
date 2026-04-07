@@ -27,6 +27,21 @@ import { isProviderEnabled, getProviderCredentialId } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import type { Context } from "hono";
 
+export const connectOAuthSchema = z.object({
+  scopes: z.array(z.string()).optional(),
+  profileId: z.uuid().optional(),
+});
+
+export const connectApiKeySchema = z.object({
+  apiKey: z.string().min(1, "API key is required"),
+  profileId: z.uuid().optional(),
+});
+
+export const connectCredentialsSchema = z.object({
+  credentials: z.record(z.string(), z.string()),
+  profileId: z.uuid().optional(),
+});
+
 async function resolveProfileId(c: Context<AppEnv>, actor: Actor): Promise<string> {
   const profileId = c.req.query("profileId");
   if (profileId) {
@@ -74,13 +89,7 @@ export function createConnectionsRouter() {
       }
 
       try {
-        const body = parseBody(
-          z.object({
-            scopes: z.array(z.string()).optional(),
-            profileId: z.uuid().optional(),
-          }),
-          await c.req.json(),
-        );
+        const body = parseBody(connectOAuthSchema, await c.req.json());
         const { scopes, profileId } = body;
 
         const effectiveProfileId = profileId ?? (await resolveProfileId(c, actor));
@@ -123,14 +132,7 @@ export function createConnectionsRouter() {
 
       try {
         const body = await c.req.json();
-        const data = parseBody(
-          z.object({
-            apiKey: z.string().min(1, "API key is required"),
-            profileId: z.uuid().optional(),
-          }),
-          body,
-          "apiKey",
-        );
+        const data = parseBody(connectApiKeySchema, body, "apiKey");
         const profileId = data.profileId ?? (await getDefaultProfileId(actor));
 
         // Validate ownership — user can use their own profiles or app profiles
@@ -164,14 +166,7 @@ export function createConnectionsRouter() {
 
       try {
         const body = await c.req.json();
-        const data = parseBody(
-          z.object({
-            credentials: z.record(z.string(), z.string()),
-            profileId: z.uuid().optional(),
-          }),
-          body,
-          "credentials",
-        );
+        const data = parseBody(connectCredentialsSchema, body, "credentials");
 
         // Resolve the auth mode from the provider
         const authMode = await getProviderAuthMode(provider, orgId);

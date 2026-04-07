@@ -14,6 +14,10 @@ export const metaPaths = {
           content: {
             "application/json": {
               schema: { type: "object" },
+              example: {
+                openapi: "3.1.0",
+                info: { title: "Appstrate API", version: "2026-03-21" },
+              },
             },
           },
         },

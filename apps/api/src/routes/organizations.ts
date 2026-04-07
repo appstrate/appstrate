@@ -36,7 +36,7 @@ import { createDefaultApplication } from "../services/applications.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
 import { logger } from "../lib/logger.ts";
 
-const createOrgSchema = z.object({
+export const createOrgSchema = z.object({
   name: z.string().min(1, "Name is required"),
   slug: z
     .string()
@@ -44,7 +44,7 @@ const createOrgSchema = z.object({
     .optional(),
 });
 
-const updateOrgSchema = z.object({
+export const updateOrgSchema = z.object({
   name: z.string().min(1).optional(),
   slug: z
     .string()
@@ -52,12 +52,12 @@ const updateOrgSchema = z.object({
     .optional(),
 });
 
-const addMemberSchema = z.object({
+export const addMemberSchema = z.object({
   email: z.string().email("Email is required"),
   role: z.enum(ASSIGNABLE_ROLES).default("member"),
 });
 
-const updateRoleSchema = z.object({
+export const updateRoleSchema = z.object({
   role: z.enum(ASSIGNABLE_ROLES),
 });
 

@@ -11,11 +11,11 @@ import { requireOrgAgent, requireMutableAgent } from "../middleware/guards.ts";
 import { invalidRequest, parseBody } from "../lib/errors.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
-const updateSkillsSchema = z.object({
+export const updateSkillsSchema = z.object({
   skillIds: z.array(z.string()).max(50),
 });
 
-const updateToolsSchema = z.object({
+export const updateToolsSchema = z.object({
   toolIds: z.array(z.string()).max(50),
 });
 

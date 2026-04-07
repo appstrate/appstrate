@@ -111,6 +111,22 @@ export const responses = {
       },
     },
   },
+  InternalServerError: {
+    description: "Unexpected server error",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/internal-error",
+          title: "Internal Server Error",
+          status: 500,
+          detail: "An unexpected error occurred. Please try again or contact support.",
+          code: "internal_error",
+          requestId: "req_abc123",
+        },
+      },
+    },
+  },
   IdempotencyConflict: {
     description: "Same Idempotency-Key used with a different request body",
     headers: {

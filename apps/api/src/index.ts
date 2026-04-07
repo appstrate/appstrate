@@ -34,6 +34,7 @@ import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createWebhooksRouter } from "./routes/webhooks.ts";
 import healthRouter from "./routes/health.ts";
 import { createConnectionsRouter } from "./routes/connections.ts";
+import { createLibraryRouter } from "./routes/library.ts";
 import orgsRouter from "./routes/organizations.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
@@ -302,6 +303,7 @@ app.route("/api/proxies", createProxiesRouter());
 app.route("/api/models", createModelsRouter());
 app.route("/api/provider-keys", createProviderKeysRouter());
 app.route("/api/applications", createApplicationsRouter());
+app.route("/api/library", createLibraryRouter());
 app.route("/api/connection-profiles", createConnectionProfilesRouter());
 app.route("/api/app-profiles", createAppProfilesRouter());
 app.route("/api", profileRouter);
@@ -340,9 +342,10 @@ app.get("/*", async (c) => {
   return c.html(raw.replace("</head>", `${appConfigScript}\n</head>`));
 });
 
-// Start server
+// Start server — bind 0.0.0.0 so both IPv4 and IPv6 clients can connect
 export default {
   port: env.PORT,
+  hostname: "0.0.0.0",
   fetch: app.fetch,
   idleTimeout: 255,
 };

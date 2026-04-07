@@ -16,7 +16,7 @@ import {
   revokeApiKey,
 } from "../services/api-keys.ts";
 
-const createApiKeySchema = z.object({
+export const createApiKeySchema = z.object({
   name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
   expiresAt: z.iso
     .datetime({ message: "expiresAt must be a valid ISO 8601 date" })

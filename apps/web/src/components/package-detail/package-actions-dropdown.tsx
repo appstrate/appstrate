@@ -11,6 +11,7 @@ import {
   Pencil,
   CalendarPlus,
   Trash2,
+  PackageMinus,
   FileJson,
   FileText,
 } from "lucide-react";
@@ -56,6 +57,9 @@ interface PackageActionsDropdownProps {
   // Skill/Tool-specific
   canDeletePackage?: boolean;
   onDeletePackage?: () => void;
+  // Uninstall from current app
+  canUninstall?: boolean;
+  onUninstall?: () => void;
 }
 
 export function PackageActionsDropdown({
@@ -83,6 +87,8 @@ export function PackageActionsDropdown({
   onDeleteCredentials,
   canDeletePackage,
   onDeletePackage,
+  canUninstall,
+  onUninstall,
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
   const navigate = useNavigate();
@@ -201,11 +207,20 @@ export function PackageActionsDropdown({
             </>
           )}
 
-          {/* ── Delete ── */}
-          {isAdmin && !isBuiltIn && (isOwned || isImported) && (
+          {/* ── Uninstall / Delete ── */}
+          {isAdmin && (canUninstall || (!isBuiltIn && (isOwned || isImported))) && (
             <>
               <DropdownMenuSeparator />
-              {isAgent && onDeleteAgent && (
+              {canUninstall && onUninstall && (
+                <DropdownMenuItem
+                  onSelect={onUninstall}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <PackageMinus size={14} />
+                  {t("packages.uninstall", { ns: "settings" })}
+                </DropdownMenuItem>
+              )}
+              {!isBuiltIn && (isOwned || isImported) && isAgent && onDeleteAgent && (
                 <DropdownMenuItem
                   onSelect={onDeleteAgent}
                   disabled={runningRuns > 0}
@@ -215,15 +230,19 @@ export function PackageActionsDropdown({
                   {t("btn.delete")}
                 </DropdownMenuItem>
               )}
-              {!isAgent && canDeletePackage && onDeletePackage && (
-                <DropdownMenuItem
-                  onSelect={onDeletePackage}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 size={14} />
-                  {t("btn.delete")}
-                </DropdownMenuItem>
-              )}
+              {!isBuiltIn &&
+                (isOwned || isImported) &&
+                !isAgent &&
+                canDeletePackage &&
+                onDeletePackage && (
+                  <DropdownMenuItem
+                    onSelect={onDeletePackage}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 size={14} />
+                    {t("btn.delete")}
+                  </DropdownMenuItem>
+                )}
             </>
           )}
         </DropdownMenuContent>

@@ -114,7 +114,21 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push(
       "The proxy returns the upstream response as-is (status code, body, Content-Type). " +
         "If the response was truncated (>50 KB), the `X-Truncated: true` header is present — " +
-        "paginate or narrow your query.\n",
+        "paginate or narrow your query, or send `X-Max-Response-Size: <bytes>` (up to 1 MB) to raise the limit.\n",
+    );
+    sections.push(
+      "Requests to the proxy timeout after 30 seconds. " +
+        "For slow endpoints, paginate or request smaller payloads.\n",
+    );
+    sections.push(
+      "If the proxy itself encounters an error (invalid provider, unauthorized URL, missing credentials), " +
+        'it returns a JSON `{ "error": "..." }` body with a 4xx/5xx status — ' +
+        "read the error message to diagnose the issue instead of retrying blindly.\n",
+    );
+    sections.push(
+      "The proxy maintains a cookie jar per provider — `Set-Cookie` headers from upstream responses " +
+        "are stored automatically and sent on subsequent requests. " +
+        "You do not need to manage cookies yourself.\n",
     );
 
     sections.push("### Connected Providers\n");

@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
 import {
   createWebhook,
   listWebhooks,
@@ -74,6 +75,7 @@ describe("webhooks service", () => {
     });
 
     it("supports packageId filter", async () => {
+      await seedPackage({ id: "@testorg/my-agent", orgId });
       const wh = await createWebhook(
         orgId,
         defaultAppId,

@@ -26,6 +26,20 @@ export const proxiesPaths = {
                   },
                 },
               },
+              example: {
+                proxies: [
+                  {
+                    id: "cm6pqr678",
+                    label: "US Residential Proxy",
+                    urlPrefix: "http://user:****@us-proxy.example.com:8080",
+                    source: "custom",
+                    enabled: true,
+                    isDefault: false,
+                    createdAt: "2026-01-10T08:00:00Z",
+                    updatedAt: "2026-01-10T08:00:00Z",
+                  },
+                ],
+              },
             },
           },
         },
@@ -47,8 +61,12 @@ export const proxiesPaths = {
               type: "object",
               required: ["label", "url"],
               properties: {
-                label: { type: "string", description: "Display name for the proxy" },
-                url: { type: "string", description: "Proxy URL (http://user:pass@host:port)" },
+                label: { type: "string", minLength: 1, description: "Display name for the proxy" },
+                url: {
+                  type: "string",
+                  format: "uri",
+                  description: "Proxy URL (http://user:pass@host:port)",
+                },
               },
             },
           },
@@ -69,6 +87,7 @@ export const proxiesPaths = {
                   id: { type: "string" },
                 },
               },
+              example: { id: "cm6pqr679" },
             },
           },
         },
@@ -138,8 +157,8 @@ export const proxiesPaths = {
             schema: {
               type: "object",
               properties: {
-                label: { type: "string" },
-                url: { type: "string" },
+                label: { type: "string", minLength: 1 },
+                url: { type: "string", format: "uri" },
                 enabled: { type: "boolean" },
               },
             },
@@ -218,7 +237,7 @@ export const proxiesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "429": { description: "Rate limited" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },

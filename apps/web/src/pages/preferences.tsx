@@ -40,7 +40,10 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 
 import { ConfirmModal } from "../components/confirm-modal";
+import { useProviders } from "../hooks/use-providers";
+import { resolveScopeLabel } from "../lib/scope-labels";
 import type { UserConnectionProviderGroup, UserConnectionEntry } from "@appstrate/shared-types";
+import type { AvailableScope } from "@appstrate/core/validation";
 
 export function PreferencesPage() {
   const { t, i18n } = useTranslation(["settings", "common"]);
@@ -626,11 +629,13 @@ function ConnectionItem({
   hasMultipleProfiles,
   onDisconnect,
   disconnecting,
+  availableScopes,
 }: {
   conn: UserConnectionEntry;
   hasMultipleProfiles: boolean;
   onDisconnect: () => void;
   disconnecting: boolean;
+  availableScopes?: AvailableScope[];
 }) {
   const { t } = useTranslation(["settings", "common"]);
 
@@ -658,7 +663,10 @@ function ConnectionItem({
     },
   );
   if (conn.scopesGranted.length > 0) {
-    rows.push({ label: t("connectors.scopesLabel"), value: conn.scopesGranted.join(", ") });
+    rows.push({
+      label: t("connectors.scopesLabel"),
+      value: conn.scopesGranted.map((s) => resolveScopeLabel(s, availableScopes)).join(", "),
+    });
   }
 
   return (
@@ -691,6 +699,7 @@ function ProviderCard({
   hasMultipleProfiles,
   onDisconnect,
   disconnecting,
+  availableScopes,
 }: {
   provider: UserConnectionProviderGroup;
   expanded: boolean;
@@ -698,6 +707,7 @@ function ProviderCard({
   hasMultipleProfiles: boolean;
   onDisconnect: (conn: UserConnectionEntry) => void;
   disconnecting: boolean;
+  availableScopes?: AvailableScope[];
 }) {
   const { t } = useTranslation(["settings", "common"]);
 
@@ -736,6 +746,7 @@ function ProviderCard({
                     key={conn.connectionId}
                     conn={conn}
                     hasMultipleProfiles={hasMultipleProfiles}
+                    availableScopes={availableScopes}
                     onDisconnect={() => onDisconnect(conn)}
                     disconnecting={disconnecting}
                   />
@@ -752,6 +763,7 @@ function ProviderCard({
 function ConnectorsTab() {
   const { t } = useTranslation(["settings", "common"]);
   const { data: userConns, isLoading } = useAllUserConnections();
+  const { data: providersData } = useProviders();
   const disconnectMutation = useDisconnect();
   const deleteAllMutation = useDeleteAllConnections();
 
@@ -861,6 +873,9 @@ function ConnectorsTab() {
                 })
               }
               disconnecting={disconnectMutation.isPending}
+              availableScopes={
+                providersData?.providers?.find((p) => p.id === pg.providerId)?.availableScopes
+              }
             />
           ))}
         </div>

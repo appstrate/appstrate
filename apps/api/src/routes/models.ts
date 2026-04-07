@@ -27,7 +27,7 @@ import {
   systemEntityForbidden,
 } from "../lib/errors.ts";
 
-const createModelSchema = z.object({
+export const createModelSchema = z.object({
   label: z.string().min(1, "label is required"),
   api: z.string().min(1, "api is required"),
   baseUrl: z.url({ error: "baseUrl must be a valid URL" }),
@@ -40,7 +40,7 @@ const createModelSchema = z.object({
   cost: modelCostSchema.optional(),
 });
 
-const updateModelSchema = z.object({
+export const updateModelSchema = z.object({
   label: z.string().min(1).optional(),
   api: z.string().min(1).optional(),
   baseUrl: z.url().optional(),
@@ -54,11 +54,11 @@ const updateModelSchema = z.object({
   cost: modelCostSchema.nullable().optional(),
 });
 
-const setDefaultSchema = z.object({
+export const setDefaultSchema = z.object({
   modelId: z.string().nullable(),
 });
 
-const testInlineSchema = z.object({
+export const testInlineSchema = z.object({
   api: z.string().min(1),
   baseUrl: z.url(),
   modelId: z.string().min(1),

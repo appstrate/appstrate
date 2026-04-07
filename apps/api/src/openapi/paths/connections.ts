@@ -36,6 +36,25 @@ export const connectionsPaths = {
                   },
                 },
               },
+              example: {
+                connections: [
+                  {
+                    provider: "@appstrate/gmail",
+                    status: "connected",
+                    connectionId: "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                    connectedAt: "2026-01-12T14:22:00Z",
+                    scopesGranted: [
+                      "https://www.googleapis.com/auth/gmail.readonly",
+                      "https://www.googleapis.com/auth/gmail.labels",
+                    ],
+                  },
+                  {
+                    provider: "@appstrate/clickup",
+                    status: "not_connected",
+                    scopesGranted: [],
+                  },
+                ],
+              },
             },
           },
         },
@@ -96,20 +115,8 @@ export const connectionsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Provider scope (e.g. @appstrate)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Provider name (e.g. gmail)",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         content: {
@@ -158,20 +165,8 @@ export const connectionsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Provider scope (e.g. @appstrate)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Provider name (e.g. gmail)",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -181,7 +176,7 @@ export const connectionsPaths = {
               type: "object",
               required: ["apiKey"],
               properties: {
-                apiKey: { type: "string", description: "API key value" },
+                apiKey: { type: "string", minLength: 1, description: "API key value" },
                 profileId: {
                   type: "string",
                   format: "uuid",
@@ -224,20 +219,8 @@ export const connectionsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Provider scope (e.g. @appstrate)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Provider name (e.g. gmail)",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -350,20 +333,8 @@ export const connectionsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Provider scope (e.g. @appstrate)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Provider name (e.g. gmail)",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "profileId",
           in: "query",

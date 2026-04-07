@@ -27,6 +27,7 @@ export const appProfilesPaths = {
                   ok: { type: "boolean" },
                 },
               },
+              example: { ok: true },
             },
           },
         },
@@ -101,6 +102,34 @@ export const appProfilesPaths = {
                   },
                 },
               },
+              example: {
+                providers: [
+                  {
+                    providerId: "@appstrate/gmail",
+                    displayName: "Gmail",
+                    logo: "gmail.svg",
+                    totalConnections: 1,
+                    orgs: [
+                      {
+                        orgId: "550e8400-e29b-41d4-a716-446655440000",
+                        orgName: "Acme Corp",
+                        connections: [
+                          {
+                            connectionId: "550e8400-e29b-41d4-a716-446655440020",
+                            scopesGranted: ["https://mail.google.com/"],
+                            connectedAt: "2026-01-12T09:00:00Z",
+                            profile: {
+                              id: "550e8400-e29b-41d4-a716-446655440010",
+                              name: "Default",
+                              isDefault: true,
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
             },
           },
         },
@@ -154,6 +183,18 @@ export const appProfilesPaths = {
                   },
                 },
               },
+              example: {
+                profiles: [
+                  {
+                    profile: {
+                      id: "550e8400-e29b-41d4-a716-446655440030",
+                      name: "Shared Production",
+                      applicationId: "app_cm4jkl013",
+                    },
+                    providerIds: ["@appstrate/gmail", "@appstrate/clickup"],
+                  },
+                ],
+              },
             },
           },
         },
@@ -199,6 +240,18 @@ export const appProfilesPaths = {
                     },
                   },
                 },
+              },
+              example: {
+                profiles: [
+                  {
+                    id: "550e8400-e29b-41d4-a716-446655440030",
+                    name: "Shared Production",
+                    applicationId: "app_cm4jkl013",
+                    connectionCount: 2,
+                    createdAt: "2026-01-10T08:00:00Z",
+                    updatedAt: "2026-01-10T08:00:00Z",
+                  },
+                ],
               },
             },
           },
@@ -397,7 +450,7 @@ export const appProfilesPaths = {
               type: "object",
               required: ["providerId", "sourceProfileId"],
               properties: {
-                providerId: { type: "string" },
+                providerId: { type: "string", minLength: 1 },
                 sourceProfileId: { type: "string", format: "uuid" },
               },
             },
