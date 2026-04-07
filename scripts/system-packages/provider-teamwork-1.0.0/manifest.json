@@ -1,0 +1,52 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/teamwork",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Teamwork",
+  "description": "Project management and collaboration platform for client work",
+  "iconUrl": "https://cdn.simpleicons.org/teamwork",
+  "categories": ["project-management", "collaboration"],
+  "docsUrl": "https://apidocs.teamwork.com/",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "description": "Teamwork API key (found in Settings > API & Webhooks)"
+          },
+          "subdomain": {
+            "type": "string",
+            "description": "Your Teamwork subdomain (e.g. 'mycompany' from mycompany.teamwork.com)"
+          }
+        },
+        "required": ["api_key", "subdomain"]
+      },
+      "fieldName": "api_key"
+    },
+    "credentialEncoding": "basic_api_key_x",
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Basic",
+    "authorizedUris": [
+      "https://*.teamwork.com/*"
+    ]
+  },
+  "setupGuide": {
+    "steps": [
+      {
+        "label": "Go to Teamwork Settings > API & Webhooks",
+        "url": "https://www.teamwork.com/"
+      },
+      {
+        "label": "Generate or find your API key"
+      },
+      {
+        "label": "Copy the API key and note your subdomain"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
