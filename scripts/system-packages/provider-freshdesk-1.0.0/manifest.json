@@ -1,0 +1,52 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/freshdesk",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Freshdesk",
+  "description": "Customer support and helpdesk ticketing platform",
+  "iconUrl": "https://cdn.simpleicons.org/freshdesk",
+  "categories": ["crm", "support", "customer-service"],
+  "docsUrl": "https://developers.freshdesk.com/api/",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "description": "Freshdesk API key (found in Profile Settings > API Key)"
+          },
+          "subdomain": {
+            "type": "string",
+            "description": "Your Freshdesk subdomain (e.g. 'mycompany' from mycompany.freshdesk.com)"
+          }
+        },
+        "required": ["api_key", "subdomain"]
+      },
+      "fieldName": "api_key"
+    },
+    "credentialEncoding": "basic_api_key_x",
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Basic",
+    "authorizedUris": [
+      "https://*.freshdesk.com/*"
+    ]
+  },
+  "setupGuide": {
+    "steps": [
+      {
+        "label": "Log in to your Freshdesk account and go to Profile Settings",
+        "url": "https://support.freshdesk.com/"
+      },
+      {
+        "label": "Find your API Key on the right side of the Profile Settings page"
+      },
+      {
+        "label": "Copy the API Key and note your subdomain (from your URL)"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
