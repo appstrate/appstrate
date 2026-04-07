@@ -1,0 +1,67 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/zoho-crm",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Zoho CRM",
+  "description": "Customer relationship management platform for sales and marketing",
+  "iconUrl": "https://cdn.simpleicons.org/zoho",
+  "categories": ["crm", "sales", "marketing"],
+  "docsUrl": "https://www.zoho.com/crm/developer/docs/api/v7/",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://accounts.zoho.com/oauth/v2/auth",
+      "tokenUrl": "https://accounts.zoho.com/oauth/v2/token",
+      "refreshUrl": "https://accounts.zoho.com/oauth/v2/token",
+      "defaultScopes": ["ZohoCRM.modules.READ", "ZohoCRM.users.READ"],
+      "scopeSeparator": ",",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "authorizationParams": {
+        "access_type": "offline",
+        "prompt": "consent"
+      }
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Zoho-oauthtoken",
+    "authorizedUris": [
+      "https://www.zohoapis.com/*",
+      "https://www.zohoapis.eu/*",
+      "https://www.zohoapis.in/*",
+      "https://www.zohoapis.com.au/*",
+      "https://www.zohoapis.jp/*",
+      "https://www.zohoapis.com.cn/*"
+    ],
+    "availableScopes": [
+      { "value": "ZohoCRM.modules.READ", "label": "Read CRM module data" },
+      { "value": "ZohoCRM.modules.CREATE", "label": "Create records in CRM modules" },
+      { "value": "ZohoCRM.modules.UPDATE", "label": "Update CRM module records" },
+      { "value": "ZohoCRM.modules.DELETE", "label": "Delete CRM module records" },
+      { "value": "ZohoCRM.modules.ALL", "label": "Full access to CRM modules" },
+      { "value": "ZohoCRM.users.READ", "label": "Read user information" },
+      { "value": "ZohoCRM.users.ALL", "label": "Full access to users" },
+      { "value": "ZohoCRM.settings.READ", "label": "Read CRM settings" },
+      { "value": "ZohoCRM.settings.ALL", "label": "Full access to settings" },
+      { "value": "ZohoCRM.coql.READ", "label": "Execute COQL queries" },
+      { "value": "ZohoCRM.bulk.READ", "label": "Read bulk operations" },
+      { "value": "ZohoCRM.bulk.CREATE", "label": "Create bulk operations" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the authorized redirect URI to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Register a client in the Zoho API Console",
+        "url": "https://api-console.zoho.com/"
+      },
+      {
+        "label": "Choose 'Server-based Applications' and configure OAuth settings"
+      },
+      {
+        "label": "Copy your Client ID and Client Secret"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
