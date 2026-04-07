@@ -1,0 +1,62 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/x",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "X (Twitter)",
+  "description": "Social media platform for microblogging and real-time engagement",
+  "iconUrl": "https://cdn.simpleicons.org/x/white",
+  "categories": ["social-media", "marketing"],
+  "docsUrl": "https://docs.x.com/x-api",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://x.com/i/oauth2/authorize",
+      "tokenUrl": "https://api.x.com/2/oauth2/token",
+      "refreshUrl": "https://api.x.com/2/oauth2/token",
+      "defaultScopes": ["tweet.read", "users.read", "offline.access"],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_basic"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://api.x.com/*"
+    ],
+    "availableScopes": [
+      { "value": "tweet.read", "label": "Read tweets" },
+      { "value": "tweet.write", "label": "Post & delete tweets" },
+      { "value": "tweet.moderate.write", "label": "Moderate tweet replies" },
+      { "value": "users.read", "label": "Read user profiles" },
+      { "value": "follows.read", "label": "Read followers & following" },
+      { "value": "follows.write", "label": "Follow & unfollow users" },
+      { "value": "like.read", "label": "Read likes" },
+      { "value": "like.write", "label": "Like & unlike tweets" },
+      { "value": "list.read", "label": "Read lists" },
+      { "value": "list.write", "label": "Create & manage lists" },
+      { "value": "bookmark.read", "label": "Read bookmarks" },
+      { "value": "bookmark.write", "label": "Manage bookmarks" },
+      { "value": "space.read", "label": "Read Spaces" },
+      { "value": "dm.read", "label": "Read direct messages" },
+      { "value": "dm.write", "label": "Send direct messages" },
+      { "value": "offline.access", "label": "Refresh token (long-lived access)" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the callback URL to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create a project & app in the X Developer Portal",
+        "url": "https://developer.x.com/en/portal/dashboard"
+      },
+      {
+        "label": "Enable OAuth 2.0 under 'User Authentication Settings'"
+      },
+      {
+        "label": "Set type to 'Web App' and copy Client ID & Client Secret"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
