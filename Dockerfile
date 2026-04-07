@@ -19,6 +19,7 @@ COPY packages/emails/package.json packages/emails/
 COPY packages/env/package.json packages/env/
 COPY runtime-pi/package.json runtime-pi/
 COPY runtime-pi/sidecar/package.json runtime-pi/sidecar/
+COPY e2e/package.json e2e/
 COPY patches/ patches/
 
 RUN bun install --frozen-lockfile
