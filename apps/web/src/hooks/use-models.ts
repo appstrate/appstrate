@@ -177,7 +177,29 @@ export function useModelFormHandler(opts: {
 
   const onSubmit = (data: ModelFormData) => {
     if (opts.editModel) {
-      updateModel.mutate({ id: opts.editModel.id, data }, { onSuccess: opts.onSuccess });
+      if (data.newProviderKey) {
+        const provider = findProviderByApiAndBaseUrl(data.api, data.baseUrl);
+        const providerLabel = provider?.label ?? "Custom";
+        createPk.mutate(
+          {
+            label: providerLabel,
+            api: data.api,
+            baseUrl: data.baseUrl,
+            apiKey: data.newProviderKey.apiKey,
+          },
+          {
+            onSuccess: (result) => {
+              const { newProviderKey: _, ...modelData } = data;
+              updateModel.mutate(
+                { id: opts.editModel!.id, data: { ...modelData, providerKeyId: result.id } },
+                { onSuccess: opts.onSuccess },
+              );
+            },
+          },
+        );
+      } else {
+        updateModel.mutate({ id: opts.editModel.id, data }, { onSuccess: opts.onSuccess });
+      }
     } else if (data.newProviderKey) {
       const provider = findProviderByApiAndBaseUrl(data.api, data.baseUrl);
       const providerLabel = provider?.label ?? "Custom";
