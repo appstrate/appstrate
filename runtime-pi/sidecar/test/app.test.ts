@@ -697,6 +697,165 @@ describe("ALL /proxy — forwarding", () => {
   });
 });
 
+// --- ALL /proxy — binary body integrity ---
+
+describe("ALL /proxy — binary body integrity", () => {
+  it("preserves binary body with non-UTF-8 bytes", async () => {
+    // Bytes that are invalid UTF-8 — would be replaced by U+FFFD if decoded as text
+    const binaryPayload = new Uint8Array([0x00, 0xff, 0xfe, 0x80, 0xc0, 0x41, 0x42]);
+    let capturedBody: ArrayBuffer | undefined;
+
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      if (init?.body instanceof ArrayBuffer) {
+        capturedBody = init.body;
+      }
+      return new Response("ok", { status: 200 });
+    });
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/upload",
+        "Content-Type": "application/octet-stream",
+      },
+      body: binaryPayload.buffer,
+    });
+
+    expect(res.status).toBe(200);
+    expect(capturedBody).toBeDefined();
+    const forwarded = new Uint8Array(capturedBody!);
+    expect(forwarded).toEqual(binaryPayload);
+  });
+
+  it("preserves binary body on retry after 401", async () => {
+    const binaryPayload = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG header
+    let capturedBody: ArrayBuffer | undefined;
+
+    const deps = makeDeps({
+      refreshCredentials: mock(
+        async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "new-token" },
+          authorizedUris: ["https://api.example.com/*"],
+          allowAllUris: false,
+        }),
+      ),
+      fetchFn: mock(async (_url: string, init?: RequestInit) => {
+        const authHeader = (init?.headers as Record<string, string>)?.["authorization"] ?? "";
+        if (authHeader.includes("old-token")) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+        if (init?.body instanceof ArrayBuffer) {
+          capturedBody = init.body;
+        }
+        return new Response("ok", { status: 200 });
+      }),
+      fetchCredentials: mock(
+        async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "old-token" },
+          authorizedUris: ["https://api.example.com/*"],
+          allowAllUris: false,
+        }),
+      ),
+    });
+
+    const app = createApp(deps);
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "@test/github",
+        "X-Target": "https://api.example.com/upload",
+        Authorization: "Bearer {{access_token}}",
+        "Content-Type": "application/octet-stream",
+      },
+      body: binaryPayload.buffer,
+    });
+
+    expect(res.status).toBe(200);
+    expect(capturedBody).toBeDefined();
+    const forwarded = new Uint8Array(capturedBody!);
+    expect(forwarded).toEqual(binaryPayload);
+  });
+
+  it("forwards empty POST body without error", async () => {
+    let capturedBody: BodyInit | undefined;
+
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      capturedBody = init?.body ?? undefined;
+      return new Response("ok", { status: 200 });
+    });
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/action",
+        "Content-Type": "application/json",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    // Empty body: arrayBuffer() returns 0-length buffer
+    if (capturedBody instanceof ArrayBuffer) {
+      expect(capturedBody.byteLength).toBe(0);
+    }
+  });
+
+  it("decodes binary as text only when X-Substitute-Body is set", async () => {
+    // Valid JSON as bytes — should be decoded for substitution
+    const jsonBytes = new TextEncoder().encode('{"token":"{{access_token}}"}');
+    let capturedBody: string | undefined;
+
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      if (typeof init?.body === "string") {
+        capturedBody = init.body;
+      }
+      return new Response("ok", { status: 200 });
+    });
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/action",
+        "X-Substitute-Body": "true",
+        "Content-Type": "application/json",
+      },
+      body: jsonBytes.buffer,
+    });
+
+    expect(res.status).toBe(200);
+    expect(capturedBody).toBe('{"token":"test-123"}');
+  });
+
+  it("passes binary body as ArrayBuffer when X-Substitute-Body is not set", async () => {
+    const binaryPayload = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+    let bodyIsArrayBuffer = false;
+
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      bodyIsArrayBuffer = init?.body instanceof ArrayBuffer;
+      return new Response("ok", { status: 200 });
+    });
+
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "POST",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/upload",
+        "Content-Type": "application/octet-stream",
+      },
+      body: binaryPayload.buffer,
+    });
+
+    expect(res.status).toBe(200);
+    expect(bodyIsArrayBuffer).toBe(true);
+  });
+});
+
 // --- ALL /llm/* — LLM reverse proxy ---
 
 const LLM_CONFIG: LlmProxyConfig = {
