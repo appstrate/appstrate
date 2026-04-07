@@ -73,6 +73,14 @@ export function useTestProviderKey() {
   });
 }
 
+export function deduplicateLabel(label: string, existingKeys: OrgProviderKeyInfo[]): string {
+  const existingLabels = new Set(existingKeys.map((k) => k.label));
+  if (!existingLabels.has(label)) return label;
+  let counter = 2;
+  while (existingLabels.has(`${label} (${counter})`)) counter++;
+  return `${label} (${counter})`;
+}
+
 export function useTestProviderKeyInline() {
   return useMutation({
     mutationFn: (data: { api: string; baseUrl: string; apiKey?: string; existingKeyId?: string }) =>

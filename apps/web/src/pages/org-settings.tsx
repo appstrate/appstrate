@@ -43,13 +43,16 @@ import {
   useUpdateProviderKey,
   useDeleteProviderKey,
   useTestProviderKey,
+  deduplicateLabel,
 } from "../hooks/use-provider-keys";
 import { useConnectionTest } from "../hooks/use-connection-test";
 import { ProxyFormModal } from "../components/proxy-form-modal";
 import { ModelFormModal } from "../components/model-form-modal";
 import { ProviderKeyFormModal } from "../components/provider-key-form-modal";
+import { cn } from "@/lib/utils";
 import { PROVIDER_ICONS } from "../components/icons";
 import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
+import { formatDateField } from "../lib/markdown";
 
 import { ConfirmModal } from "../components/confirm-modal";
 import { CopyLinkButton } from "../components/copy-link-button";
@@ -623,6 +626,9 @@ export function OrgSettingsPage() {
               onDelete={(pk) => {
                 setConfirmState({ type: "deleteProviderKey", label: pk.label, id: pk.id });
               }}
+              onRename={(pk, newLabel) => {
+                updatePkMutation.mutate({ id: pk.id, data: { label: newLabel } });
+              }}
             />
           )}
         </>
@@ -688,8 +694,14 @@ export function OrgSettingsPage() {
               { onSuccess: () => setPkModalOpen(false) },
             );
           } else {
+            const uniqueLabel = deduplicateLabel(data.label, providerKeys ?? []);
             createPkMutation.mutate(
-              data as { label: string; api: string; baseUrl: string; apiKey: string },
+              { ...data, label: uniqueLabel } as {
+                label: string;
+                api: string;
+                baseUrl: string;
+                apiKey: string;
+              },
               {
                 onSuccess: () => setPkModalOpen(false),
               },
@@ -876,6 +888,55 @@ function ProxiesTab({
   );
 }
 
+function InlineEditableLabel({
+  value,
+  editable,
+  onSave,
+}: {
+  value: string;
+  editable: boolean;
+  onSave: (newValue: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  if (!editable || !editing) {
+    return (
+      <span
+        className={cn("text-sm font-medium", editable && "cursor-pointer hover:underline")}
+        onClick={() => {
+          if (editable) {
+            setDraft(value);
+            setEditing(true);
+          }
+        }}
+      >
+        {value}
+      </span>
+    );
+  }
+
+  return (
+    <Input
+      autoFocus
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (draft.trim() && draft.trim() !== value) onSave(draft.trim());
+        setEditing(false);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          if (draft.trim() && draft.trim() !== value) onSave(draft.trim());
+          setEditing(false);
+        }
+        if (e.key === "Escape") setEditing(false);
+      }}
+      className="h-7 w-auto min-w-40 text-sm font-medium"
+    />
+  );
+}
+
 function ProviderKeysSection({
   providerKeys,
   isLoading,
@@ -883,6 +944,7 @@ function ProviderKeysSection({
   onCreate,
   onEdit,
   onDelete,
+  onRename,
 }: {
   providerKeys: OrgProviderKeyInfo[] | undefined;
   isLoading: boolean;
@@ -890,6 +952,7 @@ function ProviderKeysSection({
   onCreate: () => void;
   onEdit: (pk: OrgProviderKeyInfo) => void;
   onDelete: (pk: OrgProviderKeyInfo) => void;
+  onRename: (pk: OrgProviderKeyInfo, newLabel: string) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestProviderKey();
@@ -905,20 +968,30 @@ function ProviderKeysSection({
       </div>
 
       {providerKeys && providerKeys.length > 0 ? (
-        <div className="flex flex-col gap-3">
+        <div className="border-border divide-border divide-y rounded-lg border">
           {providerKeys.map((pk) => {
             const provider = findProviderByApiAndBaseUrl(pk.api, pk.baseUrl);
             const ProviderIcon = provider ? PROVIDER_ICONS[provider.id] : undefined;
             return (
-              <div key={pk.id} className="border-border bg-card rounded-lg border p-5">
-                <div className="mb-3 flex items-center gap-3">
-                  {ProviderIcon && <ProviderIcon className="size-5" />}
-                  <div className="flex-1">
-                    <h3 className="text-[0.95rem] font-semibold">{pk.label}</h3>
-                    <span className="text-muted-foreground text-sm">{pk.api}</span>
+              <div key={pk.id} className="flex items-center gap-3 px-4 py-3">
+                {ProviderIcon && <ProviderIcon className="text-muted-foreground size-4 shrink-0" />}
+                <div className="min-w-0 flex-1">
+                  <InlineEditableLabel
+                    value={pk.label}
+                    editable={pk.source === "custom"}
+                    onSave={(newLabel) => onRename(pk, newLabel)}
+                  />
+                  <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                    <span>{pk.api}</span>
+                    {pk.createdAt && (
+                      <>
+                        <span>&middot;</span>
+                        <span>{formatDateField(pk.createdAt)}</span>
+                      </>
+                    )}
                   </div>
                 </div>
-                <div className="border-border mt-3 flex items-center justify-end gap-2 border-t pt-3">
+                <div className="flex items-center gap-1.5">
                   <Button
                     variant="outline"
                     size="sm"

@@ -6,7 +6,7 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import type { OrgModelInfo, TestResult, ModelCost } from "@appstrate/shared-types";
 import type { ModelFormData } from "../components/model-form-modal";
-import { useCreateProviderKey } from "./use-provider-keys";
+import { useCreateProviderKey, useProviderKeys, deduplicateLabel } from "./use-provider-keys";
 import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
 
 export function useModels() {
@@ -172,54 +172,42 @@ export function useModelFormHandler(opts: {
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
   const createPk = useCreateProviderKey();
+  const { data: providerKeys } = useProviderKeys();
 
   const isPending = createModel.isPending || updateModel.isPending || createPk.isPending;
 
   const onSubmit = (data: ModelFormData) => {
+    const createProviderKeyAndThen = (onKeyCreated: (keyId: string) => void) => {
+      const provider = findProviderByApiAndBaseUrl(data.api, data.baseUrl);
+      const label = deduplicateLabel(provider?.label ?? "Custom", providerKeys ?? []);
+      createPk.mutate(
+        {
+          label,
+          api: data.api,
+          baseUrl: data.baseUrl,
+          apiKey: data.newProviderKey!.apiKey,
+        },
+        { onSuccess: (result) => onKeyCreated(result.id) },
+      );
+    };
+
     if (opts.editModel) {
       if (data.newProviderKey) {
-        const provider = findProviderByApiAndBaseUrl(data.api, data.baseUrl);
-        const providerLabel = provider?.label ?? "Custom";
-        createPk.mutate(
-          {
-            label: providerLabel,
-            api: data.api,
-            baseUrl: data.baseUrl,
-            apiKey: data.newProviderKey.apiKey,
-          },
-          {
-            onSuccess: (result) => {
-              const { newProviderKey: _, ...modelData } = data;
-              updateModel.mutate(
-                { id: opts.editModel!.id, data: { ...modelData, providerKeyId: result.id } },
-                { onSuccess: opts.onSuccess },
-              );
-            },
-          },
-        );
+        createProviderKeyAndThen((keyId) => {
+          const { newProviderKey: _, ...modelData } = data;
+          updateModel.mutate(
+            { id: opts.editModel!.id, data: { ...modelData, providerKeyId: keyId } },
+            { onSuccess: opts.onSuccess },
+          );
+        });
       } else {
         updateModel.mutate({ id: opts.editModel.id, data }, { onSuccess: opts.onSuccess });
       }
     } else if (data.newProviderKey) {
-      const provider = findProviderByApiAndBaseUrl(data.api, data.baseUrl);
-      const providerLabel = provider?.label ?? "Custom";
-      createPk.mutate(
-        {
-          label: providerLabel,
-          api: data.api,
-          baseUrl: data.baseUrl,
-          apiKey: data.newProviderKey.apiKey,
-        },
-        {
-          onSuccess: (result) => {
-            const { newProviderKey: _, ...modelData } = data;
-            createModel.mutate(
-              { ...modelData, providerKeyId: result.id },
-              { onSuccess: opts.onSuccess },
-            );
-          },
-        },
-      );
+      createProviderKeyAndThen((keyId) => {
+        const { newProviderKey: _, ...modelData } = data;
+        createModel.mutate({ ...modelData, providerKeyId: keyId }, { onSuccess: opts.onSuccess });
+      });
     } else {
       createModel.mutate(data, { onSuccess: opts.onSuccess });
     }
