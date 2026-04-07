@@ -9,12 +9,16 @@ export interface PersistedStringState {
 
 /**
  * Factory for a Zustand vanilla store that persists a single string ID
- * to localStorage as a raw string (not JSON-wrapped), with cross-tab sync.
+ * to localStorage as a raw string (not JSON-wrapped).
+ *
+ * Each tab reads localStorage once on init and manages its own state
+ * independently. No cross-tab sync — tabs can have different org/app
+ * selections without interfering with each other.
  */
 export function createPersistedStringStore(storageKey: string): StoreApi<PersistedStringState> {
   const initial = typeof window !== "undefined" ? localStorage.getItem(storageKey) : null;
 
-  const store = createStore<PersistedStringState>()((set) => ({
+  return createStore<PersistedStringState>()((set) => ({
     id: initial,
     setId: (id) => {
       set({ id });
@@ -22,12 +26,4 @@ export function createPersistedStringStore(storageKey: string): StoreApi<Persist
       else localStorage.removeItem(storageKey);
     },
   }));
-
-  if (typeof window !== "undefined") {
-    window.addEventListener("storage", (e) => {
-      if (e.key === storageKey) store.setState({ id: e.newValue });
-    });
-  }
-
-  return store;
 }
