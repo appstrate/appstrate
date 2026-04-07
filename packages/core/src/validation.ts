@@ -156,6 +156,7 @@ export interface ResolvedProviderDefinition {
   credentialFieldName?: string;
   credentialHeaderName?: string;
   credentialHeaderPrefix?: string;
+  credentialEncoding?: string;
   authorizedUris?: string[];
   allowAllUris: boolean;
   availableScopes?: AvailableScope[];
@@ -216,6 +217,7 @@ export function buildProviderDefinitionFromManifest(
     // Transport fields (from definition level — cross-cutting, implementation-specific)
     credentialHeaderName: rawDef.credentialHeaderName as string | undefined,
     credentialHeaderPrefix: rawDef.credentialHeaderPrefix as string | undefined,
+    credentialEncoding: rawDef.credentialEncoding as string | undefined,
     // Transversal fields
     authorizedUris: (rawDef.authorizedUris as string[])?.length
       ? (rawDef.authorizedUris as string[])

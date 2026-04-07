@@ -373,14 +373,17 @@ async function buildRefreshContext(
  * - "basic_api_key_x": base64(api_key:X) — Freshdesk/Teamwork pattern
  * - "basic_email_token": base64(email/token:api_key) — Zendesk API token pattern
  */
-function buildSidecarCredentials(
+/** @internal Exported for testing only. */
+export function buildSidecarCredentials(
   credentials: Record<string, string>,
   def: Record<string, unknown>,
   authMode: string | undefined,
 ): Record<string, string> {
   const credentialEncoding = def.credentialEncoding as string | undefined;
 
-  // Apply credential encoding transformations for api_key providers
+  // Apply credential encoding transformations for api_key providers.
+  // Returns ALL credential fields (not just the mapped fieldName) because
+  // extra fields like subdomain/email are needed for URL substitution via {{variable}}.
   if (authMode === "api_key" && credentialEncoding) {
     const apiKey = credentials.api_key;
     if (credentialEncoding === "basic_api_key_x" && apiKey) {
