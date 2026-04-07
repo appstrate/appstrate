@@ -4,7 +4,6 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
@@ -186,14 +185,6 @@ export function RunDetailPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Badge status={displayStatus} />
-        <span
-          className={cn(
-            "text-muted-foreground bg-muted rounded px-1.5 py-0.5 font-mono text-xs",
-            !run.packageVersion && "italic",
-          )}
-        >
-          {run.packageVersion ? `v${run.packageVersion}` : t("exec.draft")}
-        </span>
         {userName ? (
           <span className="text-muted-foreground text-sm">
             {t("exec.user", { name: userName })}

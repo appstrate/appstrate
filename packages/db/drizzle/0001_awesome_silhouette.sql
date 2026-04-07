@@ -1,0 +1,2 @@
+ALTER TABLE "runs" ADD COLUMN "provider_statuses" jsonb;--> statement-breakpoint
+ALTER TABLE "webhooks" ADD CONSTRAINT "webhooks_package_id_packages_id_fk" FOREIGN KEY ("package_id") REFERENCES "public"."packages"("id") ON DELETE set null ON UPDATE no action;

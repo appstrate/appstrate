@@ -13,10 +13,12 @@ import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
 import { resolveProviderProfiles } from "./connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { resolveProviderStatuses } from "./connection-manager/index.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { UploadedFile, FileReference } from "./adapters/types.ts";
+import type { RunProviderSnapshot } from "@appstrate/shared-types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,7 +35,7 @@ export interface RunPipelineParams {
   config: Record<string, unknown>;
   modelId?: string | null;
   proxyId?: string | null;
-  overrideVersionId?: number;
+  overrideVersionLabel?: string;
   /** Schedule ID — set only for scheduled runs. */
   scheduleId?: string;
   /** Connection profile ID used to create the run. */
@@ -130,7 +132,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     config,
     modelId,
     proxyId,
-    overrideVersionId,
+    overrideVersionLabel,
     scheduleId,
     connectionProfileId,
     applicationId,
@@ -140,26 +142,34 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // --- Step 1: Build run context ---
   let promptContext;
   let agentPackage: Buffer | null;
-  let packageVersionId: number | null;
+  let versionLabel: string | null;
+  let versionDirty: boolean;
   let proxyLabel: string | null;
   let modelLabel: string | null;
   let modelSource: string | null;
   try {
-    ({ promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel, modelSource } =
-      await buildRunContext({
-        runId,
-        agent,
-        providerProfiles,
-        orgId,
-        applicationId,
-        actor,
-        input: input ?? undefined,
-        files,
-        config,
-        modelId,
-        proxyId,
-        overrideVersionId,
-      }));
+    ({
+      promptContext,
+      agentPackage,
+      versionLabel,
+      versionDirty,
+      proxyLabel,
+      modelLabel,
+      modelSource,
+    } = await buildRunContext({
+      runId,
+      agent,
+      providerProfiles,
+      orgId,
+      applicationId,
+      actor,
+      input: input ?? undefined,
+      files,
+      config,
+      modelId,
+      proxyId,
+      overrideVersionLabel,
+    }));
   } catch (err) {
     if (err instanceof ModelNotConfiguredError) {
       return { ok: false, error: { code: "model_not_configured", message: err.message } };
@@ -170,7 +180,27 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     };
   }
 
-  // --- Step 2: Quota check (Cloud only) ---
+  // --- Step 2: Snapshot provider statuses ---
+  let providerStatusSnapshots: RunProviderSnapshot[] | undefined;
+  const manifestProviders = resolveManifestProviders(agent.manifest);
+  if (manifestProviders.length > 0) {
+    const statuses = await resolveProviderStatuses(
+      manifestProviders,
+      providerProfiles,
+      orgId,
+      applicationId,
+    );
+    providerStatusSnapshots = statuses.map((s) => ({
+      id: s.id,
+      status: s.status,
+      source: s.source,
+      profileName: s.profileName,
+      profileOwnerName: s.profileOwnerName,
+      ...(s.scopesSufficient != null ? { scopesSufficient: s.scopesSufficient } : {}),
+    }));
+  }
+
+  // --- Step 3: Quota check (Cloud only) ---
   const cloud = getCloudModule();
   if (cloud) {
     try {
@@ -187,29 +217,31 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     }
   }
 
-  // --- Step 3: Extract profile ID map ---
+  // --- Step 4: Extract profile ID map ---
   const profileIdMap = Object.fromEntries(
     Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
   );
 
-  // --- Step 4: Create run record ---
-  await createRun(
-    runId,
-    agent.id,
+  // --- Step 5: Create run record ---
+  await createRun({
+    id: runId,
+    packageId: agent.id,
     actor,
     orgId,
     applicationId,
-    input ?? null,
+    input: input ?? null,
     scheduleId,
-    packageVersionId ?? undefined,
     connectionProfileId,
-    proxyLabel ?? undefined,
-    modelLabel ?? undefined,
-    modelSource ?? undefined,
-    profileIdMap,
-  );
+    versionLabel: versionLabel ?? undefined,
+    versionDirty,
+    proxyLabel: proxyLabel ?? undefined,
+    modelLabel: modelLabel ?? undefined,
+    modelSource: modelSource ?? undefined,
+    providerProfileIds: profileIdMap,
+    providerStatuses: providerStatusSnapshots,
+  });
 
-  // --- Step 5: Fire-and-forget execution ---
+  // --- Step 6: Fire-and-forget execution ---
   executeAgentInBackground(
     runId,
     orgId,
