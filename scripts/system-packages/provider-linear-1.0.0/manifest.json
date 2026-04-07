@@ -1,0 +1,55 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/linear",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Linear",
+  "description": "Modern issue tracking and project management for software teams",
+  "iconUrl": "https://cdn.simpleicons.org/linear",
+  "categories": ["project-management", "issue-tracking", "development"],
+  "docsUrl": "https://linear.app/developers",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://linear.app/oauth/authorize",
+      "tokenUrl": "https://api.linear.app/oauth/token",
+      "refreshUrl": "https://api.linear.app/oauth/token",
+      "defaultScopes": ["read"],
+      "scopeSeparator": ",",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_post",
+      "authorizationParams": {
+        "prompt": "consent"
+      }
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://api.linear.app/*"
+    ],
+    "availableScopes": [
+      { "value": "read", "label": "Read access to workspace data" },
+      { "value": "write", "label": "Write access to workspace data" },
+      { "value": "issues:create", "label": "Create new issues" },
+      { "value": "comments:create", "label": "Create issue comments" },
+      { "value": "timeSchedule:write", "label": "Manage time schedules" },
+      { "value": "admin", "label": "Admin-level access" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the callback URL to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create an OAuth2 application in Linear settings",
+        "url": "https://linear.app/settings/api/applications/new"
+      },
+      {
+        "label": "Configure the redirect callback URLs"
+      },
+      {
+        "label": "Copy your Client ID and Client Secret"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
