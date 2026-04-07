@@ -29,9 +29,14 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { z } from "zod";
 import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
-const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
-const modelIdSchema = z.object({ modelId: z.string().nullable() });
-const appProfileIdSchema = z.object({ appProfileId: z.uuid().nullable() });
+export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
+export const modelIdSchema = z.object({ modelId: z.string().nullable() });
+export const appProfileIdSchema = z.object({ appProfileId: z.uuid().nullable() });
+export const setProviderProfileSchema = z.object({
+  providerId: z.string().min(1),
+  profileId: z.uuid(),
+});
+export const removeProviderProfileSchema = z.object({ providerId: z.string().min(1) });
 
 export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
@@ -120,10 +125,7 @@ export function createAgentsRouter() {
       const agent = c.get("agent");
       const actor = getActor(c);
       const body = await c.req.json();
-      const data = parseBody(
-        z.object({ providerId: z.string().min(1), profileId: z.uuid() }),
-        body,
-      );
+      const data = parseBody(setProviderProfileSchema, body);
 
       // Validate ownership — user can only set overrides to their own profiles
       const profile = await getAccessibleProfile(data.profileId, actor, c.get("applicationId"));
@@ -146,7 +148,7 @@ export function createAgentsRouter() {
       const agent = c.get("agent");
       const actor = getActor(c);
       const body = await c.req.json();
-      const data = parseBody(z.object({ providerId: z.string().min(1) }), body);
+      const data = parseBody(removeProviderProfileSchema, body);
       await removeUserAgentProviderOverride(actor, agent.id, data.providerId);
       return c.json({ success: true });
     },

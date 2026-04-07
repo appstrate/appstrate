@@ -51,6 +51,19 @@ export const applicationsPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ApplicationObject" },
+              example: {
+                id: "app_cm1xyz789ghi012",
+                object: "application",
+                orgId: "550e8400-e29b-41d4-a716-446655440000",
+                name: "My SaaS App",
+                isDefault: false,
+                settings: {
+                  allowedRedirectDomains: ["myapp.com", "staging.myapp.com"],
+                },
+                createdBy: "usr_k7x9m2p4q1",
+                createdAt: "2026-01-15T10:30:00Z",
+                updatedAt: "2026-01-15T10:30:00Z",
+              },
             },
           },
         },
@@ -83,6 +96,33 @@ export const applicationsPaths = {
                     items: { $ref: "#/components/schemas/ApplicationObject" },
                   },
                 },
+              },
+              example: {
+                object: "list",
+                data: [
+                  {
+                    id: "app_default001",
+                    object: "application",
+                    orgId: "550e8400-e29b-41d4-a716-446655440000",
+                    name: "Default",
+                    isDefault: true,
+                    settings: { allowedRedirectDomains: [] },
+                    createdBy: null,
+                    createdAt: "2026-01-10T08:00:00Z",
+                    updatedAt: "2026-01-10T08:00:00Z",
+                  },
+                  {
+                    id: "app_cm1xyz789ghi012",
+                    object: "application",
+                    orgId: "550e8400-e29b-41d4-a716-446655440000",
+                    name: "My SaaS App",
+                    isDefault: false,
+                    settings: { allowedRedirectDomains: ["myapp.com"] },
+                    createdBy: "usr_k7x9m2p4q1",
+                    createdAt: "2026-01-15T10:30:00Z",
+                    updatedAt: "2026-01-15T10:30:00Z",
+                  },
+                ],
               },
             },
           },
@@ -262,7 +302,11 @@ export const applicationsPaths = {
               type: "object",
               required: ["packageId"],
               properties: {
-                packageId: { type: "string", description: "Package ID from org catalog" },
+                packageId: {
+                  type: "string",
+                  minLength: 1,
+                  description: "Package ID from org catalog",
+                },
                 config: { type: "object", description: "Initial configuration" },
               },
             },
@@ -274,6 +318,11 @@ export const applicationsPaths = {
           description: "Package installed",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ApplicationPackage" },
+            },
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -299,13 +348,18 @@ export const applicationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "appId", in: "path", required: true, schema: { type: "string" } },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Installed package detail",
           headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ApplicationPackage" },
+            },
+          },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -320,8 +374,8 @@ export const applicationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "appId", in: "path", required: true, schema: { type: "string" } },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         content: {
@@ -344,6 +398,11 @@ export const applicationsPaths = {
         "200": {
           description: "Updated package config",
           headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ApplicationPackage" },
+            },
+          },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -357,8 +416,8 @@ export const applicationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "appId", in: "path", required: true, schema: { type: "string" } },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": { description: "Package uninstalled" },
@@ -419,8 +478,8 @@ export const applicationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "appId", in: "path", required: true, schema: { type: "string" } },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         content: {
@@ -472,8 +531,8 @@ export const applicationsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "appId", in: "path", required: true, schema: { type: "string" } },
-        { name: "scope", in: "path", required: true, schema: { type: "string" } },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {

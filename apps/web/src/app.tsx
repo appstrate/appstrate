@@ -32,6 +32,7 @@ import { ScheduleDetailPage } from "./pages/schedule-detail";
 import { ScheduleCreatePage } from "./pages/schedule-create";
 import { ScheduleEditPage } from "./pages/schedule-edit";
 import { PreferencesPage } from "./pages/preferences";
+import { LibraryPage } from "./pages/library-page";
 import { LoginPage } from "./pages/login";
 import { RegisterPage } from "./pages/register";
 import { VerifyEmailPage } from "./pages/verify-email";
@@ -275,6 +276,7 @@ export function App() {
               path="/providers/:scope/:name/:version"
               element={<UnifiedPackageDetailPage type="provider" />}
             />
+            <Route path="/library" element={<LibraryPage />} />
             <Route path="/applications" element={<ApplicationsPage />} />
             <Route path="/preferences" element={<PreferencesPage />} />
             <Route path="/webhooks" element={<WebhooksPage />} />

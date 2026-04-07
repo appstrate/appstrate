@@ -85,10 +85,11 @@ export function useApplicationResolver(): void {
   const currentAppId = useStore(appStore, (s) => s.id);
   const { data: applications } = useApplications();
 
-  useAutoSelect(
-    applications,
-    currentAppId,
-    (id) => appStore.getState().setId(id),
-    (items) => items.find((a) => a.isDefault),
+  const setId = useCallback((id: string) => appStore.getState().setId(id), []);
+  const findDefault = useCallback(
+    (items: { id: string; isDefault: boolean }[]) => items.find((a) => a.isDefault),
+    [],
   );
+
+  useAutoSelect(applications, currentAppId, setId, findDefault);
 }

@@ -30,18 +30,37 @@ import { encryptCredentials } from "@appstrate/connect";
 import { hasActualCredentials } from "../lib/provider-config.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 
-const createApplicationSchema = z.object({
+export const createApplicationSchema = z.object({
   name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
   settings: appSettingsSchema.optional(),
 });
 
-const updateApplicationSchema = z.object({
+export const updateApplicationSchema = z.object({
   name: z
     .string()
     .min(1, "name is required")
     .max(100, "name must be 100 characters or less")
     .optional(),
   settings: appSettingsSchema.optional(),
+});
+
+export const installPackageSchema = z.object({
+  packageId: z.string().min(1),
+  config: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const updatePackageSchema = z.object({
+  config: z.record(z.string(), z.unknown()).optional(),
+  modelId: z.string().nullable().optional(),
+  proxyId: z.string().nullable().optional(),
+  appProfileId: z.string().nullable().optional(),
+  versionId: z.number().int().nullable().optional(),
+  enabled: z.boolean().optional(),
+});
+
+export const appProviderCredentialsSchema = z.object({
+  credentials: z.record(z.string(), z.string().min(1)).optional(),
+  enabled: z.boolean().optional(),
 });
 
 export function createApplicationsRouter() {
@@ -144,20 +163,6 @@ export function createApplicationsRouter() {
 
   // ─── Application Packages (install/uninstall/config) ─────────────────────
 
-  const installPackageSchema = z.object({
-    packageId: z.string().min(1),
-    config: z.record(z.string(), z.unknown()).optional(),
-  });
-
-  const updatePackageSchema = z.object({
-    config: z.record(z.string(), z.unknown()).optional(),
-    modelId: z.string().nullable().optional(),
-    proxyId: z.string().nullable().optional(),
-    appProfileId: z.string().nullable().optional(),
-    versionId: z.number().int().nullable().optional(),
-    enabled: z.boolean().optional(),
-  });
-
   // Guard: validate that the application belongs to the org (once for all /:appId/packages/* routes)
   router.use("/:appId/packages/*", async (c, next) => {
     await getApplication(c.get("orgId"), c.req.param("appId")!);
@@ -245,11 +250,6 @@ export function createApplicationsRouter() {
   router.use("/:appId/providers/*", async (c, next) => {
     await getApplication(c.get("orgId"), c.req.param("appId")!);
     return next();
-  });
-
-  const appProviderCredentialsSchema = z.object({
-    credentials: z.record(z.string(), z.string().min(1)).optional(),
-    enabled: z.boolean().optional(),
   });
 
   // PUT /api/applications/:appId/providers/:scope/:name/credentials — set app-level credentials

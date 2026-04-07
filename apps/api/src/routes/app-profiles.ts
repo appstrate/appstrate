@@ -35,7 +35,11 @@ import { getActor } from "../lib/actor.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { listConnections, listProviderCredentialIds } from "@appstrate/connect";
 
-const profileNameSchema = z.object({ name: z.string().min(1, "Name is required").max(100) });
+export const profileNameSchema = z.object({ name: z.string().min(1, "Name is required").max(100) });
+export const bindAppProfileSchema = z.object({
+  providerId: z.string().min(1),
+  sourceProfileId: z.uuid(),
+});
 
 async function requireAppProfile(profileId: string, applicationId: string) {
   const profile = await getAppProfile(profileId, applicationId);
@@ -151,13 +155,7 @@ export function createAppProfilesRouter() {
     await requireAppProfile(profileId, applicationId);
 
     const body = await c.req.json();
-    const data = parseBody(
-      z.object({
-        providerId: z.string().min(1),
-        sourceProfileId: z.uuid(),
-      }),
-      body,
-    );
+    const data = parseBody(bindAppProfileSchema, body);
 
     // Verify source profile belongs to the requesting user
     const actor = getActor(c);

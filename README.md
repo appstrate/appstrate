@@ -69,14 +69,20 @@ First signup creates an organization automatically. See [Contributing](./CONTRIB
 
 ### Progressive Infrastructure
 
-Appstrate adapts to your infrastructure. Add services when you need them — never before.
+Appstrate adapts to your infrastructure. Start minimal and add services as you grow — each tier works both as a development setup and a deployment target for small to medium workloads.
 
-| Tier  | Name             | Prerequisites | Database                | Storage    | Queue     | Execution         |
-| ----- | ---------------- | ------------- | ----------------------- | ---------- | --------- | ----------------- |
-| **0** | **Zero-Install** | Bun           | PGlite (embedded)       | Filesystem | In-memory | Bun subprocess    |
-| **1** | **Minimal**      | Bun + Docker  | PostgreSQL              | Filesystem | In-memory | Bun subprocess    |
-| **2** | **Standard**     | Bun + Docker  | PostgreSQL + Redis      | Filesystem | BullMQ    | Bun subprocess    |
-| **3** | **Full**         | Bun + Docker  | PostgreSQL + Redis + S3 | S3         | BullMQ    | Docker containers |
+| Tier  | Name            | Prerequisites | Database                | Storage    | Queue     | Execution         | RAM (idle) | RAM per run |
+| ----- | --------------- | ------------- | ----------------------- | ---------- | --------- | ----------------- | ---------- | ----------- |
+| **0** | **Embedded**    | Bun           | PGlite (embedded)       | Filesystem | In-memory | Bun subprocess    | ~300 MB    | +50-100 MB  |
+| **1** | **Lightweight** | Bun + Docker  | PostgreSQL              | Filesystem | In-memory | Bun subprocess    | ~600 MB    | +50-100 MB  |
+| **2** | **Persistent**  | Bun + Docker  | PostgreSQL + Redis      | Filesystem | BullMQ    | Bun subprocess    | ~700 MB    | +50-100 MB  |
+| **3** | **Full**        | Bun + Docker  | PostgreSQL + Redis + S3 | S3         | BullMQ    | Docker containers | ~1.5 GB    | +200-300 MB |
+
+Tiers 0-2 run agents as Bun subprocesses — each concurrent run adds ~50-100 MB. On constrained hardware, limit parallel runs accordingly.
+
+**Tier 0** is ideal for personal use, small devices (Raspberry Pi 4+, NAS), or getting started with zero dependencies. **Tiers 1-2** suit small teams and constrained servers. **Tier 3** is for production with full container isolation.
+
+> **Raspberry Pi**: Bun supports ARM64 natively. A Raspberry Pi 4 (4 GB) handles Tiers 0-1 with 2-3 concurrent runs. A Pi 5 (8 GB) can run Tier 2 comfortably or Tier 3 with `SIDECAR_POOL_SIZE=0` and sequential runs.
 
 **Tier 0** is the default — `bun run dev` works immediately after install. To scale up:
 

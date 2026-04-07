@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm";
 import type { AppEnv } from "../types/index.ts";
 import { unauthorized, parseBody } from "../lib/errors.ts";
 
-const welcomeSetupSchema = z.object({
+export const welcomeSetupSchema = z.object({
   displayName: z.string().max(100).optional(),
 });
 

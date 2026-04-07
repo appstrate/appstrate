@@ -20,6 +20,8 @@ import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, invalidRequest, internalError } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 
+export const reportAuthFailureSchema = z.object({ providerId: z.string().min(1) });
+
 /**
  * Verify the run token from the Authorization header.
  * Returns the run data or throws an ApiError.
@@ -254,7 +256,7 @@ export function createInternalRouter() {
   router.post("/connections/report-auth-failure", async (c) => {
     const { runId, run } = await verifyRunToken(c);
     const body = await c.req.json();
-    const parsed = z.object({ providerId: z.string().min(1) }).safeParse(body);
+    const parsed = reportAuthFailureSchema.safeParse(body);
     if (!parsed.success) {
       throw invalidRequest("Missing or invalid providerId");
     }

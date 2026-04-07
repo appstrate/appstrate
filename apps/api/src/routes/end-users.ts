@@ -18,10 +18,10 @@ import {
 } from "../services/end-users.ts";
 import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-const createEndUserSchema = z.object({
-  name: z.string().optional(),
-  email: z.string().email().optional(),
-  externalId: z.string().optional(),
+export const createEndUserSchema = z.object({
+  name: z.string().max(200).nullable().optional(),
+  email: z.string().email().nullable().optional(),
+  externalId: z.string().max(255).nullable().optional(),
   metadata: z
     .record(
       z.string().min(1).max(40),
@@ -31,10 +31,10 @@ const createEndUserSchema = z.object({
     .optional(),
 });
 
-const updateEndUserSchema = z.object({
-  name: z.string().optional(),
-  email: z.string().email().optional(),
-  externalId: z.string().optional(),
+export const updateEndUserSchema = z.object({
+  name: z.string().max(200).nullable().optional(),
+  email: z.string().email().nullable().optional(),
+  externalId: z.string().max(255).nullable().optional(),
   metadata: z
     .record(
       z.string().min(1).max(40),
@@ -60,9 +60,9 @@ export function createEndUsersRouter() {
 
       const applicationId = c.get("applicationId");
       const created = await createEndUser(orgId, applicationId, {
-        name: data.name,
-        email: data.email,
-        externalId: data.externalId,
+        name: data.name ?? undefined,
+        email: data.email ?? undefined,
+        externalId: data.externalId ?? undefined,
         metadata: data.metadata,
       });
       return c.json(created, 201);
@@ -121,7 +121,12 @@ export function createEndUsersRouter() {
 
     const body = await c.req.json();
     const data = parseBody(updateEndUserSchema, body);
-    const result = await updateEndUser(orgId, endUserId, data);
+    const result = await updateEndUser(orgId, endUserId, {
+      name: data.name ?? undefined,
+      email: data.email ?? undefined,
+      externalId: data.externalId ?? undefined,
+      metadata: data.metadata,
+    });
     return c.json(result);
   });
 

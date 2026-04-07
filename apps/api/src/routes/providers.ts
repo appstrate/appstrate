@@ -105,7 +105,7 @@ function buildProviderDefinition(data: {
   return definition;
 }
 
-const createProviderSchema = z.object({
+export const createProviderSchema = z.object({
   id: z.string().min(1, "id is required"),
   displayName: z.string().min(1, "displayName is required"),
   version: z.string().optional(),
@@ -125,7 +125,7 @@ const createProviderSchema = z.object({
   tokenAuthMethod: z.enum(["client_secret_post", "client_secret_basic"]).optional(),
   authorizationParams: z.record(z.string(), z.string()).optional(),
   tokenParams: z.record(z.string(), z.string()).optional(),
-  credentialSchema: z.any().optional(),
+  credentialSchema: z.record(z.string(), z.unknown()).optional(),
   credentialFieldName: z.string().optional(),
   credentialHeaderName: z.string().optional(),
   credentialHeaderPrefix: z.string().optional(),
@@ -144,7 +144,13 @@ const createProviderSchema = z.object({
     .optional(),
 });
 
-const updateProviderSchema = createProviderSchema.omit({ id: true });
+export const updateProviderSchema = createProviderSchema.omit({ id: true });
+
+export const configureCredentialsSchema = z.object({
+  credentials: z.record(z.string(), z.string().min(1)).optional(),
+  enabled: z.boolean().optional(),
+  invalidateConnections: z.boolean().optional(),
+});
 
 export function createProvidersRouter() {
   const router = new Hono<AppEnv>();
@@ -292,12 +298,7 @@ export function createProvidersRouter() {
       const providerId = getItemId(c);
       const body = await c.req.json();
 
-      const credSchema = z.object({
-        credentials: z.record(z.string(), z.string().min(1)).optional(),
-        enabled: z.boolean().optional(),
-        invalidateConnections: z.boolean().optional(),
-      });
-      const data = parseBody(credSchema, body);
+      const data = parseBody(configureCredentialsSchema, body);
 
       // Verify the provider exists and get its admin credential schema
       const pkg = await getProvider(orgId, providerId);

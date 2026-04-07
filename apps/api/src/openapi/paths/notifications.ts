@@ -27,6 +27,7 @@ export const notificationsPaths = {
                 },
                 required: ["count"],
               },
+              example: { count: 5 },
             },
           },
         },
@@ -63,6 +64,9 @@ export const notificationsPaths = {
                   },
                 },
                 required: ["counts"],
+              },
+              example: {
+                counts: { "@acme/email-sorter": 3, "@appstrate/code-reviewer": 2 },
               },
             },
           },

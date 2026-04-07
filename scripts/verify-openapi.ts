@@ -1,17 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Verify OpenAPI spec: completeness, structural validity, and best practices.
+ * Verify OpenAPI spec: completeness, structural validity, best practices,
+ * and Zod ↔ OpenAPI request-body schema consistency.
  *
  * 1. Endpoint coverage — compares spec vs maintained endpoint list
  * 2. Structural validation — @readme/openapi-parser (OpenAPI 3.1 schema conformance)
  * 3. Best practices lint — @redocly/openapi-core (recommended ruleset)
+ * 4. Zod ↔ OpenAPI schema comparison — compares Zod-derived JSON Schemas (pre-converted
+ *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas
  *
  * Usage: bun scripts/verify-openapi.ts
  */
 import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
 import { openApiSpec } from "../apps/api/src/openapi/index.ts";
+import {
+  zodSchemaRegistry,
+  type ZodSchemaEntry,
+} from "../apps/api/src/openapi/zod-schema-registry.ts";
 
 let exitCode = 0;
 
@@ -151,6 +158,9 @@ const expectedEndpoints = [
   "GET /api/packages/skills/{scope}/{name}",
   "PUT /api/packages/skills/{scope}/{name}",
   "DELETE /api/packages/skills/{scope}/{name}",
+  "GET /api/packages/skills/{id}",
+  "PUT /api/packages/skills/{id}",
+  "DELETE /api/packages/skills/{id}",
   "GET /api/packages/skills/{scope}/{name}/versions",
   "GET /api/packages/skills/{scope}/{name}/versions/info",
   "POST /api/packages/skills/{scope}/{name}/versions",
@@ -164,6 +174,9 @@ const expectedEndpoints = [
   "GET /api/packages/tools/{scope}/{name}",
   "PUT /api/packages/tools/{scope}/{name}",
   "DELETE /api/packages/tools/{scope}/{name}",
+  "GET /api/packages/tools/{id}",
+  "PUT /api/packages/tools/{id}",
+  "DELETE /api/packages/tools/{id}",
   "GET /api/packages/tools/{scope}/{name}/versions",
   "GET /api/packages/tools/{scope}/{name}/versions/info",
   "POST /api/packages/tools/{scope}/{name}/versions",
@@ -177,6 +190,9 @@ const expectedEndpoints = [
   "GET /api/packages/providers/{scope}/{name}",
   "PUT /api/packages/providers/{scope}/{name}",
   "DELETE /api/packages/providers/{scope}/{name}",
+  "GET /api/packages/providers/{id}",
+  "PUT /api/packages/providers/{id}",
+  "DELETE /api/packages/providers/{id}",
   "GET /api/packages/providers/{scope}/{name}/versions",
   "GET /api/packages/providers/{scope}/{name}/versions/info",
   "POST /api/packages/providers/{scope}/{name}/versions",
@@ -185,10 +201,14 @@ const expectedEndpoints = [
   "GET /api/packages/providers/{scope}/{name}/versions/{version}",
 
   // Packages — Agents
+  "GET /api/packages/agents",
   "POST /api/packages/agents",
   "GET /api/packages/agents/{scope}/{name}",
   "PUT /api/packages/agents/{scope}/{name}",
   "DELETE /api/packages/agents/{scope}/{name}",
+  "GET /api/packages/agents/{id}",
+  "PUT /api/packages/agents/{id}",
+  "DELETE /api/packages/agents/{id}",
   "GET /api/packages/agents/{scope}/{name}/versions",
   "GET /api/packages/agents/{scope}/{name}/versions/info",
   "POST /api/packages/agents/{scope}/{name}/versions",
@@ -348,16 +368,13 @@ console.log(`  -----------------------------------------------`);
 
 try {
   const config = await createConfig({
-    extends: ["minimal"],
+    extends: ["recommended"],
     rules: {
-      // Upgrade some rules from the recommended set that we care about
-      "operation-operationId": "warn",
-      "operation-description": "warn",
-      "tag-description": "warn",
-      "no-path-trailing-slash": "error",
-      "path-not-include-query": "error",
       // Hono resolves by registration order — these paths are unambiguous at runtime
       "no-ambiguous-paths": "off",
+      // Public endpoints (health, OAuth callback, OpenAPI spec, docs) intentionally
+      // have no 4xx responses — they are unauthenticated and always succeed or 5xx
+      "operation-4xx-response": "off",
     },
   });
 
@@ -391,10 +408,278 @@ try {
 }
 
 // ═══════════════════════════════════════════════════
+// 4. Zod ↔ OpenAPI request body schema comparison
+// ═══════════════════════════════════════════════════
+
+console.log(`\n  4. Zod <> OpenAPI Request Body Comparison`);
+console.log(`  -------------------------------------------`);
+
+/**
+ * Resolve a `$ref` pointer (e.g. "#/components/schemas/Foo") against the spec.
+ * Returns the referenced object, or undefined if the path is invalid.
+ */
+function resolveRef(ref: string): Record<string, unknown> | undefined {
+  if (!ref.startsWith("#/")) return undefined;
+  const parts = ref.slice(2).split("/");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let current: any = openApiSpec;
+  for (const part of parts) {
+    if (current == null || typeof current !== "object") return undefined;
+    current = current[part];
+  }
+  return current as Record<string, unknown> | undefined;
+}
+
+/**
+ * Extract the request-body JSON Schema from the OpenAPI spec for a given path+method.
+ * Returns undefined if the endpoint has no requestBody or no application/json content.
+ * Resolves top-level `$ref` pointers so the comparison gets the actual schema.
+ */
+function getOpenApiRequestBodySchema(
+  specPath: string,
+  method: string,
+): Record<string, unknown> | undefined {
+  const pathObj = (openApiSpec.paths as Record<string, Record<string, unknown>>)[specPath];
+  if (!pathObj) return undefined;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const operation = pathObj[method.toLowerCase()] as any;
+  if (!operation?.requestBody) return undefined;
+
+  let schema = operation.requestBody?.content?.["application/json"]?.schema as
+    | Record<string, unknown>
+    | undefined;
+
+  // Resolve top-level $ref
+  if (schema && typeof schema.$ref === "string") {
+    schema = resolveRef(schema.$ref);
+  }
+
+  return schema;
+}
+
+/**
+ * Normalize a JSON Schema type to a comparable form.
+ * Handles OpenAPI's `type: ["string", "null"]` vs JSON Schema's `anyOf` from Zod.
+ */
+function normalizeType(schema: Record<string, unknown>): {
+  baseTypes: string[];
+  nullable: boolean;
+} {
+  if (schema.anyOf && Array.isArray(schema.anyOf)) {
+    // Zod emits anyOf for nullable: [{ type: "string", ... }, { type: "null" }]
+    const types: string[] = [];
+    let nullable = false;
+    for (const variant of schema.anyOf as Record<string, unknown>[]) {
+      if (variant.type === "null") {
+        nullable = true;
+      } else if (typeof variant.type === "string") {
+        types.push(variant.type);
+      }
+    }
+    return { baseTypes: types.sort(), nullable };
+  }
+
+  if (Array.isArray(schema.type)) {
+    // OpenAPI style: type: ["string", "null"]
+    const types = (schema.type as string[]).filter((t) => t !== "null").sort();
+    const nullable = (schema.type as string[]).includes("null");
+    return { baseTypes: types, nullable };
+  }
+
+  if (typeof schema.type === "string") {
+    return { baseTypes: [schema.type], nullable: false };
+  }
+
+  return { baseTypes: [], nullable: false };
+}
+
+interface SchemaDiscrepancy {
+  entry: ZodSchemaEntry;
+  issues: string[];
+}
+
+const discrepancies: SchemaDiscrepancy[] = [];
+let comparedCount = 0;
+
+for (const entry of zodSchemaRegistry) {
+  const openApiSchema = getOpenApiRequestBodySchema(entry.path, entry.method);
+
+  if (!openApiSchema) {
+    discrepancies.push({
+      entry,
+      issues: [`No OpenAPI requestBody schema found for ${entry.method} ${entry.path}`],
+    });
+    continue;
+  }
+
+  // The registry pre-converts Zod schemas to JSON Schema via z.toJSONSchema()
+  const zodJsonSchema = entry.jsonSchema;
+
+  comparedCount++;
+  const issues: string[] = [];
+
+  // --- Compare required fields ---
+  const zodRequired = new Set<string>(
+    Array.isArray(zodJsonSchema.required) ? (zodJsonSchema.required as string[]) : [],
+  );
+  const oaRequired = new Set<string>(
+    Array.isArray(openApiSchema.required) ? (openApiSchema.required as string[]) : [],
+  );
+
+  for (const field of zodRequired) {
+    if (!oaRequired.has(field)) {
+      issues.push(`Required field "${field}": Zod=required, OpenAPI=optional`);
+    }
+  }
+  for (const field of oaRequired) {
+    if (!zodRequired.has(field)) {
+      issues.push(`Required field "${field}": OpenAPI=required, Zod=optional`);
+    }
+  }
+
+  // --- Compare properties ---
+  const zodProps = (zodJsonSchema.properties || {}) as Record<string, Record<string, unknown>>;
+  const oaProps = (openApiSchema.properties || {}) as Record<string, Record<string, unknown>>;
+
+  const zodPropNames = new Set(Object.keys(zodProps));
+  const oaPropNames = new Set(Object.keys(oaProps));
+
+  // Fields in Zod but not in OpenAPI
+  for (const field of zodPropNames) {
+    if (!oaPropNames.has(field)) {
+      issues.push(`Property "${field}": present in Zod but missing from OpenAPI`);
+    }
+  }
+
+  // Fields in OpenAPI but not in Zod
+  for (const field of oaPropNames) {
+    if (!zodPropNames.has(field)) {
+      issues.push(`Property "${field}": present in OpenAPI but missing from Zod`);
+    }
+  }
+
+  // Compare shared properties in detail
+  for (const field of zodPropNames) {
+    if (!oaPropNames.has(field)) continue;
+
+    const zodProp = zodProps[field]!;
+    const oaProp = oaProps[field]!;
+
+    // Type comparison (normalizes nullable representations)
+    const zodType = normalizeType(zodProp);
+    const oaType = normalizeType(oaProp);
+
+    if (zodType.baseTypes.join(",") !== oaType.baseTypes.join(",")) {
+      issues.push(
+        `Property "${field}" type: Zod=[${zodType.baseTypes}], OpenAPI=[${oaType.baseTypes}]`,
+      );
+    }
+
+    if (zodType.nullable !== oaType.nullable) {
+      issues.push(
+        `Property "${field}" nullable: Zod=${zodType.nullable}, OpenAPI=${oaType.nullable}`,
+      );
+    }
+
+    // String constraints — maxLength (check anyOf variants for Zod nullable types)
+    const zodMaxLen =
+      zodProp.maxLength ??
+      (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.maxLength)?.maxLength;
+    const oaMaxLen = oaProp.maxLength;
+    if (zodMaxLen !== undefined && oaMaxLen !== undefined && zodMaxLen !== oaMaxLen) {
+      issues.push(`Property "${field}" maxLength: Zod=${zodMaxLen}, OpenAPI=${oaMaxLen}`);
+    }
+    if (zodMaxLen !== undefined && oaMaxLen === undefined) {
+      issues.push(`Property "${field}" maxLength: Zod=${zodMaxLen}, OpenAPI=unset`);
+    }
+
+    // String constraints — minLength
+    const zodMinLen =
+      zodProp.minLength ??
+      (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.minLength)?.minLength;
+    const oaMinLen = oaProp.minLength;
+    if (zodMinLen !== undefined && oaMinLen !== undefined && zodMinLen !== oaMinLen) {
+      issues.push(`Property "${field}" minLength: Zod=${zodMinLen}, OpenAPI=${oaMinLen}`);
+    }
+    if (zodMinLen !== undefined && oaMinLen === undefined) {
+      issues.push(`Property "${field}" minLength: Zod=${zodMinLen}, OpenAPI=unset`);
+    }
+
+    // Pattern
+    const zodPattern = zodProp.pattern;
+    const oaPattern = oaProp.pattern;
+    if (zodPattern && oaPattern && zodPattern !== oaPattern) {
+      issues.push(`Property "${field}" pattern: Zod="${zodPattern}", OpenAPI="${oaPattern}"`);
+    }
+
+    // Format (check anyOf variants for Zod nullable types)
+    const zodFormat =
+      zodProp.format ??
+      (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.format)?.format;
+    const oaFormat = oaProp.format;
+    if (zodFormat && oaFormat && zodFormat !== oaFormat) {
+      issues.push(`Property "${field}" format: Zod="${zodFormat}", OpenAPI="${oaFormat}"`);
+    }
+
+    // Enum values (also check inside array items)
+    const zodEnum = zodProp.enum ?? (zodProp.items as Record<string, unknown> | undefined)?.enum;
+    const oaEnum = oaProp.enum ?? (oaProp.items as Record<string, unknown> | undefined)?.enum;
+    if (zodEnum && oaEnum) {
+      const zodEnumStr = JSON.stringify([...(zodEnum as unknown[])].sort());
+      const oaEnumStr = JSON.stringify([...(oaEnum as unknown[])].sort());
+      if (zodEnumStr !== oaEnumStr) {
+        issues.push(`Property "${field}" enum: Zod=${zodEnumStr}, OpenAPI=${oaEnumStr}`);
+      }
+    }
+
+    // Array item type
+    if (zodProp.type === "array" && oaProp.type === "array") {
+      const zodItems = zodProp.items as Record<string, unknown> | undefined;
+      const oaItems = oaProp.items as Record<string, unknown> | undefined;
+      if (zodItems?.type && oaItems?.type && zodItems.type !== oaItems.type) {
+        issues.push(
+          `Property "${field}" array items type: Zod=${zodItems.type}, OpenAPI=${oaItems.type}`,
+        );
+      }
+    }
+
+    // Array minItems
+    if (zodProp.minItems !== undefined && oaProp.minItems !== undefined) {
+      if (zodProp.minItems !== oaProp.minItems) {
+        issues.push(
+          `Property "${field}" minItems: Zod=${zodProp.minItems}, OpenAPI=${oaProp.minItems}`,
+        );
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    discrepancies.push({ entry, issues });
+  }
+}
+
+console.log(`  Compared: ${comparedCount}/${zodSchemaRegistry.length} registry entries\n`);
+
+if (discrepancies.length === 0) {
+  console.log(`  OK — all Zod schemas match their OpenAPI counterparts.`);
+} else {
+  exitCode = 1;
+  console.log(`  ${discrepancies.length} endpoint(s) with discrepancies:\n`);
+  for (const d of discrepancies) {
+    console.log(`  ERROR  ${d.entry.method} ${d.entry.path} (${d.entry.description})`);
+    for (const issue of d.issues) {
+      console.log(`          - ${issue}`);
+    }
+    console.log();
+  }
+}
+
+// ═══════════════════════════════════════════════════
 // Summary
 // ═══════════════════════════════════════════════════
 
-console.log(`\n  ${"=".repeat(50)}`);
+console.log(`  ${"=".repeat(50)}`);
 console.log(`  ${exitCode === 0 ? "ALL CHECKS PASSED" : "SOME CHECKS FAILED"}`);
 console.log(`  ${"=".repeat(50)}\n`);
 
