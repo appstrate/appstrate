@@ -98,13 +98,8 @@ export const providersPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -136,13 +131,8 @@ export const providersPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {
@@ -181,13 +171,8 @@ export const providersPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -217,13 +202,8 @@ export const providersPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,

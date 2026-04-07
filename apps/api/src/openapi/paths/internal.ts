@@ -58,13 +58,8 @@ export const internalPaths = {
       description: "Container-to-host only. Auth via Bearer run token.",
       security: [{ bearerExecToken: [] }],
       parameters: [
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -115,13 +110,8 @@ export const internalPaths = {
         "Called by sidecar on upstream 401 to force an OAuth2 token refresh before retrying. If the provider is not OAuth2 or has no refresh token, returns current credentials unchanged. If the refresh itself fails, flags the connection as needs_reconnection and returns 401. Container-to-host only. Auth via Bearer run token.",
       security: [{ bearerExecToken: [] }],
       parameters: [
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {

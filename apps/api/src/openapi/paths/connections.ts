@@ -115,20 +115,8 @@ export const connectionsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Provider scope (e.g. @appstrate)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Provider name (e.g. gmail)",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         content: {
@@ -177,20 +165,8 @@ export const connectionsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Provider scope (e.g. @appstrate)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Provider name (e.g. gmail)",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -243,20 +219,8 @@ export const connectionsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Provider scope (e.g. @appstrate)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Provider name (e.g. gmail)",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -369,20 +333,8 @@ export const connectionsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Provider scope (e.g. @appstrate)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Provider name (e.g. gmail)",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "profileId",
           in: "query",

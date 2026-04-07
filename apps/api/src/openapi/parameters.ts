@@ -74,4 +74,18 @@ export const parameters = {
       "Application ID. Required for app-scoped routes (agents, runs, schedules, webhooks). Not needed for API key auth (app resolved from key).",
     schema: { type: "string" },
   },
+  PackageScope: {
+    name: "scope",
+    in: "path" as const,
+    required: true,
+    description: "Package scope (e.g. @myorg)",
+    schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
+  },
+  PackageName: {
+    name: "name",
+    in: "path" as const,
+    required: true,
+    description: "Package name",
+    schema: { type: "string" },
+  },
 } as const;

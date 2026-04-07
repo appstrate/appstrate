@@ -14,13 +14,8 @@ export const runsPaths = {
         { $ref: "#/components/parameters/AppstrateUser" },
         { $ref: "#/components/parameters/AppstrateVersion" },
         { $ref: "#/components/parameters/IdempotencyKey" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "query",
@@ -48,6 +43,9 @@ export const runsPaths = {
                     'Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults.',
                 },
               },
+            },
+            example: {
+              input: { message: "Summarize my latest emails" },
             },
           },
           "multipart/form-data": {
@@ -107,6 +105,7 @@ export const runsPaths = {
         "409": { $ref: "#/components/responses/IdempotencyInProgress" },
         "422": { $ref: "#/components/responses/IdempotencyConflict" },
         "429": { $ref: "#/components/responses/RateLimited" },
+        "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
   },
@@ -119,13 +118,8 @@ export const runsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "limit",
           in: "query",
@@ -171,13 +165,8 @@ export const runsPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {

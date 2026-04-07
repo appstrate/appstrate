@@ -252,13 +252,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -429,20 +424,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -478,20 +461,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -527,20 +498,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: false,
@@ -594,20 +553,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -653,20 +600,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -715,20 +650,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -753,20 +676,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -794,20 +705,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -863,20 +762,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {
@@ -1026,20 +913,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -1075,20 +950,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -1124,20 +987,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: false,
@@ -1191,20 +1042,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -1250,20 +1089,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -1312,20 +1139,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -1350,20 +1165,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -1390,20 +1193,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -1459,20 +1250,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {
@@ -1616,20 +1395,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -1661,20 +1428,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -1726,20 +1481,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {
@@ -1763,20 +1506,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -1811,20 +1542,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -1860,20 +1579,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: false,
@@ -1927,20 +1634,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -1979,20 +1674,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -2035,20 +1718,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -2088,20 +1759,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @other-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*$" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: false,
@@ -2300,20 +1959,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -2349,20 +1996,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -2398,20 +2033,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: false,
@@ -2465,20 +2088,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -2524,20 +2135,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "version",
           in: "path",
@@ -2586,20 +2185,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -2624,20 +2211,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -2665,20 +2240,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -2730,20 +2293,8 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Package scope (e.g. @my-org)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package name",
-        },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {

@@ -42,6 +42,12 @@ export const endUsersPaths = {
                 },
               },
             },
+            example: {
+              name: "Alice Martin",
+              email: "alice@example.com",
+              externalId: "usr_12345",
+              metadata: { plan: "pro", region: "eu-west" },
+            },
           },
         },
       },

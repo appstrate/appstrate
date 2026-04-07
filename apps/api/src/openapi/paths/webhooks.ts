@@ -49,6 +49,13 @@ export const webhooksPaths = {
                 enabled: { type: "boolean", default: true },
               },
             },
+            example: {
+              url: "https://api.example.com/webhooks/appstrate",
+              events: ["run.completed", "run.failed"],
+              packageId: null,
+              payloadMode: "summary",
+              enabled: true,
+            },
           },
         },
       },
