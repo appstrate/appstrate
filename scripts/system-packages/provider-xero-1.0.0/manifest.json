@@ -1,0 +1,57 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/xero",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Xero",
+  "description": "Cloud-based accounting and bookkeeping platform for small businesses",
+  "iconUrl": "xero",
+  "categories": ["accounting", "finance"],
+  "docsUrl": "https://developer.xero.com/documentation/api/accounting/overview",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://login.xero.com/identity/connect/authorize",
+      "tokenUrl": "https://identity.xero.com/connect/token",
+      "refreshUrl": "https://identity.xero.com/connect/token",
+      "defaultScopes": [
+        "openid",
+        "profile",
+        "email",
+        "accounting.transactions.read",
+        "accounting.contacts.read",
+        "offline_access"
+      ],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_basic"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": ["https://api.xero.com/*"],
+    "availableScopes": [
+      { "value": "openid", "label": "OpenID Connect" },
+      { "value": "profile", "label": "User profile" },
+      { "value": "email", "label": "User email" },
+      { "value": "offline_access", "label": "Refresh tokens" },
+      { "value": "accounting.transactions.read", "label": "Read transactions and invoices" },
+      { "value": "accounting.transactions", "label": "Read/write transactions and invoices" },
+      { "value": "accounting.contacts.read", "label": "Read contacts" },
+      { "value": "accounting.contacts", "label": "Read/write contacts" },
+      { "value": "accounting.settings.read", "label": "Read organisation settings" },
+      { "value": "accounting.settings", "label": "Read/write organisation settings" },
+      { "value": "accounting.reports.read", "label": "Read reports" },
+      { "value": "accounting.journals.read", "label": "Read journals" },
+      { "value": "accounting.attachments", "label": "Read/write attachments" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
+    "steps": [
+      { "label": "Create a Xero app", "url": "https://developer.xero.com/app/manage" },
+      { "label": "Select 'Web App' type and configure redirect URI" },
+      { "label": "Copy Client ID and Client Secret" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
