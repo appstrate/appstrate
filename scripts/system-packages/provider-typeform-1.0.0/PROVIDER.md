@@ -171,10 +171,17 @@ Returns responses for a form. Requires `responses:read` scope.
 ### Delete Responses
 `DELETE /forms/{formId}/responses`
 
-Deletes specific responses. Requires `responses:write` scope.
+Deletes specific responses. Requires `responses:write` scope. Deletion is asynchronous: a `200` response means the deletion request was accepted, not that deletion finished immediately.
 
 **Query parameters:**
-- `included_tokens` — Comma-separated response tokens to delete
+- `included_response_ids` — Comma-separated list of `response_id` values to delete (up to 1000)
+
+**Request body (JSON, alternative):**
+```json
+{
+  "included_response_ids": ["resp_001", "resp_002"]
+}
+```
 
 ### List Workspaces
 `GET /workspaces`
@@ -247,5 +254,7 @@ Common Typeform field types:
 - Form IDs are alphanumeric strings (e.g. `abc123XYZ`).
 - Field references (`ref`) are user-defined strings that persist across form updates — use these instead of `id` for stable integrations.
 - Responses include answer `type` that matches the field type (e.g. `number` for rating, `text` for text fields).
+- `DELETE /forms/{formId}/responses` expects `included_response_ids`, not response tokens.
+- Response deletion is asynchronous — verify deletion by listing responses again.
 - Rate limit: 2 requests/second for responses endpoint, higher for other endpoints.
 - Webhook payloads are signed with a secret (if configured) via `Typeform-Signature` header.
