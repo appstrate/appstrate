@@ -17,7 +17,7 @@ import { sql } from "drizzle-orm";
 import { runStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
-import { organizations } from "./organizations.ts";
+import { apiKeys, organizations } from "./organizations.ts";
 import { packages } from "./packages.ts";
 import { connectionProfiles } from "./connections.ts";
 
@@ -67,6 +67,9 @@ export const runs = pgTable(
     runNumber: integer("run_number"),
     providerProfileIds: jsonb("provider_profile_ids").$type<Record<string, string>>(),
     providerStatuses: jsonb("provider_statuses"),
+    apiKeyId: text("api_key_id").references(() => apiKeys.id, {
+      onDelete: "set null",
+    }),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   },
   (table) => [

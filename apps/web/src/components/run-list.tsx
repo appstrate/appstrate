@@ -5,19 +5,16 @@ import { useTranslation } from "react-i18next";
 import { PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
-import { useProfiles } from "../hooks/use-profiles";
-import { useAllSchedules } from "../hooks/use-schedules";
 import { useAgents } from "../hooks/use-packages";
 import { RunRow } from "./run-row";
 import { EmptyState } from "./page-states";
+import type { EnrichedRun } from "@appstrate/shared-types";
 
 interface RunListProps {
   packageId?: string;
   scheduleId?: string;
   /** Fixed agent name -- skips agent lookup when set (e.g. schedule detail) */
   fixedAgentName?: string;
-  /** Fixed schedule name -- skips schedule lookup when set */
-  fixedScheduleName?: string | null;
   /** Items per page (default 20) */
   pageSize?: number;
   /** Show pagination controls (default true) */
@@ -36,7 +33,6 @@ export function RunList({
   packageId,
   scheduleId,
   fixedAgentName,
-  fixedScheduleName,
   pageSize = 20,
   paginated = true,
   hideAgentName = false,
@@ -55,12 +51,9 @@ export function RunList({
     offset: page * pageSize,
   });
 
-  const runs = data?.runs ?? [];
+  const runs = (data?.runs ?? []) as EnrichedRun[];
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / pageSize);
-
-  // Resolve user names
-  const profileMap = useProfiles(runs.map((e) => e.userId).filter((id): id is string => !!id));
 
   // Resolve agent names (skip if fixed or hidden)
   const { data: agents } = useAgents();
@@ -70,9 +63,6 @@ export function RunList({
       agentNameMap.set(f.id, f.displayName);
     }
   }
-
-  // Resolve schedule names (skip if fixed)
-  const { data: schedules } = useAllSchedules();
 
   if (isLoading && page === 0) {
     return (
@@ -87,16 +77,10 @@ export function RunList({
     return <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />;
   }
 
-  const resolveAgentName = (run: (typeof runs)[0]) => {
+  const resolveAgentName = (run: EnrichedRun) => {
     if (hideAgentName) return undefined;
     if (fixedAgentName) return fixedAgentName;
     return agentNameMap.get(run.packageId ?? "") ?? run.packageId ?? "\u2014";
-  };
-
-  const resolveScheduleName = (run: (typeof runs)[0]) => {
-    if (!run.scheduleId) return null;
-    if (fixedScheduleName) return fixedScheduleName;
-    return schedules?.find((s) => s.id === run.scheduleId)?.name ?? null;
   };
 
   return (
@@ -104,13 +88,7 @@ export function RunList({
       <div className="border-border rounded-md border">
         {page === 0 && firstPageBanner}
         {runs.map((run) => (
-          <RunRow
-            key={run.id}
-            run={run}
-            agentName={resolveAgentName(run)}
-            userName={run.userId ? profileMap.get(run.userId) : undefined}
-            scheduleName={resolveScheduleName(run)}
-          />
+          <RunRow key={run.id} run={run} agentName={resolveAgentName(run)} />
         ))}
       </div>
 

@@ -44,6 +44,8 @@ export interface RunPipelineParams {
   applicationId: string;
   /** Uploaded files to inject into the container. */
   uploadedFiles?: UploadedFile[];
+  /** API key ID that triggered the run (if auth via API key). */
+  apiKeyId?: string;
 }
 
 export type RunPipelineError =
@@ -137,6 +139,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     connectionProfileId,
     applicationId,
     uploadedFiles,
+    apiKeyId,
   } = params;
 
   // --- Step 1: Build run context ---
@@ -239,6 +242,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     modelSource: modelSource ?? undefined,
     providerProfileIds: profileIdMap,
     providerStatuses: providerStatusSnapshots,
+    apiKeyId,
   });
 
   // --- Step 6: Fire-and-forget execution ---

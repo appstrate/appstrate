@@ -7,11 +7,12 @@ import { JsonView } from "./json-view";
 import { SectionCard } from "./section-card";
 import { EmptyState } from "./page-states";
 import { ProviderStatusRow } from "./provider-status-row";
+import { RunTrigger } from "./run-trigger";
 import { useProviders } from "../hooks/use-providers";
-import type { Run, RunProviderSnapshot } from "@appstrate/shared-types";
+import type { EnrichedRun, RunProviderSnapshot } from "@appstrate/shared-types";
 
 interface RunInfoTabProps {
-  run: Run;
+  run: EnrichedRun;
 }
 
 function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
@@ -40,17 +41,20 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
 
   return (
     <div className="space-y-4">
-      {/* Version */}
-      <InfoCard
-        label="Version"
-        value={
-          <span className={cn("font-mono", !run.versionLabel && "italic")}>
-            {run.versionLabel
-              ? `v${run.versionLabel}${run.versionDirty ? ` ${t("exec.versionDirty")}` : ""}`
-              : t("exec.draft")}
-          </span>
-        }
-      />
+      {/* Version + Trigger */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <InfoCard
+          label="Version"
+          value={
+            <span className={cn("font-mono", !run.versionLabel && "italic")}>
+              {run.versionLabel
+                ? `v${run.versionLabel}${run.versionDirty ? ` ${t("exec.versionDirty")}` : ""}`
+                : t("exec.draft")}
+            </span>
+          }
+        />
+        <InfoCard label={t("exec.infoTrigger")} value={<RunTrigger run={run} />} />
+      </div>
 
       {/* Connections */}
       {providerStatuses && providerStatuses.length > 0 && (

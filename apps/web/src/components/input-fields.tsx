@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { FormField } from "./form-field";
+import { FormField, type FormFieldType } from "./form-field";
 import { FileField } from "./file-field";
+import { JsonFieldEditor } from "./json-field-editor";
+import { MultiSelectField } from "./multi-select";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
-import { schemaToFields, type SchemaWrapper } from "@appstrate/core/form";
+import { schemaToFields, type SchemaWrapper, type FieldDescriptor } from "@appstrate/core/form";
 
 interface InputFieldsProps {
   schema: SchemaWrapper;
@@ -16,6 +16,30 @@ interface InputFieldsProps {
   onFileChange?: (key: string, files: File[]) => void;
   idPrefix?: string;
   errors?: Record<string, string>;
+}
+
+/** Map JSON Schema format → HTML input type for string fields. */
+const FORMAT_TO_INPUT_TYPE: Record<string, FormFieldType> = {
+  email: "email",
+  "idn-email": "email",
+  uri: "url",
+  url: "url",
+  date: "date",
+  "date-time": "datetime-local",
+  time: "time",
+  color: "color",
+  password: "password",
+};
+
+/** Resolve the HTML input type from a FieldDescriptor. */
+function toFormFieldType(field: FieldDescriptor): FormFieldType {
+  if (field.type === "number" || field.type === "integer") return "number";
+  if (field.type === "textarea") return "textarea";
+  // Format-based resolution for text fields
+  if (field.type === "text" && field.format) {
+    return FORMAT_TO_INPUT_TYPE[field.format] ?? "text";
+  }
+  return "text";
 }
 
 export function InputFields({
@@ -76,30 +100,41 @@ export function InputFields({
 
         if (field.type === "json") {
           return (
-            <div key={field.key} className="space-y-2">
-              <Label htmlFor={id}>
-                {field.label}
-                {field.required ? " *" : ""}
-              </Label>
-              <Textarea
-                id={id}
-                value={String(values[field.key] ?? "")}
-                onChange={(e) => onChange(field.key, e.target.value)}
-                placeholder={field.placeholder}
-                rows={6}
-                className={cn("font-mono text-xs", error && "border-destructive")}
-              />
-              {field.description && (
-                <p className="text-muted-foreground text-sm">{field.description}</p>
-              )}
-              {error && <p className="text-destructive text-sm">{error}</p>}
-            </div>
+            <JsonFieldEditor
+              key={field.key}
+              id={id}
+              label={field.label}
+              required={field.required}
+              value={String(values[field.key] ?? "")}
+              onChange={(v) => onChange(field.key, v)}
+              description={field.description}
+              error={error}
+            />
           );
         }
 
-        // text, textarea, number, enum → FormField
-        const formType =
-          field.type === "number" ? "number" : field.type === "textarea" ? "textarea" : "text";
+        if (field.type === "multiselect" && field.multiselectOptions) {
+          const currentValue = Array.isArray(values[field.key])
+            ? (values[field.key] as string[])
+            : [];
+          return (
+            <MultiSelectField
+              key={field.key}
+              id={id}
+              label={field.label}
+              required={field.required}
+              options={field.multiselectOptions}
+              value={currentValue}
+              onChange={(v) => onChange(field.key, v)}
+              description={field.description}
+              error={error}
+            />
+          );
+        }
+
+        // text, textarea, number, integer, enum, and format-based fields → FormField
+        const formType = toFormFieldType(field);
+        const v = field.validation;
 
         return (
           <FormField
@@ -109,11 +144,21 @@ export function InputFields({
             required={field.required}
             type={formType}
             value={String(values[field.key] ?? "")}
-            onChange={(v) => onChange(field.key, v)}
+            onChange={(val) => onChange(field.key, val)}
             placeholder={field.placeholder}
             description={field.description}
             enumValues={field.enumValues}
             error={error}
+            min={field.effectiveMin}
+            max={field.effectiveMax}
+            minLength={v?.minLength}
+            maxLength={v?.maxLength}
+            pattern={v?.pattern}
+            step={
+              field.type === "integer"
+                ? (field.step ?? 1)
+                : (field.step ?? (field.type === "number" ? "any" : undefined))
+            }
           />
         );
       })}

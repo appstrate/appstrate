@@ -434,6 +434,7 @@ export function createRunsRouter() {
         connectionProfileId: defaultUserProfileId ?? undefined,
         applicationId: c.get("applicationId"),
         uploadedFiles,
+        apiKeyId: c.get("apiKeyId") ?? undefined,
       });
 
       if (!result.ok) {

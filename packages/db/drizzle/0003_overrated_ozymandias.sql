@@ -1,0 +1,2 @@
+ALTER TABLE "runs" ADD COLUMN "api_key_id" text;--> statement-breakpoint
+ALTER TABLE "runs" ADD CONSTRAINT "runs_api_key_id_api_keys_id_fk" FOREIGN KEY ("api_key_id") REFERENCES "public"."api_keys"("id") ON DELETE set null ON UPDATE no action;

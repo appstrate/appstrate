@@ -253,6 +253,10 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "proxies:read",
   "proxies:write",
   "proxies:delete",
+  // Connections (end-user OAuth via API key + Appstrate-User header)
+  "connections:read",
+  "connections:connect",
+  "connections:disconnect",
   // Applications & End-Users
   "applications:read",
   "applications:write",

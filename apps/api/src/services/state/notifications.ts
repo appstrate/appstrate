@@ -41,15 +41,15 @@ export async function markNotificationRead(
 }
 
 /**
- * Filter: actor-owned OR schedule-triggered org-level runs (no actor).
- * App-level runs come from schedules bound to app profiles — they have
- * no userId/endUserId but do have a scheduleId. All org members can see them.
+ * Filter: actor-owned OR org-visible runs (no userId).
+ * This covers:
+ * - Runs triggered by the actor themselves (userId or endUserId match)
+ * - Schedule-triggered runs (no userId, no endUserId, has scheduleId)
+ * - End-user runs (no userId, has endUserId) — visible to all org members
+ *   since they are API-triggered on behalf of end-users
  */
 function actorOrOrgFilter(actorId: string): SQL {
-  return or(
-    actorOwnershipFilter(actorId),
-    and(isNull(runs.userId), isNull(runs.endUserId), isNotNull(runs.scheduleId)),
-  )!;
+  return or(actorOwnershipFilter(actorId), isNull(runs.userId))!;
 }
 
 export async function markAllNotificationsRead(

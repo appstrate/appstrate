@@ -558,6 +558,13 @@
   "applications.metadata": "Metadata",
   "applications.deleteEndUser": "Supprimer",
   "applications.deleteEndUserConfirm": "Supprimer cet end-user ? Ses connexions et runs seront supprimés.",
+  "applications.editEndUser": "Modifier",
+  "applications.saveEndUser": "Enregistrer",
+  "applications.metadataCount_one": "{{count}} meta",
+  "applications.metadataCount_other": "{{count}} meta",
+  "applications.addMetadataKey": "Ajouter une clé",
+  "applications.metadataKey": "Clé",
+  "applications.metadataValue": "Valeur",
 
   "endUsers.pageTitle": "End-Users",
   "endUsers.createTitle": "Nouvel end-user",

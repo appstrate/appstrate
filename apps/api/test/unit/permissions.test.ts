@@ -195,9 +195,6 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "app-profiles:write",
       "app-profiles:delete",
       "app-profiles:bind",
-      "connections:read",
-      "connections:connect",
-      "connections:disconnect",
       "memories:read",
       "memories:delete",
     ];
@@ -221,6 +218,9 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "webhooks:delete",
       "applications:read",
       "applications:write",
+      "connections:read",
+      "connections:connect",
+      "connections:disconnect",
     ];
     for (const perm of included) {
       expect(API_KEY_ALLOWED_SCOPES.has(perm as never)).toBe(true);
