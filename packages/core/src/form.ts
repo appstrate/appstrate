@@ -147,6 +147,31 @@ export interface FieldError {
   params?: Record<string, unknown>;
 }
 
+// ─── HTML Input Type Resolution ─────────────────────────────────────────────
+
+/** Map JSON Schema format → HTML input type for string fields. */
+export const FORMAT_TO_HTML_INPUT_TYPE: Readonly<Record<string, string>> = {
+  email: "email",
+  "idn-email": "email",
+  uri: "url",
+  url: "url",
+  date: "date",
+  "date-time": "datetime-local",
+  time: "time",
+  color: "color",
+  password: "password",
+};
+
+/** Resolve the HTML input type from a FieldDescriptor. */
+export function toHtmlInputType(field: FieldDescriptor): string {
+  if (field.type === "number" || field.type === "integer") return "number";
+  if (field.type === "textarea") return "textarea";
+  if (field.type === "text" && field.format) {
+    return FORMAT_TO_HTML_INPUT_TYPE[field.format] ?? "text";
+  }
+  return "text";
+}
+
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 /** Extract the list of required field names from a JSON Schema object. */
