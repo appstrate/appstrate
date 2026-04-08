@@ -68,39 +68,42 @@ Fastest to implement — copy Gmail/YouTube pattern, only change scopes and auth
 1. `google-calendar`
 2. `google-forms`
 3. `google-contacts`
-4. `google-ads` ⚠️ (needs developer-token doc)
 
 ### Phase 2 — Microsoft Graph Pattern (batch, high reuse)
 Copy pattern, only change scopes.
-5. `microsoft-outlook`
-6. `microsoft-teams`
-7. `onedrive`
+4. `microsoft-outlook`
+5. `microsoft-teams`
+6. `onedrive`
 
-### Phase 3 — Standard OAuth2 (varied)
-Each needs individual research for endpoints.
-8. `mailchimp`
-9. `typeform`
-10. `calendly`
-11. `zoom`
-12. `dropbox`
-13. `intercom`
-14. `xero`
-15. `quickbooks-online`
-16. `paypal`
-17. `canva`
-18. `convertkit`
+### Phase 3 — Standard OAuth2 (no quirks)
+Each has unique OAuth endpoints but standard flow, no special behavior.
+7. `mailchimp` — permanent tokens, no refresh needed
+8. `typeform`
+9. `calendly`
+10. `zoom`
+11. `dropbox`
+12. `intercom` — permanent tokens, no refresh needed
+13. `paypal`
+14. `canva`
+15. `convertkit`
 
-### Phase 4 — API Key Providers
-Simpler manifests, no OAuth setup. Focus on PROVIDER.md quality.
-19. `shopify`
-20. `activecampaign`
-21. `wordpress`
-22. `woocommerce`
-23. `telegram`
-24. `twilio`
-25. `webhooks`
-26. `loom`
-27. `fathom`
+### Phase 4 — Simple API Key Providers
+Straightforward API key auth with standard Bearer header.
+16. `fathom`
+17. `twilio`
+
+### Phase 5 — Edge Cases ⚠️
+Providers with non-standard patterns, extra credentials, variable URLs, or limited APIs. Each needs extra care.
+18. `google-ads` — ⚠️ needs extra `developer-token` header on all requests
+19. `xero` — ⚠️ multi-tenant, needs `xero-tenant-id` header after `/connections` call
+20. `quickbooks-online` — ⚠️ company/realm ID from OAuth callback, used in all API paths
+21. `shopify` — ⚠️ shop-specific URLs → API key mode with Custom App token
+22. `activecampaign` — ⚠️ custom `Api-Token` header, account-specific base URL
+23. `wordpress` — ⚠️ `allowAllUris`, variable site URLs, Application Passwords (Basic Auth)
+24. `woocommerce` — ⚠️ `allowAllUris`, variable site URLs, Consumer Key/Secret (Basic Auth)
+25. `telegram` — ⚠️ token embedded in URL path (`/bot{token}/method`)
+26. `webhooks` — ⚠️ generic provider, `allowAllUris`, not a traditional API
+27. `loom` — ⚠️ very limited REST API surface, mostly SDK-based platform
 
 ---
 
@@ -149,8 +152,9 @@ The realm/company ID is returned during OAuth callback. Must be stored and used 
 
 | Phase | Providers | Est. Time | Notes |
 |-------|-----------|-----------|-------|
-| Phase 1 (Google) | 4 | 1h | High reuse from existing Google providers |
+| Phase 1 (Google) | 3 | 40min | High reuse from existing Google providers |
 | Phase 2 (Microsoft) | 3 | 45min | High reuse within batch |
-| Phase 3 (OAuth2) | 11 | 4h | Each needs endpoint research + docs |
-| Phase 4 (API Key) | 9 | 3h | Simpler auth, focus on docs |
+| Phase 3 (OAuth2, standard) | 9 | 3h | Individual endpoint research |
+| Phase 4 (API Key, simple) | 2 | 30min | Straightforward Bearer auth |
+| Phase 5 (Edge cases) | 10 | 4h | Extra research, non-standard patterns |
 | **Total** | **27** | **~9h** | |
