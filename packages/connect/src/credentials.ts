@@ -10,6 +10,9 @@ import type { Db } from "@appstrate/db/client";
 import type { ConnectionRecord, DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { forceRefresh, type RefreshContext } from "./token-refresh.ts";
+import type { OAuthTokenAuthMethod, OAuthTokenContentType } from "./token-utils.ts";
+
+type CredentialEncoding = "basic_api_key_x" | "basic_email_token";
 
 /**
  * Get a connection by profile + provider + org + provider credential.
@@ -358,9 +361,9 @@ async function buildRefreshContext(
     tokenUrl,
     clientId: adminCreds.clientId,
     clientSecret: adminCreds.clientSecret,
-    tokenAuthMethod: (oauth2.tokenAuthMethod as string) ?? undefined,
+    tokenAuthMethod: (oauth2.tokenAuthMethod as OAuthTokenAuthMethod) ?? undefined,
     scopeSeparator: (oauth2.scopeSeparator as string) ?? undefined,
-    tokenContentType: (oauth2.tokenContentType as string) ?? undefined,
+    tokenContentType: (oauth2.tokenContentType as OAuthTokenContentType) ?? undefined,
   };
 }
 
@@ -379,7 +382,7 @@ export function buildSidecarCredentials(
   def: Record<string, unknown>,
   authMode: string | undefined,
 ): Record<string, string> {
-  const credentialEncoding = def.credentialEncoding as string | undefined;
+  const credentialEncoding = def.credentialEncoding as CredentialEncoding | undefined;
 
   // Apply credential encoding transformations for api_key providers.
   // Returns ALL credential fields (not just the mapped fieldName) because

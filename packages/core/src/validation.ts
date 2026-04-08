@@ -137,6 +137,12 @@ export const providerManifestSchema = afpsProviderManifestSchema.safeExtend({
 /** Inferred type from the provider manifest schema. */
 export type ProviderManifest = z.infer<typeof providerManifestSchema>;
 
+export type OAuthTokenAuthMethod = "client_secret_basic" | "client_secret_post";
+export type OAuthTokenContentType =
+  | "application/json"
+  | "application/x-www-form-urlencoded";
+export type CredentialEncoding = "basic_api_key_x" | "basic_email_token";
+
 /** Resolved provider definition built from a raw manifest JSONB object. */
 export interface ResolvedProviderDefinition {
   id: string;
@@ -148,15 +154,15 @@ export interface ResolvedProviderDefinition {
   defaultScopes: string[];
   scopeSeparator: string;
   pkceEnabled: boolean;
-  tokenAuthMethod?: string;
-  tokenContentType?: string;
+  tokenAuthMethod?: OAuthTokenAuthMethod;
+  tokenContentType?: OAuthTokenContentType;
   authorizationParams: Record<string, string>;
   tokenParams: Record<string, string>;
   credentialSchema?: Record<string, unknown>;
   credentialFieldName?: string;
   credentialHeaderName?: string;
   credentialHeaderPrefix?: string;
-  credentialEncoding?: string;
+  credentialEncoding?: CredentialEncoding;
   authorizedUris?: string[];
   allowAllUris: boolean;
   availableScopes?: AvailableScope[];
@@ -197,8 +203,8 @@ export function buildProviderDefinitionFromManifest(
     defaultScopes: (oauth2?.defaultScopes as string[]) ?? [],
     scopeSeparator: (oauth2?.scopeSeparator as string) ?? " ",
     pkceEnabled: (oauth2?.pkceEnabled as boolean) ?? true,
-    tokenAuthMethod: oauth2?.tokenAuthMethod as string | undefined,
-    tokenContentType: oauth2?.tokenContentType as string | undefined,
+    tokenAuthMethod: oauth2?.tokenAuthMethod as OAuthTokenAuthMethod | undefined,
+    tokenContentType: oauth2?.tokenContentType as OAuthTokenContentType | undefined,
     authorizationParams: (oauth2?.authorizationParams as Record<string, string>) ?? {},
     tokenParams: (oauth2?.tokenParams as Record<string, string>) ?? {},
     // OAuth1 fields (from definition.oauth1)
@@ -217,7 +223,7 @@ export function buildProviderDefinitionFromManifest(
     // Transport fields (from definition level — cross-cutting, implementation-specific)
     credentialHeaderName: rawDef.credentialHeaderName as string | undefined,
     credentialHeaderPrefix: rawDef.credentialHeaderPrefix as string | undefined,
-    credentialEncoding: rawDef.credentialEncoding as string | undefined,
+    credentialEncoding: rawDef.credentialEncoding as CredentialEncoding | undefined,
     // Transversal fields
     authorizedUris: (rawDef.authorizedUris as string[])?.length
       ? (rawDef.authorizedUris as string[])

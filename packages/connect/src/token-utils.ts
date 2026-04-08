@@ -5,6 +5,11 @@
  * Used by both oauth.ts (initial token exchange) and token-refresh.ts (refresh flow).
  */
 
+export type OAuthTokenAuthMethod = "client_secret_basic" | "client_secret_post";
+export type OAuthTokenContentType =
+  | "application/json"
+  | "application/x-www-form-urlencoded";
+
 /**
  * Build headers for an OAuth2 token endpoint request.
  * When tokenAuthMethod is "client_secret_basic", credentials are sent
@@ -13,10 +18,10 @@
  * (required by providers like Atlassian/Jira that don't accept form-urlencoded).
  */
 export function buildTokenHeaders(
-  tokenAuthMethod: string | undefined,
+  tokenAuthMethod: OAuthTokenAuthMethod | undefined,
   clientId: string,
   clientSecret: string,
-  tokenContentType?: string,
+  tokenContentType?: OAuthTokenContentType,
 ): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": tokenContentType ?? "application/x-www-form-urlencoded",
@@ -39,7 +44,7 @@ export function buildTokenHeaders(
  */
 export function buildTokenBody(
   params: Record<string, string>,
-  tokenContentType?: string,
+  tokenContentType?: OAuthTokenContentType,
 ): string {
   if (tokenContentType === "application/json") {
     return JSON.stringify(params);
