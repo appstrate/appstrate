@@ -7,7 +7,7 @@
   "description": "AI meeting recorder with transcripts and summaries",
   "iconUrl": "https://cdn.simpleicons.org/fathom",
   "categories": ["meetings", "productivity"],
-  "docsUrl": "https://developers.fathom.ai/",
+  "docsUrl": "https://developers.fathom.ai/api-overview",
   "definition": {
     "authMode": "api_key",
     "credentials": {
@@ -22,9 +22,8 @@
         "required": ["api_key"]
       }
     },
-    "credentialHeaderName": "Authorization",
-    "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://api.fathom.video/*"]
+    "credentialHeaderName": "X-Api-Key",
+    "authorizedUris": ["https://api.fathom.ai/*"]
   },
   "setupGuide": {
     "steps": [
