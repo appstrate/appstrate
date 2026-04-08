@@ -7,8 +7,31 @@ import { applications } from "@appstrate/db/schema";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "../lib/ids.ts";
 
+export const appBrandingSchema = z.object({
+  name: z.string().max(100).optional(),
+  logoUrl: z.string().max(2048).optional(),
+  primaryColor: z
+    .string()
+    .regex(/^#[0-9a-f]{6}$/i)
+    .optional(),
+  supportEmail: z.string().email().optional(),
+  fromName: z.string().max(100).optional(),
+});
+
+export type AppBranding = z.infer<typeof appBrandingSchema>;
+
+export const endUserAuthSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  allowSignup: z.boolean().default(true),
+  requireEmailVerification: z.boolean().default(true),
+});
+
+export type EndUserAuthSettings = z.infer<typeof endUserAuthSettingsSchema>;
+
 export const appSettingsSchema = z.object({
   allowedRedirectDomains: z.array(z.string()).max(20).optional(),
+  branding: appBrandingSchema.optional(),
+  endUserAuth: endUserAuthSettingsSchema.optional(),
 });
 
 export type AppSettings = z.infer<typeof appSettingsSchema>;

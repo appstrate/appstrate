@@ -25,6 +25,8 @@ function toEndUserResponse(row: {
   email: string | null;
   externalId: string | null;
   metadata: unknown;
+  status: string;
+  emailVerified: boolean;
   createdAt: Date;
   updatedAt: Date;
 }): EndUserInfo {
@@ -36,6 +38,8 @@ function toEndUserResponse(row: {
     email: row.email,
     externalId: row.externalId,
     metadata: row.metadata as Record<string, unknown> | null,
+    status: row.status,
+    emailVerified: row.emailVerified,
     createdAt: toISORequired(row.createdAt),
     updatedAt: toISORequired(row.updatedAt),
   };
@@ -156,6 +160,8 @@ export async function listEndUsers(
       email: endUsers.email,
       externalId: endUsers.externalId,
       metadata: endUsers.metadata,
+      status: endUsers.status,
+      emailVerified: endUsers.emailVerified,
       createdAt: endUsers.createdAt,
       updatedAt: endUsers.updatedAt,
     })
@@ -179,6 +185,8 @@ export async function getEndUser(orgId: string, endUserId: string): Promise<EndU
       email: endUsers.email,
       externalId: endUsers.externalId,
       metadata: endUsers.metadata,
+      status: endUsers.status,
+      emailVerified: endUsers.emailVerified,
       createdAt: endUsers.createdAt,
       updatedAt: endUsers.updatedAt,
     })

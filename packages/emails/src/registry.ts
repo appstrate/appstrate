@@ -5,6 +5,9 @@ import { renderVerificationEmail } from "./templates/verification.ts";
 import { renderInvitationEmail } from "./templates/invitation.ts";
 import { renderMagicLinkEmail } from "./templates/magic-link.ts";
 import { renderResetPasswordEmail } from "./templates/reset-password.ts";
+import { renderEndUserVerificationEmail } from "./templates/enduser-verification.ts";
+import { renderEndUserResetPasswordEmail } from "./templates/enduser-reset-password.ts";
+import { renderEndUserWelcomeEmail } from "./templates/enduser-welcome.ts";
 
 // Default OSS templates
 const defaultRenderers: { [K in EmailType]: EmailRenderer<K> } = {
@@ -12,6 +15,9 @@ const defaultRenderers: { [K in EmailType]: EmailRenderer<K> } = {
   invitation: renderInvitationEmail,
   "magic-link": renderMagicLinkEmail,
   "reset-password": renderResetPasswordEmail,
+  "enduser-verification": renderEndUserVerificationEmail,
+  "enduser-reset-password": renderEndUserResetPasswordEmail,
+  "enduser-welcome": renderEndUserWelcomeEmail,
 };
 
 // Mutable registry — defaults + overrides merged at boot

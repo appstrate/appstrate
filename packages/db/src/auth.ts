@@ -3,6 +3,8 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
+import { jwt } from "better-auth/plugins";
+import { oauthProvider } from "@better-auth/oauth-provider";
 import { createTransport } from "nodemailer";
 import { eq } from "drizzle-orm";
 import { renderEmail } from "@appstrate/emails";
@@ -164,7 +166,34 @@ export const auth = betterAuth({
   basePath: "/api/auth",
   secret: env.BETTER_AUTH_SECRET,
 
-  plugins,
+  // Disable /token to avoid conflict with oauth-provider's /oauth2/token
+  disabledPaths: ["/token"],
+
+  plugins: [
+    ...plugins,
+
+    // ─── JWT signing for OIDC tokens (ES256 + auto key rotation) ───
+    jwt({
+      jwks: {
+        keyPairConfig: { alg: "ES256" },
+        rotationInterval: 60 * 60 * 24 * 90, // 90 days
+        gracePeriod: 60 * 60 * 24 * 7, // 7 days after rotation
+      },
+      disableSettingJwtHeader: true, // Required when using oauth-provider
+    }),
+
+    // ─── OAuth 2.1 Authorization Server for end-users ───
+    oauthProvider({
+      loginPage: "/oauth/enduser/login",
+      consentPage: "/oauth/enduser/consent",
+
+      // Token lifetimes
+      accessTokenExpiresIn: 15 * 60, // 15 min
+      refreshTokenExpiresIn: 24 * 60 * 60, // 24h (SPA)
+      idTokenExpiresIn: 60 * 60, // 1h
+      codeExpiresIn: 10 * 60, // 10 min
+    }),
+  ],
 
   emailAndPassword: {
     enabled: true,

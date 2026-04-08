@@ -52,6 +52,13 @@ export const endUsers = pgTable(
     name: text("name"),
     email: text("email"),
     metadata: jsonb("metadata"),
+    // ─── OIDC Identity fields ───
+    authUserId: text("auth_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    status: text("status").notNull().default("active"), // active | pending_verification | suspended
+    emailVerified: boolean("email_verified").notNull().default(false),
+    // ─── Timestamps ───
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -62,6 +69,9 @@ export const endUsers = pgTable(
     uniqueIndex("idx_end_users_app_email")
       .on(table.applicationId, table.email)
       .where(sql`email IS NOT NULL`),
+    uniqueIndex("idx_end_users_app_auth_user")
+      .on(table.applicationId, table.authUserId)
+      .where(sql`${table.authUserId} IS NOT NULL`),
     index("idx_end_users_application_id").on(table.applicationId),
     index("idx_end_users_org_id").on(table.orgId),
   ],

@@ -463,6 +463,8 @@ export interface EndUserInfo {
   email: string | null;
   externalId: string | null;
   metadata: Record<string, unknown> | null;
+  status: string;
+  emailVerified: boolean;
   createdAt: string;
   updatedAt: string;
 }

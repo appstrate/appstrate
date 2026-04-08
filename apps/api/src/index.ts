@@ -32,6 +32,8 @@ import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
 import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createWebhooksRouter } from "./routes/webhooks.ts";
+import { createOAuthClientsRouter } from "./routes/oauth-clients.ts";
+import { createOAuthEndUserPagesRouter } from "./routes/oauth-enduser-pages.ts";
 import healthRouter from "./routes/health.ts";
 import { createConnectionsRouter } from "./routes/connections.ts";
 import { createLibraryRouter } from "./routes/library.ts";
@@ -45,6 +47,8 @@ import { getCloudModule } from "./lib/cloud-loader.ts";
 import { ApiError, unauthorized } from "./lib/errors.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "./lib/permissions.ts";
 import { isEndUserInApp } from "./services/end-users.ts";
+import { verifyEndUserAccessToken, scopesToPermissions } from "./services/enduser-token.ts";
+import { resolveOrCreateEndUser } from "./services/enduser-mapping.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
 import { getAppConfig } from "./lib/app-config.ts";
@@ -93,6 +97,16 @@ app.on(["POST", "GET"], "/api/auth/*", (c) => {
   return auth.handler(c.req.raw);
 });
 
+// Mount OAuth 2.1 endpoints (oauth-provider plugin) — public, handles its own auth
+app.on(["POST", "GET"], "/oauth2/*", (c) => {
+  return auth.handler(c.req.raw);
+});
+
+// OIDC Discovery + OAuth Authorization Server Metadata — public
+app.get("/.well-known/openid-configuration", (c) => auth.handler(c.req.raw));
+app.get("/.well-known/oauth-authorization-server", (c) => auth.handler(c.req.raw));
+app.get("/.well-known/oauth-authorization-server/*", (c) => auth.handler(c.req.raw));
+
 // Paths that skip both auth and org-context middleware (handled by other means or public)
 function skipAuth(path: string): boolean {
   if (!path.startsWith("/api/")) return true;
@@ -100,6 +114,8 @@ function skipAuth(path: string): boolean {
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
   if (path === "/api/connections/callback") return true; // OAuth redirect — no session
   if (path === "/api/docs" || path === "/api/openapi.json") return true;
+  if (path.startsWith("/oauth2/")) return true; // OAuth 2.1 endpoints (self-authenticated)
+  if (path.startsWith("/oauth/enduser/")) return true; // OIDC login/consent pages
   if (getCloudModule()?.publicPaths.includes(path)) return true; // e.g. Stripe webhook
   return false;
 }
@@ -177,6 +193,36 @@ app.use("*", async (c, next) => {
     return next();
   }
 
+  // Try end-user JWT access token (issued by oauth-provider)
+  if (authHeader?.startsWith("Bearer ey")) {
+    const claims = await verifyEndUserAccessToken(authHeader.slice(7));
+    if (claims) {
+      // Resolve per-app end-user from auth user
+      const endUser = claims.endUserId
+        ? {
+            id: claims.endUserId,
+            applicationId: claims.applicationId ?? "",
+            email: claims.email ?? null,
+            name: claims.name ?? null,
+          }
+        : claims.applicationId
+          ? await resolveOrCreateEndUser(
+              { id: claims.authUserId, email: claims.email ?? "", name: claims.name },
+              claims.applicationId,
+            )
+          : null;
+
+      if (endUser) {
+        c.set("endUser", endUser);
+        c.set("applicationId", endUser.applicationId);
+      }
+      c.set("authMethod", "enduser_token");
+      c.set("permissions", scopesToPermissions(claims.scope));
+      return next();
+    }
+    // JWT verification failed — fall through to cookie
+  }
+
   // Fallback: cookie session
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session?.user) {
@@ -218,6 +264,7 @@ app.use("*", async (c, next) => {
   if (skipAuth(path)) return next(); // public paths also skip org context
   if (!c.get("user")) return next(); // no auth resolved — nothing to do
   if (c.get("authMethod") === "api_key") return next(); // API key already resolved orgId + permissions
+  if (c.get("authMethod") === "enduser_token") return next(); // end-user token carries applicationId directly
   if (skipOrgContext(path)) return next();
 
   return requireOrgContext()(c, next);
@@ -226,6 +273,7 @@ app.use("*", async (c, next) => {
 // Permission resolution for session auth (after org context sets orgRole)
 app.use("*", async (c, next) => {
   if (c.get("authMethod") === "api_key") return next(); // already resolved
+  if (c.get("authMethod") === "enduser_token") return next(); // already resolved from token scopes
   const orgRole = c.get("orgRole");
   if (orgRole) {
     c.set("permissions", resolvePermissions(orgRole));
@@ -303,6 +351,8 @@ app.route("/api/proxies", createProxiesRouter());
 app.route("/api/models", createModelsRouter());
 app.route("/api/provider-keys", createProviderKeysRouter());
 app.route("/api/applications", createApplicationsRouter());
+app.route("/api/applications", createOAuthClientsRouter());
+app.route("/oauth/enduser", createOAuthEndUserPagesRouter());
 app.route("/api/library", createLibraryRouter());
 app.route("/api/connection-profiles", createConnectionProfilesRouter());
 app.route("/api/app-profiles", createAppProfilesRouter());

@@ -60,7 +60,7 @@ export type AppEnv = {
     orgSlug: string;
     orgRole: import("@appstrate/shared-types").OrgRole;
     permissions?: Set<string>;
-    authMethod: "session" | "api_key";
+    authMethod: "session" | "api_key" | "enduser_token";
     apiKeyId: string | null;
     applicationId: string; // from API key auth or resolved by app-context middleware (X-App-Id)
     requestId: string;

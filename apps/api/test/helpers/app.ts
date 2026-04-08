@@ -18,6 +18,8 @@ import { requireOrgContext } from "../../src/middleware/org-context.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { isEndUserInApp } from "../../src/services/end-users.ts";
+import { verifyEndUserAccessToken, scopesToPermissions } from "../../src/services/enduser-token.ts";
+import { resolveOrCreateEndUser } from "../../src/services/enduser-mapping.ts";
 import { ApiError, unauthorized } from "../../src/lib/errors.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "../../src/lib/permissions.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
@@ -46,6 +48,8 @@ import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
 import { createWebhooksRouter } from "../../src/routes/webhooks.ts";
+import { createOAuthClientsRouter } from "../../src/routes/oauth-clients.ts";
+import { createOAuthEndUserPagesRouter } from "../../src/routes/oauth-enduser-pages.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createConnectionsRouter } from "../../src/routes/connections.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
@@ -95,6 +99,8 @@ export function getTestApp(): Hono<AppEnv> {
     if (path.startsWith("/api/realtime/")) return true;
     if (path === "/api/connections/callback") return true;
     if (path === "/api/docs" || path === "/api/openapi.json") return true;
+    if (path.startsWith("/oauth2/")) return true;
+    if (path.startsWith("/oauth/enduser/")) return true;
     return false;
   }
 
@@ -160,6 +166,34 @@ export function getTestApp(): Hono<AppEnv> {
       return next();
     }
 
+    // Try end-user JWT access token (issued by oauth-provider)
+    if (authHeader?.startsWith("Bearer ey")) {
+      const claims = await verifyEndUserAccessToken(authHeader.slice(7));
+      if (claims) {
+        const endUser = claims.endUserId
+          ? {
+              id: claims.endUserId,
+              applicationId: claims.applicationId ?? "",
+              email: claims.email ?? null,
+              name: claims.name ?? null,
+            }
+          : claims.applicationId
+            ? await resolveOrCreateEndUser(
+                { id: claims.authUserId, email: claims.email ?? "", name: claims.name },
+                claims.applicationId,
+              )
+            : null;
+
+        if (endUser) {
+          c.set("endUser", endUser);
+          c.set("applicationId", endUser.applicationId);
+        }
+        c.set("authMethod", "enduser_token");
+        c.set("permissions", scopesToPermissions(claims.scope));
+        return next();
+      }
+    }
+
     // Fallback: cookie session
     const sessionResult = await auth.api.getSession({ headers: c.req.raw.headers });
     if (!sessionResult?.user) {
@@ -196,6 +230,7 @@ export function getTestApp(): Hono<AppEnv> {
     if (skipAuth(path)) return next();
     if (!c.get("user")) return next();
     if (c.get("authMethod") === "api_key") return next();
+    if (c.get("authMethod") === "enduser_token") return next();
     if (skipOrgContext(path)) return next();
     return requireOrgContext()(c, next);
   });
@@ -203,6 +238,7 @@ export function getTestApp(): Hono<AppEnv> {
   // Permission resolution for session auth (after org context sets orgRole)
   app.use("*", async (c, next) => {
     if (c.get("authMethod") === "api_key") return next();
+    if (c.get("authMethod") === "enduser_token") return next();
     const orgRole = c.get("orgRole");
     if (orgRole) {
       c.set("permissions", resolvePermissions(orgRole));
@@ -265,6 +301,13 @@ export function getTestApp(): Hono<AppEnv> {
   app.route("/api/models", createModelsRouter());
   app.route("/api/provider-keys", createProviderKeysRouter());
   app.route("/api/applications", createApplicationsRouter());
+  app.route("/api/applications", createOAuthClientsRouter());
+  app.route("/oauth/enduser", createOAuthEndUserPagesRouter());
+
+  // OAuth2 + OIDC discovery (handled by Better Auth oauth-provider plugin)
+  app.on(["POST", "GET"], "/oauth2/*", (c) => auth.handler(c.req.raw));
+  app.get("/.well-known/openid-configuration", (c) => auth.handler(c.req.raw));
+  app.get("/.well-known/oauth-authorization-server", (c) => auth.handler(c.req.raw));
   app.route("/api/connection-profiles", createConnectionProfilesRouter());
   app.route("/api/app-profiles", createAppProfilesRouter());
   app.route("/api", profileRouter);

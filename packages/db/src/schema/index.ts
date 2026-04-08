@@ -10,3 +10,4 @@ export * from "./runs.ts";
 export * from "./connections.ts";
 export * from "./types.ts";
 export * from "./webhooks.ts";
+export * from "./oauth-provider.ts";
