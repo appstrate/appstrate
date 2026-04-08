@@ -21,7 +21,7 @@
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
     "@eslint/js": "^10.0.1",
-    "@mariozechner/pi-ai": "^0.52.12",
+    "@mariozechner/pi-ai": "^0.66.0",
     "@readme/openapi-parser": "^5.5.0",
     "@redocly/openapi-core": "^2.19.1",
     "@types/bun": "latest",
