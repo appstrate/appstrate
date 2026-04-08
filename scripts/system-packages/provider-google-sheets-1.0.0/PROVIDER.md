@@ -1,8 +1,8 @@
 # Google Sheets API
 
-Base URL: `https://sheets.googleapis.com/v4/spreadsheets`
+Base URL: `https://sheets.googleapis.com`
 
-Read and write data in Google Sheets. Supports cell ranges (A1 notation), batch operations, and formatting.
+Read and write data in Google Sheets. Supports cell ranges (A1 notation), batch operations, and formatting. All spreadsheet endpoints are under the `/v4/spreadsheets` path.
 
 ## Endpoints
 
