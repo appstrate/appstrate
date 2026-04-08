@@ -1,0 +1,44 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/wordpress",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "WordPress",
+  "description": "Content management system — manage posts, pages, media, and users via the REST API",
+  "iconUrl": "wordpress",
+  "categories": ["cms", "content"],
+  "docsUrl": "https://developer.wordpress.org/rest-api/",
+  "definition": {
+    "authMode": "custom",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "site_url": {
+            "type": "string",
+            "description": "WordPress site URL (e.g. https://mysite.com)"
+          },
+          "username": {
+            "type": "string",
+            "description": "WordPress username"
+          },
+          "application_password": {
+            "type": "string",
+            "description": "Application Password (generated in Users → Profile → Application Passwords)"
+          }
+        },
+        "required": ["site_url", "username", "application_password"]
+      }
+    },
+    "allowAllUris": true,
+    "authorizedUris": []
+  },
+  "setupGuide": {
+    "steps": [
+      { "label": "Go to your WordPress admin → Users → Profile" },
+      { "label": "Scroll to 'Application Passwords' and create a new password" },
+      { "label": "Copy the generated password (shown only once)" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
