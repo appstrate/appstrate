@@ -6,7 +6,14 @@ import type { AppEnv } from "../types/index.ts";
 import { getItemId } from "./packages.ts";
 import { logger } from "../lib/logger.ts";
 import { escapeHtml } from "../lib/html.ts";
-import { ApiError, forbidden, invalidRequest, internalError, parseBody } from "../lib/errors.ts";
+import {
+  ApiError,
+  forbidden,
+  invalidRequest,
+  internalError,
+  notFound,
+  parseBody,
+} from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import {
   listActorConnections,
@@ -23,8 +30,15 @@ import {
 import { getDefaultProfileId, getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import type { Actor } from "../lib/actor.ts";
-import { isProviderEnabled, getProviderCredentialId } from "@appstrate/connect";
+import {
+  isProviderEnabled,
+  getProviderCredentialId,
+  getCredentials,
+  forceRefreshCredentials,
+} from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
+import { userProviderConnections } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 import type { Context } from "hono";
 
 export const connectOAuthSchema = z.object({
@@ -306,6 +320,54 @@ export function createConnectionsRouter() {
       }
     },
   );
+
+  // GET /api/connections/:connectionId/credentials — return decrypted OAuth access_token
+  // Used by satellite apps (workspace-fs) to resolve cloud drive tokens.
+  // Forces a token refresh if the stored token is expired.
+  router.get("/:connectionId/credentials", requirePermission("connections", "read"), async (c) => {
+    const connectionId = c.req.param("connectionId");
+
+    const [conn] = await db
+      .select()
+      .from(userProviderConnections)
+      .where(eq(userProviderConnections.id, connectionId))
+      .limit(1);
+
+    if (!conn || conn.orgId !== c.get("orgId")) throw notFound("Connection not found");
+
+    // Force refresh if token is expired or about to expire (5 min buffer).
+    // If expiresAt is not set, refresh anyway — OAuth2 tokens are short-lived.
+    const needsRefresh = !conn.expiresAt || conn.expiresAt.getTime() < Date.now() + 5 * 60_000;
+    if (needsRefresh) {
+      try {
+        await forceRefreshCredentials(
+          db,
+          conn.profileId,
+          conn.providerId,
+          conn.orgId,
+          conn.providerCredentialId,
+        );
+      } catch (err) {
+        logger.warn("Token refresh failed, returning stored credentials", {
+          connectionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // Read (possibly refreshed) credentials
+    const result = await getCredentials(
+      db,
+      conn.profileId,
+      conn.providerId,
+      conn.orgId,
+      conn.providerCredentialId,
+    );
+
+    if (!result) throw notFound("No credentials found for this connection");
+
+    return c.json({ access_token: result.credentials.access_token ?? null });
+  });
 
   return router;
 }

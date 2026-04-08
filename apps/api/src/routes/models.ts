@@ -66,6 +66,16 @@ export const testInlineSchema = z.object({
   existingModelId: z.string().optional(),
 });
 
+/**
+ * Build Pi SDK compat override based on the real LLM provider URL.
+ * Providers like Mistral/Together reject extra OpenAI params (store, max_completion_tokens).
+ */
+function buildModelCompat(baseUrl: string): Record<string, unknown> | null {
+  const strict = baseUrl.includes("mistral.ai") || baseUrl.includes("together.ai");
+  if (!strict) return null;
+  return { supportsStore: false, maxTokensField: "max_tokens", supportsDeveloperRole: false };
+}
+
 export function createModelsRouter() {
   const router = new Hono<AppEnv>();
 
@@ -329,6 +339,10 @@ export function createModelsRouter() {
     const resolved = await loadModel(orgId, modelId);
     if (!resolved) throw notFound("Model not found or not enabled");
 
+    // Detect compat overrides for providers that reject OpenAI-specific params.
+    // The sidecar proxy masks the real baseUrl, so satellites can't detect this themselves.
+    const compat = buildModelCompat(resolved.baseUrl);
+
     return c.json({
       api: resolved.api,
       baseUrl: resolved.baseUrl,
@@ -338,6 +352,7 @@ export function createModelsRouter() {
       reasoning: resolved.reasoning ?? false,
       contextWindow: resolved.contextWindow ?? 128000,
       maxTokens: resolved.maxTokens ?? 16384,
+      ...(compat ? { compat } : {}),
     });
   });
 

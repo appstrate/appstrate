@@ -220,6 +220,9 @@ const ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<Permission>> = {
  * Session-only operations (org management, billing, personal profiles, etc.) are excluded.
  */
 export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>([
+  // Connections (read credentials + connect for satellite apps)
+  "connections:read",
+  "connections:connect",
   // Agents
   "agents:read",
   "agents:write",
