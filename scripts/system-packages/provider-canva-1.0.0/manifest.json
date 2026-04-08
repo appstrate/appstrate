@@ -1,0 +1,55 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/canva",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Canva",
+  "description": "Online graphic design and visual content platform",
+  "iconUrl": "canva",
+  "categories": ["design", "marketing"],
+  "docsUrl": "https://www.canva.dev/docs/connect/",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://www.canva.com/api/oauth/authorize",
+      "tokenUrl": "https://api.canva.com/rest/v1/oauth/token",
+      "refreshUrl": "https://api.canva.com/rest/v1/oauth/token",
+      "defaultScopes": [
+        "design:meta:read",
+        "design:content:read",
+        "profile:read"
+      ],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_basic"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": ["https://api.canva.com/*"],
+    "availableScopes": [
+      { "value": "design:meta:read", "label": "Read design metadata" },
+      { "value": "design:content:read", "label": "Read design content" },
+      { "value": "design:content:write", "label": "Write design content" },
+      { "value": "design:permission:read", "label": "Read design permissions" },
+      { "value": "design:permission:write", "label": "Write design permissions" },
+      { "value": "folder:read", "label": "Read folders" },
+      { "value": "folder:write", "label": "Write folders" },
+      { "value": "asset:read", "label": "Read assets" },
+      { "value": "asset:write", "label": "Upload assets" },
+      { "value": "brandtemplate:meta:read", "label": "Read brand template metadata" },
+      { "value": "brandtemplate:content:read", "label": "Read brand template content" },
+      { "value": "profile:read", "label": "Read user profile" },
+      { "value": "comment:read", "label": "Read comments" },
+      { "value": "comment:write", "label": "Write comments" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
+    "steps": [
+      { "label": "Create a Canva app", "url": "https://www.canva.com/developers/integrations" },
+      { "label": "Configure OAuth redirect URI and scopes" },
+      { "label": "Copy your Client ID and Client Secret" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
