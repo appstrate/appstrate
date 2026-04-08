@@ -325,7 +325,7 @@ export function createConnectionsRouter() {
   // Used by satellite apps (workspace-fs) to resolve cloud drive tokens.
   // Forces a token refresh if the stored token is expired.
   router.get("/:connectionId/credentials", requirePermission("connections", "read"), async (c) => {
-    const connectionId = c.req.param("connectionId");
+    const connectionId = c.req.param("connectionId")!;
 
     const [conn] = await db
       .select()
