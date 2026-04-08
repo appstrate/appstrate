@@ -1,0 +1,44 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/woocommerce",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "WooCommerce",
+  "description": "E-commerce plugin for WordPress — manage products, orders, customers, and coupons",
+  "iconUrl": "woo",
+  "categories": ["e-commerce", "retail"],
+  "docsUrl": "https://woocommerce.github.io/woocommerce-rest-api-docs/",
+  "definition": {
+    "authMode": "custom",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "site_url": {
+            "type": "string",
+            "description": "WooCommerce site URL (e.g. https://mystore.com)"
+          },
+          "consumer_key": {
+            "type": "string",
+            "description": "Consumer Key (starts with ck_)"
+          },
+          "consumer_secret": {
+            "type": "string",
+            "description": "Consumer Secret (starts with cs_)"
+          }
+        },
+        "required": ["site_url", "consumer_key", "consumer_secret"]
+      }
+    },
+    "allowAllUris": true,
+    "authorizedUris": []
+  },
+  "setupGuide": {
+    "steps": [
+      { "label": "Go to WooCommerce → Settings → Advanced → REST API" },
+      { "label": "Add a new API key with Read/Write permissions" },
+      { "label": "Copy the Consumer Key and Consumer Secret" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
