@@ -1,0 +1,38 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/loom",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Loom",
+  "description": "Video messaging platform — access video metadata, transcripts, and embed information",
+  "iconUrl": "loom",
+  "categories": ["video", "communication"],
+  "docsUrl": "https://dev.loom.com/docs",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "description": "Loom Developer API key"
+          }
+        },
+        "required": ["api_key"]
+      },
+      "fieldName": "api_key"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": ["https://www.loom.com/*", "https://developer.loom.com/*"]
+  },
+  "setupGuide": {
+    "steps": [
+      { "label": "Create a Loom developer account", "url": "https://dev.loom.com/" },
+      { "label": "Create an app in the Developer Portal" },
+      { "label": "Copy your API credentials" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
