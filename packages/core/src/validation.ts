@@ -138,9 +138,7 @@ export const providerManifestSchema = afpsProviderManifestSchema.safeExtend({
 export type ProviderManifest = z.infer<typeof providerManifestSchema>;
 
 export type OAuthTokenAuthMethod = "client_secret_basic" | "client_secret_post";
-export type OAuthTokenContentType =
-  | "application/json"
-  | "application/x-www-form-urlencoded";
+export type OAuthTokenContentType = "application/json" | "application/x-www-form-urlencoded";
 export type CredentialEncoding = "basic_api_key_x" | "basic_email_token";
 
 /** Resolved provider definition built from a raw manifest JSONB object. */

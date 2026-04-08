@@ -6,9 +6,7 @@
  */
 
 export type OAuthTokenAuthMethod = "client_secret_basic" | "client_secret_post";
-export type OAuthTokenContentType =
-  | "application/json"
-  | "application/x-www-form-urlencoded";
+export type OAuthTokenContentType = "application/json" | "application/x-www-form-urlencoded";
 
 /**
  * Build headers for an OAuth2 token endpoint request.

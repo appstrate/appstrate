@@ -54,4 +54,4 @@ docker-compose.override.yml
 # Playwright
 test-results/
 playwright-report/
-.playwright/
+.playwright/IMPL-*.md

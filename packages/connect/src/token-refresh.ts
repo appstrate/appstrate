@@ -90,7 +90,12 @@ async function doRefresh(
   try {
     response = await fetch(ctx.tokenUrl, {
       method: "POST",
-      headers: buildTokenHeaders(ctx.tokenAuthMethod, ctx.clientId, ctx.clientSecret, ctx.tokenContentType),
+      headers: buildTokenHeaders(
+        ctx.tokenAuthMethod,
+        ctx.clientId,
+        ctx.clientSecret,
+        ctx.tokenContentType,
+      ),
       body,
       signal: AbortSignal.timeout(30_000),
     });
