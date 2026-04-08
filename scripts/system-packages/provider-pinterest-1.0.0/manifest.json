@@ -14,7 +14,7 @@
       "authorizationUrl": "https://www.pinterest.com/oauth/",
       "tokenUrl": "https://api.pinterest.com/v5/oauth/token",
       "refreshUrl": "https://api.pinterest.com/v5/oauth/token",
-      "defaultScopes": ["boards:read", "pins:read", "user_accounts:read"],
+      "defaultScopes": ["user_accounts:read"],
       "scopeSeparator": ",",
       "pkceEnabled": false,
       "tokenAuthMethod": "client_secret_basic"

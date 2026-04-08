@@ -30,9 +30,8 @@
     "credentialEncoding": "basic_api_key_x",
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Basic",
-    "authorizedUris": [
-      "https://*.teamwork.com/*"
-    ]
+    "allowAllUris": true,
+    "authorizedUris": ["https://*.teamwork.com/*"]
   },
   "setupGuide": {
     "steps": [
