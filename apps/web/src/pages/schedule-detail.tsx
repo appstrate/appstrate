@@ -373,7 +373,6 @@ function ScheduleHistory({
       scheduleId={schedule.id}
       pageSize={12}
       fixedAgentName={agentName}
-      fixedScheduleName={schedule.name}
       firstPageBanner={previewRow}
       emptyState={
         <div className="border-border rounded-md border">

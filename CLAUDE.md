@@ -452,6 +452,8 @@ Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Mig
 - **Proxy system**: Org-level proxy CRUD via `/api/proxies` (admin-only). System proxies loaded from `SYSTEM_PROXIES` env var at boot. Agent-level override via `GET/PUT /api/agents/:id/proxy`. Cascade: agent override → org default → `PROXY_URL` env var.
 - **Application-scoped config**: Agent configuration is per-application via `application_packages` (not per-org). Memories are application-scoped.
 - **Run lifecycle**: `pending` → `running` → `success` | `failed` | `timeout` | `cancelled`. Status transitions via `updateRunStatus()` in `state.ts`. `pg_notify` fires on every status change, pushing realtime updates to SSE subscribers. Concurrent runs per agent are supported — `run-tracker.ts` tracks all in-flight runs for graceful shutdown.
+- **Enriched run responses**: `listRunsWithFilter` and `getRunFull` use LEFT JOINs to enrich runs with `userName` (from `profiles`), `endUserName` (from `end_users`, name with externalId fallback), `apiKeyName` (from `api_keys`), and `scheduleName` (from `package_schedules`). The `EnrichedRun` type in `@appstrate/shared-types` extends `Run` with these four nullable string fields. Frontend components read names directly from the run response — no separate lookup hooks needed.
+- **Run trigger tracking**: `runs.apiKeyId` (FK → `api_keys.id`, nullable, ON DELETE SET NULL) records which API key triggered a run. Set from `c.get("apiKeyId")` in the run route. Combined with existing `userId`, `endUserId`, and `scheduleId`, this enables full trigger attribution in the UI.
 
 ## Known Issues & Technical Debt
 

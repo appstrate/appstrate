@@ -10,6 +10,16 @@ export type { PackageType };
 
 export type { Run } from "@appstrate/db/schema";
 
+import type { Run } from "@appstrate/db/schema";
+
+/** Run with enriched display names from LEFT JOINs (user, end-user, API key, schedule). */
+export type EnrichedRun = Run & {
+  userName: string | null;
+  endUserName: string | null;
+  apiKeyName: string | null;
+  scheduleName: string | null;
+};
+
 // --- App Config Types ---
 
 export interface AppConfig {
