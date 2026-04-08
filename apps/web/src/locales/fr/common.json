@@ -98,5 +98,6 @@
   "library.empty": "Aucun package disponible",
   "pagination.previous": "Précédent",
   "pagination.next": "Suivant",
-  "pagination.pageOf": "Page {{page}} sur {{total}}"
+  "pagination.pageOf": "Page {{page}} sur {{total}}",
+  "invalidJson": "JSON invalide"
 }
