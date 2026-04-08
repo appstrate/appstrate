@@ -1,0 +1,46 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/shopify",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Shopify",
+  "description": "E-commerce platform — manage products, orders, customers, and inventory",
+  "iconUrl": "shopify",
+  "categories": ["e-commerce", "retail"],
+  "docsUrl": "https://shopify.dev/docs/api/admin-rest",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "shop_domain": {
+            "type": "string",
+            "description": "Your Shopify store domain (e.g. mystore.myshopify.com)"
+          },
+          "access_token": {
+            "type": "string",
+            "description": "Admin API access token from a Custom App"
+          }
+        },
+        "required": ["shop_domain", "access_token"]
+      },
+      "fieldName": "access_token"
+    },
+    "credentialHeaderName": "X-Shopify-Access-Token",
+    "credentialHeaderPrefix": "",
+    "allowAllUris": true,
+    "authorizedUris": ["https://*.myshopify.com/*"]
+  },
+  "setupGuide": {
+    "steps": [
+      {
+        "label": "Go to Shopify Admin → Settings → Apps → Develop apps",
+        "url": "https://admin.shopify.com/"
+      },
+      { "label": "Create a Custom App and configure Admin API scopes" },
+      { "label": "Install the app and copy the Admin API access token" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
