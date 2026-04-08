@@ -94,18 +94,19 @@ Creates a new design. Requires `design:content:write` scope.
 ```
 
 ### Start Export Job
-`POST /designs/{designId}/exports`
+`POST /exports`
 
-Starts an async export of a design to PDF, PNG, JPG, etc. Requires `design:content:read` scope.
+Starts an async export of a design to PDF, PNG, JPG, GIF, PPTX, MP4, or HTML formats. Requires `design:content:read` scope.
 
 **Request body (JSON):**
 ```json
 {
+  "design_id": "DAVZr1z5464",
   "format": {
     "type": "pdf",
-    "size": "a4"
-  },
-  "pages": [1, 2, 3]
+    "size": "a4",
+    "pages": [2, 3, 4]
+  }
 }
 ```
 
@@ -113,26 +114,40 @@ Starts an async export of a design to PDF, PNG, JPG, etc. Requires `design:conte
 ```json
 {
   "job": {
-    "id": "export_abc123",
+    "id": "e08861ae-3b29-45db-8dc1-1fe0bf7f1cc8",
     "status": "in_progress"
   }
 }
 ```
 
 ### Get Export Job
-`GET /designs/{designId}/exports/{exportId}`
+`GET /exports/{exportId}`
 
-Polls the status of an export job. When complete, provides a download URL.
+Polls the status of an export job. When complete, provides one or more download URLs.
 
 **Response (completed):**
 ```json
 {
   "job": {
-    "id": "export_abc123",
+    "id": "e08861ae-3b29-45db-8dc1-1fe0bf7f1cc8",
     "status": "success",
     "urls": [
       "https://export-download.canva.com/..."
     ]
+  }
+}
+```
+
+**Response (failed):**
+```json
+{
+  "job": {
+    "id": "e08861ae-3b29-45db-8dc1-1fe0bf7f1cc8",
+    "status": "failed",
+    "error": {
+      "code": "license_required",
+      "message": "User doesn't have the required license to export in PRO quality."
+    }
   }
 }
 ```
@@ -226,26 +241,25 @@ Returns available brand templates. Requires `brandtemplate:meta:read` scope.
 
 Returns details for a specific brand template.
 
-### List Comments
-`GET /designs/{designId}/comments`
+### Get Comment Thread
+`GET /comments/{threadId}`
 
-Returns comments on a design. Requires `comment:read` scope.
+Returns metadata for a comment thread. Requires `comment:read` scope. Canva comments APIs are currently provided as a preview.
 
 **Response:**
 ```json
 {
-  "items": [
-    {
-      "id": "comment_abc123",
-      "message": "Can we change the color to blue?",
-      "author": {
-        "user_id": "oUnPjZ2k2yuhftbWF3sUhA",
-        "display_name": "Alice Martin"
-      },
-      "created_at": 1718449200,
-      "updated_at": 1718449200
-    }
-  ]
+  "thread": {
+    "id": "thread_abc123",
+    "design_id": "DAFVztcvd98",
+    "author": {
+      "user_id": "oUnPjZ2k2yuhftbWF3sUhA",
+      "display_name": "Alice Martin"
+    },
+    "message": "Can we change the color to blue?",
+    "created_at": 1718449200,
+    "updated_at": 1718449800
+  }
 }
 ```
 
@@ -259,11 +273,13 @@ Cursor-based pagination:
 
 ### Async Exports
 Design export is asynchronous:
-1. `POST /designs/{id}/exports` — Start export, get `job.id`
-2. Poll `GET /designs/{id}/exports/{exportId}` until `status` is `success` or `failed`
-3. Download from `urls` array in the completed response
+1. `POST /exports` — Start export with `design_id` in the body, get `job.id`
+2. Poll `GET /exports/{exportId}` until `status` is `success` or `failed`
+3. Download from the returned `urls` array
 
 Export statuses: `in_progress`, `success`, `failed`
+
+Download URLs expire after 24 hours.
 
 ### Error Format
 ```json
@@ -279,9 +295,12 @@ Export statuses: `in_progress`, `success`, `failed`
 - Uses `client_secret_basic` (HTTP Basic Auth) for token exchange.
 - PKCE is required for the OAuth flow.
 - Access tokens expire after 1 hour, refresh tokens after 6 months.
-- Design export is async — you must poll for completion (typically a few seconds).
+- Design export is async — you must poll `GET /exports/{exportId}` for completion.
+- Export creation uses `POST /exports` with `design_id` in the body, not a nested `/designs/{id}/exports` path.
+- Download URLs returned by export jobs expire after 24 hours.
 - Design dimensions are in pixels.
 - File uploads use `multipart/form-data` (not JSON).
 - Timestamps are Unix timestamps (seconds), not ISO 8601.
+- Canva comments APIs are preview APIs and use thread-based endpoints.
 - Design types for creation: `Presentation`, `Poster`, `Instagram Post`, `A4 Document`, etc.
-- Rate limits vary by endpoint — consult Canva's developer docs for specifics.
+- Export endpoints have additional throttles per integration, per document, and per user.
