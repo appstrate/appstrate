@@ -156,7 +156,8 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
         // OAuth2 / API key — single credential field with header info
         const fieldName = getCredentialFieldName(provider as ProviderDefinition);
         const headerName = provider.credentialHeaderName ?? "Authorization";
-        const headerPrefix = provider.credentialHeaderPrefix ?? "Bearer ";
+        const rawHeaderPrefix = provider.credentialHeaderPrefix ?? "Bearer";
+        const headerPrefix = rawHeaderPrefix.endsWith(" ") ? rawHeaderPrefix : `${rawHeaderPrefix} `;
         sections.push(`  Auth: \`${headerName}: ${headerPrefix}{{${fieldName}}}\``);
       }
 

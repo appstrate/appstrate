@@ -211,6 +211,7 @@ Related entity references use `_fieldname_value` for reading and `fieldname@odat
 ## Important Notes
 - **Instance URL** — The base URL is organization-specific (e.g. `myorg.api.crm.dynamics.com`). Regions use different suffixes (`crm2`, `crm4`, etc.).
 - **OAuth scope** — In Microsoft documentation, delegated access should use an environment-specific scope such as `https://{org}.api.crm.dynamics.com/user_impersonation`. Confidential-client flows may instead use `https://{org}.api.crm.dynamics.com/.default`.
+- **Appstrate limitation** — Because Appstrate provider manifests use static default scopes, this provider may require custom handling or manual verification for organizations whose OAuth flow requires an org-specific scope value.
 - **Token refresh** — Access tokens expire after 1 hour. Automatic refresh via the runtime.
 - **GUIDs** — All entity IDs are GUIDs in parentheses: `contacts(a1b2c3d4-...)`.
 - **OData protocol** — All queries use OData v4 conventions. Include `Accept: application/json` and `OData-MaxVersion: 4.0` headers.
