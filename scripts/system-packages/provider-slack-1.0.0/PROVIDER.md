@@ -177,9 +177,9 @@ Get detailed information about a channel.
 Upload a file in 3 steps (`files.upload` was sunset March 2025):
 
 **Step 1** — Get an upload URL:
-`GET /files.getUploadURLExternal`
+`POST /files.getUploadURLExternal`
 
-**Query parameters:**
+**Request body:**
 - `filename` — File name (required)
 - `length` — File size in bytes (required)
 
