@@ -1,0 +1,41 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/twilio",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Twilio",
+  "description": "Cloud communications platform for SMS, voice, and messaging",
+  "iconUrl": "twilio",
+  "categories": ["messaging", "communications"],
+  "docsUrl": "https://www.twilio.com/docs/usage/api",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "account_sid": {
+            "type": "string",
+            "description": "Twilio Account SID (starts with AC)"
+          },
+          "auth_token": {
+            "type": "string",
+            "description": "Twilio Auth Token"
+          }
+        },
+        "required": ["account_sid", "auth_token"]
+      }
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Basic",
+    "authorizedUris": ["https://api.twilio.com/*", "https://lookups.twilio.com/*", "https://verify.twilio.com/*"]
+  },
+  "setupGuide": {
+    "steps": [
+      { "label": "Sign up and get your credentials", "url": "https://www.twilio.com/try-twilio" },
+      { "label": "Find your Account SID and Auth Token on the Console Dashboard", "url": "https://console.twilio.com/" },
+      { "label": "Copy both credentials" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}
