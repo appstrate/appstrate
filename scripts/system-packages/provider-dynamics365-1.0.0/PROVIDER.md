@@ -2,7 +2,7 @@
 
 Base URL: `https://{org}.api.crm.dynamics.com/api/data/v9.2`
 
-Enterprise CRM and ERP platform. The base URL is organization-specific. Uses OData v4 protocol with standard query options (`$select`, `$filter`, `$expand`, `$orderby`, `$top`). Entity IDs are GUIDs.
+Enterprise CRM and ERP platform. The base URL is organization-specific. Uses OData v4 protocol with standard query options (`$select`, `$filter`, `$expand`, `$orderby`, `$top`). Entity IDs are GUIDs. OAuth is also organization-specific in practice: the delegated scope should match the environment URL (for example `https://{org}.api.crm.dynamics.com/user_impersonation`).
 
 ## Endpoints
 
@@ -210,6 +210,7 @@ Related entity references use `_fieldname_value` for reading and `fieldname@odat
 
 ## Important Notes
 - **Instance URL** — The base URL is organization-specific (e.g. `myorg.api.crm.dynamics.com`). Regions use different suffixes (`crm2`, `crm4`, etc.).
+- **OAuth scope** — In Microsoft documentation, delegated access should use an environment-specific scope such as `https://{org}.api.crm.dynamics.com/user_impersonation`. Confidential-client flows may instead use `https://{org}.api.crm.dynamics.com/.default`.
 - **Token refresh** — Access tokens expire after 1 hour. Automatic refresh via the runtime.
 - **GUIDs** — All entity IDs are GUIDs in parentheses: `contacts(a1b2c3d4-...)`.
 - **OData protocol** — All queries use OData v4 conventions. Include `Accept: application/json` and `OData-MaxVersion: 4.0` headers.

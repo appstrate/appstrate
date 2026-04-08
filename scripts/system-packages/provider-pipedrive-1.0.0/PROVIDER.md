@@ -262,4 +262,4 @@ Email and phone fields are arrays of objects:
 - **Email/phone as arrays** — Contact email and phone are arrays of objects with `value`, `primary`, `label`.
 - **Pipeline stages** — Deals progress through stages. Get available stages with `GET /stages?pipeline_id={ID}`.
 - **Monetary values** — Deal values are in the deal's currency. Use `currency` field to know the unit.
-- **API v2 migration** — Some endpoints are migrating to v2 (`/api/v2/`). Use v1 which is stable and complete.
+- **API v2 migration** — Pipedrive is gradually moving parts of the API to `/api/v2/`. This provider documents the stable v1 surface used by the current package, but new integrations should verify whether a newer v2 endpoint exists before implementing net-new features.

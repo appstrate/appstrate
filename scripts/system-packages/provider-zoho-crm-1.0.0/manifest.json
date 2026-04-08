@@ -7,7 +7,7 @@
   "description": "Customer relationship management platform for sales and marketing",
   "iconUrl": "https://cdn.simpleicons.org/zoho",
   "categories": ["crm", "sales", "marketing"],
-  "docsUrl": "https://www.zoho.com/crm/developer/docs/api/v7/",
+  "docsUrl": "https://www.zoho.com/crm/developer/docs/api/v8/",
   "definition": {
     "authMode": "oauth2",
     "oauth2": {
@@ -31,7 +31,9 @@
       "https://www.zohoapis.in/*",
       "https://www.zohoapis.com.au/*",
       "https://www.zohoapis.jp/*",
-      "https://www.zohoapis.com.cn/*"
+      "https://www.zohoapis.com.cn/*",
+      "https://www.zohoapis.sa/*",
+      "https://www.zohocloud.ca/*"
     ],
     "availableScopes": [
       { "value": "ZohoCRM.modules.READ", "label": "Read CRM module data" },

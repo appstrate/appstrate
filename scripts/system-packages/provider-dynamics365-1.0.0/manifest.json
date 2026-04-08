@@ -7,7 +7,7 @@
   "description": "Enterprise CRM and ERP platform by Microsoft",
   "iconUrl": "https://cdn.simpleicons.org/dynamics365",
   "categories": ["crm", "sales", "erp"],
-  "docsUrl": "https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/overview",
+  "docsUrl": "https://learn.microsoft.com/en-us/power-apps/developer/data-platform/authenticate-oauth",
   "definition": {
     "authMode": "oauth2",
     "oauth2": {
@@ -54,7 +54,7 @@
         "url": "https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
       },
       {
-        "label": "Add Dynamics CRM API permissions and configure redirect URI"
+        "label": "Add Dataverse delegated permission ('Access Dynamics 365 as organization users') and configure the redirect URI"
       },
       {
         "label": "Create a Client Secret and copy Application (Client) ID"

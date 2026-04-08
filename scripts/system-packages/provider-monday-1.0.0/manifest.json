@@ -13,7 +13,7 @@
     "oauth2": {
       "authorizationUrl": "https://auth.monday.com/oauth2/authorize",
       "tokenUrl": "https://auth.monday.com/oauth2/token",
-      "defaultScopes": [],
+      "defaultScopes": ["me:read", "boards:read", "workspaces:read", "users:read"],
       "scopeSeparator": " ",
       "pkceEnabled": false,
       "tokenAuthMethod": "client_secret_post"

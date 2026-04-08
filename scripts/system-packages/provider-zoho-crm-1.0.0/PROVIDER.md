@@ -1,13 +1,13 @@
 # Zoho CRM API
 
-Base URL: `https://www.zohoapis.com/crm/v7`
+Base URL: `https://www.zohoapis.com/crm/v8`
 
-CRM platform for sales and marketing. Uses a module-based REST API where all record operations follow the same pattern at `/crm/v7/{MODULE}`. The API domain may vary by datacenter region (`.com`, `.eu`, `.in`, `.com.au`, `.jp`). Uses `Zoho-oauthtoken` as the authorization header prefix instead of `Bearer`.
+CRM platform for sales and marketing. Uses a module-based REST API where all record operations follow the same pattern at `/crm/v8/{MODULE}`. The actual API base domain should come from the OAuth token response's `api_domain` field and may vary by datacenter region (`.com`, `.eu`, `.in`, `.com.au`, `.jp`, `.com.cn`, `.sa`, `.ca`). Uses `Zoho-oauthtoken` as the authorization header prefix instead of `Bearer`.
 
 ## Endpoints
 
 ### List Records
-`GET /crm/v7/{MODULE}`
+`GET /crm/v8/{MODULE}`
 
 **Query parameters:**
 - `fields` — Comma-separated field names (e.g. `Last_Name,Email,Phone`)
@@ -40,10 +40,10 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 ```
 
 ### Get Record
-`GET /crm/v7/{MODULE}/{RECORD_ID}`
+`GET /crm/v8/{MODULE}/{RECORD_ID}`
 
 ### Create Records
-`POST /crm/v7/{MODULE}`
+`POST /crm/v8/{MODULE}`
 
 **Request body (JSON):**
 ```json
@@ -75,7 +75,7 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 ```
 
 ### Update Records
-`PUT /crm/v7/{MODULE}`
+`PUT /crm/v8/{MODULE}`
 
 **Request body (JSON):**
 ```json
@@ -91,10 +91,10 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 ```
 
 ### Delete Records
-`DELETE /crm/v7/{MODULE}?ids={ID1},{ID2}`
+`DELETE /crm/v8/{MODULE}?ids={ID1},{ID2}`
 
 ### Search Records
-`GET /crm/v7/{MODULE}/search`
+`GET /crm/v8/{MODULE}/search`
 
 **Query parameters:**
 - `criteria` — Filter criteria (e.g. `(Last_Name:equals:Smith)`)
@@ -106,7 +106,7 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 **Criteria operators:** `equals`, `starts_with`, `contains`, `not_equal`, `greater_than`, `less_than`, `greater_equal`, `less_equal`, `between`, `in`
 
 ### COQL Query
-`POST /crm/v7/coql`
+`POST /crm/v8/coql`
 
 **Request body (JSON):**
 ```json
@@ -130,16 +130,16 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 ```
 
 ### List Users
-`GET /crm/v7/users`
+`GET /crm/v8/users`
 
 **Query parameters:**
 - `type` — `AllUsers`, `ActiveUsers`, `DeactiveUsers`, `AdminUsers`
 
 ### Get Notes
-`GET /crm/v7/{MODULE}/{RECORD_ID}/Notes`
+`GET /crm/v8/{MODULE}/{RECORD_ID}/Notes`
 
 ### Add Note
-`POST /crm/v7/{MODULE}/{RECORD_ID}/Notes`
+`POST /crm/v8/{MODULE}/{RECORD_ID}/Notes`
 
 **Request body (JSON):**
 ```json
@@ -154,9 +154,9 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 ```
 
 ### Get Related Records
-`GET /crm/v7/{MODULE}/{RECORD_ID}/{RELATED_MODULE}`
+`GET /crm/v8/{MODULE}/{RECORD_ID}/{RELATED_MODULE}`
 
-Example: `GET /crm/v7/Accounts/5073207.../Contacts` — get contacts linked to an account.
+Example: `GET /crm/v8/Accounts/5073207.../Contacts` — get contacts linked to an account.
 
 ## Common Patterns
 
@@ -188,7 +188,7 @@ POST and PUT accept an array of up to 100 records in the `data` field.
 
 ## Important Notes
 - **Authorization prefix** — Uses `Zoho-oauthtoken` instead of `Bearer` in the Authorization header.
-- **Multi-datacenter** — API domain varies by region: `.com` (US), `.eu` (EU), `.in` (India), `.com.au` (Australia), `.jp` (Japan).
+- **Multi-datacenter** — Use the `api_domain` returned by OAuth for API calls. Common domains include `.com` (US), `.eu` (EU), `.in` (India), `.com.au` (Australia), `.jp` (Japan), `.com.cn` (China), `.sa` (Saudi Arabia), and `.ca` (Canada).
 - **Token refresh** — Access tokens expire after 1 hour. Automatic refresh via the runtime.
 - **Scope separator** — Zoho uses commas to separate scopes (e.g. `ZohoCRM.modules.READ,ZohoCRM.users.READ`).
 - **Field names** — Use underscore-separated PascalCase (e.g. `Last_Name`, `Lead_Source`, `Created_Time`).
