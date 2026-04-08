@@ -11,7 +11,7 @@ cp .env.example .env
 bun run dev                   # PGlite + filesystem + in-memory → :3000
 ```
 
-No Docker, no PostgreSQL, no Redis. First signup creates an organization automatically.
+No Docker, no PostgreSQL, no Redis. After signup, the onboarding flow guides the user to create their first organization.
 
 **Tier 3 (full stack with Docker):**
 
