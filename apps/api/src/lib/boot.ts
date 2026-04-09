@@ -35,7 +35,10 @@ import { logInfraMode } from "../infra/index.ts";
 export async function boot(): Promise<void> {
   // Wire OIDC custom claims: inject endUserId + applicationId into access tokens
   setCustomAccessTokenClaimsHook(async (user, referenceId) => {
-    const endUser = await resolveOrCreateEndUser(user, referenceId);
+    const endUser = await resolveOrCreateEndUser(
+      { id: user.id, email: user.email, name: user.name, emailVerified: user.emailVerified },
+      referenceId,
+    );
     return { endUserId: endUser.id, applicationId: referenceId, role: endUser.role };
   });
 

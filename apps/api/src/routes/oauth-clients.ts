@@ -17,19 +17,25 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { getApplication, updateApplication, type AppSettings } from "../services/applications.ts";
 import { auth } from "@appstrate/db/auth";
 import { db } from "@appstrate/db/client";
-import { oauthClient } from "@appstrate/db/schema";
+import { oauthClient, oauthRefreshToken, oauthAccessToken } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 
+const redirectUriSchema = z
+  .string()
+  .url()
+  .refine((uri) => {
+    const u = new URL(uri);
+    return u.protocol === "https:" || (u.protocol === "http:" && u.hostname === "localhost");
+  }, "Redirect URIs must use HTTPS (http://localhost allowed for development)");
+
 const enableOAuthSchema = z.object({
-  redirectUris: z.array(z.string().url()).min(1, "At least one redirect URI is required"),
+  redirectUris: z.array(redirectUriSchema).min(1, "At least one redirect URI is required"),
   allowSignup: z.boolean().default(true),
-  requireEmailVerification: z.boolean().default(true),
 });
 
 const updateOAuthSchema = z.object({
-  redirectUris: z.array(z.string().url()).min(1).optional(),
+  redirectUris: z.array(redirectUriSchema).min(1).optional(),
   allowSignup: z.boolean().optional(),
-  requireEmailVerification: z.boolean().optional(),
 });
 
 /**
@@ -101,7 +107,7 @@ export function createOAuthClientsRouter() {
     // so we set it directly after creation along with the application reference.
     await db
       .update(oauthClient)
-      .set({ skipConsent: true, referenceId: appId })
+      .set({ skipConsent: true, referenceId: appId, requirePKCE: true })
       .where(eq(oauthClient.clientId, client.client_id));
 
     // Persist clientId in application settings
@@ -112,7 +118,6 @@ export function createOAuthClientsRouter() {
           enabled: true,
           clientId: client.client_id,
           allowSignup: body.allowSignup,
-          requireEmailVerification: body.requireEmailVerification,
         },
       },
     });
@@ -158,7 +163,6 @@ export function createOAuthClientsRouter() {
       enabled: true,
       clientId: endUserAuth.clientId,
       allowSignup: endUserAuth.allowSignup ?? true,
-      requireEmailVerification: endUserAuth.requireEmailVerification ?? true,
       redirectUris: client?.redirectUris ?? [],
     });
   });
@@ -202,9 +206,6 @@ export function createOAuthClientsRouter() {
         endUserAuth: {
           ...endUserAuth,
           ...(body.allowSignup !== undefined && { allowSignup: body.allowSignup }),
-          ...(body.requireEmailVerification !== undefined && {
-            requireEmailVerification: body.requireEmailVerification,
-          }),
         },
       },
     });
@@ -225,11 +226,14 @@ export function createOAuthClientsRouter() {
       return c.json({ enabled: false });
     }
 
-    // Disable the OAuth client in Better Auth (tokens stop working)
+    // Disable the OAuth client and revoke all tokens
     await db
       .update(oauthClient)
       .set({ disabled: true })
       .where(eq(oauthClient.clientId, endUserAuth.clientId));
+    // Revoke all access and refresh tokens for this client
+    await db.delete(oauthAccessToken).where(eq(oauthAccessToken.clientId, endUserAuth.clientId));
+    await db.delete(oauthRefreshToken).where(eq(oauthRefreshToken.clientId, endUserAuth.clientId));
 
     // Clear settings
     await updateApplication(orgId, appId, {
@@ -238,7 +242,6 @@ export function createOAuthClientsRouter() {
         endUserAuth: {
           enabled: false,
           allowSignup: true,
-          requireEmailVerification: true,
         },
       },
     });

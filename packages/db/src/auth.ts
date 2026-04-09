@@ -28,7 +28,7 @@ export function setBeforeSignupHook(hook: (email: string) => void): void {
 // plugin without packages/db depending on apps/api.
 
 export type CustomAccessTokenClaimsHook = (
-  user: { id: string; email: string; name: string },
+  user: { id: string; email: string; name: string; emailVerified: boolean },
   referenceId: string,
 ) => Promise<Record<string, unknown>>;
 
@@ -213,11 +213,12 @@ export const auth = betterAuth({
         if (!referenceId || !user || !_customAccessTokenClaimsHook) return {};
         try {
           return await _customAccessTokenClaimsHook(
-            { id: user.id, email: user.email, name: user.name },
+            { id: user.id, email: user.email, name: user.name, emailVerified: user.emailVerified },
             referenceId,
           );
-        } catch {
-          // Don't block token issuance if mapping fails
+        } catch (err) {
+          // Log but don't block token issuance if mapping fails
+          console.error("[auth] customAccessTokenClaims hook failed:", err);
           return {};
         }
       },

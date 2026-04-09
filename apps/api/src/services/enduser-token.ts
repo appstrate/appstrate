@@ -83,19 +83,27 @@ export function scopesToPermissions(scope?: string): Set<string> {
 
   for (const s of scopes) {
     switch (s) {
+      case "agents":
+        permissions.add("agents:read");
+        break;
+      case "agents:write":
+        permissions.add("agents:read");
+        permissions.add("agents:run");
+        break;
       case "connections":
         permissions.add("connections:read");
         break;
       case "connections:write":
         permissions.add("connections:read");
-        permissions.add("connections:write");
+        permissions.add("connections:connect");
+        permissions.add("connections:disconnect");
         break;
       case "runs":
         permissions.add("runs:read");
         break;
       case "runs:write":
         permissions.add("runs:read");
-        permissions.add("runs:write");
+        permissions.add("runs:cancel");
         break;
       // openid, profile, email don't map to resource permissions
     }

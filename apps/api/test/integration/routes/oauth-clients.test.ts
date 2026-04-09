@@ -35,7 +35,6 @@ describe("OAuth Client Admin Routes", () => {
         body: JSON.stringify({
           redirectUris: ["https://example.com/callback"],
           allowSignup: true,
-          requireEmailVerification: false,
         }),
       });
 

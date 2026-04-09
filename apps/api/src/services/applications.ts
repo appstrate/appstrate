@@ -24,7 +24,6 @@ export const endUserAuthSettingsSchema = z.object({
   enabled: z.boolean().default(false),
   clientId: z.string().optional(),
   allowSignup: z.boolean().default(true),
-  requireEmailVerification: z.boolean().default(true),
 });
 
 export type EndUserAuthSettings = z.infer<typeof endUserAuthSettingsSchema>;

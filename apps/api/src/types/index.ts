@@ -54,7 +54,13 @@ export interface LoadedPackage {
 export type AppEnv = {
   Variables: {
     user: { id: string; email: string; name: string };
-    endUser?: { id: string; applicationId: string; name: string | null; email: string | null };
+    endUser?: {
+      id: string;
+      applicationId: string;
+      name: string | null;
+      email: string | null;
+      role: string;
+    };
     agent: LoadedPackage;
     orgId: string;
     orgSlug: string;

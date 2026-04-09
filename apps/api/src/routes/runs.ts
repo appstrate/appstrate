@@ -35,6 +35,7 @@ import { getCloudModule } from "../lib/cloud-loader.ts";
 import { dispatchRunWebhook } from "../services/webhooks.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
+import { getScopedEndUserId } from "../lib/end-user-scope.ts";
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens;
   total.output_tokens += addition.output_tokens;
@@ -479,12 +480,11 @@ export function createRunsRouter() {
       .min(0)
       .catch(0)
       .parse(c.req.query("offset") ?? 0);
-    const endUser = c.get("endUser");
     const result = await listPackageRuns(agent.id, orgId, {
       limit,
       offset,
       applicationId: c.get("applicationId"),
-      endUserId: endUser?.id,
+      endUserId: getScopedEndUserId(c) ?? undefined,
     });
     return c.json(result);
   });
@@ -510,6 +510,7 @@ export function createRunsRouter() {
       limit,
       offset,
       applicationId: c.get("applicationId"),
+      endUserId: getScopedEndUserId(c) ?? undefined,
     });
     return c.json(result);
   });
@@ -522,9 +523,9 @@ export function createRunsRouter() {
     if (!row) {
       throw notFound("Run not found");
     }
-    // End-user scoping: end-users can only see their own runs
-    const endUser = c.get("endUser");
-    if (endUser && row.endUserId !== endUser.id) {
+    // End-user scoping: non-admin end-users can only see their own runs
+    const scopedEndUserId = getScopedEndUserId(c);
+    if (scopedEndUserId && row.endUserId !== scopedEndUserId) {
       throw notFound("Run not found");
     }
     return c.json(row);
@@ -538,9 +539,9 @@ export function createRunsRouter() {
     if (!exec) {
       throw notFound("Run not found");
     }
-    // End-user scoping: end-users can only see their own run logs
-    const endUser = c.get("endUser");
-    if (endUser && exec.endUserId !== endUser.id) {
+    // End-user scoping: non-admin end-users can only see their own run logs
+    const scopedEndUserId = getScopedEndUserId(c);
+    if (scopedEndUserId && exec.endUserId !== scopedEndUserId) {
       throw notFound("Run not found");
     }
     const logs = await listRunLogs(runId, orgId);
@@ -555,6 +556,12 @@ export function createRunsRouter() {
 
     const run = await getRun(runId, orgId, c.get("applicationId"));
     if (!run) {
+      throw notFound("Run not found");
+    }
+
+    // End-user scoping: non-admin end-users can only cancel their own runs
+    const scopedEndUserId = getScopedEndUserId(c);
+    if (scopedEndUserId && run.endUserId !== scopedEndUserId) {
       throw notFound("Run not found");
     }
 

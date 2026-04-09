@@ -13,9 +13,13 @@
 import { Hono } from "hono";
 import { html } from "hono/html";
 import type { AppEnv } from "../types/index.ts";
+import { rateLimitByIp } from "../middleware/rate-limit.ts";
 
 export function createOAuthEndUserPagesRouter() {
   const router = new Hono<AppEnv>();
+
+  // Rate limit all OIDC pages (60 req/min per IP)
+  router.use("*", rateLimitByIp(60));
 
   // GET /oauth/enduser/login — Login page (redirected from /oauth2/authorize)
   router.get("/login", async (c) => {
@@ -180,10 +184,10 @@ export function createOAuthEndUserPagesRouter() {
               if (data.redirect && data.url) {
                 window.location.href = data.url;
               } else if (data.error) {
-                document.body.insertAdjacentHTML(
-                  "beforeend",
-                  '<p class="error">' + (data.error_description || data.error) + "</p>",
-                );
+                const p = document.createElement("p");
+                p.className = "error";
+                p.textContent = data.error_description || data.error || "Unknown error";
+                document.body.appendChild(p);
               }
             }
           </script>

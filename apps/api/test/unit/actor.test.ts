@@ -46,6 +46,7 @@ describe("getActor", () => {
         applicationId: "app_default",
         name: "End User",
         email: "eu@test.com",
+        role: "member",
       });
       const actor = getActor(c);
       actorType = actor.type;
@@ -70,6 +71,7 @@ describe("getActor", () => {
         applicationId: "app_1",
         name: null,
         email: null,
+        role: "member",
       });
       const actor = getActor(c);
       actorType = actor.type;

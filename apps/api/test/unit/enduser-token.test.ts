@@ -23,22 +23,35 @@ describe("scopesToPermissions", () => {
     expect(perms.has("connections:write")).toBe(false);
   });
 
-  it("maps connections:write scope to both read and write", () => {
+  it("maps connections:write scope to read + connect + disconnect", () => {
     const perms = scopesToPermissions("openid connections:write");
     expect(perms.has("connections:read")).toBe(true);
-    expect(perms.has("connections:write")).toBe(true);
+    expect(perms.has("connections:connect")).toBe(true);
+    expect(perms.has("connections:disconnect")).toBe(true);
   });
 
   it("maps runs scope to runs:read", () => {
     const perms = scopesToPermissions("openid runs");
     expect(perms.has("runs:read")).toBe(true);
-    expect(perms.has("runs:write")).toBe(false);
+    expect(perms.has("runs:cancel")).toBe(false);
   });
 
-  it("maps runs:write scope to both read and write", () => {
+  it("maps runs:write scope to read + cancel", () => {
     const perms = scopesToPermissions("openid runs:write");
     expect(perms.has("runs:read")).toBe(true);
-    expect(perms.has("runs:write")).toBe(true);
+    expect(perms.has("runs:cancel")).toBe(true);
+  });
+
+  it("maps agents scope to agents:read", () => {
+    const perms = scopesToPermissions("agents");
+    expect(perms.has("agents:read")).toBe(true);
+    expect(perms.has("agents:run")).toBe(false);
+  });
+
+  it("maps agents:write scope to read + run", () => {
+    const perms = scopesToPermissions("agents:write");
+    expect(perms.has("agents:read")).toBe(true);
+    expect(perms.has("agents:run")).toBe(true);
   });
 
   it("ignores openid, profile, email scopes (no resource permissions)", () => {
@@ -50,7 +63,7 @@ describe("scopesToPermissions", () => {
     const perms = scopesToPermissions("openid connections runs:write");
     expect(perms.has("connections:read")).toBe(true);
     expect(perms.has("runs:read")).toBe(true);
-    expect(perms.has("runs:write")).toBe(true);
+    expect(perms.has("runs:cancel")).toBe(true);
     expect(perms.size).toBe(3);
   });
 });

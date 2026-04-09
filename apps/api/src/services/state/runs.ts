@@ -455,18 +455,18 @@ export async function listPackageRuns(
 export async function listScheduleRuns(
   scheduleId: string,
   orgId: string,
-  options: { limit?: number; offset?: number; applicationId: string },
+  options: { limit?: number; offset?: number; applicationId: string; endUserId?: string },
 ) {
-  const { limit = 20, offset = 0, applicationId } = options;
-  return listRunsWithFilter(
-    and(
-      eq(runs.scheduleId, scheduleId),
-      eq(runs.orgId, orgId),
-      eq(runs.applicationId, applicationId),
-    )!,
-    limit,
-    offset,
-  );
+  const { limit = 20, offset = 0, applicationId, endUserId } = options;
+  const conditions = [
+    eq(runs.scheduleId, scheduleId),
+    eq(runs.orgId, orgId),
+    eq(runs.applicationId, applicationId),
+  ];
+  if (endUserId) {
+    conditions.push(eq(runs.endUserId, endUserId));
+  }
+  return listRunsWithFilter(and(...conditions)!, limit, offset);
 }
 
 export async function getRunFull(id: string, orgId: string, applicationId: string) {

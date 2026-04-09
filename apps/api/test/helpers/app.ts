@@ -179,21 +179,34 @@ export function getTestApp(): Hono<AppEnv> {
               applicationId: claims.applicationId ?? "",
               email: claims.email ?? null,
               name: claims.name ?? null,
+              role: claims.role ?? "member",
             }
           : claims.applicationId
             ? await resolveOrCreateEndUser(
-                { id: claims.authUserId, email: claims.email ?? "", name: claims.name },
+                {
+                  id: claims.authUserId,
+                  email: claims.email ?? "",
+                  name: claims.name,
+                  emailVerified: true,
+                },
                 claims.applicationId,
               )
             : null;
 
-        if (endUser) {
-          c.set("endUser", endUser);
-          c.set("applicationId", endUser.applicationId);
-          if (!claims.role && endUser.id) {
-            claims.role = (await getEndUserRole(endUser.id)) ?? undefined;
-          }
+        if (!endUser) {
+          return c.json(
+            { error: "invalid_token", detail: "Cannot resolve end-user from token claims" },
+            401,
+          );
         }
+
+        c.set("applicationId", endUser.applicationId);
+        if (!claims.role && endUser.id) {
+          const dbRole = (await getEndUserRole(endUser.id)) ?? "member";
+          claims.role = dbRole;
+          endUser.role = dbRole;
+        }
+        c.set("endUser", endUser);
         c.set("authMethod", "enduser_token");
         c.set("permissions", resolveEndUserPermissionsFromClaims(claims));
         return next();

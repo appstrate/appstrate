@@ -21,6 +21,7 @@ interface AuthUser {
   id: string;
   email: string;
   name?: string | null;
+  emailVerified?: boolean;
 }
 
 interface ResolvedEndUser {
@@ -59,7 +60,8 @@ export async function resolveOrCreateEndUser(
   if (linked) return linked;
 
   // 2. API-created end-user with matching email — link it
-  if (authUser.email) {
+  // Only link if the auth user's email is verified (prevents account takeover when SMTP is disabled)
+  if (authUser.email && authUser.emailVerified !== false) {
     const [unlinked] = await db
       .select({
         id: endUsers.id,
@@ -80,6 +82,8 @@ export async function resolveOrCreateEndUser(
 
     if (unlinked) {
       await linkEndUserToAuthUser(unlinked.id, authUser.id);
+      // If linkEndUserToAuthUser affected 0 rows (race: another request linked it first),
+      // re-fetch via step 1 query — the winner already linked authUserId.
       logger.info("Linked existing end-user to auth user", {
         endUserId: unlinked.id,
         authUserId: authUser.id,
@@ -105,28 +109,51 @@ export async function resolveOrCreateEndUser(
   const now = new Date();
   const email = authUser.email?.toLowerCase().trim() ?? null;
 
-  const [created] = await db
-    .insert(endUsers)
-    .values({
-      id: endUserId,
-      applicationId,
-      orgId: app.orgId,
-      authUserId: authUser.id,
-      email,
-      name: authUser.name ?? email,
-      externalId: email, // Use email as externalId for OIDC-created end-users
-      status: "active",
-      emailVerified: true, // Inherited from Better Auth user (already verified there)
-      createdAt: now,
-      updatedAt: now,
-    })
-    .returning({
-      id: endUsers.id,
-      applicationId: endUsers.applicationId,
-      email: endUsers.email,
-      name: endUsers.name,
-      role: endUsers.role,
-    });
+  let created: ResolvedEndUser | undefined;
+  try {
+    const [row] = await db
+      .insert(endUsers)
+      .values({
+        id: endUserId,
+        applicationId,
+        orgId: app.orgId,
+        authUserId: authUser.id,
+        email,
+        name: authUser.name ?? email,
+        externalId: email, // Use email as externalId for OIDC-created end-users
+        status: "active",
+        emailVerified: authUser.emailVerified ?? true,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({
+        id: endUsers.id,
+        applicationId: endUsers.applicationId,
+        email: endUsers.email,
+        name: endUsers.name,
+        role: endUsers.role,
+      });
+    created = row;
+  } catch (err: unknown) {
+    // Handle race condition: unique constraint violation on (applicationId, authUserId)
+    const isUniqueViolation =
+      err instanceof Error && "code" in err && (err as { code: string }).code === "23505";
+    if (!isUniqueViolation) throw err;
+
+    // Another concurrent request won the race — re-fetch the linked row
+    const [existing] = await db
+      .select({
+        id: endUsers.id,
+        applicationId: endUsers.applicationId,
+        email: endUsers.email,
+        name: endUsers.name,
+        role: endUsers.role,
+      })
+      .from(endUsers)
+      .where(and(eq(endUsers.authUserId, authUser.id), eq(endUsers.applicationId, applicationId)))
+      .limit(1);
+    return existing!;
+  }
 
   // Create default connection profile
   await db.insert(connectionProfiles).values({

@@ -297,6 +297,7 @@ export async function isEndUserInApp(
   applicationId: string;
   name: string | null;
   email: string | null;
+  role: string;
 } | null> {
   const [row] = await db
     .select({
@@ -304,6 +305,7 @@ export async function isEndUserInApp(
       applicationId: endUsers.applicationId,
       name: endUsers.name,
       email: endUsers.email,
+      role: endUsers.role,
     })
     .from(endUsers)
     .where(and(eq(endUsers.id, endUserId), eq(endUsers.applicationId, applicationId)))
