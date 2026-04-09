@@ -164,15 +164,15 @@ Appstrate uses a formalized module system for optional features. The contract is
 - `packages/core/src/module.ts` — `AppstrateModule` interface, `ModuleInitContext` (framework-agnostic, published on npm)
 - `apps/api/src/lib/modules/module-loader.ts` — Loader with dynamic import, topological sort, agnostic hook system, AppConfig extension, shutdown
 - `apps/api/src/lib/modules/registry.ts` — `getModuleRegistry()` reads `APPSTRATE_MODULES` env var (comma-separated specifiers), `buildModuleInitContext()` provides platform services
-- `apps/api/src/lib/modules/hooks.ts` — Lifecycle hook helpers (`beforeRun`, `afterRun`, `onOrgCreated`, `onOrgDeleted`) — call hooks by name, never by module ID
+- `apps/api/src/lib/modules/hooks.ts` — Lifecycle hook helpers (`beforeRun`, `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`) — call hooks by name, never by module ID
 - `apps/api/src/lib/modules/example-module.ts` — Reference implementation
 
 **Module lifecycle:** registry (`APPSTRATE_MODULES` env var) → dynamic import → topological sort by `manifest.dependencies` → `init(ctx)` → `createRouter()` → running → `shutdown()` (reverse order). All declared modules are required — any import or init failure is fatal.
 
 **Hooks vs Events:**
 
-- **Hooks** (`callHook`, `getHookValue`): First-match-wins. For request/response patterns where one module provides the answer (e.g. `beforeRun` — can reject a run with a structured error).
-- **Events** (`emitEvent`): Broadcast-to-all. For notification patterns where multiple modules should react (e.g. `afterRun`, `onOrgCreated`, `onOrgDeleted`). Errors in individual handlers are isolated — they don't block other modules.
+- **Hooks** (`callHook`): First-match-wins. Naming: `beforeX` (gates), `resolveX` (data resolution). E.g. `beforeRun` can reject a run with a structured error, `resolveModel` resolves the LLM model.
+- **Events** (`emitEvent`): Broadcast-to-all. Naming: `onX` (something happened, modules react). E.g. `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`. Errors in individual handlers are isolated — they don't block other modules.
 
 The platform calls hooks/events by name, never by module ID. This ensures zero knowledge of module internals.
 
@@ -181,7 +181,7 @@ The platform calls hooks/events by name, never by module ID. This ensures zero k
 1. Import types from `@appstrate/core/module`
 2. Export a default `AppstrateModule` from your package
 3. Add the package specifier to the `APPSTRATE_MODULES` env var (comma-separated)
-4. Module contributes feature flags via `extendAppConfig()`, routes via `createRouter()`, auth-bypass paths via `publicPaths`, email template overrides via `emailOverrides`, request/response logic via `hooks` (e.g. `beforeRun`, `beforeSignup`), notifications via `events` (e.g. `afterRun`, `onOrgCreated`, `onOrgDeleted`)
+4. Module contributes feature flags via `extendAppConfig()`, routes via `createRouter()`, auth-bypass paths via `publicPaths`, email template overrides via `emailOverrides`, request/response logic via `hooks` (e.g. `beforeRun`, `beforeSignup`, `resolveModel`), notifications via `events` (e.g. `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`)
 
 **Disabling a module = zero footprint:** remove it from `APPSTRATE_MODULES` = not imported = no tables, no routes, no middleware, no code loaded. Default is empty (OSS mode).
 
@@ -243,7 +243,7 @@ Appstrate exposes a headless API for developers to integrate agents into their o
 - **Applications**: Table `applications` (prefix `app_`). Each org has a default application (`isDefault: true`, unique index). API keys are scoped to an application. Routes: `/api/applications` (CRUD, admin-only).
 - **End-users**: Table `end_users` (prefix `eu_`). External users managed via API, belonging to an application. Not Better Auth users — separate table, no password, no dashboard login. Routes: `/api/end-users` (CRUD, admin-only). Fields: `externalId` (unique per app), `metadata` (JSONB, max 50 keys, 40 char key, 500 char value), `email`, `name`. Each end-user gets a default connection profile on creation.
 - **`Appstrate-User` header**: Impersonation header (pattern: Stripe `Stripe-Account`). Value: `eu_` prefixed ID. API key auth only — rejected with `400` on cookie auth. Validates that the end-user belongs to the API key's application. Sets `c.set("endUser")` in context. Full audit log on each impersonation (requestId, apiKeyId, endUserId, applicationId, IP, userAgent).
-- **Webhooks**: Tables `webhooks` (prefix `wh_`) and `webhookDeliveries`. All webhooks are application-scoped via `applicationId` (`NOT NULL`). Standard Webhooks spec (HMAC-SHA256 signing). BullMQ async delivery with 8-attempt exponential backoff. Event types: `run.started`, `run.completed`, `run.failed`, `run.timeout`, `run.cancelled`. Payload modes: `full` (includes result/input) and `summary`. SSRF protection on webhook URLs. Secret rotation with 24h grace period. Routes: `/api/webhooks` (CRUD + test/ping + rotate + deliveries, admin-only). List supports `?applicationId=` query filter.
+- **Webhooks**: Tables `webhooks` (prefix `wh_`) and `webhookDeliveries`. All webhooks are application-scoped via `applicationId` (`NOT NULL`). Standard Webhooks spec (HMAC-SHA256 signing). BullMQ async delivery with 8-attempt exponential backoff. Event types: `run.started`, `run.success`, `run.failed`, `run.timeout`, `run.cancelled`. Payload modes: `full` (includes result/input) and `summary`. SSRF protection on webhook URLs. Secret rotation with 24h grace period. Routes: `/api/webhooks` (CRUD + test/ping + rotate + deliveries, admin-only). List supports `?applicationId=` query filter.
 - **Application packages**: Table `application_packages` — installed packages per application with config overrides, model/proxy overrides, and version pinning. Replaces the old `package_configs` table. Agent config is now per-application (not per-org).
 - **API versioning**: Date-based (pattern: Stripe). Current: `2026-03-21`. Header `Appstrate-Version` (request override + always in response). Org-level pinning via `settings.apiVersion`. `Sunset` header on deprecated versions. Middleware: `middleware/api-version.ts`.
 - **Idempotency**: Header `Idempotency-Key` on POST routes (end-users, webhooks, agent run). Redis-backed, 24h TTL, SHA-256 body hash for conflict detection. Returns `409` on concurrent, `422` on body mismatch, `Idempotent-Replayed: true` header on cached replay. Middleware: `middleware/idempotency.ts`.

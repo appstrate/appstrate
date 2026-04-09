@@ -174,20 +174,8 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
 
 // --- Resolution ---
 
-export interface ResolvedModel {
-  api: string;
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-  label: string;
-  input?: string[] | null;
-  contextWindow?: number | null;
-  maxTokens?: number | null;
-  reasoning?: boolean | null;
-  cost?: ModelCost | null;
-  /** Whether the model comes from SYSTEM_PROVIDER_KEYS (platform-provided). */
-  isSystemModel: boolean;
-}
+import type { ResolvedModelResult as ResolvedModel } from "@appstrate/core/module";
+export type { ResolvedModel };
 
 function systemDefToResolved(def: ModelDefinition): ResolvedModel {
   return {

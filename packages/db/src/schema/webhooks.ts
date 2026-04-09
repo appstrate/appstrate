@@ -16,7 +16,7 @@ export const webhooks = pgTable(
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
     url: text("url").notNull(),
-    events: text("events").array().notNull(), // ["run.completed", "run.failed"]
+    events: text("events").array().notNull(), // ["run.success", "run.failed"]
     packageId: text("package_id").references(() => packages.id, { onDelete: "set null" }), // null = all packages
     payloadMode: text("payload_mode").notNull().default("full"), // "full" | "summary"
     enabled: boolean("enabled").notNull().default(true),
@@ -41,7 +41,7 @@ export const webhookDeliveries = pgTable(
       .notNull()
       .references(() => webhooks.id, { onDelete: "cascade" }),
     eventId: text("event_id").notNull(), // evt_ prefix
-    eventType: text("event_type").notNull(), // "run.completed" etc.
+    eventType: text("event_type").notNull(), // "run.success" etc.
     status: text("status").notNull().default("pending"), // "pending" | "success" | "failed"
     statusCode: integer("status_code"), // HTTP response code
     latency: integer("latency"), // ms

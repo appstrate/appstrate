@@ -62,6 +62,8 @@ export interface AppstrateModule {
    * Named hooks (first-match-wins).
    * The platform invokes hooks by name — only the first module that provides
    * a given hook is called. For broadcast-to-all semantics, use `events`.
+   *
+   * Naming: `beforeX` (gates), `resolveX` (data resolution).
    */
   hooks?: Partial<ModuleHooks>;
 
@@ -69,6 +71,8 @@ export interface AppstrateModule {
    * Named event handlers (broadcast-to-all).
    * Unlike hooks, events are emitted to ALL modules that listen for them.
    * Errors in individual handlers are isolated — they don't block other modules.
+   *
+   * Naming: `onX` (something happened, modules react).
    */
   events?: Partial<ModuleEvents>;
 
@@ -92,6 +96,10 @@ export interface AppstrateModule {
 
 // ---------------------------------------------------------------------------
 // Hook & event type maps — the typed contract
+//
+// Naming conventions:
+//   Hooks (first-match-wins):  beforeX, resolveX
+//   Events (broadcast-to-all): onX
 // ---------------------------------------------------------------------------
 
 /** Known hooks and their signatures. */
@@ -100,22 +108,26 @@ export interface ModuleHooks {
   beforeRun: (params: BeforeRunParams) => Promise<RunRejection | null>;
   /** Pre-signup gate — throw to reject signup (e.g. domain allowlist). */
   beforeSignup: (email: string) => Promise<void>;
+  /** Resolve which LLM model to use for a run (org-level cascade). */
+  resolveModel: (
+    orgId: string,
+    packageId: string,
+    modelId?: string | null,
+  ) => Promise<ResolvedModelResult | null>;
 }
 
 /** Known events and their signatures. */
 export interface ModuleEvents {
-  /** Post-run notification — broadcast to all modules after a run completes. */
-  afterRun: (params: AfterRunParams) => Promise<void>;
-  /** Run status changed — broadcast for webhook delivery and other side-effects. */
-  "run:statusChanged": (params: RunStatusChangedParams) => Promise<void>;
+  /** Run status changed — broadcast on every run lifecycle transition. */
+  onRunStatusChange: (params: RunStatusChangeParams) => Promise<void>;
   /** Org created — broadcast after a new organization is created. */
-  onOrgCreated: (orgId: string, userEmail: string) => Promise<void>;
+  onOrgCreate: (orgId: string, userEmail: string) => Promise<void>;
   /** Org deleted — broadcast before an organization is deleted. */
-  onOrgDeleted: (orgId: string) => Promise<void>;
+  onOrgDelete: (orgId: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
-// Lifecycle hook types — shared between platform and modules
+// Lifecycle types — shared between platform and modules
 // ---------------------------------------------------------------------------
 
 /** Parameters passed to the `beforeRun` hook. */
@@ -133,26 +145,36 @@ export interface RunRejection {
   status?: number;
 }
 
-/** Parameters passed to the `run:statusChanged` event. */
-export interface RunStatusChangedParams {
-  orgId: string;
-  applicationId: string;
-  status: string;
-  runId: string;
-  packageId: string;
-  extra?: Record<string, unknown>;
+/** Result returned by the `resolveModel` hook. */
+export interface ResolvedModelResult {
+  api: string;
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+  label: string;
+  input?: string[] | null;
+  contextWindow?: number | null;
+  maxTokens?: number | null;
+  reasoning?: boolean | null;
+  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
+  isSystemModel: boolean;
 }
 
-/** Parameters passed to the `afterRun` event. */
-export interface AfterRunParams {
+/** Parameters passed to the `onRunStatusChange` event. */
+export interface RunStatusChangeParams {
   orgId: string;
   runId: string;
   agentId: string;
   applicationId: string;
-  status: "success" | "failed" | "timeout";
-  cost: number;
-  duration: number;
-  modelSource: string | null;
+  status: "started" | "success" | "failed" | "timeout" | "cancelled";
+  /** Cost in dollars (only on terminal status). */
+  cost?: number;
+  /** Duration in ms (only on terminal status). */
+  duration?: number;
+  /** Model source: "system" or "org" (only on terminal status). */
+  modelSource?: string | null;
+  /** Additional data for webhook payloads (result, error, etc.). */
+  extra?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------

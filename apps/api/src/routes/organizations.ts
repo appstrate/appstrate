@@ -33,7 +33,7 @@ import {
 import { getAppConfig } from "../lib/app-config.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { createDefaultApplication } from "../services/applications.ts";
-import { onOrgCreated, onOrgDeleted } from "../lib/modules/hooks.ts";
+import { onOrgCreate, onOrgDelete } from "../lib/modules/hooks.ts";
 import { logger } from "../lib/logger.ts";
 
 export const createOrgSchema = z.object({
@@ -114,7 +114,7 @@ router.post("/", async (c) => {
   const org = await createOrganization(data.name.trim(), slug, user.id);
 
   // Notify modules of org creation (non-fatal — errors isolated per module)
-  await onOrgCreated(org.id, user.email);
+  await onOrgCreate(org.id, user.email);
 
   // Create default application for the new org (non-fatal)
   const defaultApp = await createDefaultApplication(org.id, user.id).catch((err) => {
@@ -224,7 +224,7 @@ router.delete("/:orgId", async (c) => {
 
   try {
     // Notify modules of org deletion (non-fatal — errors isolated per module, FK CASCADE handles cleanup)
-    await onOrgDeleted(orgId);
+    await onOrgDelete(orgId);
 
     await deleteOrganization(orgId);
   } catch (err) {

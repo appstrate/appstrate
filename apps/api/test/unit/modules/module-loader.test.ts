@@ -417,11 +417,11 @@ describe("module-loader", () => {
     it("calls ALL modules that provide the event handler", async () => {
       const handlerA = mock(async () => {});
       const handlerB = mock(async () => {});
-      const a = mockModule("a", { events: { onOrgCreated: handlerA } });
-      const b = mockModule("b", { events: { onOrgCreated: handlerB } });
+      const a = mockModule("a", { events: { onOrgCreate: handlerA } });
+      const b = mockModule("b", { events: { onOrgCreate: handlerB } });
       await loadModulesFromInstances([a, b], mockCtx());
 
-      await emitEvent("onOrgCreated", "org1", "user@test.com");
+      await emitEvent("onOrgCreate", "org1", "user@test.com");
       expect(handlerA).toHaveBeenCalledTimes(1);
       expect(handlerA).toHaveBeenCalledWith("org1", "user@test.com");
       expect(handlerB).toHaveBeenCalledTimes(1);
@@ -430,7 +430,7 @@ describe("module-loader", () => {
 
     it("is no-op when no module provides the event", async () => {
       await loadModulesFromInstances([], mockCtx());
-      await expect(emitEvent("onOrgCreated", "org1", "u@t.com")).resolves.toBeUndefined();
+      await expect(emitEvent("onOrgCreate", "org1", "u@t.com")).resolves.toBeUndefined();
     });
 
     it("continues to other modules if one handler throws", async () => {
@@ -438,12 +438,12 @@ describe("module-loader", () => {
         throw new Error("handler A failed");
       });
       const handlerB = mock(async () => {});
-      const a = mockModule("a", { events: { onOrgDeleted: handlerA } });
-      const b = mockModule("b", { events: { onOrgDeleted: handlerB } });
+      const a = mockModule("a", { events: { onOrgDelete: handlerA } });
+      const b = mockModule("b", { events: { onOrgDelete: handlerB } });
       await loadModulesFromInstances([a, b], mockCtx());
 
       // Should not throw
-      await emitEvent("onOrgDeleted", "org1");
+      await emitEvent("onOrgDelete", "org1");
       expect(handlerA).toHaveBeenCalledTimes(1);
       expect(handlerB).toHaveBeenCalledTimes(1);
     });
@@ -451,11 +451,11 @@ describe("module-loader", () => {
     it("handles mix of modules with and without the event", async () => {
       const handler = mock(async () => {});
       const a = mockModule("a"); // no events
-      const b = mockModule("b", { events: { onOrgDeleted: handler } });
+      const b = mockModule("b", { events: { onOrgDelete: handler } });
       const c = mockModule("c"); // no events
       await loadModulesFromInstances([a, b, c], mockCtx());
 
-      await emitEvent("onOrgDeleted", "org1");
+      await emitEvent("onOrgDelete", "org1");
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith("org1");
     });

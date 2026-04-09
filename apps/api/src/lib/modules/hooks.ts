@@ -7,16 +7,16 @@
  * The platform never knows what a module does inside a hook — it just provides
  * the extension point. If no module provides a hook, it's a no-op.
  *
- * Naming convention:
- * - beforeX / afterX → lifecycle hooks on platform operations
- * - onX              → lifecycle events (broadcast-to-all)
+ * Naming conventions:
+ *   Hooks (first-match-wins):  beforeX, resolveX
+ *   Events (broadcast-to-all): onX
  */
 
 import { callHook, emitEvent } from "./module-loader.ts";
-import type { BeforeRunParams, RunRejection, AfterRunParams } from "@appstrate/core/module";
+import type { BeforeRunParams, RunRejection, RunStatusChangeParams } from "@appstrate/core/module";
 
 // Re-export for consumers that import from hooks.ts
-export type { BeforeRunParams, RunRejection, AfterRunParams };
+export type { BeforeRunParams, RunRejection, RunStatusChangeParams };
 
 // ---------------------------------------------------------------------------
 // Signup lifecycle
@@ -44,12 +44,12 @@ export async function beforeRun(params: BeforeRunParams): Promise<RunRejection |
 }
 
 /**
- * Post-run event — notifies all modules that a run has completed.
- * Modules decide internally what to do (record usage, analytics, audit, etc.).
+ * Run status change event — broadcast on every run lifecycle transition.
+ * Modules decide internally what to do (webhooks, usage recording, analytics, etc.).
  * Broadcast-to-all: errors in individual handlers are isolated.
  */
-export async function afterRun(params: AfterRunParams): Promise<void> {
-  await emitEvent("afterRun", params);
+export async function onRunStatusChange(params: RunStatusChangeParams): Promise<void> {
+  await emitEvent("onRunStatusChange", params);
 }
 
 // ---------------------------------------------------------------------------
@@ -57,11 +57,11 @@ export async function afterRun(params: AfterRunParams): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /** Notify ALL modules of org creation. Uses event broadcasting. */
-export async function onOrgCreated(orgId: string, userEmail: string): Promise<void> {
-  await emitEvent("onOrgCreated", orgId, userEmail);
+export async function onOrgCreate(orgId: string, userEmail: string): Promise<void> {
+  await emitEvent("onOrgCreate", orgId, userEmail);
 }
 
 /** Notify ALL modules of org deletion. Uses event broadcasting. */
-export async function onOrgDeleted(orgId: string): Promise<void> {
-  await emitEvent("onOrgDeleted", orgId);
+export async function onOrgDelete(orgId: string): Promise<void> {
+  await emitEvent("onOrgDelete", orgId);
 }

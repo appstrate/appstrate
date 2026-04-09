@@ -181,7 +181,7 @@ export async function seedWebhook(
     .values({
       id: `wh_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
       url: "https://example.com/webhook",
-      events: ["run.completed"],
+      events: ["run.success"],
       secret: crypto.randomUUID(),
       ...overrides,
     } as InferInsertModel<typeof webhooks>)

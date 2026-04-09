@@ -478,7 +478,7 @@ describe("OpenAPI response validation", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           url: "https://example.com/hook",
-          events: ["run.completed"],
+          events: ["run.success"],
         }),
       });
       expect(res.status).toBe(201);

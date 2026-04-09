@@ -223,7 +223,7 @@ describe("400 — validation errors", () => {
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({
         url: "not-a-valid-url",
-        events: ["run.completed"],
+        events: ["run.success"],
       }),
     });
     expect(res.status).toBe(400);

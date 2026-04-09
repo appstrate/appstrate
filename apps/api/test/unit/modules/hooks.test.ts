@@ -5,9 +5,9 @@ import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules
 import {
   beforeSignup,
   beforeRun,
-  afterRun,
-  onOrgCreated,
-  onOrgDeleted,
+  onRunStatusChange,
+  onOrgCreate,
+  onOrgDelete,
 } from "../../../src/lib/modules/hooks.ts";
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
 
@@ -118,13 +118,13 @@ describe("module hooks (lifecycle)", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // afterRun — event (broadcast-to-all)
+  // onRunStatusChange — event (broadcast-to-all)
   // ---------------------------------------------------------------------------
 
-  it("afterRun is no-op when no module provides the event", async () => {
+  it("onRunStatusChange is no-op when no module provides the event", async () => {
     await loadModulesFromInstances([], mockCtx());
     await expect(
-      afterRun({
+      onRunStatusChange({
         orgId: "org1",
         runId: "run1",
         agentId: "agent1",
@@ -137,19 +137,19 @@ describe("module hooks (lifecycle)", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("afterRun broadcasts to ALL modules", async () => {
+  it("onRunStatusChange broadcasts to ALL modules", async () => {
     const handlerA = mock(async () => {});
     const handlerB = mock(async () => {});
 
     const modA: AppstrateModule = {
       manifest: { id: "billing", name: "Billing", version: "1.0.0" },
       async init() {},
-      events: { afterRun: handlerA },
+      events: { onRunStatusChange: handlerA },
     };
     const modB: AppstrateModule = {
-      manifest: { id: "analytics", name: "Analytics", version: "1.0.0" },
+      manifest: { id: "webhooks", name: "Webhooks", version: "1.0.0" },
       async init() {},
-      events: { afterRun: handlerB },
+      events: { onRunStatusChange: handlerB },
     };
 
     await loadModulesFromInstances([modA, modB], mockCtx());
@@ -164,7 +164,7 @@ describe("module hooks (lifecycle)", () => {
       duration: 5000,
       modelSource: "openai",
     };
-    await afterRun(params);
+    await onRunStatusChange(params);
 
     expect(handlerA).toHaveBeenCalledTimes(1);
     expect(handlerA).toHaveBeenCalledWith(params);
@@ -172,7 +172,7 @@ describe("module hooks (lifecycle)", () => {
     expect(handlerB).toHaveBeenCalledWith(params);
   });
 
-  it("afterRun isolates errors — one failing handler does not block others", async () => {
+  it("onRunStatusChange isolates errors — one failing handler does not block others", async () => {
     const handlerA = mock(async () => {
       throw new Error("usage recording failed");
     });
@@ -181,18 +181,18 @@ describe("module hooks (lifecycle)", () => {
     const modA: AppstrateModule = {
       manifest: { id: "billing", name: "Billing", version: "1.0.0" },
       async init() {},
-      events: { afterRun: handlerA },
+      events: { onRunStatusChange: handlerA },
     };
     const modB: AppstrateModule = {
-      manifest: { id: "analytics", name: "Analytics", version: "1.0.0" },
+      manifest: { id: "webhooks", name: "Webhooks", version: "1.0.0" },
       async init() {},
-      events: { afterRun: handlerB },
+      events: { onRunStatusChange: handlerB },
     };
 
     await loadModulesFromInstances([modA, modB], mockCtx());
 
     // Should not throw
-    await afterRun({
+    await onRunStatusChange({
       orgId: "org1",
       runId: "run1",
       agentId: "agent1",
@@ -211,57 +211,57 @@ describe("module hooks (lifecycle)", () => {
   // Org lifecycle events
   // ---------------------------------------------------------------------------
 
-  it("onOrgCreated is no-op when no module provides the event", async () => {
+  it("onOrgCreate is no-op when no module provides the event", async () => {
     await loadModulesFromInstances([], mockCtx());
-    await expect(onOrgCreated("org1", "user@test.com")).resolves.toBeUndefined();
+    await expect(onOrgCreate("org1", "user@test.com")).resolves.toBeUndefined();
   });
 
-  it("onOrgDeleted is no-op when no module provides the event", async () => {
+  it("onOrgDelete is no-op when no module provides the event", async () => {
     await loadModulesFromInstances([], mockCtx());
-    await expect(onOrgDeleted("org1")).resolves.toBeUndefined();
+    await expect(onOrgDelete("org1")).resolves.toBeUndefined();
   });
 
-  it("onOrgCreated broadcasts to ALL modules (event semantics)", async () => {
+  it("onOrgCreate broadcasts to ALL modules (event semantics)", async () => {
     const handlerA = mock(async () => {});
     const handlerB = mock(async () => {});
 
     const modA: AppstrateModule = {
       manifest: { id: "billing", name: "Billing", version: "1.0.0" },
       async init() {},
-      events: { onOrgCreated: handlerA },
+      events: { onOrgCreate: handlerA },
     };
     const modB: AppstrateModule = {
       manifest: { id: "analytics", name: "Analytics", version: "1.0.0" },
       async init() {},
-      events: { onOrgCreated: handlerB },
+      events: { onOrgCreate: handlerB },
     };
 
     await loadModulesFromInstances([modA, modB], mockCtx());
 
-    await onOrgCreated("org1", "admin@test.com");
+    await onOrgCreate("org1", "admin@test.com");
     expect(handlerA).toHaveBeenCalledTimes(1);
     expect(handlerB).toHaveBeenCalledTimes(1);
   });
 
   it("delegates org events to module handlers with correct args", async () => {
-    const mockOnOrgCreated = mock(async () => {});
-    const mockOnOrgDeleted = mock(async () => {});
+    const mockOnOrgCreate = mock(async () => {});
+    const mockOnOrgDelete = mock(async () => {});
 
     const mod: AppstrateModule = {
       manifest: { id: "billing", name: "Billing", version: "1.0.0" },
       async init() {},
       events: {
-        onOrgCreated: mockOnOrgCreated,
-        onOrgDeleted: mockOnOrgDeleted,
+        onOrgCreate: mockOnOrgCreate,
+        onOrgDelete: mockOnOrgDelete,
       },
     };
 
     await loadModulesFromInstances([mod], mockCtx());
 
-    await onOrgCreated("org1", "admin@test.com");
-    expect(mockOnOrgCreated).toHaveBeenCalledWith("org1", "admin@test.com");
+    await onOrgCreate("org1", "admin@test.com");
+    expect(mockOnOrgCreate).toHaveBeenCalledWith("org1", "admin@test.com");
 
-    await onOrgDeleted("org2");
-    expect(mockOnOrgDeleted).toHaveBeenCalledWith("org2");
+    await onOrgDelete("org2");
+    expect(mockOnOrgDelete).toHaveBeenCalledWith("org2");
   });
 });

@@ -31,8 +31,7 @@ import { ApiError, notFound, conflict } from "../lib/errors.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
-import { afterRun } from "../lib/modules/hooks.ts";
-import { emitEvent } from "../lib/modules/module-loader.ts";
+import { onRunStatusChange } from "../lib/modules/hooks.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
@@ -65,12 +64,12 @@ export async function executeAgentInBackground(
   try {
     // Update status to running
     await updateRun(runId, orgId, applicationId, { status: "running" });
-    emitEvent("run:statusChanged", {
+    onRunStatusChange({
       orgId,
+      runId,
+      agentId: agent.id,
       applicationId,
       status: "started",
-      runId,
-      packageId: agent.id,
     });
 
     // Execute via adapter
@@ -184,15 +183,7 @@ export async function executeAgentInBackground(
           },
           "error",
         );
-        emitEvent("run:statusChanged", {
-          orgId,
-          applicationId,
-          status: "timeout",
-          runId,
-          packageId: agent.id,
-          extra: { duration },
-        });
-        afterRun({
+        onRunStatusChange({
           orgId,
           runId,
           agentId: agent.id,
@@ -239,15 +230,7 @@ export async function executeAgentInBackground(
         { runId, status: "failed", error },
         "error",
       );
-      emitEvent("run:statusChanged", {
-        orgId,
-        applicationId,
-        status: "failed",
-        runId,
-        packageId: agent.id,
-        extra: { error, duration },
-      });
-      afterRun({
+      onRunStatusChange({
         orgId,
         runId,
         agentId: agent.id,
@@ -256,6 +239,7 @@ export async function executeAgentInBackground(
         cost: accumulatedCost,
         duration,
         modelSource: modelSource ?? null,
+        extra: { error },
       });
     } else {
       // --- Success path (with or without structured output) ---
@@ -321,15 +305,7 @@ export async function executeAgentInBackground(
         { runId, status: "success" },
         "info",
       );
-      emitEvent("run:statusChanged", {
-        orgId,
-        applicationId,
-        status: "completed",
-        runId,
-        packageId: agent.id,
-        extra: { result, duration },
-      });
-      afterRun({
+      onRunStatusChange({
         orgId,
         runId,
         agentId: agent.id,
@@ -338,6 +314,7 @@ export async function executeAgentInBackground(
         cost: accumulatedCost,
         duration,
         modelSource: modelSource ?? null,
+        extra: { result },
       });
     }
   } catch (err) {
@@ -366,15 +343,7 @@ export async function executeAgentInBackground(
       },
       "error",
     );
-    emitEvent("run:statusChanged", {
-      orgId,
-      applicationId,
-      status: "failed",
-      runId,
-      packageId: agent.id,
-      extra: { error: errorMessage, duration },
-    });
-    afterRun({
+    onRunStatusChange({
       orgId,
       runId,
       agentId: agent.id,
@@ -383,6 +352,7 @@ export async function executeAgentInBackground(
       cost: accumulatedCost,
       duration,
       modelSource: modelSource ?? null,
+      extra: { error: errorMessage },
     });
   } finally {
     untrackRun(runId);
@@ -646,12 +616,12 @@ export function createRunsRouter() {
       .stopByRunId(runId)
       .catch(() => {});
 
-    emitEvent("run:statusChanged", {
+    onRunStatusChange({
       orgId,
+      runId,
+      agentId: run.packageId,
       applicationId: c.get("applicationId"),
       status: "cancelled",
-      runId,
-      packageId: run.packageId,
     });
 
     return c.json({ ok: true });

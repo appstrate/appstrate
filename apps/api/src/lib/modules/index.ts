@@ -21,10 +21,11 @@ export {
 export {
   beforeSignup,
   beforeRun,
-  afterRun,
-  onOrgCreated,
-  onOrgDeleted,
+  onRunStatusChange,
+  onOrgCreate,
+  onOrgDelete,
   type RunRejection,
+  type RunStatusChangeParams,
 } from "./hooks.ts";
 
 // Registry

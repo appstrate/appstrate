@@ -18,7 +18,7 @@ describe("Webhooks API", () => {
   function webhookPayload(overrides?: Record<string, unknown>) {
     return {
       url: "https://example.com/webhook",
-      events: ["run.completed"],
+      events: ["run.success"],
       ...overrides,
     };
   }
@@ -45,7 +45,7 @@ describe("Webhooks API", () => {
       const body = (await res.json()) as any;
       expect(body.id).toBeDefined();
       expect(body.url).toBe("https://example.com/webhook");
-      expect(body.events).toContain("run.completed");
+      expect(body.events).toContain("run.success");
     });
 
     it("returns secret only at creation", async () => {

@@ -25,7 +25,7 @@ import { prefixedId } from "../../lib/ids.ts";
 
 export const webhookEventSchema = z.enum([
   "run.started",
-  "run.completed",
+  "run.success",
   "run.failed",
   "run.timeout",
   "run.cancelled",

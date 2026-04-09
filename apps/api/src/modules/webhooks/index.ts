@@ -4,12 +4,12 @@
  * Webhooks module — Standard Webhooks event delivery for agent runs.
  *
  * When loaded, registers webhook CRUD routes and a BullMQ delivery worker.
- * Listens to "run:statusChanged" events emitted by the core run pipeline
+ * Listens to `onRunStatusChange` events emitted by the core run pipeline
  * and dispatches matching webhooks to subscribers.
  */
 
 import type { Hono } from "hono";
-import type { AppstrateModule, RunStatusChangedParams } from "@appstrate/core/module";
+import type { AppstrateModule, RunStatusChangeParams } from "@appstrate/core/module";
 import type { AppEnv } from "../../types/index.ts";
 import { createWebhooksRouter } from "./routes.ts";
 import { initWebhookWorker, shutdownWebhookWorker, dispatchRunWebhook } from "./service.ts";
@@ -36,14 +36,17 @@ const webhooksModule: AppstrateModule = {
   },
 
   events: {
-    "run:statusChanged": async (payload: RunStatusChangedParams) => {
+    onRunStatusChange: async (params: RunStatusChangeParams) => {
       dispatchRunWebhook(
-        payload.orgId,
-        payload.applicationId,
-        payload.status,
-        payload.runId,
-        payload.packageId,
-        payload.extra,
+        params.orgId,
+        params.applicationId,
+        params.status,
+        params.runId,
+        params.agentId,
+        {
+          ...params.extra,
+          ...(params.duration != null ? { duration: params.duration } : {}),
+        },
       );
     },
   },

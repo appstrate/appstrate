@@ -179,19 +179,8 @@ export function isSystemProviderKey(keyId: string): boolean {
  * Used as fallback when the provider-management module is not loaded.
  * Returns the specified model or the system default, or null.
  */
-export interface SystemResolvedModel {
-  api: string;
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-  label: string;
-  input?: string[] | null;
-  contextWindow?: number | null;
-  maxTokens?: number | null;
-  reasoning?: boolean | null;
-  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
-  isSystemModel: boolean;
-}
+import type { ResolvedModelResult as SystemResolvedModel } from "@appstrate/core/module";
+export type { SystemResolvedModel };
 
 export function resolveSystemModel(modelId?: string | null): SystemResolvedModel | null {
   const models = getSystemModels();
