@@ -113,13 +113,8 @@ router.post("/", async (c) => {
 
   const org = await createOrganization(data.name.trim(), slug, user.id);
 
-  // Cloud billing: create billing account with free tier credits (non-fatal)
-  await onOrgCreated(org.id, user.email).catch((err) => {
-    logger.error("Failed to create billing account for new org", {
-      orgId: org.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  });
+  // Notify modules of org creation (non-fatal — errors isolated per module)
+  await onOrgCreated(org.id, user.email);
 
   // Create default application for the new org (non-fatal)
   const defaultApp = await createDefaultApplication(org.id, user.id).catch((err) => {
@@ -228,13 +223,8 @@ router.delete("/:orgId", async (c) => {
   await requireOrgRole(orgId, user.id, ["owner"], "Only the owner can delete the organization");
 
   try {
-    // Cloud billing: clean up billing account before org deletion (non-fatal — FK CASCADE handles cleanup)
-    await onOrgDeleted(orgId).catch((err) => {
-      logger.warn("Failed to clean up billing account before org deletion", {
-        orgId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    // Notify modules of org deletion (non-fatal — errors isolated per module, FK CASCADE handles cleanup)
+    await onOrgDeleted(orgId);
 
     await deleteOrganization(orgId);
   } catch (err) {

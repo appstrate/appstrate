@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AppConfig } from "@appstrate/shared-types";
-import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
+import type {
+  AppstrateModule,
+  ModuleInitContext,
+  ModuleHooks,
+  ModuleEvents,
+} from "@appstrate/core/module";
 import { logger } from "../logger.ts";
 
 // ---------------------------------------------------------------------------
@@ -148,36 +153,32 @@ export function applyModuleAppConfig(base: AppConfig): AppConfig {
  * This is fully agnostic — the platform never knows which module
  * provides which hook.
  */
+// Internal type: hooks/events objects cast to indexable records for dynamic dispatch.
+// The public types (ModuleHooks/ModuleEvents) are strict — this cast is only used
+// inside the loader where dispatch is inherently dynamic (by hook/event name).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function callHook<T = unknown>(name: string, ...args: any[]): Promise<T | undefined> {
+type AnyHandler = (...args: any[]) => any;
+
+/** Unwrap the Promise return type of a hook. */
+type HookResult<K extends keyof ModuleHooks> = Awaited<ReturnType<ModuleHooks[K]>>;
+
+export async function callHook<K extends keyof ModuleHooks>(
+  name: K,
+  ...args: Parameters<ModuleHooks[K]>
+): Promise<HookResult<K> | undefined> {
   for (const mod of _modules.values()) {
-    const hook = mod.hooks?.[name];
+    const hook = (mod.hooks as Record<string, AnyHandler> | undefined)?.[name];
     if (hook) {
-      return (await hook(...args)) as T;
+      return (await hook(...args)) as HookResult<K>;
     }
   }
   return undefined;
 }
 
-/**
- * Get a value from a named hook synchronously (e.g. error constructors).
- * Returns the result from the first module that provides the hook, or null.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getHookValue<T = unknown>(name: string, ...args: any[]): T | null {
-  for (const mod of _modules.values()) {
-    const hook = mod.hooks?.[name];
-    if (hook) {
-      return hook(...args) as T;
-    }
-  }
-  return null;
-}
-
 /** Check if any loaded module provides a given hook. */
-export function hasHook(name: string): boolean {
+export function hasHook(name: keyof ModuleHooks): boolean {
   for (const mod of _modules.values()) {
-    if (mod.hooks?.[name]) return true;
+    if ((mod.hooks as Record<string, AnyHandler> | undefined)?.[name]) return true;
   }
   return false;
 }
@@ -191,10 +192,12 @@ export function hasHook(name: string): boolean {
  * Unlike callHook (first-match-wins), this calls every module's handler.
  * Errors in individual handlers are logged but don't block other modules.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function emitEvent(name: string, ...args: any[]): Promise<void> {
+export async function emitEvent<K extends keyof ModuleEvents>(
+  name: K,
+  ...args: Parameters<ModuleEvents[K]>
+): Promise<void> {
   for (const mod of _modules.values()) {
-    const handler = mod.events?.[name];
+    const handler = (mod.events as Record<string, AnyHandler> | undefined)?.[name];
     if (handler) {
       try {
         await handler(...args);

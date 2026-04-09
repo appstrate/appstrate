@@ -66,8 +66,6 @@ await loadModulesFromInstances([], {
   isEmbeddedDb: true,
   getSendMail: async () => () => {},
   getOrgAdminEmails: async () => [],
-  registerEmailOverrides: () => {},
-  setBeforeSignupHook: () => {},
 }).catch(() => {}); // no modules in test (OSS mode)
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
 initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)

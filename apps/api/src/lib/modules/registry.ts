@@ -10,8 +10,6 @@
  */
 
 import { isEmbeddedDb } from "@appstrate/db/client";
-import { registerEmailOverrides } from "@appstrate/emails";
-import { setBeforeSignupHook } from "@appstrate/db/auth";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
@@ -56,8 +54,6 @@ export function buildModuleInitContext(): ModuleInitContext {
       return sendMail;
     },
     getOrgAdminEmails,
-    registerEmailOverrides,
-    setBeforeSignupHook,
   };
 }
 

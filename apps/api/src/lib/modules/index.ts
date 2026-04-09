@@ -10,12 +10,21 @@ export {
   registerModuleRoutes,
   applyModuleAppConfig,
   callHook,
-  getHookValue,
   hasHook,
   emitEvent,
   shutdownModules,
   resetModules,
 } from "./module-loader.ts";
+
+// Hooks
+export {
+  beforeSignup,
+  beforeRun,
+  afterRun,
+  onOrgCreated,
+  onOrgDeleted,
+  type RunRejection,
+} from "./hooks.ts";
 
 // Registry
 export { getModuleRegistry, buildModuleInitContext } from "./registry.ts";

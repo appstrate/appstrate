@@ -57,26 +57,81 @@ export interface AppstrateModule {
   extendAppConfig?(base: Record<string, unknown>): Record<string, unknown>;
 
   /**
-   * Named hooks that the platform invokes at runtime (first-match-wins).
-   * Modules register handlers; the platform calls them agnostically.
-   * Only the first module providing a given hook is called.
-   * For broadcast-to-all semantics, use `events` instead.
+   * Named hooks (first-match-wins).
+   * The platform invokes hooks by name — only the first module that provides
+   * a given hook is called. For broadcast-to-all semantics, use `events`.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  hooks?: Record<string, (...args: any[]) => any>;
+  hooks?: Partial<ModuleHooks>;
 
   /**
    * Named event handlers (broadcast-to-all).
-   * Unlike hooks (first-match-wins), events are emitted to ALL modules
-   * that listen for them. Used for cross-cutting concerns where multiple
-   * modules should react (e.g. org:created → billing + analytics + audit).
-   * Errors in individual handlers don't block other modules.
+   * Unlike hooks, events are emitted to ALL modules that listen for them.
+   * Errors in individual handlers are isolated — they don't block other modules.
+   */
+  events?: Partial<ModuleEvents>;
+
+  /**
+   * Email template overrides (e.g. branded versions for Cloud).
+   * Collected after init and merged into the email registry.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  events?: Record<string, (...args: any[]) => Promise<void>>;
+  emailOverrides?: Record<string, any>;
 
   /** Called during graceful shutdown (reverse init order). */
   shutdown?(): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Hook & event type maps — the typed contract
+// ---------------------------------------------------------------------------
+
+/** Known hooks and their signatures. */
+export interface ModuleHooks {
+  /** Pre-run gate — return a rejection to block the run, or null/undefined to allow. */
+  beforeRun: (params: BeforeRunParams) => Promise<RunRejection | null>;
+  /** Pre-signup gate — throw to reject signup (e.g. domain allowlist). */
+  beforeSignup: (email: string) => Promise<void>;
+}
+
+/** Known events and their signatures. */
+export interface ModuleEvents {
+  /** Post-run notification — broadcast to all modules after a run completes. */
+  afterRun: (params: AfterRunParams) => Promise<void>;
+  /** Org created — broadcast after a new organization is created. */
+  onOrgCreated: (orgId: string, userEmail: string) => Promise<void>;
+  /** Org deleted — broadcast before an organization is deleted. */
+  onOrgDeleted: (orgId: string) => Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle hook types — shared between platform and modules
+// ---------------------------------------------------------------------------
+
+/** Parameters passed to the `beforeRun` hook. */
+export interface BeforeRunParams {
+  orgId: string;
+  agentId: string;
+  runningCount: number;
+}
+
+/** Structured rejection returned by `beforeRun` when a module blocks a run. */
+export interface RunRejection {
+  code: string;
+  message: string;
+  /** HTTP status hint (e.g. 402 for payment required, 429 for rate limit). Defaults to 403. */
+  status?: number;
+}
+
+/** Parameters passed to the `afterRun` event. */
+export interface AfterRunParams {
+  orgId: string;
+  runId: string;
+  agentId: string;
+  applicationId: string;
+  status: "success" | "failed" | "timeout";
+  cost: number;
+  duration: number;
+  modelSource: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,9 +151,4 @@ export interface ModuleInitContext {
   getSendMail: () => Promise<(to: string, subject: string, html: string) => void>;
   /** Query helper: get org admin emails. */
   getOrgAdminEmails: (orgId: string) => Promise<string[]>;
-  /** Register email template overrides. */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registerEmailOverrides: (overrides: Record<string, any>) => void;
-  /** Register a before-signup hook. */
-  setBeforeSignupHook: (hook: (email: string) => void) => void;
 }

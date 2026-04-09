@@ -9,7 +9,6 @@ import {
   registerModuleRoutes,
   applyModuleAppConfig,
   callHook,
-  getHookValue,
   hasHook,
   emitEvent,
   shutdownModules,
@@ -38,8 +37,6 @@ function mockCtx(): ModuleInitContext {
     isEmbeddedDb: true,
     getSendMail: async () => () => {},
     getOrgAdminEmails: async () => [],
-    registerEmailOverrides: () => {},
-    setBeforeSignupHook: () => {},
   };
 }
 
@@ -380,70 +377,56 @@ describe("module-loader", () => {
     });
   });
 
-  describe("agnostic hooks", () => {
+  describe("hooks (first-match-wins)", () => {
     it("callHook returns undefined when no module provides the hook", async () => {
       await loadModulesFromInstances([], mockCtx());
-      const result = await callHook("nonexistent");
+      const result = await callHook("beforeRun", { orgId: "o", agentId: "a", runningCount: 0 });
       expect(result).toBeUndefined();
     });
 
     it("callHook delegates to the first module providing the hook", async () => {
-      const mod = mockModule("hooked", {
+      const mod = mockModule("gate", {
         hooks: {
-          myHook: async (x: number) => x * 2,
+          beforeRun: async () => ({ code: "blocked", message: "no" }),
         },
       });
       await loadModulesFromInstances([mod], mockCtx());
-      const result = await callHook<number>("myHook", 5);
-      expect(result).toBe(10);
-    });
-
-    it("getHookValue returns null when no module provides the hook", async () => {
-      await loadModulesFromInstances([], mockCtx());
-      expect(getHookValue("missing")).toBeNull();
-    });
-
-    it("getHookValue returns value from the first module", async () => {
-      class MyError extends Error {}
-      const mod = mockModule("errors", {
-        hooks: { getErrorClass: () => MyError },
-      });
-      await loadModulesFromInstances([mod], mockCtx());
-      expect(getHookValue<typeof MyError>("getErrorClass")).toBe(MyError);
+      const result = await callHook("beforeRun", { orgId: "o", agentId: "a", runningCount: 0 });
+      expect(result).toEqual({ code: "blocked", message: "no" });
     });
 
     it("hasHook returns false when no module provides the hook", async () => {
       await loadModulesFromInstances([], mockCtx());
-      expect(hasHook("missing")).toBe(false);
+      expect(hasHook("beforeRun")).toBe(false);
     });
 
     it("hasHook returns true when a module provides the hook", async () => {
-      const mod = mockModule("provider", {
-        hooks: { myHook: () => {} },
+      const mod = mockModule("gate", {
+        hooks: { beforeRun: async () => null },
       });
       await loadModulesFromInstances([mod], mockCtx());
-      expect(hasHook("myHook")).toBe(true);
+      expect(hasHook("beforeRun")).toBe(true);
     });
   });
 
-  describe("emitEvent", () => {
+  describe("emitEvent (broadcast)", () => {
     it("calls ALL modules that provide the event handler", async () => {
       const handlerA = mock(async () => {});
       const handlerB = mock(async () => {});
-      const a = mockModule("a", { events: { onTest: handlerA } });
-      const b = mockModule("b", { events: { onTest: handlerB } });
+      const a = mockModule("a", { events: { onOrgCreated: handlerA } });
+      const b = mockModule("b", { events: { onOrgCreated: handlerB } });
       await loadModulesFromInstances([a, b], mockCtx());
 
-      await emitEvent("onTest", "arg1", "arg2");
+      await emitEvent("onOrgCreated", "org1", "user@test.com");
       expect(handlerA).toHaveBeenCalledTimes(1);
-      expect(handlerA).toHaveBeenCalledWith("arg1", "arg2");
+      expect(handlerA).toHaveBeenCalledWith("org1", "user@test.com");
       expect(handlerB).toHaveBeenCalledTimes(1);
-      expect(handlerB).toHaveBeenCalledWith("arg1", "arg2");
+      expect(handlerB).toHaveBeenCalledWith("org1", "user@test.com");
     });
 
     it("is no-op when no module provides the event", async () => {
       await loadModulesFromInstances([], mockCtx());
-      await expect(emitEvent("nonexistent")).resolves.toBeUndefined();
+      await expect(emitEvent("onOrgCreated", "org1", "u@t.com")).resolves.toBeUndefined();
     });
 
     it("continues to other modules if one handler throws", async () => {
@@ -451,12 +434,12 @@ describe("module-loader", () => {
         throw new Error("handler A failed");
       });
       const handlerB = mock(async () => {});
-      const a = mockModule("a", { events: { onTest: handlerA } });
-      const b = mockModule("b", { events: { onTest: handlerB } });
+      const a = mockModule("a", { events: { onOrgDeleted: handlerA } });
+      const b = mockModule("b", { events: { onOrgDeleted: handlerB } });
       await loadModulesFromInstances([a, b], mockCtx());
 
       // Should not throw
-      await emitEvent("onTest");
+      await emitEvent("onOrgDeleted", "org1");
       expect(handlerA).toHaveBeenCalledTimes(1);
       expect(handlerB).toHaveBeenCalledTimes(1);
     });
@@ -464,13 +447,13 @@ describe("module-loader", () => {
     it("handles mix of modules with and without the event", async () => {
       const handler = mock(async () => {});
       const a = mockModule("a"); // no events
-      const b = mockModule("b", { events: { onTest: handler } });
+      const b = mockModule("b", { events: { onOrgDeleted: handler } });
       const c = mockModule("c"); // no events
       await loadModulesFromInstances([a, b, c], mockCtx());
 
-      await emitEvent("onTest", "data");
+      await emitEvent("onOrgDeleted", "org1");
       expect(handler).toHaveBeenCalledTimes(1);
-      expect(handler).toHaveBeenCalledWith("data");
+      expect(handler).toHaveBeenCalledWith("org1");
     });
   });
 

@@ -31,7 +31,7 @@ import { ApiError, notFound, conflict } from "../lib/errors.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
-import { recordUsage } from "../lib/modules/hooks.ts";
+import { afterRun } from "../lib/modules/hooks.ts";
 import { dispatchRunWebhook } from "../services/webhooks.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
@@ -179,6 +179,16 @@ export async function executeAgentInBackground(
           "error",
         );
         dispatchRunWebhook(orgId, applicationId, "timeout", runId, agent.id, { duration });
+        afterRun({
+          orgId,
+          runId,
+          agentId: agent.id,
+          applicationId,
+          status: "timeout",
+          cost: accumulatedCost,
+          duration,
+          modelSource: modelSource ?? null,
+        });
         return;
       }
       throw err;
@@ -217,6 +227,16 @@ export async function executeAgentInBackground(
         "error",
       );
       dispatchRunWebhook(orgId, applicationId, "failed", runId, agent.id, { error, duration });
+      afterRun({
+        orgId,
+        runId,
+        agentId: agent.id,
+        applicationId,
+        status: "failed",
+        cost: accumulatedCost,
+        duration,
+        modelSource: modelSource ?? null,
+      });
     } else {
       // --- Success path (with or without structured output) ---
 
@@ -257,22 +277,6 @@ export async function executeAgentInBackground(
         await addPackageMemories(agent.id, orgId, applicationId, memories, runId);
       }
 
-      let metadata: Record<string, unknown> | undefined;
-      if (accumulatedCost > 0) {
-        try {
-          metadata = await recordUsage(orgId, runId, accumulatedCost, {
-            modelSource: modelSource ?? "system",
-          });
-        } catch (err) {
-          logger.error("Failed to record usage — manual reconciliation needed", {
-            err: err instanceof Error ? err.message : String(err),
-            orgId,
-            runId,
-            accumulatedCost,
-          });
-        }
-      }
-
       await updateRun(runId, orgId, applicationId, {
         status: "success",
         result,
@@ -283,7 +287,6 @@ export async function executeAgentInBackground(
         tokensUsed: totalTokens > 0 ? totalTokens : undefined,
         ...(totalTokens > 0 ? { tokenUsage: { ...accumulated } as Record<string, unknown> } : {}),
         cost: accumulatedCost > 0 ? accumulatedCost : null,
-        ...(metadata ? { metadata } : {}),
       });
 
       if (hasOutput) {
@@ -299,6 +302,16 @@ export async function executeAgentInBackground(
         "info",
       );
       dispatchRunWebhook(orgId, applicationId, "completed", runId, agent.id, { result, duration });
+      afterRun({
+        orgId,
+        runId,
+        agentId: agent.id,
+        applicationId,
+        status: "success",
+        cost: accumulatedCost,
+        duration,
+        modelSource: modelSource ?? null,
+      });
     }
   } catch (err) {
     // If aborted (cancelled), the cancel route already wrote DB status
@@ -329,6 +342,16 @@ export async function executeAgentInBackground(
     dispatchRunWebhook(orgId, applicationId, "failed", runId, agent.id, {
       error: errorMessage,
       duration,
+    });
+    afterRun({
+      orgId,
+      runId,
+      agentId: agent.id,
+      applicationId,
+      status: "failed",
+      cost: accumulatedCost,
+      duration,
+      modelSource: modelSource ?? null,
     });
   } finally {
     untrackRun(runId);
@@ -446,11 +469,12 @@ export function createRunsRouter() {
             detail: error.message,
           });
         }
-        if (error.code === "quota_exceeded") {
+        // Module rejections (beforeRun hook) carry a status hint
+        if ("status" in error && typeof error.status === "number") {
           throw new ApiError({
-            status: 402,
-            code: "quota_exceeded",
-            title: "Payment Required",
+            status: error.status,
+            code: error.code,
+            title: error.message,
             detail: error.message,
           });
         }

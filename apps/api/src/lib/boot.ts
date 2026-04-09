@@ -7,7 +7,15 @@ import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
-import { loadModules, getModuleRegistry, buildModuleInitContext } from "./modules/index.ts";
+import {
+  loadModules,
+  getModuleRegistry,
+  buildModuleInitContext,
+  getModules,
+  beforeSignup,
+} from "./modules/index.ts";
+import { registerEmailOverrides } from "@appstrate/emails";
+import { setBeforeSignupHook } from "@appstrate/db/auth";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
@@ -31,8 +39,16 @@ import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 
 export async function boot(): Promise<void> {
-  // Load optional modules (cloud, future OIDC, etc. — no-op in OSS)
+  // Load modules (cloud, OIDC, etc.)
   await loadModules(getModuleRegistry(), buildModuleInitContext());
+
+  // Wire module contributions that were declared on the module contract
+  for (const mod of getModules().values()) {
+    if (mod.emailOverrides) {
+      registerEmailOverrides(mod.emailOverrides);
+    }
+  }
+  setBeforeSignupHook(beforeSignup);
 
   // Log infrastructure mode
   const env = (await import("@appstrate/env")).getEnv();

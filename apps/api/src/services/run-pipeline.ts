@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared run pipeline — the common tail of "build context ��� quota check → create run → execute".
+ * Shared run pipeline — the common tail of "build context → pre-run hooks → create run → execute".
  * Used by both the POST /run route and the scheduler's triggerScheduledRun.
  */
 
 import { logger } from "../lib/logger.ts";
 import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
-import { checkQuota, getQuotaExceededError } from "../lib/modules/hooks.ts";
+import { beforeRun } from "../lib/modules/hooks.ts";
 import { createRun, getRunningRunCountForOrg } from "./state/index.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
@@ -50,8 +50,8 @@ export interface RunPipelineParams {
 
 export type RunPipelineError =
   | { code: "model_not_configured"; message: string }
-  | { code: "quota_exceeded"; message: string }
-  | { code: "unexpected"; message: string };
+  | { code: "unexpected"; message: string }
+  | { code: string; message: string; status?: number };
 
 export type RunPipelineResult =
   | { ok: true; runId: string; modelSource: string | null }
@@ -117,7 +117,7 @@ export async function resolveRunPreflight(params: {
 // ---------------------------------------------------------------------------
 
 /**
- * Build run context, check quota, create run record, and fire-and-forget execution.
+ * Build run context, run module pre-checks, create run record, and fire-and-forget execution.
  *
  * Returns a result type instead of throwing — callers decide how to surface errors
  * (e.g. throw ApiError for HTTP routes, or failSchedule for scheduled runs).
@@ -203,18 +203,13 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     }));
   }
 
-  // --- Step 3: Quota check (Cloud only) ---
-  try {
-    const runningCount = await getRunningRunCountForOrg(orgId);
-    await checkQuota(orgId, runningCount);
-  } catch (err) {
-    const QEE = getQuotaExceededError();
-    if (QEE && err instanceof QEE) {
-      return { ok: false, error: { code: "quota_exceeded", message: err.message } };
-    }
+  // --- Step 3: Pre-run module hook (quota, rate limits, feature gates, etc.) ---
+  const runningCount = await getRunningRunCountForOrg(orgId);
+  const rejection = await beforeRun({ orgId, agentId: agent.id, runningCount });
+  if (rejection) {
     return {
       ok: false,
-      error: { code: "unexpected", message: err instanceof Error ? err.message : String(err) },
+      error: { code: rejection.code, message: rejection.message, status: rejection.status },
     };
   }
 
