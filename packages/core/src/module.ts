@@ -79,6 +79,13 @@ export interface AppstrateModule {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   emailOverrides?: Record<string, any>;
 
+  /**
+   * Permission declarations merged into the RBAC system at boot.
+   * Keys are org roles (e.g. "owner", "admin", "member", "viewer"),
+   * values are arrays of "resource:action" strings.
+   */
+  permissions?: Record<string, string[]>;
+
   /** Called during graceful shutdown (reverse init order). */
   shutdown?(): Promise<void>;
 }

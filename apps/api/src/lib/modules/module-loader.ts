@@ -16,8 +16,19 @@ import { logger } from "../logger.ts";
 // ---------------------------------------------------------------------------
 
 const _modules: Map<string, AppstrateModule> = new Map();
+const _builtinLoaders = new Map<string, () => Promise<unknown>>();
 let _publicPathsCache: string[] | null = null;
 let _initialized = false;
+
+/**
+ * Register a built-in platform module loader.
+ * Built-in modules are resolved by short name (e.g. "scheduling")
+ * instead of npm package specifier. They are only loaded if they
+ * appear in the APPSTRATE_MODULES env var.
+ */
+export function registerBuiltinModule(name: string, loader: () => Promise<unknown>): void {
+  _builtinLoaders.set(name, loader);
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -40,11 +51,14 @@ export async function loadModules(specifiers: string[], ctx: ModuleInitContext):
     return;
   }
 
-  // Phase 1: Resolve all modules via dynamic import
+  // Phase 1: Resolve all modules via dynamic import (or built-in loader)
   const resolved: AppstrateModule[] = [];
   for (const specifier of specifiers) {
     try {
-      const raw = await import(/* webpackIgnore: true */ specifier);
+      const builtinLoader = _builtinLoaders.get(specifier);
+      const raw = builtinLoader
+        ? await builtinLoader()
+        : await import(/* webpackIgnore: true */ specifier);
       // Support both default export and named `appstrateModule` export
       const mod: AppstrateModule = raw.default ?? raw.appstrateModule;
       if (!mod?.manifest?.id) {
@@ -66,6 +80,10 @@ export async function loadModules(specifiers: string[], ctx: ModuleInitContext):
   for (const mod of sorted) {
     try {
       await mod.init(ctx);
+      if (mod.permissions) {
+        const { registerModulePermissions } = await import("../../lib/permissions.ts");
+        registerModulePermissions(mod.permissions);
+      }
       if (_modules.has(mod.manifest.id)) {
         logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
       }

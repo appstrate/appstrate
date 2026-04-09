@@ -4,6 +4,7 @@
 export {
   loadModules,
   loadModulesFromInstances,
+  registerBuiltinModule,
   getModule,
   getModules,
   getModulePublicPaths,

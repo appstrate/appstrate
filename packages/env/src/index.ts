@@ -36,7 +36,7 @@ const envSchema = z
       .transform((s) => JSON.parse(s) as unknown[]),
 
     // Modules (comma-separated specifiers, empty = OSS mode)
-    APPSTRATE_MODULES: z.string().default(""),
+    APPSTRATE_MODULES: z.string().default("scheduling,webhooks,provider-management"),
 
     // App
     APP_URL: z.string().default("http://localhost:3000"),
