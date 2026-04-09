@@ -52,7 +52,7 @@ appstrate/
 │   ├── index.ts              # Entry: middleware, auth, startup init, SPA config injection
 │   ├── lib/
 │   │   ├── cloud-loader.ts   # Dynamic import of @appstrate/cloud (optional EE module)
-│   │   └── boot.ts           # Boot sequence (loadCloud → system init → scheduler)
+│   │   └── boot.ts           # Boot sequence (loadModules → system init → scheduler)
 │   ├── routes/               # Route handlers (one file per domain)
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
@@ -163,11 +163,11 @@ Appstrate uses a formalized module system for optional features. The contract is
 
 - `packages/core/src/module.ts` — `AppstrateModule` interface, `ModuleInitContext`, `SkipModuleError` (framework-agnostic, published on npm)
 - `apps/api/src/lib/modules/module-loader.ts` — Loader with dynamic import, topological sort, agnostic hook system, AppConfig extension, shutdown
-- `apps/api/src/lib/modules/registry.ts` — `getModuleRegistry()` declares package specifiers (e.g. `"@appstrate/cloud"`), `buildModuleInitContext()` provides platform services
+- `apps/api/src/lib/modules/registry.ts` — `getModuleRegistry()` reads `APPSTRATE_MODULES` env var (comma-separated specifiers), `buildModuleInitContext()` provides platform services
 - `apps/api/src/lib/modules/hooks.ts` — Agnostic hook helpers (`checkQuota`, `recordUsage`, etc.) — call hooks by name, never by module ID
 - `apps/api/src/lib/modules/example-module.ts` — Reference implementation
 
-**Module lifecycle:** registry (specifiers) → dynamic import → topological sort by `manifest.dependencies` → `init(ctx)` → `registerRoutes(app)` → running → `shutdown()` (reverse order)
+**Module lifecycle:** registry (`APPSTRATE_MODULES` env var) → dynamic import → topological sort by `manifest.dependencies` → `init(ctx)` → `registerRoutes(app)` → running → `shutdown()` (reverse order). All declared modules are required — any import or init failure is fatal.
 
 **Hooks vs Events:**
 
@@ -180,11 +180,10 @@ The platform calls hooks/events by name, never by module ID. This ensures zero k
 
 1. Import types from `@appstrate/core/module`
 2. Export a default `AppstrateModule` from your package
-3. Add the package specifier to `getModuleRegistry()` in `registry.ts`
-4. Module's `init()` throws `SkipModuleError` if preconditions aren't met (e.g. PGlite mode)
-5. Module contributes feature flags via `extendAppConfig()`, routes via `registerRoutes()`, auth-bypass paths via `publicPaths`, request/response logic via `hooks`, notifications via `events`
+3. Add the package specifier to the `APPSTRATE_MODULES` env var (comma-separated)
+4. Module contributes feature flags via `extendAppConfig()`, routes via `registerRoutes()`, auth-bypass paths via `publicPaths`, request/response logic via `hooks`, notifications via `events`
 
-**Disabling a module = zero footprint:** package not installed = not imported = no tables, no routes, no middleware, no code loaded.
+**Disabling a module = zero footprint:** remove it from `APPSTRATE_MODULES` = not imported = no tables, no routes, no middleware, no code loaded. Default is empty (OSS mode).
 
 ### Progressive Infrastructure
 
@@ -223,7 +222,7 @@ Tier 0 (zero-install) requires only Bun. Infrastructure adapters are in `apps/ap
 - **Service layer**: All function-based (no classes). `state.ts` is the central data-access layer (runs, logs, config, agent provider bindings). Drizzle ORM with `import { db } from "../lib/db.ts"` and schema from `@appstrate/db/schema`.
 - **Request pipeline**: error handler → Request-Id → CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie → `Appstrate-User` resolution if present) → org context middleware (`X-Org-Id` → verify membership) → app context middleware (`X-App-Id` → verify app belongs to org, required for app-scoped routes: agents, runs, schedules, webhooks, end-users, api-keys, notifications, packages, providers, connections, app-profiles; realtime handles app-scoping internally via query param) → API version middleware (`Appstrate-Version` header) → route handler (per-route: `rateLimit()`, `idempotency()`) → cloud routes (if loaded).
 - **Platform config** (`buildAppConfig()` in `index.ts`): Computed once at boot. Serialized as `window.__APP_CONFIG__` and injected into `index.html` via `<script>` tag at serve time (`app.get("/*")`). Config is static — `useAppConfig()` reads it synchronously. In OSS: models/providerKeys visible, billing hidden. In Cloud: reversed. `googleAuth` and `emailVerification` flags are derived from env var presence (opt-in).
-- **Cloud module** (`lib/cloud-loader.ts`): `loadCloud()` at boot tries `import("@appstrate/cloud")`. If the module is installed (via `bun link` in dev, or git dependency in prod), the platform runs in Cloud mode. If absent, OSS mode. `getCloudModule()` returns the loaded module or `null`.
+- **Cloud module**: Loaded via the module system when `APPSTRATE_MODULES=@appstrate/cloud` is set. All declared modules are required — if declared but not installed, the platform crashes at boot. Default is empty (OSS mode). `getModule("cloud")` returns the loaded module or `null`.
 - **Cost tracking**: `runs.cost` (doublePrecision) stores the dollar cost per run. Cost chain: `SYSTEM_PROVIDER_KEYS` cost config → `ModelDefinition.cost` → `ResolvedModel.cost` → `PromptContext.llmConfig.cost` → `MODEL_COST` env var in Pi container → Pi SDK calculates cost → `RunMessage.cost` → accumulated and persisted. DB models (`org_models`) also support optional `cost` (jsonb) for self-hosted cost tracking. OpenRouter models auto-populate cost from pricing API.
 - **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `applicationId` (set by `requireAppContext()` from `X-App-Id` header, or from API key's `applicationId`), `endUser` (set via `Appstrate-User` header — `{ id, applicationId, name?, email? }`), `apiVersion` (resolved by api-version middleware), `agent` (set by `requireAgent()`).
 - **Route guards** (`middleware/guards.ts`): `requireAdmin()` → 403 if not admin/owner; `requireOwner()` → 403 if not owner; `requireAgent(param)` → loads agent + sets `c.set("agent")`, 404 if missing; `requireMutableAgent()` → also checks not system package + no running runs. **App context** (`middleware/app-context.ts`): `requireAppContext()` → validates `X-App-Id` header (session auth) or uses API key's `applicationId`, verifies app belongs to org, sets `c.set("applicationId")`. Required for app-scoped routes: agents, runs, schedules, webhooks, end-users, api-keys, notifications, packages, providers, connections, app-profiles.
@@ -436,6 +435,7 @@ Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Mig
 
 | Variable                    | Required | Default                                       | Notes                                                                                                      |
 | --------------------------- | -------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `APPSTRATE_MODULES`         | No       | `""`                                          | Comma-separated module specifiers to load at boot. Empty = OSS mode. Cloud: `@appstrate/cloud`             |
 | `REDIS_URL`                 | No       | —                                             | Redis connection string. When absent, falls back to in-memory adapters (single-instance only)              |
 | `DATABASE_URL`              | No       | —                                             | PostgreSQL connection. When absent, falls back to PGlite (embedded PostgreSQL)                             |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                                                                     |

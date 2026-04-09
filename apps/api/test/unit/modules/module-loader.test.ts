@@ -82,17 +82,16 @@ describe("module-loader", () => {
       expect(ids).toEqual(["a", "b"]);
     });
 
-    it("skips module on SkipModuleError", async () => {
+    it("throws on SkipModuleError (all declared modules are required)", async () => {
       const mod = mockModule("skipped", {
         async init() {
           throw new SkipModuleError("not available");
         },
       });
-      await loadModulesFromInstances([mod], mockCtx());
-      expect(getModule("skipped")).toBeNull();
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow("not available");
     });
 
-    it("throws on non-SkipModuleError", async () => {
+    it("throws on init error", async () => {
       const mod = mockModule("broken", {
         async init() {
           throw new Error("fatal");

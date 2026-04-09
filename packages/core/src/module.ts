@@ -105,17 +105,6 @@ export interface ModuleInitContext {
 }
 
 // ---------------------------------------------------------------------------
-// Module entry — used in the registry
-// ---------------------------------------------------------------------------
-
-export interface ModuleEntry {
-  /** Dynamic import specifier (e.g. "@appstrate/cloud"). */
-  specifier: string;
-  /** If true, init failure crashes the platform instead of skipping. */
-  required?: boolean;
-}
-
-// ---------------------------------------------------------------------------
 // Skip error
 // ---------------------------------------------------------------------------
 

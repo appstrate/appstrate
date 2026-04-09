@@ -35,6 +35,9 @@ const envSchema = z
       .default("[]")
       .transform((s) => JSON.parse(s) as unknown[]),
 
+    // Modules (comma-separated specifiers, empty = OSS mode)
+    APPSTRATE_MODULES: z.string().default(""),
+
     // App
     APP_URL: z.string().default("http://localhost:3000"),
     TRUSTED_ORIGINS: z

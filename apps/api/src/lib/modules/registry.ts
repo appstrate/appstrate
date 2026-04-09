@@ -15,7 +15,7 @@ import { setBeforeSignupHook } from "@appstrate/db/auth";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
-import type { ModuleEntry, ModuleInitContext } from "@appstrate/core/module";
+import type { ModuleInitContext } from "@appstrate/core/module";
 
 // ---------------------------------------------------------------------------
 // Registry — one entry per available module
@@ -24,19 +24,19 @@ import type { ModuleEntry, ModuleInitContext } from "@appstrate/core/module";
 /**
  * Returns the list of module entries to load at boot.
  *
- * Each entry is a dynamic import specifier. The module loader resolves
- * the import at runtime — if the package is not installed, it is silently
- * skipped (unless `required: true`).
+ * Reads from the APPSTRATE_MODULES env var (comma-separated specifiers).
+ * Empty by default (OSS mode). Cloud deployments set:
+ *   APPSTRATE_MODULES=@appstrate/cloud
  *
- * The platform NEVER references module internals here — it only knows
- * the npm package name. The module itself implements AppstrateModule.
+ * All declared modules are required — if a module is in the list, it must
+ * load and init successfully or the platform crashes.
  */
-export function getModuleRegistry(): ModuleEntry[] {
-  return [
-    { specifier: "@appstrate/cloud" },
-    // Future modules:
-    // { specifier: "@appstrate/oidc" },
-  ];
+export function getModuleRegistry(): string[] {
+  const raw = process.env.APPSTRATE_MODULES ?? "";
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AppConfig } from "@appstrate/shared-types";
-import type { AppstrateModule, ModuleEntry, ModuleInitContext } from "@appstrate/core/module";
-import { SkipModuleError } from "@appstrate/core/module";
+import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
 import { logger } from "../logger.ts";
 
 // ---------------------------------------------------------------------------
@@ -21,43 +20,40 @@ let _initialized = false;
  * Load and initialize all registered modules.
  *
  * Each entry is a dynamic import specifier. The loader:
- * 1. Resolves modules via dynamic import (skip if not installed)
+ * 1. Resolves modules via dynamic import
  * 2. Topologically sorts by `manifest.dependencies`
  * 3. Calls `init(ctx)` in dependency order
  *
- * The platform never references module internals — it only calls the
- * AppstrateModule contract methods.
+ * All declared modules are required — any import or init failure is fatal.
+ * If a module is not needed, remove it from the APPSTRATE_MODULES env var.
  */
-export async function loadModules(entries: ModuleEntry[], ctx: ModuleInitContext): Promise<void> {
+export async function loadModules(specifiers: string[], ctx: ModuleInitContext): Promise<void> {
   if (_initialized) {
     logger.debug("Modules already initialized, skipping");
     return;
   }
 
   // Phase 1: Resolve all modules via dynamic import
-  const resolved: { module: AppstrateModule; required: boolean }[] = [];
-  for (const entry of entries) {
+  const resolved: AppstrateModule[] = [];
+  for (const specifier of specifiers) {
     try {
-      const pkg = entry.specifier;
-      const raw = await import(/* webpackIgnore: true */ pkg);
+      const raw = await import(/* webpackIgnore: true */ specifier);
       // Support both default export and named `appstrateModule` export
       const mod: AppstrateModule = raw.default ?? raw.appstrateModule;
       if (!mod?.manifest?.id) {
-        logger.warn("Module missing manifest.id, skipping", { specifier: entry.specifier });
-        continue;
+        throw new Error(`Module "${specifier}" is missing manifest.id`);
       }
-      resolved.push({ module: mod, required: entry.required ?? false });
-    } catch {
-      if (entry.required) {
-        throw new Error(`Required module not found: ${entry.specifier}`);
-      }
-      logger.debug("Optional module not installed, skipping", { specifier: entry.specifier });
+      resolved.push(mod);
+    } catch (err) {
+      throw new Error(
+        `Module "${specifier}" could not be loaded: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
     }
   }
 
   // Phase 2: Topological sort by dependencies
-  const sorted = topoSort(resolved.map((r) => r.module));
-  const requiredIds = new Set(resolved.filter((r) => r.required).map((r) => r.module.manifest.id));
+  const sorted = topoSort(resolved);
 
   // Phase 3: Init in dependency order
   for (const mod of sorted) {
@@ -69,20 +65,10 @@ export async function loadModules(entries: ModuleEntry[], ctx: ModuleInitContext
       _modules.set(mod.manifest.id, mod);
       logger.info("Module loaded", { id: mod.manifest.id, version: mod.manifest.version });
     } catch (err) {
-      if (err instanceof SkipModuleError) {
-        logger.debug("Module skipped", { id: mod.manifest.id, reason: err.message });
-        continue;
-      }
-      if (requiredIds.has(mod.manifest.id)) {
-        throw new Error(
-          `Required module "${mod.manifest.id}" failed to initialize: ${err instanceof Error ? err.message : String(err)}`,
-          { cause: err },
-        );
-      }
-      logger.warn("Module init failed, skipping", {
-        id: mod.manifest.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      throw new Error(
+        `Module "${mod.manifest.id}" failed to initialize: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
     }
   }
 
@@ -104,16 +90,11 @@ export async function loadModulesFromInstances(
 
   const sorted = topoSort(modules);
   for (const mod of sorted) {
-    try {
-      await mod.init(ctx);
-      if (_modules.has(mod.manifest.id)) {
-        logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
-      }
-      _modules.set(mod.manifest.id, mod);
-    } catch (err) {
-      if (err instanceof SkipModuleError) continue;
-      throw err;
+    await mod.init(ctx);
+    if (_modules.has(mod.manifest.id)) {
+      logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
     }
+    _modules.set(mod.manifest.id, mod);
   }
 
   _initialized = true;
