@@ -11,8 +11,7 @@ import type { ConnectionRecord, DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { forceRefresh, type RefreshContext } from "./token-refresh.ts";
 import type { OAuthTokenAuthMethod, OAuthTokenContentType } from "./token-utils.ts";
-
-type CredentialEncoding = "basic_api_key_x" | "basic_email_token";
+import type { CredentialEncoding } from "@appstrate/core/validation";
 
 /**
  * Get a connection by profile + provider + org + provider credential.
