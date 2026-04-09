@@ -6,10 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Fixed
-
-- Mistral/Codestral models now use `mistral-conversations` API instead of `openai-completions`. Fixes agent crash (`message.content` undefined) after tool calls — the Pi SDK's native Mistral provider handles tool call responses correctly. (`apps/web/src/lib/model-presets.ts`)
-
 ### Added
 
 - Health check for main application container in Docker Compose
