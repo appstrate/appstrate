@@ -161,7 +161,7 @@ Appstrate uses a formalized module system for optional features. The contract is
 
 **Key files:**
 
-- `packages/core/src/module.ts` — `AppstrateModule` interface, `ModuleInitContext`, `SkipModuleError` (framework-agnostic, published on npm)
+- `packages/core/src/module.ts` — `AppstrateModule` interface, `ModuleInitContext` (framework-agnostic, published on npm)
 - `apps/api/src/lib/modules/module-loader.ts` — Loader with dynamic import, topological sort, agnostic hook system, AppConfig extension, shutdown
 - `apps/api/src/lib/modules/registry.ts` — `getModuleRegistry()` reads `APPSTRATE_MODULES` env var (comma-separated specifiers), `buildModuleInitContext()` provides platform services
 - `apps/api/src/lib/modules/hooks.ts` — Agnostic hook helpers (`checkQuota`, `recordUsage`, etc.) — call hooks by name, never by module ID

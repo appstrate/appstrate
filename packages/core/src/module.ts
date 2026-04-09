@@ -37,8 +37,7 @@ export interface AppstrateModule {
 
   /**
    * Called once at boot. Must initialize internal state (DB client, migrations, etc.).
-   * Throw `SkipModuleError` to gracefully skip (e.g. missing dependency, PGlite mode).
-   * Any other error is treated as a fatal init failure.
+   * Any error is treated as a fatal init failure — all declared modules are required.
    */
   init(ctx: ModuleInitContext): Promise<void>;
 
@@ -102,19 +101,4 @@ export interface ModuleInitContext {
   registerEmailOverrides: (overrides: Record<string, any>) => void;
   /** Register a before-signup hook. */
   setBeforeSignupHook: (hook: (email: string) => void) => void;
-}
-
-// ---------------------------------------------------------------------------
-// Skip error
-// ---------------------------------------------------------------------------
-
-/**
- * Throw from `init()` to gracefully skip a module.
- * The loader catches this specific class and logs at debug level.
- */
-export class SkipModuleError extends Error {
-  constructor(reason: string) {
-    super(reason);
-    this.name = "SkipModuleError";
-  }
 }

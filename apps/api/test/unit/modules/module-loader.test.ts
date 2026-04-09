@@ -16,7 +16,6 @@ import {
   resetModules,
 } from "../../../src/lib/modules/module-loader.ts";
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
-import { SkipModuleError } from "@appstrate/core/module";
 import type { AppConfig } from "@appstrate/shared-types";
 
 // ---------------------------------------------------------------------------
@@ -82,16 +81,7 @@ describe("module-loader", () => {
       expect(ids).toEqual(["a", "b"]);
     });
 
-    it("throws on SkipModuleError (all declared modules are required)", async () => {
-      const mod = mockModule("skipped", {
-        async init() {
-          throw new SkipModuleError("not available");
-        },
-      });
-      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow("not available");
-    });
-
-    it("throws on init error", async () => {
+    it("throws on init error (all declared modules are required)", async () => {
       const mod = mockModule("broken", {
         async init() {
           throw new Error("fatal");
