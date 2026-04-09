@@ -320,26 +320,5 @@ export function createModelsRouter() {
     }
   });
 
-  // GET /api/models/:id/config — resolve full model config (with API key)
-  // Used by satellite apps (workspace-fs) to configure chat sidecar containers.
-  router.get("/:id/config", requirePermission("models", "read"), async (c) => {
-    const orgId = c.get("orgId");
-    const modelId = c.req.param("id")!;
-
-    const resolved = await loadModel(orgId, modelId);
-    if (!resolved) throw notFound("Model not found or not enabled");
-
-    return c.json({
-      api: resolved.api,
-      baseUrl: resolved.baseUrl,
-      modelId: resolved.modelId,
-      apiKey: resolved.apiKey,
-      label: resolved.label,
-      reasoning: resolved.reasoning ?? false,
-      contextWindow: resolved.contextWindow ?? 128000,
-      maxTokens: resolved.maxTokens ?? 16384,
-    });
-  });
-
   return router;
 }
