@@ -58,12 +58,23 @@ export interface AppstrateModule {
   extendAppConfig?(base: Record<string, unknown>): Record<string, unknown>;
 
   /**
-   * Named hooks that the platform invokes at runtime.
+   * Named hooks that the platform invokes at runtime (first-match-wins).
    * Modules register handlers; the platform calls them agnostically.
-   * Multiple modules can provide the same hook — all are called.
+   * Only the first module providing a given hook is called.
+   * For broadcast-to-all semantics, use `events` instead.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   hooks?: Record<string, (...args: any[]) => any>;
+
+  /**
+   * Named event handlers (broadcast-to-all).
+   * Unlike hooks (first-match-wins), events are emitted to ALL modules
+   * that listen for them. Used for cross-cutting concerns where multiple
+   * modules should react (e.g. org:created → billing + analytics + audit).
+   * Errors in individual handlers don't block other modules.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  events?: Record<string, (...args: any[]) => Promise<void>>;
 
   /** Called during graceful shutdown (reverse init order). */
   shutdown?(): Promise<void>;

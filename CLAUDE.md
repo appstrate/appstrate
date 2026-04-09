@@ -169,7 +169,12 @@ Appstrate uses a formalized module system for optional features. The contract is
 
 **Module lifecycle:** registry (specifiers) → dynamic import → topological sort by `manifest.dependencies` → `init(ctx)` → `registerRoutes(app)` → running → `shutdown()` (reverse order)
 
-**Agnostic hook system:** The platform calls hooks by name via `callHook("hookName", ...args)`. It never knows which module provides which hook. Multiple modules can provide the same hook — the first one wins. This ensures the platform has zero knowledge of module internals.
+**Hooks vs Events:**
+
+- **Hooks** (`callHook`, `getHookValue`): First-match-wins. For request/response patterns where one module provides the answer (e.g. `checkQuota`, `getQuotaExceededError`).
+- **Events** (`emitEvent`): Broadcast-to-all. For notification patterns where multiple modules should react (e.g. `onOrgCreated`, `onOrgDeleted`). Errors in individual handlers are isolated — they don't block other modules.
+
+The platform calls hooks/events by name, never by module ID. This ensures zero knowledge of module internals.
 
 **Creating a new module (external package):**
 
@@ -177,7 +182,7 @@ Appstrate uses a formalized module system for optional features. The contract is
 2. Export a default `AppstrateModule` from your package
 3. Add the package specifier to `getModuleRegistry()` in `registry.ts`
 4. Module's `init()` throws `SkipModuleError` if preconditions aren't met (e.g. PGlite mode)
-5. Module contributes feature flags via `extendAppConfig()`, routes via `registerRoutes()`, auth-bypass paths via `publicPaths`, platform hooks via `hooks`
+5. Module contributes feature flags via `extendAppConfig()`, routes via `registerRoutes()`, auth-bypass paths via `publicPaths`, request/response logic via `hooks`, notifications via `events`
 
 **Disabling a module = zero footprint:** package not installed = not imported = no tables, no routes, no middleware, no code loaded.
 

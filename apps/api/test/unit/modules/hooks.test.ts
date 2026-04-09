@@ -40,12 +40,12 @@ describe("module hooks (agnostic)", () => {
     expect(result).toBeUndefined();
   });
 
-  it("onOrgCreated is no-op when no module provides the hook", async () => {
+  it("onOrgCreated is no-op when no module provides the event", async () => {
     await loadModulesFromInstances([], mockCtx());
     await expect(onOrgCreated("org1", "user@test.com")).resolves.toBeUndefined();
   });
 
-  it("onOrgDeleted is no-op when no module provides the hook", async () => {
+  it("onOrgDeleted is no-op when no module provides the event", async () => {
     await loadModulesFromInstances([], mockCtx());
     await expect(onOrgDeleted("org1")).resolves.toBeUndefined();
   });
@@ -71,9 +71,11 @@ describe("module hooks (agnostic)", () => {
       hooks: {
         checkQuota: mockCheckQuota,
         recordUsage: mockRecordUsage,
+        getQuotaExceededError: () => FakeQuotaError,
+      },
+      events: {
         onOrgCreated: mockOnOrgCreated,
         onOrgDeleted: mockOnOrgDeleted,
-        getQuotaExceededError: () => FakeQuotaError,
       },
     };
 
@@ -93,5 +95,27 @@ describe("module hooks (agnostic)", () => {
 
     const QEE = getQuotaExceededError();
     expect(QEE).toBe(FakeQuotaError);
+  });
+
+  it("onOrgCreated broadcasts to ALL modules (event semantics)", async () => {
+    const handlerA = mock(async () => {});
+    const handlerB = mock(async () => {});
+
+    const modA: AppstrateModule = {
+      manifest: { id: "billing", name: "Billing", version: "1.0.0" },
+      async init() {},
+      events: { onOrgCreated: handlerA },
+    };
+    const modB: AppstrateModule = {
+      manifest: { id: "analytics", name: "Analytics", version: "1.0.0" },
+      async init() {},
+      events: { onOrgCreated: handlerB },
+    };
+
+    await loadModulesFromInstances([modA, modB], mockCtx());
+
+    await onOrgCreated("org1", "admin@test.com");
+    expect(handlerA).toHaveBeenCalledTimes(1);
+    expect(handlerB).toHaveBeenCalledTimes(1);
   });
 });

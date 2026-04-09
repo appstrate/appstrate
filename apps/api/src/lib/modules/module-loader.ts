@@ -29,7 +29,10 @@ let _initialized = false;
  * AppstrateModule contract methods.
  */
 export async function loadModules(entries: ModuleEntry[], ctx: ModuleInitContext): Promise<void> {
-  if (_initialized) return;
+  if (_initialized) {
+    logger.debug("Modules already initialized, skipping");
+    return;
+  }
 
   // Phase 1: Resolve all modules via dynamic import
   const resolved: { module: AppstrateModule; required: boolean }[] = [];
@@ -60,6 +63,9 @@ export async function loadModules(entries: ModuleEntry[], ctx: ModuleInitContext
   for (const mod of sorted) {
     try {
       await mod.init(ctx);
+      if (_modules.has(mod.manifest.id)) {
+        logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
+      }
       _modules.set(mod.manifest.id, mod);
       logger.info("Module loaded", { id: mod.manifest.id, version: mod.manifest.version });
     } catch (err) {
@@ -68,7 +74,10 @@ export async function loadModules(entries: ModuleEntry[], ctx: ModuleInitContext
         continue;
       }
       if (requiredIds.has(mod.manifest.id)) {
-        throw err;
+        throw new Error(
+          `Required module "${mod.manifest.id}" failed to initialize: ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
+        );
       }
       logger.warn("Module init failed, skipping", {
         id: mod.manifest.id,
@@ -88,12 +97,18 @@ export async function loadModulesFromInstances(
   modules: AppstrateModule[],
   ctx: ModuleInitContext,
 ): Promise<void> {
-  if (_initialized) return;
+  if (_initialized) {
+    logger.debug("Modules already initialized, skipping");
+    return;
+  }
 
   const sorted = topoSort(modules);
   for (const mod of sorted) {
     try {
       await mod.init(ctx);
+      if (_modules.has(mod.manifest.id)) {
+        logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
+      }
       _modules.set(mod.manifest.id, mod);
     } catch (err) {
       if (err instanceof SkipModuleError) continue;
@@ -116,7 +131,7 @@ export function getModules(): ReadonlyMap<string, AppstrateModule> {
 
 /** Collect all public paths from all loaded modules (cached). */
 export function getModulePublicPaths(): string[] {
-  if (_publicPathsCache) return _publicPathsCache;
+  if (_publicPathsCache !== null) return _publicPathsCache;
   _publicPathsCache = Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []);
   return _publicPathsCache;
 }
@@ -145,9 +160,9 @@ export function applyModuleAppConfig(base: AppConfig): AppConfig {
 // ---------------------------------------------------------------------------
 
 /**
- * Call a named hook on ALL loaded modules that provide it.
- * Returns the result from the FIRST module that provides the hook,
- * or undefined if no module provides it.
+ * Call a named hook — returns the result from the FIRST module that
+ * provides it, or undefined if no module provides it.
+ * For broadcasting to ALL modules, use emitEvent() instead.
  *
  * This is fully agnostic — the platform never knows which module
  * provides which hook.
@@ -184,6 +199,33 @@ export function hasHook(name: string): boolean {
     if (mod.hooks?.[name]) return true;
   }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Event system (broadcast to ALL modules)
+// ---------------------------------------------------------------------------
+
+/**
+ * Emit a named event to ALL loaded modules that listen for it.
+ * Unlike callHook (first-match-wins), this calls every module's handler.
+ * Errors in individual handlers are logged but don't block other modules.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function emitEvent(name: string, ...args: any[]): Promise<void> {
+  for (const mod of _modules.values()) {
+    const handler = mod.events?.[name];
+    if (handler) {
+      try {
+        await handler(...args);
+      } catch (err) {
+        logger.warn("Module event handler error", {
+          module: mod.manifest.id,
+          event: name,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -267,23 +309,25 @@ function topoSort(modules: AppstrateModule[]): AppstrateModule[] {
 // Deep merge utility
 // ---------------------------------------------------------------------------
 
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function isPlainObject(val: unknown): val is Record<string, unknown> {
+  if (typeof val !== "object" || val === null || Array.isArray(val)) return false;
+  const proto = Object.getPrototypeOf(val);
+  return proto === null || proto === Object.prototype;
+}
+
 function deepMerge(
   target: Record<string, unknown>,
   source: Record<string, unknown>,
 ): Record<string, unknown> {
   const result = { ...target };
   for (const key of Object.keys(source)) {
+    if (UNSAFE_KEYS.has(key)) continue;
     const tVal = target[key];
     const sVal = source[key];
-    if (
-      tVal &&
-      sVal &&
-      typeof tVal === "object" &&
-      typeof sVal === "object" &&
-      !Array.isArray(tVal) &&
-      !Array.isArray(sVal)
-    ) {
-      result[key] = deepMerge(tVal as Record<string, unknown>, sVal as Record<string, unknown>);
+    if (isPlainObject(tVal) && isPlainObject(sVal)) {
+      result[key] = deepMerge(tVal, sVal);
     } else {
       result[key] = sVal;
     }

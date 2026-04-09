@@ -12,6 +12,7 @@ export {
   callHook,
   getHookValue,
   hasHook,
+  emitEvent,
   shutdownModules,
   resetModules,
 } from "./module-loader.ts";

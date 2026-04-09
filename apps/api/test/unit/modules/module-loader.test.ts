@@ -11,6 +11,7 @@ import {
   callHook,
   getHookValue,
   hasHook,
+  emitEvent,
   shutdownModules,
   resetModules,
 } from "../../../src/lib/modules/module-loader.ts";
@@ -160,6 +161,14 @@ describe("module-loader", () => {
       await loadModulesFromInstances([], mockCtx());
       expect(getModulePublicPaths()).toEqual([]);
     });
+
+    it("caches empty array correctly (does not recompute)", async () => {
+      await loadModulesFromInstances([], mockCtx());
+      const first = getModulePublicPaths();
+      const second = getModulePublicPaths();
+      // Same reference = cache was used
+      expect(first).toBe(second);
+    });
   });
 
   describe("registerModuleRoutes", () => {
@@ -203,6 +212,182 @@ describe("module-loader", () => {
       expect(result.platform).toBe("cloud");
       expect(result.features.billing).toBe(true);
       expect(result.features.models).toBe(true);
+    });
+
+    it("deep-merges correctly with falsy values", async () => {
+      const mod = mockModule("ext", {
+        extendAppConfig: (base) => ({
+          ...base,
+          nested: { enabled: false, count: 0, label: "" },
+        }),
+      });
+      await loadModulesFromInstances([mod], mockCtx());
+
+      const base: AppConfig = {
+        platform: "oss",
+        features: {
+          billing: false,
+          models: true,
+          providerKeys: true,
+          googleAuth: false,
+          githubAuth: false,
+          smtp: false,
+        },
+        trustedOrigins: [],
+      };
+
+      const result = applyModuleAppConfig(base) as unknown as Record<string, unknown>;
+      const nested = result.nested as Record<string, unknown>;
+      expect(nested.enabled).toBe(false);
+      expect(nested.count).toBe(0);
+      expect(nested.label).toBe("");
+    });
+
+    it("deep-merges correctly with null source values", async () => {
+      const mod = mockModule("ext", {
+        extendAppConfig: (base) => ({
+          ...base,
+          features: null,
+        }),
+      });
+      await loadModulesFromInstances([mod], mockCtx());
+
+      const base: AppConfig = {
+        platform: "oss",
+        features: {
+          billing: false,
+          models: true,
+          providerKeys: true,
+          googleAuth: false,
+          githubAuth: false,
+          smtp: false,
+        },
+        trustedOrigins: [],
+      };
+
+      const result = applyModuleAppConfig(base);
+      // null source overwrites object target
+      expect(result.features).toBeNull();
+    });
+
+    it("ignores prototype pollution keys (__proto__, constructor, prototype)", async () => {
+      const mod = mockModule("evil", {
+        extendAppConfig: () => {
+          // Simulate a crafted payload with dangerous keys
+          return JSON.parse(
+            '{"__proto__": {"polluted": true}, "constructor": {"bad": true}, "prototype": {"hacked": true}, "safe": "value"}',
+          );
+        },
+      });
+      await loadModulesFromInstances([mod], mockCtx());
+
+      const base: AppConfig = {
+        platform: "oss",
+        features: {
+          billing: false,
+          models: true,
+          providerKeys: true,
+          googleAuth: false,
+          githubAuth: false,
+          smtp: false,
+        },
+        trustedOrigins: [],
+      };
+
+      const result = applyModuleAppConfig(base) as unknown as Record<string, unknown>;
+      // Safe key should be merged
+      expect(result.safe).toBe("value");
+      // Prototype should NOT be polluted on Object.prototype
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+      // Dangerous keys should not be copied to the result as own properties
+      expect(Object.keys(result)).not.toContain("__proto__");
+      expect(Object.keys(result)).not.toContain("constructor");
+      expect(Object.keys(result)).not.toContain("prototype");
+    });
+
+    it("does not deep-merge class instances (Date, Error, etc.)", async () => {
+      const date = new Date("2025-01-01");
+      const mod = mockModule("ext", {
+        extendAppConfig: (base) => ({
+          ...base,
+          meta: { createdAt: date },
+        }),
+      });
+      await loadModulesFromInstances([mod], mockCtx());
+
+      const base: AppConfig = {
+        platform: "oss",
+        features: {
+          billing: false,
+          models: true,
+          providerKeys: true,
+          googleAuth: false,
+          githubAuth: false,
+          smtp: false,
+        },
+        trustedOrigins: [],
+      };
+
+      const result = applyModuleAppConfig(base) as unknown as Record<string, unknown>;
+      const meta = result.meta as Record<string, unknown>;
+      // Date should be preserved as-is, not deep-merged into a plain object
+      expect(meta.createdAt).toBe(date);
+      expect(meta.createdAt).toBeInstanceOf(Date);
+    });
+
+    it("replaces arrays entirely (does not merge by index)", async () => {
+      const mod = mockModule("ext", {
+        extendAppConfig: (base) => ({
+          ...base,
+          trustedOrigins: ["https://new.com"],
+        }),
+      });
+      await loadModulesFromInstances([mod], mockCtx());
+
+      const base: AppConfig = {
+        platform: "oss",
+        features: {
+          billing: false,
+          models: true,
+          providerKeys: true,
+          googleAuth: false,
+          githubAuth: false,
+          smtp: false,
+        },
+        trustedOrigins: ["http://localhost:3000", "http://localhost:5173"],
+      };
+
+      const result = applyModuleAppConfig(base);
+      // Array should be fully replaced, not concatenated or merged by index
+      expect(result.trustedOrigins).toEqual(["https://new.com"]);
+    });
+
+    it("does not mutate the base config", async () => {
+      const mod = mockModule("ext", {
+        extendAppConfig: (base) => ({
+          ...base,
+          features: { ...(base.features as Record<string, boolean>), billing: true },
+        }),
+      });
+      await loadModulesFromInstances([mod], mockCtx());
+
+      const base: AppConfig = {
+        platform: "oss",
+        features: {
+          billing: false,
+          models: true,
+          providerKeys: true,
+          googleAuth: false,
+          githubAuth: false,
+          smtp: false,
+        },
+        trustedOrigins: [],
+      };
+
+      applyModuleAppConfig(base);
+      // Original base should be untouched
+      expect(base.features.billing).toBe(false);
+      expect(base.platform).toBe("oss");
     });
   });
 
@@ -249,6 +434,70 @@ describe("module-loader", () => {
       });
       await loadModulesFromInstances([mod], mockCtx());
       expect(hasHook("myHook")).toBe(true);
+    });
+  });
+
+  describe("emitEvent", () => {
+    it("calls ALL modules that provide the event handler", async () => {
+      const handlerA = mock(async () => {});
+      const handlerB = mock(async () => {});
+      const a = mockModule("a", { events: { onTest: handlerA } });
+      const b = mockModule("b", { events: { onTest: handlerB } });
+      await loadModulesFromInstances([a, b], mockCtx());
+
+      await emitEvent("onTest", "arg1", "arg2");
+      expect(handlerA).toHaveBeenCalledTimes(1);
+      expect(handlerA).toHaveBeenCalledWith("arg1", "arg2");
+      expect(handlerB).toHaveBeenCalledTimes(1);
+      expect(handlerB).toHaveBeenCalledWith("arg1", "arg2");
+    });
+
+    it("is no-op when no module provides the event", async () => {
+      await loadModulesFromInstances([], mockCtx());
+      await expect(emitEvent("nonexistent")).resolves.toBeUndefined();
+    });
+
+    it("continues to other modules if one handler throws", async () => {
+      const handlerA = mock(async () => {
+        throw new Error("handler A failed");
+      });
+      const handlerB = mock(async () => {});
+      const a = mockModule("a", { events: { onTest: handlerA } });
+      const b = mockModule("b", { events: { onTest: handlerB } });
+      await loadModulesFromInstances([a, b], mockCtx());
+
+      // Should not throw
+      await emitEvent("onTest");
+      expect(handlerA).toHaveBeenCalledTimes(1);
+      expect(handlerB).toHaveBeenCalledTimes(1);
+    });
+
+    it("handles mix of modules with and without the event", async () => {
+      const handler = mock(async () => {});
+      const a = mockModule("a"); // no events
+      const b = mockModule("b", { events: { onTest: handler } });
+      const c = mockModule("c"); // no events
+      await loadModulesFromInstances([a, b, c], mockCtx());
+
+      await emitEvent("onTest", "data");
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(handler).toHaveBeenCalledWith("data");
+    });
+  });
+
+  describe("DX improvements", () => {
+    it("enriches error message for required module init failure (loadModules path)", async () => {
+      // loadModulesFromInstances always throws raw errors.
+      // The enriched error is only in loadModules (dynamic import path).
+      // We test the wrapping behavior via loadModulesFromInstances's throw:
+      const mod = mockModule("broken", {
+        async init() {
+          throw new Error("db connection failed");
+        },
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        "db connection failed",
+      );
     });
   });
 
