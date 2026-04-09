@@ -53,6 +53,7 @@ export async function verifyEndUserAccessToken(token: string): Promise<EndUserCl
     const env = getEnv();
     const { payload } = await jose.jwtVerify(token, getJWKS(), {
       issuer: env.APP_URL,
+      algorithms: ["ES256"],
     });
 
     if (!payload.sub) return null;

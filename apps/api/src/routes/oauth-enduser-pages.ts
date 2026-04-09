@@ -15,6 +15,32 @@ import { html } from "hono/html";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
 
+/** OAuth query params safe to forward — prevents XSS via arbitrary query injection. */
+const ALLOWED_OAUTH_PARAMS = [
+  "client_id",
+  "redirect_uri",
+  "response_type",
+  "scope",
+  "state",
+  "code_challenge",
+  "code_challenge_method",
+  "nonce",
+];
+
+/** Known scope labels — unknown scopes are filtered out (not rendered). */
+const SCOPE_LABELS: Record<string, string> = {
+  openid: "Votre identité",
+  profile: "Votre profil",
+  email: "Votre email",
+  connections: "Vos connexions (lecture)",
+  "connections:write": "Vos connexions (écriture)",
+  runs: "Votre historique (lecture)",
+  "runs:write": "Lancer des agents",
+  agents: "Vos agents (lecture)",
+  "agents:write": "Gérer vos agents",
+  schedules: "Vos planifications (lecture)",
+};
+
 export function createOAuthEndUserPagesRouter() {
   const router = new Hono<AppEnv>();
 
@@ -23,8 +49,15 @@ export function createOAuthEndUserPagesRouter() {
 
   // GET /oauth/enduser/login — Login page (redirected from /oauth2/authorize)
   router.get("/login", async (c) => {
-    // The oauth-provider passes signed query params that must be forwarded
-    const queryString = new URL(c.req.url).search;
+    // Parse and re-serialize only expected OAuth params to prevent XSS via query injection.
+    // CSRF: Better Auth validates Origin header against trustedOrigins on all POST endpoints.
+    const url = new URL(c.req.url);
+    const safeParams = new URLSearchParams();
+    for (const key of ALLOWED_OAUTH_PARAMS) {
+      const val = url.searchParams.get(key);
+      if (val) safeParams.set(key, val);
+    }
+    const safeQuery = safeParams.toString() ? `?${safeParams.toString()}` : "";
 
     return c.html(html`
       <!doctype html>
@@ -73,15 +106,15 @@ export function createOAuthEndUserPagesRouter() {
           <h1>Connexion</h1>
           <p>Connectez-vous pour continuer.</p>
           <form method="POST" action="/api/auth/sign-in/email">
-            <input type="hidden" name="callbackURL" value="/oauth2/authorize${queryString}" />
+            <input type="hidden" name="callbackURL" value="/oauth2/authorize${safeQuery}" />
             <input type="email" name="email" placeholder="Email" required autofocus />
             <input type="password" name="password" placeholder="Mot de passe" required />
             <button type="submit">Se connecter</button>
           </form>
           <p style="margin-top: 24px; font-size: 14px; color: #666">
             <a
-              href="/api/auth/sign-up/email${queryString
-                ? `?callbackURL=/oauth2/authorize${encodeURIComponent(queryString)}`
+              href="/api/auth/sign-up/email${safeQuery
+                ? `?callbackURL=/oauth2/authorize${encodeURIComponent(safeQuery)}`
                 : ""}"
               >Créer un compte</a
             >
@@ -146,26 +179,8 @@ export function createOAuthEndUserPagesRouter() {
           <ul class="scopes">
             ${scope
               .split(" ")
-              .map(
-                (s: string) =>
-                  html`<li>
-                    ${s === "openid"
-                      ? "Votre identité"
-                      : s === "profile"
-                        ? "Votre profil"
-                        : s === "email"
-                          ? "Votre email"
-                          : s === "connections"
-                            ? "Vos connexions (lecture)"
-                            : s === "connections:write"
-                              ? "Vos connexions (écriture)"
-                              : s === "runs"
-                                ? "Votre historique (lecture)"
-                                : s === "runs:write"
-                                  ? "Lancer des agents"
-                                  : s}
-                  </li>`,
-              )}
+              .filter((s: string) => SCOPE_LABELS[s])
+              .map((s: string) => html`<li>${SCOPE_LABELS[s]}</li>`)}
           </ul>
           <div class="actions">
             <button onclick="submitConsent(false)" class="deny" style="flex:1">Refuser</button>

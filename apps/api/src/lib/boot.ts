@@ -35,11 +35,20 @@ import { logInfraMode } from "../infra/index.ts";
 export async function boot(): Promise<void> {
   // Wire OIDC custom claims: inject endUserId + applicationId into access tokens
   setCustomAccessTokenClaimsHook(async (user, referenceId) => {
-    const endUser = await resolveOrCreateEndUser(
-      { id: user.id, email: user.email, name: user.name, emailVerified: user.emailVerified },
-      referenceId,
-    );
-    return { endUserId: endUser.id, applicationId: referenceId, role: endUser.role };
+    try {
+      const endUser = await resolveOrCreateEndUser(
+        { id: user.id, email: user.email, name: user.name, emailVerified: user.emailVerified },
+        referenceId,
+      );
+      return { endUserId: endUser.id, applicationId: referenceId, role: endUser.role };
+    } catch (err) {
+      logger.error("Failed to resolve end-user for OIDC token claims", {
+        userId: user.id,
+        referenceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
   });
 
   // Attempt to load cloud module (no-op in OSS — sets _cloud to null)

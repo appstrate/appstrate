@@ -15,16 +15,16 @@ describe("End-user JWT auth middleware", () => {
     ctx = await createTestContext({ orgSlug: "testorg" });
   });
 
-  it("falls through to cookie auth when JWT is invalid", async () => {
-    // Invalid JWT (starts with ey but isn't valid) → should fall through to cookie
+  it("returns 401 when JWT is invalid even with valid session cookie", async () => {
+    // Invalid JWT (starts with ey but isn't valid) → should NOT fall through to cookie (M1 fix)
     const res = await app.request("/api/end-users", {
       headers: {
         ...authHeaders(ctx),
         Authorization: "Bearer eyJhbGciOiJFUzI1NiJ9.invalid.signature",
       },
     });
-    // Cookie auth succeeds → 200 (end-users list)
-    expect(res.status).toBe(200);
+    // JWT was explicitly presented — reject, don't fall through to cookie
+    expect(res.status).toBe(401);
   });
 
   it("returns 401 when JWT is invalid and no cookie", async () => {

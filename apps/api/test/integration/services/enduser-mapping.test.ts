@@ -47,8 +47,13 @@ describe("resolveOrCreateEndUser", () => {
       externalId: "bob@example.com",
     });
 
-    // Now authenticate as the same email
-    const authUser = { id: ctx.user.id, email: "bob@example.com", name: "Bob Auth" };
+    // Now authenticate as the same email (emailVerified: true required for linking)
+    const authUser = {
+      id: ctx.user.id,
+      email: "bob@example.com",
+      name: "Bob Auth",
+      emailVerified: true,
+    };
     const resolved = await resolveOrCreateEndUser(authUser, ctx.defaultAppId);
 
     // Should return the same end-user (linked, not a new one)
@@ -63,6 +68,50 @@ describe("resolveOrCreateEndUser", () => {
 
     expect(row!.authUserId).toBe(ctx.user.id);
     expect(row!.emailVerified).toBe(true);
+  });
+
+  it("does not link when emailVerified is false", async () => {
+    await createEndUser(ctx.orgId, ctx.defaultAppId, {
+      email: "unverified@example.com",
+      name: "Unverified",
+    });
+
+    // Authenticate with emailVerified: false — should NOT link the API-created end-user.
+    // Uses a different email to avoid unique constraint on (applicationId, email).
+    const authUser = {
+      id: ctx.user.id,
+      email: "different@example.com",
+      name: "Different",
+      emailVerified: false,
+    };
+    const resolved = await resolveOrCreateEndUser(authUser, ctx.defaultAppId);
+
+    // Should create a new end-user (not linked to the existing one)
+    expect(resolved.id).toStartWith("eu_");
+    expect(resolved.email).toBe("different@example.com");
+  });
+
+  it("does not link when emailVerified is undefined", async () => {
+    await createEndUser(ctx.orgId, ctx.defaultAppId, {
+      email: "maybe@example.com",
+      name: "Maybe",
+    });
+
+    // Authenticate without emailVerified (undefined) — should NOT link.
+    // Uses a different email to avoid unique constraint.
+    const authUser = { id: ctx.user.id, email: "other@example.com", name: "Other" };
+    const resolved = await resolveOrCreateEndUser(authUser, ctx.defaultAppId);
+
+    // Should create a new end-user (not linked)
+    expect(resolved.id).toStartWith("eu_");
+    expect(resolved.email).toBe("other@example.com");
+  });
+
+  it("returns orgId in resolved end-user", async () => {
+    const authUser = { id: ctx.user.id, email: "org@example.com", name: "Org Test" };
+    const endUser = await resolveOrCreateEndUser(authUser, ctx.defaultAppId);
+
+    expect(endUser.orgId).toBe(ctx.orgId);
   });
 
   it("creates separate end-users for different applications", async () => {
@@ -88,7 +137,8 @@ describe("linkEndUserToAuthUser", () => {
       name: "Charlie",
     });
 
-    await linkEndUserToAuthUser(apiEndUser.id, ctx.user.id);
+    const linked = await linkEndUserToAuthUser(apiEndUser.id, ctx.user.id);
+    expect(linked).toBe(true);
 
     const [row] = await db
       .select({ authUserId: endUsers.authUserId, emailVerified: endUsers.emailVerified })
@@ -100,15 +150,18 @@ describe("linkEndUserToAuthUser", () => {
     expect(row!.emailVerified).toBe(true);
   });
 
-  it("does not overwrite if already linked", async () => {
+  it("does not overwrite if already linked and returns false", async () => {
     const apiEndUser = await createEndUser(ctx.orgId, ctx.defaultAppId, {
       email: "charlie@example.com",
       name: "Charlie",
     });
 
-    await linkEndUserToAuthUser(apiEndUser.id, ctx.user.id);
+    const first = await linkEndUserToAuthUser(apiEndUser.id, ctx.user.id);
+    expect(first).toBe(true);
+
     // Try to link to a different user — should be a no-op (WHERE authUserId IS NULL)
-    await linkEndUserToAuthUser(apiEndUser.id, "different-user-id");
+    const second = await linkEndUserToAuthUser(apiEndUser.id, "different-user-id");
+    expect(second).toBe(false);
 
     const [row] = await db
       .select({ authUserId: endUsers.authUserId })

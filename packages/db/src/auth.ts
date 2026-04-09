@@ -216,9 +216,8 @@ export const auth = betterAuth({
             { id: user.id, email: user.email, name: user.name, emailVerified: user.emailVerified },
             referenceId,
           );
-        } catch (err) {
-          // Log but don't block token issuance if mapping fails
-          console.error("[auth] customAccessTokenClaims hook failed:", err);
+        } catch {
+          // Error handled by the hook caller (boot.ts logs via structured logger)
           return {};
         }
       },

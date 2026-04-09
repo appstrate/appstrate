@@ -51,7 +51,11 @@ import {
   verifyEndUserAccessToken,
   resolveEndUserPermissionsFromClaims,
 } from "./services/enduser-token.ts";
-import { resolveOrCreateEndUser, getEndUserRole } from "./services/enduser-mapping.ts";
+import {
+  resolveOrCreateEndUser,
+  getEndUserRole,
+  getApplicationOrgId,
+} from "./services/enduser-mapping.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
 import { getAppConfig } from "./lib/app-config.ts";
@@ -201,25 +205,42 @@ app.use("*", async (c, next) => {
     const claims = await verifyEndUserAccessToken(authHeader.slice(7));
     if (claims) {
       // Resolve per-app end-user from auth user
-      const endUser = claims.endUserId
-        ? {
-            id: claims.endUserId,
-            applicationId: claims.applicationId ?? "",
-            email: claims.email ?? null,
-            name: claims.name ?? null,
-            role: claims.role ?? "member",
-          }
-        : claims.applicationId
-          ? await resolveOrCreateEndUser(
-              {
-                id: claims.authUserId,
-                email: claims.email ?? "",
-                name: claims.name,
-                emailVerified: true,
-              },
-              claims.applicationId,
-            )
-          : null;
+      let endUser: {
+        id: string;
+        applicationId: string;
+        orgId?: string;
+        email: string | null;
+        name: string | null;
+        role: string;
+      } | null = null;
+
+      if (claims.endUserId) {
+        // Token carries endUserId directly — resolve orgId from application
+        const orgId = claims.applicationId ? await getApplicationOrgId(claims.applicationId) : null;
+        if (!orgId) {
+          return c.json({ error: "invalid_token", detail: "Application not found" }, 401);
+        }
+        endUser = {
+          id: claims.endUserId,
+          applicationId: claims.applicationId ?? "",
+          orgId,
+          email: claims.email ?? null,
+          name: claims.name ?? null,
+          role: claims.role ?? "member",
+        };
+      } else if (claims.applicationId) {
+        // No endUserId in token — resolve or create via service (returns orgId)
+        endUser = await resolveOrCreateEndUser(
+          {
+            id: claims.authUserId,
+            email: claims.email ?? "",
+            name: claims.name,
+            // JWT bearer = authenticated user, emailVerified is valid for linking
+            emailVerified: true,
+          },
+          claims.applicationId,
+        );
+      }
 
       if (!endUser) {
         // Valid JWT but can't resolve end-user context — reject
@@ -235,6 +256,9 @@ app.use("*", async (c, next) => {
       }
 
       c.set("applicationId", endUser.applicationId);
+      if (endUser.orgId) {
+        c.set("orgId", endUser.orgId);
+      }
       // DB fallback for legacy tokens without role claim
       if (!claims.role && endUser.id) {
         const dbRole = (await getEndUserRole(endUser.id)) ?? "member";
@@ -246,7 +270,8 @@ app.use("*", async (c, next) => {
       c.set("permissions", resolveEndUserPermissionsFromClaims(claims));
       return next();
     }
-    // JWT verification failed — fall through to cookie
+    // JWT was explicitly presented but failed — do not fall through to cookie
+    return c.json({ error: "invalid_token", detail: "Invalid or expired access token" }, 401);
   }
 
   // Fallback: cookie session
@@ -325,6 +350,7 @@ const APP_SCOPED_PREFIXES = [
 const appContextMiddleware = requireAppContext();
 app.use("*", async (c, next) => {
   if (skipAuth(c.req.path)) return next();
+  if (c.get("authMethod") === "enduser_token") return next(); // applicationId + orgId already set from token
   if (!c.get("user")) return next();
   if (!APP_SCOPED_PREFIXES.some((p) => c.req.path.startsWith(p))) return next();
   return appContextMiddleware(c, next);

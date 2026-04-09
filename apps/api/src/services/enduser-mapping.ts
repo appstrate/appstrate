@@ -27,6 +27,7 @@ interface AuthUser {
 interface ResolvedEndUser {
   id: string;
   applicationId: string;
+  orgId: string;
   email: string | null;
   name: string | null;
   role: string;
@@ -49,6 +50,7 @@ export async function resolveOrCreateEndUser(
     .select({
       id: endUsers.id,
       applicationId: endUsers.applicationId,
+      orgId: endUsers.orgId,
       email: endUsers.email,
       name: endUsers.name,
       role: endUsers.role,
@@ -60,12 +62,14 @@ export async function resolveOrCreateEndUser(
   if (linked) return linked;
 
   // 2. API-created end-user with matching email — link it
-  // Only link if the auth user's email is verified (prevents account takeover when SMTP is disabled)
-  if (authUser.email && authUser.emailVerified !== false) {
+  // Only link if the auth user's email is strictly verified (prevents account takeover when SMTP
+  // is disabled or emailVerified is undefined). Use === true to reject undefined/null.
+  if (authUser.email && authUser.emailVerified === true) {
     const [unlinked] = await db
       .select({
         id: endUsers.id,
         applicationId: endUsers.applicationId,
+        orgId: endUsers.orgId,
         email: endUsers.email,
         name: endUsers.name,
         role: endUsers.role,
@@ -81,15 +85,34 @@ export async function resolveOrCreateEndUser(
       .limit(1);
 
     if (unlinked) {
-      await linkEndUserToAuthUser(unlinked.id, authUser.id);
-      // If linkEndUserToAuthUser affected 0 rows (race: another request linked it first),
-      // re-fetch via step 1 query — the winner already linked authUserId.
-      logger.info("Linked existing end-user to auth user", {
-        endUserId: unlinked.id,
-        authUserId: authUser.id,
-        applicationId,
-      });
-      return unlinked;
+      const linked = await linkEndUserToAuthUser(unlinked.id, authUser.id);
+      if (!linked) {
+        // Race lost — another request linked this end-user first.
+        // Re-fetch via step 1 to check if we got linked by the winner.
+        const [reFetched] = await db
+          .select({
+            id: endUsers.id,
+            applicationId: endUsers.applicationId,
+            orgId: endUsers.orgId,
+            email: endUsers.email,
+            name: endUsers.name,
+            role: endUsers.role,
+          })
+          .from(endUsers)
+          .where(
+            and(eq(endUsers.authUserId, authUser.id), eq(endUsers.applicationId, applicationId)),
+          )
+          .limit(1);
+        if (reFetched) return reFetched;
+        // Different user won the race — fall through to step 3 (create new end-user)
+      } else {
+        logger.info("Linked existing end-user to auth user", {
+          endUserId: unlinked.id,
+          authUserId: authUser.id,
+          applicationId,
+        });
+        return unlinked;
+      }
     }
   }
 
@@ -122,13 +145,14 @@ export async function resolveOrCreateEndUser(
         name: authUser.name ?? email,
         externalId: email, // Use email as externalId for OIDC-created end-users
         status: "active",
-        emailVerified: authUser.emailVerified ?? true,
+        emailVerified: authUser.emailVerified ?? false,
         createdAt: now,
         updatedAt: now,
       })
       .returning({
         id: endUsers.id,
         applicationId: endUsers.applicationId,
+        orgId: endUsers.orgId,
         email: endUsers.email,
         name: endUsers.name,
         role: endUsers.role,
@@ -145,6 +169,7 @@ export async function resolveOrCreateEndUser(
       .select({
         id: endUsers.id,
         applicationId: endUsers.applicationId,
+        orgId: endUsers.orgId,
         email: endUsers.email,
         name: endUsers.name,
         role: endUsers.role,
@@ -172,6 +197,19 @@ export async function resolveOrCreateEndUser(
 }
 
 /**
+ * Get the orgId for an application. Lightweight query used by the JWT auth
+ * middleware when the token carries endUserId directly (no resolveOrCreateEndUser call).
+ */
+export async function getApplicationOrgId(applicationId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ orgId: applications.orgId })
+    .from(applications)
+    .where(eq(applications.id, applicationId))
+    .limit(1);
+  return row?.orgId ?? null;
+}
+
+/**
  * Get an end-user's role by ID. Used as fallback when the JWT token
  * doesn't contain a role claim (legacy tokens pre-role feature).
  */
@@ -187,14 +225,20 @@ export async function getEndUserRole(endUserId: string): Promise<string | null> 
 /**
  * Link an existing API-created end-user to a Better Auth user.
  * Called when an end-user with matching email first authenticates via OIDC.
+ * Returns true if the link succeeded, false if another request won the race.
  */
-export async function linkEndUserToAuthUser(endUserId: string, authUserId: string): Promise<void> {
-  await db
+export async function linkEndUserToAuthUser(
+  endUserId: string,
+  authUserId: string,
+): Promise<boolean> {
+  const rows = await db
     .update(endUsers)
     .set({
       authUserId,
       emailVerified: true,
       updatedAt: new Date(),
     })
-    .where(and(eq(endUsers.id, endUserId), isNull(endUsers.authUserId)));
+    .where(and(eq(endUsers.id, endUserId), isNull(endUsers.authUserId)))
+    .returning({ id: endUsers.id });
+  return rows.length > 0;
 }
