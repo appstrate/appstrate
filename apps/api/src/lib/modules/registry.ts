@@ -20,6 +20,7 @@ import { registerBuiltinModule } from "./module-loader.ts";
 // Built-in platform modules (loaded only if listed in APPSTRATE_MODULES)
 // ---------------------------------------------------------------------------
 
+registerBuiltinModule("scheduling", () => import("../../modules/scheduling/index.ts"));
 registerBuiltinModule("webhooks", () => import("../../modules/webhooks/index.ts"));
 
 // ---------------------------------------------------------------------------

@@ -41,8 +41,8 @@ import {
 // --- Org settings schema (services/organizations.ts) ---
 import { orgSettingsSchema } from "../services/organizations.ts";
 
-// --- Schedule schemas (routes/schedules.ts) ---
-import { createScheduleSchema, updateScheduleSchema } from "../routes/schedules.ts";
+// --- Schedule schemas (modules/scheduling/routes.ts) ---
+import { createScheduleSchema, updateScheduleSchema } from "../modules/scheduling/routes.ts";
 
 // --- User-agent schemas (routes/user-agents.ts) ---
 import { updateSkillsSchema, updateToolsSchema } from "../routes/user-agents.ts";

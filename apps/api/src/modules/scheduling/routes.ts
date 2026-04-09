@@ -2,7 +2,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AppEnv } from "../types/index.ts";
+import type { AppEnv } from "../../types/index.ts";
 import {
   getSchedule,
   listSchedules,
@@ -10,15 +10,15 @@ import {
   createSchedule,
   updateSchedule,
   deleteSchedule,
-} from "../services/scheduler.ts";
-import { isValidCron } from "../lib/cron.ts";
-import { validateInput, schemaHasFileFields } from "../services/schema.ts";
-import { requireAgent } from "../middleware/guards.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
-import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
-import { rateLimit } from "../middleware/rate-limit.ts";
-import { getAccessibleProfile } from "../services/connection-profiles.ts";
-import { getActor } from "../lib/actor.ts";
+} from "./service.ts";
+import { isValidCron } from "../../lib/cron.ts";
+import { validateInput, schemaHasFileFields } from "../../services/schema.ts";
+import { requireAgent } from "../../middleware/guards.ts";
+import { requirePermission } from "../../middleware/require-permission.ts";
+import { forbidden, invalidRequest, notFound, parseBody } from "../../lib/errors.ts";
+import { rateLimit } from "../../middleware/rate-limit.ts";
+import { getAccessibleProfile } from "../../services/connection-profiles.ts";
+import { getActor } from "../../lib/actor.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 export const createScheduleSchema = z.object({
   name: z.string().optional(),

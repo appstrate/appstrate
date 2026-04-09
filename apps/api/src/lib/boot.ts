@@ -31,7 +31,6 @@ import {
   storageFolderForType,
 } from "../services/package-items/index.ts";
 import { markOrphanRunsFailed } from "../services/state/index.ts";
-import { initScheduleWorker } from "../services/scheduler.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
@@ -133,11 +132,6 @@ export async function boot(): Promise<void> {
   const parallelInits: Promise<void>[] = [
     orchestrator.initialize().catch((err) => {
       logger.warn("Could not initialize sidecar pool", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }),
-    initScheduleWorker().catch((err) => {
-      logger.warn("Could not initialize scheduler", {
         error: err instanceof Error ? err.message : String(err),
       });
     }),

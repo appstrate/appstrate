@@ -30,7 +30,7 @@ import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 // Route imports
 import { createAgentsRouter } from "../../src/routes/agents.ts";
 import { createRunsRouter } from "../../src/routes/runs.ts";
-import { createSchedulesRouter } from "../../src/routes/schedules.ts";
+import { createSchedulesRouter } from "../../src/modules/scheduling/routes.ts";
 import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
 import { createProvidersRouter } from "../../src/routes/providers.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";

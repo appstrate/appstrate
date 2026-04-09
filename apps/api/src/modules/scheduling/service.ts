@@ -1,36 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createQueue } from "../infra/queue/index.ts";
-import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
+import { createQueue } from "../../infra/queue/index.ts";
+import type { JobQueue, QueueJob } from "../../infra/queue/index.ts";
 import { eq, and, asc, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   packageSchedules,
   connectionProfiles as connectionProfilesTable,
 } from "@appstrate/db/schema";
-import { batchLoadUserNames } from "../lib/user-helpers.ts";
-import { logger } from "../lib/logger.ts";
+import { batchLoadUserNames } from "../../lib/user-helpers.ts";
+import { logger } from "../../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
-import { createFailedRun } from "./state/index.ts";
-import { emitEvent } from "../lib/modules/module-loader.ts";
-import { prepareAndExecuteRun, resolveRunPreflight } from "./run-pipeline.ts";
-import { asRecordOrNull } from "../lib/safe-json.ts";
-import { getPackage, packageExists } from "./agent-service.ts";
+import { createFailedRun } from "../../services/state/index.ts";
+import { emitEvent } from "../../lib/modules/module-loader.ts";
+import { prepareAndExecuteRun, resolveRunPreflight } from "../../services/run-pipeline.ts";
+import { asRecordOrNull } from "../../lib/safe-json.ts";
+import { getPackage, packageExists } from "../../services/agent-service.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import {
   getProfileByIdUnsafe,
   resolveProviderProfiles,
   resolveScheduleProfileArgs,
   getAgentAppProfile,
-} from "./connection-profiles.ts";
-import { resolveProviderStatuses } from "./connection-manager/index.ts";
-import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { ApiError, internalError } from "../lib/errors.ts";
-import { validateInput } from "./schema.ts";
+} from "../../services/connection-profiles.ts";
+import { resolveProviderStatuses } from "../../services/connection-manager/index.ts";
+import type { LoadedPackage, ProviderProfileMap } from "../../types/index.ts";
+import { resolveManifestProviders } from "../../lib/manifest-utils.ts";
+import { ApiError, internalError } from "../../lib/errors.ts";
+import { validateInput } from "../../services/schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-import { computeNextRun } from "../lib/cron.ts";
-import { actorFromIds, type Actor } from "../lib/actor.ts";
+import { computeNextRun } from "../../lib/cron.ts";
+import { actorFromIds, type Actor } from "../../lib/actor.ts";
 
 // ---------------------------------------------------------------------------
 // Types

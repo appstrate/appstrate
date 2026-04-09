@@ -16,7 +16,6 @@ import { requestId } from "./middleware/request-id.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
 import { createAgentsRouter } from "./routes/agents.ts";
 import { createRunsRouter } from "./routes/runs.ts";
-import { createSchedulesRouter } from "./routes/schedules.ts";
 import { createUserAgentsRouter } from "./routes/user-agents.ts";
 import { createProvidersRouter } from "./routes/providers.ts";
 import { createApiKeysRouter } from "./routes/api-keys.ts";
@@ -283,7 +282,6 @@ process.on("SIGTERM", () => void shutdown());
 const userAgentsRouter = createUserAgentsRouter();
 const agentsRouter = createAgentsRouter();
 const runsRouter = createRunsRouter();
-const schedulesRouter = createSchedulesRouter();
 
 // Organization routes (no org context needed — self-managed auth)
 app.route("/api/orgs", orgsRouter);
@@ -292,7 +290,6 @@ app.route("/api/agents", userAgentsRouter); // Must be before agentsRouter (impo
 app.route("/api/agents", agentsRouter);
 app.route("/api", createNotificationsRouter()); // Must be before runsRouter (GET /api/runs vs /api/runs/:id)
 app.route("/api", runsRouter);
-app.route("/api", schedulesRouter);
 app.route("/api/packages", createPackagesRouter());
 app.route("/api/end-users", createEndUsersRouter());
 app.route("/api/providers", createProvidersRouter());
