@@ -158,15 +158,19 @@ describe("module-loader", () => {
   });
 
   describe("registerModuleRoutes", () => {
-    it("calls registerRoutes on each module", async () => {
-      const routeFn = mock((_app: unknown) => {});
-      const mod = mockModule("routed", { registerRoutes: routeFn });
+    it("calls createRouter and mounts returned routers", async () => {
+      const { Hono } = await import("hono");
+      const router = new Hono();
+      router.get("/ping", (c) => c.json({ ok: true }));
+      const mod = mockModule("routed", { createRouter: () => router });
       await loadModulesFromInstances([mod], mockCtx());
 
-      const fakeApp = {};
-      registerModuleRoutes(fakeApp);
-      expect(routeFn).toHaveBeenCalledTimes(1);
-      expect(routeFn).toHaveBeenCalledWith(fakeApp);
+      const app = new Hono();
+      registerModuleRoutes(app as never);
+      // Verify the route was mounted under /api
+      const res = await app.request("/api/ping");
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
     });
   });
 

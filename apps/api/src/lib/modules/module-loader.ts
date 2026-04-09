@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Hono } from "hono";
 import type { AppConfig } from "@appstrate/shared-types";
 import type {
   AppstrateModule,
@@ -7,6 +8,7 @@ import type {
   ModuleHooks,
   ModuleEvents,
 } from "@appstrate/core/module";
+import type { AppEnv } from "../../types/index.ts";
 import { logger } from "../logger.ts";
 
 // ---------------------------------------------------------------------------
@@ -122,10 +124,13 @@ export function getModulePublicPaths(): string[] {
   return _publicPathsCache;
 }
 
-/** Register all module routes on the app. */
-export function registerModuleRoutes(app: unknown): void {
+/** Collect routers from all modules and mount them on the app under `/api`. */
+export function registerModuleRoutes(app: Hono<AppEnv>): void {
   for (const mod of _modules.values()) {
-    mod.registerRoutes?.(app);
+    const router = mod.createRouter?.();
+    if (router) {
+      app.route("/api", router);
+    }
   }
 }
 

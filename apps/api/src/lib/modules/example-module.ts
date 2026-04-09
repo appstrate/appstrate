@@ -29,10 +29,10 @@ const exampleModule: AppstrateModule = {
 
   publicPaths: ["/api/example/ping"],
 
-  registerRoutes(app) {
+  createRouter() {
     const router = new Hono<AppEnv>();
     router.get("/example/ping", (c) => c.json({ pong: true }));
-    (app as Hono<AppEnv>).route("/api", router);
+    return router;
   },
 
   extendAppConfig(base) {

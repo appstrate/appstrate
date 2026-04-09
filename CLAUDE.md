@@ -167,7 +167,7 @@ Appstrate uses a formalized module system for optional features. The contract is
 - `apps/api/src/lib/modules/hooks.ts` — Lifecycle hook helpers (`beforeRun`, `afterRun`, `onOrgCreated`, `onOrgDeleted`) — call hooks by name, never by module ID
 - `apps/api/src/lib/modules/example-module.ts` — Reference implementation
 
-**Module lifecycle:** registry (`APPSTRATE_MODULES` env var) → dynamic import → topological sort by `manifest.dependencies` → `init(ctx)` → `registerRoutes(app)` → running → `shutdown()` (reverse order). All declared modules are required — any import or init failure is fatal.
+**Module lifecycle:** registry (`APPSTRATE_MODULES` env var) → dynamic import → topological sort by `manifest.dependencies` → `init(ctx)` → `createRouter()` → running → `shutdown()` (reverse order). All declared modules are required — any import or init failure is fatal.
 
 **Hooks vs Events:**
 
@@ -181,7 +181,7 @@ The platform calls hooks/events by name, never by module ID. This ensures zero k
 1. Import types from `@appstrate/core/module`
 2. Export a default `AppstrateModule` from your package
 3. Add the package specifier to the `APPSTRATE_MODULES` env var (comma-separated)
-4. Module contributes feature flags via `extendAppConfig()`, routes via `registerRoutes()`, auth-bypass paths via `publicPaths`, email template overrides via `emailOverrides`, request/response logic via `hooks` (e.g. `beforeRun`, `beforeSignup`), notifications via `events` (e.g. `afterRun`, `onOrgCreated`, `onOrgDeleted`)
+4. Module contributes feature flags via `extendAppConfig()`, routes via `createRouter()`, auth-bypass paths via `publicPaths`, email template overrides via `emailOverrides`, request/response logic via `hooks` (e.g. `beforeRun`, `beforeSignup`), notifications via `events` (e.g. `afterRun`, `onOrgCreated`, `onOrgDeleted`)
 
 **Disabling a module = zero footprint:** remove it from `APPSTRATE_MODULES` = not imported = no tables, no routes, no middleware, no code loaded. Default is empty (OSS mode).
 

@@ -6,10 +6,11 @@
  * Published in @appstrate/core so that external modules (e.g. @appstrate/cloud)
  * can implement the interface without depending on the API package.
  *
- * These types are intentionally framework-agnostic — no Hono, no Drizzle,
- * no app-specific types. The platform adapter layer bridges these to the
- * actual framework types at runtime.
+ * Hono is the only framework dependency — all Appstrate modules must provide
+ * Hono routers. It is declared as an optional peer dependency.
  */
+
+import type { Hono } from "hono";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -30,7 +31,7 @@ export interface ModuleManifest {
 /**
  * The contract every Appstrate module must implement.
  *
- * Lifecycle: resolve -> init -> registerRoutes -> (running) -> shutdown
+ * Lifecycle: resolve -> init -> createRouter -> (running) -> shutdown
  */
 export interface AppstrateModule {
   manifest: ModuleManifest;
@@ -45,10 +46,11 @@ export interface AppstrateModule {
   publicPaths?: string[];
 
   /**
-   * Mount routes onto the app. The `app` parameter is typed as `unknown`
-   * to keep this interface framework-agnostic — modules cast internally.
+   * Create and return a Hono router to be mounted on the app under `/api`.
+   * The platform calls `app.route("/api", router)` with the returned instance.
    */
-  registerRoutes?(app: unknown): void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  createRouter?(): Hono<any>;
 
   /**
    * Contribute to the frontend AppConfig (feature flags, legal URLs, etc.).
