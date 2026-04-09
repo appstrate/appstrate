@@ -10,7 +10,7 @@
  * Without this module, only system models (from SYSTEM_PROVIDER_KEYS env) are available.
  */
 
-import type { Hono } from "hono";
+import { Hono } from "hono";
 import type { AppstrateModule } from "@appstrate/core/module";
 import type { AppEnv } from "../../types/index.ts";
 import { createModelsRouter } from "./routes/models.ts";
@@ -25,9 +25,11 @@ const providerManagementModule: AppstrateModule = {
     // System model registry is initialized in boot.ts (core responsibility).
   },
 
-  registerRoutes(app) {
-    (app as Hono<AppEnv>).route("/api/models", createModelsRouter());
-    (app as Hono<AppEnv>).route("/api/provider-keys", createProviderKeysRouter());
+  createRouter() {
+    const router = new Hono<AppEnv>();
+    router.route("/models", createModelsRouter());
+    router.route("/provider-keys", createProviderKeysRouter());
+    return router;
   },
 
   extendAppConfig(base) {

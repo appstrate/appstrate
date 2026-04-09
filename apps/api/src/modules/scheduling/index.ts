@@ -7,9 +7,7 @@
  * worker that triggers agent runs on cron schedule.
  */
 
-import type { Hono } from "hono";
 import type { AppstrateModule } from "@appstrate/core/module";
-import type { AppEnv } from "../../types/index.ts";
 import { createSchedulesRouter } from "./routes.ts";
 import { initScheduleWorker, shutdownScheduleWorker } from "./service.ts";
 
@@ -20,8 +18,8 @@ const schedulingModule: AppstrateModule = {
     await initScheduleWorker();
   },
 
-  registerRoutes(app) {
-    (app as Hono<AppEnv>).route("/api", createSchedulesRouter());
+  createRouter() {
+    return createSchedulesRouter();
   },
 
   extendAppConfig(base) {

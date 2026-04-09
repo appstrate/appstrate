@@ -8,9 +8,7 @@
  * and dispatches matching webhooks to subscribers.
  */
 
-import type { Hono } from "hono";
 import type { AppstrateModule, RunStatusChangeParams } from "@appstrate/core/module";
-import type { AppEnv } from "../../types/index.ts";
 import { createWebhooksRouter } from "./routes.ts";
 import { initWebhookWorker, shutdownWebhookWorker, dispatchRunWebhook } from "./service.ts";
 
@@ -21,8 +19,8 @@ const webhooksModule: AppstrateModule = {
     initWebhookWorker();
   },
 
-  registerRoutes(app) {
-    (app as Hono<AppEnv>).route("/api", createWebhooksRouter());
+  createRouter() {
+    return createWebhooksRouter();
   },
 
   extendAppConfig(base) {
