@@ -25,7 +25,7 @@ describe("OAuth Client Admin Routes", () => {
       expect(res.status).toBe(401);
     });
 
-    it("enables end-user auth for an application", async () => {
+    it("enables end-user auth and returns clientId + clientSecret", async () => {
       const res = await app.request(`/api/applications/${ctx.defaultAppId}/oauth`, {
         method: "POST",
         headers: {
@@ -38,9 +38,14 @@ describe("OAuth Client Admin Routes", () => {
         }),
       });
 
-      // May be 201 (success) or 4xx (if Better Auth's create-client endpoint
-      // requires specific session state). Either way, the route is wired correctly.
-      expect([201, 400, 403, 500]).toContain(res.status);
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.enabled).toBe(true);
+      expect(body.clientId).toBeDefined();
+      expect(typeof body.clientId).toBe("string");
+      expect(body.clientSecret).toBeDefined();
+      expect(typeof body.clientSecret).toBe("string");
+      expect((body.clientSecret as string).length).toBeGreaterThan(10);
     });
   });
 

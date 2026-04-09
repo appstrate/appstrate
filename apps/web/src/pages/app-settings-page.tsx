@@ -23,12 +23,13 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
 import { AppProfilesTab } from "../components/app-profiles-tab";
+import { OAuthSettingsTab } from "../components/oauth-settings-tab";
 
 interface SettingsFormData {
   name: string;
 }
 
-const TABS = ["general", "profiles"] as const;
+const TABS = ["general", "oauth", "profiles"] as const;
 type Tab = (typeof TABS)[number];
 
 export function AppSettingsPage() {
@@ -63,12 +64,14 @@ export function AppSettingsPage() {
         <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="mt-2">
           <TabsList>
             <TabsTrigger value="general">{t("appSettings.tabGeneral")}</TabsTrigger>
+            <TabsTrigger value="oauth">{t("appSettings.tabOAuth")}</TabsTrigger>
             <TabsTrigger value="profiles">{t("appSettings.tabProfiles")}</TabsTrigger>
           </TabsList>
         </Tabs>
       </PageHeader>
 
       {tab === "general" && <GeneralTab appId={appId} application={application} />}
+      {tab === "oauth" && <OAuthSettingsTab appId={appId} />}
       {tab === "profiles" && <AppProfilesTab />}
     </>
   );
