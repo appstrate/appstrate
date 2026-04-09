@@ -455,6 +455,9 @@ export interface InstalledPackage {
 
 // --- End-User Types ---
 
+/** Roles available for end-users within an application. */
+export type EndUserRole = "admin" | "member" | "viewer";
+
 export interface EndUserInfo {
   id: string;
   object: "end_user";
@@ -465,6 +468,7 @@ export interface EndUserInfo {
   metadata: Record<string, unknown> | null;
   status: string;
   emailVerified: boolean;
+  role: string;
   createdAt: string;
   updatedAt: string;
 }

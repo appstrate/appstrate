@@ -47,8 +47,11 @@ import { getCloudModule } from "./lib/cloud-loader.ts";
 import { ApiError, unauthorized } from "./lib/errors.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "./lib/permissions.ts";
 import { isEndUserInApp } from "./services/end-users.ts";
-import { verifyEndUserAccessToken, scopesToPermissions } from "./services/enduser-token.ts";
-import { resolveOrCreateEndUser } from "./services/enduser-mapping.ts";
+import {
+  verifyEndUserAccessToken,
+  resolveEndUserPermissionsFromClaims,
+} from "./services/enduser-token.ts";
+import { resolveOrCreateEndUser, getEndUserRole } from "./services/enduser-mapping.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
 import { getAppConfig } from "./lib/app-config.ts";
@@ -215,9 +218,13 @@ app.use("*", async (c, next) => {
       if (endUser) {
         c.set("endUser", endUser);
         c.set("applicationId", endUser.applicationId);
+        // DB fallback for legacy tokens without role claim
+        if (!claims.role && endUser.id) {
+          claims.role = (await getEndUserRole(endUser.id)) ?? undefined;
+        }
       }
       c.set("authMethod", "enduser_token");
-      c.set("permissions", scopesToPermissions(claims.scope));
+      c.set("permissions", resolveEndUserPermissionsFromClaims(claims));
       return next();
     }
     // JWT verification failed — fall through to cookie

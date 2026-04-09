@@ -35,6 +35,12 @@ export const endUsersPaths = {
                   maxLength: 255,
                   description: "Your system's unique identifier for this end-user",
                 },
+                role: {
+                  type: "string",
+                  enum: ["admin", "member", "viewer"],
+                  default: "member",
+                  description: "Role of the end-user within the application",
+                },
                 metadata: {
                   type: "object",
                   description:
@@ -46,6 +52,7 @@ export const endUsersPaths = {
               name: "Alice Martin",
               email: "alice@example.com",
               externalId: "usr_12345",
+              role: "member",
               metadata: { plan: "pro", region: "eu-west" },
             },
           },
@@ -251,6 +258,11 @@ export const endUsersPaths = {
                   type: ["string", "null"],
                   maxLength: 255,
                   description: "Your system's unique identifier for this end-user",
+                },
+                role: {
+                  type: "string",
+                  enum: ["admin", "member", "viewer"],
+                  description: "Role of the end-user within the application",
                 },
                 metadata: {
                   type: "object",

@@ -28,6 +28,7 @@ interface ResolvedEndUser {
   applicationId: string;
   email: string | null;
   name: string | null;
+  role: string;
 }
 
 /**
@@ -49,6 +50,7 @@ export async function resolveOrCreateEndUser(
       applicationId: endUsers.applicationId,
       email: endUsers.email,
       name: endUsers.name,
+      role: endUsers.role,
     })
     .from(endUsers)
     .where(and(eq(endUsers.authUserId, authUser.id), eq(endUsers.applicationId, applicationId)))
@@ -64,6 +66,7 @@ export async function resolveOrCreateEndUser(
         applicationId: endUsers.applicationId,
         email: endUsers.email,
         name: endUsers.name,
+        role: endUsers.role,
       })
       .from(endUsers)
       .where(
@@ -122,6 +125,7 @@ export async function resolveOrCreateEndUser(
       applicationId: endUsers.applicationId,
       email: endUsers.email,
       name: endUsers.name,
+      role: endUsers.role,
     });
 
   // Create default connection profile
@@ -138,6 +142,19 @@ export async function resolveOrCreateEndUser(
   });
 
   return created!;
+}
+
+/**
+ * Get an end-user's role by ID. Used as fallback when the JWT token
+ * doesn't contain a role claim (legacy tokens pre-role feature).
+ */
+export async function getEndUserRole(endUserId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ role: endUsers.role })
+    .from(endUsers)
+    .where(eq(endUsers.id, endUserId))
+    .limit(1);
+  return row?.role ?? null;
 }
 
 /**

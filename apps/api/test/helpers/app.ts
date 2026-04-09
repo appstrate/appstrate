@@ -18,8 +18,11 @@ import { requireOrgContext } from "../../src/middleware/org-context.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { isEndUserInApp } from "../../src/services/end-users.ts";
-import { verifyEndUserAccessToken, scopesToPermissions } from "../../src/services/enduser-token.ts";
-import { resolveOrCreateEndUser } from "../../src/services/enduser-mapping.ts";
+import {
+  verifyEndUserAccessToken,
+  resolveEndUserPermissionsFromClaims,
+} from "../../src/services/enduser-token.ts";
+import { resolveOrCreateEndUser, getEndUserRole } from "../../src/services/enduser-mapping.ts";
 import { ApiError, unauthorized } from "../../src/lib/errors.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "../../src/lib/permissions.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
@@ -187,9 +190,12 @@ export function getTestApp(): Hono<AppEnv> {
         if (endUser) {
           c.set("endUser", endUser);
           c.set("applicationId", endUser.applicationId);
+          if (!claims.role && endUser.id) {
+            claims.role = (await getEndUserRole(endUser.id)) ?? undefined;
+          }
         }
         c.set("authMethod", "enduser_token");
-        c.set("permissions", scopesToPermissions(claims.scope));
+        c.set("permissions", resolveEndUserPermissionsFromClaims(claims));
         return next();
       }
     }

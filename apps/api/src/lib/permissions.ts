@@ -212,6 +212,58 @@ const ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<Permission>> = {
 };
 
 // ---------------------------------------------------------------------------
+// End-User Role → Permission matrix
+// ---------------------------------------------------------------------------
+
+/** End-user roles — subset of org roles, scoped to application resources. */
+export type EndUserRole = "admin" | "member" | "viewer";
+
+/** End-user admin: broad access to application resources + manage other end-users. */
+const END_USER_ADMIN_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
+  "agents:read",
+  "agents:run",
+  "runs:read",
+  "runs:cancel",
+  "connections:read",
+  "connections:connect",
+  "connections:disconnect",
+  "schedules:read",
+  "end-users:read",
+  "end-users:write",
+]);
+
+/** End-user member: use agents and manage own connections. */
+const END_USER_MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
+  "agents:read",
+  "agents:run",
+  "runs:read",
+  "runs:cancel",
+  "connections:read",
+  "connections:connect",
+  "connections:disconnect",
+]);
+
+/** End-user viewer: read-only access. */
+const END_USER_VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
+  "agents:read",
+  "runs:read",
+]);
+
+/** End-user role → permissions mapping. */
+const END_USER_ROLE_PERMISSIONS: Record<EndUserRole, ReadonlySet<Permission>> = {
+  admin: END_USER_ADMIN_PERMISSIONS,
+  member: END_USER_MEMBER_PERMISSIONS,
+  viewer: END_USER_VIEWER_PERMISSIONS,
+};
+
+/** Resolve an end-user role to its permission set. */
+export function resolveEndUserPermissions(role: EndUserRole): Set<Permission> {
+  const perms = END_USER_ROLE_PERMISSIONS[role];
+  if (!perms) return new Set(END_USER_MEMBER_PERMISSIONS); // fallback to member
+  return new Set(perms);
+}
+
+// ---------------------------------------------------------------------------
 // API Key scopes
 // ---------------------------------------------------------------------------
 

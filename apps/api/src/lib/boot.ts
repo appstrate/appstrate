@@ -36,7 +36,7 @@ export async function boot(): Promise<void> {
   // Wire OIDC custom claims: inject endUserId + applicationId into access tokens
   setCustomAccessTokenClaimsHook(async (user, referenceId) => {
     const endUser = await resolveOrCreateEndUser(user, referenceId);
-    return { endUserId: endUser.id, applicationId: referenceId };
+    return { endUserId: endUser.id, applicationId: referenceId, role: endUser.role };
   });
 
   // Attempt to load cloud module (no-op in OSS — sets _cloud to null)

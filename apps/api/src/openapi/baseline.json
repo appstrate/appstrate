@@ -13993,6 +13993,12 @@
                     "maxLength": 255,
                     "description": "Your system's unique identifier for this end-user"
                   },
+                  "role": {
+                    "type": "string",
+                    "enum": ["admin", "member", "viewer"],
+                    "default": "member",
+                    "description": "Role of the end-user within the application"
+                  },
                   "metadata": {
                     "type": "object",
                     "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
@@ -14003,6 +14009,7 @@
                 "name": "Alice Martin",
                 "email": "alice@example.com",
                 "externalId": "usr_12345",
+                "role": "member",
                 "metadata": {
                   "plan": "pro",
                   "region": "eu-west"
@@ -14310,6 +14317,11 @@
                     "type": ["string", "null"],
                     "maxLength": 255,
                     "description": "Your system's unique identifier for this end-user"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["admin", "member", "viewer"],
+                    "description": "Role of the end-user within the application"
                   },
                   "metadata": {
                     "type": "object",
@@ -16734,6 +16746,11 @@
           "emailVerified": {
             "type": "boolean",
             "description": "Whether the end-user's email address has been verified"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["admin", "member", "viewer"],
+            "description": "Role of the end-user within the application"
           },
           "createdAt": {
             "type": "string",

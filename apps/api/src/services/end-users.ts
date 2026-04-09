@@ -27,6 +27,7 @@ function toEndUserResponse(row: {
   metadata: unknown;
   status: string;
   emailVerified: boolean;
+  role: string;
   createdAt: Date;
   updatedAt: Date;
 }): EndUserInfo {
@@ -40,6 +41,7 @@ function toEndUserResponse(row: {
     metadata: row.metadata as Record<string, unknown> | null,
     status: row.status,
     emailVerified: row.emailVerified,
+    role: row.role,
     createdAt: toISORequired(row.createdAt),
     updatedAt: toISORequired(row.updatedAt),
   };
@@ -57,6 +59,7 @@ export async function createEndUser(
     email?: string;
     externalId?: string;
     metadata?: Record<string, unknown>;
+    role?: string;
   },
 ): Promise<EndUserInfo> {
   const endUserId = prefixedId("eu");
@@ -105,6 +108,7 @@ export async function createEndUser(
       email: params.email ?? null,
       externalId: params.externalId ?? null,
       metadata: params.metadata ?? null,
+      role: params.role ?? "member",
       createdAt: now,
       updatedAt: now,
     })
@@ -162,6 +166,7 @@ export async function listEndUsers(
       metadata: endUsers.metadata,
       status: endUsers.status,
       emailVerified: endUsers.emailVerified,
+      role: endUsers.role,
       createdAt: endUsers.createdAt,
       updatedAt: endUsers.updatedAt,
     })
@@ -187,6 +192,7 @@ export async function getEndUser(orgId: string, endUserId: string): Promise<EndU
       metadata: endUsers.metadata,
       status: endUsers.status,
       emailVerified: endUsers.emailVerified,
+      role: endUsers.role,
       createdAt: endUsers.createdAt,
       updatedAt: endUsers.updatedAt,
     })
@@ -209,6 +215,7 @@ export async function updateEndUser(
     email?: string;
     externalId?: string;
     metadata?: Record<string, unknown>;
+    role?: string;
   },
 ): Promise<EndUserInfo> {
   // Verify end-user exists and belongs to org

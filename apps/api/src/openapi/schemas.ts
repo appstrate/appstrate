@@ -880,6 +880,11 @@ export const schemas = {
         type: "boolean",
         description: "Whether the end-user's email address has been verified",
       },
+      role: {
+        type: "string",
+        enum: ["admin", "member", "viewer"],
+        description: "Role of the end-user within the application",
+      },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },

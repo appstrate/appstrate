@@ -144,6 +144,79 @@ describe("End-Users API", () => {
     });
   });
 
+  describe("Role management", () => {
+    it("creates an end-user with default role 'member'", async () => {
+      const res = await app.request("/api/end-users", {
+        method: "POST",
+        headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Default Role" }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.role).toBe("member");
+    });
+
+    it("creates an end-user with explicit role", async () => {
+      const res = await app.request("/api/end-users", {
+        method: "POST",
+        headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Admin User", role: "admin" }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.role).toBe("admin");
+    });
+
+    it("updates an end-user role via PATCH", async () => {
+      const createRes = await app.request("/api/end-users", {
+        method: "POST",
+        headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Role Change" }),
+      });
+      const created = (await createRes.json()) as any;
+      expect(created.role).toBe("member");
+
+      const patchRes = await app.request(`/api/end-users/${created.id}`, {
+        method: "PATCH",
+        headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "viewer" }),
+      });
+      expect(patchRes.status).toBe(200);
+      const patched = (await patchRes.json()) as any;
+      expect(patched.role).toBe("viewer");
+    });
+
+    it("rejects invalid role value", async () => {
+      const res = await app.request("/api/end-users", {
+        method: "POST",
+        headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Bad Role", role: "superadmin" }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns role in list response", async () => {
+      await app.request("/api/end-users", {
+        method: "POST",
+        headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Admin", role: "admin" }),
+      });
+      await app.request("/api/end-users", {
+        method: "POST",
+        headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Viewer", role: "viewer" }),
+      });
+
+      const listRes = await app.request("/api/end-users", {
+        headers: apiKeyHeaders(),
+      });
+      const body = (await listRes.json()) as any;
+      const roles = body.data.map((u: any) => u.role);
+      expect(roles).toContain("admin");
+      expect(roles).toContain("viewer");
+    });
+  });
+
   describe("DELETE /api/end-users/:id", () => {
     it("deletes an end-user and returns 204", async () => {
       const createRes = await app.request("/api/end-users", {

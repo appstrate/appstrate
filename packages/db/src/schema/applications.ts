@@ -58,6 +58,7 @@ export const endUsers = pgTable(
     }),
     status: text("status").notNull().default("active"), // active | pending_verification | suspended
     emailVerified: boolean("email_verified").notNull().default(false),
+    role: text("role").notNull().default("member"), // admin | member | viewer
     // ─── Timestamps ───
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),

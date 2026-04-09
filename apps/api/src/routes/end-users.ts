@@ -18,10 +18,13 @@ import {
 } from "../services/end-users.ts";
 import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
+const endUserRoleSchema = z.enum(["admin", "member", "viewer"]);
+
 export const createEndUserSchema = z.object({
   name: z.string().max(200).nullable().optional(),
   email: z.string().email().nullable().optional(),
   externalId: z.string().max(255).nullable().optional(),
+  role: endUserRoleSchema.optional(),
   metadata: z
     .record(
       z.string().min(1).max(40),
@@ -35,6 +38,7 @@ export const updateEndUserSchema = z.object({
   name: z.string().max(200).nullable().optional(),
   email: z.string().email().nullable().optional(),
   externalId: z.string().max(255).nullable().optional(),
+  role: endUserRoleSchema.optional(),
   metadata: z
     .record(
       z.string().min(1).max(40),
@@ -63,6 +67,7 @@ export function createEndUsersRouter() {
         name: data.name ?? undefined,
         email: data.email ?? undefined,
         externalId: data.externalId ?? undefined,
+        role: data.role,
         metadata: data.metadata,
       });
       return c.json(created, 201);
@@ -125,6 +130,7 @@ export function createEndUsersRouter() {
       name: data.name ?? undefined,
       email: data.email ?? undefined,
       externalId: data.externalId ?? undefined,
+      role: data.role,
       metadata: data.metadata,
     });
     return c.json(result);
