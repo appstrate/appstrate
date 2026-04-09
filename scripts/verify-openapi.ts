@@ -293,6 +293,12 @@ const expectedEndpoints = [
   "PATCH /api/end-users/{id}",
   "DELETE /api/end-users/{id}",
 
+  // OAuth Clients
+  "POST /api/applications/{id}/oauth",
+  "GET /api/applications/{id}/oauth",
+  "PATCH /api/applications/{id}/oauth",
+  "DELETE /api/applications/{id}/oauth",
+
   // Webhooks
   "POST /api/webhooks",
   "GET /api/webhooks",
