@@ -4,11 +4,11 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgProviderKeys } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
-import { getSystemProviderKeys } from "./model-registry.ts";
+import { getSystemProviderKeys } from "../../../services/model-registry.ts";
 import type { OrgProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 import { testModelConfig } from "./org-models.ts";
-import { mergeSystemAndDb, buildUpdateSet } from "../lib/db-helpers.ts";
-import { toISO, toISORequired } from "../lib/date-helpers.ts";
+import { mergeSystemAndDb, buildUpdateSet } from "../../../lib/db-helpers.ts";
+import { toISO, toISORequired } from "../../../lib/date-helpers.ts";
 
 // --- List (system + DB) ---
 

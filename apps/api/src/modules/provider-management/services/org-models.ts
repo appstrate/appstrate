@@ -3,14 +3,18 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
-import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
-import type { ModelCost } from "./adapters/types.ts";
-import { logger } from "../lib/logger.ts";
+import {
+  getSystemModels,
+  isSystemModel,
+  type ModelDefinition,
+} from "../../../services/model-registry.ts";
+import type { ModelCost } from "../../../services/adapters/types.ts";
+import { logger } from "../../../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import { loadProviderKeyCredentials } from "./org-provider-keys.ts";
-import { toISORequired } from "../lib/date-helpers.ts";
-import { mergeSystemAndDb, buildUpdateSet } from "../lib/db-helpers.ts";
+import { toISORequired } from "../../../lib/date-helpers.ts";
+import { mergeSystemAndDb, buildUpdateSet } from "../../../lib/db-helpers.ts";
 
 // --- List (system + DB) ---
 
@@ -170,7 +174,7 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
 
 // --- Resolution ---
 
-interface ResolvedModel {
+export interface ResolvedModel {
   api: string;
   baseUrl: string;
   modelId: string;

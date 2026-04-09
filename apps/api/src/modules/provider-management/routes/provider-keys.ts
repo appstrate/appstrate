@@ -2,10 +2,10 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AppEnv } from "../types/index.ts";
-import { rateLimit } from "../middleware/rate-limit.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
-import { isSystemProviderKey } from "../services/model-registry.ts";
+import type { AppEnv } from "../../../types/index.ts";
+import { rateLimit } from "../../../middleware/rate-limit.ts";
+import { requirePermission } from "../../../middleware/require-permission.ts";
+import { isSystemProviderKey } from "../../../services/model-registry.ts";
 import {
   listOrgProviderKeys,
   createOrgProviderKey,
@@ -15,14 +15,14 @@ import {
   loadProviderKeyCredentials,
 } from "../services/org-provider-keys.ts";
 import { testModelConfig } from "../services/org-models.ts";
-import { logger } from "../lib/logger.ts";
+import { logger } from "../../../lib/logger.ts";
 import {
   invalidRequest,
   notFound,
   internalError,
   parseBody,
   systemEntityForbidden,
-} from "../lib/errors.ts";
+} from "../../../lib/errors.ts";
 
 export const createSchema = z.object({
   label: z.string().min(1, "label is required"),

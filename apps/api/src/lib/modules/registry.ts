@@ -22,6 +22,10 @@ import { registerBuiltinModule } from "./module-loader.ts";
 
 registerBuiltinModule("scheduling", () => import("../../modules/scheduling/index.ts"));
 registerBuiltinModule("webhooks", () => import("../../modules/webhooks/index.ts"));
+registerBuiltinModule(
+  "provider-management",
+  () => import("../../modules/provider-management/index.ts"),
+);
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers

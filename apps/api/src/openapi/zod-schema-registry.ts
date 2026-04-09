@@ -19,13 +19,13 @@ import { createWebhookSchema, updateWebhookSchema } from "../modules/webhooks/ro
 // --- End-User schemas (routes/end-users.ts) ---
 import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts";
 
-// --- Model schemas (routes/models.ts) ---
+// --- Model schemas (modules/provider-management/routes/models.ts) ---
 import {
   createModelSchema,
   updateModelSchema,
   setDefaultSchema as modelsSetDefaultSchema,
   testInlineSchema as modelsTestInlineSchema,
-} from "../routes/models.ts";
+} from "../modules/provider-management/routes/models.ts";
 
 // --- API Key schemas (routes/api-keys.ts) ---
 import { createApiKeySchema } from "../routes/api-keys.ts";
@@ -82,12 +82,12 @@ import {
   removeProviderProfileSchema,
 } from "../routes/agents.ts";
 
-// --- Provider Key schemas (routes/provider-keys.ts) ---
+// --- Provider Key schemas (modules/provider-management/routes/provider-keys.ts) ---
 import {
   createSchema as createProviderKeySchema,
   updateSchema as updateProviderKeySchema,
   testInlineSchema as providerKeysTestInlineSchema,
-} from "../routes/provider-keys.ts";
+} from "../modules/provider-management/routes/provider-keys.ts";
 
 // --- Profile schemas (routes/profile.ts) ---
 import { profileUpdateSchema, batchLookupSchema } from "../routes/profile.ts";

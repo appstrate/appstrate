@@ -2,11 +2,11 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AppEnv } from "../types/index.ts";
-import { rateLimit } from "../middleware/rate-limit.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
-import { isSystemModel } from "../services/model-registry.ts";
-import { modelCostSchema } from "../services/adapters/types.ts";
+import type { AppEnv } from "../../../types/index.ts";
+import { rateLimit } from "../../../middleware/rate-limit.ts";
+import { requirePermission } from "../../../middleware/require-permission.ts";
+import { isSystemModel } from "../../../services/model-registry.ts";
+import { modelCostSchema } from "../../../services/adapters/types.ts";
 import {
   listOrgModels,
   createOrgModel,
@@ -17,7 +17,7 @@ import {
   testModelConfig,
   loadModel,
 } from "../services/org-models.ts";
-import { logger } from "../lib/logger.ts";
+import { logger } from "../../../lib/logger.ts";
 import {
   ApiError,
   invalidRequest,
@@ -25,7 +25,7 @@ import {
   internalError,
   parseBody,
   systemEntityForbidden,
-} from "../lib/errors.ts";
+} from "../../../lib/errors.ts";
 
 export const createModelSchema = z.object({
   label: z.string().min(1, "label is required"),
