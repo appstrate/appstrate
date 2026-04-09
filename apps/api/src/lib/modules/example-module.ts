@@ -3,8 +3,8 @@
 /**
  * Example module — demonstrates the AppstrateModule contract.
  *
- * To enable: add to the module registry in registry.ts:
- *   { specifier: "./src/lib/modules/example-module.ts" }
+ * To enable: add to the APPSTRATE_MODULES env var:
+ *   APPSTRATE_MODULES=./src/lib/modules/example-module.ts
  *
  * In a real external module (like @appstrate/cloud), the module would
  * import types from `@appstrate/core/module` (published on npm) and

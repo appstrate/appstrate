@@ -18,7 +18,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import type { ModuleInitContext } from "@appstrate/core/module";
 
 // ---------------------------------------------------------------------------
-// Registry — one entry per available module
+// Registry — env-driven module specifiers
 // ---------------------------------------------------------------------------
 
 /**
