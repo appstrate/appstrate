@@ -148,6 +148,38 @@ export function createApp(deps: AppDeps): Hono {
   };
   app.get("/run-history", runHistoryHandler);
 
+  // Storage proxy — forward /storage/* and /agent-storage/* to the platform API.
+  // Used by agent extensions to access user Documents and session files.
+  const storageProxy = (prefix: string, internalPrefix: string) => {
+    app.all(`/${prefix}/*`, async (c) => {
+      const subPath = c.req.path.replace(`/${prefix}`, `/internal/${internalPrefix}`);
+      const qs = new URL(c.req.url).search;
+      const url = `${config.platformApiUrl}${subPath}${qs}`;
+
+      const method = c.req.method;
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${config.runToken}`,
+      };
+      const contentType = c.req.header("content-type");
+      if (contentType) headers["Content-Type"] = contentType;
+
+      const hasBody = method !== "GET" && method !== "HEAD";
+      const result = await fetchOrError(c, fetchFn, `Storage proxy (${prefix}) failed`, url, {
+        method,
+        headers,
+        ...(hasBody ? { body: await c.req.arrayBuffer() } : {}),
+      });
+      if (!result.ok) return result.errorResponse;
+
+      const body = await result.response.arrayBuffer();
+      return c.body(body, result.response.status as any, {
+        "Content-Type": result.response.headers.get("Content-Type") || "application/octet-stream",
+      });
+    });
+  };
+  storageProxy("storage", "storage");
+  storageProxy("agent-storage", "agent-storage");
+
   // LLM reverse proxy — replaces placeholder key with real API key, streams response.
   // The SDK formats all headers (auth, beta, identity) naturally using the placeholder;
   // we just swap the placeholder value for the real key in every header.
