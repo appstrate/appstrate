@@ -1,35 +1,98 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
-import * as schema from "./schema.ts";
+import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { getEnv } from "@appstrate/env";
+import * as schema from "./schema.ts";
 
-const { DATABASE_URL } = getEnv();
+const env = getEnv();
 
-// Main query connection pool
-const queryClient = postgres(DATABASE_URL, {
-  max: 20,
-  idle_timeout: 30,
-  connect_timeout: 30,
-  max_lifetime: 60 * 30,
-});
+/** True when using PGlite (embedded Postgres) instead of external PostgreSQL. */
+export const isEmbeddedDb = !env.DATABASE_URL;
 
-// Drizzle ORM instance with schema for relational queries
-export const db = drizzle(queryClient, { schema });
+/** Portable Drizzle PG database type — works with both postgres.js and PGlite. */
+export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
-// Export type for dependency injection
-export type Db = typeof db;
+/** Postgres.js listen client or PGlite notification handler. */
+export interface ListenClient {
+  listen(channel: string, handler: (payload: string) => void): Promise<void>;
+}
 
-// Dedicated LISTEN connection (single, long-lived, no pooling)
-export const listenClient = postgres(DATABASE_URL, {
-  max: 1,
-  idle_timeout: 0,
-  max_lifetime: 0,
-});
+// ---------------------------------------------------------------------------
+// Initialization
+// ---------------------------------------------------------------------------
 
-// Graceful shutdown
+let _closeDb: (() => Promise<void>) | null = null;
+let _listenClient: ListenClient | null = null;
+let _pgliteClient: import("@electric-sql/pglite").PGlite | null = null;
+
+/** Access the raw PGlite client (for exec() multi-statement support). Only available in embedded mode. */
+export function getPGliteClient(): import("@electric-sql/pglite").PGlite | null {
+  return _pgliteClient;
+}
+
+async function initPGlite(): Promise<Db> {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const { drizzle } = await import("drizzle-orm/pglite");
+  const { resolve } = await import("node:path");
+  const { mkdirSync } = await import("node:fs");
+
+  const dataDir = resolve(env.PGLITE_DATA_DIR);
+  mkdirSync(dataDir, { recursive: true });
+  const client = new PGlite(dataDir);
+
+  _pgliteClient = client;
+  _closeDb = () => client.close();
+  _listenClient = {
+    listen: async (channel, handler) => {
+      await client.listen(channel, handler);
+    },
+  };
+
+  return drizzle(client, { schema }) as unknown as Db;
+}
+
+async function initPostgres(): Promise<Db> {
+  const postgres = (await import("postgres")).default;
+  const { drizzle } = await import("drizzle-orm/postgres-js");
+
+  const queryClient = postgres(env.DATABASE_URL!, {
+    max: 20,
+    idle_timeout: 30,
+    connect_timeout: 30,
+    max_lifetime: 60 * 30,
+  });
+
+  const listenConn = postgres(env.DATABASE_URL!, {
+    max: 1,
+    idle_timeout: 0,
+    max_lifetime: 0,
+  });
+
+  _closeDb = async () => {
+    await queryClient.end();
+    await listenConn.end();
+  };
+  _listenClient = {
+    listen: (channel, handler) => listenConn.listen(channel, handler) as unknown as Promise<void>,
+  };
+
+  return drizzle(queryClient, { schema }) as unknown as Db;
+}
+
+// Top-level await — Bun supports this natively in ESM
+export const db: Db = await (isEmbeddedDb ? initPGlite() : initPostgres());
+
+export function getListenClient(): ListenClient {
+  return _listenClient!;
+}
+
+export const listenClient: ListenClient = {
+  listen: (channel, handler) => getListenClient().listen(channel, handler),
+};
+
 export async function closeDb(): Promise<void> {
-  await queryClient.end();
-  await listenClient.end();
+  if (_closeDb) await _closeDb();
+  _closeDb = null;
+  _listenClient = null;
+  _pgliteClient = null;
 }

@@ -7,15 +7,15 @@ import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
-import { requireAgent, requireMutableAgent } from "../middleware/guards.ts";
+import { requireOrgAgent, requireMutableAgent } from "../middleware/guards.ts";
 import { invalidRequest, parseBody } from "../lib/errors.ts";
 import { asRecord } from "../lib/safe-json.ts";
-
-const updateSkillsSchema = z.object({
+import { orgOrSystemFilter } from "../lib/package-helpers.ts";
+export const updateSkillsSchema = z.object({
   skillIds: z.array(z.string()).max(50),
 });
 
-const updateToolsSchema = z.object({
+export const updateToolsSchema = z.object({
   toolIds: z.array(z.string()).max(50),
 });
 
@@ -29,7 +29,7 @@ async function updateManifestDeps(
   const [row] = await db
     .select({ draftManifest: packages.draftManifest })
     .from(packages)
-    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
     .limit(1);
   if (!row) return;
 
@@ -50,29 +50,34 @@ export function createUserAgentsRouter() {
   const router = new Hono<AppEnv>();
 
   // PUT /api/agents/:scope/:name/skills — set skill references for an agent
-  router.put("/:scope{@[^/]+}/:name/skills", requireAgent(), requireMutableAgent(), async (c) => {
-    const agent = c.get("agent");
-    const packageId = agent.id;
+  router.put(
+    "/:scope{@[^/]+}/:name/skills",
+    requireOrgAgent(),
+    requireMutableAgent(),
+    async (c) => {
+      const agent = c.get("agent");
+      const packageId = agent.id;
 
-    const body = await c.req.json();
-    const data = parseBody(updateSkillsSchema, body, "skillIds");
-    const { skillIds } = data;
+      const body = await c.req.json();
+      const data = parseBody(updateSkillsSchema, body, "skillIds");
+      const { skillIds } = data;
 
-    const invalidIds = skillIds.filter((id) => !scopedNameRegex.test(id));
-    if (invalidIds.length > 0) {
-      throw invalidRequest(
-        `Invalid skill IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
-        "skillIds",
-      );
-    }
+      const invalidIds = skillIds.filter((id) => !scopedNameRegex.test(id));
+      if (invalidIds.length > 0) {
+        throw invalidRequest(
+          `Invalid skill IDs (must be scoped @scope/name): ${invalidIds.join(", ")}`,
+          "skillIds",
+        );
+      }
 
-    await updateManifestDeps(c.get("orgId"), packageId, "skills", skillIds);
+      await updateManifestDeps(c.get("orgId"), packageId, "skills", skillIds);
 
-    return c.json({ packageId, skillIds, message: "Skill references updated" });
-  });
+      return c.json({ packageId, skillIds, message: "Skill references updated" });
+    },
+  );
 
   // PUT /api/agents/:scope/:name/tools — set tool references for an agent
-  router.put("/:scope{@[^/]+}/:name/tools", requireAgent(), requireMutableAgent(), async (c) => {
+  router.put("/:scope{@[^/]+}/:name/tools", requireOrgAgent(), requireMutableAgent(), async (c) => {
     const agent = c.get("agent");
     const packageId = agent.id;
 

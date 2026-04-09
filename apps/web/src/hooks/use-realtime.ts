@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { getCurrentOrgId } from "./use-org";
+import { getCurrentApplicationId } from "./use-current-application";
 
 /**
  * Subscribe to run status changes + log inserts for a single run via SSE.
@@ -18,10 +19,11 @@ export function useRunRealtime(
   useEffect(() => {
     if (!runId) return;
     const orgId = getCurrentOrgId();
-    if (!orgId) return;
+    const appId = getCurrentApplicationId();
+    if (!orgId || !appId) return;
 
     const es = new EventSource(
-      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&verbose=true`,
+      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&appId=${encodeURIComponent(appId)}&verbose=true`,
       { withCredentials: true },
     );
 
@@ -55,10 +57,11 @@ export function useRunLogsRealtime(
   useEffect(() => {
     if (!runId) return;
     const orgId = getCurrentOrgId();
-    if (!orgId) return;
+    const appId = getCurrentApplicationId();
+    if (!orgId || !appId) return;
 
     const es = new EventSource(
-      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&verbose=true`,
+      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&appId=${encodeURIComponent(appId)}&verbose=true`,
       { withCredentials: true },
     );
 

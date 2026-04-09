@@ -7,7 +7,10 @@ export const schedulesPaths = {
       tags: ["Schedules"],
       summary: "List all schedules",
       description: "List all schedules across all agents for the organization.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Schedule list",
@@ -36,13 +39,9 @@ export const schedulesPaths = {
       description: "List all cron schedules configured for a specific agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -70,13 +69,9 @@ export const schedulesPaths = {
       description: "Create a cron schedule for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -91,10 +86,11 @@ export const schedulesPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "Connection profile to use for provider credentials (user or org profile)",
+                    "Connection profile to use for provider credentials (user or app profile)",
                 },
                 cronExpression: {
                   type: "string",
+                  minLength: 1,
                   description: "Cron expression (e.g. '0 9 * * 1-5')",
                 },
                 timezone: { type: "string", default: "UTC" },
@@ -110,6 +106,34 @@ export const schedulesPaths = {
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Schedule" },
+              example: {
+                id: "sched_cm1abc456def789",
+                packageId: "@acme/email-sorter",
+                connectionProfileId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                orgId: "org_r3t5w8y1z6",
+                name: "Weekday morning sort",
+                enabled: true,
+                cronExpression: "0 9 * * 1-5",
+                timezone: "Europe/Paris",
+                input: { folder: "inbox", maxEmails: 50 },
+                lastRunAt: null,
+                nextRunAt: "2026-01-16T09:00:00Z",
+                createdAt: "2026-01-15T10:30:00Z",
+                updatedAt: "2026-01-15T10:30:00Z",
+                profileName: "Pierre's profile",
+                profileType: "user",
+                readiness: {
+                  status: "ready",
+                  totalProviders: 1,
+                  connectedProviders: 1,
+                  missingProviders: [],
+                },
+              },
+            },
           },
         },
         "400": {
@@ -133,6 +157,7 @@ export const schedulesPaths = {
       description: "Get a single schedule by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -145,6 +170,29 @@ export const schedulesPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Schedule" },
+              example: {
+                id: "sched_cm1abc456def789",
+                packageId: "@acme/email-sorter",
+                connectionProfileId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                orgId: "org_r3t5w8y1z6",
+                name: "Weekday morning sort",
+                enabled: true,
+                cronExpression: "0 9 * * 1-5",
+                timezone: "Europe/Paris",
+                input: { folder: "inbox", maxEmails: 50 },
+                lastRunAt: "2026-01-15T09:00:00Z",
+                nextRunAt: "2026-01-16T09:00:00Z",
+                createdAt: "2026-01-14T14:00:00Z",
+                updatedAt: "2026-01-15T09:00:05Z",
+                profileName: "Pierre's profile",
+                profileType: "user",
+                readiness: {
+                  status: "ready",
+                  totalProviders: 1,
+                  connectedProviders: 1,
+                  missingProviders: [],
+                },
+              },
             },
           },
         },
@@ -159,6 +207,7 @@ export const schedulesPaths = {
       description: "Update a cron schedule (expression, timezone, enabled state, or input).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -186,6 +235,11 @@ export const schedulesPaths = {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Schedule" },
+            },
+          },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -198,6 +252,7 @@ export const schedulesPaths = {
       description: "Permanently delete a cron schedule.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -229,6 +284,7 @@ export const schedulesPaths = {
       description: "List recent runs triggered by a specific schedule.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
           name: "limit",

@@ -9,6 +9,7 @@ export const connectionsPaths = {
       description: "List active provider connections for the current user in the org.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "profileId",
           in: "query",
@@ -35,6 +36,25 @@ export const connectionsPaths = {
                   },
                 },
               },
+              example: {
+                connections: [
+                  {
+                    provider: "@appstrate/gmail",
+                    status: "connected",
+                    connectionId: "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+                    connectedAt: "2026-01-12T14:22:00Z",
+                    scopesGranted: [
+                      "https://www.googleapis.com/auth/gmail.readonly",
+                      "https://www.googleapis.com/auth/gmail.labels",
+                    ],
+                  },
+                  {
+                    provider: "@appstrate/clickup",
+                    status: "not_connected",
+                    scopesGranted: [],
+                  },
+                ],
+              },
             },
           },
         },
@@ -51,6 +71,7 @@ export const connectionsPaths = {
         "List all configured providers with current connection status and auth mode for the user.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "profileId",
           in: "query",
@@ -93,20 +114,9 @@ export const connectionsPaths = {
         "Initiates OAuth authorization flow (OAuth2 or OAuth1 depending on provider). Returns `authUrl` to redirect the user. If `profileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Provider scope (e.g. @appstrate)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Provider name (e.g. gmail)",
-        },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         content: {
@@ -154,20 +164,9 @@ export const connectionsPaths = {
         "Save an API key credential for a provider that uses api_key auth mode. If `profileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Provider scope (e.g. @appstrate)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Provider name (e.g. gmail)",
-        },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -177,7 +176,7 @@ export const connectionsPaths = {
               type: "object",
               required: ["apiKey"],
               properties: {
-                apiKey: { type: "string", description: "API key value" },
+                apiKey: { type: "string", minLength: 1, description: "API key value" },
                 profileId: {
                   type: "string",
                   format: "uuid",
@@ -219,20 +218,9 @@ export const connectionsPaths = {
         "Save generic credentials for a provider that uses basic or custom auth mode. Fields depend on provider's credential schema. If `profileId` is provided, it must belong to the authenticated actor (returns 403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Provider scope (e.g. @appstrate)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Provider name (e.g. gmail)",
-        },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -344,20 +332,9 @@ export const connectionsPaths = {
         "Remove a connection for a provider. If `connectionId` is provided, deletes only that specific connection. Otherwise, deletes all connections for the provider on the profile. The resolved profile must belong to the authenticated actor (returns 403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-          description: "Provider scope (e.g. @appstrate)",
-        },
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Provider name (e.g. gmail)",
-        },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         {
           name: "profileId",
           in: "query",

@@ -69,6 +69,7 @@ function ProviderKeyFormBody({
   const { t } = useTranslation(["settings", "common"]);
   const [providerId, setProviderId] = useState(() => detectProviderFromKey(providerKey));
 
+  const isEditing = !!providerKey;
   const isCustom = providerId === CUSTOM_ID;
 
   const {
@@ -184,7 +185,7 @@ function ProviderKeyFormBody({
         {/* Provider select */}
         <div className="space-y-2">
           <Label htmlFor="pk-provider">{t("providerKeys.form.provider")}</Label>
-          <Select value={providerId} onValueChange={handleProviderChange}>
+          <Select value={providerId} onValueChange={handleProviderChange} disabled={isEditing}>
             <SelectTrigger id="pk-provider">
               <SelectValue placeholder={t("models.form.providerPlaceholder")} />
             </SelectTrigger>
@@ -234,6 +235,7 @@ function ProviderKeyFormBody({
                   setValue("api", v);
                   clearErrors("api");
                 }}
+                disabled={isEditing}
               >
                 <SelectTrigger id="pk-api" className={cn(showError("api") && "border-destructive")}>
                   <SelectValue placeholder={t("models.form.apiPlaceholder")} />
@@ -255,6 +257,7 @@ function ProviderKeyFormBody({
               <Input
                 id="pk-baseUrl"
                 type="url"
+                disabled={isEditing}
                 {...register("baseUrl", {
                   validate: (v) => {
                     if (!isCustom) return undefined;

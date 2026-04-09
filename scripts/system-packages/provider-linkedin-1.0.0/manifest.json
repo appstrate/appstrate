@@ -1,0 +1,55 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/linkedin",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "LinkedIn",
+  "description": "Professional networking and B2B marketing platform",
+  "iconUrl": "linkedin",
+  "categories": ["social-media", "marketing", "crm"],
+  "docsUrl": "https://learn.microsoft.com/en-us/linkedin/",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://www.linkedin.com/oauth/v2/authorization",
+      "tokenUrl": "https://www.linkedin.com/oauth/v2/accessToken",
+      "defaultScopes": ["openid", "profile", "email"],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_post"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": ["https://api.linkedin.com/*"],
+    "availableScopes": [
+      { "value": "openid", "label": "OpenID Connect (required)" },
+      { "value": "profile", "label": "Read name & profile picture" },
+      { "value": "email", "label": "Read email address" },
+      { "value": "w_member_social", "label": "Post on behalf of member" },
+      { "value": "r_organization_social", "label": "Read organization posts" },
+      { "value": "w_organization_social", "label": "Post on behalf of organization" },
+      { "value": "rw_organization_admin", "label": "Manage organization pages" },
+      { "value": "r_ads", "label": "Read ads data" },
+      { "value": "r_ads_reporting", "label": "Read ads reporting" },
+      { "value": "rw_ads", "label": "Manage ad campaigns" },
+      { "value": "r_basicprofile", "label": "Read full profile (headline, positions)" },
+      { "value": "r_liteprofile", "label": "Read basic profile (name, photo)" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Add the redirect URL in your app's OAuth 2.0 settings: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create a LinkedIn Developer App",
+        "url": "https://www.linkedin.com/developers/apps"
+      },
+      {
+        "label": "Request needed products (Sign In, Share on LinkedIn, Marketing Developer Platform)"
+      },
+      {
+        "label": "Copy your Client ID and Client Secret from the Auth tab"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

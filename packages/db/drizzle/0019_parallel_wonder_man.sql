@@ -1,1 +1,0 @@
-ALTER TABLE "runs" ADD COLUMN "model_source" text;

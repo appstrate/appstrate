@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/core",
-  "version": "2.10.3",
+  "version": "2.10.5",
   "description": "Shared validation, storage, and utility library for Appstrate packages",
   "license": "Apache-2.0",
   "type": "module",
@@ -43,6 +43,7 @@
     "./env": "./src/env.ts",
     "./storage": "./src/storage.ts",
     "./storage-s3": "./src/storage-s3.ts",
+    "./storage-fs": "./src/storage-fs.ts",
     "./errors": "./src/errors.ts",
     "./validation": "./src/validation.ts",
     "./zip": "./src/zip.ts",

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export type { ConnectionStatus } from "./status.ts";
-export { getConnectionStatus, resolveProviderStatuses } from "./status.ts";
+export { getConnectionStatus, hasActiveConnection, resolveProviderStatuses } from "./status.ts";
 
 export { initiateConnection, handleCallback, handleOAuth1CallbackAndSave } from "./oauth.ts";
 

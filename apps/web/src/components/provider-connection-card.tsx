@@ -16,16 +16,17 @@ import { ApiKeyModal } from "./api-key-modal";
 import { CustomCredentialsModal } from "./custom-credentials-modal";
 import { useProviders } from "../hooks/use-providers";
 import { useProviderConnection } from "../hooks/use-provider-connection";
+import { resolveScopeLabel } from "../lib/scope-labels";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 
 interface ProviderConnectionCardProps {
   providerId: string;
   /** Agent package ID — enables per-provider profile persistence. */
   packageId?: string;
-  /** Org profile ID — enables the org binding section. */
-  orgProfileId?: string;
-  /** Org profile display name — shown in the bind button. */
-  orgProfileName?: string;
+  /** App profile ID — enables the app binding section. */
+  appProfileId?: string;
+  /** App profile display name — shown in the bind button. */
+  appProfileName?: string;
   /** When true, hide all action buttons — card becomes purely informational. */
   readOnly?: boolean;
   /** Profile ID to check connection status for (e.g. schedule owner's profile). */
@@ -39,8 +40,8 @@ interface ProviderConnectionCardProps {
 export function ProviderConnectionCard({
   providerId,
   packageId,
-  orgProfileId,
-  orgProfileName,
+  appProfileId,
+  appProfileName,
   readOnly: readOnlyProp,
   viewProfileId,
   scopesRequired,
@@ -53,6 +54,7 @@ export function ProviderConnectionCard({
     hasMultipleProfiles,
     effectiveProfileId,
     isConnected,
+    needsReconnection,
     profileConnections,
     binding,
     isBoundButDisconnected,
@@ -70,7 +72,7 @@ export function ProviderConnectionCard({
   } = useProviderConnection({
     providerId,
     packageId,
-    orgProfileId,
+    appProfileId,
     readOnly: readOnlyProp,
     viewProfileId,
   });
@@ -87,6 +89,7 @@ export function ProviderConnectionCard({
   const iconUrl = provider?.iconUrl;
   const authMode = provider?.authMode;
   const credentialSchema = provider?.credentialSchema as JSONSchemaObject | undefined;
+  const availableScopes = provider?.availableScopes;
 
   const hasMissingScopes = scopesMissing && scopesMissing.length > 0;
 
@@ -105,13 +108,18 @@ export function ProviderConnectionCard({
   };
 
   const handleDisconnect = () => {
-    disconnectMutation.mutate({ provider: providerId, ...profileParam });
+    const conn = profileConnections?.find((c) => c.providerId === providerId);
+    if (!conn) return;
+    disconnectMutation.mutate({
+      provider: providerId,
+      ...profileParam,
+      connectionId: conn.id,
+    });
   };
 
   // ─── Determine active mode: org-bound or user-managed ────
 
   const isOrgMode = isEffectivelyBound || isBoundButDisconnected;
-  const scopesGranted = profileConnections?.find((c) => c.providerId === providerId)?.scopesGranted;
 
   return (
     <>
@@ -160,7 +168,12 @@ export function ProviderConnectionCard({
         ) : (
           /* ─── User-managed mode: profile selector + connect/disconnect ── */
           <>
-            {isConnected ? (
+            {needsReconnection ? (
+              <span className="inline-flex shrink-0 items-center gap-1 text-xs text-amber-500">
+                <AlertTriangle className="size-3" />
+                {t("providers.needsReconnection")}
+              </span>
+            ) : isConnected ? (
               <div className="flex shrink-0 items-center gap-2">
                 {hasMissingScopes ? (
                   <span className="inline-flex items-center gap-1 text-xs text-amber-500">
@@ -173,31 +186,22 @@ export function ProviderConnectionCard({
                     {t("providers.connected")}
                   </span>
                 )}
-                {scopesGranted && scopesGranted.length > 0 && (
+                {scopesMissing && scopesMissing.length > 0 && (
                   <div className="flex items-center gap-1">
-                    <Shield className="text-muted-foreground size-3" />
-                    {scopesGranted.map((scope) => (
-                      <span
-                        key={scope}
-                        className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
-                          scopesMissing?.includes(scope)
-                            ? "bg-amber-500/10 text-amber-500"
-                            : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        {scope}
-                      </span>
-                    ))}
-                    {scopesMissing?.map((scope) =>
-                      !scopesGranted.includes(scope) ? (
+                    <Shield className="size-3 text-amber-500" />
+                    {scopesMissing.map((scope) => {
+                      const label = resolveScopeLabel(scope, availableScopes);
+                      const isRaw = label === scope;
+                      return (
                         <span
                           key={scope}
-                          className="rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] text-amber-500"
+                          title={isRaw ? undefined : scope}
+                          className={`rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-500 ${isRaw ? "font-mono" : ""}`}
                         >
-                          {scope}
+                          {label}
                         </span>
-                      ) : null,
-                    )}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -260,7 +264,7 @@ export function ProviderConnectionCard({
                     {t("providerCard.disconnect")}
                   </Button>
                 )}
-                {isConnected && orgProfileId && (
+                {isConnected && appProfileId && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -269,8 +273,8 @@ export function ProviderConnectionCard({
                     disabled={isPending || !effectiveProfileId}
                   >
                     <Building2 className="mr-1 size-3" />
-                    {orgProfileName
-                      ? t("providerCard.bindTo", { name: orgProfileName })
+                    {appProfileName
+                      ? t("providerCard.bindTo", { name: appProfileName })
                       : t("providerCard.bind")}
                   </Button>
                 )}

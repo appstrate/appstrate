@@ -4,53 +4,45 @@ Appstrate is an open-source platform for running autonomous AI agents in sandbox
 
 ## Quick Start
 
+**Tier 0 (zero-install — recommended for development):**
+
 ```sh
-# 1. Setup dev Docker Compose override
-cp docker-compose.override.example.yml docker-compose.override.yml
-
-# 2. Start infrastructure + build runtime images
-docker compose up -d          # PostgreSQL 16 + builds appstrate-pi & appstrate-sidecar images
-
-# 3. Configure .env (copy .env.example, set Pi adapter keys + DB URL + Better Auth secret)
-
-# 4. Run database migrations
-bun run db:generate           # Generate Drizzle migrations from schema
-bun run db:migrate            # Apply migrations to PostgreSQL
-
-# 5. Build everything (shared-types + frontend)
-bun run build                 # turbo build → apps/web/dist/
-
-# 6. Start platform (API + Vite build --watch in parallel)
-bun run dev                   # turbo dev → Hono on :3000
-
-# 7. First signup creates an organization automatically
-
-# 8. Run tests (requires Docker from step 2)
-bun test                          # All 1000+ tests across all packages
+cp .env.example .env
+bun run dev                   # PGlite + filesystem + in-memory → :3000
 ```
 
-### Docker Compose Structure
+No Docker, no PostgreSQL, no Redis. After signup, the onboarding flow guides the user to create their first organization.
 
-- **`docker-compose.yml`** — Self-hosting file (images from GHCR). Also the base for dev.
-- **`docker-compose.override.yml`** — Dev override (gitignored, auto-merged by Compose). Copy from `docker-compose.override.example.yml`. Adds local image builds, disables migrate/appstrate services (run manually via `bun run db:migrate` / `bun run dev`).
-- **`docker:dev`** script — `docker compose up -d` (postgres + runtime image builds with override).
-- **`docker:prod`** script — `docker compose --profile prod up -d` (full stack built locally, for testing).
-- **Self-hosting** — Without override: `docker compose up -d` pulls GHCR images and starts everything.
+**Tier 3 (full stack with Docker):**
+
+```sh
+bun run setup                 # Interactive tier selection, starts Docker, migrates DB, builds
+bun run dev
+```
+
+### Docker Compose (Tier 1-3)
+
+- **`docker-compose.dev.yml`** — Development services with profiles:
+  - `bun run docker:dev:minimal` — Tier 1: PostgreSQL only
+  - `bun run docker:dev:standard` — Tier 2: PostgreSQL + Redis
+  - `bun run docker:dev` — Tier 3: PostgreSQL + Redis + MinIO
+- **`docker-compose.yml`** — Self-hosting / production (images from GHCR)
+- **`docker:prod`** script — `docker compose --profile prod up -d` (full stack)
 
 ## Stack — Critical Constraints
 
-| Constraint     | Details                                                                                                                                                                                                                                                                                                                                                     |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime        | **Bun** everywhere — NOT node. Bun auto-loads `.env`                                                                                                                                                                                                                                                                                                        |
-| API framework  | **Hono** — NOT `Bun.serve()` (need SSE via `streamSSE`, routing, middleware)                                                                                                                                                                                                                                                                                |
-| Docker client  | **`fetch()` + unix socket** — NOT dockerode (socket bugs with Bun). See `services/docker.ts`                                                                                                                                                                                                                                                                |
-| DB security    | **No RLS** — app-level security, all queries filter by `orgId`                                                                                                                                                                                                                                                                                              |
-| Logging        | **`lib/logger.ts`** (JSON to stdout) — no `console.*` calls                                                                                                                                                                                                                                                                                                 |
-| Auth           | **Better Auth** cookie sessions + `X-Org-Id` header. Email/password + optional Google social login (opt-in via env vars). Optional email verification (opt-in via SMTP env vars). Account linking with trusted providers. API key auth (`ask_` prefix) tried first, then cookie fallback. `Appstrate-User` header for end-user impersonation (API key only) |
-| Validation     | **Zod 4** for all request body/query validation + JSONB safe narrowing. **AJV** only for dynamic manifest schemas                                                                                                                                                                                                                                           |
-| Env validation | **`@appstrate/env`** (Zod schema) is the single source of truth — not `.env.example`                                                                                                                                                                                                                                                                        |
-| Redis          | **Redis 7+** — BullMQ scheduler, distributed rate limiting (`rate-limiter-flexible`), cancel Pub/Sub, OAuth PKCE state                                                                                                                                                                                                                                      |
-| Storage        | **S3** (`@aws-sdk/client-s3`) via `@appstrate/core/storage-s3` — configurable endpoint for MinIO/R2                                                                                                                                                                                                                                                         |
+| Constraint     | Details                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime        | **Bun** everywhere — NOT node. Bun auto-loads `.env`                                                                                                                                                                                                                                                                                                                                                |
+| API framework  | **Hono** — NOT `Bun.serve()` (need SSE via `streamSSE`, routing, middleware)                                                                                                                                                                                                                                                                                                                        |
+| Docker client  | **`fetch()` + unix socket** — NOT dockerode (socket bugs with Bun). See `services/docker.ts`                                                                                                                                                                                                                                                                                                        |
+| DB security    | **No RLS** — app-level security, all queries filter by `orgId` (+ `applicationId` for app-scoped resources)                                                                                                                                                                                                                                                                                         |
+| Logging        | **`lib/logger.ts`** (JSON to stdout) — no `console.*` calls                                                                                                                                                                                                                                                                                                                                         |
+| Auth           | **Better Auth** cookie sessions + `X-Org-Id` header + `X-App-Id` header (app-scoped routes). Email/password + optional Google social login (opt-in via env vars). Optional email verification (opt-in via SMTP env vars). Account linking with trusted providers. API key auth (`ask_` prefix) tried first, then cookie fallback. `Appstrate-User` header for end-user impersonation (API key only) |
+| Validation     | **Zod 4** for all request body/query validation + JSONB safe narrowing. **AJV** only for dynamic manifest schemas                                                                                                                                                                                                                                                                                   |
+| Env validation | **`@appstrate/env`** (Zod schema) is the single source of truth — not `.env.example`                                                                                                                                                                                                                                                                                                                |
+| Redis          | **Redis 7+** — BullMQ scheduler, distributed rate limiting (`rate-limiter-flexible`), cancel Pub/Sub, OAuth PKCE state                                                                                                                                                                                                                                                                              |
+| Storage        | **S3** (`@aws-sdk/client-s3`) via `@appstrate/core/storage-s3` — configurable endpoint for MinIO/R2                                                                                                                                                                                                                                                                                                 |
 
 ## Navigating the Codebase
 
@@ -65,14 +57,14 @@ appstrate/
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
 │   │   ├── headers.ts        # Reusable response header definitions
-│   │   └── paths/            # One file per route domain (182 endpoints)
+│   │   └── paths/            # One file per route domain (191 endpoints)
 │   └── types/                # Backend types + re-exports from shared-types
 │
 ├── apps/web/src/             # @appstrate/web — React 19 + Vite + React Query v5
 │   ├── pages/                # Route pages (React Router v7 BrowserRouter)
 │   ├── hooks/                # React Query hooks + SSE realtime hooks
 │   ├── components/           # UI components (modals, forms, editors)
-│   ├── stores/               # Zustand stores (auth-store, org-store, profile-store)
+│   ├── stores/               # Zustand stores (auth-store, org-store, app-store, sidebar-store, theme-store)
 │   ├── lib/                  # Utilities (auth-client, markdown, provider-status, strings)
 │   ├── styles.css            # Tailwind 4 CSS (dark theme, custom @theme inline)
 │   └── i18n.ts               # i18next: fr (default) + en, namespaces: common/agents/settings
@@ -163,10 +155,23 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 
 ## Key Conventions & Gotchas
 
+### Progressive Infrastructure
+
+Appstrate uses a tiered infrastructure model — every external dependency is optional with a built-in fallback:
+
+| Component                     | When absent                     | Fallback                       | Tier required |
+| ----------------------------- | ------------------------------- | ------------------------------ | ------------- |
+| PostgreSQL (`DATABASE_URL`)   | PGlite (embedded WASM Postgres) | `./data/pglite/`               | 1+            |
+| Redis (`REDIS_URL`)           | In-memory adapters              | EventEmitter, Map, local queue | 2+            |
+| S3/MinIO (`S3_BUCKET`)        | Filesystem storage              | `./data/storage/`              | 3             |
+| Docker (`RUN_ADAPTER=docker`) | Bun subprocesses                | No container isolation         | 3             |
+
+Tier 0 (zero-install) requires only Bun. Infrastructure adapters are in `apps/api/src/infra/` with dynamic imports to avoid loading Redis/BullMQ when not configured.
+
 ### Development Workflow
 
 - **New API route**: Create route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi` to validate.
-- **DB migration**: Edit `packages/db/src/schema.ts` → `bun run db:generate` → `bun run db:migrate`.
+- **DB migration**: Edit `packages/db/src/schema.ts` → `bun run db:generate` → `bun run db:migrate` (requires `DATABASE_URL` for drizzle-kit CLI). PGlite applies migrations automatically at boot.
 - **Quality gate**: `bun run check` (turbo check = TypeScript across all packages + `verify-openapi` structural/lint validation).
 - **Tests**: `bun test` from monorepo root runs all 1000+ tests across all packages in a single process. See **Testing** section below for structure, conventions, and patterns.
 
@@ -174,28 +179,28 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 
 - **i18n**: `i18next` with `react-i18next`. Default: `fr`, supported: `fr`/`en`. Namespaces: `common`, `agents`, `settings`. Locales in `apps/web/src/locales/{lang}/`.
 - **Styling**: Tailwind 4 CSS (`@tailwindcss/vite` plugin + `tailwind-merge`). Single `styles.css` with `@import "tailwindcss"` and custom `@theme inline` dark theme variables. All components use Tailwind utility classes.
-- **Auth**: Better Auth React client → `credentials: "include"` on all `apiFetch()` calls. `X-Org-Id` header for org context.
+- **Auth**: Better Auth React client → `credentials: "include"` on all `apiFetch()` calls. `X-Org-Id` header for org context, `X-App-Id` header for app context (sent automatically from `app-store` via `api.ts`).
 - **Realtime**: SSE EventSource hooks (`use-realtime.ts`) + `useGlobalRunSync` patches React Query cache directly. `useGlobalRunSync` deliberately uses `fetch()` + `ReadableStream` (NOT `EventSource`) to avoid Safari aggressive auto-reconnect — do not convert it. `GlobalRealtimeSync` is mounted inside `MainLayout` (not on onboarding/welcome routes) to avoid SSE reconnection loops when org state is settling.
 - **Feature gating**: `useAppConfig()` hook reads `window.__APP_CONFIG__` (injected into HTML at serve time via `<script>` tag, computed once at boot by `buildAppConfig()`). Returns `{ platform, features: { billing, models, providerKeys, googleAuth, emailVerification } }`. No API call — falls back to OSS defaults if undefined. Used to conditionally render routes, nav items, and onboarding steps. Models/provider keys UI hidden in Cloud mode; billing hidden in OSS mode. Google sign-in button and account linking UI hidden when `googleAuth` is false. Email verification hidden when `emailVerification` is false.
-- **API helpers** (`api.ts`): `api<T>(path)` prepends `/api` + JSON parse; `apiFetch<T>(path)` raw path (for `/auth/*`); `uploadFormData<T>(path, formData)` for file uploads — never set `Content-Type` manually (browser sets multipart boundary); `apiBlob(path)` for binary downloads. All inject `X-Org-Id` and `credentials: "include"`.
-- **React Query keys**: Always org-scoped `[entity, orgId, id?]` — e.g. `["agents", orgId]`, `["agent", orgId, packageId]`, `["runs", orgId, packageId]`. Only exception: `["orgs"]` is global. On org switch, `queryClient.removeQueries` wipes all except `["orgs"]`.
+- **API helpers** (`api.ts`): `api<T>(path)` prepends `/api` + JSON parse; `apiFetch<T>(path)` raw path (for `/auth/*`); `uploadFormData<T>(path, formData)` for file uploads — never set `Content-Type` manually (browser sets multipart boundary); `apiBlob(path)` for binary downloads. All inject `X-Org-Id`, `X-App-Id` (from `app-store`), and `credentials: "include"`.
+- **React Query keys**: Org-scoped `[entity, orgId, id?]` or app-scoped `[entity, orgId, appId, id?]` for app-scoped resources (agents, runs, schedules, webhooks). Examples: `["agents", orgId, appId]`, `["runs", orgId, appId, packageId]`. Non-app-scoped: `["orgs"]` (global), `["connections", orgId]`. On org switch, `queryClient.removeQueries` wipes all except `["orgs"]`.
 - **Standard components**: Always use `<Modal>` (`components/modal.tsx`) for dialogs — never build raw overlays. Use `<LoadingState>`, `<ErrorState>`, `<EmptyState>` from `page-states.tsx` for page states. Use `<InputFields>` for JSON Schema-driven forms, `<FileField>` for uploads.
 
 ### Backend
 
-- **Multi-tenant**: All DB queries filter by `orgId`. Admins = org role `admin` or `owner`.
+- **Multi-tenant**: All DB queries filter by `orgId`. App-scoped resources (agents, runs, schedules, webhooks, connections, end-users, api-keys, notifications, packages) additionally filter by `applicationId`. Admins = org role `admin` or `owner`.
 - **Service layer**: All function-based (no classes). `state.ts` is the central data-access layer (runs, logs, config, agent provider bindings). Drizzle ORM with `import { db } from "../lib/db.ts"` and schema from `@appstrate/db/schema`.
-- **Request pipeline**: error handler → Request-Id → CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie → `Appstrate-User` resolution if present) → org context middleware (`X-Org-Id` → verify membership) → API version middleware (`Appstrate-Version` header) → route handler (per-route: `rateLimit()`, `idempotency()`) → cloud routes (if loaded).
+- **Request pipeline**: error handler → Request-Id → CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie → `Appstrate-User` resolution if present) → org context middleware (`X-Org-Id` → verify membership) → app context middleware (`X-App-Id` → verify app belongs to org, required for app-scoped routes: agents, runs, schedules, webhooks, end-users, api-keys, notifications, packages, providers, connections, app-profiles; realtime handles app-scoping internally via query param) → API version middleware (`Appstrate-Version` header) → route handler (per-route: `rateLimit()`, `idempotency()`) → cloud routes (if loaded).
 - **Platform config** (`buildAppConfig()` in `index.ts`): Computed once at boot. Serialized as `window.__APP_CONFIG__` and injected into `index.html` via `<script>` tag at serve time (`app.get("/*")`). Config is static — `useAppConfig()` reads it synchronously. In OSS: models/providerKeys visible, billing hidden. In Cloud: reversed. `googleAuth` and `emailVerification` flags are derived from env var presence (opt-in).
 - **Cloud module** (`lib/cloud-loader.ts`): `loadCloud()` at boot tries `import("@appstrate/cloud")`. If the module is installed (via `bun link` in dev, or git dependency in prod), the platform runs in Cloud mode. If absent, OSS mode. `getCloudModule()` returns the loaded module or `null`.
 - **Cost tracking**: `runs.cost` (doublePrecision) stores the dollar cost per run. Cost chain: `SYSTEM_PROVIDER_KEYS` cost config → `ModelDefinition.cost` → `ResolvedModel.cost` → `PromptContext.llmConfig.cost` → `MODEL_COST` env var in Pi container → Pi SDK calculates cost → `RunMessage.cost` → accumulated and persisted. DB models (`org_models`) also support optional `cost` (jsonb) for self-hosted cost tracking. OpenRouter models auto-populate cost from pricing API.
-- **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `applicationId` (from API key), `endUser` (set via `Appstrate-User` header — `{ id, applicationId, name?, email? }`), `apiVersion` (resolved by api-version middleware), `agent` (set by `requireAgent()`).
-- **Route guards** (`middleware/guards.ts`): `requireAdmin()` → 403 if not admin/owner; `requireOwner()` → 403 if not owner; `requireAgent(param)` → loads agent + sets `c.set("agent")`, 404 if missing; `requireMutableAgent()` → also checks not system package + no running runs.
+- **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `applicationId` (set by `requireAppContext()` from `X-App-Id` header, or from API key's `applicationId`), `endUser` (set via `Appstrate-User` header — `{ id, applicationId, name?, email? }`), `apiVersion` (resolved by api-version middleware), `agent` (set by `requireAgent()`).
+- **Route guards** (`middleware/guards.ts`): `requireAdmin()` → 403 if not admin/owner; `requireOwner()` → 403 if not owner; `requireAgent(param)` → loads agent + sets `c.set("agent")`, 404 if missing; `requireMutableAgent()` → also checks not system package + no running runs. **App context** (`middleware/app-context.ts`): `requireAppContext()` → validates `X-App-Id` header (session auth) or uses API key's `applicationId`, verifies app belongs to org, sets `c.set("applicationId")`. Required for app-scoped routes: agents, runs, schedules, webhooks, end-users, api-keys, notifications, packages, providers, connections, app-profiles.
 - **Rate limiting**: Redis-backed via `rate-limiter-flexible` (`RateLimiterRedis`). Keyed by `method:path:identity` where identity is `userId` for sessions or `apikey:{apiKeyId}` for API keys. IP-based (`ip:method:path:ip`) for public unauthenticated routes. Returns IETF `RateLimit` structured header (`limit=N, remaining=M, reset=S`) + `RateLimit-Policy` + `Retry-After` headers. Key limits: run (20/min), import (10/min), create (10/min).
 - **Route registration order**: `userAgentsRouter` MUST be registered before `agentsRouter` in `index.ts` — Hono matches in order.
 - **Docker streams**: Multiplexed 8-byte frame headers `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`.
 - **Package versioning**: Semver-based version system across `package-versions.ts`, `package-version-deps.ts`, and `package-storage.ts`. Key tables: `packageVersions` (version, integrity, manifest snapshot, yanked), `packageDistTags` (named pointers like "latest"), `packageVersionDependencies` (per-version skill/tool deps). Semver enforcement via `@appstrate/core/version-policy` (`validateForwardVersion` — forward-only, no downgrades). "latest" dist-tag auto-managed on non-prerelease publishes. Custom dist-tags via `addDistTag`/`removeDistTag` (protected: "latest" cannot be set/removed manually). Yank support via `yankVersion` (sets `yanked: true`, reassigns affected dist-tags to best stable version). 3-step version resolution: exact match → dist-tag lookup → semver range (`resolveVersionFromCatalog`). Integrity: SHA256 SRI hash computed via `@appstrate/core/integrity`. Per-version dependencies stored via `storeVersionDependencies` (extracted with `@appstrate/core/dependencies`). All versioning columns included in the initial squashed migration.
-- **Providers as packages**: Providers (OAuth/API services) are the 4th package type (`type: "provider"`) alongside agents, skills, and tools. Provider definition lives in `packages.manifest.definition` (JSONB). System providers loaded from ZIP files in `system-packages/` at boot via `system-packages.ts`. Credentials stored in `providerCredentials` table keyed by `(providerId, orgId)`. Routes in `routes/providers.ts` (GET list, POST create, PUT update, DELETE). OAuth/credential logic in `@appstrate/connect` (`packages/connect/src/registry.ts`).
+- **Providers as packages**: Providers (OAuth/API services) are the 4th package type (`type: "provider"`) alongside agents, skills, and tools. Provider definition lives in `packages.manifest.definition` (JSONB). System providers loaded from ZIP files in `system-packages/` at boot via `system-packages.ts`. Credentials stored in `applicationProviderCredentials` table keyed by `(applicationId, providerId)`. Routes in `routes/providers.ts` (GET list, POST create, PUT update, DELETE). OAuth/credential logic in `@appstrate/connect` (`packages/connect/src/registry.ts`).
 - **AgentService**: All agents (system + local) stored in DB. System agents loaded from ZIPs at boot and synced to DB with `orgId: null`.
 - **Graceful shutdown**: `run-tracker.ts` — stop scheduler + sidecar pool → reject new POST → wait in-flight (max 30s) → exit.
 - **Validation (Zod)**: All route request bodies MUST be validated with `parseBody(schema, body)` from `lib/errors.ts`. This helper calls `.safeParse()` and throws `invalidRequest()` on failure. Pattern: define schema in the route file (or service file if reused), call `const data = parseBody(mySchema, body)`. Optional third `param` argument for field-specific errors. Reference implementations: `routes/models.ts`, `routes/webhooks.ts`, `routes/organizations.ts`. Naming: `{concept}Schema` for Zod objects (e.g. `createWebhookSchema`), `{Concept}` for inferred types via `z.infer<>`. For JSONB columns read from DB, use safe narrowing helpers (null/typeof/Array.isArray guards) instead of raw `as` casts. For query parameters, use `z.coerce.number().int().min().max().catch(default).parse()`. The codebase uses **Zod 4** — use `z.url()` (NOT `z.string().url()`), `z.uuid()`, etc. See `docs/architecture/ZOD_SCHEMA_AUDIT.md` for the full audit and patterns.
@@ -208,7 +213,8 @@ Appstrate exposes a headless API for developers to integrate agents into their o
 - **Applications**: Table `applications` (prefix `app_`). Each org has a default application (`isDefault: true`, unique index). API keys are scoped to an application. Routes: `/api/applications` (CRUD, admin-only).
 - **End-users**: Table `end_users` (prefix `eu_`). External users managed via API, belonging to an application. Not Better Auth users — separate table, no password, no dashboard login. Routes: `/api/end-users` (CRUD, admin-only). Fields: `externalId` (unique per app), `metadata` (JSONB, max 50 keys, 40 char key, 500 char value), `email`, `name`. Each end-user gets a default connection profile on creation.
 - **`Appstrate-User` header**: Impersonation header (pattern: Stripe `Stripe-Account`). Value: `eu_` prefixed ID. API key auth only — rejected with `400` on cookie auth. Validates that the end-user belongs to the API key's application. Sets `c.set("endUser")` in context. Full audit log on each impersonation (requestId, apiKeyId, endUserId, applicationId, IP, userAgent).
-- **Webhooks**: Tables `webhooks` (prefix `wh_`) and `webhookDeliveries`. Two scopes: `organization` (fires for ALL runs — dashboard + API) and `application` (fires only for runs via a specific application's API key). `scope` column (`text NOT NULL DEFAULT 'application'`), `applicationId` nullable (required when scope is `application`, null otherwise). Standard Webhooks spec (HMAC-SHA256 signing). BullMQ async delivery with 8-attempt exponential backoff. Event types: `run.started`, `run.completed`, `run.failed`, `run.timeout`, `run.cancelled`. Payload modes: `full` (includes result/input) and `summary`. SSRF protection on webhook URLs. Secret rotation with 24h grace period. Routes: `/api/webhooks` (CRUD + test/ping + rotate + deliveries, admin-only). List supports `?scope=` and `?applicationId=` query filters.
+- **Webhooks**: Tables `webhooks` (prefix `wh_`) and `webhookDeliveries`. All webhooks are application-scoped via `applicationId` (`NOT NULL`). Standard Webhooks spec (HMAC-SHA256 signing). BullMQ async delivery with 8-attempt exponential backoff. Event types: `run.started`, `run.completed`, `run.failed`, `run.timeout`, `run.cancelled`. Payload modes: `full` (includes result/input) and `summary`. SSRF protection on webhook URLs. Secret rotation with 24h grace period. Routes: `/api/webhooks` (CRUD + test/ping + rotate + deliveries, admin-only). List supports `?applicationId=` query filter.
+- **Application packages**: Table `application_packages` — installed packages per application with config overrides, model/proxy overrides, and version pinning. Replaces the old `package_configs` table. Agent config is now per-application (not per-org).
 - **API versioning**: Date-based (pattern: Stripe). Current: `2026-03-21`. Header `Appstrate-Version` (request override + always in response). Org-level pinning via `settings.apiVersion`. `Sunset` header on deprecated versions. Middleware: `middleware/api-version.ts`.
 - **Idempotency**: Header `Idempotency-Key` on POST routes (end-users, webhooks, agent run). Redis-backed, 24h TTL, SHA-256 body hash for conflict detection. Returns `409` on concurrent, `422` on body mismatch, `Idempotent-Replayed: true` header on cached replay. Middleware: `middleware/idempotency.ts`.
 - **Error handling**: RFC 9457 `application/problem+json` on all endpoints (not just headless). `ApiError` class with factory helpers (`invalidRequest`, `unauthorized`, `forbidden`, `notFound`, `conflict`, `gone`, `internalError`, `systemEntityForbidden`). `systemEntityForbidden(type, id, verb?)` for "Cannot modify/delete built-in X" errors. `parseBody(schema, body, param?)` for Zod validation (throws `invalidRequest` on failure). Custom `headers` field on `ApiError` for rate-limit headers. `Request-Id` (`req_` prefix) on all responses.
@@ -320,16 +326,16 @@ For testing middleware that calls services (e.g., `requireAgent` calls `getPacka
 
 ### Test Helpers (`apps/api/test/helpers/`)
 
-| Helper            | Purpose                                                                                                       |
-| ----------------- | ------------------------------------------------------------------------------------------------------------- |
-| `app.ts`          | `getTestApp()` — full Hono app replica (same middleware chain as production, without boot/Docker/scheduler)   |
-| `auth.ts`         | `createTestUser()`, `createTestOrg()`, `createTestContext()`, `authHeaders()` — real Better Auth sign-up flow |
-| `db.ts`           | `truncateAll()` — DELETE FROM all 31 tables in FK-safe order                                                  |
-| `seed.ts`         | 15+ factories: `seedPackage()`, `seedRun()`, `seedApiKey()`, `seedWebhook()`, etc. — insert real DB records   |
-| `assertions.ts`   | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`, `getDbRow()` — DB state verification                 |
-| `redis.ts`        | `getRedis()`, `flushRedis()` — test Redis client                                                              |
-| `sse.ts`          | SSE stream parsing utilities                                                                                  |
-| `oauth-server.ts` | Mock OAuth2 provider for connection tests                                                                     |
+| Helper            | Purpose                                                                                                                                                                                                                                                              |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app.ts`          | `getTestApp()` — full Hono app replica (same middleware chain as production, without boot/Docker/scheduler)                                                                                                                                                          |
+| `auth.ts`         | `createTestUser()`, `createTestOrg()`, `createTestContext()`, `authHeaders()`, `orgOnlyHeaders()` — real Better Auth sign-up flow. `TestContext` includes `defaultAppId`. `authHeaders()` auto-injects `X-App-Id`; use `orgOnlyHeaders()` for org-only routes        |
+| `db.ts`           | `truncateAll()` — DELETE FROM all 31 tables in FK-safe order                                                                                                                                                                                                         |
+| `seed.ts`         | 18+ factories: `seedPackage()`, `seedRun()`, `seedApiKey()`, `seedWebhook()`, `seedApplication()`, `seedConnectionProfile()`, `seedConnectionForApp()`, `seedProviderCredentials()`, etc. — insert real DB records. All app-scoped factories require `applicationId` |
+| `assertions.ts`   | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`, `getDbRow()` — DB state verification                                                                                                                                                                        |
+| `redis.ts`        | `getRedis()`, `flushRedis()` — test Redis client                                                                                                                                                                                                                     |
+| `sse.ts`          | SSE stream parsing utilities                                                                                                                                                                                                                                         |
+| `oauth-server.ts` | Mock OAuth2 provider for connection tests                                                                                                                                                                                                                            |
 
 ### Writing New Tests
 
@@ -380,18 +386,18 @@ describe("GET /api/my-resource", () => {
 
 ## API Reference
 
-**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 182 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
+**The OpenAPI 3.1 spec is the single source of truth for all API endpoints.** It documents 191 endpoints with full request/response schemas, auth requirements, error codes, and SSE event formats.
 
 - **Source files**: `apps/api/src/openapi/` — modular TypeScript files assembled at build time
 - **Live spec**: `GET /api/openapi.json` (raw JSON) — public, no auth
 - **Interactive docs**: `GET /api/docs` (Swagger UI) — public, no auth
 - **Validation**: `bun run verify:openapi` — structural + lint (0 errors/warnings)
 
-When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `agents`, `runs`, `realtime`, `schedules`, `connections`, `connection-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `internal`, `welcome`, `meta`, `models`, `applications`, `end-users`, `webhooks`.
+When working on API routes, always consult the corresponding OpenAPI path file in `apps/api/src/openapi/paths/` for the authoritative spec. Route domains: `health`, `auth`, `agents`, `runs`, `realtime`, `schedules`, `connections`, `connection-profiles`, `app-profiles`, `providers`, `provider-keys`, `proxies`, `api-keys`, `packages`, `notifications`, `organizations`, `profile`, `invitations`, `internal`, `welcome`, `meta`, `models`, `applications`, `end-users`, `webhooks`.
 
 ## Database
 
-Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId`. Key headless tables: `applications` (app* prefix), `endUsers` (eu* prefix), `webhooks` (wh\_ prefix), `webhookDeliveries`.
+Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId` (+ `applicationId` for app-scoped resources). Key headless tables: `applications` (app* prefix), `endUsers` (eu* prefix), `webhooks` (wh\_ prefix), `webhookDeliveries`, `applicationPackages` (installed packages per app with config, model/proxy overrides, version pinning).
 
 ## Environment Variables
 
@@ -399,8 +405,8 @@ Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Mig
 
 | Variable                    | Required | Default                                       | Notes                                                                                                      |
 | --------------------------- | -------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `REDIS_URL`                 | Yes      | —                                             | Redis connection string (required for scheduler, rate limiting, cancel signaling, OAuth PKCE)              |
-| `DATABASE_URL`              | Yes      | —                                             | PostgreSQL connection string                                                                               |
+| `REDIS_URL`                 | No       | —                                             | Redis connection string. When absent, falls back to in-memory adapters (single-instance only)              |
+| `DATABASE_URL`              | No       | —                                             | PostgreSQL connection. When absent, falls back to PGlite (embedded PostgreSQL)                             |
 | `BETTER_AUTH_SECRET`        | Yes      | —                                             | Session signing secret                                                                                     |
 | `CONNECTION_ENCRYPTION_KEY` | Yes      | —                                             | 32 bytes, base64-encoded. Encrypts stored credentials                                                      |
 | `PLATFORM_API_URL`          | No       | —                                             | How sidecar reaches the host platform. Fallback computed at runtime (`http://host.docker.internal:{PORT}`) |
@@ -412,16 +418,21 @@ Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Mig
 | `APP_URL`                   | No       | `http://localhost:3000`                       | Public URL for OAuth callbacks                                                                             |
 | `TRUSTED_ORIGINS`           | No       | `http://localhost:3000,http://localhost:5173` | CORS origins, comma-separated                                                                              |
 | `DOCKER_SOCKET`             | No       | `/var/run/docker.sock`                        | Path to Docker socket                                                                                      |
-| `RUN_ADAPTER`               | No       | `pi`                                          | Adapter type for agent run                                                                                 |
+| `RUN_ADAPTER`               | No       | `process`                                     | Execution backend: `docker` (containers) or `process` (Bun subprocesses)                                   |
 | `SIDECAR_POOL_SIZE`         | No       | `2`                                           | Number of pre-warmed sidecar containers (0 = disabled)                                                     |
 | `PI_IMAGE`                  | No       | `appstrate-pi:latest`                         | Docker image for the Pi agent runtime (override for GHCR / custom registries)                              |
 | `SIDECAR_IMAGE`             | No       | `appstrate-sidecar:latest`                    | Docker image for the sidecar proxy (override for GHCR / custom registries)                                 |
-| `S3_BUCKET`                 | Yes      | —                                             | S3 bucket name for storage                                                                                 |
-| `S3_REGION`                 | Yes      | —                                             | S3 region (e.g. `us-east-1`)                                                                               |
+| `S3_BUCKET`                 | No       | —                                             | S3 bucket name. When absent, falls back to filesystem storage (`FS_STORAGE_PATH`)                          |
+| `S3_REGION`                 | No       | —                                             | S3 region (e.g. `us-east-1`). Required when `S3_BUCKET` is set                                             |
+| `FS_STORAGE_PATH`           | No       | `./data/storage`                              | Filesystem storage path (used when `S3_BUCKET` is absent)                                                  |
+| `PGLITE_DATA_DIR`           | No       | `./data/pglite`                               | PGlite data directory (used when `DATABASE_URL` is absent)                                                 |
 | `S3_ENDPOINT`               | No       | —                                             | Custom S3 endpoint (for MinIO/R2/other S3-compatible)                                                      |
 | `RUN_TOKEN_SECRET`          | No       | —                                             | Run token signing secret (if unset, tokens are unsigned)                                                   |
 | `GOOGLE_CLIENT_ID`          | No       | —                                             | Google OAuth client ID (enables Google sign-in when both Google vars are set)                              |
 | `GOOGLE_CLIENT_SECRET`      | No       | —                                             | Google OAuth client secret                                                                                 |
+| `GITHUB_CLIENT_ID`          | No       | —                                             | GitHub OAuth App client ID (enables GitHub sign-in when both GitHub vars are set)                          |
+| `GITHUB_CLIENT_SECRET`      | No       | —                                             | GitHub OAuth App client secret                                                                             |
+| `COOKIE_DOMAIN`             | No       | —                                             | Cookie domain for cross-subdomain auth                                                                     |
 | `SMTP_HOST`                 | No       | —                                             | SMTP server host (enables email verification when all SMTP vars are set)                                   |
 | `SMTP_PORT`                 | No       | `587`                                         | SMTP server port                                                                                           |
 | `SMTP_USER`                 | No       | —                                             | SMTP authentication username                                                                               |
@@ -439,7 +450,10 @@ Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Mig
 - **Skills**: YAML frontmatter (`name`, `description`) in `SKILL.md`. Available in container at `.pi/skills/{id}/SKILL.md`.
 - **Provider auth modes**: `oauth2` (OAuth2/PKCE with token refresh), `oauth1` (OAuth 1.0a with HMAC-SHA1 — uses `requestTokenUrl`/`accessTokenUrl`; `clientId`/`clientSecret` map to consumer key/secret), `api_key` (single key in header), `basic` (username:password Base64), `custom` (multi-field `credentialSchema` rendered as dynamic form), Sidecar injects credentials via `credentialHeaderName`/`credentialHeaderPrefix`. URI restrictions via `authorizedUris` array or `allowAllUris: true`.
 - **Proxy system**: Org-level proxy CRUD via `/api/proxies` (admin-only). System proxies loaded from `SYSTEM_PROXIES` env var at boot. Agent-level override via `GET/PUT /api/agents/:id/proxy`. Cascade: agent override → org default → `PROXY_URL` env var.
+- **Application-scoped config**: Agent configuration is per-application via `application_packages` (not per-org). Memories are application-scoped.
 - **Run lifecycle**: `pending` → `running` → `success` | `failed` | `timeout` | `cancelled`. Status transitions via `updateRunStatus()` in `state.ts`. `pg_notify` fires on every status change, pushing realtime updates to SSE subscribers. Concurrent runs per agent are supported — `run-tracker.ts` tracks all in-flight runs for graceful shutdown.
+- **Enriched run responses**: `listRunsWithFilter` and `getRunFull` use LEFT JOINs to enrich runs with `userName` (from `profiles`), `endUserName` (from `end_users`, name with externalId fallback), `apiKeyName` (from `api_keys`), and `scheduleName` (from `package_schedules`). The `EnrichedRun` type in `@appstrate/shared-types` extends `Run` with these four nullable string fields. Frontend components read names directly from the run response — no separate lookup hooks needed.
+- **Run trigger tracking**: `runs.apiKeyId` (FK → `api_keys.id`, nullable, ON DELETE SET NULL) records which API key triggered a run. Set from `c.get("apiKeyId")` in the run route. Combined with existing `userId`, `endUserId`, and `scheduleId`, this enables full trigger attribution in the UI.
 
 ## Known Issues & Technical Debt
 

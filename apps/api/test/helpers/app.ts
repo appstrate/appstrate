@@ -21,6 +21,7 @@ import { isEndUserInApp } from "../../src/services/end-users.ts";
 import { ApiError, unauthorized } from "../../src/lib/errors.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "../../src/lib/permissions.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
+import { requireAppContext } from "../../src/middleware/app-context.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
 import { loadCloud } from "../../src/lib/cloud-loader.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
@@ -39,6 +40,7 @@ import { createProviderKeysRouter } from "../../src/routes/provider-keys.ts";
 import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createApplicationsRouter } from "../../src/routes/applications.ts";
 import { createConnectionProfilesRouter } from "../../src/routes/connection-profiles.ts";
+import { createAppProfilesRouter } from "../../src/routes/app-profiles.ts";
 import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
@@ -208,6 +210,29 @@ export function getTestApp(): Hono<AppEnv> {
     return next();
   });
 
+  // App context middleware: resolve X-App-Id for app-scoped routes
+  const APP_SCOPED_PREFIXES = [
+    "/api/agents",
+    "/api/runs",
+    "/api/schedules",
+    "/api/webhooks",
+    "/api/end-users",
+    "/api/api-keys",
+    "/api/notifications",
+    "/api/packages",
+    "/api/providers",
+    "/api/connections",
+    "/api/app-profiles",
+  ];
+
+  const appContextMiddleware = requireAppContext();
+  app.use("*", async (c, next) => {
+    if (skipAuth(c.req.path)) return next();
+    if (!c.get("user")) return next();
+    if (!APP_SCOPED_PREFIXES.some((p) => c.req.path.startsWith(p))) return next();
+    return appContextMiddleware(c, next);
+  });
+
   // API versioning
   const apiVersionMiddleware = apiVersion(async (orgId) => {
     const settings = await getOrgSettings(orgId);
@@ -241,6 +266,7 @@ export function getTestApp(): Hono<AppEnv> {
   app.route("/api/provider-keys", createProviderKeysRouter());
   app.route("/api/applications", createApplicationsRouter());
   app.route("/api/connection-profiles", createConnectionProfilesRouter());
+  app.route("/api/app-profiles", createAppProfilesRouter());
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/connections", createConnectionsRouter());

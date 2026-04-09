@@ -11,10 +11,16 @@ import { parseSignedToken } from "../lib/run-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import { getRecentRuns } from "../services/state/index.ts";
 import { getPackage } from "../services/agent-service.ts";
-import { resolveCredentialsForProxy, forceRefreshCredentials } from "@appstrate/connect";
+import {
+  resolveCredentialsForProxy,
+  forceRefreshCredentials,
+  getProviderCredentialId,
+} from "@appstrate/connect";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, invalidRequest, internalError } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
+
+export const reportAuthFailureSchema = z.object({ providerId: z.string().min(1) });
 
 /**
  * Verify the run token from the Authorization header.
@@ -27,6 +33,7 @@ async function verifyRunToken(c: Context): Promise<{
     userId: string | null;
     endUserId: string | null;
     orgId: string;
+    applicationId: string;
     status: string;
     connectionProfileId: string | null;
     providerProfileIds: Record<string, string> | null;
@@ -54,6 +61,7 @@ async function verifyRunToken(c: Context): Promise<{
       userId: runs.userId,
       endUserId: runs.endUserId,
       orgId: runs.orgId,
+      applicationId: runs.applicationId,
       status: runs.status,
       connectionProfileId: runs.connectionProfileId,
       providerProfileIds: runs.providerProfileIds,
@@ -78,6 +86,7 @@ async function verifyRunToken(c: Context): Promise<{
       userId: run.userId,
       endUserId: run.endUserId,
       orgId: run.orgId,
+      applicationId: run.applicationId,
       status: run.status,
       connectionProfileId: run.connectionProfileId,
       providerProfileIds: run.providerProfileIds ?? null,
@@ -119,7 +128,7 @@ export function createInternalRouter() {
 
     try {
       const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
-      const recentRuns = await getRecentRuns(run.packageId, actor, run.orgId, {
+      const recentRuns = await getRecentRuns(run.packageId, actor, run.orgId, run.applicationId, {
         limit,
         fields,
         excludeRunId: runId,
@@ -164,7 +173,17 @@ export function createInternalRouter() {
       throw notFound(`No profile resolved for provider '${providerId}'`);
     }
 
-    const result = await resolveCredentialsForProxy(db, profileId, provider.id, run.orgId);
+    const credentialId = await getProviderCredentialId(db, run.applicationId, provider.id);
+    if (!credentialId) {
+      throw notFound(`No provider credentials configured for '${providerId}' in application`);
+    }
+    const result = await resolveCredentialsForProxy(
+      db,
+      profileId,
+      provider.id,
+      run.orgId,
+      credentialId,
+    );
 
     if (!result) {
       throw notFound(`No credentials for provider '${providerId}'`);
@@ -190,8 +209,18 @@ export function createInternalRouter() {
       throw notFound(`No profile resolved for provider '${providerId}'`);
     }
 
+    const credentialId = await getProviderCredentialId(db, run.applicationId, providerId);
+    if (!credentialId) {
+      throw notFound(`No provider credentials configured for '${providerId}' in application`);
+    }
     try {
-      const result = await forceRefreshCredentials(db, profileId, providerId, run.orgId);
+      const result = await forceRefreshCredentials(
+        db,
+        profileId,
+        providerId,
+        run.orgId,
+        credentialId,
+      );
       if (!result) {
         throw notFound(`No credentials for provider '${providerId}'`);
       }
@@ -208,6 +237,7 @@ export function createInternalRouter() {
             eq(userProviderConnections.profileId, profileId),
             eq(userProviderConnections.providerId, providerId),
             eq(userProviderConnections.orgId, run.orgId),
+            eq(userProviderConnections.providerCredentialId, credentialId),
           ),
         );
 
@@ -226,7 +256,7 @@ export function createInternalRouter() {
   router.post("/connections/report-auth-failure", async (c) => {
     const { runId, run } = await verifyRunToken(c);
     const body = await c.req.json();
-    const parsed = z.object({ providerId: z.string().min(1) }).safeParse(body);
+    const parsed = reportAuthFailureSchema.safeParse(body);
     if (!parsed.success) {
       throw invalidRequest("Missing or invalid providerId");
     }
@@ -238,6 +268,12 @@ export function createInternalRouter() {
       return c.json({ flagged: false });
     }
 
+    const credentialId = await getProviderCredentialId(db, run.applicationId, providerId);
+    if (!credentialId) {
+      logger.warn("No provider credential found for auth failure report", { runId, providerId });
+      return c.json({ flagged: false });
+    }
+
     await db
       .update(userProviderConnections)
       .set({ needsReconnection: true, updatedAt: new Date() })
@@ -246,6 +282,7 @@ export function createInternalRouter() {
           eq(userProviderConnections.profileId, profileId),
           eq(userProviderConnections.providerId, providerId),
           eq(userProviderConnections.orgId, run.orgId),
+          eq(userProviderConnections.providerCredentialId, credentialId),
         ),
       );
 

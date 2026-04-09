@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Webhooks service — CRUD, signing (Standard Webhooks), and BullMQ delivery.
+ * Webhooks service — CRUD, signing (Standard Webhooks), and queue-based delivery.
  */
 
 import { z } from "zod";
-import { eq, and, or, desc } from "drizzle-orm";
-import { Queue, Worker, UnrecoverableError } from "bullmq";
-import type { Job } from "bullmq";
+import { eq, and, desc } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
@@ -16,7 +14,8 @@ import type { WebhookInfo, WebhookCreateResponse } from "@appstrate/shared-types
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { toISORequired } from "../lib/date-helpers.ts";
 import { buildUpdateSet } from "../lib/db-helpers.ts";
-import { getRedisConnection } from "../lib/redis.ts";
+import { createQueue, PermanentJobError } from "../infra/queue/index.ts";
+import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { isDevEnvironment, LOCALHOST_HOSTS } from "./redirect-validation.ts";
 import { prefixedId } from "../lib/ids.ts";
 
@@ -32,15 +31,13 @@ export const webhookEventSchema = z.enum([
   "run.cancelled",
 ]);
 
-export type WebhookEventType = z.infer<typeof webhookEventSchema>;
-
-export const webhookEventsSchema = z.array(webhookEventSchema).min(1);
+type WebhookEventType = z.infer<typeof webhookEventSchema>;
 
 /** Delays per attempt (attempt 1 = immediate, attempt 2 = 30s, etc.) */
 const RETRY_DELAYS_MS = [30_000, 300_000, 1_800_000, 3_600_000, 7_200_000, 10_800_000, 14_400_000];
 const MAX_ATTEMPTS = 8;
 const DELIVERY_TIMEOUT_MS = 15_000;
-const MAX_WEBHOOKS_PER_ORG = 20;
+const MAX_WEBHOOKS_PER_APP = 20;
 const MAX_PAYLOAD_SIZE = 256 * 1024; // 256KB
 
 // ---------------------------------------------------------------------------
@@ -67,26 +64,24 @@ function generateSecret(): string {
 
 function toWebhookResponse(row: {
   id: string;
-  scope: string;
-  applicationId: string | null;
+  applicationId: string;
   url: string;
   events: string[];
   packageId: string | null;
   payloadMode: string;
-  active: boolean;
+  enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }): WebhookInfo {
   return {
     id: row.id,
     object: "webhook",
-    scope: row.scope as "organization" | "application",
     applicationId: row.applicationId,
     url: row.url,
     events: row.events,
     packageId: row.packageId,
     payloadMode: row.payloadMode as "summary" | "full",
-    active: row.active,
+    enabled: row.enabled,
     createdAt: toISORequired(row.createdAt),
     updatedAt: toISORequired(row.updatedAt),
   };
@@ -95,7 +90,7 @@ function toWebhookResponse(row: {
 /**
  * Validate webhook URL — must be HTTPS (http://localhost in dev), not SSRF.
  */
-export function validateWebhookUrl(url: string): void {
+function validateWebhookUrl(url: string): void {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -116,19 +111,6 @@ export function validateWebhookUrl(url: string): void {
   }
 }
 
-export function validateEvents(events: unknown): string[] {
-  if (!Array.isArray(events) || events.length === 0) {
-    throw invalidRequest("events must be a non-empty array", "events");
-  }
-  const result = webhookEventsSchema.safeParse(events);
-  if (!result.success) {
-    // Find the first invalid value for a clear error message
-    const invalid = events.find((e) => !webhookEventSchema.safeParse(e).success);
-    throw invalidRequest(`Invalid event type: '${invalid}'`, "events");
-  }
-  return result.data;
-}
-
 // ---------------------------------------------------------------------------
 // Standard Webhooks signing
 // ---------------------------------------------------------------------------
@@ -140,7 +122,7 @@ async function sign(secret: string, content: string): Promise<string> {
   return `v1,${Buffer.from(hasher.digest()).toString("base64")}`;
 }
 
-export async function buildSignedHeaders(
+async function buildSignedHeaders(
   eventId: string,
   timestamp: number,
   body: string,
@@ -163,32 +145,30 @@ export async function buildSignedHeaders(
 
 export async function createWebhook(
   orgId: string,
+  applicationId: string,
   params: {
-    scope: "organization" | "application";
-    applicationId?: string | null;
     url: string;
     events: string[];
     packageId?: string | null;
     payloadMode?: string;
-    active?: boolean;
+    enabled?: boolean;
   },
 ): Promise<WebhookCreateResponse> {
-  // Check limit
+  // Check limit (per application, not per org)
   const existing = await db
     .select({ id: webhooks.id })
     .from(webhooks)
-    .where(eq(webhooks.orgId, orgId));
-  if (existing.length >= MAX_WEBHOOKS_PER_ORG) {
+    .where(and(eq(webhooks.orgId, orgId), eq(webhooks.applicationId, applicationId)));
+  if (existing.length >= MAX_WEBHOOKS_PER_APP) {
     throw new ApiError({
       status: 400,
       code: "webhook_limit_reached",
       title: "Webhook Limit Reached",
-      detail: `Maximum ${MAX_WEBHOOKS_PER_ORG} webhooks per organization`,
+      detail: `Maximum ${MAX_WEBHOOKS_PER_APP} webhooks per application`,
     });
   }
 
   validateWebhookUrl(params.url);
-  const validatedEvents = validateEvents(params.events);
 
   const id = prefixedId("wh");
   const secret = generateSecret();
@@ -198,13 +178,12 @@ export async function createWebhook(
     .values({
       id,
       orgId,
-      scope: params.scope,
-      applicationId: params.scope === "application" ? (params.applicationId ?? null) : null,
+      applicationId,
       url: params.url,
-      events: validatedEvents,
+      events: params.events,
       packageId: params.packageId ?? null,
       payloadMode: params.payloadMode ?? "full",
-      active: params.active ?? true,
+      enabled: params.enabled ?? true,
       secret,
     })
     .returning();
@@ -212,54 +191,51 @@ export async function createWebhook(
   return { ...toWebhookResponse(created!), secret };
 }
 
-export async function listWebhooks(
-  orgId: string,
-  filters?: { applicationId?: string; scope?: string },
-): Promise<WebhookInfo[]> {
-  const conditions = [eq(webhooks.orgId, orgId)];
-  if (filters?.scope) {
-    conditions.push(eq(webhooks.scope, filters.scope));
-  }
-  if (filters?.applicationId) {
-    conditions.push(eq(webhooks.applicationId, filters.applicationId));
-  }
-
+export async function listWebhooks(orgId: string, applicationId: string): Promise<WebhookInfo[]> {
   const rows = await db
     .select({
       id: webhooks.id,
-      scope: webhooks.scope,
       applicationId: webhooks.applicationId,
       url: webhooks.url,
       events: webhooks.events,
       packageId: webhooks.packageId,
       payloadMode: webhooks.payloadMode,
-      active: webhooks.active,
+      enabled: webhooks.enabled,
       createdAt: webhooks.createdAt,
       updatedAt: webhooks.updatedAt,
     })
     .from(webhooks)
-    .where(and(...conditions))
+    .where(and(eq(webhooks.orgId, orgId), eq(webhooks.applicationId, applicationId)))
     .orderBy(desc(webhooks.createdAt));
 
   return rows.map(toWebhookResponse);
 }
 
-export async function getWebhook(orgId: string, webhookId: string): Promise<WebhookInfo> {
+export async function getWebhook(
+  orgId: string,
+  applicationId: string,
+  webhookId: string,
+): Promise<WebhookInfo> {
   const [row] = await db
     .select({
       id: webhooks.id,
-      scope: webhooks.scope,
       applicationId: webhooks.applicationId,
       url: webhooks.url,
       events: webhooks.events,
       packageId: webhooks.packageId,
       payloadMode: webhooks.payloadMode,
-      active: webhooks.active,
+      enabled: webhooks.enabled,
       createdAt: webhooks.createdAt,
       updatedAt: webhooks.updatedAt,
     })
     .from(webhooks)
-    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)))
+    .where(
+      and(
+        eq(webhooks.id, webhookId),
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+      ),
+    )
     .limit(1);
 
   if (!row) throw notFound(`Webhook '${webhookId}' not found`);
@@ -268,41 +244,72 @@ export async function getWebhook(orgId: string, webhookId: string): Promise<Webh
 
 export async function updateWebhook(
   orgId: string,
+  applicationId: string,
   webhookId: string,
   params: {
     url?: string;
     events?: string[];
     packageId?: string | null;
     payloadMode?: string;
-    active?: boolean;
+    enabled?: boolean;
   },
 ): Promise<WebhookInfo> {
-  await getWebhook(orgId, webhookId);
+  await getWebhook(orgId, applicationId, webhookId);
 
   if (params.url) validateWebhookUrl(params.url);
-  if (params.events) validateEvents(params.events);
 
   const updates = buildUpdateSet(params);
 
   const [updated] = await db
     .update(webhooks)
     .set(updates)
-    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)))
+    .where(
+      and(
+        eq(webhooks.id, webhookId),
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+      ),
+    )
     .returning();
 
   return toWebhookResponse(updated!);
 }
 
-export async function deleteWebhook(orgId: string, webhookId: string): Promise<void> {
-  await getWebhook(orgId, webhookId);
-  await db.delete(webhooks).where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)));
+export async function deleteWebhook(
+  orgId: string,
+  applicationId: string,
+  webhookId: string,
+): Promise<void> {
+  await getWebhook(orgId, applicationId, webhookId);
+  await db
+    .delete(webhooks)
+    .where(
+      and(
+        eq(webhooks.id, webhookId),
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+      ),
+    );
 }
 
-export async function rotateSecret(orgId: string, webhookId: string): Promise<{ secret: string }> {
+/** Grace period for the previous secret after rotation (24 hours). */
+const SECRET_ROTATION_GRACE_MS = 24 * 60 * 60 * 1000;
+
+export async function rotateSecret(
+  orgId: string,
+  applicationId: string,
+  webhookId: string,
+): Promise<{ secret: string }> {
   const [row] = await db
     .select({ id: webhooks.id, secret: webhooks.secret })
     .from(webhooks)
-    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)))
+    .where(
+      and(
+        eq(webhooks.id, webhookId),
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+      ),
+    )
     .limit(1);
 
   if (!row) throw notFound(`Webhook '${webhookId}' not found`);
@@ -312,8 +319,8 @@ export async function rotateSecret(orgId: string, webhookId: string): Promise<{ 
     .update(webhooks)
     .set({
       secret: newSecret,
-      previousSecret: null,
-      previousSecretExpiresAt: null,
+      previousSecret: row.secret,
+      previousSecretExpiresAt: new Date(Date.now() + SECRET_ROTATION_GRACE_MS),
       updatedAt: new Date(),
     })
     .where(eq(webhooks.id, webhookId));
@@ -323,6 +330,7 @@ export async function rotateSecret(orgId: string, webhookId: string): Promise<{ 
 
 export async function listDeliveries(
   orgId: string,
+  applicationId: string,
   webhookId: string,
   limit = 20,
 ): Promise<
@@ -338,7 +346,7 @@ export async function listDeliveries(
     createdAt: string;
   }[]
 > {
-  await getWebhook(orgId, webhookId);
+  await getWebhook(orgId, applicationId, webhookId);
 
   const rows = await db
     .select()
@@ -401,22 +409,18 @@ export function buildEventEnvelope(params: {
 }
 
 // ---------------------------------------------------------------------------
-// BullMQ delivery queue
+// Delivery queue
 // ---------------------------------------------------------------------------
 
-let deliveryQueue: Queue<DeliveryJobData> | null = null;
-let deliveryWorker: Worker<DeliveryJobData> | null = null;
+let deliveryQueue: JobQueue<DeliveryJobData> | null = null;
 
-function getDeliveryQueue(): Queue<DeliveryJobData> {
+async function getDeliveryQueue(): Promise<JobQueue<DeliveryJobData>> {
   if (!deliveryQueue) {
-    deliveryQueue = new Queue<DeliveryJobData>("webhook-delivery", {
-      connection: getRedisConnection() as never,
-      defaultJobOptions: {
-        attempts: MAX_ATTEMPTS,
-        backoff: { type: "custom" },
-        removeOnComplete: 1000,
-        removeOnFail: 5000,
-      },
+    deliveryQueue = await createQueue<DeliveryJobData>("webhook-delivery", {
+      attempts: MAX_ATTEMPTS,
+      backoff: { type: "custom" },
+      removeOnComplete: 1000,
+      removeOnFail: 5000,
     });
   }
   return deliveryQueue;
@@ -426,24 +430,14 @@ function getDeliveryQueue(): Queue<DeliveryJobData> {
  * Dispatch webhook events for a run status change.
  * Called from the run pipeline after status transitions.
  *
- * Matches webhooks in two scopes:
- * - "organization": fires for ALL runs in the org (dashboard + API)
- * - "application": fires only for runs via a specific application's API key
+ * All webhooks are application-scoped — fires only for runs in the same application.
  */
 export async function dispatchWebhookEvents(
   orgId: string,
   eventType: WebhookEventType,
   run: Record<string, unknown>,
-  applicationId?: string | null,
+  applicationId: string,
 ): Promise<void> {
-  // Build OR condition: org-scoped webhooks always match; app-scoped only if applicationId present
-  const scopeConditions = [and(eq(webhooks.scope, "organization"))];
-  if (applicationId) {
-    scopeConditions.push(
-      and(eq(webhooks.scope, "application"), eq(webhooks.applicationId, applicationId)),
-    );
-  }
-
   const rows = await db
     .select({
       id: webhooks.id,
@@ -452,9 +446,15 @@ export async function dispatchWebhookEvents(
       payloadMode: webhooks.payloadMode,
     })
     .from(webhooks)
-    .where(and(eq(webhooks.orgId, orgId), eq(webhooks.active, true), or(...scopeConditions)));
+    .where(
+      and(
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+        eq(webhooks.enabled, true),
+      ),
+    );
 
-  const queue = getDeliveryQueue();
+  const queue = await getDeliveryQueue();
 
   for (const wh of rows) {
     if (!wh.events?.includes(eventType)) continue;
@@ -477,10 +477,10 @@ export async function dispatchWebhookEvents(
 
 /**
  * Process a single webhook delivery attempt.
- * Throws on failure — BullMQ handles retry scheduling via backoffStrategy.
- * Throws UnrecoverableError for permanent failures (4xx except 408/429).
+ * Throws on failure — queue handles retry scheduling via backoffStrategy.
+ * Throws PermanentJobError for permanent failures (4xx except 408/429).
  */
-async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
+async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
   const { webhookId, eventId, eventType, payload } = job.data;
   const attempt = job.attemptsMade + 1; // attemptsMade is 0-based before this attempt
 
@@ -488,6 +488,8 @@ async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
     .select({
       url: webhooks.url,
       secret: webhooks.secret,
+      previousSecret: webhooks.previousSecret,
+      previousSecretExpiresAt: webhooks.previousSecretExpiresAt,
     })
     .from(webhooks)
     .where(eq(webhooks.id, webhookId))
@@ -500,7 +502,13 @@ async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
 
   const timestamp = Math.floor(Date.now() / 1000);
 
+  // Sign with current secret; during grace period, include previous secret signature too
   const headers = await buildSignedHeaders(eventId, timestamp, payload, wh.secret);
+  if (wh.previousSecret && wh.previousSecretExpiresAt && wh.previousSecretExpiresAt > new Date()) {
+    const content = `${eventId}.${timestamp}.${payload}`;
+    const prevSig = await sign(wh.previousSecret, content);
+    headers["webhook-signature"] = `${headers["webhook-signature"]} ${prevSig}`;
+  }
   headers["webhook-attempt"] = String(attempt);
 
   const start = Date.now();
@@ -563,10 +571,10 @@ async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
   // Permanent failure (4xx except 408/429) — do not retry
   if (isPermanentFailure) {
     logger.warn("Webhook delivery permanently failed", failContext);
-    throw new UnrecoverableError(`Permanent failure: HTTP ${statusCode}`);
+    throw new PermanentJobError(`Permanent failure: HTTP ${statusCode}`);
   }
 
-  // Transient failure — throw to trigger BullMQ retry with backoff
+  // Transient failure — throw to trigger retry with backoff
   logger.warn("Webhook delivery failed, will retry", failContext);
   throw new Error(errorMessage ?? `HTTP ${statusCode}`);
 }
@@ -574,30 +582,15 @@ async function processDelivery(job: Job<DeliveryJobData>): Promise<void> {
 /**
  * Initialize the webhook delivery worker. Called at boot.
  */
-export function initWebhookWorker(): void {
-  if (deliveryWorker) return;
+export async function initWebhookWorker(): Promise<void> {
+  const queue = await getDeliveryQueue();
 
-  deliveryWorker = new Worker<DeliveryJobData>("webhook-delivery", processDelivery, {
-    connection: getRedisConnection() as never,
+  queue.process(processDelivery, {
     concurrency: 10,
-    limiter: {
-      max: 100,
-      duration: 1000, // 100 deliveries/sec
+    limiter: { max: 100, duration: 1000 },
+    backoffStrategy: (attemptsMade: number) => {
+      return RETRY_DELAYS_MS[attemptsMade - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]!;
     },
-    settings: {
-      backoffStrategy: (attemptsMade: number) => {
-        // attemptsMade is 1-based here (1 = first retry after first failure)
-        return RETRY_DELAYS_MS[attemptsMade - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]!;
-      },
-    },
-  });
-
-  deliveryWorker.on("failed", (job, err) => {
-    if (err instanceof UnrecoverableError) return; // Already logged in processDelivery
-    logger.error("Webhook delivery job failed", {
-      jobId: job?.id,
-      error: err.message,
-    });
   });
 
   logger.info("Webhook delivery worker started");
@@ -607,8 +600,32 @@ export function initWebhookWorker(): void {
  * Shutdown the webhook delivery worker. Called during graceful shutdown.
  */
 export async function shutdownWebhookWorker(): Promise<void> {
-  await deliveryWorker?.close();
-  await deliveryQueue?.close();
-  deliveryWorker = null;
+  await deliveryQueue?.shutdown();
   deliveryQueue = null;
+}
+
+/**
+ * Fire-and-forget webhook dispatch for run status changes.
+ * Shared by the run route (POST /run) and the scheduler (triggerScheduledRun).
+ */
+export function dispatchRunWebhook(
+  orgId: string,
+  applicationId: string,
+  status: string,
+  runId: string,
+  packageId: string,
+  extra?: Record<string, unknown>,
+): void {
+  const eventType = `run.${status}` as WebhookEventType;
+  dispatchWebhookEvents(
+    orgId,
+    eventType,
+    { id: runId, packageId, status, ...extra },
+    applicationId,
+  ).catch((err) => {
+    logger.warn("Webhook dispatch failed", {
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 }

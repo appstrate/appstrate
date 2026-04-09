@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedConnectionProfile } from "../../helpers/seed.ts";
+import { seedConnectionProfile, seedProviderCredentials, seedPackage } from "../../helpers/seed.ts";
 import { userProviderConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
@@ -27,21 +27,27 @@ async function seedConnection(
   profileId: string,
   providerId: string,
   orgId: string,
-): Promise<string> {
+  appId: string,
+): Promise<{ connectionId: string; credentialId: string }> {
   const encrypted = encryptCredentials({ test: "value" });
+  // Ensure provider package exists (FK target for applicationProviderCredentials)
+  const pkgId = providerId.startsWith("@") ? providerId : `@system/${providerId}`;
+  await seedPackage({ orgId: null, id: pkgId, type: "provider", source: "system" }).catch(() => {});
+  const cred = await seedProviderCredentials({ applicationId: appId, providerId: pkgId });
 
   const [row] = await db
     .insert(userProviderConnections)
     .values({
       profileId,
-      providerId,
+      providerId: pkgId,
       orgId,
+      providerCredentialId: cred.id,
       credentialsEncrypted: encrypted,
       scopesGranted: [],
     })
     .returning();
 
-  return row!.id;
+  return { connectionId: row!.id, credentialId: cred.id };
 }
 
 // ─── Tests ────────────────────────────────────────────────
@@ -50,13 +56,15 @@ describe("connection-manager", () => {
   let userId: string;
   let orgId: string;
   let profileId: string;
+  let applicationId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const user = await createTestUser();
     userId = user.id;
-    const { org } = await createTestOrg(userId, { slug: "testorg" });
+    const { org, defaultAppId } = await createTestOrg(userId, { slug: "testorg" });
     orgId = org.id;
+    applicationId = defaultAppId;
 
     const profile = await seedConnectionProfile({ userId, name: "Default", isDefault: true });
     profileId = profile.id;
@@ -90,7 +98,20 @@ describe("connection-manager", () => {
 
   describe("saveApiKeyConnection", () => {
     it("stores an encrypted API key credential", async () => {
-      await saveApiKeyConnection("test-provider", "sk-test-key-12345", profileId, orgId);
+      await seedPackage({
+        orgId: null,
+        id: "@system/test-provider",
+        type: "provider",
+        source: "system",
+      });
+      await seedProviderCredentials({ applicationId, providerId: "@system/test-provider" });
+      await saveApiKeyConnection(
+        "@system/test-provider",
+        "sk-test-key-12345",
+        profileId,
+        orgId,
+        applicationId,
+      );
 
       const rows = await db
         .select()
@@ -98,7 +119,7 @@ describe("connection-manager", () => {
         .where(eq(userProviderConnections.profileId, profileId));
 
       expect(rows).toHaveLength(1);
-      expect(rows[0]!.providerId).toBe("test-provider");
+      expect(rows[0]!.providerId).toBe("@system/test-provider");
       expect(rows[0]!.orgId).toBe(orgId);
 
       // Credential is encrypted (not plaintext)
@@ -110,8 +131,27 @@ describe("connection-manager", () => {
     });
 
     it("upserts on same profile + provider + org", async () => {
-      await saveApiKeyConnection("test-provider", "key-v1", profileId, orgId);
-      await saveApiKeyConnection("test-provider", "key-v2", profileId, orgId);
+      await seedPackage({
+        orgId: null,
+        id: "@system/test-provider",
+        type: "provider",
+        source: "system",
+      });
+      await seedProviderCredentials({ applicationId, providerId: "@system/test-provider" });
+      await saveApiKeyConnection(
+        "@system/test-provider",
+        "key-v1",
+        profileId,
+        orgId,
+        applicationId,
+      );
+      await saveApiKeyConnection(
+        "@system/test-provider",
+        "key-v2",
+        profileId,
+        orgId,
+        applicationId,
+      );
 
       const rows = await db
         .select()
@@ -129,12 +169,20 @@ describe("connection-manager", () => {
 
   describe("saveCredentialsConnection", () => {
     it("stores encrypted basic credentials", async () => {
+      await seedPackage({
+        orgId: null,
+        id: "@system/basic-provider",
+        type: "provider",
+        source: "system",
+      });
+      await seedProviderCredentials({ applicationId, providerId: "@system/basic-provider" });
       await saveCredentialsConnection(
-        "basic-provider",
+        "@system/basic-provider",
         "basic",
         { username: "admin", password: "secret123" },
         profileId,
         orgId,
+        applicationId,
       );
 
       const rows = await db
@@ -143,7 +191,7 @@ describe("connection-manager", () => {
         .where(eq(userProviderConnections.profileId, profileId));
 
       expect(rows).toHaveLength(1);
-      expect(rows[0]!.providerId).toBe("basic-provider");
+      expect(rows[0]!.providerId).toBe("@system/basic-provider");
 
       const decrypted = decryptCredentials<Record<string, string>>(rows[0]!.credentialsEncrypted);
       expect(decrypted.username).toBe("admin");
@@ -151,12 +199,20 @@ describe("connection-manager", () => {
     });
 
     it("stores encrypted custom credentials", async () => {
+      await seedPackage({
+        orgId: null,
+        id: "@system/custom-provider",
+        type: "provider",
+        source: "system",
+      });
+      await seedProviderCredentials({ applicationId, providerId: "@system/custom-provider" });
       await saveCredentialsConnection(
-        "custom-provider",
+        "@system/custom-provider",
         "custom",
         { token: "abc", workspace_id: "ws-1" },
         profileId,
         orgId,
+        applicationId,
       );
 
       const rows = await db
@@ -176,15 +232,15 @@ describe("connection-manager", () => {
 
   describe("listActorConnections", () => {
     it("returns connections for a profile", async () => {
-      await seedConnection(profileId, "gmail", orgId);
-      await seedConnection(profileId, "clickup", orgId);
+      await seedConnection(profileId, "gmail", orgId, applicationId);
+      await seedConnection(profileId, "clickup", orgId, applicationId);
 
-      const connections = await listActorConnections(profileId, orgId);
+      const connections = await listActorConnections(profileId, orgId, applicationId);
 
       expect(connections).toHaveLength(2);
       const providers = connections.map((c) => c.provider);
-      expect(providers).toContain("gmail");
-      expect(providers).toContain("clickup");
+      expect(providers).toContain("@system/gmail");
+      expect(providers).toContain("@system/clickup");
 
       for (const conn of connections) {
         expect(conn.status).toBe("connected");
@@ -194,7 +250,7 @@ describe("connection-manager", () => {
     });
 
     it("returns empty array for a profile with no connections", async () => {
-      const connections = await listActorConnections(profileId, orgId);
+      const connections = await listActorConnections(profileId, orgId, applicationId);
       expect(connections).toBeArray();
       expect(connections).toHaveLength(0);
     });
@@ -206,19 +262,21 @@ describe("connection-manager", () => {
         name: "Other Profile",
       });
 
-      await seedConnection(otherProfile.id, "gmail", orgId);
+      await seedConnection(otherProfile.id, "gmail", orgId, applicationId);
 
-      const connections = await listActorConnections(profileId, orgId);
+      const connections = await listActorConnections(profileId, orgId, applicationId);
       expect(connections).toHaveLength(0);
     });
 
     it("does not return connections from other orgs", async () => {
       const otherUser = await createTestUser({ email: "org2@test.com" });
-      const { org: otherOrg } = await createTestOrg(otherUser.id, { slug: "otherorg" });
+      const { org: otherOrg, defaultAppId: otherAppId } = await createTestOrg(otherUser.id, {
+        slug: "otherorg",
+      });
 
-      await seedConnection(profileId, "gmail", otherOrg.id);
+      await seedConnection(profileId, "gmail", otherOrg.id, otherAppId);
 
-      const connections = await listActorConnections(profileId, orgId);
+      const connections = await listActorConnections(profileId, orgId, applicationId);
       expect(connections).toHaveLength(0);
     });
   });
@@ -227,20 +285,25 @@ describe("connection-manager", () => {
 
   describe("disconnectProvider", () => {
     it("removes connection for the given provider", async () => {
-      await seedConnection(profileId, "gmail", orgId);
-      await seedConnection(profileId, "clickup", orgId);
+      const gmail = await seedConnection(profileId, "gmail", orgId, applicationId);
+      await seedConnection(profileId, "clickup", orgId, applicationId);
 
-      await disconnectProvider("gmail", profileId, orgId);
+      await disconnectProvider("@system/gmail", profileId, orgId, gmail.credentialId);
 
-      const connections = await listActorConnections(profileId, orgId);
+      const connections = await listActorConnections(profileId, orgId, applicationId);
       expect(connections).toHaveLength(1);
-      expect(connections[0]!.provider).toBe("clickup");
+      expect(connections[0]!.provider).toBe("@system/clickup");
     });
 
     it("does not throw when provider has no connection", async () => {
-      await disconnectProvider("nonexistent", profileId, orgId);
+      await disconnectProvider(
+        "nonexistent",
+        profileId,
+        orgId,
+        "00000000-0000-0000-0000-000000000000",
+      );
 
-      const connections = await listActorConnections(profileId, orgId);
+      const connections = await listActorConnections(profileId, orgId, applicationId);
       expect(connections).toHaveLength(0);
     });
   });
@@ -249,24 +312,24 @@ describe("connection-manager", () => {
 
   describe("disconnectConnectionById", () => {
     it("removes a specific connection by ID", async () => {
-      const connId = await seedConnection(profileId, "gmail", orgId);
-      await seedConnection(profileId, "clickup", orgId);
+      const { connectionId } = await seedConnection(profileId, "gmail", orgId, applicationId);
+      await seedConnection(profileId, "clickup", orgId, applicationId);
 
       const actor: Actor = { type: "member", id: userId };
-      await disconnectConnectionById(connId, actor);
+      await disconnectConnectionById(connectionId, actor, applicationId);
 
-      const connections = await listActorConnections(profileId, orgId);
+      const connections = await listActorConnections(profileId, orgId, applicationId);
       expect(connections).toHaveLength(1);
-      expect(connections[0]!.provider).toBe("clickup");
+      expect(connections[0]!.provider).toBe("@system/clickup");
     });
 
     it("throws when connection does not belong to the actor", async () => {
-      const connId = await seedConnection(profileId, "gmail", orgId);
+      const { connectionId } = await seedConnection(profileId, "gmail", orgId, applicationId);
 
       const otherUser = await createTestUser({ email: "hacker@test.com" });
       const actor: Actor = { type: "member", id: otherUser.id };
 
-      await expect(disconnectConnectionById(connId, actor)).rejects.toThrow(
+      await expect(disconnectConnectionById(connectionId, actor, applicationId)).rejects.toThrow(
         "Connection not found or not owned by actor",
       );
     });
@@ -275,7 +338,7 @@ describe("connection-manager", () => {
       const actor: Actor = { type: "member", id: userId };
       const fakeId = "00000000-0000-0000-0000-000000000000";
 
-      await expect(disconnectConnectionById(fakeId, actor)).rejects.toThrow(
+      await expect(disconnectConnectionById(fakeId, actor, applicationId)).rejects.toThrow(
         "Connection not found or not owned by actor",
       );
     });
@@ -288,15 +351,15 @@ describe("connection-manager", () => {
       // Create a second profile for the same user
       const profile2 = await seedConnectionProfile({ userId, name: "Profile 2" });
 
-      await seedConnection(profileId, "gmail", orgId);
-      await seedConnection(profileId, "clickup", orgId);
-      await seedConnection(profile2.id, "slack", orgId);
+      await seedConnection(profileId, "gmail", orgId, applicationId);
+      await seedConnection(profileId, "clickup", orgId, applicationId);
+      await seedConnection(profile2.id, "slack", orgId, applicationId);
 
       const actor: Actor = { type: "member", id: userId };
-      await deleteAllActorConnections(actor);
+      await deleteAllActorConnections(actor, applicationId);
 
-      const conn1 = await listActorConnections(profileId, orgId);
-      const conn2 = await listActorConnections(profile2.id, orgId);
+      const conn1 = await listActorConnections(profileId, orgId, applicationId);
+      const conn2 = await listActorConnections(profile2.id, orgId, applicationId);
 
       expect(conn1).toHaveLength(0);
       expect(conn2).toHaveLength(0);
@@ -304,26 +367,28 @@ describe("connection-manager", () => {
 
     it("does not remove connections belonging to other actors", async () => {
       const otherUser = await createTestUser({ email: "keep@test.com" });
-      const { org: otherOrg } = await createTestOrg(otherUser.id, { slug: "keeporg" });
+      const { org: otherOrg, defaultAppId: otherAppId } = await createTestOrg(otherUser.id, {
+        slug: "keeporg",
+      });
       const otherProfile = await seedConnectionProfile({
         userId: otherUser.id,
         name: "Keep Profile",
       });
 
-      await seedConnection(profileId, "gmail", orgId);
-      await seedConnection(otherProfile.id, "clickup", otherOrg.id);
+      await seedConnection(profileId, "gmail", orgId, applicationId);
+      await seedConnection(otherProfile.id, "clickup", otherOrg.id, otherAppId);
 
       const actor: Actor = { type: "member", id: userId };
-      await deleteAllActorConnections(actor);
+      await deleteAllActorConnections(actor, applicationId);
 
       // Actor's connections are gone
-      const actorConns = await listActorConnections(profileId, orgId);
+      const actorConns = await listActorConnections(profileId, orgId, applicationId);
       expect(actorConns).toHaveLength(0);
 
       // Other user's connections are intact
-      const otherConns = await listActorConnections(otherProfile.id, otherOrg.id);
+      const otherConns = await listActorConnections(otherProfile.id, otherOrg.id, otherAppId);
       expect(otherConns).toHaveLength(1);
-      expect(otherConns[0]!.provider).toBe("clickup");
+      expect(otherConns[0]!.provider).toBe("@system/clickup");
     });
 
     it("is a no-op when actor has no profiles", async () => {
@@ -331,7 +396,61 @@ describe("connection-manager", () => {
       const actor: Actor = { type: "member", id: otherUser.id };
 
       // Should not throw
-      await deleteAllActorConnections(actor);
+      await deleteAllActorConnections(actor, applicationId);
+    });
+  });
+
+  // ── Multi-app connection isolation ───────────────────────
+
+  describe("multi-app connection isolation", () => {
+    it("listActorConnections only returns connections for the specified application", async () => {
+      // Create a second application in the same org
+      const { applications } = await import("@appstrate/db/schema");
+      const [app2] = await db
+        .insert(applications)
+        .values({ id: "app_test2", orgId, name: "App 2", isDefault: false })
+        .returning();
+      const app2Id = app2!.id;
+
+      // Connect the same provider in both apps (different credentials)
+      await seedConnection(profileId, "gmail", orgId, applicationId);
+      await seedConnection(profileId, "clickup", orgId, applicationId);
+      await seedConnection(profileId, "gmail", orgId, app2Id);
+
+      // App 1 should only see its own connections
+      const app1Conns = await listActorConnections(profileId, orgId, applicationId);
+      expect(app1Conns).toHaveLength(2);
+      expect(app1Conns.map((c) => c.provider)).toContain("@system/gmail");
+      expect(app1Conns.map((c) => c.provider)).toContain("@system/clickup");
+
+      // App 2 should only see its own connection
+      const app2Conns = await listActorConnections(profileId, orgId, app2Id);
+      expect(app2Conns).toHaveLength(1);
+      expect(app2Conns[0]!.provider).toBe("@system/gmail");
+    });
+
+    it("disconnectProvider only removes the connection for the app's credential", async () => {
+      const { applications } = await import("@appstrate/db/schema");
+      const [app2] = await db
+        .insert(applications)
+        .values({ id: "app_isolation2", orgId, name: "App Iso 2", isDefault: false })
+        .returning();
+      const app2Id = app2!.id;
+
+      const conn1 = await seedConnection(profileId, "gmail", orgId, applicationId);
+      await seedConnection(profileId, "gmail", orgId, app2Id);
+
+      // Disconnect gmail from app 1 only
+      await disconnectProvider("@system/gmail", profileId, orgId, conn1.credentialId);
+
+      // App 1: no connections
+      const app1Conns = await listActorConnections(profileId, orgId, applicationId);
+      expect(app1Conns).toHaveLength(0);
+
+      // App 2: still has gmail
+      const app2Conns = await listActorConnections(profileId, orgId, app2Id);
+      expect(app2Conns).toHaveLength(1);
+      expect(app2Conns[0]!.provider).toBe("@system/gmail");
     });
   });
 });

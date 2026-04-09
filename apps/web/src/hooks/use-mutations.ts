@@ -116,7 +116,10 @@ export function useConnect() {
         }, 500);
       });
     },
-    onSuccess: () => invalidateConnectionRelated(qc),
+    onSuccess: () => {
+      invalidateConnectionRelated(qc);
+      toast.success(i18n.t("settings:providers.connectSuccess"));
+    },
     onError: onMutationError,
   });
 }
@@ -138,7 +141,10 @@ export function useConnectApiKey() {
         body: JSON.stringify({ apiKey, ...(profileId ? { profileId } : {}) }),
       });
     },
-    onSuccess: () => invalidateConnectionRelated(qc),
+    onSuccess: () => {
+      invalidateConnectionRelated(qc);
+      toast.success(i18n.t("settings:providers.connectSuccess"));
+    },
     onError: onMutationError,
   });
 }
@@ -166,7 +172,7 @@ export function useDisconnect() {
 export function useDeleteAllConnections() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api("/connection-profiles/connections", { method: "DELETE" }),
+    mutationFn: () => api("/app-profiles/connections", { method: "DELETE" }),
     onSuccess: () => {
       invalidateConnectionRelated(qc);
       qc.invalidateQueries({ queryKey: ["connection-profiles"] });
@@ -246,7 +252,10 @@ export function useConnectCredentials() {
         body: JSON.stringify({ credentials, ...(profileId ? { profileId } : {}) }),
       });
     },
-    onSuccess: () => invalidateConnectionRelated(qc),
+    onSuccess: () => {
+      invalidateConnectionRelated(qc);
+      toast.success(i18n.t("settings:providers.connectSuccess"));
+    },
     onError: onMutationError,
   });
 }
@@ -397,7 +406,10 @@ export function useConfigureProviderCredentials() {
         body: JSON.stringify({ credentials, enabled, invalidateConnections }),
       });
     },
-    onSuccess: () => invalidateProviderQueries(qc),
+    onSuccess: () => {
+      invalidateProviderQueries(qc);
+      toast.success(i18n.t("settings:providers.credentialsSaved"));
+    },
     onError: onMutationError,
   });
 }

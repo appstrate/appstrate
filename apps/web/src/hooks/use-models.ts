@@ -3,9 +3,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
 import type { OrgModelInfo, TestResult, ModelCost } from "@appstrate/shared-types";
 import type { ModelFormData } from "../components/model-form-modal";
-import { useCreateProviderKey } from "./use-provider-keys";
+import { useCreateProviderKey, useProviderKeys, deduplicateLabel } from "./use-provider-keys";
 import { findProviderByApiAndBaseUrl } from "../lib/model-presets";
 
 export function useModels() {
@@ -136,10 +137,11 @@ export function useOpenRouterModels(search: string | undefined) {
 
 export function useAgentModel(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   return useQuery({
-    queryKey: ["agent-model", orgId, packageId],
+    queryKey: ["agent-model", orgId, appId, packageId],
     queryFn: () => api<{ modelId: string | null }>(`/agents/${packageId}/model`),
-    enabled: !!orgId && !!packageId,
+    enabled: !!orgId && !!appId && !!packageId,
   });
 }
 
@@ -170,32 +172,42 @@ export function useModelFormHandler(opts: {
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
   const createPk = useCreateProviderKey();
+  const { data: providerKeys } = useProviderKeys();
 
   const isPending = createModel.isPending || updateModel.isPending || createPk.isPending;
 
   const onSubmit = (data: ModelFormData) => {
-    if (opts.editModel) {
-      updateModel.mutate({ id: opts.editModel.id, data }, { onSuccess: opts.onSuccess });
-    } else if (data.newProviderKey) {
+    const createProviderKeyAndThen = (onKeyCreated: (keyId: string) => void) => {
       const provider = findProviderByApiAndBaseUrl(data.api, data.baseUrl);
-      const providerLabel = provider?.label ?? "Custom";
+      const label = deduplicateLabel(provider?.label ?? "Custom", providerKeys ?? []);
       createPk.mutate(
         {
-          label: providerLabel,
+          label,
           api: data.api,
           baseUrl: data.baseUrl,
-          apiKey: data.newProviderKey.apiKey,
+          apiKey: data.newProviderKey!.apiKey,
         },
-        {
-          onSuccess: (result) => {
-            const { newProviderKey: _, ...modelData } = data;
-            createModel.mutate(
-              { ...modelData, providerKeyId: result.id },
-              { onSuccess: opts.onSuccess },
-            );
-          },
-        },
+        { onSuccess: (result) => onKeyCreated(result.id) },
       );
+    };
+
+    if (opts.editModel) {
+      if (data.newProviderKey) {
+        createProviderKeyAndThen((keyId) => {
+          const { newProviderKey: _, ...modelData } = data;
+          updateModel.mutate(
+            { id: opts.editModel!.id, data: { ...modelData, providerKeyId: keyId } },
+            { onSuccess: opts.onSuccess },
+          );
+        });
+      } else {
+        updateModel.mutate({ id: opts.editModel.id, data }, { onSuccess: opts.onSuccess });
+      }
+    } else if (data.newProviderKey) {
+      createProviderKeyAndThen((keyId) => {
+        const { newProviderKey: _, ...modelData } = data;
+        createModel.mutate({ ...modelData, providerKeyId: keyId }, { onSuccess: opts.onSuccess });
+      });
     } else {
       createModel.mutate(data, { onSuccess: opts.onSuccess });
     }

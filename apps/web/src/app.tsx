@@ -27,11 +27,12 @@ import { AppSettingsPage } from "./pages/app-settings-page";
 import { SkillsPage } from "./pages/skills-page";
 import { ToolsPage } from "./pages/tools-page";
 import { ProvidersPage } from "./pages/providers-page";
-import { OrgProfileDetailPage } from "./pages/org-profile-detail";
+import { AppProfileDetailPage } from "./pages/app-profile-detail";
 import { ScheduleDetailPage } from "./pages/schedule-detail";
 import { ScheduleCreatePage } from "./pages/schedule-create";
 import { ScheduleEditPage } from "./pages/schedule-edit";
 import { PreferencesPage } from "./pages/preferences";
+import { LibraryPage } from "./pages/library-page";
 import { LoginPage } from "./pages/login";
 import { RegisterPage } from "./pages/register";
 import { VerifyEmailPage } from "./pages/verify-email";
@@ -241,10 +242,10 @@ export function App() {
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/providers" element={<ProvidersPage />} />
             <Route
-              path="/org-profiles"
-              element={<Navigate to="/org-settings#profiles" replace />}
+              path="/app-profiles"
+              element={<Navigate to="/app-settings#profiles" replace />}
             />
-            <Route path="/org-profiles/:id" element={<OrgProfileDetailPage />} />
+            <Route path="/app-profiles/:id" element={<AppProfileDetailPage />} />
             <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
             <Route path="/skills/:scope/:name/edit" element={<PackageEditorPage type="skill" />} />
             <Route
@@ -275,6 +276,7 @@ export function App() {
               path="/providers/:scope/:name/:version"
               element={<UnifiedPackageDetailPage type="provider" />}
             />
+            <Route path="/library" element={<LibraryPage />} />
             <Route path="/applications" element={<ApplicationsPage />} />
             <Route path="/preferences" element={<PreferencesPage />} />
             <Route path="/webhooks" element={<WebhooksPage />} />

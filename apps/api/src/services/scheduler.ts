@@ -1,42 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Queue, Worker } from "bullmq";
-import type { Job, ConnectionOptions } from "bullmq";
+import { createQueue } from "../infra/queue/index.ts";
+import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { eq, and, asc, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   packageSchedules,
   connectionProfiles as connectionProfilesTable,
-  userProviderConnections,
 } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
-import { createRun, createFailedRun } from "./state/index.ts";
-import { executeAgentInBackground } from "../routes/runs.ts";
-import { dispatchWebhookEvents } from "./webhooks.ts";
-import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
+import { createFailedRun } from "./state/index.ts";
+import { dispatchRunWebhook } from "./webhooks.ts";
+import { prepareAndExecuteRun, resolveRunPreflight } from "./run-pipeline.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
-import type { PromptContext } from "./adapters/types.ts";
 import { getPackage, packageExists } from "./agent-service.ts";
-import { getPackageConfig } from "./state/index.ts";
-import { validateAgentReadiness } from "./agent-readiness.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import {
   getProfileByIdUnsafe,
   resolveProviderProfiles,
   resolveScheduleProfileArgs,
-  getAgentOrgProfile,
+  getAgentAppProfile,
 } from "./connection-profiles.ts";
+import { resolveProviderStatuses } from "./connection-manager/index.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
 import { validateInput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-import { getRedisConnection } from "../lib/redis.ts";
 import { computeNextRun } from "../lib/cron.ts";
-import { getRunningRunCountForOrg } from "./state/index.ts";
-import { getCloudModule } from "../lib/cloud-loader.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 
 // ---------------------------------------------------------------------------
@@ -48,6 +41,7 @@ interface ScheduleJobData {
   packageId: string;
   connectionProfileId: string;
   orgId: string;
+  applicationId: string;
   input?: Record<string, unknown>;
 }
 
@@ -69,57 +63,55 @@ function toSchedule(row: typeof packageSchedules.$inferSelect): Schedule {
 
 const QUEUE_NAME = "schedules";
 
-let scheduleQueue: Queue | null = null;
-let scheduleWorker: Worker | null = null;
+let scheduleQueue: JobQueue<ScheduleJobData> | null = null;
 
-function getQueue(): Queue {
+async function getQueue(): Promise<JobQueue<ScheduleJobData>> {
   if (!scheduleQueue) {
-    scheduleQueue = new Queue(QUEUE_NAME, {
-      connection: getRedisConnection() as unknown as ConnectionOptions,
-    });
+    scheduleQueue = await createQueue<ScheduleJobData>(QUEUE_NAME);
   }
   return scheduleQueue;
 }
 
-/** Upsert a BullMQ repeatable job scheduler for a schedule. */
+/** Upsert a repeatable job scheduler for a schedule. */
 async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<void> {
-  const queue = getQueue();
-
   const jobData: ScheduleJobData = {
     scheduleId: schedule.id,
     packageId: schedule.packageId,
     connectionProfileId: schedule.connectionProfileId,
     orgId,
+    applicationId: schedule.applicationId,
     input: asRecordOrNull(schedule.input) ?? undefined,
   };
 
-  await queue.upsertJobScheduler(
+  await (
+    await getQueue()
+  ).upsertScheduler(
     schedule.id,
-    {
-      pattern: schedule.cronExpression,
-      tz: schedule.timezone ?? "UTC",
-    },
-    {
-      name: "execute-agent",
-      data: jobData,
-    },
+    { pattern: schedule.cronExpression, tz: schedule.timezone ?? "UTC" },
+    { name: "execute-agent", data: jobData },
   );
 }
 
-/** Remove a BullMQ repeatable job scheduler. */
+/** Remove a repeatable job scheduler. */
 async function removeScheduleJob(scheduleId: string): Promise<void> {
-  const queue = getQueue();
-  await queue.removeJobScheduler(scheduleId);
+  await (await getQueue()).removeScheduler(scheduleId);
 }
 
-/** Process a scheduled job via BullMQ worker. */
-async function handleScheduleJob(job: Job<ScheduleJobData>): Promise<void> {
-  const { scheduleId, packageId, connectionProfileId, orgId, input } = job.data;
+/** Process a scheduled job. */
+async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> {
+  const { scheduleId, packageId, connectionProfileId, orgId, applicationId, input } = job.data;
 
-  await triggerScheduledRun(scheduleId, packageId, connectionProfileId, orgId, input);
+  await triggerScheduledRun(
+    scheduleId,
+    packageId,
+    connectionProfileId,
+    orgId,
+    applicationId,
+    input,
+  );
 
   // Update schedule timestamps
-  const schedule = await getSchedule(scheduleId);
+  const schedule = await getSchedule(scheduleId, orgId, applicationId);
   const nextRun = schedule
     ? computeNextRun(schedule.cronExpression, schedule.timezone ?? "UTC")
     : null;
@@ -138,38 +130,18 @@ async function handleScheduleJob(job: Job<ScheduleJobData>): Promise<void> {
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-/** Initialize the BullMQ worker and sync existing schedules from DB. */
+/** Initialize the schedule worker and sync existing schedules from DB. */
 export async function initScheduleWorker(): Promise<void> {
-  scheduleWorker = new Worker<ScheduleJobData>(
-    QUEUE_NAME,
+  const queue = await getQueue();
+
+  queue.process(
     async (job) => {
       await handleScheduleJob(job);
     },
-    {
-      connection: getRedisConnection() as unknown as ConnectionOptions,
-      // concurrency: 1 ensures this worker processes one job at a time.
-      // Combined with the group limiter below, this caps throughput per instance.
-      concurrency: 1,
-      limiter: {
-        // NOTE: BullMQ limiter is per-worker, not global across instances.
-        // With N instances running N workers, the effective global rate is N × max.
-        // This is acceptable: each instance handles its own share of the queue,
-        // and BullMQ's distributed locking prevents duplicate processing.
-        max: 5,
-        duration: 60_000,
-      },
-    },
+    { concurrency: 1, limiter: { max: 5, duration: 60_000 } },
   );
 
-  scheduleWorker.on("failed", (job, err) => {
-    logger.error("Schedule job failed", {
-      jobId: job?.id,
-      scheduleId: job?.data?.scheduleId,
-      error: err.message,
-    });
-  });
-
-  // Sync all enabled schedules from DB to BullMQ
+  // Sync all enabled schedules from DB to queue
   const rows = await db.select().from(packageSchedules).where(eq(packageSchedules.enabled, true));
 
   let synced = 0;
@@ -187,15 +159,13 @@ export async function initScheduleWorker(): Promise<void> {
   }
 
   if (synced > 0) {
-    logger.info("BullMQ scheduler initialized", { schedulersSynced: synced });
+    logger.info("Schedule worker initialized", { schedulersSynced: synced });
   }
 }
 
-/** Shutdown BullMQ worker and queue. */
+/** Shutdown schedule worker and queue. */
 export async function shutdownScheduleWorker(): Promise<void> {
-  await scheduleWorker?.close();
-  await scheduleQueue?.close();
-  scheduleWorker = null;
+  await scheduleQueue?.shutdown();
   scheduleQueue = null;
   logger.info("Schedule worker stopped");
 }
@@ -209,19 +179,24 @@ async function triggerScheduledRun(
   packageId: string,
   connectionProfileId: string,
   orgId: string,
+  applicationId: string,
   input: Record<string, unknown> | undefined,
 ) {
   /** Create a failed run record + dispatch webhook so the user is notified. */
   async function failSchedule(error: string, actor: Actor | null = null): Promise<void> {
     const runId = `run_${crypto.randomUUID()}`;
     try {
-      await createFailedRun(runId, packageId, actor, orgId, error, scheduleId, connectionProfileId);
-      dispatchWebhookEvents(orgId, "run.failed", {
-        id: runId,
+      await createFailedRun(
+        runId,
         packageId,
-        status: "failed",
+        actor,
+        orgId,
+        applicationId,
         error,
-      }).catch(() => {});
+        scheduleId,
+        connectionProfileId,
+      );
+      dispatchRunWebhook(orgId, applicationId, "failed", runId, packageId, { error });
     } catch (err) {
       logger.error("Failed to create failed schedule run record", {
         scheduleId,
@@ -239,7 +214,7 @@ async function triggerScheduledRun(
       return;
     }
 
-    // Resolve actor from connection profile (null for org profiles)
+    // Resolve actor from connection profile (null for app profiles)
     const profile = await getProfileByIdUnsafe(connectionProfileId);
     if (!profile) {
       logger.warn("Connection profile not found, skipping schedule", {
@@ -252,45 +227,32 @@ async function triggerScheduledRun(
 
     const actor: Actor | null = actorFromIds(profile.userId, profile.endUserId);
 
-    // Load the agent's admin-configured org profile (validates it still exists)
-    const agentOrgProfile = await getAgentOrgProfile(orgId, packageId);
-    const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
+    // Load the agent's admin-configured app profile (validates it still exists)
+    const agentAppProfile = await getAgentAppProfile(applicationId, packageId);
+    const { defaultUserProfileId, appProfileId } = resolveScheduleProfileArgs(
       profile,
       connectionProfileId,
-      agentOrgProfile?.id ?? null,
+      agentAppProfile?.id ?? null,
     );
 
-    // Resolve provider profiles, config, and validate readiness (inlined preflight).
-    // Schedules don't support per-provider overrides.
+    // Shared preflight: resolve providers, config, validate readiness
     let providerProfiles: ProviderProfileMap;
     let config: Record<string, unknown>;
     let preflightModelId: string | null;
     let preflightProxyId: string | null;
     try {
-      const manifestProviders = resolveManifestProviders(agent.manifest);
-
-      const [resolvedProfiles, packageConfig] = await Promise.all([
-        resolveProviderProfiles(
-          manifestProviders,
-          defaultUserProfileId,
-          undefined,
-          orgProfileId,
-          orgId,
-        ),
-        getPackageConfig(orgId, packageId),
-      ]);
-
-      await validateAgentReadiness({
+      const preflight = await resolveRunPreflight({
         agent,
-        providerProfiles: resolvedProfiles,
+        applicationId,
         orgId,
-        config: packageConfig.config,
+        defaultUserProfileId,
+        appProfileId,
       });
 
-      providerProfiles = resolvedProfiles;
-      config = packageConfig.config;
-      preflightModelId = packageConfig.modelId;
-      preflightProxyId = packageConfig.proxyId;
+      providerProfiles = preflight.providerProfiles;
+      config = preflight.config;
+      preflightModelId = preflight.modelId;
+      preflightProxyId = preflight.proxyId;
     } catch (err) {
       if (err instanceof ApiError) {
         logger.warn("Agent readiness check failed, skipping schedule", {
@@ -302,7 +264,16 @@ async function triggerScheduledRun(
         await failSchedule(err.message, actor);
         return;
       }
-      throw err;
+      logger.error("Unexpected error during schedule preflight", {
+        scheduleId,
+        packageId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await failSchedule(
+        `Preflight error: ${err instanceof Error ? err.message : String(err)}`,
+        actor,
+      );
+      return;
     }
 
     // Validate input against agent's input schema (schema may have changed since schedule creation)
@@ -325,81 +296,32 @@ async function triggerScheduledRun(
 
     const runId = `run_${crypto.randomUUID()}`;
 
-    // Build run context (tokens, config, state, providers, package, version)
-    let promptContext: PromptContext;
-    let agentPackage: Buffer | null;
-    let packageVersionId: number | null;
-    let proxyLabel: string | null;
-    let modelLabel: string | null;
-    let modelSource: string | null;
-    try {
-      ({ promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel, modelSource } =
-        await buildRunContext({
-          runId,
-          agent,
-          providerProfiles,
-          orgId,
-          actor,
-          input,
-          config,
-          modelId: preflightModelId,
-          proxyId: preflightProxyId,
-        }));
-    } catch (err) {
-      if (err instanceof ModelNotConfiguredError) {
-        logger.warn("No model configured, skipping scheduled run", {
-          scheduleId,
-          packageId,
-          orgId,
-        });
-        await failSchedule("No model configured", actor);
-        return;
-      }
-      throw err;
-    }
-
-    // Pre-run quota check (Cloud only — skip silently if quota exceeded)
-    const cloud = getCloudModule();
-    if (cloud) {
-      try {
-        const runningCount = await getRunningRunCountForOrg(orgId);
-        await cloud.cloudHooks.checkQuota(orgId, runningCount);
-      } catch (err) {
-        if (err instanceof cloud.QuotaExceededError) {
-          logger.warn("Quota exceeded, skipping scheduled run", {
-            scheduleId,
-            packageId,
-            orgId,
-            reason: err.message,
-          });
-          await failSchedule(err.message, actor);
-          return;
-        }
-        throw err;
-      }
-    }
-
-    // Extract just the profileId map (strip source field)
-    const profileIdMap = Object.fromEntries(
-      Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
-    );
-
-    // Create run record with schedule_id and version
-    await createRun(
+    const result = await prepareAndExecuteRun({
       runId,
-      packageId,
-      actor,
+      agent,
+      providerProfiles,
       orgId,
-      input ?? null,
+      actor,
+      input,
+      config,
+      modelId: preflightModelId,
+      proxyId: preflightProxyId,
       scheduleId,
-      packageVersionId ?? undefined,
       connectionProfileId,
-      proxyLabel ?? undefined,
-      modelLabel ?? undefined,
-      modelSource ?? undefined,
-      undefined,
-      profileIdMap,
-    );
+      applicationId,
+    });
+
+    if (!result.ok) {
+      logger.warn("Scheduled run pipeline failed", {
+        scheduleId,
+        packageId,
+        orgId,
+        code: result.error.code,
+        detail: result.error.message,
+      });
+      await failSchedule(result.error.message, actor);
+      return;
+    }
 
     logger.info("Triggering scheduled run", {
       runId,
@@ -407,23 +329,6 @@ async function triggerScheduledRun(
       scheduleId,
       connectionProfileId,
       orgId,
-    });
-
-    // Fire-and-forget (catch to prevent unhandled rejection)
-    executeAgentInBackground(
-      runId,
-      orgId,
-      agent,
-      promptContext,
-      agentPackage,
-      undefined,
-      undefined,
-      modelSource,
-    ).catch((err) => {
-      logger.error("Unhandled error in scheduled run", {
-        runId,
-        error: err instanceof Error ? err.message : String(err),
-      });
     });
   } catch (err) {
     logger.error("Failed to trigger schedule", {
@@ -438,11 +343,16 @@ async function triggerScheduledRun(
 // CRUD helpers
 // ---------------------------------------------------------------------------
 
-export async function listSchedules(orgId: string): Promise<EnrichedSchedule[]> {
+export async function listSchedules(
+  orgId: string,
+  applicationId: string,
+): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
     .from(packageSchedules)
-    .where(eq(packageSchedules.orgId, orgId))
+    .where(
+      and(eq(packageSchedules.orgId, orgId), eq(packageSchedules.applicationId, applicationId)),
+    )
     .orderBy(asc(packageSchedules.createdAt));
   return enrichSchedules(rows.map(toSchedule), orgId);
 }
@@ -450,17 +360,36 @@ export async function listSchedules(orgId: string): Promise<EnrichedSchedule[]> 
 export async function listPackageSchedules(
   packageId: string,
   orgId: string,
+  applicationId: string,
 ): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
     .from(packageSchedules)
-    .where(and(eq(packageSchedules.packageId, packageId), eq(packageSchedules.orgId, orgId)))
+    .where(
+      and(
+        eq(packageSchedules.packageId, packageId),
+        eq(packageSchedules.orgId, orgId),
+        eq(packageSchedules.applicationId, applicationId),
+      ),
+    )
     .orderBy(asc(packageSchedules.createdAt));
   return enrichSchedules(rows.map(toSchedule), orgId);
 }
 
-export async function getSchedule(id: string): Promise<EnrichedSchedule | null> {
-  const rows = await db.select().from(packageSchedules).where(eq(packageSchedules.id, id)).limit(1);
+export async function getSchedule(
+  id: string,
+  orgId?: string,
+  applicationId?: string,
+): Promise<EnrichedSchedule | null> {
+  const conditions = [eq(packageSchedules.id, id)];
+  if (orgId) conditions.push(eq(packageSchedules.orgId, orgId));
+  if (applicationId) conditions.push(eq(packageSchedules.applicationId, applicationId));
+
+  const rows = await db
+    .select()
+    .from(packageSchedules)
+    .where(and(...conditions))
+    .limit(1);
   if (!rows[0]) return null;
   const schedule = toSchedule(rows[0]);
   const [enriched] = await enrichSchedules([schedule], schedule.orgId);
@@ -493,7 +422,7 @@ async function computeScheduleReadiness(
     return { status: "ready", totalProviders: 0, connectedProviders: 0, missingProviders: [] };
   }
 
-  const { defaultUserProfileId, orgProfileId } = resolveScheduleProfileArgs(
+  const { defaultUserProfileId, appProfileId } = resolveScheduleProfileArgs(
     profile,
     schedule.connectionProfileId,
   );
@@ -501,44 +430,20 @@ async function computeScheduleReadiness(
     providers,
     defaultUserProfileId,
     undefined,
-    orgProfileId,
-    orgId,
+    appProfileId,
+    schedule.applicationId,
   );
 
-  // Batch-fetch all connections for resolved profile IDs in one query
-  const resolvedProfileIds = [
-    ...new Set(
-      providers.map((p) => providerProfiles[p.id]?.profileId).filter((id): id is string => !!id),
-    ),
-  ];
+  // Reuse the shared provider status resolution (batch-fetches connections)
+  const statuses = await resolveProviderStatuses(
+    providers,
+    providerProfiles,
+    orgId,
+    schedule.applicationId,
+  );
 
-  const connectionMap = new Map<string, boolean>();
-  if (resolvedProfileIds.length > 0) {
-    const connRows = await db
-      .select({
-        profileId: userProviderConnections.profileId,
-        providerId: userProviderConnections.providerId,
-      })
-      .from(userProviderConnections)
-      .where(
-        and(
-          inArray(userProviderConnections.profileId, resolvedProfileIds),
-          eq(userProviderConnections.orgId, orgId),
-        ),
-      );
-    for (const row of connRows) {
-      connectionMap.set(`${row.profileId}:${row.providerId}`, true);
-    }
-  }
-
-  const results = providers.map((p) => {
-    const sourceProfileId = providerProfiles[p.id]?.profileId;
-    if (!sourceProfileId) return { id: p.id, connected: false };
-    return { id: p.id, connected: connectionMap.has(`${sourceProfileId}:${p.id}`) };
-  });
-
-  const missing = results.filter((r) => !r.connected).map((r) => r.id);
-  const connected = results.filter((r) => r.connected).length;
+  const missing = statuses.filter((s) => s.status !== "connected").map((s) => s.id);
+  const connected = statuses.filter((s) => s.status === "connected").length;
 
   return {
     status: missing.length === 0 ? "ready" : connected > 0 ? "degraded" : "not_ready",
@@ -580,11 +485,11 @@ async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<En
       const agent = agentMap.get(schedule.packageId);
 
       let profileName: string | null = null;
-      let profileType: "user" | "org" | null = null;
+      let profileType: "user" | "app" | null = null;
       let profileOwnerName: string | null = null;
       if (profile) {
         profileName = profile.name;
-        profileType = profile.orgId ? "org" : "user";
+        profileType = profile.applicationId ? "app" : "user";
         if (profile.userId) {
           profileOwnerName = userNameMap.get(profile.userId) ?? null;
         }
@@ -605,6 +510,7 @@ export async function createSchedule(
   packageId: string,
   connectionProfileId: string,
   orgId: string,
+  applicationId: string,
   data: {
     name?: string;
     cronExpression: string;
@@ -625,6 +531,7 @@ export async function createSchedule(
       packageId,
       connectionProfileId,
       orgId,
+      applicationId,
       name: data.name ?? null,
       enabled: true,
       cronExpression: data.cronExpression,
@@ -646,6 +553,8 @@ export async function createSchedule(
 
 export async function updateSchedule(
   id: string,
+  orgId: string,
+  applicationId: string,
   data: {
     connectionProfileId?: string;
     name?: string;
@@ -655,7 +564,7 @@ export async function updateSchedule(
     enabled?: boolean;
   },
 ): Promise<Schedule | null> {
-  const existing = await getSchedule(id);
+  const existing = await getSchedule(id, orgId, applicationId);
   if (!existing) return null;
 
   const cronExpr = data.cronExpression ?? existing.cronExpression;
@@ -680,7 +589,13 @@ export async function updateSchedule(
   const [row] = await db
     .update(packageSchedules)
     .set(payload)
-    .where(eq(packageSchedules.id, id))
+    .where(
+      and(
+        eq(packageSchedules.id, id),
+        eq(packageSchedules.orgId, orgId),
+        eq(packageSchedules.applicationId, applicationId),
+      ),
+    )
     .returning();
 
   if (!row) {
@@ -689,7 +604,7 @@ export async function updateSchedule(
   const schedule = toSchedule(row);
 
   if (schedule.enabled) {
-    await upsertScheduleJob(schedule, existing.orgId);
+    await upsertScheduleJob(schedule, orgId);
   } else {
     await removeScheduleJob(id);
   }
@@ -697,12 +612,22 @@ export async function updateSchedule(
   return schedule;
 }
 
-export async function deleteSchedule(id: string): Promise<boolean> {
+export async function deleteSchedule(
+  id: string,
+  orgId: string,
+  applicationId: string,
+): Promise<boolean> {
   await removeScheduleJob(id);
 
   const deleted = await db
     .delete(packageSchedules)
-    .where(eq(packageSchedules.id, id))
+    .where(
+      and(
+        eq(packageSchedules.id, id),
+        eq(packageSchedules.orgId, orgId),
+        eq(packageSchedules.applicationId, applicationId),
+      ),
+    )
     .returning({ id: packageSchedules.id });
   return deleted.length > 0;
 }

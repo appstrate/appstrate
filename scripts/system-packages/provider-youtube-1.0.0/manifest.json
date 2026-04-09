@@ -1,0 +1,75 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/youtube",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "YouTube",
+  "description": "Video sharing and streaming platform by Google",
+  "iconUrl": "youtube",
+  "categories": ["social-media", "video", "marketing"],
+  "docsUrl": "https://developers.google.com/youtube/v3/docs",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+      "tokenUrl": "https://oauth2.googleapis.com/token",
+      "refreshUrl": "https://oauth2.googleapis.com/token",
+      "defaultScopes": ["https://www.googleapis.com/auth/youtube.readonly"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post",
+      "authorizationParams": {
+        "access_type": "offline",
+        "prompt": "consent"
+      }
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://www.googleapis.com/youtube/*",
+      "https://youtube.googleapis.com/*",
+      "https://www.googleapis.com/upload/youtube/*"
+    ],
+    "availableScopes": [
+      {
+        "value": "https://www.googleapis.com/auth/youtube.readonly",
+        "label": "Read-only access (videos, channels, playlists)"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/youtube",
+        "label": "Full access (manage account)"
+      },
+      { "value": "https://www.googleapis.com/auth/youtube.upload", "label": "Upload videos" },
+      {
+        "value": "https://www.googleapis.com/auth/youtube.force-ssl",
+        "label": "Manage videos, comments, captions (SSL required)"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/youtubepartner",
+        "label": "YouTube Partner (content & rights management)"
+      },
+      {
+        "value": "https://www.googleapis.com/auth/youtube.channel-memberships.creator",
+        "label": "Read channel memberships"
+      }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the authorized redirect URI to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Enable the YouTube Data API v3",
+        "url": "https://console.cloud.google.com/apis/library/youtube.googleapis.com"
+      },
+      {
+        "label": "Configure the OAuth consent screen",
+        "url": "https://console.cloud.google.com/apis/credentials/consent"
+      },
+      {
+        "label": "Create OAuth credentials",
+        "url": "https://console.cloud.google.com/apis/credentials"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

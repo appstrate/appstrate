@@ -27,6 +27,19 @@ export const providerKeysPaths = {
                   },
                 },
               },
+              example: {
+                keys: [
+                  {
+                    id: "cm7stu901",
+                    label: "OpenAI Production",
+                    api: "openai-responses",
+                    baseUrl: "https://api.openai.com/v1",
+                    source: "custom",
+                    createdAt: "2026-01-10T08:00:00Z",
+                    updatedAt: "2026-01-10T08:00:00Z",
+                  },
+                ],
+              },
             },
           },
         },
@@ -49,9 +62,14 @@ export const providerKeysPaths = {
               type: "object",
               required: ["label", "api", "baseUrl", "apiKey"],
               properties: {
-                label: { type: "string", description: "Display name for the provider key" },
+                label: {
+                  type: "string",
+                  minLength: 1,
+                  description: "Display name for the provider key",
+                },
                 api: {
                   type: "string",
+                  minLength: 1,
                   description:
                     "API type (openai-completions, openai-responses, anthropic-messages, google-generative-ai, google-vertex, azure-openai-responses, bedrock-converse-stream)",
                 },
@@ -60,7 +78,7 @@ export const providerKeysPaths = {
                   format: "uri",
                   description: "Provider API base URL",
                 },
-                apiKey: { type: "string", description: "API key for authentication" },
+                apiKey: { type: "string", minLength: 1, description: "API key for authentication" },
               },
             },
           },
@@ -81,6 +99,7 @@ export const providerKeysPaths = {
                   id: { type: "string" },
                 },
               },
+              example: { id: "cm7stu902" },
             },
           },
         },
@@ -105,7 +124,7 @@ export const providerKeysPaths = {
               type: "object",
               required: ["api", "baseUrl"],
               properties: {
-                api: { type: "string", description: "API type" },
+                api: { type: "string", minLength: 1, description: "API type" },
                 baseUrl: {
                   type: "string",
                   format: "uri",
@@ -140,7 +159,7 @@ export const providerKeysPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "429": { description: "Rate limited" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },
@@ -161,10 +180,10 @@ export const providerKeysPaths = {
             schema: {
               type: "object",
               properties: {
-                label: { type: "string" },
-                api: { type: "string" },
+                label: { type: "string", minLength: 1 },
+                api: { type: "string", minLength: 1 },
                 baseUrl: { type: "string", format: "uri" },
-                apiKey: { type: "string" },
+                apiKey: { type: "string", minLength: 1 },
               },
             },
           },
@@ -244,7 +263,7 @@ export const providerKeysPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "429": { description: "Rate limited" },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },

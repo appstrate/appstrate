@@ -5,6 +5,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedSchedule, seedConnectionProfile, seedRun } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
 
 const app = getTestApp();
 
@@ -41,6 +42,7 @@ describe("Schedules API", () => {
       await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
         name: "Hourly",
@@ -69,7 +71,7 @@ describe("Schedules API", () => {
 
     async function seedAgentWithInput() {
       const fid = agentId("input-sched");
-      return seedAgent({
+      const agent = await seedAgent({
         id: fid,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -82,6 +84,8 @@ describe("Schedules API", () => {
         },
         draftContent: "Process {{email}}",
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
+      return agent;
     }
 
     it("returns 400 when required input field is missing", async () => {
@@ -158,6 +162,7 @@ describe("Schedules API", () => {
     it("creates a schedule for an agent", async () => {
       const fid = agentId("cron-agent");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -180,6 +185,7 @@ describe("Schedules API", () => {
     it("rejects invalid cron expression", async () => {
       const fid = agentId("bad-cron");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -198,6 +204,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
         name: "Old Name",
@@ -223,6 +230,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
       });
@@ -243,6 +251,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
         name: "Hourly Run",
@@ -278,6 +287,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: otherCtx.orgId,
+        applicationId: otherCtx.defaultAppId,
         connectionProfileId: otherProfile.id,
         cronExpression: "0 * * * *",
       });
@@ -296,6 +306,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
       });
@@ -304,6 +315,7 @@ describe("Schedules API", () => {
       await seedRun({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         scheduleId: schedule.id,
         status: "success",
@@ -327,6 +339,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
       });
@@ -344,33 +357,41 @@ describe("Schedules API", () => {
   });
 
   describe("Org profile support", () => {
-    it("creates a schedule with an org profile", async () => {
-      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org Profile" });
+    it("creates a schedule with an app profile", async () => {
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App Profile",
+      });
       const fid = agentId("org-sched");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionProfileId: orgProfile.id,
+          connectionProfileId: appProfile.id,
           cronExpression: "0 9 * * 1-5",
-          name: "Org Schedule",
+          name: "App Schedule",
         }),
       });
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      expect(body.connectionProfileId).toBe(orgProfile.id);
+      expect(body.connectionProfileId).toBe(appProfile.id);
     });
 
-    it("updates a schedule to use an org profile", async () => {
-      const orgProfile = await seedConnectionProfile({ orgId: ctx.orgId, name: "Org Profile" });
+    it("updates a schedule to use an app profile", async () => {
+      const appProfile = await seedConnectionProfile({
+        applicationId: ctx.defaultAppId,
+        name: "App Profile",
+      });
       const fid = agentId("org-upd");
       const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         connectionProfileId: profileId,
         cronExpression: "0 * * * *",
       });
@@ -378,7 +399,7 @@ describe("Schedules API", () => {
       const res = await app.request(`/api/schedules/${schedule.id}`, {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionProfileId: orgProfile.id }),
+        body: JSON.stringify({ connectionProfileId: appProfile.id }),
       });
 
       expect(res.status).toBe(200);
@@ -386,18 +407,19 @@ describe("Schedules API", () => {
 
     it("rejects a profile from another org", async () => {
       const otherCtx = await createTestContext();
-      const otherOrgProfile = await seedConnectionProfile({
-        orgId: otherCtx.orgId,
-        name: "Other Org Profile",
+      const otherAppProfile = await seedConnectionProfile({
+        applicationId: otherCtx.defaultAppId,
+        name: "Other App Profile",
       });
       const fid = agentId("foreign-org");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionProfileId: otherOrgProfile.id,
+          connectionProfileId: otherAppProfile.id,
           cronExpression: "0 9 * * 1-5",
         }),
       });

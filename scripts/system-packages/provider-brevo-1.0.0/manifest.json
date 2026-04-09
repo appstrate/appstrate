@@ -5,12 +5,8 @@
   "type": "provider",
   "displayName": "Brevo",
   "description": "Email marketing and CRM platform",
-  "iconUrl": "https://cdn.simpleicons.org/brevo",
-  "categories": [
-    "email",
-    "marketing",
-    "crm"
-  ],
+  "iconUrl": "brevo",
+  "categories": ["email", "marketing", "crm"],
   "docsUrl": "https://developers.brevo.com/docs/getting-started",
   "definition": {
     "authMode": "api_key",
@@ -23,16 +19,12 @@
             "description": "Brevo API v3 key"
           }
         },
-        "required": [
-          "api_key"
-        ]
+        "required": ["api_key"]
       }
     },
     "credentialHeaderName": "api-key",
     "credentialHeaderPrefix": "",
-    "authorizedUris": [
-      "https://api.brevo.com/*"
-    ]
+    "authorizedUris": ["https://api.brevo.com/*"]
   },
   "setupGuide": {
     "steps": [

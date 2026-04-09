@@ -28,7 +28,7 @@ interface ResourceActions {
   memories: "read" | "delete";
   connections: "read" | "connect" | "disconnect";
   profiles: "read" | "write" | "delete";
-  "org-profiles": "read" | "write" | "delete" | "bind";
+  "app-profiles": "read" | "write" | "delete" | "bind";
   models: "read" | "write" | "delete";
   "provider-keys": "read" | "write" | "delete";
   proxies: "read" | "write" | "delete";
@@ -102,10 +102,10 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "profiles:write",
   "profiles:delete",
   // Org profiles
-  "org-profiles:read",
-  "org-profiles:write",
-  "org-profiles:delete",
-  "org-profiles:bind",
+  "app-profiles:read",
+  "app-profiles:write",
+  "app-profiles:delete",
+  "app-profiles:bind",
   // Infrastructure
   "models:read",
   "models:write",
@@ -169,8 +169,8 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "profiles:write",
   "profiles:delete",
   // Org profiles (read + bind own connections)
-  "org-profiles:read",
-  "org-profiles:bind",
+  "app-profiles:read",
+  "app-profiles:bind",
   // Infrastructure (read only, except provider-keys which is admin-only)
   "models:read",
   "proxies:read",
@@ -195,7 +195,7 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "memories:read",
   "connections:read",
   "profiles:read",
-  "org-profiles:read",
+  "app-profiles:read",
   "models:read",
   "proxies:read",
   "applications:read",
@@ -253,6 +253,10 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "proxies:read",
   "proxies:write",
   "proxies:delete",
+  // Connections (end-user OAuth via API key + Appstrate-User header)
+  "connections:read",
+  "connections:connect",
+  "connections:disconnect",
   // Applications & End-Users
   "applications:read",
   "applications:write",

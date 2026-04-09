@@ -12,7 +12,6 @@ import {
   listUserRuns,
   listOrgRuns,
 } from "../services/state/index.ts";
-
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();
 
@@ -20,7 +19,7 @@ export function createNotificationsRouter() {
   router.get("/notifications/unread-count", async (c) => {
     const actor = getActor(c);
     const orgId = c.get("orgId");
-    const count = await getUnreadNotificationCount(actor.id, orgId);
+    const count = await getUnreadNotificationCount(actor.id, orgId, c.get("applicationId"));
     return c.json({ count });
   });
 
@@ -28,7 +27,7 @@ export function createNotificationsRouter() {
   router.get("/notifications/unread-counts-by-agent", async (c) => {
     const actor = getActor(c);
     const orgId = c.get("orgId");
-    const counts = await getUnreadCountsByAgent(actor.id, orgId);
+    const counts = await getUnreadCountsByAgent(actor.id, orgId, c.get("applicationId"));
     return c.json({ counts });
   });
 
@@ -37,7 +36,7 @@ export function createNotificationsRouter() {
     const actor = getActor(c);
     const orgId = c.get("orgId");
     const runId = c.req.param("runId");
-    const ok = await markNotificationRead(runId, actor.id, orgId);
+    const ok = await markNotificationRead(runId, actor.id, orgId, c.get("applicationId"));
     return c.json({ ok });
   });
 
@@ -45,7 +44,7 @@ export function createNotificationsRouter() {
   router.put("/notifications/read-all", async (c) => {
     const actor = getActor(c);
     const orgId = c.get("orgId");
-    const updated = await markAllNotificationsRead(actor.id, orgId);
+    const updated = await markAllNotificationsRead(actor.id, orgId, c.get("applicationId"));
     return c.json({ updated });
   });
 
@@ -53,6 +52,7 @@ export function createNotificationsRouter() {
   router.get("/runs", async (c) => {
     const actor = getActor(c);
     const orgId = c.get("orgId");
+    const applicationId = c.get("applicationId");
     const limit = z.coerce
       .number()
       .int()
@@ -72,8 +72,8 @@ export function createNotificationsRouter() {
     // End-users always see only their own runs
     const result =
       userFilter === "me" || endUser
-        ? await listUserRuns(actor.id, orgId, { limit, offset })
-        : await listOrgRuns(orgId, { limit, offset });
+        ? await listUserRuns(actor.id, orgId, { limit, offset, applicationId: applicationId })
+        : await listOrgRuns(orgId, { limit, offset, applicationId: applicationId });
     return c.json(result);
   });
 

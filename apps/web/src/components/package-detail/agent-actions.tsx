@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { isFileField } from "@appstrate/core/form";
 import { usePackageDetail } from "../../hooks/use-packages";
@@ -11,7 +12,8 @@ import {
   useDeleteAgentRuns,
   useDeleteAllMemories,
 } from "../../hooks/use-mutations";
-import { useAgentDetailUI } from "../../stores/agent-detail-ui-store";
+import { usePackageInstallState, useTogglePackageInstall } from "../../hooks/use-library";
+import { useCurrentApplicationId } from "../../hooks/use-current-application";
 import { PackageActionsDropdown } from "./package-actions-dropdown";
 import { ConfirmModal } from "../confirm-modal";
 
@@ -39,17 +41,19 @@ export function AgentActions({
   onFork?: () => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
+  const navigate = useNavigate();
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: runs } = useRuns(packageId);
   const { data: memories } = useAgentMemories(packageId);
   const deleteAgent = useDeleteAgent();
   const deleteRuns = useDeleteAgentRuns(packageId);
   const deleteAllMemories = useDeleteAllMemories(packageId);
-  const setScheduleOpen = useAgentDetailUI((s) => s.setScheduleOpen);
-  const setEditingSchedule = useAgentDetailUI((s) => s.setEditingSchedule);
+  const uninstallMutation = useTogglePackageInstall();
+  const currentAppId = useCurrentApplicationId();
+  const { installedAppNames, isInstalledInCurrentApp } = usePackageInstallState(packageId);
 
   const [confirmState, setConfirmState] = useState<{
-    type: "deleteAgent" | "clearRuns" | "clearMemories";
+    type: "deleteAgent" | "clearRuns" | "clearMemories" | "uninstallAgent";
     label: string;
   } | null>(null);
 
@@ -71,6 +75,13 @@ export function AgentActions({
         break;
       case "clearMemories":
         deleteAllMemories.mutate(undefined, { onSuccess });
+        break;
+      case "uninstallAgent":
+        if (!currentAppId) return;
+        uninstallMutation.mutate(
+          { appId: currentAppId, packageId, installed: true },
+          { onSuccess },
+        );
         break;
     }
   };
@@ -97,7 +108,23 @@ export function AgentActions({
         onDeleteAgent={() =>
           setConfirmState({
             type: "deleteAgent",
-            label: t("detail.deleteConfirm", { name: detail.displayName }),
+            label:
+              installedAppNames.length > 0
+                ? t("detail.deleteConfirmWithApps", {
+                    name: detail.displayName,
+                    apps: installedAppNames.join(", "),
+                  })
+                : t("detail.deleteConfirm", { name: detail.displayName }),
+          })
+        }
+        canUninstall={isInstalledInCurrentApp && detail.source !== "system"}
+        onUninstall={() =>
+          setConfirmState({
+            type: "uninstallAgent",
+            label: t("packages.uninstallConfirm", {
+              name: detail.displayName,
+              ns: "settings",
+            }),
           })
         }
         onDeleteRuns={() =>
@@ -106,10 +133,7 @@ export function AgentActions({
             label: t("detail.clearRunsConfirm"),
           })
         }
-        onAddSchedule={() => {
-          setEditingSchedule(null);
-          setScheduleOpen(true);
-        }}
+        onAddSchedule={() => navigate("/schedules/new")}
         onDeleteMemories={() =>
           setConfirmState({
             type: "clearMemories",
@@ -123,7 +147,17 @@ export function AgentActions({
         onConfirm={handleConfirm}
         title={t("btn.confirm", { ns: "common" })}
         description={confirmState?.label ?? ""}
-        isPending={deleteAgent.isPending || deleteRuns.isPending || deleteAllMemories.isPending}
+        confirmLabel={
+          confirmState?.type === "uninstallAgent"
+            ? t("packages.uninstall", { ns: "settings" })
+            : undefined
+        }
+        isPending={
+          deleteAgent.isPending ||
+          deleteRuns.isPending ||
+          deleteAllMemories.isPending ||
+          uninstallMutation.isPending
+        }
       />
     </>
   );

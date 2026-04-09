@@ -7,9 +7,11 @@ import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, and, inArray } from "drizzle-orm";
-import { packages, profiles } from "@appstrate/db/schema";
+import { packages, profiles, applicationProviderCredentials } from "@appstrate/db/schema";
+import { encryptCredentials } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import { postInstallPackage } from "../services/post-install-package.ts";
+import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/agent-service.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
@@ -33,7 +35,7 @@ import {
   PackageAlreadyExistsError,
   type PackageTypeConfig,
 } from "../services/package-items/index.ts";
-import { validateToolSource, validateManifest } from "@appstrate/core/validation";
+import { validateToolSource, validateManifest, type PackageType } from "@appstrate/core/validation";
 import { parseScopedName, SLUG_REGEX } from "@appstrate/core/naming";
 import { unzipAndNormalize } from "../services/package-storage.ts";
 import { isValidVersion } from "@appstrate/core/semver";
@@ -73,11 +75,11 @@ import {
 // Shared helpers for package CRUD routes
 // ═══════════════════════════════════════════════
 
-const githubImportSchema = z.object({
+export const githubImportSchema = z.object({
   url: z.url("Missing 'url' field"),
 });
 
-const forkSchema = z
+export const forkSchema = z
   .object({
     name: z.string().regex(SLUG_REGEX, "Name must match slug format").optional(),
   })
@@ -258,7 +260,6 @@ async function createVersionSafe(params: {
     await createVersionAndUpload({
       packageId: params.packageId,
       version,
-      orgId: params.orgId,
       createdBy: params.userId,
       zipBuffer,
       manifest: params.manifest,
@@ -272,6 +273,8 @@ async function createVersionSafe(params: {
 
 interface PackageRouteConfig {
   cfg: PackageTypeConfig;
+  /** URL path segment used for routing (e.g. "skills", "providers"). */
+  path: string;
   parseOpts: {
     requiredFile: string | null;
     contentFileExt: string | null;
@@ -288,6 +291,7 @@ interface PackageRouteConfig {
     packageId: string;
     orgId: string;
     manifest: Record<string, unknown>;
+    applicationId?: string;
   }) => Promise<void>;
   /** Hook called after a package is updated. */
   afterUpdate?: (params: {
@@ -305,17 +309,19 @@ interface PackageRouteConfig {
   getHandler?: (c: Context<AppEnv>) => Promise<Response>;
 }
 
-const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
-  skills: {
+const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
+  skill: {
     cfg: SKILL_CONFIG,
+    path: "skills",
     parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
     responseKey: "skill",
     storageFileName: () => "SKILL.md",
     jsonBodyCreate: true,
     requireContent: true,
   },
-  tools: {
+  tool: {
     cfg: TOOL_CONFIG,
+    path: "tools",
     parseOpts: { requiredFile: null, contentFileExt: ".ts" },
     responseKey: "tool",
     validateSource: validateToolSource,
@@ -323,8 +329,9 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     sourceFileName: (id) => `${parseScopedName(id)?.name ?? id}.ts`,
     jsonBodyCreate: true,
   },
-  agents: {
+  agent: {
     cfg: AGENT_CONFIG,
+    path: "agents",
     parseOpts: { requiredFile: null, contentFileExt: null },
     responseKey: "agent",
     storageFileName: () => "prompt.md",
@@ -333,12 +340,26 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
     requireMutableForVersionOps: true,
     getHandler: agentDetailHandler,
   },
-  providers: {
+  provider: {
     cfg: PROVIDER_CONFIG,
+    path: "providers",
     parseOpts: { requiredFile: null, contentFileExt: null },
     responseKey: "provider",
     storageFileName: () => "PROVIDER.md",
     jsonBodyCreate: true,
+    afterCreate: async ({ packageId, applicationId }) => {
+      if (applicationId) {
+        await db
+          .insert(applicationProviderCredentials)
+          .values({
+            applicationId,
+            providerId: packageId,
+            credentialsEncrypted: encryptCredentials({}),
+            enabled: true,
+          })
+          .onConflictDoNothing();
+      }
+    },
   },
 };
 
@@ -347,7 +368,8 @@ const ROUTE_CONFIGS: Record<string, PackageRouteConfig> = {
 function makeListHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const items = await listOrgItems(orgId, rcfg.cfg);
+    const applicationId = c.get("applicationId");
+    const items = await listOrgItems(orgId, rcfg.cfg, applicationId);
     const enriched = await enrichWithCreatorNames(items);
     return c.json({ [rcfg.cfg.storageFolder]: enriched });
   };
@@ -428,9 +450,14 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         validatedManifest as Record<string, unknown>,
       );
 
-      // After-create hook (e.g. agent junction table sync)
+      // After-create hook (e.g. auto-enable provider)
       if (rcfg.afterCreate) {
-        await rcfg.afterCreate({ packageId, orgId, manifest: validatedManifest });
+        await rcfg.afterCreate({
+          packageId,
+          orgId,
+          manifest: validatedManifest,
+          applicationId: c.get("applicationId"),
+        });
       }
 
       // Upload files to S3 storage
@@ -450,6 +477,14 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         manifest: validatedManifest,
         normalizedFiles,
       });
+
+      // Auto-install in the current application (non-fatal)
+      const applicationId = c.get("applicationId");
+      if (applicationId) {
+        await installPackage(applicationId, orgId, packageId).catch((e: unknown) =>
+          logger.debug("auto-install skipped", { packageId, applicationId, err: String(e) }),
+        );
+      }
 
       return c.json(
         {
@@ -527,7 +562,12 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     // After-create hook
     if (rcfg.afterCreate) {
       const finalManifest = asRecord(item.draftManifest);
-      await rcfg.afterCreate({ packageId: item.id, orgId, manifest: finalManifest });
+      await rcfg.afterCreate({
+        packageId: item.id,
+        orgId,
+        manifest: finalManifest,
+        applicationId: c.get("applicationId"),
+      });
     }
 
     // Create initial version (non-fatal)
@@ -539,6 +579,14 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       manifest: finalManifest,
       normalizedFiles: parsed.normalizedFiles ?? {},
     });
+
+    // Auto-install in the current application (non-fatal)
+    const applicationId = c.get("applicationId");
+    if (applicationId) {
+      await installPackage(applicationId, orgId, item.id).catch((e: unknown) =>
+        logger.debug("auto-install skipped", { packageId: item.id, applicationId, err: String(e) }),
+      );
+    }
 
     return c.json(
       {
@@ -563,6 +611,7 @@ export function getItemId(c: Context<AppEnv>): string {
 function makeGetHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
+    const applicationId = c.get("applicationId");
     const itemId = getItemId(c);
     const [item, versionCount, latestVersionDate] = await Promise.all([
       getOrgItem(orgId, itemId, rcfg.cfg),
@@ -571,6 +620,11 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     ]);
 
     if (!item) {
+      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
+    }
+
+    // Enforce app-level access: all apps can only access installed packages
+    if (!(await hasPackageAccess(applicationId, itemId))) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 
@@ -718,6 +772,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 function makeDeleteHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
+    const applicationId = c.get("applicationId");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
@@ -727,7 +782,7 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
 
     // For agents, check running runs
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId, orgId);
+      const running = await getRunningRunsForPackage(itemId, orgId, applicationId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -828,6 +883,7 @@ function makeVersionInfoHandler(rcfg: PackageRouteConfig) {
 function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
+    const applicationId = c.get("applicationId");
     const user = c.get("user");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
@@ -838,7 +894,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 
     // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId, orgId);
+      const running = await getRunningRunsForPackage(itemId, orgId, applicationId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -887,6 +943,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
+    const applicationId = c.get("applicationId");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
@@ -896,7 +953,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 
     // Mutable check: no running runs for agents
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId, orgId);
+      const running = await getRunningRunsForPackage(itemId, orgId, applicationId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -976,6 +1033,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
 function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
+    const applicationId = c.get("applicationId");
     const itemId = getItemId(c);
     const label = rcfg.cfg.label.slice(0, -1);
 
@@ -990,7 +1048,7 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
     }
 
     if (rcfg.requireMutableForVersionOps) {
-      const running = await getRunningRunsForPackage(itemId, orgId);
+      const running = await getRunningRunsForPackage(itemId, orgId, applicationId);
       if (running > 0) {
         throw conflict(
           "agent_in_use",
@@ -1017,7 +1075,8 @@ export function createPackagesRouter() {
   const router = new Hono<AppEnv>();
 
   // --- Package CRUD routes (skills, tools, agents, providers) ---
-  for (const [path, rcfg] of Object.entries(ROUTE_CONFIGS)) {
+  for (const rcfg of Object.values(ROUTE_CONFIGS)) {
+    const { path } = rcfg;
     // Permission resource matches the route path (e.g. "skills", "tools", "agents", "providers")
     const resource = path as import("../lib/permissions.ts").Resource;
     const writeGuard = requirePermission(resource, "write");
@@ -1233,7 +1292,7 @@ export function createPackagesRouter() {
         .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
     } else {
       // New package — insert
-      const cfg = ROUTE_CONFIGS[packageType + "s"]?.cfg;
+      const cfg = ROUTE_CONFIGS[packageType as PackageType]?.cfg;
       if (!cfg) {
         throw invalidRequest(`Unknown package type '${packageType}'`);
       }
@@ -1272,6 +1331,25 @@ export function createPackagesRouter() {
         title: "Post-Install Failed",
         detail: message,
       });
+    }
+
+    // After-create hook (e.g. auto-enable provider)
+    const rcfg = ROUTE_CONFIGS[packageType as PackageType];
+    if (rcfg?.afterCreate) {
+      await rcfg.afterCreate({
+        packageId,
+        orgId,
+        manifest: manifest as Record<string, unknown>,
+        applicationId: c.get("applicationId"),
+      });
+    }
+
+    // Auto-install in the current application (non-fatal, skip if already installed)
+    const applicationId = c.get("applicationId");
+    if (applicationId) {
+      await installPackage(applicationId, orgId, packageId).catch((e: unknown) =>
+        logger.debug("auto-install skipped", { packageId, applicationId, err: String(e) }),
+      );
     }
 
     // Force import: replace existing version content if integrity differs

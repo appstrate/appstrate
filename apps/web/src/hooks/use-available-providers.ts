@@ -3,17 +3,21 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../api";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
 import type { AvailableProvider } from "@appstrate/shared-types";
 
-export function useAvailableProviders() {
+export function useAvailableProviders(profileId?: string | null) {
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
+  const qs = profileId ? `?profileId=${profileId}` : "";
   return useQuery({
-    queryKey: ["available-providers", orgId],
+    queryKey: ["available-providers", orgId, appId, profileId ?? null],
     queryFn: async () => {
       const data = await apiFetch<{ integrations: AvailableProvider[] }>(
-        `/api/connections/integrations`,
+        `/api/connections/integrations${qs}`,
       );
       return data.integrations;
     },
+    enabled: !!orgId && !!appId,
   });
 }

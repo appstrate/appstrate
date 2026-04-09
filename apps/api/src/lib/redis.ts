@@ -8,7 +8,9 @@ let publisher: Redis | null = null;
 let subscriber: Redis | null = null;
 
 function createRedisClient(): Redis {
-  const client = new Redis(getEnv().REDIS_URL, {
+  const url = getEnv().REDIS_URL;
+  if (!url) throw new Error("REDIS_URL is required when using Redis-backed adapters");
+  const client = new Redis(url, {
     maxRetriesPerRequest: null, // required by BullMQ
     enableReadyCheck: false,
     connectTimeout: 10_000,

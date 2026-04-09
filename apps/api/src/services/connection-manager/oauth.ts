@@ -14,6 +14,7 @@ import {
   type OAuth1CallbackResult,
 } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
+import { resolveProviderCredentialId } from "./helpers.ts";
 
 export function getOAuthCallbackUrl(): string {
   return `${getEnv().APP_URL}/api/connections/callback`;
@@ -24,6 +25,7 @@ export async function initiateConnection(
   orgId: string,
   actor: Actor,
   profileId: string,
+  applicationId: string,
   requestedScopes?: string[],
 ): Promise<{ authUrl: string; state: string }> {
   const redirectUri = getOAuthCallbackUrl();
@@ -31,14 +33,28 @@ export async function initiateConnection(
   // Route to OAuth1 if the provider uses it
   const providerDef = await getProvider(db, orgId, provider);
   if (providerDef?.authMode === "oauth1") {
-    return initiateOAuth1(db, orgId, actor, profileId, provider, redirectUri);
+    return initiateOAuth1(db, orgId, actor, profileId, provider, redirectUri, applicationId);
   }
 
-  return initiateOAuth(db, orgId, actor, profileId, provider, redirectUri, requestedScopes);
+  return initiateOAuth(
+    db,
+    orgId,
+    actor,
+    profileId,
+    provider,
+    redirectUri,
+    requestedScopes,
+    applicationId,
+  );
 }
 
 export async function handleCallback(code: string, state: string): Promise<OAuthCallbackResult> {
   const result = await handleOAuthCallback(db, code, state);
+
+  const providerCredentialId = await resolveProviderCredentialId(
+    result.applicationId,
+    result.providerId,
+  );
 
   await saveConnection(
     db,
@@ -52,6 +68,7 @@ export async function handleCallback(code: string, state: string): Promise<OAuth
     {
       scopesGranted: result.scopesGranted,
       expiresAt: result.expiresAt,
+      providerCredentialId,
     },
   );
 
@@ -70,11 +87,25 @@ export async function handleOAuth1CallbackAndSave(
 ): Promise<OAuth1CallbackResult> {
   const result = await handleOAuth1Callback(db, oauthToken, oauthVerifier);
 
-  await saveConnection(db, result.profileId, result.providerId, result.orgId, {
-    consumer_key: result.consumerKey,
-    access_token: result.accessToken,
-    access_token_secret: result.accessTokenSecret,
-  });
+  const providerCredentialId = await resolveProviderCredentialId(
+    result.applicationId,
+    result.providerId,
+  );
+
+  await saveConnection(
+    db,
+    result.profileId,
+    result.providerId,
+    result.orgId,
+    {
+      consumer_key: result.consumerKey,
+      access_token: result.accessToken,
+      access_token_secret: result.accessTokenSecret,
+    },
+    {
+      providerCredentialId,
+    },
+  );
 
   logger.info("OAuth1 connection established", {
     providerId: result.providerId,

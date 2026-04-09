@@ -22,6 +22,7 @@ export async function markNotificationRead(
   runId: string,
   actorId: string,
   orgId: string,
+  applicationId: string,
 ): Promise<boolean> {
   const updated = await db
     .update(runs)
@@ -30,6 +31,7 @@ export async function markNotificationRead(
       and(
         eq(runs.id, runId),
         eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
         isNotNull(runs.notifiedAt),
         actorOrOrgFilter(actorId),
       ),
@@ -39,18 +41,22 @@ export async function markNotificationRead(
 }
 
 /**
- * Filter: actor-owned OR schedule-triggered org-level runs (no actor).
- * Org-level runs come from schedules bound to org profiles — they have
- * no userId/endUserId but do have a scheduleId. All org members can see them.
+ * Filter: actor-owned OR org-visible runs (no userId).
+ * This covers:
+ * - Runs triggered by the actor themselves (userId or endUserId match)
+ * - Schedule-triggered runs (no userId, no endUserId, has scheduleId)
+ * - End-user runs (no userId, has endUserId) — visible to all org members
+ *   since they are API-triggered on behalf of end-users
  */
 function actorOrOrgFilter(actorId: string): SQL {
-  return or(
-    actorOwnershipFilter(actorId),
-    and(isNull(runs.userId), isNull(runs.endUserId), isNotNull(runs.scheduleId)),
-  )!;
+  return or(actorOwnershipFilter(actorId), isNull(runs.userId))!;
 }
 
-export async function markAllNotificationsRead(actorId: string, orgId: string): Promise<number> {
+export async function markAllNotificationsRead(
+  actorId: string,
+  orgId: string,
+  applicationId: string,
+): Promise<number> {
   const updated = await db
     .update(runs)
     .set({ readAt: new Date() })
@@ -58,6 +64,7 @@ export async function markAllNotificationsRead(actorId: string, orgId: string): 
       and(
         actorOrOrgFilter(actorId),
         eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
         isNotNull(runs.notifiedAt),
         isNull(runs.readAt),
       ),
@@ -66,7 +73,11 @@ export async function markAllNotificationsRead(actorId: string, orgId: string): 
   return updated.length;
 }
 
-export async function getUnreadNotificationCount(actorId: string, orgId: string): Promise<number> {
+export async function getUnreadNotificationCount(
+  actorId: string,
+  orgId: string,
+  applicationId: string,
+): Promise<number> {
   const [row] = await db
     .select({ count: count() })
     .from(runs)
@@ -74,6 +85,7 @@ export async function getUnreadNotificationCount(actorId: string, orgId: string)
       and(
         actorOrOrgFilter(actorId),
         eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
         isNotNull(runs.notifiedAt),
         isNull(runs.readAt),
       ),
@@ -84,6 +96,7 @@ export async function getUnreadNotificationCount(actorId: string, orgId: string)
 export async function getUnreadCountsByAgent(
   actorId: string,
   orgId: string,
+  applicationId: string,
 ): Promise<Record<string, number>> {
   const rows = await db
     .select({
@@ -95,6 +108,7 @@ export async function getUnreadCountsByAgent(
       and(
         actorOrOrgFilter(actorId),
         eq(runs.orgId, orgId),
+        eq(runs.applicationId, applicationId),
         isNotNull(runs.notifiedAt),
         isNull(runs.readAt),
         isNotNull(runs.packageId),
@@ -111,17 +125,25 @@ export async function getUnreadCountsByAgent(
 
 export async function listOrgRuns(
   orgId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: { limit?: number; offset?: number; applicationId: string },
 ) {
-  const { limit = 20, offset = 0 } = options;
-  return listRunsWithFilter(eq(runs.orgId, orgId), limit, offset);
+  const { limit = 20, offset = 0, applicationId } = options;
+  return listRunsWithFilter(
+    and(eq(runs.orgId, orgId), eq(runs.applicationId, applicationId))!,
+    limit,
+    offset,
+  );
 }
 
 export async function listUserRuns(
   actorId: string,
   orgId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: { limit?: number; offset?: number; applicationId: string },
 ) {
-  const { limit = 20, offset = 0 } = options;
-  return listRunsWithFilter(and(actorOrOrgFilter(actorId), eq(runs.orgId, orgId))!, limit, offset);
+  const { limit = 20, offset = 0, applicationId } = options;
+  return listRunsWithFilter(
+    and(actorOrOrgFilter(actorId), eq(runs.orgId, orgId), eq(runs.applicationId, applicationId))!,
+    limit,
+    offset,
+  );
 }

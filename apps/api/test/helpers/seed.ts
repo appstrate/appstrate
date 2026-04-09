@@ -23,7 +23,7 @@ import {
   userProviderConnections,
   orgInvitations,
   packageVersions,
-  providerCredentials,
+  applicationProviderCredentials,
 } from "@appstrate/db/schema";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
@@ -89,6 +89,7 @@ export async function seedPackageVersion(
 type RunInsert = Partial<InferInsertModel<typeof runs>> & {
   packageId: string;
   orgId: string;
+  applicationId: string;
 };
 
 export async function seedRun(overrides: RunInsert): Promise<InferSelectModel<typeof runs>> {
@@ -169,6 +170,7 @@ export async function seedEndUser(
 
 type WebhookInsert = Partial<InferInsertModel<typeof webhooks>> & {
   orgId: string;
+  applicationId: string;
 };
 
 export async function seedWebhook(
@@ -177,6 +179,7 @@ export async function seedWebhook(
   const [wh] = await db
     .insert(webhooks)
     .values({
+      id: `wh_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
       url: "https://example.com/webhook",
       events: ["run.completed"],
       secret: crypto.randomUUID(),
@@ -192,6 +195,7 @@ type ScheduleInsert = Partial<InferInsertModel<typeof packageSchedules>> & {
   packageId: string;
   connectionProfileId: string;
   orgId: string;
+  applicationId: string;
 };
 
 export async function seedSchedule(
@@ -301,7 +305,7 @@ export async function seedOrgModel(
 // ─── Connection Profiles ──────────────────────────────────
 
 type ConnectionProfileInsert = Partial<InferInsertModel<typeof connectionProfiles>> &
-  ({ userId: string } | { orgId: string });
+  ({ userId: string } | { applicationId: string });
 
 export async function seedConnectionProfile(
   overrides: ConnectionProfileInsert,
@@ -322,6 +326,7 @@ type UserConnectionInsert = Partial<InferInsertModel<typeof userProviderConnecti
   profileId: string;
   providerId: string;
   orgId: string;
+  providerCredentialId: string;
 };
 
 export async function seedUserConnection(
@@ -339,27 +344,60 @@ export async function seedUserConnection(
 
 // ─── Provider Credentials ────────────────────────────────
 
-type ProviderCredentialsInsert = Partial<InferInsertModel<typeof providerCredentials>> & {
+type ProviderCredentialsInsert = Partial<
+  InferInsertModel<typeof applicationProviderCredentials>
+> & {
+  applicationId: string;
   providerId: string;
-  orgId: string;
 };
 
 export async function seedProviderCredentials(
   overrides: ProviderCredentialsInsert,
-): Promise<InferInsertModel<typeof providerCredentials>> {
+): Promise<InferInsertModel<typeof applicationProviderCredentials> & { id: string }> {
   const values = {
     enabled: true,
     credentialsEncrypted: "test-admin-encrypted",
     ...overrides,
   };
-  await db
-    .insert(providerCredentials)
+  const [row] = await db
+    .insert(applicationProviderCredentials)
     .values(values)
     .onConflictDoUpdate({
-      target: [providerCredentials.providerId, providerCredentials.orgId],
+      target: [
+        applicationProviderCredentials.applicationId,
+        applicationProviderCredentials.providerId,
+      ],
       set: values,
-    });
-  return values;
+    })
+    .returning();
+  return { ...values, id: row!.id };
+}
+
+// ─── Connections (with auto-created provider credentials) ──
+
+import { saveConnection } from "@appstrate/connect";
+
+/**
+ * Seed a user connection with auto-created applicationProviderCredentials.
+ * Simplifies tests by handling the providerCredentialId requirement.
+ */
+export async function seedConnectionForApp(
+  profileId: string,
+  providerId: string,
+  orgId: string,
+  applicationId: string,
+  credentials: Record<string, unknown>,
+  options?: { scopesGranted?: string[]; expiresAt?: string | null },
+): Promise<void> {
+  // Ensure provider package exists (FK target for applicationProviderCredentials)
+  await seedPackage({ orgId: null, id: providerId, type: "provider", source: "system" }).catch(
+    () => {},
+  );
+  const cred = await seedProviderCredentials({ applicationId, providerId });
+  await saveConnection(db, profileId, providerId, orgId, credentials, {
+    providerCredentialId: cred.id,
+    ...options,
+  });
 }
 
 // ─── Invitations ──────────────────────────────────────────

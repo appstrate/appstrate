@@ -24,6 +24,7 @@ export const profilePaths = {
                   language: { type: "string", enum: ["fr", "en"] },
                 },
               },
+              example: { id: "usr_abc123", displayName: "Alice Martin", language: "fr" },
             },
           },
         },
@@ -42,7 +43,7 @@ export const profilePaths = {
             schema: {
               type: "object",
               properties: {
-                displayName: { type: "string" },
+                displayName: { type: "string", minLength: 1, maxLength: 100 },
                 language: { type: "string", enum: ["fr", "en"] },
               },
             },
@@ -66,6 +67,7 @@ export const profilePaths = {
                   displayName: { type: "string" },
                 },
               },
+              example: { ok: true, language: "en", displayName: "Alice Martin" },
             },
           },
         },
@@ -110,6 +112,12 @@ export const profilePaths = {
                     items: { $ref: "#/components/schemas/ProfileBatchItem" },
                   },
                 },
+              },
+              example: {
+                profiles: [
+                  { id: "usr_abc123", displayName: "Alice Martin" },
+                  { id: "usr_def456", displayName: "Bob Dupont" },
+                ],
               },
             },
           },

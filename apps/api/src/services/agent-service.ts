@@ -9,12 +9,14 @@ import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
+import { hasPackageAccess } from "./application-packages.ts";
 
 interface DbPackageRow {
   id: string;
   draftManifest: unknown;
   draftContent: string;
   source?: string;
+  updatedAt?: Date;
   depRefs?: {
     dependencyId: string;
     type: string;
@@ -59,6 +61,7 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
       (manifest.dependencies?.tools ?? {}) as Record<string, string>,
     ),
     source: (row.source as "system" | "local") ?? "local",
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -100,6 +103,7 @@ export async function getPackage(id: string, orgId: string): Promise<LoadedPacka
       draftManifest: packages.draftManifest,
       draftContent: packages.draftContent,
       source: packages.source,
+      updatedAt: packages.updatedAt,
     })
     .from(packages)
     .where(and(...conditions))
@@ -115,13 +119,35 @@ export async function getPackage(id: string, orgId: string): Promise<LoadedPacka
     draftManifest: pkgRow.draftManifest,
     draftContent: pkgRow.draftContent ?? "",
     source: pkgRow.source,
+    updatedAt: pkgRow.updatedAt,
     depRefs,
   });
 }
 
-/** List all agents: system (orgId: null) + user packages of type "agent" (from DB, scoped by org). */
-export async function listPackages(orgId: string): Promise<LoadedPackage[]> {
-  const conditions = [eq(packages.type, "agent"), orgOrSystemFilter(orgId)];
+/**
+ * Load an agent and verify application-level access in one operation.
+ * Default app = access to all, custom app = must be explicitly installed.
+ * Returns null if agent not found OR access denied (404 semantics — no info leak).
+ */
+export async function getPackageWithAccess(
+  id: string,
+  orgId: string,
+  applicationId: string,
+): Promise<LoadedPackage | null> {
+  const agent = await getPackage(id, orgId);
+  if (!agent) return null;
+
+  if (!(await hasPackageAccess(applicationId, id))) return null;
+
+  return agent;
+}
+
+/** List packages by type: system (orgId: null) + user packages (from DB, scoped by org). Defaults to "agent". */
+export async function listPackages(
+  orgId: string,
+  type: PackageType = "agent",
+): Promise<LoadedPackage[]> {
+  const conditions = [eq(packages.type, type), orgOrSystemFilter(orgId)];
   const rows = await db
     .select({
       id: packages.id,

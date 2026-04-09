@@ -14,7 +14,7 @@ export const welcomePaths = {
             schema: {
               type: "object",
               properties: {
-                displayName: { type: "string" },
+                displayName: { type: "string", maxLength: 100 },
               },
             },
           },
@@ -30,6 +30,7 @@ export const welcomePaths = {
           content: {
             "application/json": {
               schema: { type: "object", properties: { ok: { type: "boolean" } } },
+              example: { ok: true },
             },
           },
         },

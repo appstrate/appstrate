@@ -37,35 +37,59 @@ export const schemas = {
   },
   User: {
     type: "object",
+    required: ["id", "name", "email"],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
       email: { type: "string" },
     },
   },
+  ApplicationPackage: {
+    type: "object",
+    description: "A package installed in an application with its config and overrides.",
+    required: ["packageId", "enabled", "installedAt", "updatedAt"],
+    properties: {
+      object: { type: "string", enum: ["application_package"] },
+      packageId: { type: "string", description: "Package ID from org catalog" },
+      config: { type: "object", description: "Application-specific configuration" },
+      modelId: { type: ["string", "null"], description: "Model override for this app" },
+      proxyId: { type: ["string", "null"], description: "Proxy override for this app" },
+      appProfileId: { type: ["string", "null"], description: "App profile override" },
+      versionId: { type: ["integer", "null"], description: "Pinned version (null = latest)" },
+      enabled: { type: "boolean" },
+      installedAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+      packageType: { type: "string", enum: ["agent", "skill", "tool", "provider"] },
+      packageSource: { type: "string", enum: ["system", "local"] },
+    },
+  },
   WebhookObject: {
     type: "object",
     description: "Webhook configuration object",
+    required: [
+      "id",
+      "object",
+      "applicationId",
+      "url",
+      "events",
+      "payloadMode",
+      "enabled",
+      "createdAt",
+    ],
     properties: {
       id: { type: "string", description: "Webhook ID (wh_ prefix)" },
       object: { type: "string", enum: ["webhook"] },
-      scope: {
-        type: "string",
-        enum: ["organization", "application"],
-        description:
-          "Webhook scope. 'organization' fires for all runs; 'application' fires only for runs via the linked application's API key",
-      },
       applicationId: {
-        type: ["string", "null"],
-        description:
-          "Application ID (app_ prefix). Required when scope is 'application', null otherwise",
+        type: "string",
+        description: "Application ID (app_ prefix). All webhooks are application-scoped.",
       },
       url: { type: "string", format: "uri" },
       events: { type: "array", items: { type: "string" } },
       packageId: { type: ["string", "null"] },
       payloadMode: { type: "string", enum: ["full", "summary"] },
-      active: { type: "boolean" },
+      enabled: { type: "boolean" },
       createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
     },
   },
   OrgSettings: {
@@ -81,6 +105,7 @@ export const schemas = {
   },
   ProfileBatchItem: {
     type: "object",
+    required: ["id"],
     properties: {
       id: { type: "string" },
       displayName: { type: "string" },
@@ -88,15 +113,18 @@ export const schemas = {
   },
   Organization: {
     type: "object",
+    required: ["id", "name", "slug", "role", "createdAt"],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
       role: { type: "string", enum: ["owner", "admin", "member"] },
+      createdAt: { type: "string", format: "date-time", description: "Creation timestamp" },
     },
   },
   OrgMember: {
     type: "object",
+    required: ["userId", "email", "role", "joinedAt"],
     properties: {
       userId: { type: "string" },
       displayName: { type: "string" },
@@ -107,6 +135,7 @@ export const schemas = {
   },
   OrgInvitationInfo: {
     type: "object",
+    required: ["id", "email", "role", "token", "expiresAt", "createdAt"],
     properties: {
       id: { type: "string" },
       email: { type: "string" },
@@ -135,6 +164,7 @@ export const schemas = {
   },
   ProviderStatus: {
     type: "object",
+    required: ["id", "provider", "status", "authMode"],
     properties: {
       id: { type: "string", description: "Provider requirement ID" },
       provider: { type: "string", description: "Provider ID" },
@@ -147,7 +177,7 @@ export const schemas = {
       scopesMissing: { type: "array", items: { type: "string" } },
       source: {
         type: "string",
-        enum: ["org_binding", "user_profile"],
+        enum: ["app_binding", "user_profile"],
         description: "How the connection profile was resolved",
       },
       profileName: {
@@ -162,6 +192,7 @@ export const schemas = {
   },
   AgentSkillRef: {
     type: "object",
+    required: ["id", "name"],
     properties: {
       id: { type: "string" },
       version: { type: "string" },
@@ -171,6 +202,7 @@ export const schemas = {
   },
   AgentToolRef: {
     type: "object",
+    required: ["id", "name"],
     properties: {
       id: { type: "string" },
       version: { type: "string" },
@@ -180,6 +212,7 @@ export const schemas = {
   },
   AgentListItem: {
     type: "object",
+    required: ["id", "source", "type"],
     properties: {
       id: { type: "string" },
       displayName: { type: "string" },
@@ -202,7 +235,7 @@ export const schemas = {
       dependencies: {
         type: "object",
         properties: {
-          providers: { type: "array", items: { type: "string" } },
+          providers: { type: "object", additionalProperties: { type: "string" } },
           skills: { type: "object", additionalProperties: { type: "string" } },
           tools: { type: "object", additionalProperties: { type: "string" } },
         },
@@ -211,6 +244,7 @@ export const schemas = {
   },
   AgentDetail: {
     type: "object",
+    required: ["id", "source"],
     properties: {
       id: { type: "string" },
       displayName: { type: "string" },
@@ -296,14 +330,14 @@ export const schemas = {
         type: "integer",
         description: "Number of published versions (0 for built-in agents)",
       },
-      agentOrgProfileId: {
+      agentAppProfileId: {
         type: ["string", "null"],
         format: "uuid",
-        description: "Admin-configured org connection profile ID (null if none)",
+        description: "Admin-configured app connection profile ID (null if none)",
       },
-      agentOrgProfileName: {
+      agentAppProfileName: {
         type: ["string", "null"],
-        description: "Display name of the admin-configured org connection profile",
+        description: "Display name of the admin-configured app connection profile",
       },
       forkedFrom: { type: ["string", "null"], description: "Source package ID if forked" },
       hasUnarchivedChanges: {
@@ -336,6 +370,7 @@ export const schemas = {
   },
   Run: {
     type: "object",
+    required: ["id", "packageId", "orgId", "applicationId", "status", "versionDirty", "startedAt"],
     properties: {
       id: { type: "string" },
       packageId: { type: "string" },
@@ -356,7 +391,14 @@ export const schemas = {
       duration: { type: "integer", description: "Duration in milliseconds" },
       connectionProfileId: { type: "string" },
       scheduleId: { type: "string" },
-      packageVersionId: { type: "integer" },
+      versionLabel: {
+        type: ["string", "null"],
+        description: "Version label at run time (e.g. '1.0.0')",
+      },
+      versionDirty: {
+        type: "boolean",
+        description: "Whether the draft had unpublished changes at run time",
+      },
       proxyLabel: { type: ["string", "null"], description: "Proxy label used at run time" },
       modelLabel: { type: ["string", "null"], description: "Model label used at run time" },
       modelSource: {
@@ -381,6 +423,7 @@ export const schemas = {
   },
   RunLog: {
     type: "object",
+    required: ["id", "runId", "type", "level", "createdAt"],
     properties: {
       id: { type: "integer" },
       runId: { type: "string" },
@@ -400,6 +443,15 @@ export const schemas = {
   },
   Schedule: {
     type: "object",
+    required: [
+      "id",
+      "packageId",
+      "connectionProfileId",
+      "orgId",
+      "cronExpression",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       id: { type: "string" },
       packageId: { type: "string" },
@@ -415,7 +467,7 @@ export const schemas = {
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
       profileName: { type: ["string", "null"] },
-      profileType: { type: ["string", "null"], enum: ["user", "org", null] },
+      profileType: { type: ["string", "null"], enum: ["user", "app", null] },
       readiness: {
         type: "object",
         properties: {
@@ -429,6 +481,7 @@ export const schemas = {
   },
   AvailableProvider: {
     type: "object",
+    required: ["uniqueKey", "provider", "status", "authMode"],
     properties: {
       uniqueKey: { type: "string" },
       provider: { type: "string" },
@@ -443,6 +496,7 @@ export const schemas = {
   },
   ConnectionStatus: {
     type: "object",
+    required: ["provider", "status"],
     properties: {
       provider: { type: "string" },
       status: { type: "string", enum: ["connected", "not_connected", "needs_reconnection"] },
@@ -453,6 +507,7 @@ export const schemas = {
   },
   ProviderConfig: {
     type: "object",
+    required: ["id", "displayName", "authMode"],
     properties: {
       id: { type: "string" },
       displayName: { type: "string" },
@@ -511,8 +566,11 @@ export const schemas = {
     type: "object",
     required: ["id", "displayName", "authMode"],
     properties: {
-      id: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*$" },
-      displayName: { type: "string" },
+      id: { type: "string", minLength: 1 },
+      displayName: { type: "string", minLength: 1 },
+      version: { type: "string" },
+      description: { type: "string" },
+      author: { type: "string" },
       authMode: {
         type: "string",
         enum: ["oauth2", "oauth1", "api_key", "basic", "custom"],
@@ -530,7 +588,53 @@ export const schemas = {
       tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
       authorizationParams: { type: "object" },
       tokenParams: { type: "object" },
-      credentialSchema: { type: "object" },
+      credentialSchema: { type: "object", description: "JSON Schema for custom credential fields" },
+      credentialFieldName: { type: "string" },
+      credentialHeaderName: { type: "string" },
+      credentialHeaderPrefix: { type: "string" },
+      availableScopes: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            value: { type: "string" },
+            label: { type: "string" },
+          },
+        },
+      },
+      iconUrl: { type: "string" },
+      categories: { type: "array", items: { type: "string" } },
+      docsUrl: { type: "string" },
+      authorizedUris: { type: "array", items: { type: "string" } },
+      allowAllUris: { type: "boolean" },
+    },
+  },
+  ProviderConfigUpdate: {
+    type: "object",
+    required: ["displayName", "authMode"],
+    properties: {
+      displayName: { type: "string", minLength: 1 },
+      version: { type: "string" },
+      description: { type: "string" },
+      author: { type: "string" },
+      authMode: {
+        type: "string",
+        enum: ["oauth2", "oauth1", "api_key", "basic", "custom"],
+      },
+      clientId: { type: "string" },
+      clientSecret: { type: "string" },
+      authorizationUrl: { type: "string" },
+      tokenUrl: { type: "string" },
+      refreshUrl: { type: "string" },
+      requestTokenUrl: { type: "string", description: "OAuth1 request token endpoint" },
+      accessTokenUrl: { type: "string", description: "OAuth1 access token endpoint" },
+      defaultScopes: { type: "array", items: { type: "string" } },
+      scopeSeparator: { type: "string" },
+      pkceEnabled: { type: "boolean" },
+      tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
+      authorizationParams: { type: "object" },
+      tokenParams: { type: "object" },
+      credentialSchema: { type: "object", description: "JSON Schema for custom credential fields" },
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
@@ -553,6 +657,7 @@ export const schemas = {
   },
   ApiKeyInfo: {
     type: "object",
+    required: ["id", "name", "keyPrefix", "scopes", "createdAt"],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
@@ -572,6 +677,7 @@ export const schemas = {
   },
   OrgPackageItem: {
     type: "object",
+    required: ["id", "source", "createdAt", "updatedAt"],
     properties: {
       id: { type: "string" },
       name: { type: ["string", "null"] },
@@ -589,6 +695,7 @@ export const schemas = {
   },
   OrgPackageItemDetail: {
     type: "object",
+    required: ["id", "source", "createdAt", "updatedAt"],
     properties: {
       id: { type: "string" },
       name: { type: ["string", "null"] },
@@ -631,6 +738,7 @@ export const schemas = {
   },
   AgentMemory: {
     type: "object",
+    required: ["id", "content", "createdAt"],
     properties: {
       id: { type: "integer" },
       content: { type: "string" },
@@ -640,6 +748,7 @@ export const schemas = {
   },
   OrgProviderKey: {
     type: "object",
+    required: ["id", "label", "api", "baseUrl", "source", "createdAt", "updatedAt"],
     properties: {
       id: { type: "string" },
       label: { type: "string" },
@@ -653,6 +762,19 @@ export const schemas = {
   },
   OrgModel: {
     type: "object",
+    required: [
+      "id",
+      "label",
+      "api",
+      "baseUrl",
+      "modelId",
+      "enabled",
+      "isDefault",
+      "source",
+      "providerKeyId",
+      "createdAt",
+      "updatedAt",
+    ],
     properties: {
       id: { type: "string" },
       label: { type: "string" },
@@ -698,6 +820,7 @@ export const schemas = {
   },
   OrgProxy: {
     type: "object",
+    required: ["id", "label", "enabled", "isDefault", "source", "createdAt", "updatedAt"],
     properties: {
       id: { type: "string" },
       label: { type: "string" },
@@ -712,8 +835,11 @@ export const schemas = {
   },
   ApplicationObject: {
     type: "object",
+    required: ["id", "object", "orgId", "name", "isDefault", "settings", "createdAt", "updatedAt"],
     properties: {
       id: { type: "string", description: "Application ID (app_ prefix)" },
+      object: { type: "string", enum: ["application"], description: "Object type" },
+      orgId: { type: "string", description: "Organization ID" },
       name: { type: "string", description: "Human-readable application name" },
       isDefault: { type: "boolean", description: "Whether this is the default application" },
       settings: {
@@ -736,8 +862,10 @@ export const schemas = {
   },
   EndUserObject: {
     type: "object",
+    required: ["id", "object", "applicationId", "createdAt", "updatedAt"],
     properties: {
       id: { type: "string", description: "End-user ID (eu_ prefix)" },
+      object: { type: "string", enum: ["end_user"], description: "Object type" },
       applicationId: { type: "string", description: "ID of the parent application" },
       name: { type: ["string", "null"], description: "Display name" },
       email: { type: ["string", "null"], format: "email", description: "Email address" },

@@ -9,12 +9,12 @@ import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 import { internalError, notFound, parseBody } from "../lib/errors.ts";
 
-const profileUpdateSchema = z.object({
+export const profileUpdateSchema = z.object({
   language: z.enum(["fr", "en"]).optional(),
   displayName: z.string().min(1).max(100).optional(),
 });
 
-const batchLookupSchema = z.object({
+export const batchLookupSchema = z.object({
   ids: z.array(z.string()).max(100),
 });
 

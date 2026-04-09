@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useConnectionProfiles, useOrgProfiles } from "../hooks/use-connection-profiles";
+import { useConnectionProfiles, useAppProfiles } from "../hooks/use-connection-profiles";
 import { PROFILE_ALL_VALUE, encodeProfileValue, decodeProfileValue } from "@/lib/profile-selection";
 
 export interface ForeignProfile {
@@ -45,24 +45,24 @@ export function CombinedProfileSelect({
 }: CombinedProfileSelectProps) {
   const { t } = useTranslation(["settings", "agents"]);
   const { data: userProfiles } = useConnectionProfiles();
-  const { data: orgProfiles } = useOrgProfiles();
+  const { data: appProfiles } = useAppProfiles();
 
   const hasUserProfiles = (userProfiles?.length ?? 0) > 0;
-  const hasOrgProfiles = (orgProfiles?.length ?? 0) > 0;
+  const hasAppProfiles = (appProfiles?.length ?? 0) > 0;
 
   // Determine if the foreign profile should be shown (value matches and not in own/org lists)
   const showForeign = useMemo(() => {
     if (!foreignProfile) return false;
     const inUser = userProfiles?.some((p) => p.id === foreignProfile.id) ?? false;
-    const inOrg = orgProfiles?.some((p) => p.id === foreignProfile.id) ?? false;
-    return !inUser && !inOrg;
-  }, [foreignProfile, userProfiles, orgProfiles]);
+    const inApp = appProfiles?.some((p) => p.id === foreignProfile.id) ?? false;
+    return !inUser && !inApp;
+  }, [foreignProfile, userProfiles, appProfiles]);
 
-  const hasMeaningfulChoice = hasUserProfiles || hasOrgProfiles || showForeign;
+  const hasMeaningfulChoice = hasUserProfiles || hasAppProfiles || showForeign;
 
   // Hide when no meaningful choice
   if (!hasMeaningfulChoice) return null;
-  if (!showAllOption && !hasOrgProfiles && !showForeign && (userProfiles?.length ?? 0) <= 1)
+  if (!showAllOption && !hasAppProfiles && !showForeign && (userProfiles?.length ?? 0) <= 1)
     return null;
 
   const selectValue = encodeProfileValue(value);
@@ -102,16 +102,16 @@ export function CombinedProfileSelect({
             {p.isDefault ? ` (${t("profiles.default")})` : ""}
           </SelectItem>
         ))}
-        {hasOrgProfiles && (
+        {hasAppProfiles && (
           <SelectGroup>
             <div
               className="text-muted-foreground flex items-center gap-1 px-2 py-1.5 text-xs font-medium"
               role="presentation"
             >
               <Building2 className="size-3" />
-              {t("schedule.orgProfiles", { ns: "agents" })}
+              {t("schedule.appProfiles", { ns: "agents" })}
             </div>
-            {orgProfiles?.map((p) => (
+            {appProfiles?.map((p) => (
               <SelectItem key={p.id} value={p.id}>
                 {p.name}
               </SelectItem>

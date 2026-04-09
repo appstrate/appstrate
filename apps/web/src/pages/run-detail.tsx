@@ -4,7 +4,6 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
@@ -14,17 +13,16 @@ import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
 import { useRunRealtime, useRunLogsRealtime } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { Shield } from "lucide-react";
-import { Badge } from "../components/status-badge";
+import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LogViewer } from "../components/log-viewer";
 import { buildLogEntries, type RawLog } from "../components/log-utils";
 import { InputModal } from "../components/input-modal";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
-import { useProfiles } from "../hooks/use-profiles";
+import { RunRow } from "../components/run-row";
 import { useMarkRead } from "../hooks/use-notifications";
-import type { RunStatus, RunLog } from "@appstrate/shared-types";
+import type { RunStatus, RunLog, EnrichedRun } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { Markdown } from "../components/markdown";
@@ -36,10 +34,10 @@ export function RunDetailPage() {
   const location = useLocation();
   const stateNumber = (location.state as { runNumber?: number } | null)?.runNumber;
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   const { data: agent } = usePackageDetail("agent", packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
-  const profileMap = useProfiles(run?.userId ? [run.userId] : []);
   const [liveStatus, setLiveStatus] = useState<RunStatus | null>(null);
   const [trackedExecId, setTrackedExecId] = useState(runId);
 
@@ -65,14 +63,14 @@ export function RunDetailPage() {
     useCallback(
       (newLog: Record<string, unknown>) => {
         const log = newLog as unknown as RunLog;
-        qc.setQueryData<RunLog[]>(["run-logs", orgId, runId], (prev) => {
+        qc.setQueryData<RunLog[]>(["run-logs", orgId, appId, runId], (prev) => {
           if (!prev) return [log];
           // Deduplicate: skip if already present (race between REST fetch and SSE)
           if (prev.some((l) => l.id === log.id)) return prev;
           return [...prev, log];
         });
       },
-      [qc, orgId, runId],
+      [qc, orgId, appId, runId],
     ),
   );
 
@@ -120,17 +118,6 @@ export function RunDetailPage() {
   const resultSubTab = userSubTab ?? autoSubTab ?? "data";
   const setResultSubTab = (v: "report" | "data") => setUserSubTab(v);
 
-  // Live elapsed timer while running
-  const [elapsed, setElapsed] = useState(0);
-  useEffect(() => {
-    if (!isRunning || !run?.startedAt) return;
-    const start = new Date(run.startedAt).getTime();
-    const tick = () => setElapsed(Date.now() - start);
-    tick();
-    const id = setInterval(tick, 100);
-    return () => clearInterval(id);
-  }, [isRunning, run?.startedAt]);
-
   // Subscribe to SSE for instant local status feedback
   useRunRealtime(
     isRunning ? runId : null,
@@ -145,11 +132,11 @@ export function RunDetailPage() {
           newStatus === "timeout" ||
           newStatus === "cancelled";
         if (terminal) {
-          qc.invalidateQueries({ queryKey: ["run", orgId, runId] });
-          qc.invalidateQueries({ queryKey: ["run-logs", orgId, runId] });
+          qc.invalidateQueries({ queryKey: ["run", orgId, appId, runId] });
+          qc.invalidateQueries({ queryKey: ["run-logs", orgId, appId, runId] });
         }
       },
-      [qc, orgId, runId],
+      [qc, orgId, appId, runId],
     ),
   );
 
@@ -157,11 +144,8 @@ export function RunDetailPage() {
 
   if (error || !run) return <ErrorState message={error?.message} />;
 
-  const displayStatus = status || run.status;
+  const enrichedRun = run as EnrichedRun;
   const date = run.startedAt ? formatDateField(run.startedAt) : "";
-  const time = run.duration ?? elapsed;
-  const duration = time ? `${(time / 1000).toFixed(1)}s` : "";
-  const userName = run.userId ? profileMap.get(run.userId) : undefined;
 
   return (
     <>
@@ -182,29 +166,8 @@ export function RunDetailPage() {
         ]}
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Badge status={displayStatus} />
-        <span
-          className={cn(
-            "text-muted-foreground bg-muted rounded px-1.5 py-0.5 font-mono text-xs",
-            !run.packageVersion && "italic",
-          )}
-        >
-          {run.packageVersion ? `v${run.packageVersion}` : t("exec.draft")}
-        </span>
-        {userName ? (
-          <span className="text-muted-foreground text-sm">
-            {t("exec.user", { name: userName })}
-          </span>
-        ) : null}
-        {run.proxyLabel && (
-          <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
-            <Shield size={12} />
-            {t("exec.proxy", { label: run.proxyLabel })}
-          </span>
-        )}
-        <span className="text-muted-foreground text-xs">{date}</span>
-        {duration && <span className="text-muted-foreground text-xs">{duration}</span>}
+      <div className="border-border mb-4 rounded-md border">
+        <RunRow run={enrichedRun} disableLink />
       </div>
 
       {agent && (
@@ -220,7 +183,7 @@ export function RunDetailPage() {
         />
       )}
 
-      {displayStatus === "failed" && run.error && (
+      {run.status === "failed" && run.error && (
         <div className="bg-destructive/10 text-destructive mb-4 rounded-md px-4 py-3 text-sm">
           {run.error}
         </div>
@@ -288,7 +251,7 @@ export function RunDetailPage() {
 
       {activeTab === "state" && stateData && <JsonView data={stateData} />}
 
-      {activeTab === "info" && <RunInfoTab run={run} />}
+      {activeTab === "info" && <RunInfoTab run={enrichedRun} />}
     </>
   );
 }

@@ -24,6 +24,7 @@ import { modelsPaths } from "./paths/models.ts";
 import { providerKeysPaths } from "./paths/provider-keys.ts";
 import { proxiesPaths } from "./paths/proxies.ts";
 import { connectionProfilesPaths } from "./paths/connection-profiles.ts";
+import { appProfilesPaths } from "./paths/app-profiles.ts";
 import { apiKeysPaths } from "./paths/api-keys.ts";
 import { organizationsPaths } from "./paths/organizations.ts";
 import { profilePaths } from "./paths/profile.ts";
@@ -52,6 +53,7 @@ export const openApiSpec = {
     ...providerKeysPaths,
     ...proxiesPaths,
     ...connectionProfilesPaths,
+    ...appProfilesPaths,
     ...apiKeysPaths,
     ...organizationsPaths,
     ...profilePaths,

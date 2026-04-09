@@ -11,6 +11,7 @@ import { createShutdownHandler } from "./lib/shutdown.ts";
 import { validateApiKey } from "./services/api-keys.ts";
 import { ensureDefaultProfile } from "./services/connection-profiles.ts";
 import { requireOrgContext } from "./middleware/org-context.ts";
+import { requireAppContext } from "./middleware/app-context.ts";
 import { requestId } from "./middleware/request-id.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
 import { createAgentsRouter } from "./routes/agents.ts";
@@ -25,6 +26,7 @@ import { createProviderKeysRouter } from "./routes/provider-keys.ts";
 import { createInternalRouter } from "./routes/internal.ts";
 import { createApplicationsRouter } from "./routes/applications.ts";
 import { createConnectionProfilesRouter } from "./routes/connection-profiles.ts";
+import { createAppProfilesRouter } from "./routes/app-profiles.ts";
 import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
@@ -32,6 +34,7 @@ import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createWebhooksRouter } from "./routes/webhooks.ts";
 import healthRouter from "./routes/health.ts";
 import { createConnectionsRouter } from "./routes/connections.ts";
+import { createLibraryRouter } from "./routes/library.ts";
 import orgsRouter from "./routes/organizations.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
@@ -230,6 +233,29 @@ app.use("*", async (c, next) => {
   return next();
 });
 
+// App context middleware: resolve X-App-Id for app-scoped routes
+const APP_SCOPED_PREFIXES = [
+  "/api/agents",
+  "/api/runs",
+  "/api/schedules",
+  "/api/webhooks",
+  "/api/end-users",
+  "/api/api-keys",
+  "/api/notifications",
+  "/api/packages",
+  "/api/providers",
+  "/api/connections",
+  "/api/app-profiles",
+];
+
+const appContextMiddleware = requireAppContext();
+app.use("*", async (c, next) => {
+  if (skipAuth(c.req.path)) return next();
+  if (!c.get("user")) return next();
+  if (!APP_SCOPED_PREFIXES.some((p) => c.req.path.startsWith(p))) return next();
+  return appContextMiddleware(c, next);
+});
+
 // API versioning: resolve Appstrate-Version header > org setting > default
 const apiVersionMiddleware = apiVersion(async (orgId) => {
   const settings = await getOrgSettings(orgId);
@@ -277,7 +303,9 @@ app.route("/api/proxies", createProxiesRouter());
 app.route("/api/models", createModelsRouter());
 app.route("/api/provider-keys", createProviderKeysRouter());
 app.route("/api/applications", createApplicationsRouter());
+app.route("/api/library", createLibraryRouter());
 app.route("/api/connection-profiles", createConnectionProfilesRouter());
+app.route("/api/app-profiles", createAppProfilesRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
 app.route("/api/connections", createConnectionsRouter());
@@ -314,9 +342,10 @@ app.get("/*", async (c) => {
   return c.html(raw.replace("</head>", `${appConfigScript}\n</head>`));
 });
 
-// Start server
+// Start server — bind 0.0.0.0 so both IPv4 and IPv6 clients can connect
 export default {
   port: env.PORT,
+  hostname: "0.0.0.0",
   fetch: app.fetch,
   idleTimeout: 255,
 };

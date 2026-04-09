@@ -20,11 +20,12 @@ function profileMap(entries: Record<string, string>): ProviderProfileMap {
 function createMockDeps(overrides?: Partial<DependencyValidationDeps>): DependencyValidationDeps {
   return {
     isProviderEnabled: async () => true,
-    getConnectionStatus: async (provider) => ({
+    getConnectionStatus: async (provider, _profileId, _orgId, _credId) => ({
       provider,
       status: "connected" as const,
       scopesGranted: ["read", "write"],
     }),
+    getProviderCredentialId: async () => "mock-credential-id",
     validateScopes: () => ({ sufficient: true, missing: [] }),
     ...overrides,
   };
@@ -36,7 +37,7 @@ describe("validateAgentDependencies", () => {
     const providers = [{ id: "@test/gmail", scopes: ["read"] }, { id: "@test/clickup" }];
     const profiles = profileMap({ "@test/gmail": "profile-1", "@test/clickup": "profile-2" });
 
-    await validateAgentDependencies(providers, profiles, "org-1", deps);
+    await validateAgentDependencies(providers, profiles, "org-1", "app-1", deps);
   });
 
   it("throws when provider is not enabled", async () => {
@@ -45,7 +46,7 @@ describe("validateAgentDependencies", () => {
     const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     try {
-      await validateAgentDependencies(providers, profiles, "org-1", deps);
+      await validateAgentDependencies(providers, profiles, "org-1", "app-1", deps);
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -61,7 +62,7 @@ describe("validateAgentDependencies", () => {
     const profiles: ProviderProfileMap = {};
 
     try {
-      await validateAgentDependencies(providers, profiles, "org-1", deps);
+      await validateAgentDependencies(providers, profiles, "org-1", "app-1", deps);
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -72,7 +73,7 @@ describe("validateAgentDependencies", () => {
 
   it("throws when provider connection status is not_connected", async () => {
     const deps = createMockDeps({
-      getConnectionStatus: async (provider) => ({
+      getConnectionStatus: async (provider, _profileId, _orgId, _credId) => ({
         provider,
         status: "not_connected" as const,
       }),
@@ -81,7 +82,7 @@ describe("validateAgentDependencies", () => {
     const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     try {
-      await validateAgentDependencies(providers, profiles, "org-1", deps);
+      await validateAgentDependencies(providers, profiles, "org-1", "app-1", deps);
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -92,7 +93,7 @@ describe("validateAgentDependencies", () => {
 
   it("throws when provider needs reconnection", async () => {
     const deps = createMockDeps({
-      getConnectionStatus: async (provider) => ({
+      getConnectionStatus: async (provider, _profileId, _orgId, _credId) => ({
         provider,
         status: "needs_reconnection" as const,
         scopesGranted: ["read"],
@@ -102,7 +103,7 @@ describe("validateAgentDependencies", () => {
     const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     try {
-      await validateAgentDependencies(providers, profiles, "org-1", deps);
+      await validateAgentDependencies(providers, profiles, "org-1", "app-1", deps);
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -118,7 +119,7 @@ describe("validateAgentDependencies", () => {
     const profiles = profileMap({ "@test/gmail": "profile-1" });
 
     try {
-      await validateAgentDependencies(providers, profiles, "org-1", deps);
+      await validateAgentDependencies(providers, profiles, "org-1", "app-1", deps);
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
@@ -138,7 +139,7 @@ describe("validateAgentDependencies", () => {
     const providers = [{ id: "@test/gmail" }];
     const profiles = profileMap({ "@test/gmail": "profile-1" });
 
-    await validateAgentDependencies(providers, profiles, "org-1", deps);
+    await validateAgentDependencies(providers, profiles, "org-1", "app-1", deps);
     expect(scopesCalled).toBe(false);
   });
 
@@ -153,14 +154,14 @@ describe("validateAgentDependencies", () => {
     const providers = [{ id: "@test/gmail", scopes: [] }];
     const profiles = profileMap({ "@test/gmail": "profile-1" });
 
-    await validateAgentDependencies(providers, profiles, "org-1", deps);
+    await validateAgentDependencies(providers, profiles, "org-1", "app-1", deps);
     expect(scopesCalled).toBe(false);
   });
 
   it("validates multiple providers in parallel", async () => {
     let statusCallCount = 0;
     const deps = createMockDeps({
-      getConnectionStatus: async (provider) => {
+      getConnectionStatus: async (provider, _profileId, _orgId, _credId) => {
         statusCallCount++;
         return { provider, status: "connected" as const, scopesGranted: [] };
       },
@@ -172,7 +173,7 @@ describe("validateAgentDependencies", () => {
       "@test/stripe": "p3",
     });
 
-    await validateAgentDependencies(providers, profiles, "org-1", deps);
+    await validateAgentDependencies(providers, profiles, "org-1", "app-1", deps);
     expect(statusCallCount).toBe(3);
   });
 
@@ -187,13 +188,13 @@ describe("validateAgentDependencies", () => {
     const providers = [{ id: "@test/gmail" }, { id: "@test/clickup" }];
     const profiles = profileMap({ "@test/gmail": "p1", "@test/clickup": "p2" });
 
-    await validateAgentDependencies(providers, profiles, "org-1", deps);
+    await validateAgentDependencies(providers, profiles, "org-1", "app-1", deps);
     expect(enabledCallCount).toBe(2);
   });
 
   it("succeeds with empty providers list", async () => {
     const deps = createMockDeps();
-    await validateAgentDependencies([], {}, "org-1", deps);
+    await validateAgentDependencies([], {}, "org-1", "app-1", deps);
   });
 
   it("works with org_binding source entries", async () => {
@@ -201,9 +202,9 @@ describe("validateAgentDependencies", () => {
     const providers = [{ id: "@test/gmail" }, { id: "@test/gdrive" }];
     const profiles: ProviderProfileMap = {
       "@test/gmail": { profileId: "user-profile-1", source: "user_profile" },
-      "@test/gdrive": { profileId: "admin-profile-1", source: "org_binding" },
+      "@test/gdrive": { profileId: "admin-profile-1", source: "app_binding" },
     };
 
-    await validateAgentDependencies(providers, profiles, "org-1", deps);
+    await validateAgentDependencies(providers, profiles, "org-1", "app-1", deps);
   });
 });

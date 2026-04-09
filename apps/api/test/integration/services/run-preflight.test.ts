@@ -3,22 +3,27 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedAgent, seedConnectionProfile, seedPackage } from "../../helpers/seed.ts";
-import { saveConnection } from "@appstrate/connect";
-import { providerCredentials } from "@appstrate/db/schema";
+import {
+  seedAgent,
+  seedConnectionProfile,
+  seedPackage,
+  seedConnectionForApp,
+} from "../../helpers/seed.ts";
+import { applicationProviderCredentials } from "@appstrate/db/schema";
 import { resolveProviderProfiles } from "../../../src/services/connection-profiles.ts";
 import { resolveManifestProviders } from "../../../src/lib/manifest-utils.ts";
-import { getPackageConfig } from "../../../src/services/state/index.ts";
+import { getPackageConfig } from "../../../src/services/application-packages.ts";
 import { validateAgentReadiness } from "../../../src/services/agent-readiness.ts";
 import { getPackage } from "../../../src/services/agent-service.ts";
 import { getDefaultProfileId } from "../../../src/services/connection-profiles.ts";
-import { bindOrgProfileProvider } from "../../../src/services/state/org-profile-bindings.ts";
+import { bindAppProfileProvider } from "../../../src/services/state/app-profile-bindings.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../../../src/types/index.ts";
 
 describe("run preflight — provider profile resolution", () => {
   let userId: string;
   let orgId: string;
+  let appId: string;
   let actor: Actor;
   let defaultProfileId: string;
   let altProfileId: string;
@@ -29,8 +34,9 @@ describe("run preflight — provider profile resolution", () => {
     await truncateAll();
     const { id } = await createTestUser();
     userId = id;
-    const { org } = await createTestOrg(userId);
+    const { org, defaultAppId } = await createTestOrg(userId);
     orgId = org.id;
+    appId = defaultAppId;
     actor = { type: "member", id: userId };
 
     // Seed provider packages + enable them
@@ -48,9 +54,9 @@ describe("run preflight — provider profile resolution", () => {
           definition: { authMode: "api_key" },
         },
       });
-      await db.insert(providerCredentials).values({
+      await db.insert(applicationProviderCredentials).values({
+        applicationId: appId,
         providerId: pid,
-        orgId,
         credentialsEncrypted: "{}",
         enabled: true,
       });
@@ -59,13 +65,13 @@ describe("run preflight — provider profile resolution", () => {
     // Default profile + connections for both providers
     defaultProfileId = await getDefaultProfileId(actor);
     for (const pid of providerIds) {
-      await saveConnection(db, defaultProfileId, pid, orgId, { api_key: "default-key" });
+      await seedConnectionForApp(defaultProfileId, pid, orgId, appId, { api_key: "default-key" });
     }
 
     // Alt profile + connection for gmail only
     const alt = await seedConnectionProfile({ userId, name: "Alt" });
     altProfileId = alt.id;
-    await saveConnection(db, altProfileId, "@system/gmail", orgId, { api_key: "alt-key" });
+    await seedConnectionForApp(altProfileId, "@system/gmail", orgId, appId, { api_key: "alt-key" });
   });
 
   async function seedAgentWithProviders(agentId: string) {
@@ -91,9 +97,10 @@ describe("run preflight — provider profile resolution", () => {
     agent: LoadedPackage;
     packageId: string;
     orgId: string;
+    applicationId: string;
     defaultUserProfileId: string | null;
     userProviderOverrides?: Record<string, string>;
-    orgProfileId?: string | null;
+    appProfileId?: string | null;
   }): Promise<{
     providerProfiles: ProviderProfileMap;
     config: Record<string, unknown>;
@@ -104,9 +111,10 @@ describe("run preflight — provider profile resolution", () => {
       agent,
       packageId,
       orgId: oid,
+      applicationId: aid,
       defaultUserProfileId,
       userProviderOverrides,
-      orgProfileId,
+      appProfileId,
     } = params;
     const manifestProviders = resolveManifestProviders(agent.manifest);
 
@@ -115,10 +123,10 @@ describe("run preflight — provider profile resolution", () => {
         manifestProviders,
         defaultUserProfileId,
         userProviderOverrides,
-        orgProfileId,
-        oid,
+        appProfileId,
+        aid,
       ),
-      getPackageConfig(oid, packageId),
+      getPackageConfig(aid, packageId),
     ]);
 
     await validateAgentReadiness({
@@ -126,6 +134,7 @@ describe("run preflight — provider profile resolution", () => {
       providerProfiles,
       orgId: oid,
       config: packageConfig.config,
+      applicationId: aid,
     });
 
     return {
@@ -144,6 +153,7 @@ describe("run preflight — provider profile resolution", () => {
       agent,
       packageId: agentId,
       orgId,
+      applicationId: appId,
       defaultUserProfileId: defaultProfileId,
     });
 
@@ -161,6 +171,7 @@ describe("run preflight — provider profile resolution", () => {
       agent,
       packageId: agentId,
       orgId,
+      applicationId: appId,
       defaultUserProfileId: defaultProfileId,
       userProviderOverrides: { "@system/gmail": altProfileId },
     });
@@ -174,22 +185,23 @@ describe("run preflight — provider profile resolution", () => {
     const agentId = "@testorg/preflight-org";
     const agent = await seedAgentWithProviders(agentId);
 
-    // Create org profile + bind gmail to alt profile
-    const orgProfile = await seedConnectionProfile({ orgId, name: "Org" });
-    await bindOrgProfileProvider(orgProfile.id, "@system/gmail", altProfileId, userId);
+    // Create app profile + bind gmail to alt profile
+    const appProfile = await seedConnectionProfile({ applicationId: appId, name: "App" });
+    await bindAppProfileProvider(appProfile.id, "@system/gmail", altProfileId, userId);
 
     const { providerProfiles } = await runPreflight({
       agent,
       packageId: agentId,
       orgId,
+      applicationId: appId,
       defaultUserProfileId: defaultProfileId,
       userProviderOverrides: { "@system/gmail": defaultProfileId },
-      orgProfileId: orgProfile.id,
+      appProfileId: appProfile.id,
     });
 
     expect(providerProfiles["@system/gmail"]!.profileId).toBe(altProfileId);
-    expect(providerProfiles["@system/gmail"]!.source).toBe("org_binding");
-    // clickup not bound in org profile -> falls back to user override or default
+    expect(providerProfiles["@system/gmail"]!.source).toBe("app_binding");
+    // clickup not bound in app profile -> falls back to user override or default
     expect(providerProfiles["@system/clickup"]!.profileId).toBe(defaultProfileId);
     expect(providerProfiles["@system/clickup"]!.source).toBe("user_profile");
   });
@@ -198,23 +210,26 @@ describe("run preflight — provider profile resolution", () => {
     const agentId = "@testorg/preflight-mixed";
     const agent = await seedAgentWithProviders(agentId);
 
-    const orgProfile = await seedConnectionProfile({ orgId, name: "Org" });
+    const appProfile = await seedConnectionProfile({ applicationId: appId, name: "App" });
     // Only bind gmail, NOT clickup
-    await bindOrgProfileProvider(orgProfile.id, "@system/gmail", altProfileId, userId);
+    await bindAppProfileProvider(appProfile.id, "@system/gmail", altProfileId, userId);
 
     // Provide override for clickup
-    await saveConnection(db, altProfileId, "@system/clickup", orgId, { api_key: "alt-cu" });
+    await seedConnectionForApp(altProfileId, "@system/clickup", orgId, appId, {
+      api_key: "alt-cu",
+    });
 
     const { providerProfiles } = await runPreflight({
       agent,
       packageId: agentId,
       orgId,
+      applicationId: appId,
       defaultUserProfileId: defaultProfileId,
       userProviderOverrides: { "@system/clickup": altProfileId },
-      orgProfileId: orgProfile.id,
+      appProfileId: appProfile.id,
     });
 
-    expect(providerProfiles["@system/gmail"]!.source).toBe("org_binding");
+    expect(providerProfiles["@system/gmail"]!.source).toBe("app_binding");
     expect(providerProfiles["@system/clickup"]!.profileId).toBe(altProfileId);
     expect(providerProfiles["@system/clickup"]!.source).toBe("user_profile");
   });

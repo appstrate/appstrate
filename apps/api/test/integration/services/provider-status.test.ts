@@ -3,23 +3,24 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedConnectionProfile, seedPackage } from "../../helpers/seed.ts";
-import { saveConnection } from "@appstrate/connect";
-import { providerCredentials } from "@appstrate/db/schema";
+import { seedConnectionProfile, seedPackage, seedConnectionForApp } from "../../helpers/seed.ts";
+import { applicationProviderCredentials } from "@appstrate/db/schema";
 import { resolveProviderStatuses } from "../../../src/services/connection-manager/status.ts";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../../../src/types/index.ts";
 
 describe("resolveProviderStatuses", () => {
   let userId: string;
   let orgId: string;
+  let appId: string;
   let profileId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const { id } = await createTestUser({ name: "Alice" });
     userId = id;
-    const { org } = await createTestOrg(userId);
+    const { org, defaultAppId } = await createTestOrg(userId);
     orgId = org.id;
+    appId = defaultAppId;
 
     const profile = await seedConnectionProfile({ userId, name: "Alice Profile" });
     profileId = profile.id;
@@ -39,9 +40,9 @@ describe("resolveProviderStatuses", () => {
         definition: { authMode: "api_key" },
       },
     });
-    await db.insert(providerCredentials).values({
+    await db.insert(applicationProviderCredentials).values({
+      applicationId: appId,
       providerId: id,
-      orgId,
       credentialsEncrypted: "{}",
       enabled: true,
     });
@@ -50,14 +51,14 @@ describe("resolveProviderStatuses", () => {
   it("returns source and profileName for user_profile entry", async () => {
     const providerId = "@system/test-status";
     await seedProvider(providerId);
-    await saveConnection(db, profileId, providerId, orgId, { api_key: "k" });
+    await seedConnectionForApp(profileId, providerId, orgId, appId, { api_key: "k" });
 
     const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const profiles: ProviderProfileMap = {
       [providerId]: { profileId, source: "user_profile" },
     };
 
-    const statuses = await resolveProviderStatuses(providers, profiles, orgId);
+    const statuses = await resolveProviderStatuses(providers, profiles, orgId, appId);
     expect(statuses).toHaveLength(1);
     const s0 = statuses[0]!;
     expect(s0.status).toBe("connected");
@@ -69,16 +70,16 @@ describe("resolveProviderStatuses", () => {
   it("returns source org_binding with correct profile info", async () => {
     const providerId = "@system/test-org-bind";
     await seedProvider(providerId);
-    await saveConnection(db, profileId, providerId, orgId, { api_key: "k" });
+    await seedConnectionForApp(profileId, providerId, orgId, appId, { api_key: "k" });
 
     const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const profiles: ProviderProfileMap = {
-      [providerId]: { profileId, source: "org_binding" },
+      [providerId]: { profileId, source: "app_binding" },
     };
 
-    const statuses = await resolveProviderStatuses(providers, profiles, orgId);
+    const statuses = await resolveProviderStatuses(providers, profiles, orgId, appId);
     const s0 = statuses[0]!;
-    expect(s0.source).toBe("org_binding");
+    expect(s0.source).toBe("app_binding");
     expect(s0.profileName).toBe("Alice Profile");
     expect(s0.profileOwnerName).toBe("Alice");
   });
@@ -95,7 +96,7 @@ describe("resolveProviderStatuses", () => {
       },
     };
 
-    const statuses = await resolveProviderStatuses(providers, profiles, orgId);
+    const statuses = await resolveProviderStatuses(providers, profiles, orgId, appId);
     const s0 = statuses[0]!;
     expect(s0.profileName).toBeNull();
     expect(s0.profileOwnerName).toBeNull();
@@ -108,7 +109,7 @@ describe("resolveProviderStatuses", () => {
     const providers: AgentProviderRequirement[] = [{ id: providerId }];
     const profiles: ProviderProfileMap = {};
 
-    const statuses = await resolveProviderStatuses(providers, profiles, orgId);
+    const statuses = await resolveProviderStatuses(providers, profiles, orgId, appId);
     const s0 = statuses[0]!;
     expect(s0.status).toBe("not_connected");
     expect(s0.source).toBeNull();

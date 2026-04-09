@@ -10,12 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
-import {
-  useUnreadCount,
-  useAllRuns,
-  useMarkRead,
-  useMarkAllRead,
-} from "../hooks/use-notifications";
+import { useUnreadCount, useMarkRead, useMarkAllRead } from "../hooks/use-notifications";
+import { useAllRuns } from "../hooks/use-runs";
 import { useAgents } from "../hooks/use-packages";
 import { useIsMobile } from "../hooks/use-mobile";
 import type { Run } from "@appstrate/shared-types";

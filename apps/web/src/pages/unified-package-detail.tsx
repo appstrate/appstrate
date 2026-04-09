@@ -19,6 +19,8 @@ import { usePackageOwnership } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { useProviders } from "../hooks/use-providers";
 import { useDeleteProviderCredentials } from "../hooks/use-mutations";
+import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
+import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
@@ -213,9 +215,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const downloadPackage = usePackageDownload(scope, name);
   const deletePkgMutation = useDeletePackage(type);
   const deleteCredentialsMutation = useDeleteProviderCredentials();
+  const uninstallMutation = useTogglePackageInstall();
+  const currentAppId = useCurrentApplicationId();
+  const { installedAppNames, isInstalledInCurrentApp } = usePackageInstallState(packageId);
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
-    type: "deleteCredentials" | "deletePackage";
+    type: "deleteCredentials" | "deletePackage" | "uninstallPackage";
     description: string;
   } | null>(null);
 
@@ -422,9 +427,27 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
                   setConfirmAction({
                     type: "deletePackage",
-                    description: t("packages.deleteConfirm", {
-                      type: typeLabel,
-                      name: nameStr,
+                    description:
+                      installedAppNames.length > 0
+                        ? t("packages.deleteConfirmWithApps", {
+                            type: typeLabel,
+                            name: nameStr,
+                            apps: installedAppNames.join(", "),
+                            ns: "settings",
+                          })
+                        : t("packages.deleteConfirm", {
+                            type: typeLabel,
+                            name: nameStr,
+                            ns: "settings",
+                          }),
+                  });
+                }}
+                canUninstall={isInstalledInCurrentApp && source !== "system"}
+                onUninstall={() => {
+                  setConfirmAction({
+                    type: "uninstallPackage",
+                    description: t("packages.uninstallConfirm", {
+                      name: displayName,
                       ns: "settings",
                     }),
                   });
@@ -558,7 +581,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   type="agent"
                   source={agent.source}
                   keywords={agent.keywords}
-                  providerIds={agent.dependencies.providers}
+                  providerIds={Object.keys(agent.dependencies.providers ?? {})}
                   runningRuns={agent.runningRuns}
                 />
               ))}
@@ -601,12 +624,31 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         onClose={() => setConfirmAction(null)}
         title={t("btn.confirm", { ns: "common" })}
         description={confirmAction?.description ?? ""}
-        isPending={deleteCredentialsMutation.isPending || deletePkgMutation.isPending}
+        isPending={
+          deleteCredentialsMutation.isPending ||
+          deletePkgMutation.isPending ||
+          uninstallMutation.isPending
+        }
+        confirmLabel={
+          confirmAction?.type === "uninstallPackage"
+            ? t("packages.uninstall", { ns: "settings" })
+            : undefined
+        }
         onConfirm={() => {
           if (!confirmAction) return;
           const close = () => setConfirmAction(null);
           if (confirmAction.type === "deleteCredentials") {
             deleteCredentialsMutation.mutate(packageId, { onSuccess: close });
+          } else if (confirmAction.type === "uninstallPackage") {
+            if (!currentAppId) return;
+            uninstallMutation.mutate(
+              { appId: currentAppId, packageId, installed: true },
+              {
+                onSuccess: close,
+                onError: (err) =>
+                  toast.error(err instanceof Error ? err.message : t("error.generic")),
+              },
+            );
           } else {
             deletePkgMutation.mutate(packageId, {
               onSuccess: close,

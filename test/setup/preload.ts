@@ -9,10 +9,10 @@ import { resolve } from "path";
 
 // ─── Docker Compose (idempotent — no-op if already running) ─────
 const composeFile = resolve(import.meta.dir, "docker-compose.test.yml");
-const compose = Bun.spawnSync(
-  ["docker", "compose", "-f", composeFile, "up", "-d", "--wait"],
-  { stdout: "pipe", stderr: "pipe" },
-);
+const compose = Bun.spawnSync(["docker", "compose", "-f", composeFile, "up", "-d", "--wait"], {
+  stdout: "pipe",
+  stderr: "pipe",
+});
 if (compose.exitCode !== 0) {
   const stderr = compose.stderr.toString();
   throw new Error(`Docker Compose failed (exit ${compose.exitCode}): ${stderr}`);
@@ -30,9 +30,9 @@ const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? "redis://localhost:6380";
 process.env.DATABASE_URL = TEST_DATABASE_URL;
 process.env.REDIS_URL = TEST_REDIS_URL;
 process.env.BETTER_AUTH_SECRET = "test-secret-at-least-32-chars-long-for-hmac";
-process.env.CONNECTION_ENCRYPTION_KEY = Buffer.from(
-  "0123456789abcdef0123456789abcdef",
-).toString("base64"); // 32 bytes
+process.env.CONNECTION_ENCRYPTION_KEY = Buffer.from("0123456789abcdef0123456789abcdef").toString(
+  "base64",
+); // 32 bytes
 process.env.S3_BUCKET = "test-bucket";
 process.env.S3_REGION = "us-east-1";
 process.env.S3_ENDPOINT = "http://localhost:9002";
@@ -58,7 +58,18 @@ process.env.DOCKER_SOCKET = "http://localhost:2375";
 // ─── MinIO bucket creation ───────────────────────────────────
 // Create the test bucket via mc inside the MinIO container (idempotent).
 const mcAlias = Bun.spawnSync(
-  ["docker", "exec", "setup-minio-test-1", "mc", "alias", "set", "local", "http://localhost:9000", "minioadmin", "minioadmin"],
+  [
+    "docker",
+    "exec",
+    "setup-minio-test-1",
+    "mc",
+    "alias",
+    "set",
+    "local",
+    "http://localhost:9000",
+    "minioadmin",
+    "minioadmin",
+  ],
   { stdout: "pipe", stderr: "pipe" },
 );
 if (mcAlias.exitCode === 0) {
@@ -70,17 +81,65 @@ if (mcAlias.exitCode === 0) {
 
 // ─── DinD: pre-pull alpine image ─────────────────────────────
 // Pull alpine:3.20 into the DinD daemon so docker API tests don't wait for pulls.
+Bun.spawnSync(["docker", "-H", "tcp://localhost:2375", "pull", "alpine:3.20"], {
+  stdout: "pipe",
+  stderr: "pipe",
+});
+
+// ─── Migrations ─────────────────────────────────────────────
+// Drop and recreate the test DB to ensure a clean slate (fresh migration).
+// Uses psql via the test postgres container to avoid needing a local client.
 Bun.spawnSync(
-  ["docker", "-H", "tcp://localhost:2375", "pull", "alpine:3.20"],
+  [
+    "docker",
+    "exec",
+    "setup-postgres-test-1",
+    "psql",
+    "-U",
+    "test",
+    "-d",
+    "postgres",
+    "-c",
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'appstrate_test' AND pid <> pg_backend_pid();",
+  ],
+  { stdout: "pipe", stderr: "pipe" },
+);
+Bun.spawnSync(
+  [
+    "docker",
+    "exec",
+    "setup-postgres-test-1",
+    "psql",
+    "-U",
+    "test",
+    "-d",
+    "postgres",
+    "-c",
+    "DROP DATABASE IF EXISTS appstrate_test;",
+  ],
+  { stdout: "pipe", stderr: "pipe" },
+);
+Bun.spawnSync(
+  [
+    "docker",
+    "exec",
+    "setup-postgres-test-1",
+    "psql",
+    "-U",
+    "test",
+    "-d",
+    "postgres",
+    "-c",
+    "CREATE DATABASE appstrate_test;",
+  ],
   { stdout: "pipe", stderr: "pipe" },
 );
 
-// ─── Migrations ─────────────────────────────────────────────
 // Run drizzle-kit migrate as a subprocess from the packages/db directory,
 // since the postgres driver is a dependency of @appstrate/db, not @appstrate/api.
 
 const dbDir = resolve(import.meta.dir, "../../packages/db");
-const result = Bun.spawnSync(["bunx", "drizzle-kit", "migrate"], {
+const result = Bun.spawnSync(["bun", "drizzle-kit", "migrate"], {
   cwd: dbDir,
   env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL },
   stdout: "pipe",
@@ -89,6 +148,8 @@ const result = Bun.spawnSync(["bunx", "drizzle-kit", "migrate"], {
 
 if (result.exitCode !== 0) {
   const stderr = result.stderr.toString();
-  throw new Error(`Migration failed (exit ${result.exitCode}): ${stderr}`);
+  const stdout = result.stdout.toString();
+  throw new Error(
+    `Migration failed (exit ${result.exitCode}):\nstderr: ${stderr}\nstdout: ${stdout}`,
+  );
 }
-

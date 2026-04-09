@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun } from "../../helpers/seed.ts";
+import { seedAgent, seedRun, seedEndUser } from "../../helpers/seed.ts";
 import { addOrgMember, createTestUser } from "../../helpers/auth.ts";
 
 const app = getTestApp();
@@ -33,6 +33,7 @@ describe("Notifications API", () => {
       const run = await seedRun({
         packageId: agent.id,
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
         notifiedAt: new Date(),
@@ -77,6 +78,7 @@ describe("Notifications API", () => {
       await seedRun({
         packageId: "@notiforg/silent-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
         // notifiedAt is null by default — should not be counted
@@ -173,6 +175,7 @@ describe("Notifications API", () => {
       const run = await seedRun({
         packageId: "@notiforg/no-notif",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -231,6 +234,7 @@ describe("Notifications API", () => {
       await seedRun({
         packageId: "@notiforg/already-read",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
         notifiedAt: new Date(),
@@ -275,12 +279,14 @@ describe("Notifications API", () => {
       await seedRun({
         packageId: "@notiforg/list-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@notiforg/list-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "failed",
       });
@@ -311,12 +317,14 @@ describe("Notifications API", () => {
       await seedRun({
         packageId: "@notiforg/shared-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@notiforg/shared-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: otherUser.id,
         status: "success",
       });
@@ -346,12 +354,14 @@ describe("Notifications API", () => {
       await seedRun({
         packageId: "@notiforg/filter-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@notiforg/filter-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: otherUser.id,
         status: "success",
       });
@@ -380,6 +390,7 @@ describe("Notifications API", () => {
         await seedRun({
           packageId: "@notiforg/limit-agent",
           orgId: ctx.orgId,
+          applicationId: ctx.defaultAppId,
           userId: ctx.user.id,
           status: "success",
         });
@@ -408,6 +419,7 @@ describe("Notifications API", () => {
         await seedRun({
           packageId: "@notiforg/offset-agent",
           orgId: ctx.orgId,
+          applicationId: ctx.defaultAppId,
           userId: ctx.user.id,
           status: "success",
         });
@@ -436,6 +448,7 @@ describe("Notifications API", () => {
       await seedRun({
         packageId: "@otherotherorg/secret-agent",
         orgId: otherCtx.orgId,
+        applicationId: otherCtx.defaultAppId,
         userId: otherCtx.user.id,
         status: "success",
       });
@@ -457,6 +470,116 @@ describe("Notifications API", () => {
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/runs");
       expect(res.status).toBe(401);
+    });
+  });
+
+  // ─── End-user run notifications ─────────────────────────────
+
+  describe("End-user run notifications", () => {
+    it("marks end-user run as read when viewed by org member", async () => {
+      await seedAgent({
+        id: "@notiforg/eu-notif-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        name: "External User",
+      });
+      const run = await seedRun({
+        packageId: "@notiforg/eu-notif-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        endUserId: eu.id,
+        status: "success",
+        notifiedAt: new Date(),
+      });
+
+      // Org member marks the end-user run as read
+      const res = await app.request(`/api/notifications/read/${run.id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean };
+      expect(body.ok).toBe(true);
+    });
+
+    it("counts end-user runs in unread count for org members", async () => {
+      await seedAgent({
+        id: "@notiforg/eu-count-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        name: "EU Count Test",
+      });
+      await seedRun({
+        packageId: "@notiforg/eu-count-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        endUserId: eu.id,
+        status: "success",
+        notifiedAt: new Date(),
+      });
+
+      const res = await app.request("/api/notifications/unread-count", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { count: number };
+      expect(body.count).toBe(1);
+    });
+
+    it("mark-all-read includes end-user runs", async () => {
+      await seedAgent({
+        id: "@notiforg/eu-markall-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        name: "EU MarkAll",
+      });
+      await seedRun({
+        packageId: "@notiforg/eu-markall-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        endUserId: eu.id,
+        status: "success",
+        notifiedAt: new Date(),
+      });
+      // Also seed an own-user run
+      await seedRun({
+        packageId: "@notiforg/eu-markall-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+        notifiedAt: new Date(),
+      });
+
+      const markRes = await app.request("/api/notifications/read-all", {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+
+      expect(markRes.status).toBe(200);
+      const markBody = (await markRes.json()) as { updated: number };
+      expect(markBody.updated).toBe(2);
+
+      // Verify count is now 0
+      const countRes = await app.request("/api/notifications/unread-count", {
+        headers: authHeaders(ctx),
+      });
+      const countBody = (await countRes.json()) as { count: number };
+      expect(countBody.count).toBe(0);
     });
   });
 });

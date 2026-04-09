@@ -21,7 +21,7 @@ import {
   type DistTagEntry,
 } from "@appstrate/core/semver";
 import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/version-policy";
-import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
+
 import { buildDependencies } from "./package-items/dependencies.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
@@ -39,7 +39,6 @@ interface CreateVersionParams {
   integrity: string;
   artifactSize: number;
   manifest: Record<string, unknown>;
-  orgId: string | null;
   createdBy: string | null;
 }
 
@@ -48,7 +47,7 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
   id: number;
   version: string;
 } | null> {
-  const { packageId, version, integrity, artifactSize, manifest, orgId, createdBy } = params;
+  const { packageId, version, integrity, artifactSize, manifest, createdBy } = params;
 
   if (!isValidVersion(version)) {
     logger.error("Invalid semver version", { packageId, version });
@@ -101,7 +100,7 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
 
       const [row] = await tx
         .insert(packageVersions)
-        .values({ packageId, version, integrity, artifactSize, manifest, orgId, createdBy })
+        .values({ packageId, version, integrity, artifactSize, manifest, createdBy })
         .returning({ id: packageVersions.id, version: packageVersions.version });
 
       // Auto-manage "latest" dist-tag
@@ -173,15 +172,19 @@ export async function getLatestVersionId(packageId: string): Promise<number | nu
   return row?.id ?? null;
 }
 
-/** Get the latest version ID + manifest for dirty-check at run time. */
-export async function getLatestVersionWithManifest(
+/** Get the latest version ID + version string + createdAt for dirty-check at run time. */
+export async function getLatestVersionInfo(
   packageId: string,
-): Promise<{ id: number; manifest: Record<string, unknown> } | null> {
+): Promise<{ id: number; version: string; createdAt: Date } | null> {
   const versionId = await getLatestVersionId(packageId);
   if (!versionId) return null;
 
   const [row] = await db
-    .select({ id: packageVersions.id, manifest: packageVersions.manifest })
+    .select({
+      id: packageVersions.id,
+      version: packageVersions.version,
+      createdAt: packageVersions.createdAt,
+    })
     .from(packageVersions)
     .where(eq(packageVersions.id, versionId))
     .limit(1);
@@ -189,7 +192,8 @@ export async function getLatestVersionWithManifest(
   if (!row) return null;
   return {
     id: row.id,
-    manifest: asRecord(row.manifest),
+    version: row.version,
+    createdAt: row.createdAt,
   };
 }
 
@@ -241,29 +245,11 @@ export async function getVersionForDownload(
   return row ?? null;
 }
 
-/** Resolve a version query and return only the manifest (no ZIP download). */
-export async function resolveVersionManifest(
-  packageId: string,
-  versionQuery: string,
-): Promise<Record<string, unknown> | null> {
-  const versionId = await resolveVersion(packageId, versionQuery);
-  if (!versionId) return null;
-
-  const [row] = await db
-    .select({ manifest: packageVersions.manifest })
-    .from(packageVersions)
-    .where(eq(packageVersions.id, versionId))
-    .limit(1);
-
-  if (!row?.manifest) return null;
-  return asRecordOrNull(row.manifest);
-}
-
 // ─────────────────────────────────────────────
 // Version detail
 // ─────────────────────────────────────────────
 
-export interface VersionDetail {
+interface VersionDetail {
   id: number;
   version: string;
   manifest: Record<string, unknown>;
@@ -354,60 +340,6 @@ export async function getVersionCount(packageId: string): Promise<number> {
 // Yank
 // ─────────────────────────────────────────────
 
-/** Yank a version. Reassigns dist-tags pointing to the yanked version. */
-export async function yankVersion(
-  packageId: string,
-  version: string,
-  reason?: string,
-): Promise<boolean> {
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${packageId}))`);
-
-    const [yanked] = await tx
-      .update(packageVersions)
-      .set({ yanked: true, yankedReason: reason ?? null })
-      .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.version, version)))
-      .returning({ id: packageVersions.id });
-
-    if (!yanked) return false;
-
-    const affectedTags = await tx
-      .select({ tag: packageDistTags.tag })
-      .from(packageDistTags)
-      .where(
-        and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.versionId, yanked.id)),
-      );
-
-    if (affectedTags.length > 0) {
-      const candidates = await tx
-        .select({ id: packageVersions.id, version: packageVersions.version })
-        .from(packageVersions)
-        .where(and(eq(packageVersions.packageId, packageId), eq(packageVersions.yanked, false)));
-
-      const instructions = planTagReassignment(affectedTags, candidates);
-
-      for (const instr of instructions) {
-        if (instr.action === "reassign") {
-          await tx
-            .update(packageDistTags)
-            .set({ versionId: instr.newVersionId, updatedAt: new Date() })
-            .where(
-              and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)),
-            );
-        } else {
-          await tx
-            .delete(packageDistTags)
-            .where(
-              and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, instr.tag)),
-            );
-        }
-      }
-    }
-
-    return true;
-  });
-}
-
 // ─────────────────────────────────────────────
 // Delete version
 // ─────────────────────────────────────────────
@@ -478,26 +410,6 @@ export async function deletePackageVersion(packageId: string, version: string): 
 // ─────────────────────────────────────────────
 // Dist-tags
 // ─────────────────────────────────────────────
-
-export async function addDistTag(packageId: string, tag: string, versionId: number): Promise<void> {
-  if (!isValidDistTag(tag)) throw new Error(`Invalid tag name '${tag}'`);
-  if (isProtectedTag(tag)) throw new Error("The 'latest' tag cannot be set manually");
-
-  await db
-    .insert(packageDistTags)
-    .values({ packageId, tag, versionId })
-    .onConflictDoUpdate({
-      target: [packageDistTags.packageId, packageDistTags.tag],
-      set: { versionId, updatedAt: new Date() },
-    });
-}
-
-export async function removeDistTag(packageId: string, tag: string): Promise<void> {
-  if (isProtectedTag(tag)) throw new Error("The 'latest' tag cannot be removed");
-  await db
-    .delete(packageDistTags)
-    .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, tag)));
-}
 
 async function listDistTags(packageId: string): Promise<{ tag: string; version: string }[]> {
   return db
@@ -590,8 +502,8 @@ export async function getLatestVersionIntegrity(packageId: string): Promise<stri
   return row?.integrity ?? null;
 }
 
-export type CreateVersionError = "invalid_version" | "no_changes";
-export type CreateVersionResult = { id: number; version: string } | { error: CreateVersionError };
+type CreateVersionError = "invalid_version" | "no_changes";
+type CreateVersionResult = { id: number; version: string } | { error: CreateVersionError };
 
 /** Create an immutable version snapshot from the current draft (packages table).
  *  Uses manifest.version as-is — no auto-bump. Returns an error object if version is missing,
@@ -698,7 +610,6 @@ export async function createVersionFromDraft(params: {
   const result = await createVersionAndUpload({
     packageId,
     version,
-    orgId,
     createdBy: userId,
     zipBuffer,
     manifest: finalManifest,
@@ -753,12 +664,11 @@ export async function replaceVersionContent(params: {
 export async function createVersionAndUpload(params: {
   packageId: string;
   version: string;
-  orgId: string | null;
   createdBy: string | null;
   zipBuffer: Buffer;
   manifest: Record<string, unknown>;
 }): Promise<{ id: number; version: string } | null> {
-  const { packageId, version, orgId, createdBy, zipBuffer, manifest } = params;
+  const { packageId, version, createdBy, zipBuffer, manifest } = params;
 
   const integrity = computeIntegrity(new Uint8Array(zipBuffer));
   const artifactSize = zipBuffer.byteLength;
@@ -773,7 +683,6 @@ export async function createVersionAndUpload(params: {
       integrity,
       artifactSize,
       manifest,
-      orgId,
       createdBy,
     });
 

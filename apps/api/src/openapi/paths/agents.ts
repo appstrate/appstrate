@@ -12,7 +12,10 @@ export const agentsPaths = {
       summary: "List all agents",
       description:
         "Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Agent list",
@@ -31,6 +34,46 @@ export const agentsPaths = {
                   },
                 },
               },
+              example: {
+                agents: [
+                  {
+                    id: "@acme/email-sorter",
+                    displayName: "Email Sorter",
+                    description: "Automatically sorts and labels incoming emails",
+                    schemaVersion: "1",
+                    author: "Acme Corp",
+                    keywords: ["email", "automation"],
+                    source: "local",
+                    scope: "@acme",
+                    version: "1.2.0",
+                    type: "agent",
+                    runningRuns: 1,
+                    dependencies: {
+                      providers: { "@appstrate/gmail": "^1.0.0" },
+                      skills: {},
+                      tools: {},
+                    },
+                  },
+                  {
+                    id: "@appstrate/code-reviewer",
+                    displayName: "Code Reviewer",
+                    description: "Reviews pull requests and suggests improvements",
+                    schemaVersion: "1",
+                    author: "Appstrate",
+                    keywords: ["code", "review", "github"],
+                    source: "system",
+                    scope: "@appstrate",
+                    version: "2.0.0",
+                    type: "agent",
+                    runningRuns: 0,
+                    dependencies: {
+                      providers: { "@appstrate/github": "^1.0.0" },
+                      skills: { "@appstrate/summarize": "^1.0.0" },
+                      tools: {},
+                    },
+                  },
+                ],
+              },
             },
           },
         },
@@ -46,13 +89,9 @@ export const agentsPaths = {
       description: "Save agent configuration values. Validated against manifest config schema.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -96,13 +135,9 @@ export const agentsPaths = {
         "Returns the proxy configuration for an agent (override ID and resolution status).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -135,13 +170,9 @@ export const agentsPaths = {
         'Set a proxy override for this agent. Pass a proxy ID, "none" to disable proxying, or null to use org default.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -188,13 +219,9 @@ export const agentsPaths = {
         "Returns accumulated memories for an agent (org-scoped, shared across all users).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -228,13 +255,9 @@ export const agentsPaths = {
       description: "Delete all accumulated memories for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -268,13 +291,9 @@ export const agentsPaths = {
       description: "Delete a specific memory by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
         { name: "memoryId", in: "path", required: true, schema: { type: "integer" } },
       ],
       responses: {
@@ -309,13 +328,9 @@ export const agentsPaths = {
       description: "Returns the LLM model override for an agent (null if using org default).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -347,13 +362,9 @@ export const agentsPaths = {
         "Set a model override for this agent. Pass a model ID or null to revert to org default.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -399,13 +410,9 @@ export const agentsPaths = {
       description: "Set the skill references for a user agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -462,13 +469,9 @@ export const agentsPaths = {
       description: "Set the tool references for a user agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -526,13 +529,9 @@ export const agentsPaths = {
         "Returns the per-provider connection profile overrides for an agent. Each key is a provider ID mapped to a profile ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -567,13 +566,9 @@ export const agentsPaths = {
       description: "Override the connection profile used for a specific provider in this agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -616,13 +611,9 @@ export const agentsPaths = {
         "Remove the connection profile override for a specific provider, reverting to the default profile.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -657,22 +648,18 @@ export const agentsPaths = {
       },
     },
   },
-  "/api/agents/{scope}/{name}/org-profile": {
+  "/api/agents/{scope}/{name}/app-profile": {
     put: {
-      operationId: "setAgentOrgProfile",
+      operationId: "setAgentAppProfile",
       tags: ["Agents"],
-      summary: "Set org profile for an agent",
+      summary: "Set app profile for an agent",
       description:
-        "Set or clear the org-level connection profile for this agent. Pass a profile ID to set, or null to clear.",
+        "Set or clear the application-level connection profile for this agent. Pass a profile ID to set, or null to clear.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
@@ -680,12 +667,12 @@ export const agentsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["orgProfileId"],
+              required: ["appProfileId"],
               properties: {
-                orgProfileId: {
+                appProfileId: {
                   type: ["string", "null"],
                   format: "uuid",
-                  description: "Org profile ID or null to clear",
+                  description: "App profile ID or null to clear",
                 },
               },
             },
@@ -694,7 +681,7 @@ export const agentsPaths = {
       },
       responses: {
         "200": {
-          description: "Org profile updated",
+          description: "App profile updated",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },

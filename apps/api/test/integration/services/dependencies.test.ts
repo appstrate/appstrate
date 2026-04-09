@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
 import {
   listOrgItems,
   getOrgItem,
@@ -20,14 +21,16 @@ describe("manifest-based dependency resolution", () => {
   let userId: string;
   let orgId: string;
   let orgSlug: string;
+  let appId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
-    const { org } = await createTestOrg(userId, { slug: "deporg" });
+    const { org, defaultAppId } = await createTestOrg(userId, { slug: "deporg" });
     orgId = org.id;
     orgSlug = org.slug;
+    appId = defaultAppId;
   });
 
   // ── buildDependencies ─────────────────────────────────────
@@ -306,7 +309,8 @@ describe("manifest-based dependency resolution", () => {
         },
       });
 
-      const items = await listOrgItems(orgId, TOOL_CONFIG);
+      await installPackage(appId, orgId, `@${orgSlug}/counted-tool`);
+      const items = await listOrgItems(orgId, TOOL_CONFIG, appId);
       const tool = items.find((i) => i.id === `@${orgSlug}/counted-tool`);
 
       expect(tool).toBeDefined();
@@ -326,7 +330,8 @@ describe("manifest-based dependency resolution", () => {
         },
       });
 
-      const items = await listOrgItems(orgId, SKILL_CONFIG);
+      await installPackage(appId, orgId, `@${orgSlug}/unused-skill`);
+      const items = await listOrgItems(orgId, SKILL_CONFIG, appId);
       const skill = items.find((i) => i.id === `@${orgSlug}/unused-skill`);
 
       expect(skill).toBeDefined();

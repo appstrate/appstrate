@@ -8,7 +8,6 @@ import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
-import { AppBreadcrumbSwitcher } from "../components/app-breadcrumb-switcher";
 import { useApiKeys, useAvailableScopes, useRevokeApiKey } from "../hooks/use-api-keys";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -54,8 +53,7 @@ export function ApiKeysPage() {
         title={t("settings:apiKeys.pageTitle")}
         emoji="🔑"
         breadcrumbs={[
-          { label: t("nav.appSection", { ns: "common" }), href: "/applications" },
-          { label: "", node: <AppBreadcrumbSwitcher /> },
+          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("settings:apiKeys.pageTitle") },
         ]}
         actions={

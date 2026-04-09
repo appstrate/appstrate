@@ -25,6 +25,17 @@ export const organizationsPaths = {
                   },
                 },
               },
+              example: {
+                organizations: [
+                  {
+                    id: "550e8400-e29b-41d4-a716-446655440000",
+                    name: "Acme Corp",
+                    slug: "acme-corp",
+                    role: "owner",
+                    createdAt: "2026-01-10T08:00:00Z",
+                  },
+                ],
+              },
             },
           },
         },
@@ -45,8 +56,8 @@ export const organizationsPaths = {
               type: "object",
               required: ["name"],
               properties: {
-                name: { type: "string" },
-                slug: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*$" },
+                name: { type: "string", minLength: 1 },
+                slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
               },
             },
           },
@@ -70,6 +81,13 @@ export const organizationsPaths = {
                   role: { type: "string", enum: ["owner"] },
                   createdAt: { type: "string", format: "date-time" },
                 },
+              },
+              example: {
+                id: "550e8400-e29b-41d4-a716-446655440001",
+                name: "New Organization",
+                slug: "new-org",
+                role: "owner",
+                createdAt: "2026-01-15T10:30:00Z",
               },
             },
           },
@@ -96,6 +114,28 @@ export const organizationsPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgDetail" },
+              example: {
+                id: "550e8400-e29b-41d4-a716-446655440000",
+                name: "Acme Corp",
+                slug: "acme-corp",
+                members: [
+                  {
+                    userId: "usr_abc123",
+                    displayName: "Alice",
+                    email: "alice@acme.com",
+                    role: "owner",
+                    joinedAt: "2026-01-10T08:00:00Z",
+                  },
+                  {
+                    userId: "usr_def456",
+                    displayName: "Bob",
+                    email: "bob@acme.com",
+                    role: "member",
+                    joinedAt: "2026-01-12T10:00:00Z",
+                  },
+                ],
+                invitations: [],
+              },
             },
           },
         },
@@ -115,7 +155,8 @@ export const organizationsPaths = {
             schema: {
               type: "object",
               properties: {
-                name: { type: "string" },
+                name: { type: "string", minLength: 1 },
+                slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
               },
             },
           },
@@ -127,6 +168,21 @@ export const organizationsPaths = {
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  name: { type: "string" },
+                  slug: { type: "string" },
+                  createdBy: { type: "string" },
+                  createdAt: { type: "string", format: "date-time" },
+                  updatedAt: { type: "string", format: "date-time" },
+                },
+              },
+            },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -171,10 +227,10 @@ export const organizationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["email"],
+              required: ["email", "role"],
               properties: {
                 email: { type: "string", format: "email" },
-                role: { type: "string", enum: ["admin", "member"], default: "member" },
+                role: { type: "string", enum: ["admin", "member", "viewer"], default: "member" },
               },
             },
           },
@@ -203,6 +259,13 @@ export const organizationsPaths = {
                   },
                 },
               },
+              example: {
+                added: false,
+                invited: true,
+                email: "newuser@example.com",
+                role: "member",
+                token: "inv_abc123def456",
+              },
             },
           },
         },
@@ -229,7 +292,7 @@ export const organizationsPaths = {
               type: "object",
               required: ["role"],
               properties: {
-                role: { type: "string", enum: ["admin", "member"] },
+                role: { type: "string", enum: ["viewer", "member", "admin"] },
               },
             },
           },
@@ -241,6 +304,17 @@ export const organizationsPaths = {
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  userId: { type: "string" },
+                  role: { type: "string", enum: ["viewer", "member", "admin"] },
+                },
+              },
+            },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -294,7 +368,7 @@ export const organizationsPaths = {
               type: "object",
               required: ["role"],
               properties: {
-                role: { type: "string", enum: ["admin", "member"] },
+                role: { type: "string", enum: ["viewer", "member", "admin"] },
               },
             },
           },
@@ -306,6 +380,17 @@ export const organizationsPaths = {
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  role: { type: "string", enum: ["viewer", "member", "admin"] },
+                },
+              },
+            },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -358,6 +443,9 @@ export const organizationsPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgSettings" },
+              example: {
+                apiVersion: "2026-03-21",
+              },
             },
           },
         },

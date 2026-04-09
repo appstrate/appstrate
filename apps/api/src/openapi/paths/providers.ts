@@ -8,7 +8,10 @@ export const providersPaths = {
       summary: "List all providers",
       description:
         "List all provider configurations (built-in + custom) for the organization. Available to all org members.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       responses: {
         "200": {
           description: "Provider list",
@@ -28,6 +31,19 @@ export const providersPaths = {
                   callbackUrl: { type: "string" },
                 },
               },
+              example: {
+                providers: [
+                  {
+                    id: "@appstrate/gmail",
+                    displayName: "Gmail",
+                    authMode: "oauth2",
+                    source: "built-in",
+                    hasCredentials: true,
+                    enabled: true,
+                  },
+                ],
+                callbackUrl: "https://app.appstrate.dev/api/connections/callback",
+              },
             },
           },
         },
@@ -39,7 +55,10 @@ export const providersPaths = {
       tags: ["Providers"],
       summary: "Create a custom provider",
       description: "Create a new provider configuration.",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
       requestBody: {
         required: true,
         content: {
@@ -78,19 +97,15 @@ export const providersPaths = {
       description: "Update a custom provider configuration. Built-in providers cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,
         content: {
           "application/json": {
-            schema: { $ref: "#/components/schemas/ProviderConfigInput" },
+            schema: { $ref: "#/components/schemas/ProviderConfigUpdate" },
           },
         },
       },
@@ -115,13 +130,9 @@ export const providersPaths = {
         "Delete a custom provider. Built-in providers cannot be deleted. Cannot delete if used by agents.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {
@@ -132,7 +143,22 @@ export const providersPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "409": { description: "Provider in use by agents" },
+        "409": {
+          description: "Provider in use by agents",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Conflict",
+                status: 409,
+                detail: "Cannot delete provider: it is still referenced by active agents",
+                code: "conflict",
+                requestId: "req_ghi789",
+              },
+            },
+          },
+        },
       },
     },
   },
@@ -144,13 +170,9 @@ export const providersPaths = {
       description: "Remove admin credentials for a provider.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -179,13 +201,9 @@ export const providersPaths = {
       description: "Set OAuth client credentials for a provider.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       requestBody: {
         required: true,

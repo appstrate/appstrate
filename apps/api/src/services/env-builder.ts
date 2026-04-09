@@ -8,14 +8,14 @@ import { db } from "@appstrate/db/client";
 import { getEnv } from "@appstrate/env";
 import { signRunToken } from "../lib/run-token.ts";
 import { buildProviderTokens } from "./token-resolver.ts";
-import { getPackageConfig, getLastRunState, getPackageMemories } from "./state/index.ts";
+import { getLastRunState, getPackageMemories } from "./state/index.ts";
+import { getPackageConfig } from "./application-packages.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
-import { getLatestVersionWithManifest } from "./package-versions.ts";
+import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
-import { asJSONSchemaObject } from "@appstrate/core/form";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
 import type { ProviderProfileMap } from "../types/index.ts";
 import { toISO } from "../lib/date-helpers.ts";
 
@@ -35,22 +35,24 @@ export async function buildRunContext(params: {
   agent: LoadedPackage;
   providerProfiles: ProviderProfileMap;
   orgId: string;
+  applicationId: string;
   actor: Actor | null;
   input?: Record<string, unknown>;
   files?: FileReference[];
   config?: Record<string, unknown>;
   modelId?: string | null;
   proxyId?: string | null;
-  overrideVersionId?: number;
+  overrideVersionLabel?: string;
 }): Promise<{
   promptContext: PromptContext;
   agentPackage: Buffer | null;
-  packageVersionId: number | null;
+  versionLabel: string | null;
+  versionDirty: boolean;
   proxyLabel: string | null;
   modelLabel: string | null;
   modelSource: string | null;
 }> {
-  const { runId, agent, providerProfiles, orgId, actor, input, files } = params;
+  const { runId, agent, providerProfiles, orgId, applicationId, actor, input, files } = params;
   const manifestProviders = resolveManifestProviders(agent.manifest);
 
   // Skip getPackageConfig when all values are already provided by the caller (from preflight)
@@ -67,17 +69,17 @@ export async function buildRunContext(params: {
     latestVersion,
     memories,
   ] = await Promise.all([
-    buildProviderTokens(manifestProviders, providerProfiles, orgId),
-    skipConfigFetch ? null : getPackageConfig(orgId, agent.id),
-    getLastRunState(agent.id, actor, orgId),
+    buildProviderTokens(manifestProviders, providerProfiles, orgId, applicationId),
+    skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
+    getLastRunState(agent.id, actor, orgId, applicationId),
     resolveProviderDefs(orgId, manifestProviders),
     buildAgentPackage(agent, orgId),
-    params.overrideVersionId
-      ? Promise.resolve(params.overrideVersionId)
+    params.overrideVersionLabel
+      ? null
       : agent.source !== "system"
-        ? getLatestVersionWithManifest(agent.id).catch(() => null)
+        ? getLatestVersionInfo(agent.id).catch(() => null)
         : null,
-    getPackageMemories(agent.id, orgId),
+    getPackageMemories(agent.id, applicationId),
   ]);
 
   const config = params.config ?? configFull?.config ?? {};
@@ -113,19 +115,22 @@ export async function buildRunContext(params: {
     cost: modelResult.cost,
   };
 
-  // Step 3: resolve version ID (dirty check against live manifest)
-  let packageVersionId: number | null = null;
-  if (typeof latestVersion === "number") {
-    packageVersionId = latestVersion;
-  } else if (latestVersion) {
-    const liveKey = JSON.stringify(agent.manifest);
-    const versionKey = JSON.stringify(latestVersion.manifest);
-    packageVersionId = liveKey === versionKey ? latestVersion.id : null;
+  // Step 3: resolve version label + dirty flag
+  let versionLabel: string | null = params.overrideVersionLabel ?? null;
+  let versionDirty = false;
+  if (!versionLabel && latestVersion) {
+    versionLabel = latestVersion.version;
+    const updatedAt = agent.updatedAt ?? new Date();
+    versionDirty = updatedAt > latestVersion.createdAt;
   }
 
   // Step 4: assemble prompt context
   const apiEnv = getEnv();
-  const runApiUrl = apiEnv.PLATFORM_API_URL ?? `http://host.docker.internal:${apiEnv.PORT}`;
+  const runApiUrl =
+    apiEnv.PLATFORM_API_URL ??
+    (apiEnv.RUN_ADAPTER === "process"
+      ? `http://localhost:${apiEnv.PORT}`
+      : `http://host.docker.internal:${apiEnv.PORT}`);
 
   const promptContext: PromptContext = {
     rawPrompt: agent.prompt,
@@ -135,17 +140,7 @@ export async function buildRunContext(params: {
     runApi: { url: runApiUrl, token: signRunToken(runId) },
     input: input ?? {},
     files,
-    schemas: {
-      input: agent.manifest.input?.schema
-        ? asJSONSchemaObject(agent.manifest.input.schema)
-        : undefined,
-      config: agent.manifest.config?.schema
-        ? asJSONSchemaObject(agent.manifest.config.schema)
-        : undefined,
-      output: agent.manifest.output?.schema
-        ? asJSONSchemaObject(agent.manifest.output.schema)
-        : undefined,
-    },
+    schemas: extractManifestSchemas(agent.manifest),
     providers: providerDefs,
     memories: memories.map((m) => ({
       id: m.id,
@@ -169,7 +164,15 @@ export async function buildRunContext(params: {
     toolDocs,
   };
 
-  return { promptContext, agentPackage, packageVersionId, proxyLabel, modelLabel, modelSource };
+  return {
+    promptContext,
+    agentPackage,
+    versionLabel,
+    versionDirty,
+    proxyLabel,
+    modelLabel,
+    modelSource,
+  };
 }
 
 /** Resolve unique provider definitions for prompt context. */

@@ -10,9 +10,10 @@ import {
   Wrench,
   Puzzle,
   Plug,
-  Settings,
   Webhook,
   Loader2,
+  Users,
+  KeyRound,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
@@ -45,6 +46,13 @@ export function NavOrg() {
   const resourceItems = [
     { path: "/skills", label: t("nav.skills"), icon: Wrench },
     { path: "/tools", label: t("nav.tools"), icon: Puzzle },
+  ];
+
+  const integrationItems = [
+    { path: "/providers", label: t("nav.connectors"), icon: Plug },
+    ...(isAdmin ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }] : []),
+    ...(isAdmin ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }] : []),
+    ...(isAdmin ? [{ path: "/api-keys", label: t("nav.apiKeys"), icon: KeyRound }] : []),
   ];
 
   const renderItems = (items: typeof automationItems) =>
@@ -113,48 +121,7 @@ export function NavOrg() {
       {/* Intégrations */}
       <SidebarGroup>
         <SidebarGroupLabel>{t("nav.integrationsSection")}</SidebarGroupLabel>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              asChild
-              isActive={location.pathname.startsWith("/providers")}
-              tooltip={t("nav.connectors")}
-            >
-              <Link to="/providers">
-                <Plug />
-                <span>{t("nav.connectors")}</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          {isAdmin && (
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                isActive={location.pathname.startsWith("/webhooks")}
-                tooltip={t("nav.webhooks")}
-              >
-                <Link to="/webhooks">
-                  <Webhook />
-                  <span>{t("nav.webhooks")}</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          )}
-          {isAdmin && (
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                isActive={location.pathname.startsWith("/org-settings")}
-                tooltip={t("nav.settings")}
-              >
-                <Link to="/org-settings">
-                  <Settings />
-                  <span>{t("nav.settings")}</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          )}
-        </SidebarMenu>
+        <SidebarMenu>{renderItems(integrationItems)}</SidebarMenu>
       </SidebarGroup>
     </>
   );

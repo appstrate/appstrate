@@ -34,13 +34,8 @@ export function WebhookDetailPage() {
         ]}
         actions={
           <div className="flex items-center gap-2">
-            <Badge variant="outline">
-              {webhook.scope === "organization"
-                ? t("settings:webhooks.scopeBadgeOrg")
-                : t("settings:webhooks.scopeBadgeApp")}
-            </Badge>
-            <Badge variant={webhook.active ? "success" : "secondary"}>
-              {webhook.active ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
+            <Badge variant={webhook.enabled ? "success" : "secondary"}>
+              {webhook.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
             </Badge>
           </div>
         }

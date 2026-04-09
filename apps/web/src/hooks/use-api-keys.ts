@@ -11,10 +11,7 @@ export function useApiKeys() {
   const appId = useCurrentApplicationId();
   return useQuery({
     queryKey: ["api-keys", orgId, appId],
-    queryFn: () =>
-      api<{ apiKeys: ApiKeyInfo[] }>(`/api-keys${appId ? `?applicationId=${appId}` : ""}`).then(
-        (d) => d.apiKeys,
-      ),
+    queryFn: () => api<{ apiKeys: ApiKeyInfo[] }>("/api-keys").then((d) => d.apiKeys),
     enabled: !!orgId && !!appId,
   });
 }
@@ -30,12 +27,11 @@ export function useAvailableScopes() {
 
 export function useCreateApiKey() {
   const qc = useQueryClient();
-  const appId = useCurrentApplicationId();
   return useMutation({
     mutationFn: async (data: { name: string; expiresAt: string | null; scopes?: string[] }) => {
       return api<{ id: string; key: string; keyPrefix: string; scopes: string[] }>("/api-keys", {
         method: "POST",
-        body: JSON.stringify({ ...data, applicationId: appId }),
+        body: JSON.stringify(data),
       });
     },
     onSuccess: () => {

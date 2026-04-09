@@ -43,13 +43,17 @@ export async function initiateOAuth(
   providerId: string,
   redirectUri: string,
   requestedScopes?: string[],
+  applicationId?: string,
 ): Promise<InitiateOAuthResult> {
   const provider = await getProviderOrThrow(db, orgId, providerId, "oauth2");
   if (!provider.authorizationUrl) {
     throw new Error(`Provider '${providerId}' has no authorization URL configured`);
   }
 
-  const oauthCreds = await getProviderOAuthCredentialsOrThrow(db, orgId, providerId);
+  if (!applicationId) {
+    throw new Error("Application context is required for OAuth2 connection");
+  }
+  const oauthCreds = await getProviderOAuthCredentialsOrThrow(db, providerId, applicationId);
 
   // Generate PKCE values
   const state = crypto.randomUUID();
@@ -69,6 +73,7 @@ export async function initiateOAuth(
     ...actorToColumns(actor),
     profileId,
     providerId,
+    applicationId,
     codeVerifier,
     scopesRequested: uniqueScopes,
     redirectUri,
@@ -102,6 +107,7 @@ export interface OAuthCallbackResult {
   userId: string | null;
   actor: Actor;
   profileId: string;
+  applicationId: string;
   accessToken: string;
   refreshToken?: string;
   expiresAt: string | null;
@@ -144,7 +150,7 @@ export async function handleOAuthCallback(
     codeVerifier: rawRow.codeVerifier,
     scopesRequested: (rawRow.scopesRequested as string[]) ?? [],
     redirectUri: rawRow.redirectUri,
-    createdAt: rawRow.createdAt?.toISOString() ?? "",
+    createdAt: rawRow.createdAt!.toISOString(),
     expiresAt: rawRow.expiresAt.toISOString(),
     authMode: rawRow.authMode,
     oauthTokenSecret: rawRow.oauthTokenSecret ?? undefined,
@@ -162,10 +168,13 @@ export async function handleOAuthCallback(
     throw new Error(`Provider '${stateRow.providerId}' has no token URL configured`);
   }
 
+  if (!rawRow.applicationId) {
+    throw new Error("Application context is required for OAuth2 callback");
+  }
   const oauthCreds = await getProviderOAuthCredentialsOrThrow(
     db,
-    stateRow.orgId,
     stateRow.providerId,
+    rawRow.applicationId,
   );
 
   // Exchange code for tokens
@@ -223,6 +232,7 @@ export async function handleOAuthCallback(
     userId: stateRow.userId ?? null,
     actor,
     profileId: stateRow.profileId,
+    applicationId: rawRow.applicationId!,
     accessToken: parsed.accessToken,
     refreshToken: parsed.refreshToken,
     expiresAt: parsed.expiresAt,

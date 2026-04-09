@@ -4,7 +4,8 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedAgent, seedPackage, seedPackageVersion, seedApplication } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
 import { packages, packageDistTags } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -42,6 +43,7 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/list-agent");
 
       const res = await app.request("/api/packages/agents", {
         headers: authHeaders(ctx),
@@ -106,6 +108,7 @@ describe("Packages API", () => {
         },
         draftContent: "# My Skill\nDo something useful.",
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/my-skill");
 
       const res = await app.request("/api/packages/skills", {
         headers: authHeaders(ctx),
@@ -134,6 +137,7 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/detail-agent");
 
       const res = await app.request("/api/packages/agents/@pkgorg/detail-agent", {
         headers: authHeaders(ctx),
@@ -153,6 +157,7 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/versioned-agent");
 
       // Create a version with a createdAt in the future to ensure updatedAt < createdAt
       await seedPackageVersion({
@@ -219,6 +224,7 @@ describe("Packages API", () => {
         },
         draftContent: "# Detail Skill",
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/detail-skill");
 
       const res = await app.request("/api/packages/skills/@pkgorg/detail-skill", {
         headers: authHeaders(ctx),
@@ -236,6 +242,65 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(404);
+    });
+
+    it("returns 404 from custom app when skill is not installed", async () => {
+      await seedPackage({
+        id: "@pkgorg/hidden-skill",
+        orgId: ctx.orgId,
+        type: "skill",
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@pkgorg/hidden-skill",
+          version: "0.1.0",
+          type: "skill",
+          description: "Hidden from custom app",
+        },
+        draftContent: "# Hidden",
+      });
+
+      const customApp = await seedApplication({
+        orgId: ctx.orgId,
+        name: "Skill Custom",
+        createdBy: ctx.user.id,
+      });
+
+      const res = await app.request("/api/packages/skills/@pkgorg/hidden-skill", {
+        headers: { ...authHeaders(ctx), "X-App-Id": customApp.id },
+      });
+
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 200 from custom app when skill is installed", async () => {
+      await seedPackage({
+        id: "@pkgorg/installed-skill",
+        orgId: ctx.orgId,
+        type: "skill",
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@pkgorg/installed-skill",
+          version: "0.1.0",
+          type: "skill",
+          description: "Installed in custom app",
+        },
+        draftContent: "# Installed",
+      });
+
+      const customApp = await seedApplication({
+        orgId: ctx.orgId,
+        name: "Skill Installed",
+        createdBy: ctx.user.id,
+      });
+      await installPackage(customApp.id, ctx.orgId, "@pkgorg/installed-skill");
+
+      const res = await app.request("/api/packages/skills/@pkgorg/installed-skill", {
+        headers: { ...authHeaders(ctx), "X-App-Id": customApp.id },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.skill.id).toBe("@pkgorg/installed-skill");
     });
   });
 
@@ -654,7 +719,7 @@ describe("Packages API", () => {
 
       const res = await app.request("/api/packages/import", {
         method: "POST",
-        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+        headers: authHeaders(ctx),
         body: formData,
       });
 
@@ -667,7 +732,7 @@ describe("Packages API", () => {
 
       const res = await app.request("/api/packages/import", {
         method: "POST",
-        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+        headers: authHeaders(ctx),
         body: formData,
       });
 
@@ -681,7 +746,7 @@ describe("Packages API", () => {
 
       const res = await app.request("/api/packages/import", {
         method: "POST",
-        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+        headers: authHeaders(ctx),
         body: formData,
       });
 
@@ -714,11 +779,13 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/my-agent");
       await seedAgent({
         id: "@isolatedorg/their-agent",
         orgId: otherCtx.orgId,
         createdBy: otherCtx.user.id,
       });
+      await installPackage(otherCtx.defaultAppId, otherCtx.orgId, "@isolatedorg/their-agent");
 
       // User from pkgorg should only see their own agents
       const res1 = await app.request("/api/packages/agents", {
@@ -735,10 +802,7 @@ describe("Packages API", () => {
 
       // User from isolatedorg should only see their own agents
       const res2 = await app.request("/api/packages/agents", {
-        headers: {
-          Cookie: otherCtx.cookie,
-          "X-Org-Id": otherCtx.orgId,
-        },
+        headers: authHeaders(otherCtx),
       });
       expect(res2.status).toBe(200);
       const body2 = (await res2.json()) as any;

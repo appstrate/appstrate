@@ -3,11 +3,13 @@
 import { useEffect, useRef } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
+import { useCurrentApplicationId } from "./use-current-application";
+import { invalidateRunAndNotificationQueries } from "./use-notifications";
 import type { Run } from "@appstrate/shared-types";
 
 const TERMINAL_STATUSES = new Set(["success", "failed", "timeout", "cancelled"]);
 
-function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
+function handleSSEMessage(qc: QueryClient, orgId: string, appId: string, raw: string) {
   try {
     const newRow = JSON.parse(raw) as Record<string, unknown>;
     const packageId = newRow.packageId as string;
@@ -15,12 +17,12 @@ function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
     const status = newRow.status as string;
     const scheduleId = newRow.scheduleId as string | null;
 
-    qc.setQueryData<Run>(["run", orgId, runId], (prev) => {
+    qc.setQueryData<Run>(["run", orgId, appId, runId], (prev) => {
       if (!prev) return prev;
       return { ...prev, ...newRow } as Run;
     });
 
-    qc.setQueryData<Run[]>(["runs", orgId, packageId], (prev) => {
+    qc.setQueryData<Run[]>(["runs", orgId, appId, packageId], (prev) => {
       if (!prev) return prev;
       const exists = prev.some((ex) => ex.id === runId);
       if (exists) {
@@ -36,15 +38,13 @@ function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
 
     // Invalidate schedule-specific caches
     if (scheduleId) {
-      qc.invalidateQueries({ queryKey: ["schedule-runs", orgId, scheduleId] });
-      qc.invalidateQueries({ queryKey: ["schedule", orgId, scheduleId] });
-      qc.invalidateQueries({ queryKey: ["schedules", orgId] });
+      qc.invalidateQueries({ queryKey: ["schedule-runs", orgId, appId, scheduleId] });
+      qc.invalidateQueries({ queryKey: ["schedule", orgId, appId, scheduleId] });
+      qc.invalidateQueries({ queryKey: ["schedules", orgId, appId] });
     }
 
     if (TERMINAL_STATUSES.has(status)) {
-      qc.invalidateQueries({ queryKey: ["run", orgId, runId] });
-      qc.invalidateQueries({ queryKey: ["unread-count", orgId] });
-      qc.invalidateQueries({ queryKey: ["unread-counts-by-agent", orgId] });
+      invalidateRunAndNotificationQueries(qc);
       qc.invalidateQueries({ queryKey: ["billing", orgId] });
     }
   } catch {
@@ -60,18 +60,19 @@ function handleSSEMessage(qc: QueryClient, orgId: string, raw: string) {
 export function useGlobalRunSync() {
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
   const qcRef = useRef(qc);
   qcRef.current = qc;
 
   useEffect(() => {
-    if (!orgId) return;
+    if (!orgId || !appId) return;
 
     const controller = new AbortController();
 
     (async () => {
       try {
         const res = await fetch(
-          `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&verbose=true`,
+          `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&appId=${encodeURIComponent(appId)}&verbose=true`,
           {
             credentials: "include",
             signal: controller.signal,
@@ -99,7 +100,7 @@ export function useGlobalRunSync() {
               else if (line.startsWith("data:")) data = line.slice(5).trim();
             }
             if (event === "run_update" && data) {
-              handleSSEMessage(qcRef.current, orgId, data);
+              handleSSEMessage(qcRef.current, orgId, appId, data);
             }
           }
         }
@@ -109,5 +110,5 @@ export function useGlobalRunSync() {
     })();
 
     return () => controller.abort();
-  }, [orgId]);
+  }, [orgId, appId]);
 }

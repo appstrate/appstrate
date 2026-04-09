@@ -60,6 +60,14 @@ export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
                 fileMatch: ["*"],
                 schema: schema?.schema ?? {},
               },
+              {
+                // Provide empty local schema for the 2020-12 meta-schema URI
+                // so Monaco doesn't try to fetch it from the network when the
+                // edited JSON content contains "$schema": "https://json-schema.org/draft/2020-12/schema"
+                uri: "https://json-schema.org/draft/2020-12/schema",
+                fileMatch: [],
+                schema: {},
+              },
             ],
           });
         }}

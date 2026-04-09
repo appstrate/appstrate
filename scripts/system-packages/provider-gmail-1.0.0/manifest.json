@@ -5,11 +5,8 @@
   "type": "provider",
   "displayName": "Gmail",
   "description": "Email service by Google",
-  "iconUrl": "https://cdn.simpleicons.org/gmail",
-  "categories": [
-    "email",
-    "productivity"
-  ],
+  "iconUrl": "gmail",
+  "categories": ["email", "productivity"],
   "docsUrl": "https://developers.google.com/workspace/gmail/api",
   "definition": {
     "authMode": "oauth2",
@@ -31,10 +28,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://gmail.googleapis.com/*",
-      "https://www.googleapis.com/gmail/*"
-    ],
+    "authorizedUris": ["https://gmail.googleapis.com/*", "https://www.googleapis.com/gmail/*"],
     "availableScopes": [
       {
         "value": "https://www.googleapis.com/auth/gmail.readonly",

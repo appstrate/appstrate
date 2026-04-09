@@ -7,6 +7,7 @@ import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useProviders } from "../hooks/use-providers";
+import { useConnectionProfiles } from "../hooks/use-connection-profiles";
 import { ProfileSelector } from "../components/profile-selector";
 import { Modal } from "../components/modal";
 import { ProviderCredentialsModal } from "../components/provider-credentials-modal";
@@ -21,8 +22,16 @@ import type { ProviderConfig } from "@appstrate/shared-types";
 export function ProvidersPage() {
   const { t } = useTranslation(["settings", "agents"]);
   const [showAll, setShowAll] = useState(false);
-  const [profileId, setProfileId] = useState<string | null>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const { data: profiles } = useConnectionProfiles();
   const { data: providersData } = useProviders();
+
+  // Resolve effective profile: user selection → default profile → first profile
+  const profileId = useMemo(() => {
+    if (selectedProfileId) return selectedProfileId;
+    if (!profiles?.length) return null;
+    return (profiles.find((p) => p.isDefault) ?? profiles[0])?.id ?? null;
+  }, [selectedProfileId, profiles]);
 
   const [configurePickerOpen, setConfigurePickerOpen] = useState(false);
   const [configureProvider, setConfigureProvider] = useState<ProviderConfig | null>(null);
@@ -45,14 +54,14 @@ export function ProvidersPage() {
         actions.set(
           p.id,
           <div className="ml-auto flex items-center gap-2">
-            <ProviderConnectButton provider={p} />
+            <ProviderConnectButton provider={p} profileId={profileId} />
             {configButton}
           </div>,
         );
       }
     }
     return { badgeMap: badges, actionsMap: actions, iconMap: icons };
-  }, [providersData]);
+  }, [providersData, profileId]);
 
   // Filter: enabled providers (default) or all
   const enabledIds = new Set<string>();
@@ -71,7 +80,8 @@ export function ProvidersPage() {
           <TabsTrigger value="all">{t("providers.filterAll")}</TabsTrigger>
         </TabsList>
       </Tabs>
-      <ProfileSelector value={profileId} onChange={setProfileId} />
+      <div className="flex-1" />
+      <ProfileSelector value={profileId} onChange={setSelectedProfileId} />
     </div>
   );
 

@@ -5,31 +5,21 @@ import { Hono } from "hono";
 import { logger } from "../lib/logger.ts";
 import type { LoadedPackage, AppEnv } from "../types/index.ts";
 import {
-  createRun,
   updateRun,
   appendRunLog,
   getRun,
   getRunFull,
   getRunningRunsForPackage,
-  getRunningRunCountForOrg,
   deletePackageRuns,
   listPackageRuns,
   listScheduleRuns,
   listRunLogs,
   addPackageMemories,
-  getPackageConfig,
 } from "../services/state/index.ts";
-import {
-  resolveActorProfileContext,
-  getAgentOrgProfile,
-  resolveProviderProfiles,
-} from "../services/connection-profiles.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { validateAgentReadiness } from "../services/agent-readiness.ts";
+import { resolveActorProfileContext, getAgentAppProfile } from "../services/connection-profiles.ts";
 import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
-import { buildRunContext, ModelNotConfiguredError } from "../services/env-builder.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -42,9 +32,9 @@ import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { getCloudModule } from "../lib/cloud-loader.ts";
-import { dispatchWebhookEvents } from "../services/webhooks.ts";
+import { dispatchRunWebhook } from "../services/webhooks.ts";
+import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
-
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens;
   total.output_tokens += addition.output_tokens;
@@ -54,29 +44,6 @@ function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
     (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
 }
 
-/** Fire-and-forget webhook dispatch after run status change. */
-function dispatchWebhooks(
-  orgId: string,
-  status: string,
-  runId: string,
-  packageId: string,
-  extra?: Record<string, unknown>,
-  applicationId?: string | null,
-): void {
-  const eventType = `run.${status}` as Parameters<typeof dispatchWebhookEvents>[1];
-  dispatchWebhookEvents(
-    orgId,
-    eventType,
-    { id: runId, packageId, status, ...extra },
-    applicationId,
-  ).catch((err) => {
-    logger.warn("Webhook dispatch failed", {
-      runId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  });
-}
-
 // --- Background run (decoupled from client) ---
 
 export async function executeAgentInBackground(
@@ -84,9 +51,9 @@ export async function executeAgentInBackground(
   orgId: string,
   agent: LoadedPackage,
   promptContext: PromptContext,
+  applicationId: string,
   agentPackage?: Buffer | null,
   inputFiles?: UploadedFile[],
-  applicationId?: string | null,
   modelSource?: string | null,
 ) {
   const startTime = Date.now();
@@ -98,8 +65,8 @@ export async function executeAgentInBackground(
 
   try {
     // Update status to running
-    await updateRun(runId, orgId, { status: "running" });
-    dispatchWebhooks(orgId, "started", runId, agent.id, undefined, applicationId);
+    await updateRun(runId, orgId, applicationId, { status: "running" });
+    dispatchRunWebhook(orgId, applicationId, "started", runId, agent.id);
 
     // Execute via adapter
     const adapter = new PiAdapter();
@@ -187,7 +154,7 @@ export async function executeAgentInBackground(
       if (err instanceof TimeoutError) {
         const duration = Date.now() - startTime;
         const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
-        await updateRun(runId, orgId, {
+        await updateRun(runId, orgId, applicationId, {
           status: "timeout",
           error: `Run timed out after ${timeout}s`,
           completedAt: new Date().toISOString(),
@@ -212,7 +179,7 @@ export async function executeAgentInBackground(
           },
           "error",
         );
-        dispatchWebhooks(orgId, "timeout", runId, agent.id, { duration }, applicationId);
+        dispatchRunWebhook(orgId, applicationId, "timeout", runId, agent.id, { duration });
         return;
       }
       throw err;
@@ -234,7 +201,7 @@ export async function executeAgentInBackground(
     const duration = Date.now() - startTime;
 
     if (error) {
-      await updateRun(runId, orgId, {
+      await updateRun(runId, orgId, applicationId, {
         status: "failed",
         error,
         completedAt: new Date().toISOString(),
@@ -250,7 +217,7 @@ export async function executeAgentInBackground(
         { runId, status: "failed", error },
         "error",
       );
-      dispatchWebhooks(orgId, "failed", runId, agent.id, { error, duration }, applicationId);
+      dispatchRunWebhook(orgId, applicationId, "failed", runId, agent.id, { error, duration });
     } else {
       // --- Success path (with or without structured output) ---
 
@@ -288,7 +255,7 @@ export async function executeAgentInBackground(
       };
 
       if (memories.length > 0) {
-        await addPackageMemories(agent.id, orgId, memories, runId);
+        await addPackageMemories(agent.id, orgId, applicationId, memories, runId);
       }
 
       let metadata: Record<string, unknown> | undefined;
@@ -307,7 +274,7 @@ export async function executeAgentInBackground(
         }
       }
 
-      await updateRun(runId, orgId, {
+      await updateRun(runId, orgId, applicationId, {
         status: "success",
         result,
         ...(state ? { state } : {}),
@@ -332,7 +299,7 @@ export async function executeAgentInBackground(
         { runId, status: "success" },
         "info",
       );
-      dispatchWebhooks(orgId, "completed", runId, agent.id, { result, duration }, applicationId);
+      dispatchRunWebhook(orgId, applicationId, "completed", runId, agent.id, { result, duration });
     }
   } catch (err) {
     // If aborted (cancelled), the cancel route already wrote DB status
@@ -340,7 +307,7 @@ export async function executeAgentInBackground(
 
     const duration = Date.now() - startTime;
     const errorMessage = err instanceof Error ? err.message : "Unknown error";
-    await updateRun(runId, orgId, {
+    await updateRun(runId, orgId, applicationId, {
       status: "failed",
       error: errorMessage,
       completedAt: new Date().toISOString(),
@@ -360,14 +327,10 @@ export async function executeAgentInBackground(
       },
       "error",
     );
-    dispatchWebhooks(
-      orgId,
-      "failed",
-      runId,
-      agent.id,
-      { error: errorMessage, duration },
-      applicationId,
-    );
+    dispatchRunWebhook(orgId, applicationId, "failed", runId, agent.id, {
+      error: errorMessage,
+      duration,
+    });
   } finally {
     untrackRun(runId);
   }
@@ -395,13 +358,13 @@ export function createRunsRouter() {
 
       // If a specific version is requested, resolve and override agent data
       let effectiveAgent = agent;
-      let overrideVersionId: number | undefined;
+      let overrideVersionLabel: string | undefined;
       if (versionOverride && agent.source !== "system") {
         const versionDetail = await getVersionDetail(agent.id, versionOverride);
         if (!versionDetail) {
           throw notFound(`Version '${versionOverride}' not found`);
         }
-        overrideVersionId = versionDetail.id;
+        overrideVersionLabel = versionDetail.version;
         // Override manifest and content — version manifest replaces draft entirely
         effectiveAgent = {
           ...agent,
@@ -410,44 +373,34 @@ export function createRunsRouter() {
         };
       }
 
-      // Resolve org profile and actor profile context in parallel
-      const [agentOrgProfile, { defaultUserProfileId, userProviderOverrides }] = await Promise.all([
-        getAgentOrgProfile(orgId, packageId),
-        resolveActorProfileContext(actor, packageId),
-      ]);
-      const agentOrgProfileId = agentOrgProfile?.id ?? null;
+      // Resolve app profile, actor profile context, and input in parallel
+      const [agentAppProfile, { defaultUserProfileId, userProviderOverrides }, inputResult] =
+        await Promise.all([
+          getAgentAppProfile(c.get("applicationId"), packageId),
+          resolveActorProfileContext(actor, packageId),
+          parseRequestInput(
+            c,
+            effectiveAgent.manifest.input?.schema
+              ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
+              : undefined,
+            effectiveAgent.manifest.input?.fileConstraints,
+          ),
+        ]);
 
-      // Resolve provider profiles, config, and validate agent readiness (inlined preflight)
-      const manifestProviders = resolveManifestProviders(effectiveAgent.manifest);
-
-      const [providerProfiles, packageConfig, inputResult] = await Promise.all([
-        resolveProviderProfiles(
-          manifestProviders,
-          defaultUserProfileId,
-          userProviderOverrides,
-          agentOrgProfileId,
-          orgId,
-        ),
-        getPackageConfig(orgId, packageId),
-        parseRequestInput(
-          c,
-          effectiveAgent.manifest.input?.schema
-            ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
-            : undefined,
-          effectiveAgent.manifest.input?.fileConstraints,
-        ),
-      ]);
-
-      await validateAgentReadiness({
-        agent: effectiveAgent,
+      // Shared preflight: resolve providers, config, validate readiness
+      const {
         providerProfiles,
+        config,
+        modelId: preflightModelId,
+        proxyId: preflightProxyId,
+      } = await resolveRunPreflight({
+        agent: effectiveAgent,
+        applicationId: c.get("applicationId"),
         orgId,
-        config: packageConfig.config,
+        defaultUserProfileId,
+        userProviderOverrides,
+        appProfileId: agentAppProfile?.id ?? null,
       });
-
-      const config = packageConfig.config;
-      const preflightModelId = packageConfig.modelId;
-      const preflightProxyId = packageConfig.proxyId;
 
       const {
         input: parsedInput,
@@ -466,103 +419,44 @@ export function createRunsRouter() {
         size: f.size,
       }));
 
-      // Build run context (tokens, config, state, providers, package, version)
-      let promptContext: PromptContext;
-      let agentPackage: Buffer | null;
-      let packageVersionId: number | null;
-      let proxyLabel: string | null;
-      let modelLabel: string | null;
-      let modelSource: string | null;
-      try {
-        ({
-          promptContext,
-          agentPackage: agentPackage,
-          packageVersionId,
-          proxyLabel,
-          modelLabel,
-          modelSource,
-        } = await buildRunContext({
-          runId,
-          agent: effectiveAgent,
-          providerProfiles,
-          orgId,
-          actor,
-          input: parsedInput,
-          files: fileRefs,
-          config,
-          modelId: modelIdOverride ?? preflightModelId,
-          proxyId: proxyIdOverride ?? preflightProxyId,
-          overrideVersionId,
-        }));
-      } catch (err) {
-        if (err instanceof ModelNotConfiguredError) {
+      const result = await prepareAndExecuteRun({
+        runId,
+        agent: effectiveAgent,
+        providerProfiles,
+        orgId,
+        actor,
+        input: parsedInput,
+        files: fileRefs,
+        config,
+        modelId: modelIdOverride ?? preflightModelId,
+        proxyId: proxyIdOverride ?? preflightProxyId,
+        overrideVersionLabel,
+        connectionProfileId: defaultUserProfileId ?? undefined,
+        applicationId: c.get("applicationId"),
+        uploadedFiles,
+        apiKeyId: c.get("apiKeyId") ?? undefined,
+      });
+
+      if (!result.ok) {
+        const { error } = result;
+        if (error.code === "model_not_configured") {
           throw new ApiError({
             status: 400,
             code: "model_not_configured",
             title: "Bad Request",
-            detail: err.message,
+            detail: error.message,
           });
         }
-        throw err;
-      }
-
-      // Pre-run quota check (Cloud only — reject before creating the run record)
-      const cloud = getCloudModule();
-      if (cloud) {
-        try {
-          const runningCount = await getRunningRunCountForOrg(orgId);
-          await cloud.cloudHooks.checkQuota(orgId, runningCount);
-        } catch (err) {
-          if (err instanceof cloud.QuotaExceededError) {
-            throw new ApiError({
-              status: 402,
-              code: "quota_exceeded",
-              title: "Payment Required",
-              detail: err.message,
-            });
-          }
-          throw err;
+        if (error.code === "quota_exceeded") {
+          throw new ApiError({
+            status: 402,
+            code: "quota_exceeded",
+            title: "Payment Required",
+            detail: error.message,
+          });
         }
+        throw new Error(error.message);
       }
-
-      // Extract just the profileId map (strip source field)
-      const profileIdMap = Object.fromEntries(
-        Object.entries(providerProfiles).map(([k, v]) => [k, v.profileId]),
-      );
-
-      // Create run record
-      await createRun(
-        runId,
-        packageId,
-        actor,
-        orgId,
-        parsedInput ?? null,
-        undefined,
-        packageVersionId ?? undefined,
-        defaultUserProfileId ?? undefined,
-        proxyLabel ?? undefined,
-        modelLabel ?? undefined,
-        modelSource ?? undefined,
-        c.get("applicationId") ?? null,
-        profileIdMap,
-      );
-
-      // Fire-and-forget background run
-      executeAgentInBackground(
-        runId,
-        orgId,
-        effectiveAgent,
-        promptContext,
-        agentPackage,
-        uploadedFiles,
-        c.get("applicationId") ?? null,
-        modelSource,
-      ).catch((err) => {
-        logger.error("Unhandled error in background run", {
-          runId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
 
       return c.json({ runId });
     },
@@ -589,6 +483,7 @@ export function createRunsRouter() {
     const result = await listPackageRuns(agent.id, orgId, {
       limit,
       offset,
+      applicationId: c.get("applicationId"),
       endUserId: endUser?.id,
     });
     return c.json(result);
@@ -611,7 +506,11 @@ export function createRunsRouter() {
       .min(0)
       .catch(0)
       .parse(c.req.query("offset") ?? 0);
-    const result = await listScheduleRuns(scheduleId, orgId, { limit, offset });
+    const result = await listScheduleRuns(scheduleId, orgId, {
+      limit,
+      offset,
+      applicationId: c.get("applicationId"),
+    });
     return c.json(result);
   });
 
@@ -619,7 +518,7 @@ export function createRunsRouter() {
   router.get("/runs/:id", async (c) => {
     const runId = c.req.param("id");
     const orgId = c.get("orgId");
-    const row = await getRunFull(runId, orgId);
+    const row = await getRunFull(runId, orgId, c.get("applicationId"));
     if (!row) {
       throw notFound("Run not found");
     }
@@ -635,7 +534,7 @@ export function createRunsRouter() {
   router.get("/runs/:id/logs", async (c) => {
     const runId = c.req.param("id");
     const orgId = c.get("orgId");
-    const exec = await getRun(runId, orgId);
+    const exec = await getRun(runId, orgId, c.get("applicationId"));
     if (!exec) {
       throw notFound("Run not found");
     }
@@ -654,7 +553,7 @@ export function createRunsRouter() {
     const runId = c.req.param("id")!;
     const orgId = c.get("orgId");
 
-    const run = await getRun(runId, orgId);
+    const run = await getRun(runId, orgId, c.get("applicationId"));
     if (!run) {
       throw notFound("Run not found");
     }
@@ -666,7 +565,7 @@ export function createRunsRouter() {
 
     // Update DB
     const now = new Date().toISOString();
-    await updateRun(runId, orgId, {
+    await updateRun(runId, orgId, c.get("applicationId"), {
       status: "cancelled",
       error: "Cancelled by user",
       completedAt: now,
@@ -693,14 +592,7 @@ export function createRunsRouter() {
       .stopByRunId(runId)
       .catch(() => {});
 
-    dispatchWebhooks(
-      orgId,
-      "cancelled",
-      runId,
-      run.packageId,
-      undefined,
-      c.get("applicationId") ?? null,
-    );
+    dispatchRunWebhook(orgId, c.get("applicationId"), "cancelled", runId, run.packageId);
 
     return c.json({ ok: true });
   });
@@ -714,12 +606,13 @@ export function createRunsRouter() {
       const agent = c.get("agent");
       const orgId = c.get("orgId");
 
-      const running = await getRunningRunsForPackage(agent.id, orgId);
+      const applicationId = c.get("applicationId");
+      const running = await getRunningRunsForPackage(agent.id, orgId, applicationId);
       if (running > 0) {
         throw conflict("run_in_progress", `${running} run(s) still running`);
       }
 
-      const deleted = await deletePackageRuns(agent.id, orgId);
+      const deleted = await deletePackageRuns(agent.id, orgId, applicationId);
       return c.json({ deleted });
     },
   );

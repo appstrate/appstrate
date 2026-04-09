@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { inArray, and, eq, or, isNull } from "drizzle-orm";
+import { inArray, and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { connectionProfiles, userProviderConnections } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../../lib/user-helpers.ts";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../../types/index.ts";
 import type { ProviderStatus, ConnectionStatusValue } from "@appstrate/shared-types";
-import { getConnection, validateScopes, listProviders } from "@appstrate/connect";
+import {
+  getConnection,
+  getProviderCredentialId,
+  validateScopes,
+  listProviders,
+} from "@appstrate/connect";
 import { authModeLabel } from "./helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 
@@ -22,8 +27,9 @@ export async function getConnectionStatus(
   provider: string,
   connectionProfileId: string,
   orgId: string,
+  providerCredentialId: string,
 ): Promise<ConnectionStatus> {
-  const conn = await getConnection(db, connectionProfileId, provider, orgId);
+  const conn = await getConnection(db, connectionProfileId, provider, orgId, providerCredentialId);
   if (conn) {
     return {
       provider,
@@ -34,6 +40,40 @@ export async function getConnectionStatus(
     };
   }
   return { provider, status: "not_connected" };
+}
+
+/**
+ * Check if an active connection exists for a provider on a profile, scoped to the application.
+ *
+ * Connection profiles are independent of applications, but connections are tagged with a
+ * providerCredentialId linking them to one application's credentials. This function validates
+ * that the user has a healthy connection specifically for the given application — not just
+ * any app. This prevents binding a connection created by App A to an app-profile in App B,
+ * which would pass validation but fail at runtime.
+ */
+export async function hasActiveConnection(
+  provider: string,
+  connectionProfileId: string,
+  orgId: string,
+  applicationId: string,
+): Promise<boolean> {
+  const credentialId = await getProviderCredentialId(db, applicationId, provider);
+  if (!credentialId) return false;
+
+  const rows = await db
+    .select({ id: userProviderConnections.id })
+    .from(userProviderConnections)
+    .where(
+      and(
+        eq(userProviderConnections.profileId, connectionProfileId),
+        eq(userProviderConnections.providerId, provider),
+        eq(userProviderConnections.orgId, orgId),
+        eq(userProviderConnections.providerCredentialId, credentialId),
+        eq(userProviderConnections.needsReconnection, false),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
 }
 
 /** Build scope validation info for a connection. */
@@ -57,13 +97,11 @@ function buildScopeInfo(
 /**
  * Batch-fetch profile name + owner name for a set of profile IDs.
  *
- * Defense-in-depth: filters by orgId to ensure only profiles belonging to the
- * org (or user-owned profiles with orgId=null) are returned, even though
- * profileIds already come from org-scoped queries via resolveProviderProfiles().
+ * profileIds already come from org-scoped queries via resolveProviderProfiles(),
+ * so no additional filtering is needed beyond the ID match.
  */
 async function buildProfileInfoMap(
   profileIds: string[],
-  orgId: string,
 ): Promise<Map<string, { profileName: string | null; profileOwnerName: string | null }>> {
   if (profileIds.length === 0) {
     return new Map();
@@ -76,12 +114,7 @@ async function buildProfileInfoMap(
       userId: connectionProfiles.userId,
     })
     .from(connectionProfiles)
-    .where(
-      and(
-        inArray(connectionProfiles.id, profileIds),
-        or(eq(connectionProfiles.orgId, orgId), isNull(connectionProfiles.orgId)),
-      ),
-    );
+    .where(inArray(connectionProfiles.id, profileIds));
 
   const userIds = profileRows.map((r) => r.userId).filter((id): id is string => id != null);
   const userNameMap = await batchLoadUserNames(userIds);
@@ -96,11 +129,13 @@ async function buildProfileInfoMap(
 
 /**
  * Batch-fetch connection statuses for all (profileId, orgId) pairs in a single query.
+ * Filters by providerCredentialId when available to ensure per-app isolation.
  * Returns a Map keyed by "profileId:providerId" → connection row.
  */
 async function batchGetConnectionStatuses(
   profileIds: string[],
   orgId: string,
+  credentialIdMap: Map<string, string>,
 ): Promise<
   Map<
     string,
@@ -108,6 +143,17 @@ async function batchGetConnectionStatuses(
   >
 > {
   if (profileIds.length === 0) return new Map();
+
+  const conditions = [
+    inArray(userProviderConnections.profileId, profileIds),
+    eq(userProviderConnections.orgId, orgId),
+  ];
+
+  // Filter to only connections created with the application's credentials.
+  // If no credentials are configured for any provider, return empty — no connections can exist.
+  const credentialIds = [...credentialIdMap.values()];
+  if (credentialIds.length === 0) return new Map();
+  conditions.push(inArray(userProviderConnections.providerCredentialId, credentialIds));
 
   const rows = await db
     .select({
@@ -119,12 +165,7 @@ async function batchGetConnectionStatuses(
       needsReconnection: userProviderConnections.needsReconnection,
     })
     .from(userProviderConnections)
-    .where(
-      and(
-        inArray(userProviderConnections.profileId, profileIds),
-        eq(userProviderConnections.orgId, orgId),
-      ),
-    );
+    .where(and(...conditions));
 
   const map = new Map<
     string,
@@ -145,12 +186,14 @@ async function batchGetConnectionStatuses(
 /**
  * Resolve provider statuses for an agent's required providers.
  * providerProfiles maps each providerId to the profile holding its credentials
- * (already resolved via org profile bindings or user profile direct).
+ * (already resolved via app profile bindings or user profile direct).
+ * applicationId is required to resolve per-app provider credentials.
  */
 export async function resolveProviderStatuses(
   providers: AgentProviderRequirement[],
   providerProfiles: ProviderProfileMap,
   orgId: string,
+  applicationId: string,
 ): Promise<ProviderStatus[]> {
   const profileIds = [
     ...new Set(
@@ -160,10 +203,20 @@ export async function resolveProviderStatuses(
     ),
   ];
 
+  // Resolve providerCredentialId for each provider in this application
+  const credentialIdMap = new Map<string, string>();
+  const providerIds = [...new Set(providers.map((p) => p.id))];
+  await Promise.all(
+    providerIds.map(async (providerId) => {
+      const credId = await getProviderCredentialId(db, applicationId, providerId);
+      if (credId) credentialIdMap.set(providerId, credId);
+    }),
+  );
+
   // Batch-fetch profile info, connection statuses, and auth modes in parallel
   const [profileInfoMap, connectionMap, allProviders] = await Promise.all([
-    buildProfileInfoMap(profileIds, orgId),
-    batchGetConnectionStatuses(profileIds, orgId),
+    buildProfileInfoMap(profileIds),
+    batchGetConnectionStatuses(profileIds, orgId, credentialIdMap),
     listProviders(db, orgId),
   ]);
 

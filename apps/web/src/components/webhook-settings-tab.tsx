@@ -34,7 +34,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
 
   const [selectedEvents, setSelectedEvents] = useState<string[]>(webhook.events);
   const [payloadMode, setPayloadMode] = useState<"full" | "summary">(webhook.payloadMode);
-  const [active, setActive] = useState(webhook.active);
+  const [active, setActive] = useState(webhook.enabled);
   const [rotateOpen, setRotateOpen] = useState(false);
   const [rotatedSecret, setRotatedSecret] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -43,7 +43,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
     updateMutation.mutate(
       {
         id: webhook.id,
-        data: { events: selectedEvents, payloadMode, active },
+        data: { events: selectedEvents, payloadMode, enabled: active },
       },
       {
         onSuccess: () => {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { and, eq, lt } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
+import { db, isEmbeddedDb, getPGliteClient } from "@appstrate/db/client";
 import { oauthStates, packages, packageVersions } from "@appstrate/db/schema";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
@@ -28,14 +28,32 @@ import { initWebhookWorker } from "../services/webhooks.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
+import { logInfraMode } from "../infra/index.ts";
 
 export async function boot(): Promise<void> {
   // Attempt to load cloud module (no-op in OSS — sets _cloud to null)
   await loadCloud();
 
-  // Verify S3 bucket is accessible (fail-fast if misconfigured)
+  // Log infrastructure mode
+  const env = (await import("@appstrate/env")).getEnv();
+  if (isEmbeddedDb) {
+    logger.info("Database: PGlite (embedded)", { path: env.PGLITE_DATA_DIR });
+    // Apply migrations programmatically for PGlite (no external drizzle-kit CLI)
+    await applyEmbeddedMigrations();
+  } else {
+    logger.info("Database: PostgreSQL", {
+      url: env.DATABASE_URL?.replace(/\/\/.*@/, "//***@") ?? "",
+    });
+  }
+  if (env.S3_BUCKET) {
+    logger.info("Storage: S3", { bucket: env.S3_BUCKET, endpoint: env.S3_ENDPOINT ?? "AWS" });
+  } else {
+    logger.info("Storage: filesystem", { path: env.FS_STORAGE_PATH });
+  }
+  logInfraMode();
+
+  // Verify storage backend is accessible (fail-fast if misconfigured)
   await ensureBucket();
-  logger.info("S3 bucket verified");
 
   // Load system proxies from SYSTEM_PROXIES env var
   initSystemProxies();
@@ -93,8 +111,8 @@ export async function boot(): Promise<void> {
     });
   }
 
-  // Initialize cross-instance cancel subscriber (no-op without Redis)
-  initCancelSubscriber();
+  // Initialize cross-instance cancel subscriber
+  await initCancelSubscriber();
 
   // Parallel init: sidecar pool, scheduler, and DB cleanups are all independent
   const parallelInits: Promise<void>[] = [
@@ -207,7 +225,6 @@ async function loadAndSyncSystemPackages(): Promise<void> {
     await createVersionAndUpload({
       packageId: id,
       version,
-      orgId: null,
       createdBy: null,
       zipBuffer,
       manifest: manifest as unknown as Record<string, unknown>,
@@ -229,4 +246,60 @@ async function loadAndSyncSystemPackages(): Promise<void> {
   );
 
   logger.info("System packages synced", { packages: synced });
+}
+
+/**
+ * Apply Drizzle migrations programmatically for PGlite (embedded mode).
+ * Uses a custom migrator that splits multi-statement SQL files into individual
+ * statements, since PGlite does not support multi-statement prepared queries.
+ */
+async function applyEmbeddedMigrations(): Promise<void> {
+  const { resolve, join } = await import("node:path");
+  const { readFileSync, existsSync } = await import("node:fs");
+
+  const migrationsDir = resolve(import.meta.dir, "../../../../packages/db/drizzle");
+  const journalPath = join(migrationsDir, "meta/_journal.json");
+
+  if (!existsSync(journalPath)) {
+    logger.warn("No migration journal found, skipping PGlite migrations");
+    return;
+  }
+
+  const pg = getPGliteClient()!;
+
+  // Create migrations tracking table
+  await pg.exec(`
+    CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (
+      id SERIAL PRIMARY KEY,
+      hash TEXT NOT NULL,
+      created_at BIGINT DEFAULT (EXTRACT(EPOCH FROM now()) * 1000)
+    )
+  `);
+
+  // Read journal to get migration order
+  const journal = JSON.parse(readFileSync(journalPath, "utf-8")) as {
+    entries: { idx: number; tag: string }[];
+  };
+
+  // Get already-applied migrations
+  const { rows } = await pg.query<{ hash: string }>('SELECT hash FROM "__drizzle_migrations"');
+  const applied = new Set(rows.map((r) => r.hash));
+
+  for (const entry of journal.entries) {
+    if (applied.has(entry.tag)) continue;
+
+    const sqlFile = join(migrationsDir, `${entry.tag}.sql`);
+    if (!existsSync(sqlFile)) {
+      logger.warn("Migration file not found, skipping", { tag: entry.tag });
+      continue;
+    }
+
+    const content = readFileSync(sqlFile, "utf-8");
+    // PGlite exec() supports multi-statement SQL natively
+    await pg.exec(content.replaceAll("--> statement-breakpoint", ""));
+    // Record migration as applied
+    await pg.query('INSERT INTO "__drizzle_migrations" (hash) VALUES ($1)', [entry.tag]);
+  }
+
+  logger.info("PGlite migrations applied", { count: journal.entries.length - applied.size });
 }

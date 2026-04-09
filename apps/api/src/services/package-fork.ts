@@ -165,7 +165,6 @@ async function forkWithConfig(
   await createVersionAndUpload({
     packageId: newPkg.id,
     version: versionRow.version,
-    orgId,
     createdBy: userId ?? null,
     zipBuffer: newZipBuffer,
     manifest: updatedManifest,

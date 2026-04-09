@@ -8,8 +8,17 @@ import type {
 } from "@appstrate/core/validation";
 export type { PackageType };
 
-import type { Run as _Run } from "@appstrate/db/schema";
-export type Run = _Run & { packageVersion?: string | null };
+export type { Run } from "@appstrate/db/schema";
+
+import type { Run } from "@appstrate/db/schema";
+
+/** Run with enriched display names from LEFT JOINs (user, end-user, API key, schedule). */
+export type EnrichedRun = Run & {
+  userName: string | null;
+  endUserName: string | null;
+  apiKeyName: string | null;
+  scheduleName: string | null;
+};
 
 // --- App Config Types ---
 
@@ -59,7 +68,7 @@ export interface ScheduleReadiness {
 
 export type EnrichedSchedule = PackageSchedule & {
   profileName: string | null;
-  profileType: "user" | "org" | null;
+  profileType: "user" | "app" | null;
   profileOwnerName: string | null;
   readiness: ScheduleReadiness;
 };
@@ -97,25 +106,6 @@ export interface OrgInvitation {
 
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 
-// --- Agent Readiness Utilities ---
-
-/** Check if a prompt is empty or whitespace-only. */
-export function isPromptEmpty(prompt: string): boolean {
-  return prompt.trim().length === 0;
-}
-
-/**
- * Find IDs declared in `required` but missing from `installed`.
- * Works for both skills and tools.
- */
-export function findMissingDependencies(
-  required: Record<string, string>,
-  installedIds: string[],
-): string[] {
-  const installed = new Set(installedIds);
-  return Object.keys(required).filter((id) => !installed.has(id));
-}
-
 // --- Connection Types ---
 
 /** Connection record as returned by the API (no encrypted credentials). */
@@ -125,6 +115,7 @@ export interface ConnectionInfo {
   providerId: string;
   orgId: string;
   scopesGranted?: string[];
+  needsReconnection: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -148,6 +139,7 @@ export interface UserConnectionEntry {
   scopesGranted: string[];
   connectedAt: string;
   profile: { id: string; name: string; isDefault: boolean };
+  application: { id: string; name: string };
 }
 
 export interface UserConnectionOrgGroup {
@@ -164,7 +156,7 @@ export interface UserConnectionProviderGroup {
   orgs: UserConnectionOrgGroup[];
 }
 
-export type ProviderProfileSource = "org_binding" | "user_profile";
+export type ProviderProfileSource = "app_binding" | "user_profile";
 
 export interface ProviderStatus {
   id: string;
@@ -178,12 +170,22 @@ export interface ProviderStatus {
   scopesGranted?: string[];
   scopesSufficient?: boolean;
   scopesMissing?: string[];
-  /** How the connection profile was resolved — "org_binding" if via org profile delegation, "user_profile" if via personal profile. */
+  /** How the connection profile was resolved — "app_binding" if via app profile delegation, "user_profile" if via personal profile. */
   source: ProviderProfileSource | null;
   /** Name of the connection profile used for this provider. */
   profileName: string | null;
   /** Name of the user who owns the connection profile. */
   profileOwnerName: string | null;
+}
+
+/** Lightweight snapshot of a provider's connection state at run time. */
+export interface RunProviderSnapshot {
+  id: string;
+  status: ConnectionStatusValue;
+  source: ProviderProfileSource | null;
+  profileName: string | null;
+  profileOwnerName: string | null;
+  scopesSufficient?: boolean;
 }
 
 export interface AgentListItem {
@@ -232,9 +234,9 @@ export interface AgentDetail {
 
   populatedProviders?: Record<string, ProviderConfig>;
   callbackUrl?: string;
-  /** Org profile ID configured for this agent. Used for per-provider org bindings. */
-  agentOrgProfileId: string | null;
-  agentOrgProfileName: string | null;
+  /** App profile ID configured for this agent. Used for per-provider app bindings. */
+  agentAppProfileId: string | null;
+  agentAppProfileName: string | null;
   versionCount?: number;
   hasUnarchivedChanges?: boolean;
   forkedFrom: string | null;
@@ -436,6 +438,21 @@ export interface ApplicationInfo {
   updatedAt: string;
 }
 
+export interface InstalledPackage {
+  packageId: string;
+  config: Record<string, unknown>;
+  modelId: string | null;
+  proxyId: string | null;
+  appProfileId: string | null;
+  versionId: number | null;
+  enabled: boolean;
+  installedAt: string;
+  updatedAt: string;
+  packageType: string;
+  packageSource: string;
+  draftManifest: Record<string, unknown> | null;
+}
+
 // --- End-User Types ---
 
 export interface EndUserInfo {
@@ -462,13 +479,12 @@ export interface EndUserListResponse {
 export interface WebhookInfo {
   id: string;
   object: "webhook";
-  scope: "organization" | "application";
-  applicationId: string | null;
+  applicationId: string;
   url: string;
   events: string[];
   packageId: string | null;
   payloadMode: "full" | "summary";
-  active: boolean;
+  enabled: boolean;
   createdAt: string;
   updatedAt: string;
 }

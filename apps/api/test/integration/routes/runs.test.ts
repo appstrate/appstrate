@@ -4,7 +4,17 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedRunLog } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedRun,
+  seedRunLog,
+  seedApplication,
+  seedEndUser,
+  seedApiKey,
+  seedSchedule,
+  seedConnectionProfile,
+} from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
 
 const app = getTestApp();
 
@@ -29,7 +39,7 @@ describe("Runs API", () => {
     };
 
     async function seedAgentWithInput() {
-      return seedAgent({
+      const agent = await seedAgent({
         id: "@runorg/input-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -42,6 +52,8 @@ describe("Runs API", () => {
         },
         draftContent: "Process the email: {{email}}",
       });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/input-agent");
+      return agent;
     }
 
     it("returns 400 when required input field is missing", async () => {
@@ -100,6 +112,7 @@ describe("Runs API", () => {
   describe("GET /api/agents/:scope/:name/runs", () => {
     it("returns empty array when no runs exist", async () => {
       await seedAgent({ id: "@runorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/my-agent");
 
       const res = await app.request("/api/agents/@runorg/my-agent/runs", {
         headers: authHeaders(ctx),
@@ -114,9 +127,11 @@ describe("Runs API", () => {
 
     it("returns runs for an agent", async () => {
       await seedAgent({ id: "@runorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/my-agent");
       const run = await seedRun({
         packageId: "@runorg/my-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -138,6 +153,7 @@ describe("Runs API", () => {
       await seedRun({
         packageId: "@otherorg/secret-agent",
         orgId: otherCtx.orgId,
+        applicationId: otherCtx.defaultAppId,
         userId: otherCtx.user.id,
         status: "success",
       });
@@ -164,6 +180,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/detail-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -192,6 +209,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@otherorg/other-agent",
         orgId: otherCtx.orgId,
+        applicationId: otherCtx.defaultAppId,
         userId: otherCtx.user.id,
         status: "success",
       });
@@ -217,6 +235,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/log-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -248,6 +267,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/nolog-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "pending",
       });
@@ -268,6 +288,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@otherorg/log-agent",
         orgId: otherCtx.orgId,
+        applicationId: otherCtx.defaultAppId,
         userId: otherCtx.user.id,
         status: "success",
       });
@@ -293,6 +314,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/cancel-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -312,6 +334,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/cancel-pending",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "pending",
       });
@@ -331,6 +354,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/done-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -358,6 +382,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@otherorg/cancel-agent",
         orgId: otherCtx.orgId,
+        applicationId: otherCtx.defaultAppId,
         userId: otherCtx.user.id,
         status: "running",
       });
@@ -383,15 +408,18 @@ describe("Runs API", () => {
   describe("DELETE /api/agents/:scope/:name/runs", () => {
     it("deletes all runs for an agent (admin)", async () => {
       await seedAgent({ id: "@runorg/del-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/del-agent");
       await seedRun({
         packageId: "@runorg/del-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@runorg/del-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "failed",
       });
@@ -408,9 +436,11 @@ describe("Runs API", () => {
 
     it("returns 409 when running runs exist", async () => {
       await seedAgent({ id: "@runorg/running-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/running-agent");
       await seedRun({
         packageId: "@runorg/running-agent",
         orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -428,6 +458,211 @@ describe("Runs API", () => {
         method: "DELETE",
       });
       expect(res.status).toBe(401);
+    });
+
+    it("only deletes runs in the current application (cross-app isolation)", async () => {
+      // Create a second app
+      const appB = await seedApplication({ orgId: ctx.orgId, name: "AppB" });
+
+      await seedAgent({ id: "@runorg/iso-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/iso-agent");
+      await installPackage(appB.id, ctx.orgId, "@runorg/iso-agent");
+
+      // Seed runs in AppA
+      await seedRun({
+        packageId: "@runorg/iso-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      // Seed runs in AppB
+      const appBRun = await seedRun({
+        packageId: "@runorg/iso-agent",
+        orgId: ctx.orgId,
+        applicationId: appB.id,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      // Delete from AppA context
+      const res = await app.request("/api/agents/@runorg/iso-agent/runs", {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.deleted).toBe(1);
+
+      // AppB run should still exist
+      const appBHeaders = {
+        ...authHeaders(ctx),
+        "X-App-Id": appB.id,
+      };
+      const listRes = await app.request("/api/agents/@runorg/iso-agent/runs", {
+        headers: appBHeaders,
+      });
+      expect(listRes.status).toBe(200);
+      const listBody = (await listRes.json()) as any;
+      const runIds = listBody.runs.map((r: any) => r.id);
+      expect(runIds).toContain(appBRun.id);
+    });
+  });
+
+  // ─── Enriched run responses ─────────────────────────────────
+
+  describe("Enriched run responses", () => {
+    it("GET /api/runs/:id returns userName from profile", async () => {
+      await seedAgent({ id: "@runorg/enriched-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/enriched-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.userName).toBeString();
+      expect(body.userName).toBeTruthy();
+      expect(body.endUserName).toBeNull();
+      expect(body.apiKeyName).toBeNull();
+      expect(body.scheduleName).toBeNull();
+    });
+
+    it("GET /api/runs/:id returns endUserName for end-user runs", async () => {
+      await seedAgent({ id: "@runorg/eu-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        name: "Alice External",
+      });
+      const run = await seedRun({
+        packageId: "@runorg/eu-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        endUserId: eu.id,
+        status: "success",
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.endUserName).toBe("Alice External");
+      expect(body.userName).toBeNull();
+    });
+
+    it("GET /api/runs/:id returns endUserName from externalId fallback", async () => {
+      await seedAgent({ id: "@runorg/eu2-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        externalId: "ext-user-123",
+      });
+      const run = await seedRun({
+        packageId: "@runorg/eu2-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        endUserId: eu.id,
+        status: "success",
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.endUserName).toBe("ext-user-123");
+    });
+
+    it("GET /api/runs/:id returns apiKeyName for API key runs", async () => {
+      await seedAgent({ id: "@runorg/ak-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        name: "My Production Key",
+      });
+      const run = await seedRun({
+        packageId: "@runorg/ak-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        apiKeyId: apiKey.id,
+        status: "success",
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.apiKeyName).toBe("My Production Key");
+    });
+
+    it("GET /api/runs/:id returns scheduleName for scheduled runs", async () => {
+      await seedAgent({ id: "@runorg/sched-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const profile = await seedConnectionProfile({
+        userId: ctx.user.id,
+      });
+      const schedule = await seedSchedule({
+        packageId: "@runorg/sched-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        connectionProfileId: profile.id,
+        name: "Daily Sync",
+      });
+      const run = await seedRun({
+        packageId: "@runorg/sched-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        scheduleId: schedule.id,
+        status: "success",
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.scheduleName).toBe("Daily Sync");
+      expect(body.userName).toBeNull();
+    });
+
+    it("GET /api/agents/:scope/:name/runs returns enriched fields in list", async () => {
+      await seedAgent({ id: "@runorg/list-enriched", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/list-enriched");
+      await seedRun({
+        packageId: "@runorg/list-enriched",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      const res = await app.request("/api/agents/@runorg/list-enriched/runs", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.runs).toHaveLength(1);
+      expect(body.runs[0].userName).toBeString();
+      expect(body.runs[0].userName).toBeTruthy();
+      expect(body.runs[0].endUserName).toBeNull();
+      expect(body.runs[0].apiKeyName).toBeNull();
+      expect(body.runs[0].scheduleName).toBeNull();
     });
   });
 });

@@ -4,15 +4,16 @@
 /**
  * Development setup script — gets you from clone to running in one command.
  *
- * Usage: bun run setup
+ * Usage:
+ *   bun run setup           # Interactive tier selection
+ *   bun run setup -- --tier 0   # Zero-install (no Docker)
+ *   bun run setup -- --tier 3   # Full stack (Docker + all services)
  *
- * Steps:
- *   1. Verify prerequisites (Docker, node_modules)
- *   2. Copy .env.example → .env (if .env doesn't exist)
- *   3. Start dev infrastructure (docker compose)
- *   4. Wait for all services to be ready
- *   5. Run database migrations
- *   6. Build frontend + shared packages
+ * Infrastructure Tiers:
+ *   0 — Zero-Install: PGlite + filesystem + in-memory (no Docker)
+ *   1 — Minimal: PostgreSQL (Docker)
+ *   2 — Standard: PostgreSQL + Redis (Docker)
+ *   3 — Full: PostgreSQL + Redis + MinIO + Docker execution
  */
 
 const { existsSync } = await import("node:fs");
@@ -65,17 +66,69 @@ function waitFor(label: string, check: string, maxRetries: number, hint: string)
   }
 }
 
+// ── Tier selection ───────────────────────────────────────────
+
+const TIER_NAMES = ["Zero-Install", "Minimal", "Standard", "Full"] as const;
+const TIER_DESC = [
+  "PGlite + filesystem + in-memory (no Docker needed)",
+  "PostgreSQL (Docker)",
+  "PostgreSQL + Redis (Docker)",
+  "PostgreSQL + Redis + MinIO + Docker execution",
+];
+
+async function selectTier(): Promise<number> {
+  // Check --tier CLI argument
+  const tierArg = process.argv.find((a) => a.startsWith("--tier"));
+  if (tierArg) {
+    const val = tierArg.includes("=")
+      ? tierArg.split("=")[1]
+      : process.argv[process.argv.indexOf(tierArg) + 1];
+    const n = parseInt(val ?? "", 10);
+    if (n >= 0 && n <= 3) return n;
+  }
+
+  console.log(`  ${BOLD}Choose your infrastructure tier:${RESET}\n`);
+  for (let i = 0; i <= 3; i++) {
+    const marker = i === 0 ? ` ${GREEN}(recommended)${RESET}` : "";
+    console.log(`    ${BOLD}${i}${RESET} — ${TIER_NAMES[i]}${marker}`);
+    console.log(`        ${DIM}${TIER_DESC[i]}${RESET}`);
+  }
+
+  process.stdout.write(`\n  Tier [0]: `);
+  const input = await new Promise<string>((resolve) => {
+    const buf: number[] = [];
+    process.stdin.setRawMode?.(false);
+    process.stdin.resume();
+    process.stdin.once("data", (data) => {
+      process.stdin.pause();
+      resolve(data.toString().trim());
+    });
+  });
+
+  const n = input === "" ? 0 : parseInt(input, 10);
+  if (n >= 0 && n <= 3) return n;
+  console.error(`  ${RED}Invalid tier. Defaulting to 0.${RESET}`);
+  return 0;
+}
+
 console.log(`\n${BOLD}Appstrate — Development Setup${RESET}\n`);
+
+const tier = await selectTier();
+console.log(`\n  ${CHECK} Tier ${tier}: ${TIER_NAMES[tier]}\n`);
 
 // ── Step 1: Prerequisites ─────────────────────────────────────
 
-try {
-  execSync("docker info", { stdio: "pipe" });
-  console.log(`  ${CHECK} Docker is running`);
-} catch {
-  console.error(`  ${RED}✗${RESET} Docker is not running.`);
-  console.error(`    ${YELLOW}→ Start Docker Desktop and retry.${RESET}`);
-  process.exit(1);
+if (tier > 0) {
+  try {
+    execSync("docker info", { stdio: "pipe" });
+    console.log(`  ${CHECK} Docker is running`);
+  } catch {
+    console.error(`  ${RED}✗${RESET} Docker is not running (required for Tier ${tier}).`);
+    console.error(
+      `    ${YELLOW}→ Start Docker Desktop and retry, or use Tier 0 (no Docker).${RESET}`,
+    );
+    process.exit(1);
+  }
 }
 
 if (!existsSync(root + "/node_modules")) {
@@ -94,58 +147,74 @@ if (existsSync(envPath)) {
 } else {
   if (!existsSync(envExamplePath)) {
     console.error(`  ${RED}✗${RESET} .env.example not found.`);
-    console.error(`    ${YELLOW}→ Ensure you're in the appstrate directory.${RESET}`);
     process.exit(1);
   }
   await cp(envExamplePath, envPath);
-  console.log(`  ${CHECK} .env created from .env.example ${DIM}(dev-ready defaults)${RESET}`);
+  console.log(`  ${CHECK} .env created from .env.example`);
 }
 
-// ── Step 3: Docker infrastructure ─────────────────────────────
+// ── Step 3: Docker infrastructure (Tier 1+) ──────────────────
 
-console.log("");
-run(
-  "docker compose -f docker-compose.dev.yml up -d",
-  "Starting infrastructure",
-  "Check docker compose logs: docker compose -f docker-compose.dev.yml logs",
-);
+if (tier === 0) {
+  console.log(`\n  ${DIM}Skipping Docker (Tier 0 — zero-install)${RESET}`);
+} else {
+  const profileMap = ["", "minimal", "standard", "full"];
+  const profile = profileMap[tier]!;
 
-// ── Step 4: Wait for services ─────────────────────────────────
+  console.log("");
+  run(
+    `docker compose -f docker-compose.dev.yml --profile ${profile} up -d`,
+    `Starting infrastructure (${profile})`,
+    "Check: docker compose -f docker-compose.dev.yml logs",
+  );
 
-waitFor(
-  "Waiting for PostgreSQL",
-  "docker compose -f docker-compose.dev.yml exec -T postgres pg_isready -U appstrate",
-  30,
-  "Check: docker compose -f docker-compose.dev.yml logs postgres",
-);
+  // ── Step 4: Wait for services ────────────────────────────
 
-waitFor(
-  "Waiting for Redis",
-  "docker compose -f docker-compose.dev.yml exec -T redis redis-cli ping",
-  15,
-  "Check: docker compose -f docker-compose.dev.yml logs redis",
-);
+  waitFor(
+    "Waiting for PostgreSQL",
+    "docker compose -f docker-compose.dev.yml exec -T postgres pg_isready -U appstrate",
+    30,
+    "Check: docker compose -f docker-compose.dev.yml logs postgres",
+  );
 
-waitFor(
-  "Waiting for MinIO",
-  "docker compose -f docker-compose.dev.yml exec -T minio mc ready local",
-  15,
-  "Check: docker compose -f docker-compose.dev.yml logs minio",
-);
+  if (tier >= 2) {
+    waitFor(
+      "Waiting for Redis",
+      "docker compose -f docker-compose.dev.yml exec -T redis redis-cli ping",
+      15,
+      "Check: docker compose -f docker-compose.dev.yml logs redis",
+    );
+  }
 
-// ── Step 5: Database migrations ───────────────────────────────
+  if (tier >= 3) {
+    waitFor(
+      "Waiting for MinIO",
+      "docker compose -f docker-compose.dev.yml exec -T minio mc ready local",
+      15,
+      "Check: docker compose -f docker-compose.dev.yml logs minio",
+    );
+  }
 
-console.log("");
-run("bun run db:migrate", "Running database migrations", "Check DATABASE_URL in .env");
+  // ── Step 5: Database migrations ────────────────────────────
+
+  console.log("");
+  run("bun run db:migrate", "Running database migrations", "Check DATABASE_URL in .env");
+}
 
 // ── Step 6: Build ─────────────────────────────────────────────
 
+console.log("");
 run("bun run build", "Building frontend + shared packages", "Run: bun run build");
 
 // ── Done ──────────────────────────────────────────────────────
 
+const envHint =
+  tier === 0
+    ? `${DIM}(Tier 0 — PGlite embedded, no .env changes needed)${RESET}`
+    : `${DIM}(Tier ${tier} — uncomment DATABASE_URL${tier >= 2 ? " + REDIS_URL" : ""}${tier >= 3 ? " + S3_BUCKET" : ""} in .env)${RESET}`;
+
 console.log(`
-${GREEN}${BOLD}Setup complete!${RESET}
+${GREEN}${BOLD}Setup complete!${RESET} ${envHint}
 
   Start the platform:
 
@@ -156,7 +225,6 @@ ${GREEN}${BOLD}Setup complete!${RESET}
   ${BOLD}Useful commands:${RESET}
     bun run dev              Start API + frontend (hot-reload)
     bun run check            TypeScript + ESLint + Prettier + OpenAPI
-    bun test                 Run all tests (requires Docker)
-    bun run build-runtime    Build agent image (only if you modify runtime-pi/)
-    bun run build-sidecar    Build sidecar image (only if you modify runtime-pi/sidecar/)
+    bun test                 Run all tests
+    bun run docker:dev       Start Tier 3 Docker infrastructure
 `);

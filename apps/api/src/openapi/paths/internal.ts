@@ -33,6 +33,16 @@ export const internalPaths = {
                   runs: { type: "array", items: { type: "object" } },
                 },
               },
+              example: {
+                runs: [
+                  {
+                    id: "run_cm9abc123",
+                    status: "success",
+                    state: { lastProcessedId: 42 },
+                    createdAt: "2026-01-14T09:00:00Z",
+                  },
+                ],
+              },
             },
           },
         },
@@ -48,13 +58,8 @@ export const internalPaths = {
       description: "Container-to-host only. Auth via Bearer run token.",
       security: [{ bearerExecToken: [] }],
       parameters: [
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -68,12 +73,31 @@ export const internalPaths = {
                   authorizedUris: { type: "array", items: { type: "string" } },
                 },
               },
+              example: {
+                credentials: { access_token: "ya29.a0AfH6SM..." },
+                authorizedUris: ["https://gmail.googleapis.com/*"],
+              },
             },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { description: "Run not running" },
-        "404": { description: "Agent, provider, or binding not found" },
+        "403": {
+          description: "Run not running",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Forbidden",
+                status: 403,
+                detail: "Run is not in running state",
+                code: "forbidden",
+                requestId: "req_jkl012",
+              },
+            },
+          },
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -86,13 +110,8 @@ export const internalPaths = {
         "Called by sidecar on upstream 401 to force an OAuth2 token refresh before retrying. If the provider is not OAuth2 or has no refresh token, returns current credentials unchanged. If the refresh itself fails, flags the connection as needs_reconnection and returns 401. Container-to-host only. Auth via Bearer run token.",
       security: [{ bearerExecToken: [] }],
       parameters: [
-        {
-          name: "scope",
-          in: "path",
-          required: true,
-          schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*$" },
-        },
-        { name: "name", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
@@ -111,7 +130,7 @@ export const internalPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "404": { description: "Provider or profile not found" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -132,6 +151,7 @@ export const internalPaths = {
               properties: {
                 providerId: {
                   type: "string",
+                  minLength: 1,
                   description: "Provider ID that returned 401",
                 },
               },

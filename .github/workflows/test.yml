@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
@@ -24,7 +25,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
         with:
-          bun-version: "1.3.9"
+          bun-version: "1.3.11"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -48,7 +49,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
         with:
-          bun-version: "1.3.9"
+          bun-version: "1.3.11"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -66,3 +67,42 @@ jobs:
           files: coverage/report.lcov
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  e2e:
+    name: E2E tests
+    if: contains(github.event.pull_request.labels.*.name, 'e2e') || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: "1.3.11"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build frontend
+        run: cd apps/web && bun run build
+
+      - name: Install Playwright browsers
+        run: cd e2e && npx playwright install chromium --with-deps
+
+      - name: Prepare data directory for PGlite
+        run: mkdir -p data/pglite data/storage
+
+      - name: Run E2E tests
+        run: bun run test:e2e
+        env:
+          BETTER_AUTH_SECRET: e2e-ci-secret-that-is-at-least-32-characters
+          CONNECTION_ENCRYPTION_KEY: Y2FzgQmlgIRocYT1VUWM+73fQ5zOTPB8sHJxTh1x4qI=
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+          retention-days: 7

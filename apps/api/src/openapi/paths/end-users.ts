@@ -10,6 +10,7 @@ export const endUsersPaths = {
         "Create a new end-user within an application. At least one of name, email, or externalId should be provided for identification.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { $ref: "#/components/parameters/IdempotencyKey" },
       ],
       requestBody: {
@@ -19,11 +20,6 @@ export const endUsersPaths = {
             schema: {
               type: "object",
               properties: {
-                applicationId: {
-                  type: "string",
-                  description:
-                    "ID of the application this end-user belongs to (app_ prefix). Defaults to the organization's default application if omitted.",
-                },
                 name: {
                   type: ["string", "null"],
                   maxLength: 200,
@@ -40,10 +36,17 @@ export const endUsersPaths = {
                   description: "Your system's unique identifier for this end-user",
                 },
                 metadata: {
-                  type: ["object", "null"],
-                  description: "Arbitrary key-value metadata",
+                  type: "object",
+                  description:
+                    "Key-value metadata. Max 50 keys, key length 1\u201340 chars, values: string (max 500), number, boolean, or null.",
                 },
               },
+            },
+            example: {
+              name: "Alice Martin",
+              email: "alice@example.com",
+              externalId: "usr_12345",
+              metadata: { plan: "pro", region: "eu-west" },
             },
           },
         },
@@ -61,6 +64,17 @@ export const endUsersPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/EndUserObject" },
+              example: {
+                id: "eu_cm4jkl012",
+                object: "end_user",
+                applicationId: "app_cm4jkl013",
+                name: "Alice Martin",
+                email: "alice@example.com",
+                externalId: "usr_12345",
+                metadata: { plan: "pro", region: "eu-west" },
+                createdAt: "2026-01-15T10:30:00Z",
+                updatedAt: "2026-01-15T10:30:00Z",
+              },
             },
           },
         },
@@ -79,12 +93,7 @@ export const endUsersPaths = {
         "List end-users with cursor-based pagination. Filter by applicationId, externalId, or email.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "applicationId",
-          in: "query",
-          schema: { type: "string" },
-          description: "Filter by application ID",
-        },
+        { $ref: "#/components/parameters/XAppId" },
         {
           name: "externalId",
           in: "query",
@@ -139,7 +148,29 @@ export const endUsersPaths = {
                     type: "boolean",
                     description: "Whether more results exist beyond this page",
                   },
+                  limit: {
+                    type: "integer",
+                    description: "The limit that was applied to this query",
+                  },
                 },
+              },
+              example: {
+                object: "list",
+                data: [
+                  {
+                    id: "eu_cm4jkl012",
+                    object: "end_user",
+                    applicationId: "app_cm4jkl013",
+                    name: "Alice Martin",
+                    email: "alice@example.com",
+                    externalId: "usr_12345",
+                    metadata: { plan: "pro" },
+                    createdAt: "2026-01-15T10:30:00Z",
+                    updatedAt: "2026-01-15T10:30:00Z",
+                  },
+                ],
+                hasMore: false,
+                limit: 20,
               },
             },
           },
@@ -158,6 +189,7 @@ export const endUsersPaths = {
       description: "Get a single end-user by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -170,6 +202,17 @@ export const endUsersPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/EndUserObject" },
+              example: {
+                id: "eu_cm4jkl012",
+                object: "end_user",
+                applicationId: "app_cm4jkl013",
+                name: "Alice Martin",
+                email: "alice@example.com",
+                externalId: "usr_12345",
+                metadata: { plan: "pro", region: "eu-west" },
+                createdAt: "2026-01-15T10:30:00Z",
+                updatedAt: "2026-01-15T10:30:00Z",
+              },
             },
           },
         },
@@ -185,6 +228,7 @@ export const endUsersPaths = {
       description: "Update end-user name, email, externalId, or metadata.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -209,8 +253,9 @@ export const endUsersPaths = {
                   description: "Your system's unique identifier for this end-user",
                 },
                 metadata: {
-                  type: ["object", "null"],
-                  description: "Arbitrary key-value metadata",
+                  type: "object",
+                  description:
+                    "Key-value metadata. Max 50 keys, key length 1\u201340 chars, values: string (max 500), number, boolean, or null.",
                 },
               },
             },
@@ -227,6 +272,17 @@ export const endUsersPaths = {
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/EndUserObject" },
+              example: {
+                id: "eu_cm4jkl012",
+                object: "end_user",
+                applicationId: "app_cm4jkl013",
+                name: "Alice Martin Updated",
+                email: "alice@example.com",
+                externalId: "usr_12345",
+                metadata: { plan: "enterprise", region: "eu-west" },
+                createdAt: "2026-01-15T10:30:00Z",
+                updatedAt: "2026-01-20T14:00:00Z",
+              },
             },
           },
         },
@@ -243,6 +299,7 @@ export const endUsersPaths = {
       description: "Permanently delete an end-user.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {

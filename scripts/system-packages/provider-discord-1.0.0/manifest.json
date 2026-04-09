@@ -1,0 +1,57 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/discord",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Discord",
+  "description": "Communication platform for communities and teams",
+  "iconUrl": "discord",
+  "categories": ["social-media", "messaging", "community"],
+  "docsUrl": "https://discord.com/developers/docs/reference",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://discord.com/oauth2/authorize",
+      "tokenUrl": "https://discord.com/api/v10/oauth2/token",
+      "refreshUrl": "https://discord.com/api/v10/oauth2/token",
+      "defaultScopes": ["identify", "guilds"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_basic",
+      "authorizationParams": {
+        "prompt": "consent"
+      }
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": ["https://discord.com/api/*"],
+    "availableScopes": [
+      { "value": "identify", "label": "Read user profile (id, username, avatar)" },
+      { "value": "email", "label": "Read user email address" },
+      { "value": "guilds", "label": "List user's guilds (servers)" },
+      { "value": "guilds.join", "label": "Add user to a guild" },
+      { "value": "guilds.members.read", "label": "Read user's guild member info" },
+      { "value": "connections", "label": "View user's linked accounts" },
+      { "value": "bot", "label": "Add bot to a guild" },
+      { "value": "webhook.incoming", "label": "Create incoming webhooks" },
+      { "value": "applications.commands", "label": "Register slash commands" },
+      { "value": "messages.read", "label": "Read messages in channels" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Add the redirect URI in OAuth2 settings: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create a Discord application",
+        "url": "https://discord.com/developers/applications"
+      },
+      {
+        "label": "Go to OAuth2 settings and add the redirect URI"
+      },
+      {
+        "label": "Copy your Client ID and Client Secret"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

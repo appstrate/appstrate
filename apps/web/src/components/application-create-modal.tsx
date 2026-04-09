@@ -60,7 +60,12 @@ export function ApplicationCreateModal({ open, onClose }: Props) {
           <Button type="button" variant="outline" onClick={handleClose}>
             {t("btn.cancel")}
           </Button>
-          <Button type="submit" form="create-application-form" disabled={createMutation.isPending}>
+          <Button
+            type="submit"
+            form="create-application-form"
+            data-testid="app-create-submit"
+            disabled={createMutation.isPending}
+          >
             {createMutation.isPending ? <Spinner /> : t("btn.create")}
           </Button>
         </>
