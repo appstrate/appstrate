@@ -1,38 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getEnv } from "@appstrate/env";
-import { getCloudModule } from "./cloud-loader.ts";
+import { applyModuleAppConfig } from "./modules/index.ts";
 import type { AppConfig } from "@appstrate/shared-types";
 
 const env = getEnv();
 
 // Platform config — computed once at boot, injected into SPA HTML.
-// In OSS (no cloud module): models & provider keys visible, billing hidden.
-// In Cloud (@appstrate/cloud loaded): models & provider keys hidden (platform-managed), billing visible.
+// Base config uses OSS defaults. Modules extend it via `extendAppConfig()`.
 export function buildAppConfig(): AppConfig {
-  const cloud = getCloudModule();
-  const isCloud = cloud !== null;
   return {
-    platform: isCloud ? "cloud" : "oss",
+    platform: "oss",
     features: {
-      billing: isCloud,
+      billing: false,
       models: true,
       providerKeys: true,
       googleAuth: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
       githubAuth: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
       smtp: !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM),
     },
-    legalUrls: cloud?.legalUrls,
     trustedOrigins: env.TRUSTED_ORIGINS,
   };
 }
 
 let _appConfig: AppConfig | null = null;
 
-/** Returns the app config. Must be called after boot (cloud module loaded). */
+/** Returns the app config. Must be called after boot (modules loaded). */
 export function getAppConfig(): AppConfig {
   if (!_appConfig) {
-    _appConfig = buildAppConfig();
+    _appConfig = applyModuleAppConfig(buildAppConfig());
   }
   return _appConfig;
 }

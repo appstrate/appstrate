@@ -31,7 +31,7 @@ import { ApiError, notFound, conflict } from "../lib/errors.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
-import { getCloudModule } from "../lib/cloud-loader.ts";
+import { recordUsage } from "../lib/modules/hooks.ts";
 import { dispatchRunWebhook } from "../services/webhooks.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
@@ -60,7 +60,6 @@ export async function executeAgentInBackground(
   const controller = trackRun(runId);
   const { signal } = controller;
 
-  const cloud = getCloudModule();
   let accumulatedCost = 0;
 
   try {
@@ -259,9 +258,9 @@ export async function executeAgentInBackground(
       }
 
       let metadata: Record<string, unknown> | undefined;
-      if (cloud && accumulatedCost > 0) {
+      if (accumulatedCost > 0) {
         try {
-          metadata = await cloud.cloudHooks.recordUsage(orgId, runId, accumulatedCost, {
+          metadata = await recordUsage(orgId, runId, accumulatedCost, {
             modelSource: modelSource ?? "system",
           });
         } catch (err) {

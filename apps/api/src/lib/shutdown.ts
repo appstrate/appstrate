@@ -3,6 +3,7 @@
 import { closeDb } from "@appstrate/db/client";
 import { logger } from "./logger.ts";
 import { shutdownInfra } from "../infra/index.ts";
+import { shutdownModules } from "./modules/index.ts";
 import { hasRedis } from "../infra/mode.ts";
 import { shutdownScheduleWorker } from "../services/scheduler.ts";
 import { shutdownWebhookWorker } from "../services/webhooks.ts";
@@ -44,6 +45,9 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
         });
       }
     }
+
+    logger.info("Shutting down modules...");
+    await shutdownModules();
 
     logger.info("Closing database and infrastructure connections...");
     await shutdownInfra();

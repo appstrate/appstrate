@@ -7,7 +7,7 @@ import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
-import { loadCloud } from "./cloud-loader.ts";
+import { loadModules, getModuleRegistry, buildModuleInitContext } from "./modules/index.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
@@ -31,8 +31,8 @@ import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 
 export async function boot(): Promise<void> {
-  // Attempt to load cloud module (no-op in OSS — sets _cloud to null)
-  await loadCloud();
+  // Load optional modules (cloud, future OIDC, etc. — no-op in OSS)
+  await loadModules(getModuleRegistry(), buildModuleInitContext());
 
   // Log infrastructure mode
   const env = (await import("@appstrate/env")).getEnv();

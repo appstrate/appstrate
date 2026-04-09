@@ -23,7 +23,7 @@ import { resolvePermissions, resolveApiKeyPermissions } from "../../src/lib/perm
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { requireAppContext } from "../../src/middleware/app-context.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
-import { loadCloud } from "../../src/lib/cloud-loader.ts";
+import { loadModules } from "../../src/lib/modules/index.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 
@@ -59,7 +59,16 @@ let cachedApp: Hono<AppEnv> | null = null;
 
 // Initialize boot-time singletons that routes depend on.
 // In production these are called by boot(). For tests, we call them directly.
-await loadCloud().catch(() => {}); // sets _cloud to null (OSS mode)
+await loadModules([], {
+  databaseUrl: null,
+  redisUrl: null,
+  appUrl: "http://localhost:3000",
+  isEmbeddedDb: true,
+  getSendMail: async () => () => {},
+  getOrgAdminEmails: async () => [],
+  registerEmailOverrides: () => {},
+  setBeforeSignupHook: () => {},
+}).catch(() => {}); // no modules in test (OSS mode)
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
 initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 

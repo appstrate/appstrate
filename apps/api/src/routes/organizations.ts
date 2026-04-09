@@ -33,7 +33,7 @@ import {
 import { getAppConfig } from "../lib/app-config.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { createDefaultApplication } from "../services/applications.ts";
-import { getCloudModule } from "../lib/cloud-loader.ts";
+import { onOrgCreated, onOrgDeleted } from "../lib/modules/hooks.ts";
 import { logger } from "../lib/logger.ts";
 
 export const createOrgSchema = z.object({
@@ -114,14 +114,12 @@ router.post("/", async (c) => {
   const org = await createOrganization(data.name.trim(), slug, user.id);
 
   // Cloud billing: create billing account with free tier credits (non-fatal)
-  await getCloudModule()
-    ?.cloudHooks.onOrgCreated(org.id, user.email)
-    .catch((err) => {
-      logger.error("Failed to create billing account for new org", {
-        orgId: org.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
+  await onOrgCreated(org.id, user.email).catch((err) => {
+    logger.error("Failed to create billing account for new org", {
+      orgId: org.id,
+      error: err instanceof Error ? err.message : String(err),
     });
+  });
 
   // Create default application for the new org (non-fatal)
   const defaultApp = await createDefaultApplication(org.id, user.id).catch((err) => {
@@ -231,14 +229,12 @@ router.delete("/:orgId", async (c) => {
 
   try {
     // Cloud billing: clean up billing account before org deletion (non-fatal — FK CASCADE handles cleanup)
-    await getCloudModule()
-      ?.cloudHooks.onOrgDeleted(orgId)
-      .catch((err) => {
-        logger.warn("Failed to clean up billing account before org deletion", {
-          orgId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+    await onOrgDeleted(orgId).catch((err) => {
+      logger.warn("Failed to clean up billing account before org deletion", {
+        orgId,
+        error: err instanceof Error ? err.message : String(err),
       });
+    });
 
     await deleteOrganization(orgId);
   } catch (err) {

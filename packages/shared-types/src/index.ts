@@ -23,7 +23,7 @@ export type EnrichedRun = Run & {
 // --- App Config Types ---
 
 export interface AppConfig {
-  platform: "oss" | "cloud";
+  platform: string;
   features: {
     billing: boolean;
     models: boolean;
@@ -31,12 +31,15 @@ export interface AppConfig {
     googleAuth: boolean;
     githubAuth: boolean;
     smtp: boolean;
+    [key: string]: boolean;
   };
   legalUrls?: {
     terms?: string;
     privacy?: string;
   };
   trustedOrigins: string[];
+  /** Module-specific config blobs (keyed by module ID). */
+  modules?: Record<string, unknown>;
 }
 
 // --- Package Types ---

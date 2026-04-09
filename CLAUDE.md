@@ -155,6 +155,31 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 
 ## Key Conventions & Gotchas
 
+### Module System
+
+Appstrate uses a formalized module system for optional features. Each module implements the `AppstrateModule` contract (`apps/api/src/lib/modules/types.ts`) and is loaded at boot via the module loader.
+
+**Key files:**
+
+- `apps/api/src/lib/modules/types.ts` — `AppstrateModule` interface, `ModuleInitContext`, `SkipModuleError`
+- `apps/api/src/lib/modules/module-loader.ts` — Loader with topological sort, public path collection, AppConfig extension, shutdown
+- `apps/api/src/lib/modules/registry.ts` — `getModuleRegistry()` declares available modules, `buildModuleInitContext()` provides platform services
+- `apps/api/src/lib/modules/cloud-adapter.ts` — Wraps `@appstrate/cloud` in the module contract (zero changes to cloud/ repo)
+- `apps/api/src/lib/modules/hooks.ts` — Typed helpers for cloud hooks (`checkQuota`, `recordUsage`, `onOrgCreated`, `onOrgDeleted`)
+- `apps/api/src/lib/modules/example-module.ts` — Reference implementation
+
+**Module lifecycle:** registry → topological sort by `manifest.dependencies` → `init(ctx)` → `registerRoutes(app)` → running → `shutdown()` (reverse order)
+
+**Creating a new module:**
+
+1. Create a file implementing `AppstrateModule` (see `example-module.ts`)
+2. Add it to `getModuleRegistry()` in `registry.ts`
+3. Module's `init()` throws `SkipModuleError` if preconditions aren't met (e.g. missing dependency, PGlite mode)
+4. Module contributes feature flags via `extendAppConfig()`, routes via `registerRoutes()`, auth-bypass paths via `publicPaths`
+5. Other code accesses module hooks via typed helpers, never directly
+
+**Disabling a module = zero footprint:** no tables, no routes, no middleware, no code loaded.
+
 ### Progressive Infrastructure
 
 Appstrate uses a tiered infrastructure model — every external dependency is optional with a built-in fallback:

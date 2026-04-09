@@ -7,7 +7,7 @@
 
 import { logger } from "../lib/logger.ts";
 import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
-import { getCloudModule } from "../lib/cloud-loader.ts";
+import { checkQuota, getQuotaExceededError } from "../lib/modules/hooks.ts";
 import { createRun, getRunningRunCountForOrg } from "./state/index.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
@@ -204,20 +204,18 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   }
 
   // --- Step 3: Quota check (Cloud only) ---
-  const cloud = getCloudModule();
-  if (cloud) {
-    try {
-      const runningCount = await getRunningRunCountForOrg(orgId);
-      await cloud.cloudHooks.checkQuota(orgId, runningCount);
-    } catch (err) {
-      if (err instanceof cloud.QuotaExceededError) {
-        return { ok: false, error: { code: "quota_exceeded", message: err.message } };
-      }
-      return {
-        ok: false,
-        error: { code: "unexpected", message: err instanceof Error ? err.message : String(err) },
-      };
+  try {
+    const runningCount = await getRunningRunCountForOrg(orgId);
+    await checkQuota(orgId, runningCount);
+  } catch (err) {
+    const QEE = getQuotaExceededError();
+    if (QEE && err instanceof QEE) {
+      return { ok: false, error: { code: "quota_exceeded", message: err.message } };
     }
+    return {
+      ok: false,
+      error: { code: "unexpected", message: err instanceof Error ? err.message : String(err) },
+    };
   }
 
   // --- Step 4: Extract profile ID map ---

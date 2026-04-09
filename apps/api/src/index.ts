@@ -41,7 +41,7 @@ import invitationsRouter from "./routes/invitations.ts";
 import welcomeRouter from "./routes/welcome.ts";
 import { swaggerUI } from "@hono/swagger-ui";
 import { openApiSpec } from "./openapi/index.ts";
-import { getCloudModule } from "./lib/cloud-loader.ts";
+import { getModulePublicPaths, registerModuleRoutes } from "./lib/modules/index.ts";
 import { ApiError, unauthorized } from "./lib/errors.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "./lib/permissions.ts";
 import { isEndUserInApp } from "./services/end-users.ts";
@@ -100,7 +100,7 @@ function skipAuth(path: string): boolean {
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
   if (path === "/api/connections/callback") return true; // OAuth redirect — no session
   if (path === "/api/docs" || path === "/api/openapi.json") return true;
-  if (getCloudModule()?.publicPaths.includes(path)) return true; // e.g. Stripe webhook
+  if (getModulePublicPaths().includes(path)) return true; // e.g. Stripe webhook
   return false;
 }
 
@@ -320,11 +320,8 @@ app.route("/api", welcomeRouter);
 const internalRouter = createInternalRouter();
 app.route("/internal", internalRouter);
 
-// Cloud routes (billing, webhooks — no-op in OSS)
-const cloud = getCloudModule();
-if (cloud) {
-  cloud.registerCloudRoutes(app);
-}
+// Module routes (cloud billing, future OIDC, etc. — no-op if no modules loaded)
+registerModuleRoutes(app);
 
 // Static files for UI (JS, CSS, images, fonts — skip index.html, served with config below)
 app.use(
