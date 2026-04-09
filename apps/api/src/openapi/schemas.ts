@@ -871,6 +871,15 @@ export const schemas = {
       email: { type: ["string", "null"], format: "email", description: "Email address" },
       externalId: { type: ["string", "null"], description: "External system identifier" },
       metadata: { type: ["object", "null"], description: "Arbitrary key-value metadata" },
+      status: {
+        type: "string",
+        enum: ["active", "pending_verification", "suspended"],
+        description: "End-user account status",
+      },
+      emailVerified: {
+        type: "boolean",
+        description: "Whether the end-user's email address has been verified",
+      },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },

@@ -22,6 +22,7 @@ export type AppBranding = z.infer<typeof appBrandingSchema>;
 
 export const endUserAuthSettingsSchema = z.object({
   enabled: z.boolean().default(false),
+  clientId: z.string().optional(),
   allowSignup: z.boolean().default(true),
   requireEmailVerification: z.boolean().default(true),
 });

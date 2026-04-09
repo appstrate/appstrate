@@ -37,6 +37,7 @@ import { packagesPaths } from "./paths/packages.ts";
 import { webhooksPaths } from "./paths/webhooks.ts";
 import { applicationsPaths } from "./paths/applications.ts";
 import { endUsersPaths } from "./paths/end-users.ts";
+import { oauthClientsPaths } from "./paths/oauth-clients.ts";
 
 export const openApiSpec = {
   ...openApiInfo,
@@ -66,6 +67,7 @@ export const openApiSpec = {
     ...webhooksPaths,
     ...applicationsPaths,
     ...endUsersPaths,
+    ...oauthClientsPaths,
   },
   components: {
     securitySchemes,

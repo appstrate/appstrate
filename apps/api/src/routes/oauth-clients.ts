@@ -4,16 +4,20 @@
  * OAuth Client Admin Routes
  *
  * Manage OAuth client configuration per application.
- * Each application with endUserAuth.enabled = true acts as an OAuth client.
+ * Each application with endUserAuth.enabled = true has a single OAuth client
+ * with skipConsent (first-party, same pattern as Auth0/Firebase).
  */
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 import type { AppEnv } from "../types/index.ts";
-import { invalidRequest, parseBody } from "../lib/errors.ts";
+import { invalidRequest, conflict, parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getApplication, updateApplication, type AppSettings } from "../services/applications.ts";
 import { auth } from "@appstrate/db/auth";
+import { db } from "@appstrate/db/client";
+import { oauthClient } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 
 const enableOAuthSchema = z.object({
@@ -28,6 +32,29 @@ const updateOAuthSchema = z.object({
   requireEmailVerification: z.boolean().optional(),
 });
 
+/**
+ * Call Better Auth's internal handler for OAuth client management.
+ * Forwards the session cookie and sets the required Origin header.
+ */
+async function callBetterAuth(
+  c: { req: { url: string; header: (name: string) => string | undefined } },
+  path: string,
+  method: string,
+  body: unknown,
+): Promise<Response> {
+  return auth.handler(
+    new Request(new URL(path, c.req.url).href, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: c.req.header("cookie") ?? "",
+        Origin: new URL(c.req.url).origin,
+      },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
 export function createOAuthClientsRouter() {
   const router = new Hono<AppEnv>();
 
@@ -38,21 +65,22 @@ export function createOAuthClientsRouter() {
     const body = parseBody(enableOAuthSchema, await c.req.json());
 
     const app = await getApplication(orgId, appId);
+    const currentSettings = (app.settings ?? {}) as AppSettings;
 
-    // Create OAuth client via Better Auth's internal endpoint
-    const createRes = await auth.handler(
-      new Request(new URL("/api/auth/oauth2/create-client", c.req.url).href, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Cookie: c.req.header("cookie") ?? "",
-        },
-        body: JSON.stringify({
-          name: app.name,
-          redirect_uris: body.redirectUris,
-        }),
-      }),
-    );
+    // Idempotence: reject if already enabled
+    if (currentSettings.endUserAuth?.enabled && currentSettings.endUserAuth?.clientId) {
+      throw conflict(
+        "oauth_already_enabled",
+        "End-user auth is already enabled for this application",
+      );
+    }
+
+    // Create OAuth client via Better Auth
+    const createRes = await callBetterAuth(c, "/api/auth/oauth2/create-client", "POST", {
+      name: app.name,
+      redirect_uris: body.redirectUris,
+      scope: "openid profile email",
+    });
 
     if (!createRes.ok) {
       const errBody = await createRes.text();
@@ -68,13 +96,21 @@ export function createOAuthClientsRouter() {
       client_secret: string;
     };
 
-    // Update application settings
-    const currentSettings = (app.settings ?? {}) as AppSettings;
+    // First-party apps: skip consent + link to application via referenceId.
+    // The create-client endpoint blocks skip_consent during dynamic registration,
+    // so we set it directly after creation along with the application reference.
+    await db
+      .update(oauthClient)
+      .set({ skipConsent: true, referenceId: appId })
+      .where(eq(oauthClient.clientId, client.client_id));
+
+    // Persist clientId in application settings
     await updateApplication(orgId, appId, {
       settings: {
         ...currentSettings,
         endUserAuth: {
           enabled: true,
+          clientId: client.client_id,
           allowSignup: body.allowSignup,
           requireEmailVerification: body.requireEmailVerification,
         },
@@ -107,14 +143,23 @@ export function createOAuthClientsRouter() {
     const settings = (app.settings ?? {}) as AppSettings;
     const endUserAuth = settings.endUserAuth;
 
-    if (!endUserAuth?.enabled) {
+    if (!endUserAuth?.enabled || !endUserAuth.clientId) {
       return c.json({ enabled: false });
     }
 
+    // Fetch redirect URIs from the OAuth client record
+    const [client] = await db
+      .select({ redirectUris: oauthClient.redirectUris })
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, endUserAuth.clientId))
+      .limit(1);
+
     return c.json({
       enabled: true,
+      clientId: endUserAuth.clientId,
       allowSignup: endUserAuth.allowSignup ?? true,
       requireEmailVerification: endUserAuth.requireEmailVerification ?? true,
+      redirectUris: client?.redirectUris ?? [],
     });
   });
 
@@ -128,18 +173,35 @@ export function createOAuthClientsRouter() {
     const settings = (app.settings ?? {}) as AppSettings;
     const endUserAuth = settings.endUserAuth;
 
-    if (!endUserAuth?.enabled) {
+    if (!endUserAuth?.enabled || !endUserAuth.clientId) {
       throw invalidRequest("End-user auth is not enabled for this application");
     }
 
+    // Update redirect URIs in Better Auth if provided
+    if (body.redirectUris) {
+      const updateRes = await callBetterAuth(c, "/api/auth/oauth2/update-client", "POST", {
+        client_id: endUserAuth.clientId,
+        update: { redirect_uris: body.redirectUris },
+      });
+
+      if (!updateRes.ok) {
+        const errBody = await updateRes.text();
+        logger.error("Failed to update OAuth client redirect URIs", {
+          status: updateRes.status,
+          body: errBody,
+          clientId: endUserAuth.clientId,
+        });
+        throw invalidRequest("Failed to update OAuth client configuration.");
+      }
+    }
+
+    // Update application settings
     await updateApplication(orgId, appId, {
       settings: {
         ...settings,
         endUserAuth: {
           ...endUserAuth,
-          ...(body.allowSignup !== undefined && {
-            allowSignup: body.allowSignup,
-          }),
+          ...(body.allowSignup !== undefined && { allowSignup: body.allowSignup }),
           ...(body.requireEmailVerification !== undefined && {
             requireEmailVerification: body.requireEmailVerification,
           }),
@@ -157,20 +219,33 @@ export function createOAuthClientsRouter() {
 
     const app = await getApplication(orgId, appId);
     const settings = (app.settings ?? {}) as AppSettings;
+    const endUserAuth = settings.endUserAuth;
 
-    if (!settings.endUserAuth?.enabled) {
+    if (!endUserAuth?.enabled || !endUserAuth.clientId) {
       return c.json({ enabled: false });
     }
 
+    // Disable the OAuth client in Better Auth (tokens stop working)
+    await db
+      .update(oauthClient)
+      .set({ disabled: true })
+      .where(eq(oauthClient.clientId, endUserAuth.clientId));
+
+    // Clear settings
     await updateApplication(orgId, appId, {
       settings: {
         ...settings,
-        endUserAuth: { enabled: false, allowSignup: true, requireEmailVerification: true },
+        endUserAuth: {
+          enabled: false,
+          allowSignup: true,
+          requireEmailVerification: true,
+        },
       },
     });
 
     logger.info("OAuth client disabled for application", {
       applicationId: appId,
+      clientId: endUserAuth.clientId,
       orgId,
     });
 

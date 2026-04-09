@@ -23,6 +23,21 @@ export function setBeforeSignupHook(hook: (email: string) => void): void {
   _beforeSignupHook = hook;
 }
 
+// ─── Custom access token claims hook (injected at boot by API) ───
+// Allows apps/api to inject resolveOrCreateEndUser into the oauth-provider
+// plugin without packages/db depending on apps/api.
+
+export type CustomAccessTokenClaimsHook = (
+  user: { id: string; email: string; name: string },
+  referenceId: string,
+) => Promise<Record<string, unknown>>;
+
+let _customAccessTokenClaimsHook: CustomAccessTokenClaimsHook | null = null;
+
+export function setCustomAccessTokenClaimsHook(hook: CustomAccessTokenClaimsHook): void {
+  _customAccessTokenClaimsHook = hook;
+}
+
 // ─── SMTP transport (lazy, only if configured) ─────────────
 
 const smtpEnabled = !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM);
@@ -192,6 +207,20 @@ export const auth = betterAuth({
       refreshTokenExpiresIn: 24 * 60 * 60, // 24h (SPA)
       idTokenExpiresIn: 60 * 60, // 1h
       codeExpiresIn: 10 * 60, // 10 min
+
+      // Inject endUserId + applicationId into access tokens
+      customAccessTokenClaims: async ({ user, referenceId }) => {
+        if (!referenceId || !user || !_customAccessTokenClaimsHook) return {};
+        try {
+          return await _customAccessTokenClaimsHook(
+            { id: user.id, email: user.email, name: user.name },
+            referenceId,
+          );
+        } catch {
+          // Don't block token issuance if mapping fails
+          return {};
+        }
+      },
     }),
   ],
 

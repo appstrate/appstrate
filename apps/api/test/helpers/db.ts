@@ -36,6 +36,12 @@ const ALL_TABLES = [
   "org_provider_keys",
   "org_proxies",
   "org_invitations",
+  // OAuth provider tables (must precede user/session)
+  "oauth_consent",
+  "oauth_access_token",
+  "oauth_refresh_token",
+  "oauth_client",
+  "jwks",
   // Mid-level tables
   "webhooks",
   "runs",

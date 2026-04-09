@@ -164,15 +164,29 @@ export function createOAuthEndUserPagesRouter() {
               )}
           </ul>
           <div class="actions">
-            <form method="POST" action="/oauth2/consent" style="flex:1">
-              <input type="hidden" name="accept" value="false" />
-              <button type="submit" class="deny" style="width:100%">Refuser</button>
-            </form>
-            <form method="POST" action="/oauth2/consent" style="flex:1">
-              <input type="hidden" name="accept" value="true" />
-              <button type="submit" class="allow" style="width:100%">Autoriser</button>
-            </form>
+            <button onclick="submitConsent(false)" class="deny" style="flex:1">Refuser</button>
+            <button onclick="submitConsent(true)" class="allow" style="flex:1">Autoriser</button>
           </div>
+          <script>
+            async function submitConsent(accept) {
+              const oauthQuery = window.location.search.substring(1);
+              const res = await fetch("/api/auth/oauth2/consent", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ accept, oauth_query: oauthQuery }),
+              });
+              const data = await res.json();
+              if (data.redirect && data.url) {
+                window.location.href = data.url;
+              } else if (data.error) {
+                document.body.insertAdjacentHTML(
+                  "beforeend",
+                  '<p class="error">' + (data.error_description || data.error) + "</p>",
+                );
+              }
+            }
+          </script>
         </body>
       </html>
     `);

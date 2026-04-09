@@ -8,6 +8,8 @@ import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
 import { loadCloud } from "./cloud-loader.ts";
+import { setCustomAccessTokenClaimsHook } from "@appstrate/db/auth";
+import { resolveOrCreateEndUser } from "../services/enduser-mapping.ts";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
@@ -31,6 +33,12 @@ import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 
 export async function boot(): Promise<void> {
+  // Wire OIDC custom claims: inject endUserId + applicationId into access tokens
+  setCustomAccessTokenClaimsHook(async (user, referenceId) => {
+    const endUser = await resolveOrCreateEndUser(user, referenceId);
+    return { endUserId: endUser.id, applicationId: referenceId };
+  });
+
   // Attempt to load cloud module (no-op in OSS — sets _cloud to null)
   await loadCloud();
 
