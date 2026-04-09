@@ -152,9 +152,18 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "mistral",
     label: "Mistral",
-    api: "openai-completions",
-    baseUrl: "https://api.mistral.ai/v1",
+    api: "mistral-conversations",
+    baseUrl: "https://api.mistral.ai",
     models: [
+      {
+        modelId: "devstral-2-latest",
+        label: "DevStral 2",
+        input: ["text"],
+        contextWindow: 256_000,
+        maxTokens: 32_768,
+        reasoning: false,
+        cost: { input: 0.3, output: 0.9, cacheRead: 0, cacheWrite: 0 },
+      },
       {
         modelId: "codestral-latest",
         label: "Codestral",
