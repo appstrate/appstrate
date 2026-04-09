@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { loadModules, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import {
   checkQuota,
   recordUsage,
@@ -9,7 +9,7 @@ import {
   onOrgDeleted,
   getQuotaExceededError,
 } from "../../../src/lib/modules/hooks.ts";
-import type { AppstrateModule, ModuleInitContext } from "../../../src/lib/modules/types.ts";
+import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
 
 function mockCtx(): ModuleInitContext {
   return {
@@ -24,38 +24,38 @@ function mockCtx(): ModuleInitContext {
   };
 }
 
-describe("module hooks", () => {
+describe("module hooks (agnostic)", () => {
   beforeEach(() => {
     resetModules();
   });
 
-  it("checkQuota is no-op when cloud not loaded", async () => {
-    await loadModules([], mockCtx());
+  it("checkQuota is no-op when no module provides the hook", async () => {
+    await loadModulesFromInstances([], mockCtx());
     await expect(checkQuota("org1", 5)).resolves.toBeUndefined();
   });
 
-  it("recordUsage returns undefined when cloud not loaded", async () => {
-    await loadModules([], mockCtx());
+  it("recordUsage returns undefined when no module provides the hook", async () => {
+    await loadModulesFromInstances([], mockCtx());
     const result = await recordUsage("org1", "run1", 0.5, { modelSource: "system" });
     expect(result).toBeUndefined();
   });
 
-  it("onOrgCreated is no-op when cloud not loaded", async () => {
-    await loadModules([], mockCtx());
+  it("onOrgCreated is no-op when no module provides the hook", async () => {
+    await loadModulesFromInstances([], mockCtx());
     await expect(onOrgCreated("org1", "user@test.com")).resolves.toBeUndefined();
   });
 
-  it("onOrgDeleted is no-op when cloud not loaded", async () => {
-    await loadModules([], mockCtx());
+  it("onOrgDeleted is no-op when no module provides the hook", async () => {
+    await loadModulesFromInstances([], mockCtx());
     await expect(onOrgDeleted("org1")).resolves.toBeUndefined();
   });
 
-  it("getQuotaExceededError returns null when cloud not loaded", async () => {
-    await loadModules([], mockCtx());
+  it("getQuotaExceededError returns null when no module provides the hook", async () => {
+    await loadModulesFromInstances([], mockCtx());
     expect(getQuotaExceededError()).toBeNull();
   });
 
-  it("delegates to cloud hooks when cloud module is loaded", async () => {
+  it("delegates to module hooks when provided", async () => {
     const mockCheckQuota = mock(async () => {});
     const mockRecordUsage = mock(async () => ({ credits: 10 }));
     const mockOnOrgCreated = mock(async () => {});
@@ -65,8 +65,8 @@ describe("module hooks", () => {
       code = "QUOTA_EXCEEDED" as const;
     }
 
-    const cloudMod: AppstrateModule = {
-      manifest: { id: "cloud", name: "Cloud", version: "1.0.0" },
+    const mod: AppstrateModule = {
+      manifest: { id: "billing", name: "Billing", version: "1.0.0" },
       async init() {},
       hooks: {
         checkQuota: mockCheckQuota,
@@ -77,7 +77,7 @@ describe("module hooks", () => {
       },
     };
 
-    await loadModules([{ module: cloudMod }], mockCtx());
+    await loadModulesFromInstances([mod], mockCtx());
 
     await checkQuota("org1", 3);
     expect(mockCheckQuota).toHaveBeenCalledWith("org1", 3);

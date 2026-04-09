@@ -3,6 +3,10 @@
 /**
  * Module registry — declares which modules are available and provides
  * the platform-level init context injected into each module.
+ *
+ * The registry is AGNOSTIC — it only knows package specifiers, never
+ * module internals. Each module is a dynamic import that must export
+ * a default AppstrateModule (or an `appstrateModule` named export).
  */
 
 import { isEmbeddedDb } from "@appstrate/db/client";
@@ -11,8 +15,7 @@ import { setBeforeSignupHook } from "@appstrate/db/auth";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
-import type { ModuleEntry, ModuleInitContext } from "./types.ts";
-import { createCloudModuleAdapter } from "./cloud-adapter.ts";
+import type { ModuleEntry, ModuleInitContext } from "@appstrate/core/module";
 
 // ---------------------------------------------------------------------------
 // Registry — one entry per available module
@@ -20,16 +23,19 @@ import { createCloudModuleAdapter } from "./cloud-adapter.ts";
 
 /**
  * Returns the list of module entries to load at boot.
- * Add new modules here. The cloud adapter owns its own dynamic import
- * internally — if @appstrate/cloud is not installed, it throws
- * SkipModuleError and is silently skipped.
+ *
+ * Each entry is a dynamic import specifier. The module loader resolves
+ * the import at runtime — if the package is not installed, it is silently
+ * skipped (unless `required: true`).
+ *
+ * The platform NEVER references module internals here — it only knows
+ * the npm package name. The module itself implements AppstrateModule.
  */
 export function getModuleRegistry(): ModuleEntry[] {
   return [
-    { module: createCloudModuleAdapter() },
+    { specifier: "@appstrate/cloud" },
     // Future modules:
-    // { module: createOidcModule() },
-    // { module: createExampleModule(), required: false },
+    // { specifier: "@appstrate/oidc" },
   ];
 }
 
@@ -56,7 +62,7 @@ export function buildModuleInitContext(): ModuleInitContext {
 }
 
 // ---------------------------------------------------------------------------
-// DI: org admin emails query (moved from cloud-loader.ts)
+// DI: org admin emails query
 // ---------------------------------------------------------------------------
 
 async function getOrgAdminEmails(orgId: string): Promise<string[]> {

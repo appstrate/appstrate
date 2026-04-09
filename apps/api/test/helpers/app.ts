@@ -23,7 +23,7 @@ import { resolvePermissions, resolveApiKeyPermissions } from "../../src/lib/perm
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { requireAppContext } from "../../src/middleware/app-context.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
-import { loadModules } from "../../src/lib/modules/index.ts";
+import { loadModulesFromInstances } from "../../src/lib/modules/index.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 
@@ -59,7 +59,7 @@ let cachedApp: Hono<AppEnv> | null = null;
 
 // Initialize boot-time singletons that routes depend on.
 // In production these are called by boot(). For tests, we call them directly.
-await loadModules([], {
+await loadModulesFromInstances([], {
   databaseUrl: null,
   redisUrl: null,
   appUrl: "http://localhost:3000",

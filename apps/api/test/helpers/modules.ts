@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AppstrateModule } from "../../src/lib/modules/types.ts";
+import type { AppstrateModule } from "@appstrate/core/module";
 
 /** Create a minimal mock module for testing. */
 export function createMockModule(

@@ -157,28 +157,29 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
 
 ### Module System
 
-Appstrate uses a formalized module system for optional features. Each module implements the `AppstrateModule` contract (`apps/api/src/lib/modules/types.ts`) and is loaded at boot via the module loader.
+Appstrate uses a formalized module system for optional features. The contract is defined in `@appstrate/core/module` (published on npm) so external modules can implement it without depending on the API package.
 
 **Key files:**
 
-- `apps/api/src/lib/modules/types.ts` — `AppstrateModule` interface, `ModuleInitContext`, `SkipModuleError`
-- `apps/api/src/lib/modules/module-loader.ts` — Loader with topological sort, public path collection, AppConfig extension, shutdown
-- `apps/api/src/lib/modules/registry.ts` — `getModuleRegistry()` declares available modules, `buildModuleInitContext()` provides platform services
-- `apps/api/src/lib/modules/cloud-adapter.ts` — Wraps `@appstrate/cloud` in the module contract (zero changes to cloud/ repo)
-- `apps/api/src/lib/modules/hooks.ts` — Typed helpers for cloud hooks (`checkQuota`, `recordUsage`, `onOrgCreated`, `onOrgDeleted`)
+- `packages/core/src/module.ts` — `AppstrateModule` interface, `ModuleInitContext`, `SkipModuleError` (framework-agnostic, published on npm)
+- `apps/api/src/lib/modules/module-loader.ts` — Loader with dynamic import, topological sort, agnostic hook system, AppConfig extension, shutdown
+- `apps/api/src/lib/modules/registry.ts` — `getModuleRegistry()` declares package specifiers (e.g. `"@appstrate/cloud"`), `buildModuleInitContext()` provides platform services
+- `apps/api/src/lib/modules/hooks.ts` — Agnostic hook helpers (`checkQuota`, `recordUsage`, etc.) — call hooks by name, never by module ID
 - `apps/api/src/lib/modules/example-module.ts` — Reference implementation
 
-**Module lifecycle:** registry → topological sort by `manifest.dependencies` → `init(ctx)` → `registerRoutes(app)` → running → `shutdown()` (reverse order)
+**Module lifecycle:** registry (specifiers) → dynamic import → topological sort by `manifest.dependencies` → `init(ctx)` → `registerRoutes(app)` → running → `shutdown()` (reverse order)
 
-**Creating a new module:**
+**Agnostic hook system:** The platform calls hooks by name via `callHook("hookName", ...args)`. It never knows which module provides which hook. Multiple modules can provide the same hook — the first one wins. This ensures the platform has zero knowledge of module internals.
 
-1. Create a file implementing `AppstrateModule` (see `example-module.ts`)
-2. Add it to `getModuleRegistry()` in `registry.ts`
-3. Module's `init()` throws `SkipModuleError` if preconditions aren't met (e.g. missing dependency, PGlite mode)
-4. Module contributes feature flags via `extendAppConfig()`, routes via `registerRoutes()`, auth-bypass paths via `publicPaths`
-5. Other code accesses module hooks via typed helpers, never directly
+**Creating a new module (external package):**
 
-**Disabling a module = zero footprint:** no tables, no routes, no middleware, no code loaded.
+1. Import types from `@appstrate/core/module`
+2. Export a default `AppstrateModule` from your package
+3. Add the package specifier to `getModuleRegistry()` in `registry.ts`
+4. Module's `init()` throws `SkipModuleError` if preconditions aren't met (e.g. PGlite mode)
+5. Module contributes feature flags via `extendAppConfig()`, routes via `registerRoutes()`, auth-bypass paths via `publicPaths`, platform hooks via `hooks`
+
+**Disabling a module = zero footprint:** package not installed = not imported = no tables, no routes, no middleware, no code loaded.
 
 ### Progressive Infrastructure
 

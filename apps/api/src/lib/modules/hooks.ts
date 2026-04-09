@@ -1,50 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Typed hook helpers for cloud module.
- * Replace scattered `getCloudModule()?.cloudHooks.X()` calls with
- * null-safe, type-safe functions. All are no-ops when cloud is absent.
+ * Agnostic hook helpers for the module system.
+ *
+ * These functions call named hooks on whatever module provides them.
+ * The platform never knows which module implements a hook — it just
+ * calls it by name. If no module provides the hook, it's a no-op.
  */
 
-import { getModule } from "./module-loader.ts";
+import { callHook, getHookValue } from "./module-loader.ts";
 
-/** Check billing quota. No-op if cloud module is not loaded. */
+/** Check quota before a run. No-op if no module provides this hook. */
 export async function checkQuota(orgId: string, runningRunCount: number): Promise<void> {
-  const cloud = getModule("cloud");
-  if (!cloud?.hooks?.checkQuota) return;
-  await cloud.hooks.checkQuota(orgId, runningRunCount);
+  await callHook("checkQuota", orgId, runningRunCount);
 }
 
-/** Record usage after a run. No-op if cloud module is not loaded. */
+/** Record usage after a run. No-op if no module provides this hook. */
 export async function recordUsage(
   orgId: string,
   runId: string,
   cost: number,
   context: { modelSource: string },
 ): Promise<Record<string, unknown> | undefined> {
-  const cloud = getModule("cloud");
-  if (!cloud?.hooks?.recordUsage) return undefined;
-  return cloud.hooks.recordUsage(orgId, runId, cost, context);
+  return callHook<Record<string, unknown>>("recordUsage", orgId, runId, cost, context);
 }
 
-/** Returns the QuotaExceededError constructor, or null if cloud is absent. */
+/** Returns the QuotaExceededError constructor, or null if not provided. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getQuotaExceededError(): (new (...args: any[]) => Error) | null {
-  const cloud = getModule("cloud");
-  if (!cloud?.hooks?.getQuotaExceededError) return null;
-  return cloud.hooks.getQuotaExceededError();
+  return getHookValue("getQuotaExceededError");
 }
 
-/** Notify cloud of org creation. No-op if cloud not loaded. */
+/** Notify modules of org creation. No-op if no module provides this hook. */
 export async function onOrgCreated(orgId: string, userEmail: string): Promise<void> {
-  const cloud = getModule("cloud");
-  if (!cloud?.hooks?.onOrgCreated) return;
-  await cloud.hooks.onOrgCreated(orgId, userEmail);
+  await callHook("onOrgCreated", orgId, userEmail);
 }
 
-/** Notify cloud of org deletion. No-op if cloud not loaded. */
+/** Notify modules of org deletion. No-op if no module provides this hook. */
 export async function onOrgDeleted(orgId: string): Promise<void> {
-  const cloud = getModule("cloud");
-  if (!cloud?.hooks?.onOrgDeleted) return;
-  await cloud.hooks.onOrgDeleted(orgId);
+  await callHook("onOrgDeleted", orgId);
 }

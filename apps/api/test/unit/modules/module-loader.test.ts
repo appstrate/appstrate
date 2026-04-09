@@ -2,24 +2,21 @@
 
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import {
-  loadModules,
+  loadModulesFromInstances,
   getModule,
   getModules,
   getModulePublicPaths,
   registerModuleRoutes,
   applyModuleAppConfig,
+  callHook,
+  getHookValue,
+  hasHook,
   shutdownModules,
   resetModules,
 } from "../../../src/lib/modules/module-loader.ts";
-import { SkipModuleError } from "../../../src/lib/modules/types.ts";
-import type {
-  AppstrateModule,
-  ModuleInitContext,
-  ModuleEntry,
-} from "../../../src/lib/modules/types.ts";
+import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
+import { SkipModuleError } from "@appstrate/core/module";
 import type { AppConfig } from "@appstrate/shared-types";
-import { Hono } from "hono";
-import type { AppEnv } from "../../../src/types/index.ts";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -46,10 +43,6 @@ function mockCtx(): ModuleInitContext {
   };
 }
 
-function entry(mod: AppstrateModule, required?: boolean): ModuleEntry {
-  return { module: mod, required };
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -59,10 +52,10 @@ describe("module-loader", () => {
     resetModules();
   });
 
-  describe("loadModules", () => {
-    it("loads a static module successfully", async () => {
+  describe("loadModulesFromInstances", () => {
+    it("loads a module successfully", async () => {
       const mod = mockModule("alpha");
-      await loadModules([entry(mod)], mockCtx());
+      await loadModulesFromInstances([mod], mockCtx());
       expect(getModule("alpha")).toBe(mod);
     });
 
@@ -70,20 +63,20 @@ describe("module-loader", () => {
       const initFn = mock(async (_ctx: ModuleInitContext) => {});
       const mod = mockModule("beta", { init: initFn });
       const ctx = mockCtx();
-      await loadModules([entry(mod)], ctx);
+      await loadModulesFromInstances([mod], ctx);
       expect(initFn).toHaveBeenCalledTimes(1);
       expect(initFn).toHaveBeenCalledWith(ctx);
     });
 
     it("returns null for unknown module IDs", async () => {
-      await loadModules([], mockCtx());
+      await loadModulesFromInstances([], mockCtx());
       expect(getModule("nonexistent")).toBeNull();
     });
 
     it("returns all loaded modules in init order", async () => {
       const a = mockModule("a");
       const b = mockModule("b");
-      await loadModules([entry(a), entry(b)], mockCtx());
+      await loadModulesFromInstances([a, b], mockCtx());
       const ids = Array.from(getModules().keys());
       expect(ids).toEqual(["a", "b"]);
     });
@@ -94,34 +87,24 @@ describe("module-loader", () => {
           throw new SkipModuleError("not available");
         },
       });
-      await loadModules([entry(mod)], mockCtx());
+      await loadModulesFromInstances([mod], mockCtx());
       expect(getModule("skipped")).toBeNull();
     });
 
-    it("throws on non-SkipModuleError from required module", async () => {
+    it("throws on non-SkipModuleError", async () => {
       const mod = mockModule("broken", {
         async init() {
           throw new Error("fatal");
         },
       });
-      await expect(loadModules([entry(mod, true)], mockCtx())).rejects.toThrow("fatal");
-    });
-
-    it("skips non-required module on init error", async () => {
-      const mod = mockModule("flaky", {
-        async init() {
-          throw new Error("oops");
-        },
-      });
-      await loadModules([entry(mod)], mockCtx());
-      expect(getModule("flaky")).toBeNull();
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow("fatal");
     });
 
     it("is idempotent — second call is no-op", async () => {
       const initFn = mock(async () => {});
       const mod = mockModule("once", { init: initFn });
-      await loadModules([entry(mod)], mockCtx());
-      await loadModules([entry(mod)], mockCtx());
+      await loadModulesFromInstances([mod], mockCtx());
+      await loadModulesFromInstances([mod], mockCtx());
       expect(initFn).toHaveBeenCalledTimes(1);
     });
   });
@@ -140,8 +123,7 @@ describe("module-loader", () => {
           initOrder.push("b");
         },
       });
-      // Deliberately pass a before b
-      await loadModules([entry(a), entry(b)], mockCtx());
+      await loadModulesFromInstances([a, b], mockCtx());
       expect(initOrder).toEqual(["b", "a"]);
     });
 
@@ -152,7 +134,7 @@ describe("module-loader", () => {
       const b = mockModule("y", {
         manifest: { id: "y", name: "Y", version: "1.0.0", dependencies: ["x"] },
       });
-      await expect(loadModules([entry(a), entry(b)], mockCtx())).rejects.toThrow(
+      await expect(loadModulesFromInstances([a, b], mockCtx())).rejects.toThrow(
         "Circular module dependency",
       );
     });
@@ -161,7 +143,7 @@ describe("module-loader", () => {
       const a = mockModule("a", {
         manifest: { id: "a", name: "A", version: "1.0.0", dependencies: ["missing"] },
       });
-      await loadModules([entry(a)], mockCtx());
+      await loadModulesFromInstances([a], mockCtx());
       expect(getModule("a")).toBe(a);
     });
   });
@@ -170,26 +152,26 @@ describe("module-loader", () => {
     it("collects public paths from all loaded modules", async () => {
       const a = mockModule("a", { publicPaths: ["/api/a/hook"] });
       const b = mockModule("b", { publicPaths: ["/api/b/hook1", "/api/b/hook2"] });
-      await loadModules([entry(a), entry(b)], mockCtx());
+      await loadModulesFromInstances([a, b], mockCtx());
       expect(getModulePublicPaths()).toEqual(["/api/a/hook", "/api/b/hook1", "/api/b/hook2"]);
     });
 
     it("returns empty array when no modules loaded", async () => {
-      await loadModules([], mockCtx());
+      await loadModulesFromInstances([], mockCtx());
       expect(getModulePublicPaths()).toEqual([]);
     });
   });
 
   describe("registerModuleRoutes", () => {
     it("calls registerRoutes on each module", async () => {
-      const routeFn = mock((_app: Hono<AppEnv>) => {});
+      const routeFn = mock((_app: unknown) => {});
       const mod = mockModule("routed", { registerRoutes: routeFn });
-      await loadModules([entry(mod)], mockCtx());
+      await loadModulesFromInstances([mod], mockCtx());
 
-      const app = new Hono<AppEnv>();
-      registerModuleRoutes(app);
+      const fakeApp = {};
+      registerModuleRoutes(fakeApp);
       expect(routeFn).toHaveBeenCalledTimes(1);
-      expect(routeFn).toHaveBeenCalledWith(app);
+      expect(routeFn).toHaveBeenCalledWith(fakeApp);
     });
   });
 
@@ -197,11 +179,12 @@ describe("module-loader", () => {
     it("deep-merges module config overlays", async () => {
       const mod = mockModule("ext", {
         extendAppConfig: (base) => ({
+          ...base,
           platform: "cloud",
-          features: { ...base.features, billing: true },
+          features: { ...(base.features as Record<string, boolean>), billing: true },
         }),
       });
-      await loadModules([entry(mod)], mockCtx());
+      await loadModulesFromInstances([mod], mockCtx());
 
       const base: AppConfig = {
         platform: "oss",
@@ -219,7 +202,53 @@ describe("module-loader", () => {
       const result = applyModuleAppConfig(base);
       expect(result.platform).toBe("cloud");
       expect(result.features.billing).toBe(true);
-      expect(result.features.models).toBe(true); // preserved from base
+      expect(result.features.models).toBe(true);
+    });
+  });
+
+  describe("agnostic hooks", () => {
+    it("callHook returns undefined when no module provides the hook", async () => {
+      await loadModulesFromInstances([], mockCtx());
+      const result = await callHook("nonexistent");
+      expect(result).toBeUndefined();
+    });
+
+    it("callHook delegates to the first module providing the hook", async () => {
+      const mod = mockModule("hooked", {
+        hooks: {
+          myHook: async (x: number) => x * 2,
+        },
+      });
+      await loadModulesFromInstances([mod], mockCtx());
+      const result = await callHook<number>("myHook", 5);
+      expect(result).toBe(10);
+    });
+
+    it("getHookValue returns null when no module provides the hook", async () => {
+      await loadModulesFromInstances([], mockCtx());
+      expect(getHookValue("missing")).toBeNull();
+    });
+
+    it("getHookValue returns value from the first module", async () => {
+      class MyError extends Error {}
+      const mod = mockModule("errors", {
+        hooks: { getErrorClass: () => MyError },
+      });
+      await loadModulesFromInstances([mod], mockCtx());
+      expect(getHookValue<typeof MyError>("getErrorClass")).toBe(MyError);
+    });
+
+    it("hasHook returns false when no module provides the hook", async () => {
+      await loadModulesFromInstances([], mockCtx());
+      expect(hasHook("missing")).toBe(false);
+    });
+
+    it("hasHook returns true when a module provides the hook", async () => {
+      const mod = mockModule("provider", {
+        hooks: { myHook: () => {} },
+      });
+      await loadModulesFromInstances([mod], mockCtx());
+      expect(hasHook("myHook")).toBe(true);
     });
   });
 
@@ -236,7 +265,7 @@ describe("module-loader", () => {
           order.push("b");
         },
       });
-      await loadModules([entry(a), entry(b)], mockCtx());
+      await loadModulesFromInstances([a, b], mockCtx());
 
       await shutdownModules();
       expect(order).toEqual(["b", "a"]);
@@ -244,7 +273,7 @@ describe("module-loader", () => {
 
     it("clears all state after shutdown", async () => {
       const mod = mockModule("temp");
-      await loadModules([entry(mod)], mockCtx());
+      await loadModulesFromInstances([mod], mockCtx());
       await shutdownModules();
       expect(getModule("temp")).toBeNull();
       expect(getModulePublicPaths()).toEqual([]);
@@ -256,7 +285,7 @@ describe("module-loader", () => {
           throw new Error("boom");
         },
       });
-      await loadModules([entry(mod)], mockCtx());
+      await loadModulesFromInstances([mod], mockCtx());
       await expect(shutdownModules()).resolves.toBeUndefined();
     });
   });
