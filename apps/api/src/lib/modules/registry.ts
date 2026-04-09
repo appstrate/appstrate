@@ -14,6 +14,13 @@ import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import type { ModuleInitContext } from "@appstrate/core/module";
+import { registerBuiltinModule } from "./module-loader.ts";
+
+// ---------------------------------------------------------------------------
+// Built-in platform modules (loaded only if listed in APPSTRATE_MODULES)
+// ---------------------------------------------------------------------------
+
+registerBuiltinModule("webhooks", () => import("../../modules/webhooks/index.ts"));
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers

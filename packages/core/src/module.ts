@@ -106,6 +106,8 @@ export interface ModuleHooks {
 export interface ModuleEvents {
   /** Post-run notification — broadcast to all modules after a run completes. */
   afterRun: (params: AfterRunParams) => Promise<void>;
+  /** Run status changed — broadcast for webhook delivery and other side-effects. */
+  "run:statusChanged": (params: RunStatusChangedParams) => Promise<void>;
   /** Org created — broadcast after a new organization is created. */
   onOrgCreated: (orgId: string, userEmail: string) => Promise<void>;
   /** Org deleted — broadcast before an organization is deleted. */
@@ -129,6 +131,16 @@ export interface RunRejection {
   message: string;
   /** HTTP status hint (e.g. 402 for payment required, 429 for rate limit). Defaults to 403. */
   status?: number;
+}
+
+/** Parameters passed to the `run:statusChanged` event. */
+export interface RunStatusChangedParams {
+  orgId: string;
+  applicationId: string;
+  status: string;
+  runId: string;
+  packageId: string;
+  extra?: Record<string, unknown>;
 }
 
 /** Parameters passed to the `afterRun` event. */

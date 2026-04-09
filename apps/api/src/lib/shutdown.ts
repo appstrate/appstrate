@@ -6,7 +6,6 @@ import { shutdownInfra } from "../infra/index.ts";
 import { shutdownModules } from "./modules/index.ts";
 import { hasRedis } from "../infra/mode.ts";
 import { shutdownScheduleWorker } from "../services/scheduler.ts";
-import { shutdownWebhookWorker } from "../services/webhooks.ts";
 import {
   getInFlightCount,
   waitForInFlight,
@@ -25,7 +24,7 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     setShuttingDown();
 
     logger.info("Shutdown initiated, stopping scheduler, webhook worker, and sidecar pool...");
-    await Promise.all([shutdownScheduleWorker(), shutdownWebhookWorker()]);
+    await shutdownScheduleWorker();
     await getOrchestrator().shutdown();
 
     // Unsubscribe from cancel channel before draining to avoid processing

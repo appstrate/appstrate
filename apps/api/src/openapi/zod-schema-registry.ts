@@ -13,8 +13,8 @@
 
 import { z } from "zod";
 
-// --- Webhook schemas (routes/webhooks.ts) ---
-import { createWebhookSchema, updateWebhookSchema } from "../routes/webhooks.ts";
+// --- Webhook schemas (modules/webhooks/routes.ts) ---
+import { createWebhookSchema, updateWebhookSchema } from "../modules/webhooks/routes.ts";
 
 // --- End-User schemas (routes/end-users.ts) ---
 import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts";

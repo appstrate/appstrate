@@ -12,7 +12,7 @@ import {
   rotateSecret,
   listDeliveries,
   buildEventEnvelope,
-} from "../../../src/services/webhooks.ts";
+} from "../../../src/modules/webhooks/service.ts";
 import { webhookDeliveries } from "@appstrate/db/schema";
 
 describe("webhooks service", () => {

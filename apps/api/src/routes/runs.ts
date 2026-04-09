@@ -32,7 +32,7 @@ import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { afterRun } from "../lib/modules/hooks.ts";
-import { dispatchRunWebhook } from "../services/webhooks.ts";
+import { emitEvent } from "../lib/modules/module-loader.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
@@ -65,7 +65,13 @@ export async function executeAgentInBackground(
   try {
     // Update status to running
     await updateRun(runId, orgId, applicationId, { status: "running" });
-    dispatchRunWebhook(orgId, applicationId, "started", runId, agent.id);
+    emitEvent("run:statusChanged", {
+      orgId,
+      applicationId,
+      status: "started",
+      runId,
+      packageId: agent.id,
+    });
 
     // Execute via adapter
     const adapter = new PiAdapter();
@@ -178,7 +184,14 @@ export async function executeAgentInBackground(
           },
           "error",
         );
-        dispatchRunWebhook(orgId, applicationId, "timeout", runId, agent.id, { duration });
+        emitEvent("run:statusChanged", {
+          orgId,
+          applicationId,
+          status: "timeout",
+          runId,
+          packageId: agent.id,
+          extra: { duration },
+        });
         afterRun({
           orgId,
           runId,
@@ -226,7 +239,14 @@ export async function executeAgentInBackground(
         { runId, status: "failed", error },
         "error",
       );
-      dispatchRunWebhook(orgId, applicationId, "failed", runId, agent.id, { error, duration });
+      emitEvent("run:statusChanged", {
+        orgId,
+        applicationId,
+        status: "failed",
+        runId,
+        packageId: agent.id,
+        extra: { error, duration },
+      });
       afterRun({
         orgId,
         runId,
@@ -301,7 +321,14 @@ export async function executeAgentInBackground(
         { runId, status: "success" },
         "info",
       );
-      dispatchRunWebhook(orgId, applicationId, "completed", runId, agent.id, { result, duration });
+      emitEvent("run:statusChanged", {
+        orgId,
+        applicationId,
+        status: "completed",
+        runId,
+        packageId: agent.id,
+        extra: { result, duration },
+      });
       afterRun({
         orgId,
         runId,
@@ -339,9 +366,13 @@ export async function executeAgentInBackground(
       },
       "error",
     );
-    dispatchRunWebhook(orgId, applicationId, "failed", runId, agent.id, {
-      error: errorMessage,
-      duration,
+    emitEvent("run:statusChanged", {
+      orgId,
+      applicationId,
+      status: "failed",
+      runId,
+      packageId: agent.id,
+      extra: { error: errorMessage, duration },
     });
     afterRun({
       orgId,
@@ -615,7 +646,13 @@ export function createRunsRouter() {
       .stopByRunId(runId)
       .catch(() => {});
 
-    dispatchRunWebhook(orgId, c.get("applicationId"), "cancelled", runId, run.packageId);
+    emitEvent("run:statusChanged", {
+      orgId,
+      applicationId: c.get("applicationId"),
+      status: "cancelled",
+      runId,
+      packageId: run.packageId,
+    });
 
     return c.json({ ok: true });
   });

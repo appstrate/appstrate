@@ -8,16 +8,16 @@ import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
-import { logger } from "../lib/logger.ts";
-import { notFound, invalidRequest, ApiError } from "../lib/errors.ts";
+import { logger } from "../../lib/logger.ts";
+import { notFound, invalidRequest, ApiError } from "../../lib/errors.ts";
 import type { WebhookInfo, WebhookCreateResponse } from "@appstrate/shared-types";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
-import { toISORequired } from "../lib/date-helpers.ts";
-import { buildUpdateSet } from "../lib/db-helpers.ts";
-import { createQueue, PermanentJobError } from "../infra/queue/index.ts";
-import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
-import { isDevEnvironment, LOCALHOST_HOSTS } from "./redirect-validation.ts";
-import { prefixedId } from "../lib/ids.ts";
+import { toISORequired } from "../../lib/date-helpers.ts";
+import { buildUpdateSet } from "../../lib/db-helpers.ts";
+import { createQueue, PermanentJobError } from "../../infra/queue/index.ts";
+import type { JobQueue, QueueJob } from "../../infra/queue/index.ts";
+import { isDevEnvironment, LOCALHOST_HOSTS } from "../../services/redirect-validation.ts";
+import { prefixedId } from "../../lib/ids.ts";
 
 // ---------------------------------------------------------------------------
 // Constants

@@ -9,9 +9,9 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AppEnv } from "../types/index.ts";
-import { rateLimit } from "../middleware/rate-limit.ts";
-import { idempotency } from "../middleware/idempotency.ts";
+import type { AppEnv } from "../../types/index.ts";
+import { rateLimit } from "../../middleware/rate-limit.ts";
+import { idempotency } from "../../middleware/idempotency.ts";
 import {
   createWebhook,
   listWebhooks,
@@ -22,9 +22,9 @@ import {
   listDeliveries,
   buildEventEnvelope,
   webhookEventSchema,
-} from "../services/webhooks.ts";
-import { parseBody } from "../lib/errors.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+} from "./service.ts";
+import { parseBody } from "../../lib/errors.ts";
+import { requirePermission } from "../../middleware/require-permission.ts";
 export const createWebhookSchema = z.object({
   url: z.url("url must be a valid URL"),
   events: z.array(webhookEventSchema).min(1, "events is required"),
