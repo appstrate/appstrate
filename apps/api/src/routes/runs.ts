@@ -30,7 +30,7 @@ import { ApiError, notFound, conflict } from "../lib/errors.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
-import { onRunStatusChange } from "../lib/modules/hooks.ts";
+import { onRunStatusChange, afterRun } from "../lib/modules/hooks.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
@@ -280,6 +280,26 @@ export async function executeAgentInBackground(
         await addPackageMemories(agent.id, orgId, applicationId, memories, runId);
       }
 
+      let metadata: Record<string, unknown> | null = null;
+      try {
+        metadata = await afterRun({
+          orgId,
+          runId,
+          agentId: agent.id,
+          applicationId,
+          status: "success",
+          cost: accumulatedCost,
+          duration,
+          modelSource: modelSource ?? null,
+        });
+      } catch (err) {
+        logger.error("afterRun hook failed — run record will be missing metadata", {
+          err: err instanceof Error ? err.message : String(err),
+          orgId,
+          runId,
+        });
+      }
+
       await updateRun(runId, orgId, applicationId, {
         status: "success",
         result,
@@ -290,6 +310,7 @@ export async function executeAgentInBackground(
         tokensUsed: totalTokens > 0 ? totalTokens : undefined,
         ...(totalTokens > 0 ? { tokenUsage: { ...accumulated } as Record<string, unknown> } : {}),
         cost: accumulatedCost > 0 ? accumulatedCost : null,
+        ...(metadata ? { metadata } : {}),
       });
 
       if (hasOutput) {

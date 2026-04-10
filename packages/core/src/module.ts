@@ -130,6 +130,13 @@ export interface ModuleHooks {
     packageId: string,
     modelId?: string | null,
   ) => Promise<ResolvedModelResult | null>;
+  /**
+   * Post-run hook — called on terminal status before the final run record is
+   * persisted. Symmetric with `beforeRun`. Modules return a metadata patch
+   * stored as `runs.metadata` (e.g. `{ creditsUsed }` from cloud billing), or
+   * null to leave it untouched.
+   */
+  afterRun: (params: RunStatusChangeParams) => Promise<Record<string, unknown> | null>;
 }
 
 /** Known events and their signatures. */

@@ -45,11 +45,23 @@ export async function beforeRun(params: BeforeRunParams): Promise<RunRejection |
 
 /**
  * Run status change event — broadcast on every run lifecycle transition.
- * Modules decide internally what to do (webhooks, usage recording, analytics, etc.).
+ * Modules decide internally what to do (webhooks, analytics, etc.).
  * Broadcast-to-all: errors in individual handlers are isolated.
  */
 export async function onRunStatusChange(params: RunStatusChangeParams): Promise<void> {
   await emitEvent("onRunStatusChange", params);
+}
+
+/**
+ * Post-run hook — symmetric with `beforeRun`. First-match-wins. Called on
+ * terminal status. Returns a metadata patch persisted as `runs.metadata`
+ * (e.g. `{ creditsUsed }` from cloud billing), or null to leave it untouched.
+ */
+export async function afterRun(
+  params: RunStatusChangeParams,
+): Promise<Record<string, unknown> | null> {
+  const result = await callHook("afterRun", params);
+  return result ?? null;
 }
 
 // ---------------------------------------------------------------------------

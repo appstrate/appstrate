@@ -207,6 +207,43 @@ describe("module-loader", () => {
       expect(hasHook("beforeRun")).toBe(true);
       expect(hasHook("beforeSignup")).toBe(false);
     });
+
+    it("afterRun wrapper returns the metadata patch from the first matching module", async () => {
+      const { afterRun } = await import("../../../src/lib/modules/hooks.ts");
+      const mod = mockModule("billing", {
+        hooks: { afterRun: async () => ({ creditsUsed: 42 }) },
+      });
+      await loadModulesFromInstances([mod], mockCtx());
+
+      const result = await afterRun({
+        orgId: "o",
+        runId: "r",
+        agentId: "a",
+        applicationId: "app",
+        status: "success",
+        cost: 0.05,
+        duration: 1234,
+        modelSource: "system",
+      });
+      expect(result).toEqual({ creditsUsed: 42 });
+    });
+
+    it("afterRun wrapper returns null when no module provides the hook", async () => {
+      const { afterRun } = await import("../../../src/lib/modules/hooks.ts");
+      await loadModulesFromInstances([], mockCtx());
+
+      const result = await afterRun({
+        orgId: "o",
+        runId: "r",
+        agentId: "a",
+        applicationId: "app",
+        status: "success",
+        cost: 0,
+        duration: 100,
+        modelSource: null,
+      });
+      expect(result).toBeNull();
+    });
   });
 
   describe("emitEvent (broadcast)", () => {
