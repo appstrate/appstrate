@@ -53,17 +53,13 @@ export interface AppstrateModule {
   createRouter?(): Hono<any>;
 
   /**
-   * Contribute to the frontend AppConfig (feature flags, legal URLs, etc.).
+   * Feature flags contributed by this module.
+   * Merged into `AppConfig.features` at boot (simple `Object.assign`).
+   * Absent modules contribute nothing — their flags stay at base defaults.
    *
-   * Return a **partial overlay** — only the keys you want to add or override.
-   * The platform deep-merges your return value onto the accumulated config.
-   * Do NOT spread `...base` — just return the delta.
-   *
-   * `base` is provided for read-only inspection (e.g. conditional flags).
-   *
-   * @example return { features: { billing: true }, legalUrls: { terms: "..." } }
+   * @example features: { billing: true }
    */
-  extendAppConfig?(base: Record<string, unknown>): Record<string, unknown>;
+  features?: Record<string, boolean>;
 
   /**
    * Named hooks (first-match-wins).

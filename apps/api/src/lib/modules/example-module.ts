@@ -35,9 +35,7 @@ const exampleModule: AppstrateModule = {
     return router;
   },
 
-  extendAppConfig() {
-    return { features: { example: true } };
-  },
+  features: { example: true },
 
   async shutdown() {
     logger.info("Example module shutdown");

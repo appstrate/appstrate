@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getEnv } from "@appstrate/env";
-import { applyModuleAppConfig } from "./modules/index.ts";
+import { applyModuleFeatures } from "./modules/index.ts";
 import type { AppConfig } from "@appstrate/shared-types";
 
 const env = getEnv();
 
 // Platform config — computed once at boot, injected into SPA HTML.
-// Base config uses OSS defaults. Modules extend it via `extendAppConfig()`.
+// Base config uses OSS defaults. Modules contribute feature flags at boot.
 export function buildAppConfig(): AppConfig {
+  const legalTerms = env.LEGAL_TERMS_URL;
+  const legalPrivacy = env.LEGAL_PRIVACY_URL;
   return {
-    platform: "oss",
     features: {
       billing: false,
       models: true,
@@ -19,6 +20,14 @@ export function buildAppConfig(): AppConfig {
       githubAuth: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
       smtp: !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM),
     },
+    ...(legalTerms && legalPrivacy
+      ? {
+          legalUrls: {
+            terms: legalTerms,
+            privacy: legalPrivacy,
+          },
+        }
+      : {}),
     trustedOrigins: env.TRUSTED_ORIGINS,
   };
 }
@@ -28,7 +37,7 @@ let _appConfig: AppConfig | null = null;
 /** Returns the app config. Must be called after boot (modules loaded). */
 export function getAppConfig(): AppConfig {
   if (!_appConfig) {
-    _appConfig = applyModuleAppConfig(buildAppConfig());
+    _appConfig = applyModuleFeatures(buildAppConfig());
   }
   return _appConfig;
 }

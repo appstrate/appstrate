@@ -8,7 +8,7 @@ export {
   getModules,
   getModulePublicPaths,
   registerModuleRoutes,
-  applyModuleAppConfig,
+  applyModuleFeatures,
   callHook,
   hasHook,
   emitEvent,

@@ -142,19 +142,18 @@ export function registerModuleRoutes(app: Hono<AppEnv>): void {
 }
 
 /**
- * Extend AppConfig with module contributions.
- * Each module's `extendAppConfig()` returns a partial overlay, deep-merged
- * onto the accumulated config in topological order.
+ * Merge module feature flags into the base AppConfig.
+ * Each module's `features` is a `Record<string, boolean>` merged via `Object.assign`.
  */
-export function applyModuleAppConfig(base: AppConfig): AppConfig {
-  let config: AppConfig = { ...base };
+export function applyModuleFeatures(base: AppConfig): AppConfig {
+  const moduleFeatures: Record<string, boolean> = {};
   for (const mod of _modules.values()) {
-    const ext = mod.extendAppConfig?.(config as unknown as Record<string, unknown>);
-    if (ext) {
-      config = deepMerge(config as unknown as Record<string, unknown>, ext) as unknown as AppConfig;
-    }
+    if (mod.features) Object.assign(moduleFeatures, mod.features);
   }
-  return config;
+  return {
+    ...base,
+    features: { ...base.features, ...moduleFeatures },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -306,34 +305,4 @@ function topoSort(modules: AppstrateModule[]): AppstrateModule[] {
   }
 
   return sorted;
-}
-
-// ---------------------------------------------------------------------------
-// Deep merge utility
-// ---------------------------------------------------------------------------
-
-const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-
-function isPlainObject(val: unknown): val is Record<string, unknown> {
-  if (typeof val !== "object" || val === null || Array.isArray(val)) return false;
-  const proto = Object.getPrototypeOf(val);
-  return proto === null || proto === Object.prototype;
-}
-
-function deepMerge(
-  target: Record<string, unknown>,
-  source: Record<string, unknown>,
-): Record<string, unknown> {
-  const result = { ...target };
-  for (const key of Object.keys(source)) {
-    if (UNSAFE_KEYS.has(key)) continue;
-    const tVal = target[key];
-    const sVal = source[key];
-    if (isPlainObject(tVal) && isPlainObject(sVal)) {
-      result[key] = deepMerge(tVal, sVal);
-    } else {
-      result[key] = sVal;
-    }
-  }
-  return result;
 }

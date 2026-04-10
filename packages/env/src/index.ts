@@ -78,6 +78,10 @@ const envSchema = z
     GITHUB_CLIENT_ID: z.string().optional(),
     GITHUB_CLIENT_SECRET: z.string().optional(),
 
+    // Legal URLs (optional — displayed in footer when set)
+    LEGAL_TERMS_URL: z.string().optional(),
+    LEGAL_PRIVACY_URL: z.string().optional(),
+
     // SMTP (optional — enables email verification when all are set)
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().positive().default(587),
