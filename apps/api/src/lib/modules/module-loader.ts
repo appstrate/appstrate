@@ -336,6 +336,7 @@ export async function shutdownModules(): Promise<void> {
 export function resetModules(): void {
   _modules.clear();
   _publicPathsCache = null;
+  _builtinCache = null;
   _initialized = false;
 }
 

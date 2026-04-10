@@ -62,7 +62,7 @@ const webhooksModule: AppstrateModule = {
   features: { webhooks: true },
 
   events: {
-    onRunStatusChange: async (params: RunStatusChangeParams) => {
+    onRunStatusChange: (params: RunStatusChangeParams) => {
       dispatchRunWebhook(
         params.orgId,
         params.applicationId,

@@ -144,14 +144,14 @@ export interface ModuleHooks {
   afterRun: (params: RunStatusChangeParams) => Promise<Record<string, unknown> | null>;
 }
 
-/** Known events and their signatures. */
+/** Known events and their signatures. Handlers may be sync or async. */
 export interface ModuleEvents {
   /** Run status changed — broadcast on every run lifecycle transition. */
-  onRunStatusChange: (params: RunStatusChangeParams) => Promise<void>;
+  onRunStatusChange: (params: RunStatusChangeParams) => void | Promise<void>;
   /** Org created — broadcast after a new organization is created. */
-  onOrgCreate: (orgId: string, userEmail: string) => Promise<void>;
+  onOrgCreate: (orgId: string, userEmail: string) => void | Promise<void>;
   /** Org deleted — broadcast before an organization is deleted. */
-  onOrgDelete: (orgId: string) => Promise<void>;
+  onOrgDelete: (orgId: string) => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

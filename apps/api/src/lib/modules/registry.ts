@@ -14,6 +14,7 @@ import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import type { ModuleInitContext } from "@appstrate/core/module";
+import { getEnv } from "@appstrate/env";
 import { applyModuleMigrations } from "./migrate.ts";
 
 // ---------------------------------------------------------------------------
@@ -37,9 +38,8 @@ import { applyModuleMigrations } from "./migrate.ts";
  * load and init successfully or the platform crashes.
  */
 export function getModuleRegistry(): string[] {
-  const raw = process.env.APPSTRATE_MODULES ?? "";
-  return raw
-    .split(",")
+  return getEnv()
+    .APPSTRATE_MODULES.split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 }
@@ -49,11 +49,11 @@ export function getModuleRegistry(): string[] {
 // ---------------------------------------------------------------------------
 
 export function buildModuleInitContext(): ModuleInitContext {
-  const env = process.env;
+  const env = getEnv();
   const ctx: ModuleInitContext = {
     databaseUrl: env.DATABASE_URL ?? null,
     redisUrl: env.REDIS_URL ?? null,
-    appUrl: env.APP_URL ?? "http://localhost:3000",
+    appUrl: env.APP_URL,
     isEmbeddedDb,
     applyMigrations: (moduleId, migrationsDir) => applyModuleMigrations(moduleId, migrationsDir),
     getSendMail: async () => {
