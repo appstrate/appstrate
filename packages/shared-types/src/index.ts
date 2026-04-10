@@ -25,13 +25,16 @@ export type EnrichedRun = Run & {
 /**
  * Platform feature flags.
  *
- * Core flags are statically typed. Module-owned flags (e.g. `webhooks`,
- * future `oidc`) are contributed at boot via `AppstrateModule.features`
- * and flow through the index signature — no shared-types edit required
- * when adding a new module.
+ * Only *core* flags are statically typed here — flags derived from
+ * environment variables owned by the core platform (opt-in integrations
+ * like Google/GitHub OAuth, SMTP).
+ *
+ * Module-owned flags (e.g. `billing` from @appstrate/cloud, `webhooks`
+ * from the webhooks module, future `oidc`) are contributed at boot via
+ * `AppstrateModule.features` and flow through the index signature —
+ * adding a new module never requires editing shared-types.
  */
 export interface AppConfigFeatures {
-  billing: boolean;
   googleAuth: boolean;
   githubAuth: boolean;
   smtp: boolean;
