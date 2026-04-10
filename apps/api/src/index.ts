@@ -43,7 +43,7 @@ import {
   getModuleOpenApiPaths,
   getModuleOpenApiComponentSchemas,
   registerModuleRoutes,
-} from "./lib/modules/index.ts";
+} from "./lib/modules/module-loader.ts";
 import { ApiError, unauthorized } from "./lib/errors.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "./lib/permissions.ts";
 import { isEndUserInApp } from "./services/end-users.ts";

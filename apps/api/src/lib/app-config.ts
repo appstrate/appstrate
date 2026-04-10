@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getEnv } from "@appstrate/env";
-import { applyModuleFeatures } from "./modules/index.ts";
+import { applyModuleFeatures } from "./modules/module-loader.ts";
 import type { AppConfig } from "@appstrate/shared-types";
 
 const env = getEnv();

@@ -3,7 +3,7 @@
 import { closeDb } from "@appstrate/db/client";
 import { logger } from "./logger.ts";
 import { shutdownInfra } from "../infra/index.ts";
-import { shutdownModules } from "./modules/index.ts";
+import { shutdownModules } from "./modules/module-loader.ts";
 import { hasRedis } from "../infra/mode.ts";
 import {
   getInFlightCount,

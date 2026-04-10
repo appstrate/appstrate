@@ -30,7 +30,7 @@ import { resolvePermissions, resolveApiKeyPermissions } from "../../src/lib/perm
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { requireAppContext } from "../../src/middleware/app-context.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
-import { loadModulesFromInstances } from "../../src/lib/modules/index.ts";
+import { loadModulesFromInstances } from "../../src/lib/modules/module-loader.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 

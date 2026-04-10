@@ -7,13 +7,9 @@ import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
-import {
-  loadModules,
-  getModuleRegistry,
-  buildModuleInitContext,
-  getModules,
-  beforeSignup,
-} from "./modules/index.ts";
+import { loadModules, getModules } from "./modules/module-loader.ts";
+import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
+import { beforeSignup } from "./modules/hooks.ts";
 import { registerEmailOverrides } from "@appstrate/emails";
 import { setBeforeSignupHook } from "@appstrate/db/auth";
 import { initRealtime } from "../services/realtime.ts";
