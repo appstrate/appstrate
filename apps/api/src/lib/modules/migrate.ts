@@ -9,25 +9,20 @@
  * Supports both PostgreSQL (via drizzle-orm migrator) and PGlite (via raw SQL).
  */
 
-import { isEmbeddedDb } from "@appstrate/db/client";
-import type { Db } from "@appstrate/db/client";
+import { isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
 import type { PGlite } from "@electric-sql/pglite";
-import type { ModuleInitContext } from "@appstrate/core/module";
 import { logger } from "../logger.ts";
 
 /**
  * Apply Drizzle migrations for a module.
  *
- * `ctx` is accepted for contract symmetry with the module init signature but
- * not read — the migrator targets the shared `db` client from @appstrate/db
- * regardless of whether `ctx.databaseUrl` is set.
+ * Each module owns its own tracking table (`__drizzle_migrations_<moduleId>`),
+ * with hyphens replaced by underscores so the identifier is a valid SQL name.
  *
- * @param _ctx - Module init context (unused, kept for API symmetry)
  * @param moduleId - Module identifier (used for migration tracking table name)
  * @param migrationsDir - Absolute path to the module's migrations directory
  */
 export async function applyModuleMigrations(
-  _ctx: ModuleInitContext,
   moduleId: string,
   migrationsDir: string,
 ): Promise<void> {
@@ -62,30 +57,46 @@ export function lockKeyForModule(migrationsTable: string): bigint {
 export async function applyPostgresMigrations(
   migrationsDir: string,
   migrationsTable: string,
-  dbClient?: Db,
 ): Promise<void> {
-  const db = dbClient ?? (await import("@appstrate/db/client")).db;
+  const { db } = await import("@appstrate/db/client");
   const { migrate } = await import("drizzle-orm/postgres-js/migrator");
   const { sql } = await import("drizzle-orm");
 
-  // Serialize concurrent replicas on the same module's migration table.
+  // pg_advisory_lock is session-scoped — the unlock must target the exact
+  // backend connection that held the lock, so both the lock and the unlock
+  // run on a reserved postgres-js connection. The migrate() work itself can
+  // run on any pooled connection: the held lock blocks concurrent replicas
+  // regardless of which connection they use for the protected work.
+  const reserved = await reservePgConnection();
+  if (!reserved) {
+    throw new Error("reservePgConnection() returned null — expected PostgreSQL client");
+  }
+  const { sql: reservedSql, release } = reserved;
+
   const lockKey = lockKeyForModule(migrationsTable);
-  await db.execute(sql`SELECT pg_advisory_lock(${lockKey}::bigint)`);
   try {
-    // Suppress NOTICE messages ("already exists, skipping") during migrations
-    await db.execute(sql`SET client_min_messages TO 'warning'`);
+    await reservedSql`SELECT pg_advisory_lock(${String(lockKey)}::bigint)`;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- db type is compatible but schema generic differs
-      await migrate(db as any, {
-        migrationsFolder: migrationsDir,
-        migrationsTable,
-        migrationsSchema: "drizzle",
-      });
+      // Suppress NOTICE messages ("already exists, skipping") during migrations
+      await db.execute(sql`SET client_min_messages TO 'warning'`);
+      try {
+        // drizzle's PgDatabase accepts any schema generic, but our exported Db
+        // is typed against the core schema — the migrator only issues raw SQL
+        // and never reads the generic, so the widening cast is safe.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- schema generic widening for migrator
+        await migrate(db as any, {
+          migrationsFolder: migrationsDir,
+          migrationsTable,
+          migrationsSchema: "drizzle",
+        });
+      } finally {
+        await db.execute(sql`SET client_min_messages TO 'notice'`);
+      }
     } finally {
-      await db.execute(sql`SET client_min_messages TO 'notice'`);
+      await reservedSql`SELECT pg_advisory_unlock(${String(lockKey)}::bigint)`;
     }
   } finally {
-    await db.execute(sql`SELECT pg_advisory_unlock(${lockKey}::bigint)`);
+    release();
   }
 }
 

@@ -299,4 +299,53 @@ describe("module-loader", () => {
       await expect(shutdownModules()).resolves.toBeUndefined();
     });
   });
+
+  // Guards the module-side of the zero-footprint invariant from CLAUDE.md:
+  // with an empty module set, the loader contributes nothing — no module
+  // routes mount, no module feature flags flip, no module hooks register, no
+  // module public paths leak. Core routes/features/hooks (agents, runs, auth,
+  // etc.) are unaffected and live outside the module system. This test only
+  // exercises the module-loader surface; the full-boot zero-footprint check
+  // is covered manually (see PR test plan).
+  describe("empty module set contributes nothing", () => {
+    it("registers no module routes, features, public paths, or hooks", async () => {
+      const { Hono } = await import("hono");
+
+      await loadModulesFromInstances([], mockCtx());
+
+      expect(getModules().size).toBe(0);
+      expect(getModulePublicPaths()).toEqual(new Set());
+
+      // registerModuleRoutes is a no-op — it only mounts module-provided
+      // routers. Core routers are wired separately in apps/api/src/index.ts
+      // (and in the test harness) and are unaffected.
+      const app = new Hono();
+      registerModuleRoutes(app as never);
+      const res = await app.request("/api/webhooks");
+      expect(res.status).toBe(404);
+
+      // applyModuleFeatures leaves base features untouched — only module
+      // contributions are merged in.
+      const merged = applyModuleFeatures(baseConfig);
+      expect(merged.features).toEqual(baseConfig.features);
+
+      // No module-provided hooks. Core does not use the module hook system
+      // for its own logic, so this strictly reflects the module surface.
+      expect(hasHook("beforeRun")).toBe(false);
+      expect(hasHook("afterRun")).toBe(false);
+      expect(hasHook("beforeSignup")).toBe(false);
+
+      // emitEvent is a silent no-op when no module listens — no handlers run
+      // and no error propagates.
+      await expect(
+        emitEvent("onRunStatusChange", {
+          orgId: "o",
+          runId: "r",
+          agentId: "a",
+          applicationId: "app",
+          status: "success",
+        }),
+      ).resolves.toBeUndefined();
+    });
+  });
 });

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { and, eq, lt } from "drizzle-orm";
-import { db, isEmbeddedDb, getPGliteClient } from "@appstrate/db/client";
+import { db, isEmbeddedDb, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
 import { oauthStates, packages, packageVersions } from "@appstrate/db/schema";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
@@ -323,6 +323,11 @@ async function applyEmbeddedMigrations(): Promise<void> {
  * using a stable constant key (shared across all replicas). A second caller
  * blocks until the first finishes, then observes its entries in the tracking
  * table and skips them.
+ *
+ * pg_advisory_lock is session-scoped: the lock and unlock must target the
+ * same backend connection. We pin them to a reserved postgres-js connection;
+ * the migrator runs on the shared pool since holding the lock elsewhere is
+ * enough to block concurrent replicas.
  */
 const APPSTRATE_CORE_MIGRATION_LOCK_KEY = 7246811234567890n;
 
@@ -333,20 +338,27 @@ async function applyCoreMigrations(): Promise<void> {
 
   const migrationsFolder = resolve(import.meta.dir, "../../../../packages/db/drizzle");
 
-  await db.execute(rawSql`SELECT pg_advisory_lock(${APPSTRATE_CORE_MIGRATION_LOCK_KEY}::bigint)`);
+  const reserved = await reservePgConnection();
+  if (!reserved) {
+    throw new Error("reservePgConnection() returned null — expected PostgreSQL client");
+  }
+  const { sql: reservedSql, release } = reserved;
+
   try {
-    // Suppress NOTICE messages ("already exists, skipping") during migrations
-    await db.execute(rawSql`SET client_min_messages TO 'warning'`);
+    await reservedSql`SELECT pg_advisory_lock(${String(APPSTRATE_CORE_MIGRATION_LOCK_KEY)}::bigint)`;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- db type is compatible but schema generic differs
-      await migrate(db as any, { migrationsFolder });
+      await db.execute(rawSql`SET client_min_messages TO 'warning'`);
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- schema generic widening for migrator
+        await migrate(db as any, { migrationsFolder });
+      } finally {
+        await db.execute(rawSql`SET client_min_messages TO 'notice'`);
+      }
     } finally {
-      await db.execute(rawSql`SET client_min_messages TO 'notice'`);
+      await reservedSql`SELECT pg_advisory_unlock(${String(APPSTRATE_CORE_MIGRATION_LOCK_KEY)}::bigint)`;
     }
   } finally {
-    await db.execute(
-      rawSql`SELECT pg_advisory_unlock(${APPSTRATE_CORE_MIGRATION_LOCK_KEY}::bigint)`,
-    );
+    release();
   }
   logger.info("Core migrations applied");
 }

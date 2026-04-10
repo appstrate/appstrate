@@ -1,15 +1,12 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { resolve } from "node:path";
 import { sql } from "drizzle-orm";
-import type { ModuleInitContext } from "@appstrate/core/module";
 import { db } from "../../helpers/db.ts";
 import { applyModuleMigrations } from "../../../src/lib/modules/migrate.ts";
 
 const FIXTURE_ROOT = resolve(import.meta.dir, "../../fixtures/migrations");
 const FIXTURE_A = resolve(FIXTURE_ROOT, "test-module");
-
-// applyModuleMigrations doesn't read ctx — empty cast is sufficient.
-const ctx = {} as ModuleInitContext;
+const FIXTURE_B = resolve(FIXTURE_ROOT, "test-module-2");
 
 async function cleanup() {
   // Suppress NOTICE spam from DROP ... IF EXISTS on absent tables.
@@ -39,12 +36,6 @@ async function countRows(fullyQualified: string): Promise<number> {
   return Number(res[0]?.n ?? 0);
 }
 
-// Note: idempotence and cross-module isolation are covered by the PGlite unit
-// tests (test/unit/modules/migrate-pglite.test.ts). Equivalent tests against
-// real Postgres would chain multiple applyModuleMigrations() calls, but the
-// current pg_advisory_lock pattern is session-scoped and leaks across pool
-// connections — the second acquire blocks indefinitely. This is a known
-// limitation of the Postgres path; the boot-time single-call pattern is safe.
 describe("applyModuleMigrations (Postgres)", () => {
   beforeEach(async () => {
     await cleanup();
@@ -55,14 +46,14 @@ describe("applyModuleMigrations (Postgres)", () => {
   });
 
   it("creates the module table and tracks the applied migration on first run", async () => {
-    await applyModuleMigrations(ctx, "test-module", FIXTURE_A);
+    await applyModuleMigrations("test-module", FIXTURE_A);
 
     expect(await tableExists("test_migrate_dummy")).toBe(true);
     expect(await countRows('drizzle."__drizzle_migrations_test_module"')).toBe(1);
   });
 
   it("replaces hyphens with underscores in the tracking table name", async () => {
-    await applyModuleMigrations(ctx, "my-module", FIXTURE_A);
+    await applyModuleMigrations("my-module", FIXTURE_A);
 
     // Hyphen → underscore: "my-module" becomes "__drizzle_migrations_my_module"
     const res = (await db.execute(
@@ -72,5 +63,27 @@ describe("applyModuleMigrations (Postgres)", () => {
           LIMIT 1`,
     )) as unknown as unknown[];
     expect(res.length).toBe(1);
+  });
+
+  // Guards the pool-affinity fix: reserveDrizzleDb pins the advisory lock, the
+  // migrator, and the unlock to the same connection. Before the fix, the unlock
+  // would land on a different pool connection (silent no-op) and the second
+  // call would block forever waiting for the now-orphaned lock.
+  it("is idempotent across successive calls on the same module", async () => {
+    await applyModuleMigrations("test-module", FIXTURE_A);
+    await applyModuleMigrations("test-module", FIXTURE_A);
+    await applyModuleMigrations("test-module", FIXTURE_A);
+
+    expect(await countRows('drizzle."__drizzle_migrations_test_module"')).toBe(1);
+  });
+
+  it("isolates migrations between modules (separate tracking tables)", async () => {
+    await applyModuleMigrations("test-module", FIXTURE_A);
+    await applyModuleMigrations("test-module-2", FIXTURE_B);
+
+    expect(await tableExists("test_migrate_dummy")).toBe(true);
+    expect(await tableExists("test_migrate_dummy_2")).toBe(true);
+    expect(await countRows('drizzle."__drizzle_migrations_test_module"')).toBe(1);
+    expect(await countRows('drizzle."__drizzle_migrations_test_module_2"')).toBe(1);
   });
 });

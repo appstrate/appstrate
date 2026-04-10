@@ -55,8 +55,7 @@ export function buildModuleInitContext(): ModuleInitContext {
     redisUrl: env.REDIS_URL ?? null,
     appUrl: env.APP_URL ?? "http://localhost:3000",
     isEmbeddedDb,
-    applyMigrations: (moduleId, migrationsDir) =>
-      applyModuleMigrations(ctx, moduleId, migrationsDir),
+    applyMigrations: (moduleId, migrationsDir) => applyModuleMigrations(moduleId, migrationsDir),
     getSendMail: async () => {
       // Lazy import to break circular dep: email.ts -> app-config.ts -> modules
       const { sendMail } = await import("../../services/email.ts");
