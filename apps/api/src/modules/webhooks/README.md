@@ -23,6 +23,16 @@ features: {
 }
 ```
 
+## App-scoped route prefixes
+
+```ts
+appScopedPaths: ["/api/webhooks"];
+```
+
+Contributed via the `appScopedPaths` field on the module manifest so that
+core's app-context middleware picks up the prefix dynamically — core has
+no hardcoded knowledge of the webhooks routes.
+
 ## Permissions
 
 | Role  | Permissions                                          |

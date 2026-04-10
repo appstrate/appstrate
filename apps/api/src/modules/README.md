@@ -54,6 +54,13 @@ const myModule: AppstrateModule = {
     return createMyFeatureRouter(); // Hono<AppEnv>
   },
 
+  /**
+   * Route prefixes that require the `X-App-Id` header and go through the
+   * app context middleware. Aggregated with core prefixes at boot — core
+   * has no hardcoded knowledge of module paths.
+   */
+  appScopedPaths: ["/api/my-feature"],
+
   openApiPaths() {
     return myFeaturePaths;
   },
@@ -68,7 +75,7 @@ const myModule: AppstrateModule = {
 export default myModule;
 ```
 
-Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`, `emailOverrides`, `publicPaths`, `manifest.dependencies`) is optional.
+Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`, `emailOverrides`, `publicPaths`, `appScopedPaths`, `manifest.dependencies`) is optional. Use `publicPaths` for routes that bypass auth (e.g. inbound webhook callbacks), and `appScopedPaths` for routes that require `X-App-Id`.
 
 ## Database ownership rules
 
