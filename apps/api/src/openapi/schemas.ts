@@ -381,6 +381,10 @@ export const schemas = {
         type: ["string", "null"],
         description: "End-user ID (eu_ prefix) if executed on behalf of an end-user",
       },
+      apiKeyId: {
+        type: ["string", "null"],
+        description: "API key ID that triggered the run (null for dashboard/schedule runs)",
+      },
       applicationId: {
         type: ["string", "null"],
         description: "Application ID (app_ prefix) that owns this run",
@@ -389,6 +393,22 @@ export const schemas = {
         type: ["object", "null"],
         description: "Additional metadata (e.g. creditsUsed in cloud mode)",
         additionalProperties: true,
+      },
+      userName: {
+        type: ["string", "null"],
+        description: "Display name of the user who triggered the run (from profiles table)",
+      },
+      endUserName: {
+        type: ["string", "null"],
+        description: "Display name of the end-user (name or externalId fallback)",
+      },
+      apiKeyName: {
+        type: ["string", "null"],
+        description: "Name of the API key that triggered the run",
+      },
+      scheduleName: {
+        type: ["string", "null"],
+        description: "Name of the schedule that triggered the run",
       },
     },
   },
