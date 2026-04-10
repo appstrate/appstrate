@@ -1,4 +1,6 @@
--- Provider Management module: initial schema
+-- Move provider-management from module back into core.
+-- Uses IF NOT EXISTS to be safe on deployments that already ran the module migration
+-- (tracking table: __drizzle_migrations_provider_management).
 
 CREATE TABLE IF NOT EXISTS "org_provider_keys" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,

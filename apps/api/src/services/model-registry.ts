@@ -2,7 +2,6 @@
 
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
-import type { ResolvedModelResult } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { modelCostSchema } from "./adapters/types.ts";
 import type { ModelCost } from "./adapters/types.ts";
@@ -173,49 +172,4 @@ export function isSystemModel(modelId: string): boolean {
 
 export function isSystemProviderKey(keyId: string): boolean {
   return systemProviderKeys?.has(keyId) ?? false;
-}
-
-/**
- * Resolve a model from system models only (SYSTEM_PROVIDER_KEYS env).
- * Used as fallback when the provider-management module is not loaded.
- * Returns the specified model or the system default, or null.
- */
-export function resolveSystemModel(modelId?: string | null): ResolvedModelResult | null {
-  const models = getSystemModels();
-  if (modelId) {
-    const def = models.get(modelId);
-    if (!def) return null;
-    return {
-      api: def.api,
-      baseUrl: def.baseUrl,
-      modelId: def.modelId,
-      apiKey: def.apiKey,
-      label: def.label,
-      input: def.input ?? null,
-      contextWindow: def.contextWindow ?? null,
-      maxTokens: def.maxTokens ?? null,
-      reasoning: def.reasoning ?? null,
-      cost: def.cost ?? null,
-      isSystemModel: true,
-    };
-  }
-  // Find system default
-  for (const def of models.values()) {
-    if (def.isDefault) {
-      return {
-        api: def.api,
-        baseUrl: def.baseUrl,
-        modelId: def.modelId,
-        apiKey: def.apiKey,
-        label: def.label,
-        input: def.input ?? null,
-        contextWindow: def.contextWindow ?? null,
-        maxTokens: def.maxTokens ?? null,
-        reasoning: def.reasoning ?? null,
-        cost: def.cost ?? null,
-        isSystemModel: true,
-      };
-    }
-  }
-  return null;
 }

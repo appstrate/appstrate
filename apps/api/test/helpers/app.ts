@@ -9,12 +9,12 @@
  * This allows integration tests to exercise the full HTTP → middleware → auth → service → DB
  * pipeline with a real database.
  *
- * NOTE on module imports: the built-in module routes (webhooks,
- * provider-management) are imported statically below. This is intentional —
- * test fixtures deliberately exercise all built-in modules regardless of the
- * `APPSTRATE_MODULES` env var, whereas production loads them dynamically
- * through the module loader. The zero-footprint rule in CLAUDE.md applies to
- * the production boot path, not to shared test helpers.
+ * NOTE on module imports: the built-in module routes (webhooks) are
+ * imported statically below. This is intentional — test fixtures deliberately
+ * exercise all built-in modules regardless of the `APPSTRATE_MODULES` env var,
+ * whereas production loads them dynamically through the module loader. The
+ * zero-footprint rule in CLAUDE.md applies to the production boot path, not
+ * to shared test helpers.
  */
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -41,8 +41,8 @@ import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
 import { createProvidersRouter } from "../../src/routes/providers.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
-import { createModelsRouter } from "../../src/modules/provider-management/routes/models.ts";
-import { createProviderKeysRouter } from "../../src/modules/provider-management/routes/provider-keys.ts";
+import { createModelsRouter } from "../../src/routes/models.ts";
+import { createProviderKeysRouter } from "../../src/routes/provider-keys.ts";
 import { createInternalRouter } from "../../src/routes/internal.ts";
 import { createApplicationsRouter } from "../../src/routes/applications.ts";
 import { createConnectionProfilesRouter } from "../../src/routes/connection-profiles.ts";
@@ -64,9 +64,9 @@ import type { AppEnv } from "../../src/types/index.ts";
 let cachedApp: Hono<AppEnv> | null = null;
 
 // Initialize boot-time singletons that routes depend on.
-// Module routers (webhooks, provider-management) are mounted statically below
-// without going through the module loader — tests don't need BullMQ workers
-// or migrations, and RBAC is owned by core.
+// The webhooks module router is mounted statically below without going through
+// the module loader — tests don't need BullMQ workers or migrations, and RBAC
+// is owned by core.
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
 initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 

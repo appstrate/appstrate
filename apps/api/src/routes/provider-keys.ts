@@ -2,10 +2,10 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AppEnv } from "../../../types/index.ts";
-import { rateLimit } from "../../../middleware/rate-limit.ts";
-import { requirePermission } from "../../../middleware/require-permission.ts";
-import { isSystemProviderKey } from "../../../services/model-registry.ts";
+import type { AppEnv } from "../types/index.ts";
+import { rateLimit } from "../middleware/rate-limit.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
+import { isSystemProviderKey } from "../services/model-registry.ts";
 import {
   listOrgProviderKeys,
   createOrgProviderKey,
@@ -15,14 +15,14 @@ import {
   loadProviderKeyCredentials,
 } from "../services/org-provider-keys.ts";
 import { testModelConfig } from "../services/org-models.ts";
-import { logger } from "../../../lib/logger.ts";
+import { logger } from "../lib/logger.ts";
 import {
   invalidRequest,
   notFound,
   internalError,
   parseBody,
   systemEntityForbidden,
-} from "../../../lib/errors.ts";
+} from "../lib/errors.ts";
 
 export const createSchema = z.object({
   label: z.string().min(1, "label is required"),
@@ -47,14 +47,13 @@ export const testInlineSchema = z.object({
 
 export function createProviderKeysRouter() {
   const router = new Hono<AppEnv>();
-  // GET /api/provider-keys
+
   router.get("/", requirePermission("provider-keys", "read"), async (c) => {
     const orgId = c.get("orgId");
     const keys = await listOrgProviderKeys(orgId);
     return c.json({ keys });
   });
 
-  // POST /api/provider-keys
   router.post("/", requirePermission("provider-keys", "write"), async (c) => {
     const orgId = c.get("orgId");
     const user = c.get("user");
@@ -72,7 +71,6 @@ export function createProviderKeysRouter() {
     }
   });
 
-  // POST /api/provider-keys/test — inline test (before saving)
   router.post("/test", rateLimit(5), requirePermission("provider-keys", "read"), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
@@ -101,7 +99,6 @@ export function createProviderKeysRouter() {
     }
   });
 
-  // POST /api/provider-keys/:id/test
   router.post("/:id/test", rateLimit(5), requirePermission("provider-keys", "read"), async (c) => {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;
@@ -120,7 +117,6 @@ export function createProviderKeysRouter() {
     }
   });
 
-  // PUT /api/provider-keys/:id
   router.put("/:id", requirePermission("provider-keys", "write"), async (c) => {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;
@@ -141,7 +137,6 @@ export function createProviderKeysRouter() {
     }
   });
 
-  // DELETE /api/provider-keys/:id
   router.delete("/:id", requirePermission("provider-keys", "delete"), async (c) => {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;

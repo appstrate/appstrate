@@ -2,11 +2,11 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AppEnv } from "../../../types/index.ts";
-import { rateLimit } from "../../../middleware/rate-limit.ts";
-import { requirePermission } from "../../../middleware/require-permission.ts";
-import { isSystemModel } from "../../../services/model-registry.ts";
-import { modelCostSchema } from "../../../services/adapters/types.ts";
+import type { AppEnv } from "../types/index.ts";
+import { rateLimit } from "../middleware/rate-limit.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
+import { isSystemModel } from "../services/model-registry.ts";
+import { modelCostSchema } from "../services/adapters/types.ts";
 import {
   listOrgModels,
   createOrgModel,
@@ -17,7 +17,7 @@ import {
   testModelConfig,
   loadModel,
 } from "../services/org-models.ts";
-import { logger } from "../../../lib/logger.ts";
+import { logger } from "../lib/logger.ts";
 import {
   ApiError,
   invalidRequest,
@@ -25,7 +25,7 @@ import {
   internalError,
   parseBody,
   systemEntityForbidden,
-} from "../../../lib/errors.ts";
+} from "../lib/errors.ts";
 
 export const createModelSchema = z.object({
   label: z.string().min(1, "label is required"),
@@ -69,14 +69,12 @@ export const testInlineSchema = z.object({
 export function createModelsRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/models — list all models (system + DB)
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
     const models = await listOrgModels(orgId);
     return c.json({ models });
   });
 
-  // POST /api/models — create a custom model
   router.post("/", requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const user = c.get("user");
@@ -112,7 +110,6 @@ export function createModelsRouter() {
     }
   });
 
-  // PUT /api/models/default — set the org default model
   // MUST be registered before PUT /:id
   router.put("/default", requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
@@ -130,7 +127,6 @@ export function createModelsRouter() {
     }
   });
 
-  // GET /api/models/openrouter — search OpenRouter models (proxy)
   router.get("/openrouter", rateLimit(10), async (c) => {
     const q = c.req.query("q") || "";
 
@@ -158,7 +154,6 @@ export function createModelsRouter() {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let models = rawModels.map((m: any) => {
-        // OpenRouter pricing is per-token; convert to $/M tokens for ModelCost
         const pricing = m.pricing;
         const promptPerToken = parseFloat(pricing?.prompt);
         const completionPerToken = parseFloat(pricing?.completion);
@@ -188,7 +183,6 @@ export function createModelsRouter() {
         };
       });
 
-      // Filter by search query
       if (q.trim()) {
         const lower = q.toLowerCase();
         models = models.filter(
@@ -196,7 +190,6 @@ export function createModelsRouter() {
         );
       }
 
-      // Limit results
       models = models.slice(0, 50);
 
       return c.json({ models });
@@ -222,7 +215,6 @@ export function createModelsRouter() {
     }
   });
 
-  // POST /api/models/test — test model config inline (before saving)
   // MUST be registered before /:id/test
   router.post("/test", rateLimit(5), async (c) => {
     const orgId = c.get("orgId");
@@ -231,7 +223,6 @@ export function createModelsRouter() {
 
     let { apiKey } = data;
 
-    // In edit mode, if no apiKey provided, fall back to the stored key
     if (!apiKey && data.existingModelId) {
       const existing = await loadModel(orgId, data.existingModelId);
       if (existing) apiKey = existing.apiKey;
@@ -257,7 +248,6 @@ export function createModelsRouter() {
     }
   });
 
-  // POST /api/models/:id/test — test model connection
   router.post("/:id/test", rateLimit(5), async (c) => {
     const orgId = c.get("orgId");
     const modelId = c.req.param("id")!;
@@ -276,7 +266,6 @@ export function createModelsRouter() {
     }
   });
 
-  // PUT /api/models/:id — update a custom model
   router.put("/:id", requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const modelId = c.req.param("id")!;
@@ -299,7 +288,6 @@ export function createModelsRouter() {
     }
   });
 
-  // DELETE /api/models/:id — delete a custom model
   router.delete("/:id", requirePermission("models", "delete"), async (c) => {
     const orgId = c.get("orgId");
     const modelId = c.req.param("id")!;

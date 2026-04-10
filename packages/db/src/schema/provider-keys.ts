@@ -12,13 +12,8 @@ import {
   jsonb,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { organizations, user } from "@appstrate/db/schema";
-
-// Provider Management module — owns org_provider_keys and org_models tables.
-//
-// Backward FKs to core tables (organizations, user) are declared via Drizzle
-// `.references()` so the schema is self-documenting. Core tables always exist
-// before this module runs (core migrations run first at boot).
+import { organizations } from "./organizations.ts";
+import { user } from "./auth.ts";
 
 export const orgProviderKeys = pgTable(
   "org_provider_keys",
@@ -52,14 +47,14 @@ export const orgModels = pgTable(
     providerKeyId: uuid("provider_key_id")
       .notNull()
       .references(() => orgProviderKeys.id, { onDelete: "cascade" }),
-    input: jsonb("input"), // ["text", "image"] | null
-    contextWindow: integer("context_window"), // 200000 | null
-    maxTokens: integer("max_tokens"), // 16384 | null
-    reasoning: boolean("reasoning"), // true | null
-    cost: jsonb("cost"), // { input, output, cacheRead, cacheWrite } in $/M tokens | null
+    input: jsonb("input"),
+    contextWindow: integer("context_window"),
+    maxTokens: integer("max_tokens"),
+    reasoning: boolean("reasoning"),
+    cost: jsonb("cost"),
     enabled: boolean("enabled").notNull().default(true),
     isDefault: boolean("is_default").notNull().default(false),
-    source: text("source").notNull().default("custom"), // "built-in" | "custom"
+    source: text("source").notNull().default("custom"),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),

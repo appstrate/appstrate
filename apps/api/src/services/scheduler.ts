@@ -20,7 +20,7 @@ import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/index.ts";
-import { onRunStatusChange } from "../lib/modules/hooks.ts";
+import { emitEvent } from "../lib/modules/module-loader.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "./run-pipeline.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
 import { getPackage, packageExists } from "./agent-service.ts";
@@ -204,7 +204,7 @@ async function triggerScheduledRun(
         scheduleId,
         connectionProfileId,
       );
-      void onRunStatusChange({
+      void emitEvent("onRunStatusChange", {
         orgId,
         runId,
         agentId: packageId,

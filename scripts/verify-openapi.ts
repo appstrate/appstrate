@@ -323,6 +323,24 @@ const expectedEndpoints = [
   "PUT /api/schedules/{id}",
   "DELETE /api/schedules/{id}",
   "GET /api/schedules/{id}/runs",
+
+  // Models
+  "GET /api/models",
+  "POST /api/models",
+  "PUT /api/models/default",
+  "GET /api/models/openrouter",
+  "POST /api/models/test",
+  "PUT /api/models/{id}",
+  "DELETE /api/models/{id}",
+  "POST /api/models/{id}/test",
+
+  // Provider Keys
+  "GET /api/provider-keys",
+  "POST /api/provider-keys",
+  "POST /api/provider-keys/test",
+  "PUT /api/provider-keys/{id}",
+  "DELETE /api/provider-keys/{id}",
+  "POST /api/provider-keys/{id}/test",
 ];
 
 // Module-contributed endpoints are sourced directly from each module's

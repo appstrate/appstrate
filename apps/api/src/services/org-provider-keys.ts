@@ -2,13 +2,13 @@
 
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgProviderKeys } from "../schema.ts";
+import { orgProviderKeys } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
-import { getSystemProviderKeys } from "../../../services/model-registry.ts";
+import { getSystemProviderKeys } from "./model-registry.ts";
 import type { OrgProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 import { testModelConfig } from "./org-models.ts";
-import { mergeSystemAndDb, buildUpdateSet } from "../../../lib/db-helpers.ts";
-import { toISO, toISORequired } from "../../../lib/date-helpers.ts";
+import { mergeSystemAndDb, buildUpdateSet } from "../lib/db-helpers.ts";
+import { toISO, toISORequired } from "../lib/date-helpers.ts";
 
 // --- List (system + DB) ---
 
@@ -93,7 +93,6 @@ export async function loadProviderKeyCredentials(
   orgId: string,
   id: string,
 ): Promise<{ api: string; baseUrl: string; apiKey: string } | null> {
-  // Check system provider keys first (same pattern as loadModel checks system models)
   const systemKey = getSystemProviderKeys().get(id);
   if (systemKey) {
     return { api: systemKey.api, baseUrl: systemKey.baseUrl, apiKey: systemKey.apiKey };

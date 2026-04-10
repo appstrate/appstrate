@@ -17,10 +17,10 @@ interface StepDef {
   route: string;
 }
 
-const ALL_STEPS: (StepDef & { showWhen?: "models" | "billing" })[] = [
+const ALL_STEPS: (StepDef & { showWhen?: "billing" })[] = [
   { key: "create", route: "/onboarding/create" },
   { key: "plan", route: "/onboarding/plan", showWhen: "billing" },
-  { key: "model", route: "/onboarding/model", showWhen: "models" },
+  { key: "model", route: "/onboarding/model" },
   { key: "providers", route: "/onboarding/providers" },
   { key: "members", route: "/onboarding/members" },
   { key: "complete", route: "/onboarding/complete" },

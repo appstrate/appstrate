@@ -30,7 +30,7 @@ import { ApiError, notFound, conflict } from "../lib/errors.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
-import { onRunStatusChange, afterRun } from "../lib/modules/hooks.ts";
+import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
@@ -63,7 +63,7 @@ export async function executeAgentInBackground(
   try {
     // Update status to running
     await updateRun(runId, orgId, applicationId, { status: "running" });
-    void onRunStatusChange({
+    void emitEvent("onRunStatusChange", {
       orgId,
       runId,
       agentId: agent.id,
@@ -182,7 +182,7 @@ export async function executeAgentInBackground(
           },
           "error",
         );
-        void onRunStatusChange({
+        void emitEvent("onRunStatusChange", {
           orgId,
           runId,
           agentId: agent.id,
@@ -229,7 +229,7 @@ export async function executeAgentInBackground(
         { runId, status: "failed", error },
         "error",
       );
-      void onRunStatusChange({
+      void emitEvent("onRunStatusChange", {
         orgId,
         runId,
         agentId: agent.id,
@@ -282,16 +282,17 @@ export async function executeAgentInBackground(
 
       let metadata: Record<string, unknown> | null = null;
       try {
-        metadata = await afterRun({
-          orgId,
-          runId,
-          agentId: agent.id,
-          applicationId,
-          status: "success",
-          cost: accumulatedCost,
-          duration,
-          modelSource: modelSource ?? null,
-        });
+        metadata =
+          (await callHook("afterRun", {
+            orgId,
+            runId,
+            agentId: agent.id,
+            applicationId,
+            status: "success",
+            cost: accumulatedCost,
+            duration,
+            modelSource: modelSource ?? null,
+          })) ?? null;
       } catch (err) {
         logger.error("afterRun hook failed — run record will be missing metadata", {
           err: err instanceof Error ? err.message : String(err),
@@ -325,7 +326,7 @@ export async function executeAgentInBackground(
         { runId, status: "success" },
         "info",
       );
-      void onRunStatusChange({
+      void emitEvent("onRunStatusChange", {
         orgId,
         runId,
         agentId: agent.id,
@@ -363,7 +364,7 @@ export async function executeAgentInBackground(
       },
       "error",
     );
-    void onRunStatusChange({
+    void emitEvent("onRunStatusChange", {
       orgId,
       runId,
       agentId: agent.id,
@@ -611,7 +612,7 @@ export function createRunsRouter() {
       .stopByRunId(runId)
       .catch(() => {});
 
-    void onRunStatusChange({
+    void emitEvent("onRunStatusChange", {
       orgId,
       runId,
       agentId: run.packageId,

@@ -29,6 +29,8 @@ import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
 import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
+import { createModelsRouter } from "./routes/models.ts";
+import { createProviderKeysRouter } from "./routes/provider-keys.ts";
 import healthRouter from "./routes/health.ts";
 import { createConnectionsRouter } from "./routes/connections.ts";
 import { createLibraryRouter } from "./routes/library.ts";
@@ -302,6 +304,8 @@ app.route("/api/agents", agentsRouter);
 app.route("/api", createNotificationsRouter()); // Must be before runsRouter (GET /api/runs vs /api/runs/:id)
 app.route("/api", runsRouter);
 app.route("/api", createSchedulesRouter());
+app.route("/api/models", createModelsRouter());
+app.route("/api/provider-keys", createProviderKeysRouter());
 app.route("/api/packages", createPackagesRouter());
 app.route("/api/end-users", createEndUsersRouter());
 app.route("/api/providers", createProvidersRouter());

@@ -40,8 +40,6 @@ function mockCtx(): ModuleInitContext {
 const baseConfig: AppConfig = {
   features: {
     billing: false,
-    models: false,
-    providerKeys: false,
     webhooks: false,
     googleAuth: false,
     githubAuth: false,
@@ -167,12 +165,11 @@ describe("module-loader", () => {
   describe("applyModuleFeatures", () => {
     it("merges feature flags from every module without mutating base", async () => {
       const a = mockModule("a", { features: { billing: true } });
-      const b = mockModule("b", { features: { models: true, webhooks: true } });
+      const b = mockModule("b", { features: { webhooks: true } });
       await loadModulesFromInstances([a, b], mockCtx());
 
       const result = applyModuleFeatures(baseConfig);
       expect(result.features.billing).toBe(true);
-      expect(result.features.models).toBe(true);
       expect(result.features.webhooks).toBe(true);
       expect(baseConfig.features.billing).toBe(false); // unchanged
     });
@@ -207,14 +204,13 @@ describe("module-loader", () => {
       expect(hasHook("beforeSignup")).toBe(false);
     });
 
-    it("afterRun wrapper returns the metadata patch from the first matching module", async () => {
-      const { afterRun } = await import("../../../src/lib/modules/hooks.ts");
+    it("callHook('afterRun') returns the metadata patch from the first matching module", async () => {
       const mod = mockModule("billing", {
         hooks: { afterRun: async () => ({ creditsUsed: 42 }) },
       });
       await loadModulesFromInstances([mod], mockCtx());
 
-      const result = await afterRun({
+      const result = await callHook("afterRun", {
         orgId: "o",
         runId: "r",
         agentId: "a",
@@ -227,11 +223,10 @@ describe("module-loader", () => {
       expect(result).toEqual({ creditsUsed: 42 });
     });
 
-    it("afterRun wrapper returns null when no module provides the hook", async () => {
-      const { afterRun } = await import("../../../src/lib/modules/hooks.ts");
+    it("callHook('afterRun') returns undefined when no module provides the hook", async () => {
       await loadModulesFromInstances([], mockCtx());
 
-      const result = await afterRun({
+      const result = await callHook("afterRun", {
         orgId: "o",
         runId: "r",
         agentId: "a",
@@ -241,7 +236,7 @@ describe("module-loader", () => {
         duration: 100,
         modelSource: null,
       });
-      expect(result).toBeNull();
+      expect(result).toBeUndefined();
     });
   });
 

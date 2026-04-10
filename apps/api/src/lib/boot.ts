@@ -7,9 +7,8 @@ import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
-import { loadModules, getModules } from "./modules/module-loader.ts";
+import { loadModules, getModules, callHook } from "./modules/module-loader.ts";
 import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
-import { beforeSignup } from "./modules/hooks.ts";
 import { registerEmailOverrides } from "@appstrate/emails";
 import { setBeforeSignupHook } from "@appstrate/db/auth";
 import { initRealtime } from "../services/realtime.ts";
@@ -57,7 +56,9 @@ export async function boot(): Promise<void> {
       registerEmailOverrides(mod.emailOverrides);
     }
   }
-  setBeforeSignupHook(beforeSignup);
+  setBeforeSignupHook(async (email: string) => {
+    await callHook("beforeSignup", email);
+  });
   if (env.S3_BUCKET) {
     logger.info("Storage: S3", { bucket: env.S3_BUCKET, endpoint: env.S3_ENDPOINT ?? "AWS" });
   } else {

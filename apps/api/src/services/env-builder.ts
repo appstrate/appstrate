@@ -14,8 +14,7 @@ import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
-import { callHook } from "../lib/modules/module-loader.ts";
-import { resolveSystemModel } from "./model-registry.ts";
+import { resolveModel } from "./org-models.ts";
 import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
 import type { ProviderProfileMap } from "../types/index.ts";
 import { toISO } from "../lib/date-helpers.ts";
@@ -93,11 +92,7 @@ export async function buildRunContext(params: {
 
   const [proxyResult, modelResult] = await Promise.all([
     resolveProxy(orgId, agent.id, effectiveProxyId),
-    // Hook-based resolution: provider-management module provides full cascade,
-    // fallback to system models only if module is not loaded.
-    callHook("resolveModel", orgId, agent.id, effectiveModelId).then(
-      (result) => result ?? resolveSystemModel(effectiveModelId),
-    ),
+    resolveModel(orgId, agent.id, effectiveModelId),
   ]);
 
   if (!modelResult) {

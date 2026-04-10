@@ -124,12 +124,6 @@ export interface ModuleHooks {
   beforeRun: (params: BeforeRunParams) => Promise<RunRejection | null>;
   /** Pre-signup gate — throw to reject signup (e.g. domain allowlist). */
   beforeSignup: (email: string) => Promise<void>;
-  /** Resolve which LLM model to use for a run (org-level cascade). */
-  resolveModel: (
-    orgId: string,
-    packageId: string,
-    modelId?: string | null,
-  ) => Promise<ResolvedModelResult | null>;
   /**
    * Post-run hook — called on terminal status before the final run record is
    * persisted. Symmetric with `beforeRun`. Modules return a metadata patch

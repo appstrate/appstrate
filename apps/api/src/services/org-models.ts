@@ -2,20 +2,16 @@
 
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import { orgModels } from "@appstrate/db/schema";
 import type { ResolvedModelResult } from "@appstrate/core/module";
-import { orgModels } from "../schema.ts";
-import {
-  getSystemModels,
-  isSystemModel,
-  type ModelDefinition,
-} from "../../../services/model-registry.ts";
-import type { ModelCost } from "../../../services/adapters/types.ts";
-import { logger } from "../../../lib/logger.ts";
+import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
+import type { ModelCost } from "./adapters/types.ts";
+import { logger } from "../lib/logger.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import { loadProviderKeyCredentials } from "./org-provider-keys.ts";
-import { toISORequired } from "../../../lib/date-helpers.ts";
-import { mergeSystemAndDb, buildUpdateSet } from "../../../lib/db-helpers.ts";
+import { toISORequired } from "../lib/date-helpers.ts";
+import { mergeSystemAndDb, buildUpdateSet } from "../lib/db-helpers.ts";
 
 // --- List (system + DB) ---
 
@@ -89,7 +85,6 @@ export async function createOrgModel(
     cost?: ModelCost;
   },
 ): Promise<string> {
-  // If this is the first model for the org, set it as default
   const existing = await db
     .select({ id: orgModels.id })
     .from(orgModels)
@@ -156,7 +151,6 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
 }
 
 export async function setDefaultModel(orgId: string, modelDbId: string | null): Promise<void> {
-  // Reset all defaults for this org
   await db
     .update(orgModels)
     .set({ isDefault: false, updatedAt: new Date() })
@@ -164,7 +158,6 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
 
   if (modelDbId === null) return;
 
-  // Only DB models can be flagged — system defaults are handled by the resolution cascade
   if (!isSystemModel(modelDbId)) {
     await db
       .update(orgModels)
@@ -191,12 +184,14 @@ function systemDefToResolved(def: ModelDefinition): ResolvedModelResult {
   };
 }
 
+/**
+ * Resolve a model for a run with full cascade: explicit override → org default → system default.
+ */
 export async function resolveModel(
   orgId: string,
   packageId: string,
   modelId: string | null,
 ): Promise<ResolvedModelResult | null> {
-  // 1. Explicit override (agent column or per-run)
   if (modelId) {
     const result = await loadModel(orgId, modelId);
     if (result) return result;
@@ -206,7 +201,6 @@ export async function resolveModel(
     });
   }
 
-  // 2. Org default
   const [dbDefault] = await db
     .select()
     .from(orgModels)
@@ -234,7 +228,6 @@ export async function resolveModel(
     }
   }
 
-  // 3. System default
   const system = getSystemModels();
   for (const [, def] of system) {
     if (def.isDefault && def.enabled !== false) {
@@ -242,7 +235,6 @@ export async function resolveModel(
     }
   }
 
-  // 4. No model configured
   return null;
 }
 
@@ -250,14 +242,12 @@ export async function loadModel(
   orgId: string,
   modelDbId: string,
 ): Promise<ResolvedModelResult | null> {
-  // Check system models first
   const system = getSystemModels();
   const systemDef = system.get(modelDbId);
   if (systemDef) {
     return systemDefToResolved(systemDef);
   }
 
-  // Check DB
   const [row] = await db
     .select({
       api: orgModels.api,
@@ -314,7 +304,6 @@ export async function testModelConfig(config: {
     };
   }
 
-  // Build request based on API type — all providers use lightweight GET /models (no tokens consumed)
   const base = config.baseUrl.replace(/\/+$/, "");
   let url: string;
   const headers: Record<string, string> = {};

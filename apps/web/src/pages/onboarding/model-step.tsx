@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,6 @@ import {
 } from "../../components/onboarding-layout";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
-import { useAppConfig } from "../../hooks/use-app-config";
 import { findProviderByApiAndBaseUrl } from "../../lib/model-presets";
 import { PROVIDER_ICONS } from "../../components/icons";
 import { BrainCircuit } from "lucide-react";
@@ -22,15 +21,7 @@ export function OnboardingModelStep() {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
   const orgId = useOnboardingGuard();
-  const { features } = useAppConfig();
   const { nextRoute } = useOnboardingNav("model");
-
-  // Skip this step in cloud mode (models are managed by the platform)
-  useEffect(() => {
-    if (!features.models && nextRoute) {
-      navigate(nextRoute, { replace: true });
-    }
-  }, [features.models, navigate, nextRoute]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const { data: models } = useModels();

@@ -25,8 +25,6 @@ export type EnrichedRun = Run & {
 export interface AppConfig {
   features: {
     billing: boolean;
-    models: boolean;
-    providerKeys: boolean;
     webhooks: boolean;
     googleAuth: boolean;
     githubAuth: boolean;
