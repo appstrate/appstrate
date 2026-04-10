@@ -54,8 +54,10 @@ export type RunStatus = (typeof runStatusEnum.enumValues)[number];
 
 // --- Schedule Types ---
 
-export type { PackageSchedule as Schedule } from "@appstrate/db/schema";
-import type { PackageSchedule } from "@appstrate/db/schema";
+// `package_schedules` is a legacy DB name — the public type drops the prefix.
+// TODO: rename the table + Drizzle variable to `schedules` in a follow-up PR.
+import type { PackageSchedule as Schedule } from "@appstrate/db/schema";
+export type { Schedule };
 
 export interface ScheduleReadiness {
   status: "ready" | "degraded" | "not_ready";
@@ -64,7 +66,7 @@ export interface ScheduleReadiness {
   missingProviders: string[];
 }
 
-export type EnrichedSchedule = PackageSchedule & {
+export type EnrichedSchedule = Schedule & {
   profileName: string | null;
   profileType: "user" | "app" | null;
   profileOwnerName: string | null;
