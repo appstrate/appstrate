@@ -234,10 +234,14 @@ export function App() {
             />
             <Route path="/agents/:scope/:name/runs/:runId" element={<RunDetailPage />} />
             <Route path="/runs" element={<RunsPage />} />
-            <Route path="/schedules" element={<SchedulesListPage />} />
-            <Route path="/schedules/new" element={<ScheduleCreatePage />} />
-            <Route path="/schedules/:id" element={<ScheduleDetailPage />} />
-            <Route path="/schedules/:id/edit" element={<ScheduleEditPage />} />
+            {features.scheduling && (
+              <>
+                <Route path="/schedules" element={<SchedulesListPage />} />
+                <Route path="/schedules/new" element={<ScheduleCreatePage />} />
+                <Route path="/schedules/:id" element={<ScheduleDetailPage />} />
+                <Route path="/schedules/:id/edit" element={<ScheduleEditPage />} />
+              </>
+            )}
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/providers" element={<ProvidersPage />} />
@@ -279,8 +283,12 @@ export function App() {
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/applications" element={<ApplicationsPage />} />
             <Route path="/preferences" element={<PreferencesPage />} />
-            <Route path="/webhooks" element={<WebhooksPage />} />
-            <Route path="/webhooks/:id" element={<WebhookDetailPage />} />
+            {features.webhooks && (
+              <>
+                <Route path="/webhooks" element={<WebhooksPage />} />
+                <Route path="/webhooks/:id" element={<WebhookDetailPage />} />
+              </>
+            )}
             {/* App-scoped routes (read applicationId from store, like orgId) */}
             <Route path="/end-users" element={<EndUsersPage />} />
             <Route path="/api-keys" element={<ApiKeysPage />} />

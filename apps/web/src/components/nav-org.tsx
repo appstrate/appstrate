@@ -18,6 +18,7 @@ import {
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
+import { useAppConfig } from "../hooks/use-app-config";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -33,6 +34,7 @@ export function NavOrg() {
   const { data: unreadCount } = useUnreadCount();
   const { data: agents } = useAgents();
   const { isAdmin } = usePermissions();
+  const { features } = useAppConfig();
 
   const hasRunning = agents?.some((f) => f.runningRuns > 0) ?? false;
   const unread = unreadCount ?? 0;
@@ -40,7 +42,9 @@ export function NavOrg() {
   const automationItems = [
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
     { path: "/agents", label: t("nav.agents"), icon: Layers },
-    { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
+    ...(features.scheduling
+      ? [{ path: "/schedules", label: t("nav.schedules"), icon: Calendar }]
+      : []),
   ];
 
   const resourceItems = [
@@ -50,7 +54,9 @@ export function NavOrg() {
 
   const integrationItems = [
     { path: "/providers", label: t("nav.connectors"), icon: Plug },
-    ...(isAdmin ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }] : []),
+    ...(isAdmin && features.webhooks
+      ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
+      : []),
     ...(isAdmin ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }] : []),
     ...(isAdmin ? [{ path: "/api-keys", label: t("nav.apiKeys"), icon: KeyRound }] : []),
   ];
