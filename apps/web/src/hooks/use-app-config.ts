@@ -11,8 +11,8 @@ declare global {
 const DEFAULT_CONFIG: AppConfig = {
   features: {
     billing: false,
-    models: true,
-    providerKeys: true,
+    models: false,
+    providerKeys: false,
     googleAuth: false,
     githubAuth: false,
     smtp: false,
