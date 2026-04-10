@@ -17,14 +17,17 @@ import { parameters } from "./parameters.ts";
 import { headers } from "./headers.ts";
 import { securitySchemes } from "./security-schemes.ts";
 
-// Core path modules (always present)
+// Path modules
 import { healthPaths } from "./paths/health.ts";
 import { authPaths } from "./paths/auth.ts";
 import { agentsPaths } from "./paths/agents.ts";
 import { runsPaths } from "./paths/runs.ts";
 import { realtimePaths } from "./paths/realtime.ts";
+import { schedulesPaths } from "./paths/schedules.ts";
 import { connectionsPaths } from "./paths/connections.ts";
 import { providersPaths } from "./paths/providers.ts";
+import { modelsPaths } from "./paths/models.ts";
+import { providerKeysPaths } from "./paths/provider-keys.ts";
 import { proxiesPaths } from "./paths/proxies.ts";
 import { connectionProfilesPaths } from "./paths/connection-profiles.ts";
 import { appProfilesPaths } from "./paths/app-profiles.ts";
@@ -39,9 +42,6 @@ import { notificationsPaths } from "./paths/notifications.ts";
 import { packagesPaths } from "./paths/packages.ts";
 import { applicationsPaths } from "./paths/applications.ts";
 import { endUsersPaths } from "./paths/end-users.ts";
-import { schedulesPaths } from "./paths/schedules.ts";
-import { modelsPaths } from "./paths/models.ts";
-import { providerKeysPaths } from "./paths/provider-keys.ts";
 
 const corePaths = {
   ...healthPaths,
@@ -49,8 +49,11 @@ const corePaths = {
   ...agentsPaths,
   ...runsPaths,
   ...realtimePaths,
+  ...schedulesPaths,
   ...connectionsPaths,
   ...providersPaths,
+  ...modelsPaths,
+  ...providerKeysPaths,
   ...proxiesPaths,
   ...connectionProfilesPaths,
   ...appProfilesPaths,
@@ -65,9 +68,6 @@ const corePaths = {
   ...packagesPaths,
   ...applicationsPaths,
   ...endUsersPaths,
-  ...schedulesPaths,
-  ...modelsPaths,
-  ...providerKeysPaths,
 };
 
 const components = {

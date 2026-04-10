@@ -109,6 +109,15 @@ const expectedEndpoints = [
   "GET /api/realtime/runs/{id}",
   "GET /api/realtime/agents/{packageId}/runs",
 
+  // Schedules
+  "GET /api/schedules",
+  "GET /api/schedules/{id}",
+  "GET /api/schedules/{id}/runs",
+  "GET /api/agents/{scope}/{name}/schedules",
+  "POST /api/agents/{scope}/{name}/schedules",
+  "PUT /api/schedules/{id}",
+  "DELETE /api/schedules/{id}",
+
   // Connections
   "GET /api/connections",
   "GET /api/connections/integrations",
@@ -159,6 +168,24 @@ const expectedEndpoints = [
   // Agent Proxy
   "GET /api/agents/{scope}/{name}/proxy",
   "PUT /api/agents/{scope}/{name}/proxy",
+
+  // Provider Keys
+  "GET /api/provider-keys",
+  "POST /api/provider-keys",
+  "POST /api/provider-keys/test",
+  "PUT /api/provider-keys/{id}",
+  "DELETE /api/provider-keys/{id}",
+  "POST /api/provider-keys/{id}/test",
+
+  // Models
+  "GET /api/models",
+  "POST /api/models",
+  "PUT /api/models/default",
+  "GET /api/models/openrouter",
+  "POST /api/models/test",
+  "PUT /api/models/{id}",
+  "DELETE /api/models/{id}",
+  "POST /api/models/{id}/test",
 
   // Proxies
   "GET /api/proxies",
@@ -314,33 +341,6 @@ const expectedEndpoints = [
   "GET /api/end-users/{id}",
   "PATCH /api/end-users/{id}",
   "DELETE /api/end-users/{id}",
-
-  // Schedules
-  "GET /api/schedules",
-  "GET /api/agents/{scope}/{name}/schedules",
-  "POST /api/agents/{scope}/{name}/schedules",
-  "GET /api/schedules/{id}",
-  "PUT /api/schedules/{id}",
-  "DELETE /api/schedules/{id}",
-  "GET /api/schedules/{id}/runs",
-
-  // Models
-  "GET /api/models",
-  "POST /api/models",
-  "PUT /api/models/default",
-  "GET /api/models/openrouter",
-  "POST /api/models/test",
-  "PUT /api/models/{id}",
-  "DELETE /api/models/{id}",
-  "POST /api/models/{id}/test",
-
-  // Provider Keys
-  "GET /api/provider-keys",
-  "POST /api/provider-keys",
-  "POST /api/provider-keys/test",
-  "PUT /api/provider-keys/{id}",
-  "DELETE /api/provider-keys/{id}",
-  "POST /api/provider-keys/{id}/test",
 ];
 
 // Module-contributed endpoints are sourced directly from each module's
