@@ -51,10 +51,7 @@ const webhooksModule: AppstrateModule = {
     ];
   },
 
-  extendAppConfig(base) {
-    const features = base.features as Record<string, boolean> | undefined;
-    return { ...base, features: { ...features, webhooks: true } };
-  },
+  features: { webhooks: true },
 
   permissions: {
     owner: ["webhooks:read", "webhooks:write", "webhooks:delete"],

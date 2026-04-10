@@ -23,7 +23,6 @@ export type EnrichedRun = Run & {
 // --- App Config Types ---
 
 export interface AppConfig {
-  platform: string;
   features: {
     billing: boolean;
     models: boolean;
@@ -38,8 +37,6 @@ export interface AppConfig {
     privacy?: string;
   };
   trustedOrigins: string[];
-  /** Module-specific config blobs (keyed by module ID). */
-  modules?: Record<string, unknown>;
 }
 
 // --- Package Types ---

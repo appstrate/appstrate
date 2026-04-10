@@ -7,7 +7,7 @@ import {
   getModules,
   getModulePublicPaths,
   registerModuleRoutes,
-  applyModuleAppConfig,
+  applyModuleFeatures,
   callHook,
   hasHook,
   emitEvent,
@@ -140,12 +140,14 @@ describe("module-loader", () => {
       const a = mockModule("a", { publicPaths: ["/api/a/hook"] });
       const b = mockModule("b", { publicPaths: ["/api/b/hook1", "/api/b/hook2"] });
       await loadModulesFromInstances([a, b], mockCtx());
-      expect(getModulePublicPaths()).toEqual(["/api/a/hook", "/api/b/hook1", "/api/b/hook2"]);
+      expect(getModulePublicPaths()).toEqual(
+        new Set(["/api/a/hook", "/api/b/hook1", "/api/b/hook2"]),
+      );
     });
 
-    it("returns empty array when no modules loaded", async () => {
+    it("returns empty set when no modules loaded", async () => {
       await loadModulesFromInstances([], mockCtx());
-      expect(getModulePublicPaths()).toEqual([]);
+      expect(getModulePublicPaths()).toEqual(new Set());
     });
 
     it("caches empty array correctly (does not recompute)", async () => {
@@ -174,19 +176,12 @@ describe("module-loader", () => {
     });
   });
 
-  describe("applyModuleAppConfig", () => {
-    it("deep-merges module config overlays", async () => {
-      const mod = mockModule("ext", {
-        extendAppConfig: (base) => ({
-          ...base,
-          platform: "cloud",
-          features: { ...(base.features as Record<string, boolean>), billing: true },
-        }),
-      });
+  describe("applyModuleFeatures", () => {
+    it("merges module feature flags into base config", async () => {
+      const mod = mockModule("ext", { features: { billing: true } });
       await loadModulesFromInstances([mod], mockCtx());
 
       const base: AppConfig = {
-        platform: "oss",
         features: {
           billing: false,
           models: true,
@@ -198,23 +193,15 @@ describe("module-loader", () => {
         trustedOrigins: ["http://localhost:3000"],
       };
 
-      const result = applyModuleAppConfig(base);
-      expect(result.platform).toBe("cloud");
+      const result = applyModuleFeatures(base);
       expect(result.features.billing).toBe(true);
       expect(result.features.models).toBe(true);
     });
 
-    it("deep-merges correctly with falsy values", async () => {
-      const mod = mockModule("ext", {
-        extendAppConfig: (base) => ({
-          ...base,
-          nested: { enabled: false, count: 0, label: "" },
-        }),
-      });
-      await loadModulesFromInstances([mod], mockCtx());
+    it("preserves base features when no modules loaded", async () => {
+      await loadModulesFromInstances([], mockCtx());
 
       const base: AppConfig = {
-        platform: "oss",
         features: {
           billing: false,
           models: true,
@@ -226,24 +213,16 @@ describe("module-loader", () => {
         trustedOrigins: [],
       };
 
-      const result = applyModuleAppConfig(base) as unknown as Record<string, unknown>;
-      const nested = result.nested as Record<string, unknown>;
-      expect(nested.enabled).toBe(false);
-      expect(nested.count).toBe(0);
-      expect(nested.label).toBe("");
+      const result = applyModuleFeatures(base);
+      expect(result.features).toEqual(base.features);
     });
 
-    it("deep-merges correctly with null source values", async () => {
-      const mod = mockModule("ext", {
-        extendAppConfig: (base) => ({
-          ...base,
-          features: null,
-        }),
-      });
-      await loadModulesFromInstances([mod], mockCtx());
+    it("merges features from multiple modules", async () => {
+      const a = mockModule("a", { features: { billing: true } });
+      const b = mockModule("b", { features: { scheduling: true, webhooks: true } });
+      await loadModulesFromInstances([a, b], mockCtx());
 
       const base: AppConfig = {
-        platform: "oss",
         features: {
           billing: false,
           models: true,
@@ -255,114 +234,18 @@ describe("module-loader", () => {
         trustedOrigins: [],
       };
 
-      const result = applyModuleAppConfig(base);
-      // null source overwrites object target
-      expect(result.features).toBeNull();
-    });
-
-    it("ignores prototype pollution keys (__proto__, constructor, prototype)", async () => {
-      const mod = mockModule("evil", {
-        extendAppConfig: () => {
-          // Simulate a crafted payload with dangerous keys
-          return JSON.parse(
-            '{"__proto__": {"polluted": true}, "constructor": {"bad": true}, "prototype": {"hacked": true}, "safe": "value"}',
-          );
-        },
-      });
-      await loadModulesFromInstances([mod], mockCtx());
-
-      const base: AppConfig = {
-        platform: "oss",
-        features: {
-          billing: false,
-          models: true,
-          providerKeys: true,
-          googleAuth: false,
-          githubAuth: false,
-          smtp: false,
-        },
-        trustedOrigins: [],
-      };
-
-      const result = applyModuleAppConfig(base) as unknown as Record<string, unknown>;
-      // Safe key should be merged
-      expect(result.safe).toBe("value");
-      // Prototype should NOT be polluted on Object.prototype
-      expect(({} as Record<string, unknown>).polluted).toBeUndefined();
-      // Dangerous keys should not be copied to the result as own properties
-      expect(Object.keys(result)).not.toContain("__proto__");
-      expect(Object.keys(result)).not.toContain("constructor");
-      expect(Object.keys(result)).not.toContain("prototype");
-    });
-
-    it("does not deep-merge class instances (Date, Error, etc.)", async () => {
-      const date = new Date("2025-01-01");
-      const mod = mockModule("ext", {
-        extendAppConfig: (base) => ({
-          ...base,
-          meta: { createdAt: date },
-        }),
-      });
-      await loadModulesFromInstances([mod], mockCtx());
-
-      const base: AppConfig = {
-        platform: "oss",
-        features: {
-          billing: false,
-          models: true,
-          providerKeys: true,
-          googleAuth: false,
-          githubAuth: false,
-          smtp: false,
-        },
-        trustedOrigins: [],
-      };
-
-      const result = applyModuleAppConfig(base) as unknown as Record<string, unknown>;
-      const meta = result.meta as Record<string, unknown>;
-      // Date should be preserved as-is, not deep-merged into a plain object
-      expect(meta.createdAt).toBe(date);
-      expect(meta.createdAt).toBeInstanceOf(Date);
-    });
-
-    it("replaces arrays entirely (does not merge by index)", async () => {
-      const mod = mockModule("ext", {
-        extendAppConfig: (base) => ({
-          ...base,
-          trustedOrigins: ["https://new.com"],
-        }),
-      });
-      await loadModulesFromInstances([mod], mockCtx());
-
-      const base: AppConfig = {
-        platform: "oss",
-        features: {
-          billing: false,
-          models: true,
-          providerKeys: true,
-          googleAuth: false,
-          githubAuth: false,
-          smtp: false,
-        },
-        trustedOrigins: ["http://localhost:3000", "http://localhost:5173"],
-      };
-
-      const result = applyModuleAppConfig(base);
-      // Array should be fully replaced, not concatenated or merged by index
-      expect(result.trustedOrigins).toEqual(["https://new.com"]);
+      const result = applyModuleFeatures(base);
+      expect(result.features.billing).toBe(true);
+      expect(result.features.scheduling).toBe(true);
+      expect(result.features.webhooks).toBe(true);
+      expect(result.features.models).toBe(true);
     });
 
     it("does not mutate the base config", async () => {
-      const mod = mockModule("ext", {
-        extendAppConfig: (base) => ({
-          ...base,
-          features: { ...(base.features as Record<string, boolean>), billing: true },
-        }),
-      });
+      const mod = mockModule("ext", { features: { billing: true } });
       await loadModulesFromInstances([mod], mockCtx());
 
       const base: AppConfig = {
-        platform: "oss",
         features: {
           billing: false,
           models: true,
@@ -374,10 +257,30 @@ describe("module-loader", () => {
         trustedOrigins: [],
       };
 
-      applyModuleAppConfig(base);
-      // Original base should be untouched
+      applyModuleFeatures(base);
       expect(base.features.billing).toBe(false);
-      expect(base.platform).toBe("oss");
+    });
+
+    it("does not touch non-features fields", async () => {
+      const mod = mockModule("ext", { features: { billing: true } });
+      await loadModulesFromInstances([mod], mockCtx());
+
+      const base: AppConfig = {
+        features: {
+          billing: false,
+          models: true,
+          providerKeys: true,
+          googleAuth: false,
+          githubAuth: false,
+          smtp: false,
+        },
+        legalUrls: { terms: "https://example.com/terms" },
+        trustedOrigins: ["http://localhost:3000"],
+      };
+
+      const result = applyModuleFeatures(base);
+      expect(result.legalUrls).toEqual({ terms: "https://example.com/terms" });
+      expect(result.trustedOrigins).toEqual(["http://localhost:3000"]);
     });
   });
 
@@ -501,7 +404,7 @@ describe("module-loader", () => {
       await loadModulesFromInstances([mod], mockCtx());
       await shutdownModules();
       expect(getModule("temp")).toBeNull();
-      expect(getModulePublicPaths()).toEqual([]);
+      expect(getModulePublicPaths()).toEqual(new Set());
     });
 
     it("does not throw if a module shutdown fails", async () => {

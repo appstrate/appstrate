@@ -102,10 +102,7 @@ const providerManagementModule: AppstrateModule = {
     ];
   },
 
-  extendAppConfig(base) {
-    const features = base.features as Record<string, boolean> | undefined;
-    return { ...base, features: { ...features, models: true, providerKeys: true } };
-  },
+  features: { models: true, providerKeys: true },
 
   hooks: {
     resolveModel: async (orgId: string, packageId: string, modelId?: string | null) => {

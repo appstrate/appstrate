@@ -108,7 +108,7 @@ function skipAuth(path: string): boolean {
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
   if (path === "/api/connections/callback") return true; // OAuth redirect — no session
   if (path === "/api/docs" || path === "/api/openapi.json") return true;
-  if (getModulePublicPaths().includes(path)) return true; // e.g. Stripe webhook
+  if (getModulePublicPaths().has(path)) return true; // e.g. Stripe webhook
   return false;
 }
 

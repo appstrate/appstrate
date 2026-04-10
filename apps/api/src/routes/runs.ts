@@ -64,7 +64,7 @@ export async function executeAgentInBackground(
   try {
     // Update status to running
     await updateRun(runId, orgId, applicationId, { status: "running" });
-    onRunStatusChange({
+    void onRunStatusChange({
       orgId,
       runId,
       agentId: agent.id,
@@ -183,7 +183,7 @@ export async function executeAgentInBackground(
           },
           "error",
         );
-        onRunStatusChange({
+        void onRunStatusChange({
           orgId,
           runId,
           agentId: agent.id,
@@ -230,7 +230,7 @@ export async function executeAgentInBackground(
         { runId, status: "failed", error },
         "error",
       );
-      onRunStatusChange({
+      void onRunStatusChange({
         orgId,
         runId,
         agentId: agent.id,
@@ -305,7 +305,7 @@ export async function executeAgentInBackground(
         { runId, status: "success" },
         "info",
       );
-      onRunStatusChange({
+      void onRunStatusChange({
         orgId,
         runId,
         agentId: agent.id,
@@ -343,7 +343,7 @@ export async function executeAgentInBackground(
       },
       "error",
     );
-    onRunStatusChange({
+    void onRunStatusChange({
       orgId,
       runId,
       agentId: agent.id,
@@ -616,7 +616,7 @@ export function createRunsRouter() {
       .stopByRunId(runId)
       .catch(() => {});
 
-    onRunStatusChange({
+    void onRunStatusChange({
       orgId,
       runId,
       agentId: run.packageId,

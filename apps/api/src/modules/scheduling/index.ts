@@ -51,10 +51,7 @@ const schedulingModule: AppstrateModule = {
     ];
   },
 
-  extendAppConfig(base) {
-    const features = base.features as Record<string, boolean> | undefined;
-    return { ...base, features: { ...features, scheduling: true } };
-  },
+  features: { scheduling: true },
 
   permissions: {
     owner: ["schedules:read", "schedules:write", "schedules:delete"],

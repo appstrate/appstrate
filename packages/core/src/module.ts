@@ -73,10 +73,13 @@ export interface AppstrateModule {
   openApiSchemas?(): OpenApiSchemaEntry[];
 
   /**
-   * Contribute to the frontend AppConfig (feature flags, legal URLs, etc.).
-   * Returns a partial overlay that is deep-merged onto the base config.
+   * Feature flags contributed by this module.
+   * Merged into `AppConfig.features` at boot (simple `Object.assign`).
+   * Absent modules contribute nothing — their flags stay at base defaults.
+   *
+   * @example features: { billing: true }
    */
-  extendAppConfig?(base: Record<string, unknown>): Record<string, unknown>;
+  features?: Record<string, boolean>;
 
   /**
    * Named hooks (first-match-wins).

@@ -12,7 +12,7 @@ export {
   getModuleOpenApiPaths,
   getModuleOpenApiComponentSchemas,
   getModuleOpenApiSchemas,
-  applyModuleAppConfig,
+  applyModuleFeatures,
   callHook,
   hasHook,
   emitEvent,

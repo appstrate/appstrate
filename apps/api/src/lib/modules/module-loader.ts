@@ -18,7 +18,7 @@ import { logger } from "../logger.ts";
 
 const _modules: Map<string, AppstrateModule> = new Map();
 const _builtinLoaders = new Map<string, () => Promise<unknown>>();
-let _publicPathsCache: string[] | null = null;
+let _publicPathsCache: Set<string> | null = null;
 let _initialized = false;
 
 /**
@@ -116,7 +116,14 @@ export async function loadModulesFromInstances(
 
   const sorted = topoSort(modules);
   for (const mod of sorted) {
-    await mod.init(ctx);
+    try {
+      await mod.init(ctx);
+    } catch (err) {
+      throw new Error(
+        `Module "${mod.manifest.id}" failed to initialize: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
     if (_modules.has(mod.manifest.id)) {
       logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
     }
@@ -136,10 +143,10 @@ export function getModules(): ReadonlyMap<string, AppstrateModule> {
   return _modules;
 }
 
-/** Collect all public paths from all loaded modules (cached). */
-export function getModulePublicPaths(): string[] {
+/** Collect all public paths from all loaded modules (cached as Set for O(1) lookup). */
+export function getModulePublicPaths(): Set<string> {
   if (_publicPathsCache !== null) return _publicPathsCache;
-  _publicPathsCache = Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []);
+  _publicPathsCache = new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
   return _publicPathsCache;
 }
 
@@ -183,16 +190,19 @@ export function getModuleOpenApiSchemas(): OpenApiSchemaEntry[] {
   return entries;
 }
 
-/** Extend AppConfig with all module contributions (deep merge). */
-export function applyModuleAppConfig(base: AppConfig): AppConfig {
-  let config: AppConfig = { ...base };
+/**
+ * Merge module feature flags into the base AppConfig.
+ * Each module's `features` is a `Record<string, boolean>` merged via `Object.assign`.
+ */
+export function applyModuleFeatures(base: AppConfig): AppConfig {
+  const moduleFeatures: Record<string, boolean> = {};
   for (const mod of _modules.values()) {
-    const ext = mod.extendAppConfig?.(config as unknown as Record<string, unknown>);
-    if (ext) {
-      config = deepMerge(config as unknown as Record<string, unknown>, ext) as unknown as AppConfig;
-    }
+    if (mod.features) Object.assign(moduleFeatures, mod.features);
   }
-  return config;
+  return {
+    ...base,
+    features: { ...base.features, ...moduleFeatures },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -201,11 +211,14 @@ export function applyModuleAppConfig(base: AppConfig): AppConfig {
 
 /**
  * Call a named hook — returns the result from the FIRST module that
- * provides it, or undefined if no module provides it.
- * For broadcasting to ALL modules, use emitEvent() instead.
+ * provides it, or `undefined` if no module provides it.
  *
- * This is fully agnostic — the platform never knows which module
- * provides which hook.
+ * **First-match-wins:** Modules are iterated in topological init order.
+ * If the first module that provides a hook returns a value (including `null`),
+ * subsequent modules are never consulted. Load order (determined by
+ * `manifest.dependencies` topological sort) defines priority.
+ *
+ * For broadcast-to-all semantics, use `emitEvent()` instead.
  */
 // Internal type: hooks/events objects cast to indexable records for dynamic dispatch.
 // The public types (ModuleHooks/ModuleEvents) are strict — this cast is only used
@@ -341,34 +354,4 @@ function topoSort(modules: AppstrateModule[]): AppstrateModule[] {
   }
 
   return sorted;
-}
-
-// ---------------------------------------------------------------------------
-// Deep merge utility
-// ---------------------------------------------------------------------------
-
-const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-
-function isPlainObject(val: unknown): val is Record<string, unknown> {
-  if (typeof val !== "object" || val === null || Array.isArray(val)) return false;
-  const proto = Object.getPrototypeOf(val);
-  return proto === null || proto === Object.prototype;
-}
-
-function deepMerge(
-  target: Record<string, unknown>,
-  source: Record<string, unknown>,
-): Record<string, unknown> {
-  const result = { ...target };
-  for (const key of Object.keys(source)) {
-    if (UNSAFE_KEYS.has(key)) continue;
-    const tVal = target[key];
-    const sVal = source[key];
-    if (isPlainObject(tVal) && isPlainObject(sVal)) {
-      result[key] = deepMerge(tVal, sVal);
-    } else {
-      result[key] = sVal;
-    }
-  }
-  return result;
 }
