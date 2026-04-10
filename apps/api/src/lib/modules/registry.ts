@@ -14,9 +14,16 @@ import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import type { ModuleInitContext } from "@appstrate/core/module";
+import { applyModuleMigrations } from "./migrate.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
+// ---------------------------------------------------------------------------
+//
+// Each specifier in APPSTRATE_MODULES is resolved at boot by `loadModules`:
+// a matching `apps/api/src/modules/<specifier>/index.ts` directory is loaded
+// as a built-in, otherwise the specifier is treated as an npm package name
+// and resolved via dynamic import.
 // ---------------------------------------------------------------------------
 
 /**
@@ -43,11 +50,12 @@ export function getModuleRegistry(): string[] {
 
 export function buildModuleInitContext(): ModuleInitContext {
   const env = process.env;
-  return {
+  const ctx: ModuleInitContext = {
     databaseUrl: env.DATABASE_URL ?? null,
     redisUrl: env.REDIS_URL ?? null,
     appUrl: env.APP_URL ?? "http://localhost:3000",
     isEmbeddedDb,
+    applyMigrations: (moduleId, migrationsDir) => applyModuleMigrations(moduleId, migrationsDir),
     getSendMail: async () => {
       // Lazy import to break circular dep: email.ts -> app-config.ts -> modules
       const { sendMail } = await import("../../services/email.ts");
@@ -55,6 +63,7 @@ export function buildModuleInitContext(): ModuleInitContext {
     },
     getOrgAdminEmails,
   };
+  return ctx;
 }
 
 // ---------------------------------------------------------------------------

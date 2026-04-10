@@ -56,7 +56,7 @@ describe("OpenAPI response header validation", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           url: "https://example.com/hook",
-          events: ["run.completed"],
+          events: ["run.success"],
         }),
       });
       expect(res.status).toBe(201);
@@ -168,7 +168,7 @@ describe("OpenAPI response header validation", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           url: "https://example.com/hook-rl",
-          events: ["run.completed"],
+          events: ["run.success"],
         }),
       });
 

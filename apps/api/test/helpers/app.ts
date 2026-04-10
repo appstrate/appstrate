@@ -8,6 +8,13 @@
  *
  * This allows integration tests to exercise the full HTTP → middleware → auth → service → DB
  * pipeline with a real database.
+ *
+ * NOTE on module imports: the built-in module routes (webhooks) are
+ * imported statically below. This is intentional — test fixtures deliberately
+ * exercise all built-in modules regardless of the `APPSTRATE_MODULES` env var,
+ * whereas production loads them dynamically through the module loader. The
+ * zero-footprint rule in CLAUDE.md applies to the production boot path, not
+ * to shared test helpers.
  */
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -23,7 +30,6 @@ import { resolvePermissions, resolveApiKeyPermissions } from "../../src/lib/perm
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { requireAppContext } from "../../src/middleware/app-context.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
-import { loadModulesFromInstances } from "../../src/lib/modules/index.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 
@@ -45,7 +51,7 @@ import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
-import { createWebhooksRouter } from "../../src/routes/webhooks.ts";
+import webhooksModule from "../../src/modules/webhooks/index.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createConnectionsRouter } from "../../src/routes/connections.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
@@ -58,15 +64,9 @@ import type { AppEnv } from "../../src/types/index.ts";
 let cachedApp: Hono<AppEnv> | null = null;
 
 // Initialize boot-time singletons that routes depend on.
-// In production these are called by boot(). For tests, we call them directly.
-await loadModulesFromInstances([], {
-  databaseUrl: null,
-  redisUrl: null,
-  appUrl: "http://localhost:3000",
-  isEmbeddedDb: true,
-  getSendMail: async () => () => {},
-  getOrgAdminEmails: async () => [],
-}).catch(() => {}); // no modules in test (OSS mode)
+// The webhooks module router is mounted statically below without going through
+// the module loader — tests don't need BullMQ workers or migrations, and RBAC
+// is owned by core.
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
 initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 
@@ -217,12 +217,13 @@ export function getTestApp(): Hono<AppEnv> {
     return next();
   });
 
-  // App context middleware: resolve X-App-Id for app-scoped routes
+  // App context middleware: resolve X-App-Id for app-scoped routes.
+  // Core prefixes listed statically; module-owned prefixes are pulled from
+  // the module manifest so tests mirror the production aggregation logic.
   const APP_SCOPED_PREFIXES = [
     "/api/agents",
     "/api/runs",
     "/api/schedules",
-    "/api/webhooks",
     "/api/end-users",
     "/api/api-keys",
     "/api/notifications",
@@ -230,6 +231,7 @@ export function getTestApp(): Hono<AppEnv> {
     "/api/providers",
     "/api/connections",
     "/api/app-profiles",
+    ...(webhooksModule.appScopedPaths ?? []),
   ];
 
   const appContextMiddleware = requireAppContext();
@@ -265,7 +267,8 @@ export function getTestApp(): Hono<AppEnv> {
   app.route("/api", schedulesRouter);
   app.route("/api/packages", createPackagesRouter());
   app.route("/api/end-users", createEndUsersRouter());
-  app.route("/api/webhooks", createWebhooksRouter());
+  const webhooksRouter = webhooksModule.createRouter?.();
+  if (webhooksRouter) app.route("/api", webhooksRouter);
   app.route("/api/providers", createProvidersRouter());
   app.route("/api/api-keys", createApiKeysRouter());
   app.route("/api/proxies", createProxiesRouter());

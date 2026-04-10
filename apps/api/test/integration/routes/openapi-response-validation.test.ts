@@ -16,7 +16,14 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedWebhook, seedEndUser, seedApiKey } from "../../helpers/seed.ts";
-import { openApiSpec } from "../../../src/openapi/index.ts";
+import { buildOpenApiSpec } from "../../../src/openapi/index.ts";
+import { webhooksPaths } from "../../../src/modules/webhooks/openapi/paths.ts";
+import { webhooksSchemas } from "../../../src/modules/webhooks/openapi/schemas.ts";
+
+// Test fixtures must validate responses against the full spec including
+// paths contributed by the webhooks module. We assemble the module paths
+// statically here because the tests never boot the module loader.
+const openApiSpec = buildOpenApiSpec(webhooksPaths, webhooksSchemas);
 
 const app = getTestApp();
 
@@ -478,7 +485,7 @@ describe("OpenAPI response validation", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           url: "https://example.com/hook",
-          events: ["run.completed"],
+          events: ["run.success"],
         }),
       });
       expect(res.status).toBe(201);

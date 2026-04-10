@@ -12,7 +12,6 @@ import {
   getRunningRunsForPackage,
   deletePackageRuns,
   listPackageRuns,
-  listScheduleRuns,
   listRunLogs,
   addPackageMemories,
 } from "../services/state/index.ts";
@@ -31,8 +30,8 @@ import { ApiError, notFound, conflict } from "../lib/errors.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
-import { afterRun } from "../lib/modules/hooks.ts";
-import { dispatchRunWebhook } from "../services/webhooks.ts";
+import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
+import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
@@ -42,6 +41,21 @@ function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
     (total.cache_creation_input_tokens ?? 0) + (addition.cache_creation_input_tokens ?? 0);
   total.cache_read_input_tokens =
     (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
+}
+
+async function collectAfterRunMetadata(
+  params: RunStatusChangeParams,
+): Promise<Record<string, unknown> | null> {
+  try {
+    return (await callHook("afterRun", params)) ?? null;
+  } catch (err) {
+    logger.error("afterRun hook failed — run record will be missing metadata", {
+      err: err instanceof Error ? err.message : String(err),
+      orgId: params.orgId,
+      runId: params.runId,
+    });
+    return null;
+  }
 }
 
 // --- Background run (decoupled from client) ---
@@ -65,7 +79,13 @@ export async function executeAgentInBackground(
   try {
     // Update status to running
     await updateRun(runId, orgId, applicationId, { status: "running" });
-    dispatchRunWebhook(orgId, applicationId, "started", runId, agent.id);
+    void emitEvent("onRunStatusChange", {
+      orgId,
+      runId,
+      agentId: agent.id,
+      applicationId,
+      status: "started",
+    });
 
     // Execute via adapter
     const adapter = new PiAdapter();
@@ -153,6 +173,16 @@ export async function executeAgentInBackground(
       if (err instanceof TimeoutError) {
         const duration = Date.now() - startTime;
         const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
+        const metadata = await collectAfterRunMetadata({
+          orgId,
+          runId,
+          agentId: agent.id,
+          applicationId,
+          status: "timeout",
+          cost: accumulatedCost,
+          duration,
+          modelSource: modelSource ?? null,
+        });
         await updateRun(runId, orgId, applicationId, {
           status: "timeout",
           error: `Run timed out after ${timeout}s`,
@@ -165,6 +195,7 @@ export async function executeAgentInBackground(
                 tokenUsage: { ...accumulated } as Record<string, unknown>,
               }
             : {}),
+          ...(metadata ? { metadata } : {}),
         });
         await appendRunLog(
           runId,
@@ -178,8 +209,7 @@ export async function executeAgentInBackground(
           },
           "error",
         );
-        dispatchRunWebhook(orgId, applicationId, "timeout", runId, agent.id, { duration });
-        void afterRun({
+        void emitEvent("onRunStatusChange", {
           orgId,
           runId,
           agentId: agent.id,
@@ -210,12 +240,23 @@ export async function executeAgentInBackground(
     const duration = Date.now() - startTime;
 
     if (error) {
+      const metadata = await collectAfterRunMetadata({
+        orgId,
+        runId,
+        agentId: agent.id,
+        applicationId,
+        status: "failed",
+        cost: accumulatedCost,
+        duration,
+        modelSource: modelSource ?? null,
+      });
       await updateRun(runId, orgId, applicationId, {
         status: "failed",
         error,
         completedAt: new Date().toISOString(),
         duration,
         notifiedAt: new Date().toISOString(),
+        ...(metadata ? { metadata } : {}),
       });
       await appendRunLog(
         runId,
@@ -226,8 +267,7 @@ export async function executeAgentInBackground(
         { runId, status: "failed", error },
         "error",
       );
-      dispatchRunWebhook(orgId, applicationId, "failed", runId, agent.id, { error, duration });
-      void afterRun({
+      void emitEvent("onRunStatusChange", {
         orgId,
         runId,
         agentId: agent.id,
@@ -236,6 +276,7 @@ export async function executeAgentInBackground(
         cost: accumulatedCost,
         duration,
         modelSource: modelSource ?? null,
+        extra: { error },
       });
     } else {
       // --- Success path (with or without structured output) ---
@@ -277,6 +318,17 @@ export async function executeAgentInBackground(
         await addPackageMemories(agent.id, orgId, applicationId, memories, runId);
       }
 
+      const metadata = await collectAfterRunMetadata({
+        orgId,
+        runId,
+        agentId: agent.id,
+        applicationId,
+        status: "success",
+        cost: accumulatedCost,
+        duration,
+        modelSource: modelSource ?? null,
+      });
+
       await updateRun(runId, orgId, applicationId, {
         status: "success",
         result,
@@ -287,6 +339,7 @@ export async function executeAgentInBackground(
         tokensUsed: totalTokens > 0 ? totalTokens : undefined,
         ...(totalTokens > 0 ? { tokenUsage: { ...accumulated } as Record<string, unknown> } : {}),
         cost: accumulatedCost > 0 ? accumulatedCost : null,
+        ...(metadata ? { metadata } : {}),
       });
 
       if (hasOutput) {
@@ -301,8 +354,7 @@ export async function executeAgentInBackground(
         { runId, status: "success" },
         "info",
       );
-      dispatchRunWebhook(orgId, applicationId, "completed", runId, agent.id, { result, duration });
-      void afterRun({
+      void emitEvent("onRunStatusChange", {
         orgId,
         runId,
         agentId: agent.id,
@@ -311,6 +363,7 @@ export async function executeAgentInBackground(
         cost: accumulatedCost,
         duration,
         modelSource: modelSource ?? null,
+        extra: { result },
       });
     }
   } catch (err) {
@@ -319,12 +372,23 @@ export async function executeAgentInBackground(
 
     const duration = Date.now() - startTime;
     const errorMessage = err instanceof Error ? err.message : "Unknown error";
+    const metadata = await collectAfterRunMetadata({
+      orgId,
+      runId,
+      agentId: agent.id,
+      applicationId,
+      status: "failed",
+      cost: accumulatedCost,
+      duration,
+      modelSource: modelSource ?? null,
+    });
     await updateRun(runId, orgId, applicationId, {
       status: "failed",
       error: errorMessage,
       completedAt: new Date().toISOString(),
       duration,
       notifiedAt: new Date().toISOString(),
+      ...(metadata ? { metadata } : {}),
     });
     await appendRunLog(
       runId,
@@ -339,11 +403,7 @@ export async function executeAgentInBackground(
       },
       "error",
     );
-    dispatchRunWebhook(orgId, applicationId, "failed", runId, agent.id, {
-      error: errorMessage,
-      duration,
-    });
-    void afterRun({
+    void emitEvent("onRunStatusChange", {
       orgId,
       runId,
       agentId: agent.id,
@@ -352,6 +412,7 @@ export async function executeAgentInBackground(
       cost: accumulatedCost,
       duration,
       modelSource: modelSource ?? null,
+      extra: { error: errorMessage },
     });
   } finally {
     untrackRun(runId);
@@ -512,31 +573,6 @@ export function createRunsRouter() {
     return c.json(result);
   });
 
-  // GET /api/schedules/:id/runs — list runs for a schedule
-  router.get("/schedules/:id/runs", async (c) => {
-    const scheduleId = c.req.param("id");
-    const orgId = c.get("orgId");
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .catch(20)
-      .parse(c.req.query("limit") ?? 20);
-    const offset = z.coerce
-      .number()
-      .int()
-      .min(0)
-      .catch(0)
-      .parse(c.req.query("offset") ?? 0);
-    const result = await listScheduleRuns(scheduleId, orgId, {
-      limit,
-      offset,
-      applicationId: c.get("applicationId"),
-    });
-    return c.json(result);
-  });
-
   // GET /api/runs/:id — get a single run
   router.get("/runs/:id", async (c) => {
     const runId = c.req.param("id");
@@ -615,7 +651,13 @@ export function createRunsRouter() {
       .stopByRunId(runId)
       .catch(() => {});
 
-    dispatchRunWebhook(orgId, c.get("applicationId"), "cancelled", runId, run.packageId);
+    void emitEvent("onRunStatusChange", {
+      orgId,
+      runId,
+      agentId: run.packageId,
+      applicationId: c.get("applicationId"),
+      status: "cancelled",
+    });
 
     return c.json({ ok: true });
   });

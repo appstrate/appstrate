@@ -11,9 +11,8 @@ import {
   deleteWebhook,
   rotateSecret,
   listDeliveries,
-  buildEventEnvelope,
-} from "../../../src/services/webhooks.ts";
-import { webhookDeliveries } from "@appstrate/db/schema";
+} from "../../../src/modules/webhooks/service.ts";
+import { webhookDeliveries } from "../../../src/modules/webhooks/schema.ts";
 
 describe("webhooks service", () => {
   let userId: string;
@@ -32,7 +31,7 @@ describe("webhooks service", () => {
   function appWebhookParams(overrides?: Record<string, unknown>) {
     return {
       url: "https://example.com/hook",
-      events: ["run.completed"],
+      events: ["run.success"],
       ...overrides,
     };
   }
@@ -46,7 +45,7 @@ describe("webhooks service", () => {
       expect(wh.id).toBeDefined();
       expect(wh.id).toStartWith("wh_");
       expect(wh.url).toBe("https://example.com/hook");
-      expect(wh.events).toContain("run.completed");
+      expect(wh.events).toContain("run.success");
       expect(wh.enabled).toBe(true);
       expect(wh.object).toBe("webhook");
       expect(wh.applicationId).toBe(defaultAppId);
@@ -55,7 +54,7 @@ describe("webhooks service", () => {
     it("creates a webhook with a different URL", async () => {
       const wh = await createWebhook(orgId, defaultAppId, {
         url: "https://example.com/org-hook",
-        events: ["run.completed"],
+        events: ["run.success"],
       });
 
       expect(wh.applicationId).toBe(defaultAppId);
@@ -165,7 +164,7 @@ describe("webhooks service", () => {
       );
       await createWebhook(otherOrg.id, otherAppId, {
         url: "https://example.com/theirs",
-        events: ["run.completed"],
+        events: ["run.success"],
       });
 
       const list = await listWebhooks(orgId, defaultAppId);
@@ -250,7 +249,7 @@ describe("webhooks service", () => {
         {
           webhookId: created.id,
           eventId: "evt_test-1",
-          eventType: "run.completed",
+          eventType: "run.success",
           status: "success",
           statusCode: 200,
           latency: 150,
@@ -285,45 +284,6 @@ describe("webhooks service", () => {
 
       const deliveries = await listDeliveries(orgId, defaultAppId, created.id);
       expect(deliveries).toHaveLength(0);
-    });
-  });
-
-  // ── buildEventEnvelope ────────────────────────────────────
-
-  describe("buildEventEnvelope", () => {
-    it("builds a valid event envelope in full mode", () => {
-      const { eventId, payload } = buildEventEnvelope({
-        eventType: "run.completed",
-        run: {
-          id: "exec_123",
-          status: "success",
-          result: "output data",
-          input: "input data",
-        },
-        payloadMode: "full",
-      });
-
-      expect(eventId).toStartWith("evt_");
-      expect(payload.type).toBe("run.completed");
-      expect(payload.object).toBe("event");
-      expect(payload.id).toBe(eventId);
-
-      const data = payload.data as { object: Record<string, unknown> };
-      expect(data.object.result).toBe("output data");
-      expect(data.object.input).toBe("input data");
-    });
-
-    it("strips result and input in summary mode", () => {
-      const { payload } = buildEventEnvelope({
-        eventType: "run.completed",
-        run: { id: "exec_123", status: "success", result: "output", input: "input" },
-        payloadMode: "summary",
-      });
-
-      const data = payload.data as { object: Record<string, unknown> };
-      expect(data.object.result).toBeUndefined();
-      expect(data.object.input).toBeUndefined();
-      expect(data.object.status).toBe("success");
     });
   });
 });

@@ -279,8 +279,12 @@ export function App() {
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/applications" element={<ApplicationsPage />} />
             <Route path="/preferences" element={<PreferencesPage />} />
-            <Route path="/webhooks" element={<WebhooksPage />} />
-            <Route path="/webhooks/:id" element={<WebhookDetailPage />} />
+            {features.webhooks && (
+              <>
+                <Route path="/webhooks" element={<WebhooksPage />} />
+                <Route path="/webhooks/:id" element={<WebhookDetailPage />} />
+              </>
+            )}
             {/* App-scoped routes (read applicationId from store, like orgId) */}
             <Route path="/end-users" element={<EndUsersPage />} />
             <Route path="/api-keys" element={<ApiKeysPage />} />

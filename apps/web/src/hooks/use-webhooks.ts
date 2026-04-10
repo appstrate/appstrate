@@ -15,7 +15,7 @@ export function toggleEvent(event: string, setter: Dispatch<SetStateAction<strin
 
 export const WEBHOOK_EVENTS = [
   "run.started",
-  "run.completed",
+  "run.success",
   "run.failed",
   "run.timeout",
   "run.cancelled",

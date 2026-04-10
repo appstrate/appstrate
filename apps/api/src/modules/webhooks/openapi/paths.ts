@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-
 export const webhooksPaths = {
   "/api/webhooks": {
     post: {
@@ -28,7 +27,7 @@ export const webhooksPaths = {
                     type: "string",
                     enum: [
                       "run.started",
-                      "run.completed",
+                      "run.success",
                       "run.failed",
                       "run.timeout",
                       "run.cancelled",
@@ -51,7 +50,7 @@ export const webhooksPaths = {
             },
             example: {
               url: "https://api.example.com/webhooks/appstrate",
-              events: ["run.completed", "run.failed"],
+              events: ["run.success", "run.failed"],
               packageId: null,
               payloadMode: "summary",
               enabled: true,
@@ -91,7 +90,7 @@ export const webhooksPaths = {
                 object: "webhook",
                 applicationId: "app_cm4jkl013",
                 url: "https://example.com/webhooks/appstrate",
-                events: ["run.completed", "run.failed"],
+                events: ["run.success", "run.failed"],
                 packageId: null,
                 payloadMode: "full",
                 enabled: true,
@@ -143,7 +142,7 @@ export const webhooksPaths = {
                     object: "webhook",
                     applicationId: "app_cm4jkl013",
                     url: "https://example.com/webhooks/appstrate",
-                    events: ["run.completed", "run.failed"],
+                    events: ["run.success", "run.failed"],
                     packageId: null,
                     payloadMode: "full",
                     enabled: true,
@@ -186,7 +185,7 @@ export const webhooksPaths = {
                 object: "webhook",
                 applicationId: "app_cm4jkl013",
                 url: "https://example.com/webhooks/appstrate",
-                events: ["run.completed", "run.failed"],
+                events: ["run.success", "run.failed"],
                 packageId: null,
                 payloadMode: "full",
                 enabled: true,
@@ -225,7 +224,7 @@ export const webhooksPaths = {
                     type: "string",
                     enum: [
                       "run.started",
-                      "run.completed",
+                      "run.success",
                       "run.failed",
                       "run.timeout",
                       "run.cancelled",
@@ -255,7 +254,7 @@ export const webhooksPaths = {
                 object: "webhook",
                 applicationId: "app_cm4jkl013",
                 url: "https://example.com/webhooks/appstrate",
-                events: ["run.completed", "run.failed"],
+                events: ["run.success", "run.failed"],
                 packageId: null,
                 payloadMode: "full",
                 enabled: true,
@@ -427,7 +426,7 @@ export const webhooksPaths = {
                   {
                     id: "dlv_cm3ghi789",
                     eventId: "evt_cm3ghi790",
-                    eventType: "run.completed",
+                    eventType: "run.success",
                     status: "success",
                     statusCode: 200,
                     latency: 142,
@@ -446,4 +445,4 @@ export const webhooksPaths = {
       },
     },
   },
-} as const;
+};

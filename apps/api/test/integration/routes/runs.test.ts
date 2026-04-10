@@ -533,6 +533,8 @@ describe("Runs API", () => {
       expect(body.userName).toBeTruthy();
       expect(body.endUserName).toBeNull();
       expect(body.apiKeyName).toBeNull();
+      // scheduleName is populated from a LEFT JOIN on package_schedules — null
+      // when the run has no scheduleId.
       expect(body.scheduleName).toBeNull();
     });
 

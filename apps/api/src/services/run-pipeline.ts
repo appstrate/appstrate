@@ -7,8 +7,7 @@
 
 import { logger } from "../lib/logger.ts";
 import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
-import { beforeRun } from "../lib/modules/hooks.ts";
-import { hasHook } from "../lib/modules/module-loader.ts";
+import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 import { createRun, getRunningRunCountForOrg } from "./state/index.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
@@ -207,7 +206,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // --- Step 3: Pre-run module hook (quota, rate limits, feature gates, etc.) ---
   if (hasHook("beforeRun")) {
     const runningCount = await getRunningRunCountForOrg(orgId);
-    const rejection = await beforeRun({ orgId, agentId: agent.id, runningCount });
+    const rejection = await callHook("beforeRun", { orgId, agentId: agent.id, runningCount });
     if (rejection) {
       return {
         ok: false,

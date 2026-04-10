@@ -10,15 +10,64 @@
  * 4. Zod ↔ OpenAPI schema comparison — compares Zod-derived JSON Schemas (pre-converted
  *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas
  *
+ * Module-owned paths and schemas are loaded dynamically from built-in modules.
+ * The set of modules validated matches `APPSTRATE_MODULES` (default: all built-in).
+ *
  * Usage: bun scripts/verify-openapi.ts
  */
+import { readdirSync, existsSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
 import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
-import { openApiSpec } from "../apps/api/src/openapi/index.ts";
+import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
 import {
-  zodSchemaRegistry,
+  buildZodSchemaRegistry,
   type ZodSchemaEntry,
 } from "../apps/api/src/openapi/zod-schema-registry.ts";
+import type { AppstrateModule, OpenApiSchemaEntry } from "@appstrate/core/module";
+
+// ---------------------------------------------------------------------------
+// Auto-discover built-in modules and collect their OpenAPI contributions
+// ---------------------------------------------------------------------------
+//
+// Discovery scans `apps/api/src/modules/*/index.ts` — no hardcoded list.
+// External modules (e.g. @appstrate/cloud) are not validated here; they're
+// loaded at runtime via APPSTRATE_MODULES and can't be imported without full boot.
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const modulesDir = resolve(scriptDir, "../apps/api/src/modules");
+const discoveredModules: string[] = existsSync(modulesDir)
+  ? readdirSync(modulesDir).filter((name) => {
+      const subdir = join(modulesDir, name);
+      try {
+        return statSync(subdir).isDirectory() && existsSync(join(subdir, "index.ts"));
+      } catch {
+        return false;
+      }
+    })
+  : [];
+
+const loadedModules: AppstrateModule[] = [];
+const modulePaths: Record<string, unknown> = {};
+const moduleComponentSchemas: Record<string, unknown> = {};
+const moduleSchemas: OpenApiSchemaEntry[] = [];
+
+for (const name of discoveredModules) {
+  const entry = join(modulesDir, name, "index.ts");
+  const mod: AppstrateModule = (await import(entry)).default;
+  loadedModules.push(mod);
+  const paths = mod.openApiPaths?.();
+  if (paths) Object.assign(modulePaths, paths);
+  const compSchemas = mod.openApiComponentSchemas?.();
+  if (compSchemas) Object.assign(moduleComponentSchemas, compSchemas);
+  const schemas = mod.openApiSchemas?.();
+  if (schemas) moduleSchemas.push(...schemas);
+}
+
+// Build the full spec and registry with module contributions
+const openApiSpec = buildOpenApiSpec(modulePaths, moduleComponentSchemas);
+const zodSchemaRegistry = buildZodSchemaRegistry(moduleSchemas);
 
 let exitCode = 0;
 
@@ -292,17 +341,21 @@ const expectedEndpoints = [
   "GET /api/end-users/{id}",
   "PATCH /api/end-users/{id}",
   "DELETE /api/end-users/{id}",
-
-  // Webhooks
-  "POST /api/webhooks",
-  "GET /api/webhooks",
-  "GET /api/webhooks/{id}",
-  "PUT /api/webhooks/{id}",
-  "DELETE /api/webhooks/{id}",
-  "POST /api/webhooks/{id}/test",
-  "POST /api/webhooks/{id}/rotate",
-  "GET /api/webhooks/{id}/deliveries",
 ];
+
+// Module-contributed endpoints are sourced directly from each module's
+// `openApiPaths()` output — no hardcoded list. This keeps verify-openapi
+// in sync with whatever the module declares, so adding or removing a
+// module endpoint requires no update here.
+for (const [path, methods] of Object.entries(modulePaths)) {
+  if (!methods || typeof methods !== "object") continue;
+  for (const method of Object.keys(methods as Record<string, unknown>)) {
+    // Skip OpenAPI path-level fields that aren't HTTP methods (parameters, summary, etc.)
+    const lower = method.toLowerCase();
+    if (!["get", "post", "put", "patch", "delete", "head", "options"].includes(lower)) continue;
+    expectedEndpoints.push(`${lower.toUpperCase()} ${path}`);
+  }
+}
 
 const specEndpoints = new Set<string>();
 const paths = openApiSpec.paths as Record<string, Record<string, unknown>>;

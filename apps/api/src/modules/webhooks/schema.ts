@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { pgTable, text, timestamp, boolean, integer, uuid, index } from "drizzle-orm/pg-core";
-import { organizations } from "./organizations.ts";
-import { applications } from "./applications.ts";
-import { packages } from "./packages.ts";
+import { organizations, applications, packages } from "@appstrate/db/schema";
+
+// Webhooks module — owns the webhooks and webhook_deliveries tables.
+//
+// FKs to core tables are declared via Drizzle `.references()` so the schema
+// is self-documenting and usable with Drizzle's query builder. Core tables
+// always exist before the module runs (core migrations run first at boot).
+// For the reverse direction (core → module), modules must emit raw SQL
+// inside their own migration — Drizzle cannot express it without leaking
+// the module schema into core.
 
 export const webhooks = pgTable(
   "webhooks",
@@ -16,7 +23,7 @@ export const webhooks = pgTable(
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
     url: text("url").notNull(),
-    events: text("events").array().notNull(), // ["run.completed", "run.failed"]
+    events: text("events").array().notNull(), // ["run.success", "run.failed"]
     packageId: text("package_id").references(() => packages.id, { onDelete: "set null" }), // null = all packages
     payloadMode: text("payload_mode").notNull().default("full"), // "full" | "summary"
     enabled: boolean("enabled").notNull().default(true),
@@ -41,7 +48,7 @@ export const webhookDeliveries = pgTable(
       .notNull()
       .references(() => webhooks.id, { onDelete: "cascade" }),
     eventId: text("event_id").notNull(), // evt_ prefix
-    eventType: text("event_type").notNull(), // "run.completed" etc.
+    eventType: text("event_type").notNull(), // "run.success" etc.
     status: text("status").notNull().default("pending"), // "pending" | "success" | "failed"
     statusCode: integer("status_code"), // HTTP response code
     latency: integer("latency"), // ms

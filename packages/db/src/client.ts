@@ -24,6 +24,7 @@ export interface ListenClient {
 let _closeDb: (() => Promise<void>) | null = null;
 let _listenClient: ListenClient | null = null;
 let _pgliteClient: import("@electric-sql/pglite").PGlite | null = null;
+let _pgQueryClient: import("postgres").Sql | null = null;
 
 /** Access the raw PGlite client (for exec() multi-statement support). Only available in embedded mode. */
 export function getPGliteClient(): import("@electric-sql/pglite").PGlite | null {
@@ -61,6 +62,7 @@ async function initPostgres(): Promise<Db> {
     connect_timeout: 30,
     max_lifetime: 60 * 30,
   });
+  _pgQueryClient = queryClient;
 
   const listenConn = postgres(env.DATABASE_URL!, {
     max: 1,
@@ -95,4 +97,28 @@ export async function closeDb(): Promise<void> {
   _closeDb = null;
   _listenClient = null;
   _pgliteClient = null;
+  _pgQueryClient = null;
+}
+
+/**
+ * Reserve a single PostgreSQL connection from the pool for session-scoped
+ * primitives like `pg_advisory_lock` — lock acquisition and release MUST hit
+ * the same backend connection, otherwise the unlock targets a different
+ * session (silent no-op) and the original session holds the lock forever.
+ *
+ * Returns `null` in PGlite mode. Caller MUST invoke `release()` in a `finally`
+ * block or the pool will leak (max 20 connections).
+ *
+ * The reserved sql is a raw postgres-js instance (not wrapped in Drizzle) so
+ * callers use tagged-template syntax: `await sql\`SELECT pg_advisory_lock(${k})\``.
+ * Protected work can run on any connection — the lock only needs to be held
+ * by *someone* to block concurrent callers.
+ */
+export async function reservePgConnection(): Promise<{
+  sql: import("postgres").ReservedSql;
+  release: () => void;
+} | null> {
+  if (isEmbeddedDb || !_pgQueryClient) return null;
+  const reserved = await _pgQueryClient.reserve();
+  return { sql: reserved, release: () => reserved.release() };
 }

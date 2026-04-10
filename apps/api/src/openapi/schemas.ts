@@ -63,35 +63,6 @@ export const schemas = {
       packageSource: { type: "string", enum: ["system", "local"] },
     },
   },
-  WebhookObject: {
-    type: "object",
-    description: "Webhook configuration object",
-    required: [
-      "id",
-      "object",
-      "applicationId",
-      "url",
-      "events",
-      "payloadMode",
-      "enabled",
-      "createdAt",
-    ],
-    properties: {
-      id: { type: "string", description: "Webhook ID (wh_ prefix)" },
-      object: { type: "string", enum: ["webhook"] },
-      applicationId: {
-        type: "string",
-        description: "Application ID (app_ prefix). All webhooks are application-scoped.",
-      },
-      url: { type: "string", format: "uri" },
-      events: { type: "array", items: { type: "string" } },
-      packageId: { type: ["string", "null"] },
-      payloadMode: { type: "string", enum: ["full", "summary"] },
-      enabled: { type: "boolean" },
-      createdAt: { type: "string", format: "date-time" },
-      updatedAt: { type: "string", format: "date-time" },
-    },
-  },
   OrgSettings: {
     type: "object",
     description: "Organization settings (extensible)",
@@ -410,6 +381,10 @@ export const schemas = {
         type: ["string", "null"],
         description: "End-user ID (eu_ prefix) if executed on behalf of an end-user",
       },
+      apiKeyId: {
+        type: ["string", "null"],
+        description: "API key ID that triggered the run (null for dashboard/schedule runs)",
+      },
       applicationId: {
         type: ["string", "null"],
         description: "Application ID (app_ prefix) that owns this run",
@@ -418,6 +393,22 @@ export const schemas = {
         type: ["object", "null"],
         description: "Additional metadata (e.g. creditsUsed in cloud mode)",
         additionalProperties: true,
+      },
+      userName: {
+        type: ["string", "null"],
+        description: "Display name of the user who triggered the run (from profiles table)",
+      },
+      endUserName: {
+        type: ["string", "null"],
+        description: "Display name of the end-user (name or externalId fallback)",
+      },
+      apiKeyName: {
+        type: ["string", "null"],
+        description: "Name of the API key that triggered the run",
+      },
+      scheduleName: {
+        type: ["string", "null"],
+        description: "Name of the schedule that triggered the run",
       },
     },
   },

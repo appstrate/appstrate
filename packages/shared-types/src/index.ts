@@ -22,16 +22,27 @@ export type EnrichedRun = Run & {
 
 // --- App Config Types ---
 
+/**
+ * Platform feature flags.
+ *
+ * Only *core* flags are statically typed here — flags derived from
+ * environment variables owned by the core platform (opt-in integrations
+ * like Google/GitHub OAuth, SMTP).
+ *
+ * Module-owned flags (e.g. `billing` from @appstrate/cloud, `webhooks`
+ * from the webhooks module, future `oidc`) are contributed at boot via
+ * `AppstrateModule.features` and flow through the index signature —
+ * adding a new module never requires editing shared-types.
+ */
+export interface AppConfigFeatures {
+  googleAuth: boolean;
+  githubAuth: boolean;
+  smtp: boolean;
+  [key: string]: boolean;
+}
+
 export interface AppConfig {
-  features: {
-    billing: boolean;
-    models: boolean;
-    providerKeys: boolean;
-    googleAuth: boolean;
-    githubAuth: boolean;
-    smtp: boolean;
-    [key: string]: boolean;
-  };
+  features: AppConfigFeatures;
   legalUrls?: {
     terms?: string;
     privacy?: string;
@@ -56,8 +67,10 @@ export type RunStatus = (typeof runStatusEnum.enumValues)[number];
 
 // --- Schedule Types ---
 
-export type { PackageSchedule as Schedule } from "@appstrate/db/schema";
-import type { PackageSchedule } from "@appstrate/db/schema";
+// `package_schedules` is a legacy DB name — the public type drops the prefix.
+// TODO: rename the table + Drizzle variable to `schedules` in a follow-up PR.
+import type { PackageSchedule as Schedule } from "@appstrate/db/schema";
+export type { Schedule };
 
 export interface ScheduleReadiness {
   status: "ready" | "degraded" | "not_ready";
@@ -66,7 +79,7 @@ export interface ScheduleReadiness {
   missingProviders: string[];
 }
 
-export type EnrichedSchedule = PackageSchedule & {
+export type EnrichedSchedule = Schedule & {
   profileName: string | null;
   profileType: "user" | "app" | null;
   profileOwnerName: string | null;
@@ -474,33 +487,9 @@ export interface EndUserListResponse {
   limit: number;
 }
 
-// --- Webhook Types ---
-
-export interface WebhookInfo {
-  id: string;
-  object: "webhook";
-  applicationId: string;
-  url: string;
-  events: string[];
-  packageId: string | null;
-  payloadMode: "full" | "summary";
-  enabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface WebhookCreateResponse extends WebhookInfo {
-  secret: string;
-}
-
-export interface WebhookDelivery {
-  id: string;
-  eventId: string;
-  eventType: string;
-  status: "pending" | "success" | "failed";
-  statusCode: number | null;
-  latency: number | null;
-  attempt: number;
-  error: string | null;
-  createdAt: string;
-}
+// --- Module Types ---
+// Module-owned public types live under `./modules/<id>.ts` and are re-exported
+// from the barrel so that consumers can keep importing from the single entry
+// point. When a module is extracted to its own npm package, the re-export can
+// be dropped without touching consumer code.
+export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./modules/webhooks.ts";
