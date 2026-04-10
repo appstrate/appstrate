@@ -10,6 +10,8 @@
  */
 
 import { isEmbeddedDb } from "@appstrate/db/client";
+import type { Db } from "@appstrate/db/client";
+import type { PGlite } from "@electric-sql/pglite";
 import type { ModuleInitContext } from "@appstrate/core/module";
 import { logger } from "../logger.ts";
 
@@ -44,7 +46,7 @@ export async function applyModuleMigrations(
  * simultaneously contend on the same lock for the same module, but different
  * modules use different keys and can migrate in parallel.
  */
-function lockKeyForModule(migrationsTable: string): bigint {
+export function lockKeyForModule(migrationsTable: string): bigint {
   // FNV-1a 64-bit over the UTF-8 bytes of the table name.
   let hash = 0xcbf29ce484222325n;
   const prime = 0x100000001b3n;
@@ -57,11 +59,12 @@ function lockKeyForModule(migrationsTable: string): bigint {
   return hash >= 0x8000000000000000n ? hash - 0x10000000000000000n : hash;
 }
 
-async function applyPostgresMigrations(
+export async function applyPostgresMigrations(
   migrationsDir: string,
   migrationsTable: string,
+  dbClient?: Db,
 ): Promise<void> {
-  const { db } = await import("@appstrate/db/client");
+  const db = dbClient ?? (await import("@appstrate/db/client")).db;
   const { migrate } = await import("drizzle-orm/postgres-js/migrator");
   const { sql } = await import("drizzle-orm");
 
@@ -86,14 +89,14 @@ async function applyPostgresMigrations(
   }
 }
 
-async function applyPGliteMigrations(
+export async function applyPGliteMigrations(
   moduleId: string,
   migrationsDir: string,
   migrationsTable: string,
+  pgClient?: PGlite,
 ): Promise<void> {
   const { join } = await import("node:path");
   const { readFileSync, existsSync } = await import("node:fs");
-  const { getPGliteClient } = await import("@appstrate/db/client");
 
   const journalPath = join(migrationsDir, "meta/_journal.json");
   if (!existsSync(journalPath)) {
@@ -101,7 +104,7 @@ async function applyPGliteMigrations(
     return;
   }
 
-  const pg = getPGliteClient()!;
+  const pg = pgClient ?? (await import("@appstrate/db/client")).getPGliteClient()!;
 
   // Create module-specific migrations tracking table
   await pg.exec(`
