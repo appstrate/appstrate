@@ -213,9 +213,9 @@ export interface ModuleInitContext {
    * Handles both PostgreSQL and PGlite. Each module gets its own migration
    * tracking table (`__drizzle_migrations_<moduleId>`), with hyphens in
    * `moduleId` replaced by underscores so the identifier is a valid SQL name
-   * (e.g. `provider-management` → `__drizzle_migrations_provider_management`).
+   * (e.g. `my-module` → `__drizzle_migrations_my_module`).
    *
-   * @param moduleId - Module identifier (e.g. "scheduling", "cloud")
+   * @param moduleId - Module identifier (e.g. "webhooks", "cloud")
    * @param migrationsDir - Absolute path to the module's migrations directory
    */
   applyMigrations: (moduleId: string, migrationsDir: string) => Promise<void>;
