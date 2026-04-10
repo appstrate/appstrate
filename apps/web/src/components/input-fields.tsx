@@ -6,7 +6,7 @@ import { JsonFieldEditor } from "./json-field-editor";
 import { MultiSelectField } from "./multi-select";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { schemaToFields, type SchemaWrapper, type FieldDescriptor } from "@appstrate/core/form";
+import { schemaToFields, toHtmlInputType, type SchemaWrapper } from "@appstrate/core/form";
 
 interface InputFieldsProps {
   schema: SchemaWrapper;
@@ -16,30 +16,6 @@ interface InputFieldsProps {
   onFileChange?: (key: string, files: File[]) => void;
   idPrefix?: string;
   errors?: Record<string, string>;
-}
-
-/** Map JSON Schema format → HTML input type for string fields. */
-const FORMAT_TO_INPUT_TYPE: Record<string, FormFieldType> = {
-  email: "email",
-  "idn-email": "email",
-  uri: "url",
-  url: "url",
-  date: "date",
-  "date-time": "datetime-local",
-  time: "time",
-  color: "color",
-  password: "password",
-};
-
-/** Resolve the HTML input type from a FieldDescriptor. */
-function toFormFieldType(field: FieldDescriptor): FormFieldType {
-  if (field.type === "number" || field.type === "integer") return "number";
-  if (field.type === "textarea") return "textarea";
-  // Format-based resolution for text fields
-  if (field.type === "text" && field.format) {
-    return FORMAT_TO_INPUT_TYPE[field.format] ?? "text";
-  }
-  return "text";
 }
 
 export function InputFields({
@@ -133,7 +109,7 @@ export function InputFields({
         }
 
         // text, textarea, number, integer, enum, and format-based fields → FormField
-        const formType = toFormFieldType(field);
+        const formType = toHtmlInputType(field) as FormFieldType;
         const v = field.validation;
 
         return (
