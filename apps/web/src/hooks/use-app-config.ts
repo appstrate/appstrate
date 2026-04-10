@@ -13,7 +13,6 @@ const DEFAULT_CONFIG: AppConfig = {
     billing: false,
     models: false,
     providerKeys: false,
-    scheduling: false,
     webhooks: false,
     googleAuth: false,
     githubAuth: false,

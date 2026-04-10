@@ -6,7 +6,6 @@ import { useAuth } from "../hooks/use-auth";
 import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { useAllSchedules } from "../hooks/use-schedules";
-import { useAppConfig } from "../hooks/use-app-config";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
@@ -26,7 +25,6 @@ export function DashboardPage() {
   });
   const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents();
   const { data: unreadCounts } = useUnreadCountsByAgent();
-  const { features } = useAppConfig();
   const { data: schedules } = useAllSchedules();
 
   const isLoading = runsLoading || agentsLoading;
@@ -94,7 +92,7 @@ export function DashboardPage() {
         {t("dashboard.welcome", { name: firstName, ns: "common" })}
       </h1>
       {/* Upcoming schedules */}
-      {features.scheduling && upcomingSchedules.length > 0 && (
+      {upcomingSchedules.length > 0 && (
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-muted-foreground text-sm font-medium">

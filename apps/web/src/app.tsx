@@ -234,14 +234,10 @@ export function App() {
             />
             <Route path="/agents/:scope/:name/runs/:runId" element={<RunDetailPage />} />
             <Route path="/runs" element={<RunsPage />} />
-            {features.scheduling && (
-              <>
-                <Route path="/schedules" element={<SchedulesListPage />} />
-                <Route path="/schedules/new" element={<ScheduleCreatePage />} />
-                <Route path="/schedules/:id" element={<ScheduleDetailPage />} />
-                <Route path="/schedules/:id/edit" element={<ScheduleEditPage />} />
-              </>
-            )}
+            <Route path="/schedules" element={<SchedulesListPage />} />
+            <Route path="/schedules/new" element={<ScheduleCreatePage />} />
+            <Route path="/schedules/:id" element={<ScheduleDetailPage />} />
+            <Route path="/schedules/:id/edit" element={<ScheduleEditPage />} />
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/providers" element={<ProvidersPage />} />

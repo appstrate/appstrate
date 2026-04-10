@@ -42,9 +42,7 @@ export function NavOrg() {
   const automationItems = [
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
     { path: "/agents", label: t("nav.agents"), icon: Layers },
-    ...(features.scheduling
-      ? [{ path: "/schedules", label: t("nav.schedules"), icon: Calendar }]
-      : []),
+    { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
   ];
 
   const resourceItems = [

@@ -55,7 +55,6 @@ import { PackageCard } from "../components/package-card";
 import { useAgentReadiness } from "../hooks/use-agent-readiness";
 import { useModels, useAgentModel } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
-import { useAppConfig } from "../hooks/use-app-config";
 
 type DetailTab =
   | "connectors"
@@ -163,8 +162,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   useEffect(() => {
     return () => resetUI();
   }, [packageId, resetUI]);
-
-  const { features } = useAppConfig();
 
   // ── Data loading (unified) ──
   const { data: detail, isLoading, error } = usePackageDetail(type, packageId);
@@ -336,9 +333,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     ...(effectiveShowConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
       : []),
-    ...(features.scheduling
-      ? [{ id: "schedules" as DetailTab, label: t("detail.tabSchedules") }]
-      : []),
+    { id: "schedules" as DetailTab, label: t("detail.tabSchedules") },
     { id: "memories", label: t("detail.tabMemories") },
     { id: "api", label: t("detail.tabApi") },
   ];
@@ -537,9 +532,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
         />
       )}
-      {type === "agent" && tab === "schedules" && features.scheduling && (
-        <AgentSchedulesTab packageId={packageId} />
-      )}
+      {type === "agent" && tab === "schedules" && <AgentSchedulesTab packageId={packageId} />}
       {type === "agent" && tab === "memories" && <AgentMemoriesTab packageId={packageId} />}
       {type === "agent" && tab === "api" && <AgentApiTab packageId={packageId} />}
 

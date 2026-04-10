@@ -42,7 +42,6 @@ const baseConfig: AppConfig = {
     billing: false,
     models: false,
     providerKeys: false,
-    scheduling: false,
     webhooks: false,
     googleAuth: false,
     githubAuth: false,
@@ -168,12 +167,12 @@ describe("module-loader", () => {
   describe("applyModuleFeatures", () => {
     it("merges feature flags from every module without mutating base", async () => {
       const a = mockModule("a", { features: { billing: true } });
-      const b = mockModule("b", { features: { scheduling: true, webhooks: true } });
+      const b = mockModule("b", { features: { models: true, webhooks: true } });
       await loadModulesFromInstances([a, b], mockCtx());
 
       const result = applyModuleFeatures(baseConfig);
       expect(result.features.billing).toBe(true);
-      expect(result.features.scheduling).toBe(true);
+      expect(result.features.models).toBe(true);
       expect(result.features.webhooks).toBe(true);
       expect(baseConfig.features.billing).toBe(false); // unchanged
     });

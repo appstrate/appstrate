@@ -27,7 +27,6 @@ export interface AppConfig {
     billing: boolean;
     models: boolean;
     providerKeys: boolean;
-    scheduling: boolean;
     webhooks: boolean;
     googleAuth: boolean;
     githubAuth: boolean;

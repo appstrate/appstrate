@@ -30,7 +30,6 @@ import { resolvePermissions, resolveApiKeyPermissions } from "../../src/lib/perm
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { requireAppContext } from "../../src/middleware/app-context.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
-import { loadModulesFromInstances } from "../../src/lib/modules/module-loader.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 
@@ -65,22 +64,9 @@ import type { AppEnv } from "../../src/types/index.ts";
 let cachedApp: Hono<AppEnv> | null = null;
 
 // Initialize boot-time singletons that routes depend on.
-// In production these are called by boot(). For tests, we call them directly.
-//
-// Modules: test fixtures statically mount the routers for webhooks and
-// provider-management (see imports below). We do NOT run their full init()
-// here because that would start BullMQ workers and apply migrations. RBAC is
-// owned by core and already covers module resources, so nothing to register.
-await loadModulesFromInstances([], {
-  databaseUrl: null,
-  redisUrl: null,
-  appUrl: "http://localhost:3000",
-  isEmbeddedDb: true,
-  applyMigrations: async () => {},
-  getSendMail: async () => () => {},
-  getOrgAdminEmails: async () => [],
-}).catch(() => {});
-
+// Module routers (webhooks, provider-management) are mounted statically below
+// without going through the module loader — tests don't need BullMQ workers
+// or migrations, and RBAC is owned by core.
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
 initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 
