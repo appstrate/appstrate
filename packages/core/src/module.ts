@@ -130,28 +130,6 @@ export interface ModuleHooks {
     packageId: string,
     modelId?: string | null,
   ) => Promise<ResolvedModelResult | null>;
-  /**
-   * Enrich run rows with module-owned display fields at read time.
-   *
-   * Called with one or more base runs (never the result of a prior hook) and
-   * returns a map from run id to a partial patch that is shallow-merged into
-   * the response. Unlike first-match hooks, `enrichRun` is a merge hook —
-   * every module that provides it contributes, and the framework merges the
-   * partials. Modules SHOULD batch their lookups (e.g. via `IN`).
-   *
-   * Example: the scheduling module returns `{ [runId]: { scheduleName } }`.
-   */
-  enrichRun: (runs: readonly EnrichRunInput[]) => Promise<Record<string, Record<string, unknown>>>;
-}
-
-/** Minimal run shape passed to `enrichRun` — only fields a module can key off of. */
-export interface EnrichRunInput {
-  id: string;
-  orgId: string;
-  applicationId: string;
-  packageId: string;
-  /** Schedule id for scheduled runs — null for manual/API-triggered runs. */
-  scheduleId: string | null;
 }
 
 /** Known events and their signatures. */

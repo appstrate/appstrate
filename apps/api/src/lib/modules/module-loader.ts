@@ -297,40 +297,6 @@ export function hasHook(name: keyof ModuleHooks): boolean {
   return false;
 }
 
-/**
- * Call a merge hook — iterate ALL modules that provide the hook and
- * shallow-merge each module's returned map into a single result.
- *
- * Used by hooks with accumulation semantics (e.g. `enrichRun`) where
- * several modules may contribute different fields to the same row.
- * Errors in individual handlers are logged and isolated; they do not
- * prevent other modules from contributing.
- */
-export async function callMergeHook<K extends keyof ModuleHooks>(
-  name: K,
-  ...args: Parameters<ModuleHooks[K]>
-): Promise<Record<string, Record<string, unknown>>> {
-  const merged: Record<string, Record<string, unknown>> = {};
-  for (const mod of _modules.values()) {
-    const hook = (mod.hooks as Record<string, AnyHandler> | undefined)?.[name];
-    if (!hook) continue;
-    try {
-      const partial = (await hook(...args)) as Record<string, Record<string, unknown>> | undefined;
-      if (!partial) continue;
-      for (const [id, fields] of Object.entries(partial)) {
-        merged[id] = { ...(merged[id] ?? {}), ...fields };
-      }
-    } catch (err) {
-      logger.warn("Module merge hook error", {
-        module: mod.manifest.id,
-        hook: name,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-  return merged;
-}
-
 // ---------------------------------------------------------------------------
 // Event system (broadcast to ALL modules)
 // ---------------------------------------------------------------------------

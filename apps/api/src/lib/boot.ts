@@ -31,7 +31,7 @@ import {
   storageFolderForType,
 } from "../services/package-items/index.ts";
 import { markOrphanRunsFailed } from "../services/state/index.ts";
-import { initScheduleWorker } from "../services/scheduling.ts";
+import { initScheduleWorker } from "../services/scheduler.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";

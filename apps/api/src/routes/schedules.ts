@@ -10,7 +10,7 @@ import {
   createSchedule,
   updateSchedule,
   deleteSchedule,
-} from "../services/scheduling.ts";
+} from "../services/scheduler.ts";
 import { isValidCron } from "../lib/cron.ts";
 import { validateInput, schemaHasFileFields } from "../services/schema.ts";
 import { requireAgent } from "../middleware/guards.ts";

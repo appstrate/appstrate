@@ -9,8 +9,7 @@ import type {
   packageVersionDependencies,
   applicationPackages,
 } from "./packages.ts";
-import type { runs, runLogs, packageMemories } from "./runs.ts";
-import type { packageSchedules } from "./schedules.ts";
+import type { runs, runLogs, packageMemories, packageSchedules } from "./runs.ts";
 import type {
   connectionProfiles,
   appProfileProviderBindings,

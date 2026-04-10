@@ -12,15 +12,7 @@ export type { Run } from "@appstrate/db/schema";
 
 import type { Run } from "@appstrate/db/schema";
 
-/**
- * Run with enriched display names.
- *
- * `userName`, `endUserName`, `apiKeyName`, and `scheduleName` all come from
- * LEFT JOINs inside core — they are always present (possibly null) in API
- * responses. Modules that want to contribute additional fields at runtime can
- * do so via the `enrichRun` merge hook; those are not declared here so that
- * shared-types stays module-agnostic.
- */
+/** Run with enriched display names from LEFT JOINs (user, end-user, API key, schedule). */
 export type EnrichedRun = Run & {
   userName: string | null;
   endUserName: string | null;

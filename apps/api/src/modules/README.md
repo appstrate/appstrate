@@ -65,7 +65,7 @@ Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`,
 1. Module tables live in `apps/api/src/modules/<id>/schema.ts`. They have their own Drizzle migration tree and a dedicated tracking table `__drizzle_migrations_<id>` (hyphens replaced with underscores).
 2. **Backward FKs (module → core)** use Drizzle `.references()` inline in the module schema — for example `orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" })`. Core tables always exist before any module migration runs at boot, so this is safe.
 3. **Forward FKs (core → module)** cannot be expressed via Drizzle without leaking the module schema into core. When you need one (example: `runs.schedule_id → package_schedules.id`), add it via raw SQL inside the module's own migration. Core stays agnostic of module tables.
-4. Core never imports from `apps/api/src/modules/`. If core code needs data from a module, use a hook (`resolveModel`, `enrichRun`) — never a direct import.
+4. Core never imports from `apps/api/src/modules/`. If core code needs data from a module, use a hook (`resolveModel`, `beforeRun`) — never a direct import.
 
 ## Permissions
 
@@ -75,10 +75,9 @@ Inside module routes, protect handlers with the same typed helper core uses: `re
 
 The trade-off is that disabling a module leaves a handful of inert permission strings in the role sets (e.g. `schedules:*` still exists in `OWNER_PERMISSIONS` even when the scheduling module is off). That is harmless metadata — no route reads it, since the routes themselves are not loaded — and it keeps the type system honest for everything that is.
 
-## Hooks, events, and merge hooks
+## Hooks and events
 
 - **Hooks** (`callHook`, first-match-wins): `beforeRun`, `beforeSignup`, `resolveModel`. The first module that provides a hook is called, subsequent modules are skipped.
-- **Merge hooks** (`callMergeHook`, all-match, shallow merge): `enrichRun` receives a batch of runs and returns `{ [runId]: { fieldA, fieldB } }`; core merges every module's response before serialization. Use this for read-time enrichment where multiple modules may decorate the same response.
 - **Events** (`emitEvent`, broadcast-to-all): `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`. Handlers run for side effects only; errors in one handler are isolated and do not block others.
 
 Names are defined in `packages/core/src/module.ts` (`ModuleHooks`, `ModuleEvents`). To add a new hook or event, update that file first so both platform and modules see the same contract.

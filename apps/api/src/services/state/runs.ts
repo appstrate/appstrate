@@ -3,9 +3,7 @@
 import { eq, and, ne, desc, isNotNull, inArray, count, max, type SQL, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, runLogs, profiles, endUsers, apiKeys, packageSchedules } from "@appstrate/db/schema";
-import type { EnrichRunInput } from "@appstrate/core/module";
 import { logger } from "../../lib/logger.ts";
-import { enrichRuns } from "../../lib/modules/hooks.ts";
 import { type Actor, actorInsert, actorFilter } from "../../lib/actor.ts";
 import { asRecordOrNull } from "../../lib/safe-json.ts";
 import { toISO } from "../../lib/date-helpers.ts";
@@ -74,23 +72,6 @@ export async function createRun(params: CreateRunParams): Promise<void> {
     apiKeyId: params.apiKeyId ?? null,
     runNumber,
   });
-}
-
-/** Build the minimal EnrichRunInput payload for the `enrichRun` hook. */
-function toEnrichInput(r: {
-  id: string;
-  scheduleId: string | null;
-  orgId: string;
-  applicationId: string;
-  packageId: string;
-}): EnrichRunInput {
-  return {
-    id: r.id,
-    scheduleId: r.scheduleId,
-    orgId: r.orgId,
-    applicationId: r.applicationId,
-    packageId: r.packageId,
-  };
 }
 
 /**
@@ -437,8 +418,6 @@ export async function listRunsWithFilter(
     .limit(limit)
     .offset(offset);
 
-  const enrichments = await enrichRuns(rows.map((r) => toEnrichInput(r.run)));
-
   return {
     runs: rows.map((r) => ({
       ...r.run,
@@ -446,7 +425,6 @@ export async function listRunsWithFilter(
       endUserName: r.endUserName ?? null,
       apiKeyName: r.apiKeyName ?? null,
       scheduleName: r.scheduleName ?? null,
-      ...(enrichments[r.run.id] ?? {}),
     })) as unknown as Record<string, unknown>[],
     total: countRow?.count ?? 0,
   };
@@ -515,14 +493,12 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
     .limit(1);
 
   if (!row) return null;
-  const enrichments = await enrichRuns([toEnrichInput(row.run)]);
   return {
     ...row.run,
     userName: row.userName ?? null,
     endUserName: row.endUserName ?? null,
     apiKeyName: row.apiKeyName ?? null,
     scheduleName: row.scheduleName ?? null,
-    ...(enrichments[row.run.id] ?? {}),
   };
 }
 

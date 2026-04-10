@@ -12,16 +12,11 @@
  *   Events (broadcast-to-all): onX
  */
 
-import { callHook, callMergeHook, emitEvent } from "./module-loader.ts";
-import type {
-  BeforeRunParams,
-  EnrichRunInput,
-  RunRejection,
-  RunStatusChangeParams,
-} from "@appstrate/core/module";
+import { callHook, emitEvent } from "./module-loader.ts";
+import type { BeforeRunParams, RunRejection, RunStatusChangeParams } from "@appstrate/core/module";
 
 // Re-export for consumers that import from hooks.ts
-export type { BeforeRunParams, EnrichRunInput, RunRejection, RunStatusChangeParams };
+export type { BeforeRunParams, RunRejection, RunStatusChangeParams };
 
 // ---------------------------------------------------------------------------
 // Signup lifecycle
@@ -55,21 +50,6 @@ export async function beforeRun(params: BeforeRunParams): Promise<RunRejection |
  */
 export async function onRunStatusChange(params: RunStatusChangeParams): Promise<void> {
   await emitEvent("onRunStatusChange", params);
-}
-
-/**
- * Enrich a batch of runs with module-owned display fields.
- *
- * Every loaded module that provides `enrichRun` contributes a partial patch
- * keyed by run id. The returned map is a shallow merge of all contributions.
- * Core callers apply each patch on top of the base row before serialization.
- * Safe to call when no modules are loaded (returns an empty map).
- */
-export async function enrichRuns(
-  runs: readonly EnrichRunInput[],
-): Promise<Record<string, Record<string, unknown>>> {
-  if (runs.length === 0) return {};
-  return callMergeHook("enrichRun", runs);
 }
 
 // ---------------------------------------------------------------------------

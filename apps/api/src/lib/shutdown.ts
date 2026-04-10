@@ -10,7 +10,7 @@ import {
   waitForInFlight,
   stopCancelSubscriber,
 } from "../services/run-tracker.ts";
-import { shutdownScheduleWorker } from "../services/scheduling.ts";
+import { shutdownScheduleWorker } from "../services/scheduler.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
