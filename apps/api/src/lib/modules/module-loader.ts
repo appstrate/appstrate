@@ -7,7 +7,6 @@ import type {
   ModuleInitContext,
   ModuleHooks,
   ModuleEvents,
-  OpenApiSchemaEntry,
 } from "@appstrate/core/module";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -20,6 +19,7 @@ import { logger } from "../logger.ts";
 // ---------------------------------------------------------------------------
 
 const _modules: Map<string, AppstrateModule> = new Map();
+let _publicPathsCache: Set<string> | null = null;
 let _initialized = false;
 
 /**
@@ -144,9 +144,11 @@ export function getModules(): ReadonlyMap<string, AppstrateModule> {
   return _modules;
 }
 
-/** Collect all public paths from all loaded modules. */
+/** Collect all public paths from all loaded modules (cached as Set for O(1) lookup). */
 export function getModulePublicPaths(): Set<string> {
-  return new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
+  if (_publicPathsCache !== null) return _publicPathsCache;
+  _publicPathsCache = new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
+  return _publicPathsCache;
 }
 
 /** Collect routers from all modules and mount them on the app under `/api`. */
@@ -177,16 +179,6 @@ export function getModuleOpenApiComponentSchemas(): Record<string, unknown> {
     if (moduleSchemas) Object.assign(schemas, moduleSchemas);
   }
   return schemas;
-}
-
-/** Collect Zod ↔ OpenAPI schema entries from all loaded modules. */
-export function getModuleOpenApiSchemas(): OpenApiSchemaEntry[] {
-  const entries: OpenApiSchemaEntry[] = [];
-  for (const mod of _modules.values()) {
-    const moduleSchemas = mod.openApiSchemas?.();
-    if (moduleSchemas) entries.push(...moduleSchemas);
-  }
-  return entries;
 }
 
 /**
@@ -296,12 +288,14 @@ export async function shutdownModules(): Promise<void> {
     }
   }
   _modules.clear();
+  _publicPathsCache = null;
   _initialized = false;
 }
 
 /** Reset all state. Exported for tests only. */
 export function resetModules(): void {
   _modules.clear();
+  _publicPathsCache = null;
   _initialized = false;
 }
 
