@@ -19,13 +19,12 @@ import { createWebhooksRouter, createWebhookSchema, updateWebhookSchema } from "
 import { initWebhookWorker, shutdownWebhookWorker, dispatchRunWebhook } from "./service.ts";
 import { webhooksPaths } from "./openapi/paths.ts";
 import { webhooksSchemas } from "./openapi/schemas.ts";
-import { applyModuleMigrations } from "../../lib/modules/migrate.ts";
 
 const webhooksModule: AppstrateModule = {
   manifest: { id: "webhooks", name: "Webhooks", version: "1.0.0" },
 
   async init(ctx: ModuleInitContext) {
-    await applyModuleMigrations(ctx, "webhooks", resolve(import.meta.dir, "drizzle/migrations"));
+    await ctx.applyMigrations("webhooks", resolve(import.meta.dir, "drizzle/migrations"));
     initWebhookWorker();
   },
 

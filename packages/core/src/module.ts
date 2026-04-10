@@ -229,6 +229,15 @@ export interface ModuleInitContext {
   appUrl: string;
   /** Whether running in embedded DB mode (PGlite). */
   isEmbeddedDb: boolean;
+  /**
+   * Apply Drizzle migrations for a module.
+   * Handles both PostgreSQL and PGlite. Each module gets its own migration
+   * tracking table (`__drizzle_migrations_<moduleId>`).
+   *
+   * @param moduleId - Module identifier (e.g. "scheduling", "cloud")
+   * @param migrationsDir - Absolute path to the module's migrations directory
+   */
+  applyMigrations: (moduleId: string, migrationsDir: string) => Promise<void>;
   /** Lazy email sender (breaks circular deps at module load time). */
   getSendMail: () => Promise<(to: string, subject: string, html: string) => void>;
   /** Query helper: get org admin emails. */

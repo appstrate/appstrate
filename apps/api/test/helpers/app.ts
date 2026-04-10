@@ -64,6 +64,7 @@ await loadModulesFromInstances([], {
   redisUrl: null,
   appUrl: "http://localhost:3000",
   isEmbeddedDb: true,
+  applyMigrations: async () => {},
   getSendMail: async () => () => {},
   getOrgAdminEmails: async () => [],
 }).catch(() => {}); // no modules in test (OSS mode)

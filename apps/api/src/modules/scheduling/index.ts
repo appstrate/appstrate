@@ -15,13 +15,12 @@ import { createScheduleSchema, updateScheduleSchema } from "./routes.ts";
 import { initScheduleWorker, shutdownScheduleWorker } from "./service.ts";
 import { schedulesPaths } from "./openapi/paths.ts";
 import { schedulingSchemas } from "./openapi/schemas.ts";
-import { applyModuleMigrations } from "../../lib/modules/migrate.ts";
 
 const schedulingModule: AppstrateModule = {
   manifest: { id: "scheduling", name: "Scheduling", version: "1.0.0" },
 
   async init(ctx: ModuleInitContext) {
-    await applyModuleMigrations(ctx, "scheduling", resolve(import.meta.dir, "drizzle/migrations"));
+    await ctx.applyMigrations("scheduling", resolve(import.meta.dir, "drizzle/migrations"));
     await initScheduleWorker();
   },
 

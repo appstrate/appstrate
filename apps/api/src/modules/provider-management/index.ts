@@ -14,7 +14,6 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import { Hono } from "hono";
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
-import { applyModuleMigrations } from "../../lib/modules/migrate.ts";
 import type { AppEnv } from "../../types/index.ts";
 import {
   createModelsRouter,
@@ -38,8 +37,7 @@ const providerManagementModule: AppstrateModule = {
   manifest: { id: "provider-management", name: "Provider Management", version: "1.0.0" },
 
   async init(ctx: ModuleInitContext) {
-    await applyModuleMigrations(
-      ctx,
+    await ctx.applyMigrations(
       "provider-management",
       resolve(import.meta.dir, "drizzle/migrations"),
     );
