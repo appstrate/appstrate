@@ -13,7 +13,7 @@ import {
   listDeliveries,
   buildEventEnvelope,
 } from "../../../src/modules/webhooks/service.ts";
-import { webhookDeliveries } from "@appstrate/db/schema";
+import { webhookDeliveries } from "../../../src/modules/webhooks/schema.ts";
 
 describe("webhooks service", () => {
   let userId: string;

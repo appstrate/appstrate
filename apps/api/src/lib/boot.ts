@@ -37,7 +37,20 @@ import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 
 export async function boot(): Promise<void> {
-  // Load modules (cloud, OIDC, etc.)
+  // Log infrastructure mode + apply core migrations (before modules, so DB is ready)
+  const env = (await import("@appstrate/env")).getEnv();
+  if (isEmbeddedDb) {
+    logger.info("Database: PGlite (embedded)", { path: env.PGLITE_DATA_DIR });
+    // Apply core migrations programmatically for PGlite (no external drizzle-kit CLI)
+    await applyEmbeddedMigrations();
+  } else {
+    logger.info("Database: PostgreSQL", {
+      url: env.DATABASE_URL?.replace(/\/\/.*@/, "//***@") ?? "",
+    });
+  }
+
+  // Load modules (cloud, scheduling, webhooks, etc.)
+  // Modules may run their own migrations in init() — core DB is ready.
   await loadModules(getModuleRegistry(), buildModuleInitContext());
 
   // Wire module contributions that were declared on the module contract
@@ -47,18 +60,6 @@ export async function boot(): Promise<void> {
     }
   }
   setBeforeSignupHook(beforeSignup);
-
-  // Log infrastructure mode
-  const env = (await import("@appstrate/env")).getEnv();
-  if (isEmbeddedDb) {
-    logger.info("Database: PGlite (embedded)", { path: env.PGLITE_DATA_DIR });
-    // Apply migrations programmatically for PGlite (no external drizzle-kit CLI)
-    await applyEmbeddedMigrations();
-  } else {
-    logger.info("Database: PostgreSQL", {
-      url: env.DATABASE_URL?.replace(/\/\/.*@/, "//***@") ?? "",
-    });
-  }
   if (env.S3_BUCKET) {
     logger.info("Storage: S3", { bucket: env.S3_BUCKET, endpoint: env.S3_ENDPOINT ?? "AWS" });
   } else {

@@ -39,6 +39,8 @@ export interface RunPipelineParams {
   overrideVersionLabel?: string;
   /** Schedule ID — set only for scheduled runs. */
   scheduleId?: string;
+  /** Schedule name — denormalized at run creation for display without JOIN. */
+  scheduleName?: string;
   /** Connection profile ID used to create the run. */
   connectionProfileId?: string;
   /** Application ID — required for all runs. */
@@ -230,6 +232,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     applicationId,
     input: input ?? null,
     scheduleId,
+    scheduleName: params.scheduleName,
     connectionProfileId,
     versionLabel: versionLabel ?? undefined,
     versionDirty,

@@ -2,7 +2,7 @@
 
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgProviderKeys } from "@appstrate/db/schema";
+import { orgProviderKeys } from "../schema.ts";
 import { encrypt, decrypt } from "@appstrate/connect";
 import { getSystemProviderKeys } from "../../../services/model-registry.ts";
 import type { OrgProviderKeyInfo, TestResult } from "@appstrate/shared-types";

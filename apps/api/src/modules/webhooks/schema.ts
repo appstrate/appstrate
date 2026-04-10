@@ -1,23 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { pgTable, text, timestamp, boolean, integer, uuid, index } from "drizzle-orm/pg-core";
-import { organizations } from "./organizations.ts";
-import { applications } from "./applications.ts";
-import { packages } from "./packages.ts";
+
+// Webhooks module — owns the webhooks and webhook_deliveries tables.
+// FKs to core tables (organizations, applications, packages)
+// are added via raw SQL in migrations (same pattern as @appstrate/cloud).
 
 export const webhooks = pgTable(
   "webhooks",
   {
     id: text("id").primaryKey(), // wh_ prefix
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    applicationId: text("application_id")
-      .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").notNull(),
+    applicationId: text("application_id").notNull(),
     url: text("url").notNull(),
     events: text("events").array().notNull(), // ["run.success", "run.failed"]
-    packageId: text("package_id").references(() => packages.id, { onDelete: "set null" }), // null = all packages
+    packageId: text("package_id"), // null = all packages
     payloadMode: text("payload_mode").notNull().default("full"), // "full" | "summary"
     enabled: boolean("enabled").notNull().default(true),
     secret: text("secret").notNull(), // whsec_ prefix, plaintext (needed for HMAC signing)
@@ -37,9 +34,7 @@ export const webhookDeliveries = pgTable(
   "webhook_deliveries",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    webhookId: text("webhook_id")
-      .notNull()
-      .references(() => webhooks.id, { onDelete: "cascade" }),
+    webhookId: text("webhook_id").notNull(),
     eventId: text("event_id").notNull(), // evt_ prefix
     eventType: text("event_type").notNull(), // "run.success" etc.
     status: text("status").notNull().default("pending"), // "pending" | "success" | "failed"

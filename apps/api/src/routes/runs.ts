@@ -12,7 +12,6 @@ import {
   getRunningRunsForPackage,
   deletePackageRuns,
   listPackageRuns,
-  listScheduleRuns,
   listRunLogs,
   addPackageMemories,
 } from "../services/state/index.ts";
@@ -509,31 +508,6 @@ export function createRunsRouter() {
       offset,
       applicationId: c.get("applicationId"),
       endUserId: endUser?.id,
-    });
-    return c.json(result);
-  });
-
-  // GET /api/schedules/:id/runs — list runs for a schedule
-  router.get("/schedules/:id/runs", async (c) => {
-    const scheduleId = c.req.param("id");
-    const orgId = c.get("orgId");
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .catch(20)
-      .parse(c.req.query("limit") ?? 20);
-    const offset = z.coerce
-      .number()
-      .int()
-      .min(0)
-      .catch(0)
-      .parse(c.req.query("offset") ?? 0);
-    const result = await listScheduleRuns(scheduleId, orgId, {
-      limit,
-      offset,
-      applicationId: c.get("applicationId"),
     });
     return c.json(result);
   });

@@ -31,6 +31,7 @@ const ALL_TABLES = [
   "user_provider_connections",
   "oauth_states",
   "application_provider_credentials",
+  // Module-owned tables (exist when module is loaded; DELETE IF EXISTS for safety)
   "package_schedules",
   "org_models",
   "org_provider_keys",

@@ -10,9 +10,11 @@
  * Without this module, only system models (from SYSTEM_PROVIDER_KEYS env) are available.
  */
 
+import { resolve } from "node:path";
 import { z } from "zod";
 import { Hono } from "hono";
-import type { AppstrateModule } from "@appstrate/core/module";
+import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
+import { applyModuleMigrations } from "../../lib/modules/migrate.ts";
 import type { AppEnv } from "../../types/index.ts";
 import {
   createModelsRouter,
@@ -35,9 +37,12 @@ import { providerManagementSchemas } from "./openapi/schemas.ts";
 const providerManagementModule: AppstrateModule = {
   manifest: { id: "provider-management", name: "Provider Management", version: "1.0.0" },
 
-  async init() {
-    // No-op — DB tables always exist (part of main schema).
-    // System model registry is initialized in boot.ts (core responsibility).
+  async init(ctx: ModuleInitContext) {
+    await applyModuleMigrations(
+      ctx,
+      "provider-management",
+      resolve(import.meta.dir, "drizzle/migrations"),
+    );
   },
 
   createRouter() {

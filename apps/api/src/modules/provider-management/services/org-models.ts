@@ -2,7 +2,7 @@
 
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgModels } from "@appstrate/db/schema";
+import { orgModels } from "../schema.ts";
 import {
   getSystemModels,
   isSystemModel,

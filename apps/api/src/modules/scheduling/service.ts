@@ -4,10 +4,8 @@ import { createQueue } from "../../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../../infra/queue/index.ts";
 import { eq, and, asc, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  packageSchedules,
-  connectionProfiles as connectionProfilesTable,
-} from "@appstrate/db/schema";
+import { connectionProfiles as connectionProfilesTable } from "@appstrate/db/schema";
+import { packageSchedules } from "./schema.ts";
 import { batchLoadUserNames } from "../../lib/user-helpers.ts";
 import { logger } from "../../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
@@ -38,6 +36,7 @@ import { actorFromIds, type Actor } from "../../lib/actor.ts";
 
 interface ScheduleJobData {
   scheduleId: string;
+  scheduleName?: string;
   packageId: string;
   connectionProfileId: string;
   orgId: string;
@@ -76,6 +75,7 @@ async function getQueue(): Promise<JobQueue<ScheduleJobData>> {
 async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<void> {
   const jobData: ScheduleJobData = {
     scheduleId: schedule.id,
+    scheduleName: schedule.name ?? undefined,
     packageId: schedule.packageId,
     connectionProfileId: schedule.connectionProfileId,
     orgId,
@@ -99,10 +99,12 @@ async function removeScheduleJob(scheduleId: string): Promise<void> {
 
 /** Process a scheduled job. */
 async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> {
-  const { scheduleId, packageId, connectionProfileId, orgId, applicationId, input } = job.data;
+  const { scheduleId, scheduleName, packageId, connectionProfileId, orgId, applicationId, input } =
+    job.data;
 
   await triggerScheduledRun(
     scheduleId,
+    scheduleName,
     packageId,
     connectionProfileId,
     orgId,
@@ -176,6 +178,7 @@ export async function shutdownScheduleWorker(): Promise<void> {
 
 async function triggerScheduledRun(
   scheduleId: string,
+  scheduleName: string | undefined,
   packageId: string,
   connectionProfileId: string,
   orgId: string,
@@ -314,6 +317,7 @@ async function triggerScheduledRun(
       modelId: preflightModelId,
       proxyId: preflightProxyId,
       scheduleId,
+      scheduleName,
       connectionProfileId,
       applicationId,
     });

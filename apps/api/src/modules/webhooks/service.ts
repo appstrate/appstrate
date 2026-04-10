@@ -7,7 +7,7 @@
 import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { webhooks, webhookDeliveries } from "@appstrate/db/schema";
+import { webhooks, webhookDeliveries } from "./schema.ts";
 import { logger } from "../../lib/logger.ts";
 import { notFound, invalidRequest, ApiError } from "../../lib/errors.ts";
 import type { WebhookInfo, WebhookCreateResponse } from "@appstrate/shared-types";

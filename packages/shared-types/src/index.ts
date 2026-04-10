@@ -57,8 +57,22 @@ export type RunStatus = (typeof runStatusEnum.enumValues)[number];
 
 // --- Schedule Types ---
 
-export type { PackageSchedule as Schedule } from "@appstrate/db/schema";
-import type { PackageSchedule } from "@appstrate/db/schema";
+export interface Schedule {
+  id: string;
+  packageId: string;
+  connectionProfileId: string;
+  orgId: string;
+  applicationId: string;
+  name: string | null;
+  enabled: boolean;
+  cronExpression: string;
+  timezone: string | null;
+  input: unknown;
+  lastRunAt: Date | null;
+  nextRunAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 export interface ScheduleReadiness {
   status: "ready" | "degraded" | "not_ready";
@@ -67,7 +81,7 @@ export interface ScheduleReadiness {
   missingProviders: string[];
 }
 
-export type EnrichedSchedule = PackageSchedule & {
+export type EnrichedSchedule = Schedule & {
   profileName: string | null;
   profileType: "user" | "app" | null;
   profileOwnerName: string | null;

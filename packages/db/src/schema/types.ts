@@ -9,7 +9,7 @@ import type {
   packageVersionDependencies,
   applicationPackages,
 } from "./packages.ts";
-import type { runs, runLogs, packageSchedules, packageMemories } from "./runs.ts";
+import type { runs, runLogs, packageMemories } from "./runs.ts";
 import type {
   connectionProfiles,
   appProfileProviderBindings,
@@ -20,15 +20,12 @@ import type {
 } from "./connections.ts";
 import type { applications, endUsers } from "./applications.ts";
 import type { user, session, account, verification } from "./auth.ts";
-import type { webhooks, webhookDeliveries } from "./webhooks.ts";
 import type {
   organizations,
   organizationMembers,
   apiKeys,
   orgInvitations,
   orgProxies,
-  orgProviderKeys,
-  orgModels,
 } from "./organizations.ts";
 
 export type Profile = InferSelectModel<typeof profiles>;
@@ -40,8 +37,6 @@ export type PackageVersion = InferSelectModel<typeof packageVersions>;
 export type PackageDistTag = InferSelectModel<typeof packageDistTags>;
 
 export type PackageVersionDependency = InferSelectModel<typeof packageVersionDependencies>;
-
-export type PackageSchedule = InferSelectModel<typeof packageSchedules>;
 
 export type Run = InferSelectModel<typeof runs>;
 
@@ -63,10 +58,6 @@ export type ApplicationProviderCredential = InferSelectModel<typeof applicationP
 
 export type OAuthState = InferSelectModel<typeof oauthStates>;
 
-export type Webhook = InferSelectModel<typeof webhooks>;
-
-export type WebhookDelivery = InferSelectModel<typeof webhookDeliveries>;
-
 export type Organization = InferSelectModel<typeof organizations>;
 
 export type OrganizationMember = InferSelectModel<typeof organizationMembers>;
@@ -76,10 +67,6 @@ export type ApiKey = InferSelectModel<typeof apiKeys>;
 export type OrgInvitation = InferSelectModel<typeof orgInvitations>;
 
 export type OrgProxy = InferSelectModel<typeof orgProxies>;
-
-export type OrgProviderKey = InferSelectModel<typeof orgProviderKeys>;
-
-export type OrgModel = InferSelectModel<typeof orgModels>;
 
 export type PackageMemory = InferSelectModel<typeof packageMemories>;
 

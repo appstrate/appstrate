@@ -13,18 +13,17 @@ import {
   runLogs,
   applications,
   endUsers,
-  webhooks,
-  packageSchedules,
   apiKeys,
   orgProxies,
-  orgProviderKeys,
-  orgModels,
   connectionProfiles,
   userProviderConnections,
   orgInvitations,
   packageVersions,
   applicationProviderCredentials,
 } from "@appstrate/db/schema";
+import { webhooks } from "../../src/modules/webhooks/schema.ts";
+import { packageSchedules } from "../../src/modules/scheduling/schema.ts";
+import { orgProviderKeys, orgModels } from "../../src/modules/provider-management/schema.ts";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
 // ─── Packages / Agents ───────────────────────────────────

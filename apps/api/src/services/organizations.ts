@@ -10,7 +10,6 @@ import {
   user,
   runs,
   runLogs,
-  packageSchedules,
   packages,
   orgInvitations,
 } from "@appstrate/db/schema";
@@ -255,8 +254,8 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // run_logs → runs (cascade exists, but org_id FK needs manual delete)
     await tx.delete(runLogs).where(eq(runLogs.orgId, orgId));
     await tx.delete(runs).where(eq(runs.orgId, orgId));
-    // appProfileProviderBindings cascade through connectionProfiles → applicationId
-    await tx.delete(packageSchedules).where(eq(packageSchedules.orgId, orgId));
+    // Module tables (package_schedules, webhooks, org_models, org_provider_keys)
+    // cascade via their orgId FK — no explicit delete needed.
     // applicationPackages cascade through applications → orgId
     await tx.delete(packages).where(eq(packages.orgId, orgId));
     // userProviderConnections are now profile-scoped (user-owned), not org-scoped — no cleanup needed

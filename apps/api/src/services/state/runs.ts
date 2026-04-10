@@ -2,7 +2,7 @@
 
 import { eq, and, ne, desc, isNotNull, inArray, count, max, type SQL, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, runLogs, profiles, endUsers, apiKeys, packageSchedules } from "@appstrate/db/schema";
+import { runs, runLogs, profiles, endUsers, apiKeys } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
 import { type Actor, actorInsert, actorFilter } from "../../lib/actor.ts";
 import { asRecordOrNull } from "../../lib/safe-json.ts";
@@ -36,6 +36,7 @@ interface CreateRunParams {
   applicationId: string;
   input: Record<string, unknown> | null;
   scheduleId?: string;
+  scheduleName?: string;
   connectionProfileId?: string;
   versionLabel?: string;
   versionDirty?: boolean;
@@ -59,17 +60,18 @@ export async function createRun(params: CreateRunParams): Promise<void> {
     status: "pending",
     input,
     startedAt: new Date(),
-    connectionProfileId: params.connectionProfileId,
-    scheduleId: params.scheduleId,
-    versionLabel: params.versionLabel,
+    connectionProfileId: params.connectionProfileId ?? null,
+    scheduleId: params.scheduleId ?? null,
+    scheduleName: params.scheduleName ?? null,
+    versionLabel: params.versionLabel ?? null,
     versionDirty: params.versionDirty ?? false,
-    proxyLabel: params.proxyLabel,
-    modelLabel: params.modelLabel,
-    modelSource: params.modelSource,
+    proxyLabel: params.proxyLabel ?? null,
+    modelLabel: params.modelLabel ?? null,
+    modelSource: params.modelSource ?? null,
     applicationId,
-    providerProfileIds: params.providerProfileIds,
-    providerStatuses: params.providerStatuses,
-    apiKeyId: params.apiKeyId,
+    providerProfileIds: params.providerProfileIds ?? null,
+    providerStatuses: params.providerStatuses ?? null,
+    apiKeyId: params.apiKeyId ?? null,
     runNumber,
   });
 }
@@ -104,8 +106,8 @@ export async function createFailedRun(
     completedAt: now,
     duration: 0,
     notifiedAt: now,
-    connectionProfileId,
-    scheduleId,
+    connectionProfileId: connectionProfileId ?? null,
+    scheduleId: scheduleId ?? null,
     runNumber,
   });
 }
@@ -406,13 +408,11 @@ export async function listRunsWithFilter(
       userName: profiles.displayName,
       endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
       apiKeyName: apiKeys.name,
-      scheduleName: packageSchedules.name,
     })
     .from(runs)
     .leftJoin(profiles, eq(runs.userId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
     .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
-    .leftJoin(packageSchedules, eq(runs.scheduleId, packageSchedules.id))
     .where(filter)
     .orderBy(desc(runs.startedAt))
     .limit(limit)
@@ -424,7 +424,7 @@ export async function listRunsWithFilter(
       userName: r.userName ?? null,
       endUserName: r.endUserName ?? null,
       apiKeyName: r.apiKeyName ?? null,
-      scheduleName: r.scheduleName ?? null,
+      scheduleName: r.run.scheduleName ?? null,
     })) as unknown as Record<string, unknown>[],
     total: countRow?.count ?? 0,
   };
@@ -482,13 +482,11 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
       userName: profiles.displayName,
       endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
       apiKeyName: apiKeys.name,
-      scheduleName: packageSchedules.name,
     })
     .from(runs)
     .leftJoin(profiles, eq(runs.userId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
     .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
-    .leftJoin(packageSchedules, eq(runs.scheduleId, packageSchedules.id))
     .where(and(...conditions))
     .limit(1);
 
@@ -498,7 +496,7 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
     userName: row.userName ?? null,
     endUserName: row.endUserName ?? null,
     apiKeyName: row.apiKeyName ?? null,
-    scheduleName: row.scheduleName ?? null,
+    scheduleName: row.run.scheduleName ?? null,
   };
 }
 

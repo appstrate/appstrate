@@ -21,12 +21,12 @@ import {
   applicationPackages,
   userAgentProviderProfiles,
   applications,
-  webhooks,
   endUsers,
-  packageSchedules,
   apiKeys,
   runs,
 } from "@appstrate/db/schema";
+import { webhooks } from "../../../src/modules/webhooks/schema.ts";
+import { packageSchedules } from "../../../src/modules/scheduling/schema.ts";
 import { bindAppProfileProvider } from "../../../src/services/state/app-profile-bindings.ts";
 import {
   updateInstalledPackage,
