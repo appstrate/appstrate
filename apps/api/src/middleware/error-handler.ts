@@ -22,8 +22,6 @@ export function errorHandler(err: Error, c: Context<AppEnv>): Response {
   } else {
     logger.error("Unhandled error", {
       requestId,
-      method: c.req.method,
-      path: c.req.path,
       error: err.message,
       stack: err.stack,
     });

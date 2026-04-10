@@ -6,11 +6,10 @@
  * All factories insert real records into the test database.
  * They return the created record for assertions.
  *
- * NOTE on module imports: schemas owned by built-in modules (webhooks,
- * provider-management) are imported directly. Tests deliberately exercise
- * every built-in module regardless of `APPSTRATE_MODULES`; the zero-footprint
- * rule in CLAUDE.md applies to the production boot path, not to shared test
- * fixtures.
+ * NOTE on module imports: the webhooks module schema is imported directly
+ * from the module directory. Tests deliberately exercise every built-in
+ * module regardless of `APPSTRATE_MODULES`; the zero-footprint rule in
+ * CLAUDE.md applies to the production boot path, not to shared test fixtures.
  */
 import { db } from "./db.ts";
 import {
@@ -19,16 +18,16 @@ import {
   runLogs,
   applications,
   endUsers,
+  packageSchedules,
   apiKeys,
   orgProxies,
+  orgProviderKeys,
+  orgModels,
   connectionProfiles,
   userProviderConnections,
   orgInvitations,
   packageVersions,
   applicationProviderCredentials,
-  packageSchedules,
-  orgProviderKeys,
-  orgModels,
 } from "@appstrate/db/schema";
 import { webhooks } from "../../src/modules/webhooks/schema.ts";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";

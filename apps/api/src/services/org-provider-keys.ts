@@ -93,6 +93,7 @@ export async function loadProviderKeyCredentials(
   orgId: string,
   id: string,
 ): Promise<{ api: string; baseUrl: string; apiKey: string } | null> {
+  // Check system provider keys first (same pattern as loadModel checks system models)
   const systemKey = getSystemProviderKeys().get(id);
   if (systemKey) {
     return { api: systemKey.api, baseUrl: systemKey.baseUrl, apiKey: systemKey.apiKey };

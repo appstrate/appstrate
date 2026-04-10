@@ -47,13 +47,14 @@ export const testInlineSchema = z.object({
 
 export function createProviderKeysRouter() {
   const router = new Hono<AppEnv>();
-
+  // GET /api/provider-keys
   router.get("/", requirePermission("provider-keys", "read"), async (c) => {
     const orgId = c.get("orgId");
     const keys = await listOrgProviderKeys(orgId);
     return c.json({ keys });
   });
 
+  // POST /api/provider-keys
   router.post("/", requirePermission("provider-keys", "write"), async (c) => {
     const orgId = c.get("orgId");
     const user = c.get("user");
@@ -71,6 +72,7 @@ export function createProviderKeysRouter() {
     }
   });
 
+  // POST /api/provider-keys/test — inline test (before saving)
   router.post("/test", rateLimit(5), requirePermission("provider-keys", "read"), async (c) => {
     const orgId = c.get("orgId");
     const body = await c.req.json();
@@ -99,6 +101,7 @@ export function createProviderKeysRouter() {
     }
   });
 
+  // POST /api/provider-keys/:id/test
   router.post("/:id/test", rateLimit(5), requirePermission("provider-keys", "read"), async (c) => {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;
@@ -117,6 +120,7 @@ export function createProviderKeysRouter() {
     }
   });
 
+  // PUT /api/provider-keys/:id
   router.put("/:id", requirePermission("provider-keys", "write"), async (c) => {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;
@@ -137,6 +141,7 @@ export function createProviderKeysRouter() {
     }
   });
 
+  // DELETE /api/provider-keys/:id
   router.delete("/:id", requirePermission("provider-keys", "delete"), async (c) => {
     const orgId = c.get("orgId");
     const id = c.req.param("id")!;

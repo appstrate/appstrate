@@ -54,10 +54,8 @@ export type RunStatus = (typeof runStatusEnum.enumValues)[number];
 
 // --- Schedule Types ---
 
+export type { PackageSchedule as Schedule } from "@appstrate/db/schema";
 import type { PackageSchedule } from "@appstrate/db/schema";
-
-/** Schedule row inferred from the core `package_schedules` table. */
-export type Schedule = PackageSchedule;
 
 export interface ScheduleReadiness {
   status: "ready" | "degraded" | "not_ready";
@@ -66,7 +64,7 @@ export interface ScheduleReadiness {
   missingProviders: string[];
 }
 
-export type EnrichedSchedule = Schedule & {
+export type EnrichedSchedule = PackageSchedule & {
   profileName: string | null;
   profileType: "user" | "app" | null;
   profileOwnerName: string | null;

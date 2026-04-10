@@ -3,7 +3,6 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
-import type { ResolvedModelResult } from "@appstrate/core/module";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import type { ModelCost } from "./adapters/types.ts";
 import { logger } from "../lib/logger.ts";
@@ -85,6 +84,7 @@ export async function createOrgModel(
     cost?: ModelCost;
   },
 ): Promise<string> {
+  // If this is the first model for the org, set it as default
   const existing = await db
     .select({ id: orgModels.id })
     .from(orgModels)
@@ -151,6 +151,7 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
 }
 
 export async function setDefaultModel(orgId: string, modelDbId: string | null): Promise<void> {
+  // Reset all defaults for this org
   await db
     .update(orgModels)
     .set({ isDefault: false, updatedAt: new Date() })
@@ -158,6 +159,7 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
 
   if (modelDbId === null) return;
 
+  // Only DB models can be flagged — system defaults are handled by the resolution cascade
   if (!isSystemModel(modelDbId)) {
     await db
       .update(orgModels)
@@ -168,7 +170,22 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
 
 // --- Resolution ---
 
-function systemDefToResolved(def: ModelDefinition): ResolvedModelResult {
+interface ResolvedModel {
+  api: string;
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+  label: string;
+  input?: string[] | null;
+  contextWindow?: number | null;
+  maxTokens?: number | null;
+  reasoning?: boolean | null;
+  cost?: ModelCost | null;
+  /** Whether the model comes from SYSTEM_PROVIDER_KEYS (platform-provided). */
+  isSystemModel: boolean;
+}
+
+function systemDefToResolved(def: ModelDefinition): ResolvedModel {
   return {
     api: def.api,
     baseUrl: def.baseUrl,
@@ -184,14 +201,12 @@ function systemDefToResolved(def: ModelDefinition): ResolvedModelResult {
   };
 }
 
-/**
- * Resolve a model for a run with full cascade: explicit override → org default → system default.
- */
 export async function resolveModel(
   orgId: string,
   packageId: string,
   modelId: string | null,
-): Promise<ResolvedModelResult | null> {
+): Promise<ResolvedModel | null> {
+  // 1. Explicit override (agent column or per-run)
   if (modelId) {
     const result = await loadModel(orgId, modelId);
     if (result) return result;
@@ -201,6 +216,7 @@ export async function resolveModel(
     });
   }
 
+  // 2. Org default
   const [dbDefault] = await db
     .select()
     .from(orgModels)
@@ -228,6 +244,7 @@ export async function resolveModel(
     }
   }
 
+  // 3. System default
   const system = getSystemModels();
   for (const [, def] of system) {
     if (def.isDefault && def.enabled !== false) {
@@ -235,19 +252,19 @@ export async function resolveModel(
     }
   }
 
+  // 4. No model configured
   return null;
 }
 
-export async function loadModel(
-  orgId: string,
-  modelDbId: string,
-): Promise<ResolvedModelResult | null> {
+export async function loadModel(orgId: string, modelDbId: string): Promise<ResolvedModel | null> {
+  // Check system models first
   const system = getSystemModels();
   const systemDef = system.get(modelDbId);
   if (systemDef) {
     return systemDefToResolved(systemDef);
   }
 
+  // Check DB
   const [row] = await db
     .select({
       api: orgModels.api,

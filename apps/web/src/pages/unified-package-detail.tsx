@@ -333,7 +333,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     ...(effectiveShowConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
       : []),
-    { id: "schedules" as DetailTab, label: t("detail.tabSchedules") },
+    { id: "schedules", label: t("detail.tabSchedules") },
     { id: "memories", label: t("detail.tabMemories") },
     { id: "api", label: t("detail.tabApi") },
   ];

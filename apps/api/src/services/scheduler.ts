@@ -1,13 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Scheduling service — cron-triggered agent runs.
- *
- * Owns the `package_schedules` table plus the BullMQ worker that fires
- * scheduled runs. Uses the shared `prepareAndExecuteRun` pipeline so that
- * scheduled runs behave identically to manual runs once they start.
- */
-
 import { createQueue } from "../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { eq, and, asc, inArray } from "drizzle-orm";

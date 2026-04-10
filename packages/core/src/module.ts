@@ -86,7 +86,7 @@ export interface AppstrateModule {
    * The platform invokes hooks by name — only the first module that provides
    * a given hook is called. For broadcast-to-all semantics, use `events`.
    *
-   * Naming: `beforeX` (gates), `resolveX` (data resolution).
+   * Naming: `beforeX` (gates), `afterX` (post-lifecycle patches).
    */
   hooks?: Partial<ModuleHooks>;
 
@@ -114,7 +114,7 @@ export interface AppstrateModule {
 // Hook & event type maps — the typed contract
 //
 // Naming conventions:
-//   Hooks (first-match-wins):  beforeX, resolveX
+//   Hooks (first-match-wins):  beforeX, afterX
 //   Events (broadcast-to-all): onX
 // ---------------------------------------------------------------------------
 
@@ -176,21 +176,6 @@ export interface RunRejection {
   message: string;
   /** HTTP status hint (e.g. 402 for payment required, 429 for rate limit). Defaults to 403. */
   status?: number;
-}
-
-/** Result returned by the `resolveModel` hook. */
-export interface ResolvedModelResult {
-  api: string;
-  baseUrl: string;
-  modelId: string;
-  apiKey: string;
-  label: string;
-  input?: string[] | null;
-  contextWindow?: number | null;
-  maxTokens?: number | null;
-  reasoning?: boolean | null;
-  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
-  isSystemModel: boolean;
 }
 
 /** Parameters passed to the `onRunStatusChange` event. */
