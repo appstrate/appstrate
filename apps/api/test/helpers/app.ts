@@ -8,6 +8,13 @@
  *
  * This allows integration tests to exercise the full HTTP → middleware → auth → service → DB
  * pipeline with a real database.
+ *
+ * NOTE on module imports: the built-in module routes (scheduling, webhooks,
+ * provider-management) are imported statically below. This is intentional —
+ * test fixtures deliberately exercise all built-in modules regardless of the
+ * `APPSTRATE_MODULES` env var, whereas production loads them dynamically
+ * through the module loader. The zero-footprint rule in CLAUDE.md applies to
+ * the production boot path, not to shared test helpers.
  */
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -266,7 +273,7 @@ export function getTestApp(): Hono<AppEnv> {
   app.route("/api", schedulesRouter);
   app.route("/api/packages", createPackagesRouter());
   app.route("/api/end-users", createEndUsersRouter());
-  app.route("/api/webhooks", createWebhooksRouter());
+  app.route("/api", createWebhooksRouter());
   app.route("/api/providers", createProvidersRouter());
   app.route("/api/api-keys", createApiKeysRouter());
   app.route("/api/proxies", createProxiesRouter());

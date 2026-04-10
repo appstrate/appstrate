@@ -25,7 +25,7 @@ const webhooksModule: AppstrateModule = {
 
   async init(ctx: ModuleInitContext) {
     await ctx.applyMigrations("webhooks", resolve(import.meta.dir, "drizzle/migrations"));
-    initWebhookWorker();
+    await initWebhookWorker();
   },
 
   createRouter() {

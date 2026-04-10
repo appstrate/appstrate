@@ -5,6 +5,12 @@
  *
  * All factories insert real records into the test database.
  * They return the created record for assertions.
+ *
+ * NOTE on module imports: schemas owned by built-in modules (scheduling,
+ * webhooks, provider-management) are imported directly. Tests deliberately
+ * exercise every built-in module regardless of `APPSTRATE_MODULES`; the
+ * zero-footprint rule in CLAUDE.md applies to the production boot path,
+ * not to shared test fixtures.
  */
 import { db } from "./db.ts";
 import {

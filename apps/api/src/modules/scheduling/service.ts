@@ -199,7 +199,7 @@ async function triggerScheduledRun(
         scheduleId,
         connectionProfileId,
       );
-      onRunStatusChange({
+      void onRunStatusChange({
         orgId,
         runId,
         agentId: packageId,

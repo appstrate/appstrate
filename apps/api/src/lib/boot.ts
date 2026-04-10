@@ -313,7 +313,16 @@ async function applyEmbeddedMigrations(): Promise<void> {
 /**
  * Apply Drizzle migrations for PostgreSQL using the standard migrator.
  * Idempotent — already-applied migrations are skipped via the tracking table.
+ *
+ * Multi-replica safety: drizzle-orm's migrator does not take a lock, so two
+ * API replicas starting simultaneously can race on `__drizzle_migrations`.
+ * We wrap the whole migration in a PostgreSQL session-level advisory lock
+ * using a stable constant key (shared across all replicas). A second caller
+ * blocks until the first finishes, then observes its entries in the tracking
+ * table and skips them.
  */
+const APPSTRATE_CORE_MIGRATION_LOCK_KEY = 7246811234567890n;
+
 async function applyCoreMigrations(): Promise<void> {
   const { resolve } = await import("node:path");
   const { migrate } = await import("drizzle-orm/postgres-js/migrator");
@@ -321,13 +330,20 @@ async function applyCoreMigrations(): Promise<void> {
 
   const migrationsFolder = resolve(import.meta.dir, "../../../../packages/db/drizzle");
 
-  // Suppress NOTICE messages ("already exists, skipping") during migrations
-  await db.execute(rawSql`SET client_min_messages TO 'warning'`);
+  await db.execute(rawSql`SELECT pg_advisory_lock(${APPSTRATE_CORE_MIGRATION_LOCK_KEY}::bigint)`);
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- db type is compatible but schema generic differs
-    await migrate(db as any, { migrationsFolder });
+    // Suppress NOTICE messages ("already exists, skipping") during migrations
+    await db.execute(rawSql`SET client_min_messages TO 'warning'`);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- db type is compatible but schema generic differs
+      await migrate(db as any, { migrationsFolder });
+    } finally {
+      await db.execute(rawSql`SET client_min_messages TO 'notice'`);
+    }
   } finally {
-    await db.execute(rawSql`SET client_min_messages TO 'notice'`);
+    await db.execute(
+      rawSql`SELECT pg_advisory_unlock(${APPSTRATE_CORE_MIGRATION_LOCK_KEY}::bigint)`,
+    );
   }
   logger.info("Core migrations applied");
 }

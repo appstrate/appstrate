@@ -232,7 +232,9 @@ export interface ModuleInitContext {
   /**
    * Apply Drizzle migrations for a module.
    * Handles both PostgreSQL and PGlite. Each module gets its own migration
-   * tracking table (`__drizzle_migrations_<moduleId>`).
+   * tracking table (`__drizzle_migrations_<moduleId>`), with hyphens in
+   * `moduleId` replaced by underscores so the identifier is a valid SQL name
+   * (e.g. `provider-management` → `__drizzle_migrations_provider_management`).
    *
    * @param moduleId - Module identifier (e.g. "scheduling", "cloud")
    * @param migrationsDir - Absolute path to the module's migrations directory

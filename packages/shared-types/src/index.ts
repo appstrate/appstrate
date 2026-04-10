@@ -57,6 +57,17 @@ export type RunStatus = (typeof runStatusEnum.enumValues)[number];
 
 // --- Schedule Types ---
 
+/**
+ * Hand-rolled copy of the `packageSchedules` row type.
+ *
+ * The table lives in the scheduling module (`apps/api/src/modules/scheduling/schema.ts`)
+ * and is intentionally not imported here: `@appstrate/shared-types` must remain
+ * zero-footprint for OSS builds that don't load the scheduling module.
+ *
+ * Keep in sync with `packageSchedules` in the scheduling module. A type-only
+ * guard in `apps/api/test/unit/modules/schedule-type-sync.test.ts` fails the
+ * build if the two drift.
+ */
 export interface Schedule {
   id: string;
   packageId: string;

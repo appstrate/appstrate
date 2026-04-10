@@ -33,6 +33,25 @@ export async function applyModuleMigrations(
   }
 }
 
+/**
+ * Derive a stable 64-bit advisory lock key from the module's tracking table
+ * name. The hash is deterministic across replicas so multiple replicas starting
+ * simultaneously contend on the same lock for the same module, but different
+ * modules use different keys and can migrate in parallel.
+ */
+function lockKeyForModule(migrationsTable: string): bigint {
+  // FNV-1a 64-bit over the UTF-8 bytes of the table name.
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  const mask = 0xffffffffffffffffn;
+  for (let i = 0; i < migrationsTable.length; i++) {
+    hash ^= BigInt(migrationsTable.charCodeAt(i));
+    hash = (hash * prime) & mask;
+  }
+  // Fold unsigned 64-bit into signed bigint range expected by pg_advisory_lock
+  return hash >= 0x8000000000000000n ? hash - 0x10000000000000000n : hash;
+}
+
 async function applyPostgresMigrations(
   _databaseUrl: string,
   migrationsDir: string,
@@ -42,17 +61,24 @@ async function applyPostgresMigrations(
   const { migrate } = await import("drizzle-orm/postgres-js/migrator");
   const { sql } = await import("drizzle-orm");
 
-  // Suppress NOTICE messages ("already exists, skipping") during migrations
-  await db.execute(sql`SET client_min_messages TO 'warning'`);
+  // Serialize concurrent replicas on the same module's migration table.
+  const lockKey = lockKeyForModule(migrationsTable);
+  await db.execute(sql`SELECT pg_advisory_lock(${lockKey}::bigint)`);
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- db type is compatible but schema generic differs
-    await migrate(db as any, {
-      migrationsFolder: migrationsDir,
-      migrationsTable,
-      migrationsSchema: "drizzle",
-    });
+    // Suppress NOTICE messages ("already exists, skipping") during migrations
+    await db.execute(sql`SET client_min_messages TO 'warning'`);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- db type is compatible but schema generic differs
+      await migrate(db as any, {
+        migrationsFolder: migrationsDir,
+        migrationsTable,
+        migrationsSchema: "drizzle",
+      });
+    } finally {
+      await db.execute(sql`SET client_min_messages TO 'notice'`);
+    }
   } finally {
-    await db.execute(sql`SET client_min_messages TO 'notice'`);
+    await db.execute(sql`SELECT pg_advisory_unlock(${lockKey}::bigint)`);
   }
 }
 
