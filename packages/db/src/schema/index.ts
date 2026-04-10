@@ -3,7 +3,6 @@
 export * from "./enums.ts";
 export * from "./auth.ts";
 export * from "./organizations.ts";
-export * from "./provider-keys.ts";
 export * from "./applications.ts";
 export * from "./profiles.ts";
 export * from "./packages.ts";

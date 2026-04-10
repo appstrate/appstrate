@@ -9,7 +9,7 @@ import type {
   packageVersionDependencies,
   applicationPackages,
 } from "./packages.ts";
-import type { runs, runLogs, packageMemories, packageSchedules } from "./runs.ts";
+import type { runs, runLogs, packageSchedules, packageMemories } from "./runs.ts";
 import type {
   connectionProfiles,
   appProfileProviderBindings,
@@ -26,6 +26,8 @@ import type {
   apiKeys,
   orgInvitations,
   orgProxies,
+  orgProviderKeys,
+  orgModels,
 } from "./organizations.ts";
 
 export type Profile = InferSelectModel<typeof profiles>;
@@ -38,11 +40,11 @@ export type PackageDistTag = InferSelectModel<typeof packageDistTags>;
 
 export type PackageVersionDependency = InferSelectModel<typeof packageVersionDependencies>;
 
+export type PackageSchedule = InferSelectModel<typeof packageSchedules>;
+
 export type Run = InferSelectModel<typeof runs>;
 
 export type RunLog = InferSelectModel<typeof runLogs>;
-
-export type PackageSchedule = InferSelectModel<typeof packageSchedules>;
 
 export type ConnectionProfile = InferSelectModel<typeof connectionProfiles>;
 
@@ -69,6 +71,10 @@ export type ApiKey = InferSelectModel<typeof apiKeys>;
 export type OrgInvitation = InferSelectModel<typeof orgInvitations>;
 
 export type OrgProxy = InferSelectModel<typeof orgProxies>;
+
+export type OrgProviderKey = InferSelectModel<typeof orgProviderKeys>;
+
+export type OrgModel = InferSelectModel<typeof orgModels>;
 
 export type PackageMemory = InferSelectModel<typeof packageMemories>;
 

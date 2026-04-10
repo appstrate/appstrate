@@ -18,6 +18,14 @@ import { z } from "zod";
 // --- End-User schemas (routes/end-users.ts) ---
 import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts";
 
+// --- Model schemas (routes/models.ts) ---
+import {
+  createModelSchema,
+  updateModelSchema,
+  setDefaultSchema as modelsSetDefaultSchema,
+  testInlineSchema as modelsTestInlineSchema,
+} from "../routes/models.ts";
+
 // --- API Key schemas (routes/api-keys.ts) ---
 import { createApiKeySchema } from "../routes/api-keys.ts";
 
@@ -70,6 +78,13 @@ import {
   removeProviderProfileSchema,
 } from "../routes/agents.ts";
 
+// --- Provider Key schemas (routes/provider-keys.ts) ---
+import {
+  createSchema as createProviderKeySchema,
+  updateSchema as updateProviderKeySchema,
+  testInlineSchema as providerKeysTestInlineSchema,
+} from "../routes/provider-keys.ts";
+
 // --- Profile schemas (routes/profile.ts) ---
 import { profileUpdateSchema, batchLookupSchema } from "../routes/profile.ts";
 
@@ -94,21 +109,6 @@ import {
   updatePackageSchema,
   appProviderCredentialsSchema,
 } from "../routes/applications.ts";
-
-// --- Models schemas (routes/models.ts) ---
-import {
-  createModelSchema,
-  updateModelSchema,
-  setDefaultSchema as modelsSetDefaultSchema,
-  testInlineSchema as modelsTestInlineSchema,
-} from "../routes/models.ts";
-
-// --- Provider key schemas (routes/provider-keys.ts) ---
-import {
-  createSchema as createProviderKeySchema,
-  updateSchema as updateProviderKeySchema,
-  testInlineSchema as providerKeysTestInlineSchema,
-} from "../routes/provider-keys.ts";
 
 // ---------------------------------------------------------------------------
 // Registry type and entries
@@ -148,6 +148,32 @@ const coreSchemas: ZodSchemaEntry[] = [
     path: "/api/end-users/{id}",
     jsonSchema: toJsonSchema(updateEndUserSchema),
     description: "Update end-user",
+  },
+
+  // ─── Models ─────────────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/models",
+    jsonSchema: toJsonSchema(createModelSchema),
+    description: "Create model",
+  },
+  {
+    method: "PUT",
+    path: "/api/models/{id}",
+    jsonSchema: toJsonSchema(updateModelSchema),
+    description: "Update model",
+  },
+  {
+    method: "PUT",
+    path: "/api/models/default",
+    jsonSchema: toJsonSchema(modelsSetDefaultSchema),
+    description: "Set default model",
+  },
+  {
+    method: "POST",
+    path: "/api/models/test",
+    jsonSchema: toJsonSchema(modelsTestInlineSchema),
+    description: "Test model config inline",
   },
 
   // ─── API Keys ───────────────────────────────────────────────────────────
@@ -300,6 +326,26 @@ const coreSchemas: ZodSchemaEntry[] = [
     description: "Set agent app profile",
   },
 
+  // ─── Provider Keys ──────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/provider-keys",
+    jsonSchema: toJsonSchema(createProviderKeySchema),
+    description: "Create provider key",
+  },
+  {
+    method: "PUT",
+    path: "/api/provider-keys/{id}",
+    jsonSchema: toJsonSchema(updateProviderKeySchema),
+    description: "Update provider key",
+  },
+  {
+    method: "POST",
+    path: "/api/provider-keys/test",
+    jsonSchema: toJsonSchema(providerKeysTestInlineSchema),
+    description: "Test provider key inline",
+  },
+
   // ─── Profile ────────────────────────────────────────────────────────────
   {
     method: "PATCH",
@@ -420,52 +466,6 @@ const coreSchemas: ZodSchemaEntry[] = [
     path: "/internal/connections/report-auth-failure",
     jsonSchema: toJsonSchema(reportAuthFailureSchema),
     description: "Report auth failure from sidecar",
-  },
-
-  // ─── Models ─────────────────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/api/models",
-    jsonSchema: toJsonSchema(createModelSchema),
-    description: "Create model",
-  },
-  {
-    method: "PUT",
-    path: "/api/models/{id}",
-    jsonSchema: toJsonSchema(updateModelSchema),
-    description: "Update model",
-  },
-  {
-    method: "PUT",
-    path: "/api/models/default",
-    jsonSchema: toJsonSchema(modelsSetDefaultSchema),
-    description: "Set default model",
-  },
-  {
-    method: "POST",
-    path: "/api/models/test",
-    jsonSchema: toJsonSchema(modelsTestInlineSchema),
-    description: "Test model config inline",
-  },
-
-  // ─── Provider Keys ──────────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/api/provider-keys",
-    jsonSchema: toJsonSchema(createProviderKeySchema),
-    description: "Create provider key",
-  },
-  {
-    method: "PUT",
-    path: "/api/provider-keys/{id}",
-    jsonSchema: toJsonSchema(updateProviderKeySchema),
-    description: "Update provider key",
-  },
-  {
-    method: "POST",
-    path: "/api/provider-keys/test",
-    jsonSchema: toJsonSchema(providerKeysTestInlineSchema),
-    description: "Test provider key inline",
   },
 ];
 
