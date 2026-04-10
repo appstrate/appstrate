@@ -35,7 +35,7 @@ const envSchema = z
       .default("[]")
       .transform((s) => JSON.parse(s) as unknown[]),
 
-    // Modules (comma-separated specifiers, e.g. "scheduling,webhooks,provider-management")
+    // Modules (comma-separated specifiers, e.g. "webhooks,provider-management,@appstrate/cloud")
     APPSTRATE_MODULES: z.string().default(""),
 
     // App

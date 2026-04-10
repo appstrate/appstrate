@@ -410,14 +410,9 @@ const coreSchemas: ZodSchemaEntry[] = [
 
 /**
  * Build the full Zod schema registry by merging core schemas with module contributions.
- * Must be called after modules are initialized.
+ * Must be called after modules are initialized (or after static filesystem discovery
+ * in build-time scripts).
  */
 export function buildZodSchemaRegistry(moduleSchemas: ZodSchemaEntry[] = []): ZodSchemaEntry[] {
   return [...coreSchemas, ...moduleSchemas];
 }
-
-/**
- * @deprecated Use buildZodSchemaRegistry() after module init instead.
- * Kept for backward compatibility — returns core schemas only.
- */
-export const zodSchemaRegistry: ZodSchemaEntry[] = coreSchemas;

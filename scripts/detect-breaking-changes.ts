@@ -21,10 +21,46 @@
  *   bun scripts/detect-breaking-changes.ts                  # Compare against baseline
  *   bun scripts/detect-breaking-changes.ts --update-baseline # Save current spec as baseline
  */
-import { openApiSpec } from "../apps/api/src/openapi/index.ts";
-import { resolve } from "path";
+import { readdirSync, existsSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
+import type { AppstrateModule } from "@appstrate/core/module";
 
 const BASELINE_PATH = resolve(import.meta.dir, "../apps/api/src/openapi/baseline.json");
+
+// ═══════════════════════════════════════════════════
+// Auto-discover built-in modules and collect their OpenAPI contributions
+// ═══════════════════════════════════════════════════
+// Mirrors the discovery block in scripts/verify-openapi.ts — we cannot boot
+// the module loader here, so we scan apps/api/src/modules/*/index.ts directly
+// and call each module's openApiPaths()/openApiComponentSchemas() statically.
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const modulesDir = resolve(scriptDir, "../apps/api/src/modules");
+const discoveredModules: string[] = existsSync(modulesDir)
+  ? readdirSync(modulesDir).filter((name) => {
+      const subdir = join(modulesDir, name);
+      try {
+        return statSync(subdir).isDirectory() && existsSync(join(subdir, "index.ts"));
+      } catch {
+        return false;
+      }
+    })
+  : [];
+
+const modulePaths: Record<string, unknown> = {};
+const moduleComponentSchemas: Record<string, unknown> = {};
+
+for (const name of discoveredModules) {
+  const mod: AppstrateModule = (await import(join(modulesDir, name, "index.ts"))).default;
+  const paths = mod.openApiPaths?.();
+  if (paths) Object.assign(modulePaths, paths);
+  const compSchemas = mod.openApiComponentSchemas?.();
+  if (compSchemas) Object.assign(moduleComponentSchemas, compSchemas);
+}
+
+const openApiSpec = buildOpenApiSpec(modulePaths, moduleComponentSchemas);
 
 // ═══════════════════════════════════════════════════
 // Types

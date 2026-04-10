@@ -76,7 +76,8 @@ const components = {
 
 /**
  * Build the final OpenAPI spec by merging core paths and schemas with module contributions.
- * Must be called after modules are initialized.
+ * Must be called after modules are initialized (or after static filesystem discovery
+ * in build-time scripts).
  */
 export function buildOpenApiSpec(
   modulePaths: Record<string, unknown> = {},
@@ -97,9 +98,3 @@ export function buildOpenApiSpec(
     },
   } as const;
 }
-
-/**
- * @deprecated Use buildOpenApiSpec() after module init instead.
- * Kept for backward compatibility — returns core paths only (no module paths).
- */
-export const openApiSpec = buildOpenApiSpec();

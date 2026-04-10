@@ -8,8 +8,9 @@ import { organizations, applications, packages } from "@appstrate/db/schema";
 // FKs to core tables are declared via Drizzle `.references()` so the schema
 // is self-documenting and usable with Drizzle's query builder. Core tables
 // always exist before the module runs (core migrations run first at boot).
-// For the reverse direction (core → module), raw SQL in the module migration
-// is used instead (see scheduling module for an example).
+// For the reverse direction (core → module), modules must emit raw SQL
+// inside their own migration — Drizzle cannot express it without leaking
+// the module schema into core.
 
 export const webhooks = pgTable(
   "webhooks",
