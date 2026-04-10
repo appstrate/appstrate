@@ -10,6 +10,7 @@ import type {
   applicationPackages,
 } from "./packages.ts";
 import type { runs, runLogs, packageMemories } from "./runs.ts";
+import type { packageSchedules } from "./schedules.ts";
 import type {
   connectionProfiles,
   appProfileProviderBindings,
@@ -41,6 +42,8 @@ export type PackageVersionDependency = InferSelectModel<typeof packageVersionDep
 export type Run = InferSelectModel<typeof runs>;
 
 export type RunLog = InferSelectModel<typeof runLogs>;
+
+export type PackageSchedule = InferSelectModel<typeof packageSchedules>;
 
 export type ConnectionProfile = InferSelectModel<typeof connectionProfiles>;
 

@@ -25,7 +25,7 @@ import {
   getSchedule,
   updateSchedule,
   deleteSchedule,
-} from "../../../src/modules/scheduling/service.ts";
+} from "../../../src/services/scheduling.ts";
 
 describe("scheduler service", () => {
   let userId: string;

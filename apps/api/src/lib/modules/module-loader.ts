@@ -9,6 +9,9 @@ import type {
   ModuleEvents,
   OpenApiSchemaEntry,
 } from "@appstrate/core/module";
+import { readdirSync, statSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
 import type { AppEnv } from "../../types/index.ts";
 import { logger } from "../logger.ts";
 
@@ -20,15 +23,60 @@ const _modules: Map<string, AppstrateModule> = new Map();
 const _builtinLoaders = new Map<string, () => Promise<unknown>>();
 let _publicPathsCache: Set<string> | null = null;
 let _initialized = false;
+let _builtinsDiscovered = false;
 
 /**
  * Register a built-in platform module loader.
- * Built-in modules are resolved by short name (e.g. "scheduling")
+ * Built-in modules are resolved by short name (e.g. "webhooks")
  * instead of npm package specifier. They are only loaded if they
  * appear in the APPSTRATE_MODULES env var.
  */
 export function registerBuiltinModule(name: string, loader: () => Promise<unknown>): void {
   _builtinLoaders.set(name, loader);
+}
+
+/**
+ * Auto-discover built-in modules by scanning the modules directory.
+ *
+ * Each subdirectory containing an `index.ts` is registered as a built-in module
+ * with id = directory name. Idempotent — safe to call multiple times.
+ *
+ * The modules dir is resolved relative to this file so it works in dev
+ * (source layout) without requiring a build step.
+ */
+export function discoverBuiltinModules(modulesDir?: string): string[] {
+  if (_builtinsDiscovered && !modulesDir) {
+    return Array.from(_builtinLoaders.keys());
+  }
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const dir = modulesDir ?? resolve(here, "../../modules");
+  if (!existsSync(dir)) {
+    logger.warn("Modules directory not found", { dir });
+    return [];
+  }
+
+  const discovered: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const subdir = join(dir, name);
+    let stat;
+    try {
+      stat = statSync(subdir);
+    } catch {
+      continue;
+    }
+    if (!stat.isDirectory()) continue;
+    const entry = join(subdir, "index.ts");
+    if (!existsSync(entry)) continue;
+
+    const loader = () => import(/* webpackIgnore: true */ entry);
+    registerBuiltinModule(name, loader);
+    discovered.push(name);
+  }
+
+  _builtinsDiscovered = true;
+  logger.debug("Built-in modules discovered", { modules: discovered });
+  return discovered;
 }
 
 // ---------------------------------------------------------------------------
@@ -51,6 +99,9 @@ export async function loadModules(specifiers: string[], ctx: ModuleInitContext):
     logger.debug("Modules already initialized, skipping");
     return;
   }
+
+  // Ensure built-in module loaders are registered (idempotent, filesystem scan)
+  discoverBuiltinModules();
 
   // Phase 1: Resolve all modules via dynamic import (or built-in loader)
   const resolved: AppstrateModule[] = [];
@@ -81,10 +132,6 @@ export async function loadModules(specifiers: string[], ctx: ModuleInitContext):
   for (const mod of sorted) {
     try {
       await mod.init(ctx);
-      if (mod.permissions) {
-        const { registerModulePermissions } = await import("../../lib/permissions.ts");
-        registerModulePermissions(mod.permissions);
-      }
       if (_modules.has(mod.manifest.id)) {
         logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
       }
@@ -250,6 +297,40 @@ export function hasHook(name: keyof ModuleHooks): boolean {
   return false;
 }
 
+/**
+ * Call a merge hook — iterate ALL modules that provide the hook and
+ * shallow-merge each module's returned map into a single result.
+ *
+ * Used by hooks with accumulation semantics (e.g. `enrichRun`) where
+ * several modules may contribute different fields to the same row.
+ * Errors in individual handlers are logged and isolated; they do not
+ * prevent other modules from contributing.
+ */
+export async function callMergeHook<K extends keyof ModuleHooks>(
+  name: K,
+  ...args: Parameters<ModuleHooks[K]>
+): Promise<Record<string, Record<string, unknown>>> {
+  const merged: Record<string, Record<string, unknown>> = {};
+  for (const mod of _modules.values()) {
+    const hook = (mod.hooks as Record<string, AnyHandler> | undefined)?.[name];
+    if (!hook) continue;
+    try {
+      const partial = (await hook(...args)) as Record<string, Record<string, unknown>> | undefined;
+      if (!partial) continue;
+      for (const [id, fields] of Object.entries(partial)) {
+        merged[id] = { ...(merged[id] ?? {}), ...fields };
+      }
+    } catch (err) {
+      logger.warn("Module merge hook error", {
+        module: mod.manifest.id,
+        hook: name,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return merged;
+}
+
 // ---------------------------------------------------------------------------
 // Event system (broadcast to ALL modules)
 // ---------------------------------------------------------------------------
@@ -306,6 +387,12 @@ export function resetModules(): void {
   _modules.clear();
   _publicPathsCache = null;
   _initialized = false;
+}
+
+/** Reset the built-in discovery cache. Exported for tests only. */
+export function resetBuiltinDiscovery(): void {
+  _builtinLoaders.clear();
+  _builtinsDiscovered = false;
 }
 
 // ---------------------------------------------------------------------------

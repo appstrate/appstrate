@@ -12,20 +12,26 @@ import {
   jsonb,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import { organizations, user } from "@appstrate/db/schema";
 
 // Provider Management module — owns org_provider_keys and org_models tables.
-// FKs to core tables (organizations, user) are added via raw SQL in migrations.
+//
+// Backward FKs to core tables (organizations, user) are declared via Drizzle
+// `.references()` so the schema is self-documenting. Core tables always exist
+// before this module runs (core migrations run first at boot).
 
 export const orgProviderKeys = pgTable(
   "org_provider_keys",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    orgId: uuid("org_id").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
     label: text("label").notNull(),
     api: text("api").notNull(),
     baseUrl: text("base_url").notNull(),
     apiKeyEncrypted: text("api_key_encrypted").notNull(),
-    createdBy: text("created_by"),
+    createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
@@ -36,12 +42,16 @@ export const orgModels = pgTable(
   "org_models",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    orgId: uuid("org_id").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
     label: text("label").notNull(),
     api: text("api").notNull(),
     baseUrl: text("base_url").notNull(),
     modelId: text("model_id").notNull(),
-    providerKeyId: uuid("provider_key_id").notNull(),
+    providerKeyId: uuid("provider_key_id")
+      .notNull()
+      .references(() => orgProviderKeys.id, { onDelete: "cascade" }),
     input: jsonb("input"), // ["text", "image"] | null
     contextWindow: integer("context_window"), // 200000 | null
     maxTokens: integer("max_tokens"), // 16384 | null
@@ -50,7 +60,7 @@ export const orgModels = pgTable(
     enabled: boolean("enabled").notNull().default(true),
     isDefault: boolean("is_default").notNull().default(false),
     source: text("source").notNull().default("custom"), // "built-in" | "custom"
-    createdBy: text("created_by"),
+    createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

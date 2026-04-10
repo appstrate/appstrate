@@ -15,6 +15,9 @@
  *
  * Usage: bun scripts/verify-openapi.ts
  */
+import { readdirSync, existsSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
 import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
@@ -25,30 +28,35 @@ import {
 import type { AppstrateModule, OpenApiSchemaEntry } from "@appstrate/core/module";
 
 // ---------------------------------------------------------------------------
-// Load built-in modules to collect their OpenAPI contributions
+// Auto-discover built-in modules and collect their OpenAPI contributions
 // ---------------------------------------------------------------------------
+//
+// Discovery scans `apps/api/src/modules/*/index.ts` — no hardcoded list.
+// External modules (e.g. @appstrate/cloud) are not validated here; they're
+// loaded at runtime via APPSTRATE_MODULES and can't be imported without full boot.
 
-// Map of built-in module short names → lazy loaders (mirrors registry.ts)
-const builtinLoaders: Record<string, () => Promise<AppstrateModule>> = {
-  scheduling: async () => (await import("../apps/api/src/modules/scheduling/index.ts")).default,
-  webhooks: async () => (await import("../apps/api/src/modules/webhooks/index.ts")).default,
-  "provider-management": async () =>
-    (await import("../apps/api/src/modules/provider-management/index.ts")).default,
-};
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const modulesDir = resolve(scriptDir, "../apps/api/src/modules");
+const discoveredModules: string[] = existsSync(modulesDir)
+  ? readdirSync(modulesDir).filter((name) => {
+      const subdir = join(modulesDir, name);
+      try {
+        return statSync(subdir).isDirectory() && existsSync(join(subdir, "index.ts"));
+      } catch {
+        return false;
+      }
+    })
+  : [];
 
-// Always validate all built-in modules (their paths are always available).
-// External modules (e.g. @appstrate/cloud) are skipped — they can't be imported without full boot.
-const specifiers = Object.keys(builtinLoaders);
-
-// Load built-in modules and collect their contributions
+const loadedModules: AppstrateModule[] = [];
 const modulePaths: Record<string, unknown> = {};
 const moduleComponentSchemas: Record<string, unknown> = {};
 const moduleSchemas: OpenApiSchemaEntry[] = [];
 
-for (const specifier of specifiers) {
-  const loader = builtinLoaders[specifier];
-  if (!loader) continue; // external module — skip (can't validate without full boot)
-  const mod = await loader();
+for (const name of discoveredModules) {
+  const entry = join(modulesDir, name, "index.ts");
+  const mod: AppstrateModule = (await import(entry)).default;
+  loadedModules.push(mod);
   const paths = mod.openApiPaths?.();
   if (paths) Object.assign(modulePaths, paths);
   const compSchemas = mod.openApiComponentSchemas?.();
@@ -306,51 +314,29 @@ const expectedEndpoints = [
   "GET /api/end-users/{id}",
   "PATCH /api/end-users/{id}",
   "DELETE /api/end-users/{id}",
+
+  // Schedules
+  "GET /api/schedules",
+  "GET /api/agents/{scope}/{name}/schedules",
+  "POST /api/agents/{scope}/{name}/schedules",
+  "GET /api/schedules/{id}",
+  "PUT /api/schedules/{id}",
+  "DELETE /api/schedules/{id}",
+  "GET /api/schedules/{id}/runs",
 ];
 
-// Module-contributed endpoints (only present when their module is loaded)
-const moduleEndpoints: Record<string, string[]> = {
-  scheduling: [
-    "GET /api/schedules",
-    "GET /api/schedules/{id}",
-    "GET /api/schedules/{id}/runs",
-    "GET /api/agents/{scope}/{name}/schedules",
-    "POST /api/agents/{scope}/{name}/schedules",
-    "PUT /api/schedules/{id}",
-    "DELETE /api/schedules/{id}",
-  ],
-  webhooks: [
-    "POST /api/webhooks",
-    "GET /api/webhooks",
-    "GET /api/webhooks/{id}",
-    "PUT /api/webhooks/{id}",
-    "DELETE /api/webhooks/{id}",
-    "POST /api/webhooks/{id}/test",
-    "POST /api/webhooks/{id}/rotate",
-    "GET /api/webhooks/{id}/deliveries",
-  ],
-  "provider-management": [
-    "GET /api/provider-keys",
-    "POST /api/provider-keys",
-    "POST /api/provider-keys/test",
-    "PUT /api/provider-keys/{id}",
-    "DELETE /api/provider-keys/{id}",
-    "POST /api/provider-keys/{id}/test",
-    "GET /api/models",
-    "POST /api/models",
-    "PUT /api/models/default",
-    "GET /api/models/openrouter",
-    "POST /api/models/test",
-    "PUT /api/models/{id}",
-    "DELETE /api/models/{id}",
-    "POST /api/models/{id}/test",
-  ],
-};
-
-// Add endpoints for all built-in modules (always validated)
-for (const name of Object.keys(builtinLoaders)) {
-  const endpoints = moduleEndpoints[name];
-  if (endpoints) expectedEndpoints.push(...endpoints);
+// Module-contributed endpoints are sourced directly from each module's
+// `openApiPaths()` output — no hardcoded list. This keeps verify-openapi
+// in sync with whatever the module declares, so adding or removing a
+// module endpoint requires no update here.
+for (const [path, methods] of Object.entries(modulePaths)) {
+  if (!methods || typeof methods !== "object") continue;
+  for (const method of Object.keys(methods as Record<string, unknown>)) {
+    // Skip OpenAPI path-level fields that aren't HTTP methods (parameters, summary, etc.)
+    const lower = method.toLowerCase();
+    if (!["get", "post", "put", "patch", "delete", "head", "options"].includes(lower)) continue;
+    expectedEndpoints.push(`${lower.toUpperCase()} ${path}`);
+  }
 }
 
 const specEndpoints = new Set<string>();

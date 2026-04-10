@@ -38,7 +38,7 @@ import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage, seedConnectionProfile, seedConnectionForApp } from "../../helpers/seed.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
 import { applicationProviderCredentials } from "@appstrate/db/schema";
-import { createSchedule, listSchedules } from "../../../src/modules/scheduling/service.ts";
+import { createSchedule, listSchedules } from "../../../src/services/scheduling.ts";
 import { bindAppProfileProvider } from "../../../src/services/state/app-profile-bindings.ts";
 import {
   ensureDefaultProfile,

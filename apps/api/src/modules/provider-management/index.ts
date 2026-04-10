@@ -112,27 +112,6 @@ const providerManagementModule: AppstrateModule = {
       return resolveModel(orgId, packageId, modelId ?? null);
     },
   },
-
-  permissions: {
-    owner: [
-      "models:read",
-      "models:write",
-      "models:delete",
-      "provider-keys:read",
-      "provider-keys:write",
-      "provider-keys:delete",
-    ],
-    admin: [
-      "models:read",
-      "models:write",
-      "models:delete",
-      "provider-keys:read",
-      "provider-keys:write",
-      "provider-keys:delete",
-    ],
-    member: ["models:read"],
-    viewer: ["models:read"],
-  },
 };
 
 export default providerManagementModule;

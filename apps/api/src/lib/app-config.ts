@@ -16,7 +16,7 @@ export function buildAppConfig(): AppConfig {
       billing: false,
       models: false,
       providerKeys: false,
-      scheduling: false,
+      scheduling: true,
       webhooks: false,
       googleAuth: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
       githubAuth: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),

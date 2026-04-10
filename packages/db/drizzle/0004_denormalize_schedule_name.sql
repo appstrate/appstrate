@@ -1,15 +1,9 @@
--- Add denormalized schedule_name to runs (avoids LEFT JOIN on module-owned table)
-ALTER TABLE "runs" ADD COLUMN IF NOT EXISTS "schedule_name" text;
---> statement-breakpoint
--- Backfill existing runs from package_schedules (if table exists)
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'package_schedules') THEN
-    UPDATE "runs" SET "schedule_name" = ps."name"
-    FROM "package_schedules" ps
-    WHERE "runs"."schedule_id" = ps."id" AND "runs"."schedule_name" IS NULL;
-  END IF;
-END $$;
---> statement-breakpoint
--- Drop the FK constraint from runs.schedule_id → package_schedules.id
--- (scheduling module now owns this FK in its own migrations)
+-- Drop the legacy FK constraint from runs.schedule_id → package_schedules.id.
+-- The scheduling module now owns this FK in its own migration.
+--
+-- NOTE: this file previously also added a `schedule_name` column as a JOIN-free
+-- display optimization. That denormalization is gone — modules enrich runs via
+-- the `enrichRun` hook, so core runs stays agnostic of module-owned tables.
+-- The DROP COLUMN for `schedule_name` lives in 0005 to cleanly handle installs
+-- that already applied the denormalization step.
 ALTER TABLE "runs" DROP CONSTRAINT IF EXISTS "runs_schedule_id_package_schedules_id_fk";

@@ -1,34 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createQueue } from "../../infra/queue/index.ts";
-import type { JobQueue, QueueJob } from "../../infra/queue/index.ts";
+/**
+ * Scheduling service — cron-triggered agent runs.
+ *
+ * Owns the `package_schedules` table plus the BullMQ worker that fires
+ * scheduled runs. Uses the shared `prepareAndExecuteRun` pipeline so that
+ * scheduled runs behave identically to manual runs once they start.
+ */
+
+import { createQueue } from "../infra/queue/index.ts";
+import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { eq, and, asc, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { connectionProfiles as connectionProfilesTable } from "@appstrate/db/schema";
-import { packageSchedules } from "./schema.ts";
-import { batchLoadUserNames } from "../../lib/user-helpers.ts";
-import { logger } from "../../lib/logger.ts";
+import {
+  packageSchedules,
+  connectionProfiles as connectionProfilesTable,
+} from "@appstrate/db/schema";
+import { batchLoadUserNames } from "../lib/user-helpers.ts";
+import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
-import { createFailedRun } from "../../services/state/index.ts";
-import { onRunStatusChange } from "../../lib/modules/hooks.ts";
-import { prepareAndExecuteRun, resolveRunPreflight } from "../../services/run-pipeline.ts";
-import { asRecordOrNull } from "../../lib/safe-json.ts";
-import { getPackage, packageExists } from "../../services/agent-service.ts";
+import { createFailedRun } from "./state/index.ts";
+import { onRunStatusChange } from "../lib/modules/hooks.ts";
+import { prepareAndExecuteRun, resolveRunPreflight } from "./run-pipeline.ts";
+import { asRecordOrNull } from "../lib/safe-json.ts";
+import { getPackage, packageExists } from "./agent-service.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
 import {
   getProfileByIdUnsafe,
   resolveProviderProfiles,
   resolveScheduleProfileArgs,
   getAgentAppProfile,
-} from "../../services/connection-profiles.ts";
-import { resolveProviderStatuses } from "../../services/connection-manager/index.ts";
-import type { LoadedPackage, ProviderProfileMap } from "../../types/index.ts";
-import { resolveManifestProviders } from "../../lib/manifest-utils.ts";
-import { ApiError, internalError } from "../../lib/errors.ts";
-import { validateInput } from "../../services/schema.ts";
+} from "./connection-profiles.ts";
+import { resolveProviderStatuses } from "./connection-manager/index.ts";
+import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { ApiError, internalError } from "../lib/errors.ts";
+import { validateInput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-import { computeNextRun } from "../../lib/cron.ts";
-import { actorFromIds, type Actor } from "../../lib/actor.ts";
+import { computeNextRun } from "../lib/cron.ts";
+import { actorFromIds, type Actor } from "../lib/actor.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,7 +46,6 @@ import { actorFromIds, type Actor } from "../../lib/actor.ts";
 
 interface ScheduleJobData {
   scheduleId: string;
-  scheduleName?: string;
   packageId: string;
   connectionProfileId: string;
   orgId: string;
@@ -75,7 +84,6 @@ async function getQueue(): Promise<JobQueue<ScheduleJobData>> {
 async function upsertScheduleJob(schedule: Schedule, orgId: string): Promise<void> {
   const jobData: ScheduleJobData = {
     scheduleId: schedule.id,
-    scheduleName: schedule.name ?? undefined,
     packageId: schedule.packageId,
     connectionProfileId: schedule.connectionProfileId,
     orgId,
@@ -99,12 +107,10 @@ async function removeScheduleJob(scheduleId: string): Promise<void> {
 
 /** Process a scheduled job. */
 async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> {
-  const { scheduleId, scheduleName, packageId, connectionProfileId, orgId, applicationId, input } =
-    job.data;
+  const { scheduleId, packageId, connectionProfileId, orgId, applicationId, input } = job.data;
 
   await triggerScheduledRun(
     scheduleId,
-    scheduleName,
     packageId,
     connectionProfileId,
     orgId,
@@ -178,7 +184,6 @@ export async function shutdownScheduleWorker(): Promise<void> {
 
 async function triggerScheduledRun(
   scheduleId: string,
-  scheduleName: string | undefined,
   packageId: string,
   connectionProfileId: string,
   orgId: string,
@@ -317,7 +322,6 @@ async function triggerScheduledRun(
       modelId: preflightModelId,
       proxyId: preflightProxyId,
       scheduleId,
-      scheduleName,
       connectionProfileId,
       applicationId,
     });

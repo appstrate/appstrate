@@ -161,38 +161,41 @@ Appstrate uses a formalized module system for optional features. The contract is
 
 **Key files:**
 
-- `packages/core/src/module.ts` — `AppstrateModule` interface, `ModuleInitContext` (framework-agnostic, published on npm)
-- `apps/api/src/lib/modules/module-loader.ts` — Loader with dynamic import, topological sort, agnostic hook system, AppConfig extension, shutdown
-- `apps/api/src/lib/modules/migrate.ts` — `applyModuleMigrations()` helper for module-owned Drizzle migrations (PostgreSQL + PGlite)
+- `packages/core/src/module.ts` — `AppstrateModule` interface, `ModuleInitContext`, hook & event type maps (framework-agnostic, published on npm)
+- `apps/api/src/lib/modules/module-loader.ts` — Loader with built-in auto-discovery, dynamic import, topological sort, hook/event dispatch (including merge hooks), AppConfig extension, shutdown
+- `apps/api/src/lib/modules/migrate.ts` — `applyModuleMigrations()` helper for module-owned Drizzle migrations (PostgreSQL + PGlite, per-module tracking tables, advisory-lock serialization)
 - `apps/api/src/lib/modules/registry.ts` — `getModuleRegistry()` reads `APPSTRATE_MODULES` env var (comma-separated specifiers), `buildModuleInitContext()` provides platform services
-- `apps/api/src/lib/modules/hooks.ts` — Lifecycle hook helpers (`beforeRun`, `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`) — call hooks by name, never by module ID
-- `apps/api/src/lib/modules/example-module.ts` — Reference implementation
+- `apps/api/src/lib/modules/hooks.ts` — Lifecycle helpers (`beforeRun`, `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`, `enrichRuns`) — call hooks by name, never by module ID
+- `apps/api/src/modules/README.md` — Authoring guide for built-in modules, plus per-module READMEs next to each `index.ts`
 
-**Module lifecycle:** core migrations → registry (`APPSTRATE_MODULES` env var) → dynamic import → topological sort by `manifest.dependencies` → `init(ctx)` (runs module migrations + workers) → `createRouter()` → running → `shutdown()` (reverse order). All declared modules are required — any import or init failure is fatal.
+**Built-in module auto-discovery:** The loader scans `apps/api/src/modules/*/index.ts` at boot via `discoverBuiltinModules()`. Each subdirectory with an `index.ts` is registered as a built-in module with id equal to the directory name. The list is never hardcoded — adding a new module is as simple as dropping a new directory under `apps/api/src/modules/`. The same discovery is reused by `scripts/verify-openapi.ts`, so OpenAPI validation picks up new modules with zero ceremony.
 
-**Module-owned schemas:** Each built-in module owns its database tables following the cloud pattern. Module schemas live in `apps/api/src/modules/<name>/schema.ts` with Drizzle migrations in `drizzle/migrations/`. Each module has its own migration tracking table (`__drizzle_migrations_<module_id>`). FKs to core tables are added via raw SQL (not Drizzle references) to maintain isolation. Modules apply their migrations in `init()` via `applyModuleMigrations()`.
+**Module lifecycle:** core migrations → auto-discover built-ins → registry (`APPSTRATE_MODULES` env var) → dynamic import → topological sort by `manifest.dependencies` → `init(ctx)` (runs module migrations + workers) → `createRouter()` → running → `shutdown()` (reverse order). All declared modules are required — any import or init failure is fatal. RBAC is not part of the lifecycle: permissions are declared statically in core and consumed by modules through the typed `requirePermission` helper.
+
+**Module-owned schemas:** Each built-in module owns its database tables following the cloud pattern. Module schemas live in `apps/api/src/modules/<name>/schema.ts` with Drizzle migrations in `drizzle/migrations/`. Each module has its own migration tracking table (`__drizzle_migrations_<module_id>`). Modules apply their migrations in `init()` via `applyModuleMigrations()`.
 
 | Module              | Tables owned                      |
 | ------------------- | --------------------------------- |
-| scheduling          | `package_schedules`               |
 | webhooks            | `webhooks`, `webhook_deliveries`  |
 | provider-management | `org_provider_keys`, `org_models` |
 
-**Hooks vs Events:**
+Scheduling lives in core (`apps/api/src/services/scheduling.ts`, `apps/api/src/routes/schedules.ts`, `package_schedules` table in `packages/db/src/schema/schedules.ts`). It was briefly extracted as a module during the `feat/platform-modules` iteration, then moved back once it became clear that the coupling with `runs` (FK, filtering, enrichment, realtime) made module isolation cost more than it delivered. Webhooks and provider-management remain modules because they keep a clean boundary with core.
 
-- **Hooks** (`callHook`): First-match-wins. Naming: `beforeX` (gates), `resolveX` (data resolution). E.g. `beforeRun` can reject a run with a structured error, `resolveModel` resolves the LLM model.
-- **Events** (`emitEvent`): Broadcast-to-all. Naming: `onX` (something happened, modules react). E.g. `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`. Errors in individual handlers are isolated — they don't block other modules.
+**FK direction rule:** Backward references (module → core) use Drizzle `.references()` inline in the module schema — safe because core tables always exist before any module migration runs. Forward references (core → module) are impossible to express via Drizzle without leaking the module schema into core, so if a future module ever needs one it must add it via raw SQL inside its own migration. Core schemas never reference module-owned tables.
+
+**Hooks vs Events vs Merge hooks:**
+
+- **Hooks** (`callHook`): First-match-wins. Naming: `beforeX` (gates), `resolveX` (data resolution). Example: `beforeRun` blocks a run with a structured error; `resolveModel` returns the LLM model for a run.
+- **Merge hooks** (`callMergeHook`): All-match, shallow merge of partial maps keyed by row id. Used for read-time enrichment where multiple modules may contribute different fields to the same response. Example: `enrichRun` — cloud could return `{ [runId]: { billedAmount } }`, a future analytics module could return `{ [runId]: { pageViews } }`, and core merges them into the run row before serialization. Batched — core passes all rows at once so modules can do a single `IN (...)` lookup.
+- **Events** (`emitEvent`): Broadcast-to-all, side effects only. Naming: `onX` (something happened, modules react). Example: `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`. Errors in individual handlers are isolated.
 
 The platform calls hooks/events by name, never by module ID. This ensures zero knowledge of module internals.
 
-**Creating a new module (external package):**
+**Permissions & API key scopes:** RBAC is a platform capability, not a module concern. Core's `apps/api/src/lib/permissions.ts` is the single typed source of truth — it ships the full `Permission` union (including `webhooks:*`, `models:*`, `provider-keys:*`), the role-to-permission matrix, and the API key allowlist. Module manifests do not declare `permissions` or `apiKeyScopes`. Module routes protect handlers with the same typed `requirePermission("webhooks", "write")` helper core uses, so adding a new resource requires editing `permissions.ts` and the module in the same PR. Disabling a module leaves inert permission strings in the role sets (the routes that read them are not loaded), which is a deliberate trade-off for keeping the type system honest.
 
-1. Import types from `@appstrate/core/module`
-2. Export a default `AppstrateModule` from your package
-3. Add the package specifier to the `APPSTRATE_MODULES` env var (comma-separated)
-4. Module contributes feature flags via `features` property, routes via `createRouter()`, auth-bypass paths via `publicPaths`, email template overrides via `emailOverrides`, request/response logic via `hooks` (e.g. `beforeRun`, `beforeSignup`, `resolveModel`), notifications via `events` (e.g. `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`), and database tables via module-owned Drizzle migrations (applied in `init()`)
+**Creating a new built-in module:** Drop a directory under `apps/api/src/modules/<name>/` with an `index.ts` exporting a default `AppstrateModule`. Discovery picks it up automatically. The module contributes feature flags via `features`, routes via `createRouter()`, auth-bypass paths via `publicPaths`, email template overrides via `emailOverrides`, request/response logic via `hooks` (`beforeRun`, `beforeSignup`, `resolveModel`, `enrichRun`), notifications via `events` (`onRunStatusChange`, `onOrgCreate`, `onOrgDelete`), and database tables via module-owned Drizzle migrations. If the module introduces a new RBAC resource, extend `apps/api/src/lib/permissions.ts` in the same PR. To ship as an external npm package instead, export the same default and set `APPSTRATE_MODULES=@scope/name`.
 
-**Disabling a module = zero footprint:** remove it from `APPSTRATE_MODULES` = not imported = no tables, no routes, no middleware, no code loaded. Default is empty (OSS mode).
+**Disabling a module = zero footprint:** remove it from `APPSTRATE_MODULES` and it is neither imported nor initialized. No tables, no routes, no middleware, no hook handlers, no feature flags. Core knows nothing about the module's existence. Default is empty (OSS mode).
 
 ### Progressive Infrastructure
 

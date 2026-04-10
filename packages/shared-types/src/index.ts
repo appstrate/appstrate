@@ -12,7 +12,15 @@ export type { Run } from "@appstrate/db/schema";
 
 import type { Run } from "@appstrate/db/schema";
 
-/** Run with enriched display names from LEFT JOINs (user, end-user, API key, schedule). */
+/**
+ * Run with enriched display names.
+ *
+ * `userName`, `endUserName`, `apiKeyName`, and `scheduleName` all come from
+ * LEFT JOINs inside core — they are always present (possibly null) in API
+ * responses. Modules that want to contribute additional fields at runtime can
+ * do so via the `enrichRun` merge hook; those are not declared here so that
+ * shared-types stays module-agnostic.
+ */
 export type EnrichedRun = Run & {
   userName: string | null;
   endUserName: string | null;
@@ -57,33 +65,10 @@ export type RunStatus = (typeof runStatusEnum.enumValues)[number];
 
 // --- Schedule Types ---
 
-/**
- * Hand-rolled copy of the `packageSchedules` row type.
- *
- * The table lives in the scheduling module (`apps/api/src/modules/scheduling/schema.ts`)
- * and is intentionally not imported here: `@appstrate/shared-types` must remain
- * zero-footprint for OSS builds that don't load the scheduling module.
- *
- * Keep in sync with `packageSchedules` in the scheduling module. A type-only
- * guard in `apps/api/test/unit/modules/schedule-type-sync.test.ts` fails the
- * build if the two drift.
- */
-export interface Schedule {
-  id: string;
-  packageId: string;
-  connectionProfileId: string;
-  orgId: string;
-  applicationId: string;
-  name: string | null;
-  enabled: boolean;
-  cronExpression: string;
-  timezone: string | null;
-  input: unknown;
-  lastRunAt: Date | null;
-  nextRunAt: Date | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
+import type { PackageSchedule } from "@appstrate/db/schema";
+
+/** Schedule row inferred from the core `package_schedules` table. */
+export type Schedule = PackageSchedule;
 
 export interface ScheduleReadiness {
   status: "ready" | "degraded" | "not_ready";

@@ -3,9 +3,9 @@
 /**
  * OpenAPI 3.1 specification for the Appstrate API.
  *
- * Core paths are assembled statically. Module-owned paths (schedules,
- * webhooks, models, provider-keys) are contributed dynamically via
- * `openApiPaths()` — they only appear when the module is loaded.
+ * Core paths are assembled statically. Module-owned paths (webhooks, models,
+ * provider-keys) are contributed dynamically via `openApiPaths()` — they only
+ * appear when the module is loaded.
  *
  * Call `buildOpenApiSpec()` after modules are initialized to get the
  * final spec with all module contributions merged in.
@@ -39,6 +39,7 @@ import { notificationsPaths } from "./paths/notifications.ts";
 import { packagesPaths } from "./paths/packages.ts";
 import { applicationsPaths } from "./paths/applications.ts";
 import { endUsersPaths } from "./paths/end-users.ts";
+import { schedulesPaths } from "./paths/schedules.ts";
 
 const corePaths = {
   ...healthPaths,
@@ -62,6 +63,7 @@ const corePaths = {
   ...packagesPaths,
   ...applicationsPaths,
   ...endUsersPaths,
+  ...schedulesPaths,
 };
 
 const components = {

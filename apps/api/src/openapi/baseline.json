@@ -16230,10 +16230,6 @@
           "apiKeyName": {
             "type": ["string", "null"],
             "description": "Name of the API key that triggered the run"
-          },
-          "scheduleName": {
-            "type": ["string", "null"],
-            "description": "Name of the schedule that triggered the run"
           }
         }
       },

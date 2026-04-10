@@ -59,11 +59,6 @@ const webhooksModule: AppstrateModule = {
 
   features: { webhooks: true },
 
-  permissions: {
-    owner: ["webhooks:read", "webhooks:write", "webhooks:delete"],
-    admin: ["webhooks:read", "webhooks:write", "webhooks:delete"],
-  },
-
   events: {
     onRunStatusChange: async (params: RunStatusChangeParams) => {
       dispatchRunWebhook(

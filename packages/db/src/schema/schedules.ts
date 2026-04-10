@@ -1,19 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { pgTable, text, timestamp, boolean, uuid, index, jsonb } from "drizzle-orm/pg-core";
-
-// Scheduling module — owns the package_schedules table.
-// FKs to core tables (packages, organizations, applications, connection_profiles)
-// are added via raw SQL in migrations (same pattern as @appstrate/cloud).
+import { organizations } from "./organizations.ts";
+import { applications } from "./applications.ts";
+import { packages } from "./packages.ts";
+import { connectionProfiles } from "./connections.ts";
 
 export const packageSchedules = pgTable(
   "package_schedules",
   {
     id: text("id").primaryKey(),
-    packageId: text("package_id").notNull(),
-    connectionProfileId: uuid("connection_profile_id").notNull(),
-    orgId: uuid("org_id").notNull(),
-    applicationId: text("application_id").notNull(),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
+    connectionProfileId: uuid("connection_profile_id")
+      .notNull()
+      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
     name: text("name"),
     enabled: boolean("enabled").default(true).notNull(),
     cronExpression: text("cron_expression").notNull(),

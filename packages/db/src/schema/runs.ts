@@ -20,6 +20,7 @@ import { applications, endUsers } from "./applications.ts";
 import { apiKeys, organizations } from "./organizations.ts";
 import { packages } from "./packages.ts";
 import { connectionProfiles } from "./connections.ts";
+import { packageSchedules } from "./schedules.ts";
 
 export const runs = pgTable(
   "runs",
@@ -53,8 +54,9 @@ export const runs = pgTable(
     connectionProfileId: uuid("connection_profile_id").references(() => connectionProfiles.id, {
       onDelete: "set null",
     }),
-    scheduleId: text("schedule_id"),
-    scheduleName: text("schedule_name"),
+    scheduleId: text("schedule_id").references(() => packageSchedules.id, {
+      onDelete: "set null",
+    }),
     versionLabel: text("version_label"),
     versionDirty: boolean("version_dirty").default(false).notNull(),
     notifiedAt: timestamp("notified_at"),

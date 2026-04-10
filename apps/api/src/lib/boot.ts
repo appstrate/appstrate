@@ -31,6 +31,7 @@ import {
   storageFolderForType,
 } from "../services/package-items/index.ts";
 import { markOrphanRunsFailed } from "../services/state/index.ts";
+import { initScheduleWorker } from "../services/scheduling.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
@@ -50,7 +51,7 @@ export async function boot(): Promise<void> {
     await applyCoreMigrations();
   }
 
-  // Load modules (cloud, scheduling, webhooks, etc.)
+  // Load modules (cloud, webhooks, provider-management, etc.)
   // Modules may run their own migrations in init() — core DB is ready.
   await loadModules(getModuleRegistry(), buildModuleInitContext());
 
@@ -134,6 +135,11 @@ export async function boot(): Promise<void> {
   const parallelInits: Promise<void>[] = [
     orchestrator.initialize().catch((err) => {
       logger.warn("Could not initialize sidecar pool", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }),
+    initScheduleWorker().catch((err) => {
+      logger.warn("Could not initialize schedule worker", {
         error: err instanceof Error ? err.message : String(err),
       });
     }),

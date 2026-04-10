@@ -16,7 +16,21 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedWebhook, seedEndUser, seedApiKey } from "../../helpers/seed.ts";
-import { openApiSpec } from "../../../src/openapi/index.ts";
+import { buildOpenApiSpec } from "../../../src/openapi/index.ts";
+import { webhooksPaths } from "../../../src/modules/webhooks/openapi/paths.ts";
+import { webhooksSchemas } from "../../../src/modules/webhooks/openapi/schemas.ts";
+import { modelsPaths } from "../../../src/modules/provider-management/openapi/models.ts";
+import { providerKeysPaths } from "../../../src/modules/provider-management/openapi/provider-keys.ts";
+import { providerManagementSchemas } from "../../../src/modules/provider-management/openapi/schemas.ts";
+
+// Test fixtures must validate responses against the full spec including
+// paths contributed by the webhooks and provider-management modules. We
+// assemble the module paths statically here because the tests never boot
+// the module loader.
+const openApiSpec = buildOpenApiSpec(
+  { ...webhooksPaths, ...modelsPaths, ...providerKeysPaths },
+  { ...webhooksSchemas, ...providerManagementSchemas },
+);
 
 const app = getTestApp();
 

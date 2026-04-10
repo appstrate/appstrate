@@ -28,7 +28,7 @@ describe("resolvePermissions", () => {
     expect(perms.has("billing:manage")).toBe(true);
   });
 
-  it("member can read + run agents + manage own connections/schedules", () => {
+  it("member can read + run agents + manage own connections", () => {
     const perms = resolvePermissions("member");
     // Can read
     expect(perms.has("agents:read")).toBe(true);
@@ -39,15 +39,15 @@ describe("resolvePermissions", () => {
     // Can manage connections
     expect(perms.has("connections:connect")).toBe(true);
     expect(perms.has("connections:disconnect")).toBe(true);
-    // Can manage schedules
-    expect(perms.has("schedules:write")).toBe(true);
-    expect(perms.has("schedules:delete")).toBe(true);
     // Can cancel runs
     expect(perms.has("runs:cancel")).toBe(true);
     // Can bind org profiles
     expect(perms.has("app-profiles:bind")).toBe(true);
     // Can write end-users
     expect(perms.has("end-users:write")).toBe(true);
+    // Module-owned permissions still part of the core taxonomy
+    expect(perms.has("schedules:write")).toBe(true);
+    expect(perms.has("models:read")).toBe(true);
     // Cannot write agents
     expect(perms.has("agents:write")).toBe(false);
     expect(perms.has("agents:configure")).toBe(false);
@@ -55,11 +55,10 @@ describe("resolvePermissions", () => {
     // Cannot manage members
     expect(perms.has("members:invite")).toBe(false);
     expect(perms.has("members:remove")).toBe(false);
-    // Cannot manage infrastructure
-    expect(perms.has("models:write")).toBe(false);
-    expect(perms.has("provider-keys:read")).toBe(false);
-    // Cannot manage api-keys/webhooks
+    // Cannot manage api-keys
     expect(perms.has("api-keys:read")).toBe(false);
+    // Provider-keys and webhooks stay admin-only
+    expect(perms.has("provider-keys:read")).toBe(false);
     expect(perms.has("webhooks:read")).toBe(false);
   });
 
@@ -69,16 +68,18 @@ describe("resolvePermissions", () => {
     expect(perms.has("agents:read")).toBe(true);
     expect(perms.has("org:read")).toBe(true);
     expect(perms.has("runs:read")).toBe(true);
-    expect(perms.has("models:read")).toBe(true);
     expect(perms.has("billing:read")).toBe(true);
+    // Module-owned read permissions included in viewer
+    expect(perms.has("schedules:read")).toBe(true);
+    expect(perms.has("models:read")).toBe(true);
     // Cannot do anything else
     expect(perms.has("agents:write")).toBe(false);
     expect(perms.has("agents:run")).toBe(false);
     expect(perms.has("connections:connect")).toBe(false);
-    expect(perms.has("schedules:write")).toBe(false);
     expect(perms.has("runs:cancel")).toBe(false);
     expect(perms.has("org:update")).toBe(false);
     expect(perms.has("org:delete")).toBe(false);
+    expect(perms.has("webhooks:read")).toBe(false);
   });
 
   it("returns a new Set each time (not shared reference)", () => {
@@ -154,7 +155,7 @@ describe("resolveApiKeyPermissions", () => {
     expect(perms.has("agents:write")).toBe(true);
     expect(perms.has("agents:delete")).toBe(true);
     // Not in the scopes
-    expect(perms.has("models:write")).toBe(false);
+    expect(perms.has("agents:run")).toBe(false);
   });
 
   it("role downgrade reduces effective permissions", () => {
@@ -185,9 +186,6 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "api-keys:read",
       "api-keys:create",
       "api-keys:revoke",
-      "provider-keys:read",
-      "provider-keys:write",
-      "provider-keys:delete",
       "profiles:read",
       "profiles:write",
       "profiles:delete",
@@ -197,6 +195,9 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "app-profiles:bind",
       "memories:read",
       "memories:delete",
+      "provider-keys:read",
+      "provider-keys:write",
+      "provider-keys:delete",
     ];
     for (const perm of excluded) {
       expect(API_KEY_ALLOWED_SCOPES.has(perm as never)).toBe(false);
@@ -213,14 +214,20 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "end-users:read",
       "end-users:write",
       "end-users:delete",
-      "webhooks:read",
-      "webhooks:write",
-      "webhooks:delete",
       "applications:read",
       "applications:write",
       "connections:read",
       "connections:connect",
       "connections:disconnect",
+      "schedules:read",
+      "schedules:write",
+      "schedules:delete",
+      "webhooks:read",
+      "webhooks:write",
+      "webhooks:delete",
+      "models:read",
+      "models:write",
+      "models:delete",
     ];
     for (const perm of included) {
       expect(API_KEY_ALLOWED_SCOPES.has(perm as never)).toBe(true);

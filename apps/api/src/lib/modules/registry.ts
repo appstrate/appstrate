@@ -14,22 +14,15 @@ import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import type { ModuleInitContext } from "@appstrate/core/module";
-import { registerBuiltinModule } from "./module-loader.ts";
 import { applyModuleMigrations } from "./migrate.ts";
 
 // ---------------------------------------------------------------------------
-// Built-in platform modules (loaded only if listed in APPSTRATE_MODULES)
-// ---------------------------------------------------------------------------
-
-registerBuiltinModule("scheduling", () => import("../../modules/scheduling/index.ts"));
-registerBuiltinModule("webhooks", () => import("../../modules/webhooks/index.ts"));
-registerBuiltinModule(
-  "provider-management",
-  () => import("../../modules/provider-management/index.ts"),
-);
-
-// ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
+// ---------------------------------------------------------------------------
+//
+// Built-in modules are auto-discovered at load time by scanning
+// `apps/api/src/modules/*/index.ts` (see `module-loader.ts:discoverBuiltinModules`).
+// Only modules listed in APPSTRATE_MODULES are actually initialized.
 // ---------------------------------------------------------------------------
 
 /**

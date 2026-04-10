@@ -9,7 +9,7 @@
  * This allows integration tests to exercise the full HTTP → middleware → auth → service → DB
  * pipeline with a real database.
  *
- * NOTE on module imports: the built-in module routes (scheduling, webhooks,
+ * NOTE on module imports: the built-in module routes (webhooks,
  * provider-management) are imported statically below. This is intentional —
  * test fixtures deliberately exercise all built-in modules regardless of the
  * `APPSTRATE_MODULES` env var, whereas production loads them dynamically
@@ -37,7 +37,7 @@ import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 // Route imports
 import { createAgentsRouter } from "../../src/routes/agents.ts";
 import { createRunsRouter } from "../../src/routes/runs.ts";
-import { createSchedulesRouter } from "../../src/modules/scheduling/routes.ts";
+import { createSchedulesRouter } from "../../src/routes/schedules.ts";
 import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
 import { createProvidersRouter } from "../../src/routes/providers.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
@@ -66,6 +66,11 @@ let cachedApp: Hono<AppEnv> | null = null;
 
 // Initialize boot-time singletons that routes depend on.
 // In production these are called by boot(). For tests, we call them directly.
+//
+// Modules: test fixtures statically mount the routers for webhooks and
+// provider-management (see imports below). We do NOT run their full init()
+// here because that would start BullMQ workers and apply migrations. RBAC is
+// owned by core and already covers module resources, so nothing to register.
 await loadModulesFromInstances([], {
   databaseUrl: null,
   redisUrl: null,
@@ -74,7 +79,8 @@ await loadModulesFromInstances([], {
   applyMigrations: async () => {},
   getSendMail: async () => () => {},
   getOrgAdminEmails: async () => [],
-}).catch(() => {}); // no modules in test (OSS mode)
+}).catch(() => {});
+
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
 initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 

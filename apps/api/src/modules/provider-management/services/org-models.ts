@@ -2,6 +2,7 @@
 
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import type { ResolvedModelResult } from "@appstrate/core/module";
 import { orgModels } from "../schema.ts";
 import {
   getSystemModels,
@@ -174,10 +175,7 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
 
 // --- Resolution ---
 
-import type { ResolvedModelResult as ResolvedModel } from "@appstrate/core/module";
-export type { ResolvedModel };
-
-function systemDefToResolved(def: ModelDefinition): ResolvedModel {
+function systemDefToResolved(def: ModelDefinition): ResolvedModelResult {
   return {
     api: def.api,
     baseUrl: def.baseUrl,
@@ -197,7 +195,7 @@ export async function resolveModel(
   orgId: string,
   packageId: string,
   modelId: string | null,
-): Promise<ResolvedModel | null> {
+): Promise<ResolvedModelResult | null> {
   // 1. Explicit override (agent column or per-run)
   if (modelId) {
     const result = await loadModel(orgId, modelId);
@@ -248,7 +246,10 @@ export async function resolveModel(
   return null;
 }
 
-export async function loadModel(orgId: string, modelDbId: string): Promise<ResolvedModel | null> {
+export async function loadModel(
+  orgId: string,
+  modelDbId: string,
+): Promise<ResolvedModelResult | null> {
   // Check system models first
   const system = getSystemModels();
   const systemDef = system.get(modelDbId);

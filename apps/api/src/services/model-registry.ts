@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
+import type { ResolvedModelResult } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
 import { modelCostSchema } from "./adapters/types.ts";
 import type { ModelCost } from "./adapters/types.ts";
@@ -179,10 +180,7 @@ export function isSystemProviderKey(keyId: string): boolean {
  * Used as fallback when the provider-management module is not loaded.
  * Returns the specified model or the system default, or null.
  */
-import type { ResolvedModelResult as SystemResolvedModel } from "@appstrate/core/module";
-export type { SystemResolvedModel };
-
-export function resolveSystemModel(modelId?: string | null): SystemResolvedModel | null {
+export function resolveSystemModel(modelId?: string | null): ResolvedModelResult | null {
   const models = getSystemModels();
   if (modelId) {
     const def = models.get(modelId);

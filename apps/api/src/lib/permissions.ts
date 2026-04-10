@@ -203,6 +203,14 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "billing:read",
 ]);
 
+/** Role → permissions mapping. */
+const ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<Permission>> = {
+  owner: OWNER_PERMISSIONS,
+  admin: ADMIN_PERMISSIONS,
+  member: MEMBER_PERMISSIONS,
+  viewer: VIEWER_PERMISSIONS,
+};
+
 // ---------------------------------------------------------------------------
 // API Key scopes
 // ---------------------------------------------------------------------------
@@ -263,47 +271,12 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
 ]);
 
 // ---------------------------------------------------------------------------
-// Mutable state (extended by modules at boot)
-// ---------------------------------------------------------------------------
-
-/** Mutable role → permissions sets. Modules add their permissions via registerModulePermissions(). */
-const _mutableRolePermissions: Record<OrgRole, Set<string>> = {
-  owner: new Set(OWNER_PERMISSIONS),
-  admin: new Set(ADMIN_PERMISSIONS),
-  member: new Set(MEMBER_PERMISSIONS),
-  viewer: new Set(VIEWER_PERMISSIONS),
-};
-
-/** Mutable API key allowed scopes. Modules add their scopes via registerModuleApiKeyScopes(). */
-const _mutableApiKeyScopes: Set<string> = new Set(API_KEY_ALLOWED_SCOPES);
-
-/**
- * Register additional permissions declared by a module.
- * Called by the module loader after each module's init().
- */
-export function registerModulePermissions(perms: Record<string, string[]>): void {
-  for (const [role, additions] of Object.entries(perms)) {
-    const roleSet = _mutableRolePermissions[role as OrgRole];
-    if (roleSet) {
-      for (const perm of additions) roleSet.add(perm);
-    }
-  }
-}
-
-/**
- * Register additional API key scopes declared by a module.
- */
-export function registerModuleApiKeyScopes(scopes: string[]): void {
-  for (const scope of scopes) _mutableApiKeyScopes.add(scope);
-}
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Resolve an org role to its permission set (includes module-registered permissions). */
+/** Resolve an org role to its permission set. */
 export function resolvePermissions(role: OrgRole): Set<Permission> {
-  return new Set(_mutableRolePermissions[role]) as Set<Permission>;
+  return new Set(ROLE_PERMISSIONS[role]);
 }
 
 /** Check if a permission set contains the required `resource:action`. */
@@ -324,8 +297,11 @@ export function hasPermission<R extends Resource>(
  * 3. Within the creator's own permissions (based on their role)
  */
 export function validateScopes(scopes: string[], creatorRole: OrgRole): Permission[] {
-  const creatorPerms = _mutableRolePermissions[creatorRole];
-  return scopes.filter((s): s is Permission => _mutableApiKeyScopes.has(s) && creatorPerms.has(s));
+  const creatorPerms = ROLE_PERMISSIONS[creatorRole];
+  return scopes.filter(
+    (s): s is Permission =>
+      API_KEY_ALLOWED_SCOPES.has(s as Permission) && creatorPerms.has(s as Permission),
+  );
 }
 
 /**
@@ -333,10 +309,10 @@ export function validateScopes(scopes: string[], creatorRole: OrgRole): Permissi
  * Returns the intersection of key scopes with the creator's current role permissions.
  */
 export function resolveApiKeyPermissions(scopes: string[], creatorRole: OrgRole): Set<Permission> {
-  const rolePerms = _mutableRolePermissions[creatorRole];
+  const rolePerms = ROLE_PERMISSIONS[creatorRole];
   const effective = new Set<Permission>();
   for (const scope of scopes) {
-    if (rolePerms.has(scope)) {
+    if (rolePerms.has(scope as Permission)) {
       effective.add(scope as Permission);
     }
   }

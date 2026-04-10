@@ -12,7 +12,7 @@
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { forbidden } from "../lib/errors.ts";
-import { hasPermission, type Resource, type Action } from "../lib/permissions.ts";
+import type { Resource, Action } from "../lib/permissions.ts";
 import { logger } from "../lib/logger.ts";
 
 /**
@@ -21,19 +21,20 @@ import { logger } from "../lib/logger.ts";
  * Usage: `router.post("/path", requirePermission("agents", "write"), handler)`
  */
 export function requirePermission<R extends Resource>(resource: R, action: Action<R>) {
+  const required = `${resource}:${action}`;
   return async (c: Context<AppEnv>, next: Next) => {
     const permissions = c.get("permissions");
-    if (!permissions || !hasPermission(permissions, resource, action)) {
+    if (!permissions || !permissions.has(required)) {
       logger.warn("permission_denied", {
         actorId: c.get("user")?.id,
         orgId: c.get("orgId"),
         authMode: c.get("authMethod"),
-        required: `${resource}:${action}`,
+        required,
         role: c.get("orgRole"),
         path: `${c.req.method} ${c.req.path}`,
         ...(c.get("apiKeyId") ? { apiKeyId: c.get("apiKeyId") } : {}),
       });
-      throw forbidden(`Insufficient permissions: ${resource}:${action} required`);
+      throw forbidden(`Insufficient permissions: ${required} required`);
     }
     return next();
   };

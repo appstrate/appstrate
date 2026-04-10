@@ -10,6 +10,7 @@ import {
   waitForInFlight,
   stopCancelSubscriber,
 } from "../services/run-tracker.ts";
+import { shutdownScheduleWorker } from "../services/scheduling.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
@@ -42,6 +43,9 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
         });
       }
     }
+
+    logger.info("Shutting down schedule worker...");
+    await shutdownScheduleWorker();
 
     logger.info("Shutting down modules...");
     await shutdownModules();
