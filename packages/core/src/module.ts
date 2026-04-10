@@ -54,7 +54,14 @@ export interface AppstrateModule {
 
   /**
    * Contribute to the frontend AppConfig (feature flags, legal URLs, etc.).
-   * Returns a partial overlay that is deep-merged onto the base config.
+   *
+   * Return a **partial overlay** — only the keys you want to add or override.
+   * The platform deep-merges your return value onto the accumulated config.
+   * Do NOT spread `...base` — just return the delta.
+   *
+   * `base` is provided for read-only inspection (e.g. conditional flags).
+   *
+   * @example return { features: { billing: true }, legalUrls: { terms: "..." } }
    */
   extendAppConfig?(base: Record<string, unknown>): Record<string, unknown>;
 

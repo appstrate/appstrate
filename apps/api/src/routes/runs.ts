@@ -179,7 +179,7 @@ export async function executeAgentInBackground(
           "error",
         );
         dispatchRunWebhook(orgId, applicationId, "timeout", runId, agent.id, { duration });
-        afterRun({
+        void afterRun({
           orgId,
           runId,
           agentId: agent.id,
@@ -227,7 +227,7 @@ export async function executeAgentInBackground(
         "error",
       );
       dispatchRunWebhook(orgId, applicationId, "failed", runId, agent.id, { error, duration });
-      afterRun({
+      void afterRun({
         orgId,
         runId,
         agentId: agent.id,
@@ -302,7 +302,7 @@ export async function executeAgentInBackground(
         "info",
       );
       dispatchRunWebhook(orgId, applicationId, "completed", runId, agent.id, { result, duration });
-      afterRun({
+      void afterRun({
         orgId,
         runId,
         agentId: agent.id,
@@ -343,7 +343,7 @@ export async function executeAgentInBackground(
       error: errorMessage,
       duration,
     });
-    afterRun({
+    void afterRun({
       orgId,
       runId,
       agentId: agent.id,

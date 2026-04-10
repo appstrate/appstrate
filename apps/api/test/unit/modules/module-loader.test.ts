@@ -140,12 +140,14 @@ describe("module-loader", () => {
       const a = mockModule("a", { publicPaths: ["/api/a/hook"] });
       const b = mockModule("b", { publicPaths: ["/api/b/hook1", "/api/b/hook2"] });
       await loadModulesFromInstances([a, b], mockCtx());
-      expect(getModulePublicPaths()).toEqual(["/api/a/hook", "/api/b/hook1", "/api/b/hook2"]);
+      expect(getModulePublicPaths()).toEqual(
+        new Set(["/api/a/hook", "/api/b/hook1", "/api/b/hook2"]),
+      );
     });
 
-    it("returns empty array when no modules loaded", async () => {
+    it("returns empty set when no modules loaded", async () => {
       await loadModulesFromInstances([], mockCtx());
-      expect(getModulePublicPaths()).toEqual([]);
+      expect(getModulePublicPaths()).toEqual(new Set());
     });
 
     it("caches empty array correctly (does not recompute)", async () => {
@@ -177,10 +179,9 @@ describe("module-loader", () => {
   describe("applyModuleAppConfig", () => {
     it("deep-merges module config overlays", async () => {
       const mod = mockModule("ext", {
-        extendAppConfig: (base) => ({
-          ...base,
+        extendAppConfig: () => ({
           platform: "cloud",
-          features: { ...(base.features as Record<string, boolean>), billing: true },
+          features: { billing: true },
         }),
       });
       await loadModulesFromInstances([mod], mockCtx());
@@ -206,8 +207,7 @@ describe("module-loader", () => {
 
     it("deep-merges correctly with falsy values", async () => {
       const mod = mockModule("ext", {
-        extendAppConfig: (base) => ({
-          ...base,
+        extendAppConfig: () => ({
           nested: { enabled: false, count: 0, label: "" },
         }),
       });
@@ -235,8 +235,7 @@ describe("module-loader", () => {
 
     it("deep-merges correctly with null source values", async () => {
       const mod = mockModule("ext", {
-        extendAppConfig: (base) => ({
-          ...base,
+        extendAppConfig: () => ({
           features: null,
         }),
       });
@@ -298,8 +297,7 @@ describe("module-loader", () => {
     it("does not deep-merge class instances (Date, Error, etc.)", async () => {
       const date = new Date("2025-01-01");
       const mod = mockModule("ext", {
-        extendAppConfig: (base) => ({
-          ...base,
+        extendAppConfig: () => ({
           meta: { createdAt: date },
         }),
       });
@@ -327,8 +325,7 @@ describe("module-loader", () => {
 
     it("replaces arrays entirely (does not merge by index)", async () => {
       const mod = mockModule("ext", {
-        extendAppConfig: (base) => ({
-          ...base,
+        extendAppConfig: () => ({
           trustedOrigins: ["https://new.com"],
         }),
       });
@@ -354,9 +351,8 @@ describe("module-loader", () => {
 
     it("does not mutate the base config", async () => {
       const mod = mockModule("ext", {
-        extendAppConfig: (base) => ({
-          ...base,
-          features: { ...(base.features as Record<string, boolean>), billing: true },
+        extendAppConfig: () => ({
+          features: { billing: true },
         }),
       });
       await loadModulesFromInstances([mod], mockCtx());
@@ -501,7 +497,7 @@ describe("module-loader", () => {
       await loadModulesFromInstances([mod], mockCtx());
       await shutdownModules();
       expect(getModule("temp")).toBeNull();
-      expect(getModulePublicPaths()).toEqual([]);
+      expect(getModulePublicPaths()).toEqual(new Set());
     });
 
     it("does not throw if a module shutdown fails", async () => {

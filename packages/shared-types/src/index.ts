@@ -23,7 +23,7 @@ export type EnrichedRun = Run & {
 // --- App Config Types ---
 
 export interface AppConfig {
-  platform: string;
+  platform: "oss" | (string & {});
   features: {
     billing: boolean;
     models: boolean;

@@ -35,9 +35,8 @@ const exampleModule: AppstrateModule = {
     return router;
   },
 
-  extendAppConfig(base) {
-    const features = base.features as Record<string, boolean> | undefined;
-    return { ...base, features: { ...features, example: true } };
+  extendAppConfig() {
+    return { features: { example: true } };
   },
 
   async shutdown() {

@@ -16,7 +16,7 @@ import { logger } from "../logger.ts";
 // ---------------------------------------------------------------------------
 
 const _modules: Map<string, AppstrateModule> = new Map();
-let _publicPathsCache: string[] | null = null;
+let _publicPathsCache: Set<string> | null = null;
 let _initialized = false;
 
 // ---------------------------------------------------------------------------
@@ -97,7 +97,14 @@ export async function loadModulesFromInstances(
 
   const sorted = topoSort(modules);
   for (const mod of sorted) {
-    await mod.init(ctx);
+    try {
+      await mod.init(ctx);
+    } catch (err) {
+      throw new Error(
+        `Module "${mod.manifest.id}" failed to initialize: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
     if (_modules.has(mod.manifest.id)) {
       logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
     }
@@ -117,10 +124,10 @@ export function getModules(): ReadonlyMap<string, AppstrateModule> {
   return _modules;
 }
 
-/** Collect all public paths from all loaded modules (cached). */
-export function getModulePublicPaths(): string[] {
+/** Collect all public paths from all loaded modules (cached as Set for O(1) lookup). */
+export function getModulePublicPaths(): Set<string> {
   if (_publicPathsCache !== null) return _publicPathsCache;
-  _publicPathsCache = Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []);
+  _publicPathsCache = new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
   return _publicPathsCache;
 }
 
@@ -134,7 +141,11 @@ export function registerModuleRoutes(app: Hono<AppEnv>): void {
   }
 }
 
-/** Extend AppConfig with all module contributions (deep merge). */
+/**
+ * Extend AppConfig with module contributions.
+ * Each module's `extendAppConfig()` returns a partial overlay, deep-merged
+ * onto the accumulated config in topological order.
+ */
 export function applyModuleAppConfig(base: AppConfig): AppConfig {
   let config: AppConfig = { ...base };
   for (const mod of _modules.values()) {
@@ -152,11 +163,14 @@ export function applyModuleAppConfig(base: AppConfig): AppConfig {
 
 /**
  * Call a named hook — returns the result from the FIRST module that
- * provides it, or undefined if no module provides it.
- * For broadcasting to ALL modules, use emitEvent() instead.
+ * provides it, or `undefined` if no module provides it.
  *
- * This is fully agnostic — the platform never knows which module
- * provides which hook.
+ * **First-match-wins:** Modules are iterated in topological init order.
+ * If the first module that provides a hook returns a value (including `null`),
+ * subsequent modules are never consulted. Load order (determined by
+ * `manifest.dependencies` topological sort) defines priority.
+ *
+ * For broadcast-to-all semantics, use `emitEvent()` instead.
  */
 // Internal type: hooks/events objects cast to indexable records for dynamic dispatch.
 // The public types (ModuleHooks/ModuleEvents) are strict — this cast is only used
