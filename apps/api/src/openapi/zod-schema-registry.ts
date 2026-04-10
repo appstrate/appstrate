@@ -326,7 +326,7 @@ const coreSchemas: ZodSchemaEntry[] = [
     description: "Set agent app profile",
   },
 
-  // ─── Provider Keys ──────────────────────────────────────────────────────
+  // ─── Provider Keys ─────────────────────────────────────────────────────
   {
     method: "POST",
     path: "/api/provider-keys",

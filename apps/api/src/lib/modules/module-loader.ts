@@ -27,7 +27,10 @@ let _initialized = false;
  * exists, it's loaded as a built-in; otherwise the specifier is treated as an
  * npm package name and loaded via dynamic import.
  */
-async function resolveSpecifier(specifier: string): Promise<unknown> {
+async function resolveSpecifier(specifier: string): Promise<{
+  default?: AppstrateModule;
+  appstrateModule?: AppstrateModule;
+}> {
   const here = dirname(fileURLToPath(import.meta.url));
   const builtinPath = resolve(here, "../../modules", specifier, "index.ts");
   if (existsSync(builtinPath)) {
@@ -61,10 +64,7 @@ export async function loadModules(specifiers: string[], ctx: ModuleInitContext):
   const resolved: AppstrateModule[] = [];
   for (const specifier of specifiers) {
     try {
-      const raw = (await resolveSpecifier(specifier)) as {
-        default?: AppstrateModule;
-        appstrateModule?: AppstrateModule;
-      };
+      const raw = await resolveSpecifier(specifier);
       // Support both default export and named `appstrateModule` export
       const mod = (raw.default ?? raw.appstrateModule) as AppstrateModule | undefined;
       if (!mod?.manifest?.id) {
