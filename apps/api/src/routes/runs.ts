@@ -31,6 +31,7 @@ import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
+import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
@@ -40,6 +41,21 @@ function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
     (total.cache_creation_input_tokens ?? 0) + (addition.cache_creation_input_tokens ?? 0);
   total.cache_read_input_tokens =
     (total.cache_read_input_tokens ?? 0) + (addition.cache_read_input_tokens ?? 0);
+}
+
+async function collectAfterRunMetadata(
+  params: RunStatusChangeParams,
+): Promise<Record<string, unknown> | null> {
+  try {
+    return (await callHook("afterRun", params)) ?? null;
+  } catch (err) {
+    logger.error("afterRun hook failed — run record will be missing metadata", {
+      err: err instanceof Error ? err.message : String(err),
+      orgId: params.orgId,
+      runId: params.runId,
+    });
+    return null;
+  }
 }
 
 // --- Background run (decoupled from client) ---
@@ -157,6 +173,16 @@ export async function executeAgentInBackground(
       if (err instanceof TimeoutError) {
         const duration = Date.now() - startTime;
         const totalTokens = accumulated.input_tokens + accumulated.output_tokens;
+        const metadata = await collectAfterRunMetadata({
+          orgId,
+          runId,
+          agentId: agent.id,
+          applicationId,
+          status: "timeout",
+          cost: accumulatedCost,
+          duration,
+          modelSource: modelSource ?? null,
+        });
         await updateRun(runId, orgId, applicationId, {
           status: "timeout",
           error: `Run timed out after ${timeout}s`,
@@ -169,6 +195,7 @@ export async function executeAgentInBackground(
                 tokenUsage: { ...accumulated } as Record<string, unknown>,
               }
             : {}),
+          ...(metadata ? { metadata } : {}),
         });
         await appendRunLog(
           runId,
@@ -213,12 +240,23 @@ export async function executeAgentInBackground(
     const duration = Date.now() - startTime;
 
     if (error) {
+      const metadata = await collectAfterRunMetadata({
+        orgId,
+        runId,
+        agentId: agent.id,
+        applicationId,
+        status: "failed",
+        cost: accumulatedCost,
+        duration,
+        modelSource: modelSource ?? null,
+      });
       await updateRun(runId, orgId, applicationId, {
         status: "failed",
         error,
         completedAt: new Date().toISOString(),
         duration,
         notifiedAt: new Date().toISOString(),
+        ...(metadata ? { metadata } : {}),
       });
       await appendRunLog(
         runId,
@@ -280,26 +318,16 @@ export async function executeAgentInBackground(
         await addPackageMemories(agent.id, orgId, applicationId, memories, runId);
       }
 
-      let metadata: Record<string, unknown> | null = null;
-      try {
-        metadata =
-          (await callHook("afterRun", {
-            orgId,
-            runId,
-            agentId: agent.id,
-            applicationId,
-            status: "success",
-            cost: accumulatedCost,
-            duration,
-            modelSource: modelSource ?? null,
-          })) ?? null;
-      } catch (err) {
-        logger.error("afterRun hook failed — run record will be missing metadata", {
-          err: err instanceof Error ? err.message : String(err),
-          orgId,
-          runId,
-        });
-      }
+      const metadata = await collectAfterRunMetadata({
+        orgId,
+        runId,
+        agentId: agent.id,
+        applicationId,
+        status: "success",
+        cost: accumulatedCost,
+        duration,
+        modelSource: modelSource ?? null,
+      });
 
       await updateRun(runId, orgId, applicationId, {
         status: "success",
@@ -344,12 +372,23 @@ export async function executeAgentInBackground(
 
     const duration = Date.now() - startTime;
     const errorMessage = err instanceof Error ? err.message : "Unknown error";
+    const metadata = await collectAfterRunMetadata({
+      orgId,
+      runId,
+      agentId: agent.id,
+      applicationId,
+      status: "failed",
+      cost: accumulatedCost,
+      duration,
+      modelSource: modelSource ?? null,
+    });
     await updateRun(runId, orgId, applicationId, {
       status: "failed",
       error: errorMessage,
       completedAt: new Date().toISOString(),
       duration,
       notifiedAt: new Date().toISOString(),
+      ...(metadata ? { metadata } : {}),
     });
     await appendRunLog(
       runId,
