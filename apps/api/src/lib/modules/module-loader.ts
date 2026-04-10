@@ -7,6 +7,7 @@ import type {
   ModuleInitContext,
   ModuleHooks,
   ModuleEvents,
+  OpenApiSchemaEntry,
 } from "@appstrate/core/module";
 import type { AppEnv } from "../../types/index.ts";
 import { logger } from "../logger.ts";
@@ -150,6 +151,36 @@ export function registerModuleRoutes(app: Hono<AppEnv>): void {
       app.route("/api", router);
     }
   }
+}
+
+/** Collect OpenAPI path definitions from all loaded modules. */
+export function getModuleOpenApiPaths(): Record<string, unknown> {
+  const paths: Record<string, unknown> = {};
+  for (const mod of _modules.values()) {
+    const modulePaths = mod.openApiPaths?.();
+    if (modulePaths) Object.assign(paths, modulePaths);
+  }
+  return paths;
+}
+
+/** Collect OpenAPI component schema definitions from all loaded modules. */
+export function getModuleOpenApiComponentSchemas(): Record<string, unknown> {
+  const schemas: Record<string, unknown> = {};
+  for (const mod of _modules.values()) {
+    const moduleSchemas = mod.openApiComponentSchemas?.();
+    if (moduleSchemas) Object.assign(schemas, moduleSchemas);
+  }
+  return schemas;
+}
+
+/** Collect Zod ↔ OpenAPI schema entries from all loaded modules. */
+export function getModuleOpenApiSchemas(): OpenApiSchemaEntry[] {
+  const entries: OpenApiSchemaEntry[] = [];
+  for (const mod of _modules.values()) {
+    const moduleSchemas = mod.openApiSchemas?.();
+    if (moduleSchemas) entries.push(...moduleSchemas);
+  }
+  return entries;
 }
 
 /** Extend AppConfig with all module contributions (deep merge). */

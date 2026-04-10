@@ -7,25 +7,16 @@
  * Used by `scripts/verify-openapi.ts` (Step 4) to compare Zod-derived
  * JSON Schemas against the hand-written OpenAPI requestBody schemas.
  *
- * Schemas are imported directly from route/service files — no duplicated
- * inline definitions. Aliases are used where names collide across files.
+ * Core schemas are defined statically here. Module-owned schemas
+ * (schedules, webhooks, models, provider-keys) are contributed
+ * dynamically via `openApiSchemas()` — they only appear when the
+ * module is loaded. Call `buildZodSchemaRegistry()` after module init.
  */
 
 import { z } from "zod";
 
-// --- Webhook schemas (modules/webhooks/routes.ts) ---
-import { createWebhookSchema, updateWebhookSchema } from "../modules/webhooks/routes.ts";
-
 // --- End-User schemas (routes/end-users.ts) ---
 import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts";
-
-// --- Model schemas (modules/provider-management/routes/models.ts) ---
-import {
-  createModelSchema,
-  updateModelSchema,
-  setDefaultSchema as modelsSetDefaultSchema,
-  testInlineSchema as modelsTestInlineSchema,
-} from "../modules/provider-management/routes/models.ts";
 
 // --- API Key schemas (routes/api-keys.ts) ---
 import { createApiKeySchema } from "../routes/api-keys.ts";
@@ -40,9 +31,6 @@ import {
 
 // --- Org settings schema (services/organizations.ts) ---
 import { orgSettingsSchema } from "../services/organizations.ts";
-
-// --- Schedule schemas (modules/scheduling/routes.ts) ---
-import { createScheduleSchema, updateScheduleSchema } from "../modules/scheduling/routes.ts";
 
 // --- User-agent schemas (routes/user-agents.ts) ---
 import { updateSkillsSchema, updateToolsSchema } from "../routes/user-agents.ts";
@@ -81,13 +69,6 @@ import {
   setProviderProfileSchema,
   removeProviderProfileSchema,
 } from "../routes/agents.ts";
-
-// --- Provider Key schemas (modules/provider-management/routes/provider-keys.ts) ---
-import {
-  createSchema as createProviderKeySchema,
-  updateSchema as updateProviderKeySchema,
-  testInlineSchema as providerKeysTestInlineSchema,
-} from "../modules/provider-management/routes/provider-keys.ts";
 
 // --- Profile schemas (routes/profile.ts) ---
 import { profileUpdateSchema, batchLookupSchema } from "../routes/profile.ts";
@@ -137,29 +118,9 @@ function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
 }
 
 /**
- * Registry of Zod request-body schemas mapped to their OpenAPI path+method.
- *
- * Each entry pre-converts the Zod schema to JSON Schema so the verify script
- * does not need to import Zod directly (zod is only available in apps/api).
- *
- * Add new entries here as you add or modify routes. The verify-openapi script
- * will automatically pick them up and compare against the OpenAPI spec.
+ * Core Zod request-body schemas (always present, not module-owned).
  */
-export const zodSchemaRegistry: ZodSchemaEntry[] = [
-  // ─── Webhooks ───────────────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/api/webhooks",
-    jsonSchema: toJsonSchema(createWebhookSchema),
-    description: "Create webhook",
-  },
-  {
-    method: "PUT",
-    path: "/api/webhooks/{id}",
-    jsonSchema: toJsonSchema(updateWebhookSchema),
-    description: "Update webhook",
-  },
-
+const coreSchemas: ZodSchemaEntry[] = [
   // ─── End-Users ──────────────────────────────────────────────────────────
   {
     method: "POST",
@@ -172,32 +133,6 @@ export const zodSchemaRegistry: ZodSchemaEntry[] = [
     path: "/api/end-users/{id}",
     jsonSchema: toJsonSchema(updateEndUserSchema),
     description: "Update end-user",
-  },
-
-  // ─── Models ─────────────────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/api/models",
-    jsonSchema: toJsonSchema(createModelSchema),
-    description: "Create model",
-  },
-  {
-    method: "PUT",
-    path: "/api/models/{id}",
-    jsonSchema: toJsonSchema(updateModelSchema),
-    description: "Update model",
-  },
-  {
-    method: "PUT",
-    path: "/api/models/default",
-    jsonSchema: toJsonSchema(modelsSetDefaultSchema),
-    description: "Set default model",
-  },
-  {
-    method: "POST",
-    path: "/api/models/test",
-    jsonSchema: toJsonSchema(modelsTestInlineSchema),
-    description: "Test model config inline",
   },
 
   // ─── API Keys ───────────────────────────────────────────────────────────
@@ -244,20 +179,6 @@ export const zodSchemaRegistry: ZodSchemaEntry[] = [
     path: "/api/orgs/{orgId}/settings",
     jsonSchema: toJsonSchema(orgSettingsSchema.partial()),
     description: "Update org settings",
-  },
-
-  // ─── Schedules ──────────────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/api/agents/{scope}/{name}/schedules",
-    jsonSchema: toJsonSchema(createScheduleSchema),
-    description: "Create schedule",
-  },
-  {
-    method: "PUT",
-    path: "/api/schedules/{id}",
-    jsonSchema: toJsonSchema(updateScheduleSchema),
-    description: "Update schedule",
   },
 
   // ─── User-Agent config (skills/tools) ───────────────────────────────────
@@ -362,26 +283,6 @@ export const zodSchemaRegistry: ZodSchemaEntry[] = [
     path: "/api/agents/{scope}/{name}/app-profile",
     jsonSchema: toJsonSchema(appProfileIdSchema),
     description: "Set agent app profile",
-  },
-
-  // ─── Provider Keys ─────────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/api/provider-keys",
-    jsonSchema: toJsonSchema(createProviderKeySchema),
-    description: "Create provider key",
-  },
-  {
-    method: "PUT",
-    path: "/api/provider-keys/{id}",
-    jsonSchema: toJsonSchema(updateProviderKeySchema),
-    description: "Update provider key",
-  },
-  {
-    method: "POST",
-    path: "/api/provider-keys/test",
-    jsonSchema: toJsonSchema(providerKeysTestInlineSchema),
-    description: "Test provider key inline",
   },
 
   // ─── Profile ────────────────────────────────────────────────────────────
@@ -506,3 +407,17 @@ export const zodSchemaRegistry: ZodSchemaEntry[] = [
     description: "Report auth failure from sidecar",
   },
 ];
+
+/**
+ * Build the full Zod schema registry by merging core schemas with module contributions.
+ * Must be called after modules are initialized.
+ */
+export function buildZodSchemaRegistry(moduleSchemas: ZodSchemaEntry[] = []): ZodSchemaEntry[] {
+  return [...coreSchemas, ...moduleSchemas];
+}
+
+/**
+ * @deprecated Use buildZodSchemaRegistry() after module init instead.
+ * Kept for backward compatibility — returns core schemas only.
+ */
+export const zodSchemaRegistry: ZodSchemaEntry[] = coreSchemas;

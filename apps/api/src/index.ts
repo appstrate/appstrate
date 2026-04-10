@@ -36,8 +36,13 @@ import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
 import welcomeRouter from "./routes/welcome.ts";
 import { swaggerUI } from "@hono/swagger-ui";
-import { openApiSpec } from "./openapi/index.ts";
-import { getModulePublicPaths, registerModuleRoutes } from "./lib/modules/index.ts";
+import { buildOpenApiSpec } from "./openapi/index.ts";
+import {
+  getModulePublicPaths,
+  getModuleOpenApiPaths,
+  getModuleOpenApiComponentSchemas,
+  registerModuleRoutes,
+} from "./lib/modules/index.ts";
 import { ApiError, unauthorized } from "./lib/errors.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "./lib/permissions.ts";
 import { isEndUserInApp } from "./services/end-users.ts";
@@ -66,7 +71,14 @@ app.use("*", cors({ origin: trustedOrigins, credentials: true }));
 app.route("/", healthRouter);
 
 // OpenAPI docs — public (before auth middleware)
-app.get("/api/openapi.json", (c) => c.json(openApiSpec));
+// Spec is built lazily on first request (after modules are initialized at boot).
+let _openApiSpec: ReturnType<typeof buildOpenApiSpec> | null = null;
+function getOpenApiSpec() {
+  if (!_openApiSpec)
+    _openApiSpec = buildOpenApiSpec(getModuleOpenApiPaths(), getModuleOpenApiComponentSchemas());
+  return _openApiSpec;
+}
+app.get("/api/openapi.json", (c) => c.json(getOpenApiSpec()));
 app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
 // Shutdown gate — reject new write requests during graceful shutdown

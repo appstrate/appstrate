@@ -153,7 +153,7 @@
       },
       "peerDependencies": {
         "@aws-sdk/client-s3": "^3",
-        "hono": "",
+        "hono": "^4.12.9",
         "typescript": "^5",
       },
       "optionalPeers": [

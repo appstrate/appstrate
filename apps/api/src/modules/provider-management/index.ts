@@ -10,12 +10,27 @@
  * Without this module, only system models (from SYSTEM_PROVIDER_KEYS env) are available.
  */
 
+import { z } from "zod";
 import { Hono } from "hono";
 import type { AppstrateModule } from "@appstrate/core/module";
 import type { AppEnv } from "../../types/index.ts";
-import { createModelsRouter } from "./routes/models.ts";
-import { createProviderKeysRouter } from "./routes/provider-keys.ts";
+import {
+  createModelsRouter,
+  createModelSchema,
+  updateModelSchema,
+  setDefaultSchema as modelsSetDefaultSchema,
+  testInlineSchema as modelsTestInlineSchema,
+} from "./routes/models.ts";
+import {
+  createProviderKeysRouter,
+  createSchema as createProviderKeySchema,
+  updateSchema as updateProviderKeySchema,
+  testInlineSchema as providerKeysTestInlineSchema,
+} from "./routes/provider-keys.ts";
 import { resolveModel } from "./services/org-models.ts";
+import { modelsPaths } from "./openapi/models.ts";
+import { providerKeysPaths } from "./openapi/provider-keys.ts";
+import { providerManagementSchemas } from "./openapi/schemas.ts";
 
 const providerManagementModule: AppstrateModule = {
   manifest: { id: "provider-management", name: "Provider Management", version: "1.0.0" },
@@ -30,6 +45,61 @@ const providerManagementModule: AppstrateModule = {
     router.route("/models", createModelsRouter());
     router.route("/provider-keys", createProviderKeysRouter());
     return router;
+  },
+
+  openApiPaths() {
+    return { ...modelsPaths, ...providerKeysPaths };
+  },
+
+  openApiComponentSchemas() {
+    return providerManagementSchemas;
+  },
+
+  openApiSchemas() {
+    return [
+      {
+        method: "POST",
+        path: "/api/models",
+        jsonSchema: z.toJSONSchema(createModelSchema) as Record<string, unknown>,
+        description: "Create model",
+      },
+      {
+        method: "PUT",
+        path: "/api/models/{id}",
+        jsonSchema: z.toJSONSchema(updateModelSchema) as Record<string, unknown>,
+        description: "Update model",
+      },
+      {
+        method: "PUT",
+        path: "/api/models/default",
+        jsonSchema: z.toJSONSchema(modelsSetDefaultSchema) as Record<string, unknown>,
+        description: "Set default model",
+      },
+      {
+        method: "POST",
+        path: "/api/models/test",
+        jsonSchema: z.toJSONSchema(modelsTestInlineSchema) as Record<string, unknown>,
+        description: "Test model config inline",
+      },
+      {
+        method: "POST",
+        path: "/api/provider-keys",
+        jsonSchema: z.toJSONSchema(createProviderKeySchema) as Record<string, unknown>,
+        description: "Create provider key",
+      },
+      {
+        method: "PUT",
+        path: "/api/provider-keys/{id}",
+        jsonSchema: z.toJSONSchema(updateProviderKeySchema) as Record<string, unknown>,
+        description: "Update provider key",
+      },
+      {
+        method: "POST",
+        path: "/api/provider-keys/test",
+        jsonSchema: z.toJSONSchema(providerKeysTestInlineSchema) as Record<string, unknown>,
+        description: "Test provider key inline",
+      },
+    ];
   },
 
   extendAppConfig(base) {

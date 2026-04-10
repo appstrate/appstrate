@@ -53,6 +53,26 @@ export interface AppstrateModule {
   createRouter?(): Hono<any>;
 
   /**
+   * Return OpenAPI 3.1 path definitions owned by this module.
+   * Keys are path strings (e.g. "/api/webhooks"), values are OpenAPI path item objects.
+   * Merged into the spec at boot — absent when the module is disabled.
+   */
+  openApiPaths?(): Record<string, unknown>;
+
+  /**
+   * Return OpenAPI 3.1 component schema definitions owned by this module.
+   * Keys are schema names (e.g. "WebhookObject"), values are OpenAPI schema objects.
+   * Merged into `components.schemas` at boot — absent when the module is disabled.
+   */
+  openApiComponentSchemas?(): Record<string, unknown>;
+
+  /**
+   * Return Zod ↔ OpenAPI schema registry entries owned by this module.
+   * Used by verify-openapi to compare Zod request-body schemas against OpenAPI specs.
+   */
+  openApiSchemas?(): OpenApiSchemaEntry[];
+
+  /**
    * Contribute to the frontend AppConfig (feature flags, legal URLs, etc.).
    * Returns a partial overlay that is deep-merged onto the base config.
    */
@@ -124,6 +144,22 @@ export interface ModuleEvents {
   onOrgCreate: (orgId: string, userEmail: string) => Promise<void>;
   /** Org deleted — broadcast before an organization is deleted. */
   onOrgDelete: (orgId: string) => Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// OpenAPI contribution types
+// ---------------------------------------------------------------------------
+
+/** Entry for the Zod ↔ OpenAPI schema registry (used by verify-openapi). */
+export interface OpenApiSchemaEntry {
+  /** HTTP method (uppercase, e.g. "POST"). */
+  method: string;
+  /** OpenAPI path (e.g. "/api/webhooks"). */
+  path: string;
+  /** Zod schema converted to JSON Schema via z.toJSONSchema(). */
+  jsonSchema: Record<string, unknown>;
+  /** Human-readable description for reporting. */
+  description: string;
 }
 
 // ---------------------------------------------------------------------------

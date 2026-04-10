@@ -7,9 +7,13 @@
  * worker that triggers agent runs on cron schedule.
  */
 
+import { z } from "zod";
 import type { AppstrateModule } from "@appstrate/core/module";
 import { createSchedulesRouter } from "./routes.ts";
+import { createScheduleSchema, updateScheduleSchema } from "./routes.ts";
 import { initScheduleWorker, shutdownScheduleWorker } from "./service.ts";
+import { schedulesPaths } from "./openapi/paths.ts";
+import { schedulingSchemas } from "./openapi/schemas.ts";
 
 const schedulingModule: AppstrateModule = {
   manifest: { id: "scheduling", name: "Scheduling", version: "1.0.0" },
@@ -20,6 +24,31 @@ const schedulingModule: AppstrateModule = {
 
   createRouter() {
     return createSchedulesRouter();
+  },
+
+  openApiPaths() {
+    return schedulesPaths;
+  },
+
+  openApiComponentSchemas() {
+    return schedulingSchemas;
+  },
+
+  openApiSchemas() {
+    return [
+      {
+        method: "POST",
+        path: "/api/agents/{scope}/{name}/schedules",
+        jsonSchema: z.toJSONSchema(createScheduleSchema) as Record<string, unknown>,
+        description: "Create schedule",
+      },
+      {
+        method: "PUT",
+        path: "/api/schedules/{id}",
+        jsonSchema: z.toJSONSchema(updateScheduleSchema) as Record<string, unknown>,
+        description: "Update schedule",
+      },
+    ];
   },
 
   extendAppConfig(base) {

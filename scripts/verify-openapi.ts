@@ -10,15 +10,56 @@
  * 4. Zod ↔ OpenAPI schema comparison — compares Zod-derived JSON Schemas (pre-converted
  *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas
  *
+ * Module-owned paths and schemas are loaded dynamically from built-in modules.
+ * The set of modules validated matches `APPSTRATE_MODULES` (default: all built-in).
+ *
  * Usage: bun scripts/verify-openapi.ts
  */
 import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
-import { openApiSpec } from "../apps/api/src/openapi/index.ts";
+import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
 import {
-  zodSchemaRegistry,
+  buildZodSchemaRegistry,
   type ZodSchemaEntry,
 } from "../apps/api/src/openapi/zod-schema-registry.ts";
+import type { AppstrateModule, OpenApiSchemaEntry } from "@appstrate/core/module";
+
+// ---------------------------------------------------------------------------
+// Load built-in modules to collect their OpenAPI contributions
+// ---------------------------------------------------------------------------
+
+// Map of built-in module short names → lazy loaders (mirrors registry.ts)
+const builtinLoaders: Record<string, () => Promise<AppstrateModule>> = {
+  scheduling: async () => (await import("../apps/api/src/modules/scheduling/index.ts")).default,
+  webhooks: async () => (await import("../apps/api/src/modules/webhooks/index.ts")).default,
+  "provider-management": async () =>
+    (await import("../apps/api/src/modules/provider-management/index.ts")).default,
+};
+
+// Always validate all built-in modules (their paths are always available).
+// External modules (e.g. @appstrate/cloud) are skipped — they can't be imported without full boot.
+const specifiers = Object.keys(builtinLoaders);
+
+// Load built-in modules and collect their contributions
+const modulePaths: Record<string, unknown> = {};
+const moduleComponentSchemas: Record<string, unknown> = {};
+const moduleSchemas: OpenApiSchemaEntry[] = [];
+
+for (const specifier of specifiers) {
+  const loader = builtinLoaders[specifier];
+  if (!loader) continue; // external module — skip (can't validate without full boot)
+  const mod = await loader();
+  const paths = mod.openApiPaths?.();
+  if (paths) Object.assign(modulePaths, paths);
+  const compSchemas = mod.openApiComponentSchemas?.();
+  if (compSchemas) Object.assign(moduleComponentSchemas, compSchemas);
+  const schemas = mod.openApiSchemas?.();
+  if (schemas) moduleSchemas.push(...schemas);
+}
+
+// Build the full spec and registry with module contributions
+const openApiSpec = buildOpenApiSpec(modulePaths, moduleComponentSchemas);
+const zodSchemaRegistry = buildZodSchemaRegistry(moduleSchemas);
 
 let exitCode = 0;
 
@@ -59,15 +100,6 @@ const expectedEndpoints = [
   "GET /api/realtime/runs",
   "GET /api/realtime/runs/{id}",
   "GET /api/realtime/agents/{packageId}/runs",
-
-  // Schedules
-  "GET /api/schedules",
-  "GET /api/schedules/{id}",
-  "GET /api/schedules/{id}/runs",
-  "GET /api/agents/{scope}/{name}/schedules",
-  "POST /api/agents/{scope}/{name}/schedules",
-  "PUT /api/schedules/{id}",
-  "DELETE /api/schedules/{id}",
 
   // Connections
   "GET /api/connections",
@@ -119,24 +151,6 @@ const expectedEndpoints = [
   // Agent Proxy
   "GET /api/agents/{scope}/{name}/proxy",
   "PUT /api/agents/{scope}/{name}/proxy",
-
-  // Provider Keys
-  "GET /api/provider-keys",
-  "POST /api/provider-keys",
-  "POST /api/provider-keys/test",
-  "PUT /api/provider-keys/{id}",
-  "DELETE /api/provider-keys/{id}",
-  "POST /api/provider-keys/{id}/test",
-
-  // Models
-  "GET /api/models",
-  "POST /api/models",
-  "PUT /api/models/default",
-  "GET /api/models/openrouter",
-  "POST /api/models/test",
-  "PUT /api/models/{id}",
-  "DELETE /api/models/{id}",
-  "POST /api/models/{id}/test",
 
   // Proxies
   "GET /api/proxies",
@@ -292,17 +306,52 @@ const expectedEndpoints = [
   "GET /api/end-users/{id}",
   "PATCH /api/end-users/{id}",
   "DELETE /api/end-users/{id}",
-
-  // Webhooks
-  "POST /api/webhooks",
-  "GET /api/webhooks",
-  "GET /api/webhooks/{id}",
-  "PUT /api/webhooks/{id}",
-  "DELETE /api/webhooks/{id}",
-  "POST /api/webhooks/{id}/test",
-  "POST /api/webhooks/{id}/rotate",
-  "GET /api/webhooks/{id}/deliveries",
 ];
+
+// Module-contributed endpoints (only present when their module is loaded)
+const moduleEndpoints: Record<string, string[]> = {
+  scheduling: [
+    "GET /api/schedules",
+    "GET /api/schedules/{id}",
+    "GET /api/schedules/{id}/runs",
+    "GET /api/agents/{scope}/{name}/schedules",
+    "POST /api/agents/{scope}/{name}/schedules",
+    "PUT /api/schedules/{id}",
+    "DELETE /api/schedules/{id}",
+  ],
+  webhooks: [
+    "POST /api/webhooks",
+    "GET /api/webhooks",
+    "GET /api/webhooks/{id}",
+    "PUT /api/webhooks/{id}",
+    "DELETE /api/webhooks/{id}",
+    "POST /api/webhooks/{id}/test",
+    "POST /api/webhooks/{id}/rotate",
+    "GET /api/webhooks/{id}/deliveries",
+  ],
+  "provider-management": [
+    "GET /api/provider-keys",
+    "POST /api/provider-keys",
+    "POST /api/provider-keys/test",
+    "PUT /api/provider-keys/{id}",
+    "DELETE /api/provider-keys/{id}",
+    "POST /api/provider-keys/{id}/test",
+    "GET /api/models",
+    "POST /api/models",
+    "PUT /api/models/default",
+    "GET /api/models/openrouter",
+    "POST /api/models/test",
+    "PUT /api/models/{id}",
+    "DELETE /api/models/{id}",
+    "POST /api/models/{id}/test",
+  ],
+};
+
+// Add endpoints for all built-in modules (always validated)
+for (const name of Object.keys(builtinLoaders)) {
+  const endpoints = moduleEndpoints[name];
+  if (endpoints) expectedEndpoints.push(...endpoints);
+}
 
 const specEndpoints = new Set<string>();
 const paths = openApiSpec.paths as Record<string, Record<string, unknown>>;

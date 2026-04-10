@@ -8,9 +8,12 @@
  * and dispatches matching webhooks to subscribers.
  */
 
+import { z } from "zod";
 import type { AppstrateModule, RunStatusChangeParams } from "@appstrate/core/module";
-import { createWebhooksRouter } from "./routes.ts";
+import { createWebhooksRouter, createWebhookSchema, updateWebhookSchema } from "./routes.ts";
 import { initWebhookWorker, shutdownWebhookWorker, dispatchRunWebhook } from "./service.ts";
+import { webhooksPaths } from "./openapi/paths.ts";
+import { webhooksSchemas } from "./openapi/schemas.ts";
 
 const webhooksModule: AppstrateModule = {
   manifest: { id: "webhooks", name: "Webhooks", version: "1.0.0" },
@@ -21,6 +24,31 @@ const webhooksModule: AppstrateModule = {
 
   createRouter() {
     return createWebhooksRouter();
+  },
+
+  openApiPaths() {
+    return webhooksPaths;
+  },
+
+  openApiComponentSchemas() {
+    return webhooksSchemas;
+  },
+
+  openApiSchemas() {
+    return [
+      {
+        method: "POST",
+        path: "/api/webhooks",
+        jsonSchema: z.toJSONSchema(createWebhookSchema) as Record<string, unknown>,
+        description: "Create webhook",
+      },
+      {
+        method: "PUT",
+        path: "/api/webhooks/{id}",
+        jsonSchema: z.toJSONSchema(updateWebhookSchema) as Record<string, unknown>,
+        description: "Update webhook",
+      },
+    ];
   },
 
   extendAppConfig(base) {

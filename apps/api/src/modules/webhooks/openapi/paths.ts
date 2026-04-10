@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-
 export const webhooksPaths = {
   "/api/webhooks": {
     post: {
@@ -446,4 +445,4 @@ export const webhooksPaths = {
       },
     },
   },
-} as const;
+};
