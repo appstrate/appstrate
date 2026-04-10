@@ -42,8 +42,19 @@ export interface AppstrateModule {
    */
   init(ctx: ModuleInitContext): Promise<void>;
 
-  /** Paths that bypass auth middleware (e.g. webhook endpoints). */
+  /** Paths that bypass auth middleware (e.g. inbound webhook endpoints). */
   publicPaths?: string[];
+
+  /**
+   * Route prefixes owned by this module that require the app context middleware
+   * (`X-App-Id` header resolution). Aggregated with core prefixes at boot.
+   *
+   * Only declare prefixes for app-scoped resources. Org-scoped or global
+   * routes should be omitted.
+   *
+   * @example appScopedPaths: ["/api/webhooks"]
+   */
+  appScopedPaths?: string[];
 
   /**
    * Create and return a Hono router to be mounted on the app under `/api`.

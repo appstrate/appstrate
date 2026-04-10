@@ -51,7 +51,7 @@ import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
-import { createWebhooksRouter } from "../../src/modules/webhooks/routes.ts";
+import webhooksModule from "../../src/modules/webhooks/index.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createConnectionsRouter } from "../../src/routes/connections.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
@@ -217,12 +217,13 @@ export function getTestApp(): Hono<AppEnv> {
     return next();
   });
 
-  // App context middleware: resolve X-App-Id for app-scoped routes
+  // App context middleware: resolve X-App-Id for app-scoped routes.
+  // Core prefixes listed statically; module-owned prefixes are pulled from
+  // the module manifest so tests mirror the production aggregation logic.
   const APP_SCOPED_PREFIXES = [
     "/api/agents",
     "/api/runs",
     "/api/schedules",
-    "/api/webhooks",
     "/api/end-users",
     "/api/api-keys",
     "/api/notifications",
@@ -230,6 +231,7 @@ export function getTestApp(): Hono<AppEnv> {
     "/api/providers",
     "/api/connections",
     "/api/app-profiles",
+    ...(webhooksModule.appScopedPaths ?? []),
   ];
 
   const appContextMiddleware = requireAppContext();
@@ -265,7 +267,8 @@ export function getTestApp(): Hono<AppEnv> {
   app.route("/api", schedulesRouter);
   app.route("/api/packages", createPackagesRouter());
   app.route("/api/end-users", createEndUsersRouter());
-  app.route("/api", createWebhooksRouter());
+  const webhooksRouter = webhooksModule.createRouter?.();
+  if (webhooksRouter) app.route("/api", webhooksRouter);
   app.route("/api/providers", createProvidersRouter());
   app.route("/api/api-keys", createApiKeysRouter());
   app.route("/api/proxies", createProxiesRouter());

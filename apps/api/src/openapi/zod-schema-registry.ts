@@ -7,10 +7,9 @@
  * Used by `scripts/verify-openapi.ts` (Step 4) to compare Zod-derived
  * JSON Schemas against the hand-written OpenAPI requestBody schemas.
  *
- * Core schemas are defined statically here. Module-owned schemas
- * (webhooks) are contributed dynamically via `openApiSchemas()` — they
- * only appear when the module is loaded. Call `buildZodSchemaRegistry()`
- * after module init.
+ * Core schemas are defined statically here. Module-owned schemas are
+ * contributed dynamically via `openApiSchemas()` — they only appear when
+ * the module is loaded. Call `buildZodSchemaRegistry()` after module init.
  */
 
 import { z } from "zod";
@@ -117,7 +116,7 @@ import {
 export interface ZodSchemaEntry {
   /** HTTP method (uppercase) */
   method: string;
-  /** OpenAPI path (e.g. "/api/webhooks") */
+  /** OpenAPI path (e.g. "/api/agents") */
   path: string;
   /** The Zod schema converted to JSON Schema via z.toJSONSchema() */
   jsonSchema: Record<string, unknown>;

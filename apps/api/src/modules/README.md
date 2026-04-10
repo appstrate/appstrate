@@ -18,6 +18,7 @@ apps/api/src/modules/<id>/
 ├── routes.ts          # (or routes/)  Hono router mounted under /api
 ├── service.ts         # Business logic, workers, lifecycle
 ├── lib/               # Module-private utilities (cron parser, helpers…)
+├── test/              # Pure unit tests for module-internal logic (no DB/HTTP)
 ├── drizzle/
 │   ├── migrations/
 │   │   ├── 0000_initial.sql
@@ -26,6 +27,15 @@ apps/api/src/modules/<id>/
     ├── paths.ts       # OpenAPI path items (merged into the platform spec)
     └── schemas.ts     # Component schemas (merged into components.schemas)
 ```
+
+## Test placement
+
+Module tests are split by dependency footprint, not by feature:
+
+- **Colocate in `apps/api/src/modules/<id>/test/`** — pure unit tests of module-internal logic that do not need a database, a running Hono app, or the shared `test/helpers/` infrastructure (e.g. envelope builders, signing, cron parsing, schema coercion).
+- **Keep in `apps/api/test/integration/`** — anything that touches the DB, calls the HTTP app via `getTestApp()`, or relies on shared factories (`seedPackage`, `createTestContext`, `truncateAll`). These depend on the global test preload (Docker infra, migrations) and must stay in the top-level test tree so they share one setup cost.
+
+The rule is "colocate tests that can run in isolation, centralize tests that share infrastructure." Don't invent a parallel helper tree inside the module just to avoid an integration import.
 
 ## Required manifest shape
 

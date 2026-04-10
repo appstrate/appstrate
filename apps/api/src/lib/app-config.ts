@@ -13,8 +13,9 @@ export function buildAppConfig(): AppConfig {
   const legalPrivacy = env.LEGAL_PRIVACY_URL;
   return {
     features: {
+      // Core platform flags. Module-owned flags (webhooks, future oidc, …)
+      // are merged in by `applyModuleFeatures()` after modules are loaded.
       billing: false,
-      webhooks: false,
       googleAuth: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
       githubAuth: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
       smtp: !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM),

@@ -3,9 +3,9 @@
 /**
  * OpenAPI 3.1 specification for the Appstrate API.
  *
- * Core paths are assembled statically. Module-owned paths (webhooks) are
- * contributed dynamically via `openApiPaths()` — they only appear when the
- * module is loaded.
+ * Core paths are assembled statically. Module-owned paths are contributed
+ * dynamically via `openApiPaths()` — they only appear when the module is
+ * loaded.
  *
  * Call `buildOpenApiSpec()` after modules are initialized to get the
  * final spec with all module contributions merged in.

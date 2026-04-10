@@ -5,12 +5,25 @@
  */
 
 import { z } from "zod";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, type InferSelectModel } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "./schema.ts";
 import { logger } from "../../lib/logger.ts";
 import { notFound, invalidRequest, ApiError } from "../../lib/errors.ts";
-import type { WebhookInfo, WebhookCreateResponse } from "@appstrate/shared-types";
+import type {
+  WebhookInfo,
+  WebhookCreateResponse,
+  WebhookDelivery as WebhookDeliveryInfo,
+} from "@appstrate/shared-types";
+
+/**
+ * Row types inferred directly from the module's Drizzle schema. Used as
+ * input types to DTO mappers (`toWebhookResponse`, `toWebhookDeliveryResponse`)
+ * so that any schema change — renamed column, dropped field, type mismatch —
+ * breaks the mapper at typecheck time.
+ */
+type WebhookRow = InferSelectModel<typeof webhooks>;
+type WebhookDeliveryRow = InferSelectModel<typeof webhookDeliveries>;
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { buildUpdateSet } from "../../lib/db-helpers.ts";
@@ -62,17 +75,33 @@ function generateSecret(): string {
   return `whsec_${base64}`;
 }
 
-function toWebhookResponse(row: {
-  id: string;
-  applicationId: string;
-  url: string;
-  events: string[];
-  packageId: string | null;
-  payloadMode: string;
-  enabled: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}): WebhookInfo {
+/**
+ * Convert a webhooks row to the public API DTO. Strips sensitive fields
+ * (`orgId`, `secret`, `previousSecret`, `previousSecretExpiresAt`),
+ * narrows `payloadMode`, and serializes dates. The input type is anchored
+ * to the Drizzle schema — drop or rename a column and this function fails
+ * to typecheck.
+ */
+/**
+ * Convert a webhook_deliveries row to the public API DTO. Narrows `status`
+ * (`text` in the schema, restricted set at runtime) and serializes
+ * `createdAt`. Anchored to the Drizzle schema via `WebhookDeliveryRow`.
+ */
+function toWebhookDeliveryResponse(row: WebhookDeliveryRow): WebhookDeliveryInfo {
+  return {
+    id: row.id,
+    eventId: row.eventId,
+    eventType: row.eventType,
+    status: row.status as "pending" | "success" | "failed",
+    statusCode: row.statusCode,
+    latency: row.latency,
+    attempt: row.attempt,
+    error: row.error,
+    createdAt: toISORequired(row.createdAt),
+  };
+}
+
+function toWebhookResponse(row: WebhookRow): WebhookInfo {
   return {
     id: row.id,
     object: "webhook",
@@ -193,17 +222,7 @@ export async function createWebhook(
 
 export async function listWebhooks(orgId: string, applicationId: string): Promise<WebhookInfo[]> {
   const rows = await db
-    .select({
-      id: webhooks.id,
-      applicationId: webhooks.applicationId,
-      url: webhooks.url,
-      events: webhooks.events,
-      packageId: webhooks.packageId,
-      payloadMode: webhooks.payloadMode,
-      enabled: webhooks.enabled,
-      createdAt: webhooks.createdAt,
-      updatedAt: webhooks.updatedAt,
-    })
+    .select()
     .from(webhooks)
     .where(and(eq(webhooks.orgId, orgId), eq(webhooks.applicationId, applicationId)))
     .orderBy(desc(webhooks.createdAt));
@@ -217,17 +236,7 @@ export async function getWebhook(
   webhookId: string,
 ): Promise<WebhookInfo> {
   const [row] = await db
-    .select({
-      id: webhooks.id,
-      applicationId: webhooks.applicationId,
-      url: webhooks.url,
-      events: webhooks.events,
-      packageId: webhooks.packageId,
-      payloadMode: webhooks.payloadMode,
-      enabled: webhooks.enabled,
-      createdAt: webhooks.createdAt,
-      updatedAt: webhooks.updatedAt,
-    })
+    .select()
     .from(webhooks)
     .where(
       and(
@@ -333,19 +342,7 @@ export async function listDeliveries(
   applicationId: string,
   webhookId: string,
   limit = 20,
-): Promise<
-  {
-    id: string;
-    eventId: string;
-    eventType: string;
-    status: string;
-    statusCode: number | null;
-    latency: number | null;
-    attempt: number;
-    error: string | null;
-    createdAt: string;
-  }[]
-> {
+): Promise<WebhookDeliveryInfo[]> {
   await getWebhook(orgId, applicationId, webhookId);
 
   const rows = await db
@@ -355,17 +352,7 @@ export async function listDeliveries(
     .orderBy(desc(webhookDeliveries.createdAt))
     .limit(Math.min(limit, 100));
 
-  return rows.map((r) => ({
-    id: r.id,
-    eventId: r.eventId,
-    eventType: r.eventType,
-    status: r.status,
-    statusCode: r.statusCode,
-    latency: r.latency,
-    attempt: r.attempt,
-    error: r.error,
-    createdAt: toISORequired(r.createdAt),
-  }));
+  return rows.map(toWebhookDeliveryResponse);
 }
 
 // ---------------------------------------------------------------------------

@@ -22,14 +22,24 @@ export type EnrichedRun = Run & {
 
 // --- App Config Types ---
 
+/**
+ * Platform feature flags.
+ *
+ * Core flags are statically typed. Module-owned flags (e.g. `webhooks`,
+ * future `oidc`) are contributed at boot via `AppstrateModule.features`
+ * and flow through the index signature — no shared-types edit required
+ * when adding a new module.
+ */
+export interface AppConfigFeatures {
+  billing: boolean;
+  googleAuth: boolean;
+  githubAuth: boolean;
+  smtp: boolean;
+  [key: string]: boolean;
+}
+
 export interface AppConfig {
-  features: {
-    billing: boolean;
-    webhooks: boolean;
-    googleAuth: boolean;
-    githubAuth: boolean;
-    smtp: boolean;
-  };
+  features: AppConfigFeatures;
   legalUrls?: {
     terms?: string;
     privacy?: string;
@@ -474,33 +484,9 @@ export interface EndUserListResponse {
   limit: number;
 }
 
-// --- Webhook Types ---
-
-export interface WebhookInfo {
-  id: string;
-  object: "webhook";
-  applicationId: string;
-  url: string;
-  events: string[];
-  packageId: string | null;
-  payloadMode: "full" | "summary";
-  enabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface WebhookCreateResponse extends WebhookInfo {
-  secret: string;
-}
-
-export interface WebhookDelivery {
-  id: string;
-  eventId: string;
-  eventType: string;
-  status: "pending" | "success" | "failed";
-  statusCode: number | null;
-  latency: number | null;
-  attempt: number;
-  error: string | null;
-  createdAt: string;
-}
+// --- Module Types ---
+// Module-owned public types live under `./modules/<id>.ts` and are re-exported
+// from the barrel so that consumers can keep importing from the single entry
+// point. When a module is extracted to its own npm package, the re-export can
+// be dropped without touching consumer code.
+export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./modules/webhooks.ts";

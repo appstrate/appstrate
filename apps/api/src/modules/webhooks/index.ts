@@ -32,6 +32,8 @@ const webhooksModule: AppstrateModule = {
     return createWebhooksRouter();
   },
 
+  appScopedPaths: ["/api/webhooks"],
+
   openApiPaths() {
     return webhooksPaths;
   },

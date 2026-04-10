@@ -8,9 +8,9 @@ import type {
   ModuleHooks,
   ModuleEvents,
 } from "@appstrate/core/module";
-import { existsSync } from "node:fs";
+import { readdirSync, statSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, join } from "node:path";
 import type { AppEnv } from "../../types/index.ts";
 import { logger } from "../logger.ts";
 
@@ -22,18 +22,46 @@ const _modules: Map<string, AppstrateModule> = new Map();
 let _publicPathsCache: Set<string> | null = null;
 let _initialized = false;
 
+// Built-in module discovery: scanned once, then cached for the process lifetime.
+// Maps built-in module id → absolute path of its index.ts.
+let _builtinCache: Map<string, string> | null = null;
+
+function getBuiltinModules(): Map<string, string> {
+  if (_builtinCache !== null) return _builtinCache;
+
+  const cache = new Map<string, string>();
+  const here = dirname(fileURLToPath(import.meta.url));
+  const modulesDir = resolve(here, "../../modules");
+
+  if (existsSync(modulesDir)) {
+    for (const entry of readdirSync(modulesDir)) {
+      const entryPath = join(modulesDir, entry);
+      try {
+        if (!statSync(entryPath).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      const indexPath = join(entryPath, "index.ts");
+      if (existsSync(indexPath)) cache.set(entry, indexPath);
+    }
+  }
+
+  _builtinCache = cache;
+  return cache;
+}
+
 /**
- * Resolve a module specifier. If a directory `apps/api/src/modules/<specifier>/index.ts`
- * exists, it's loaded as a built-in; otherwise the specifier is treated as an
- * npm package name and loaded via dynamic import.
+ * Resolve a module specifier. If a built-in module with that id exists under
+ * `apps/api/src/modules/<specifier>/index.ts`, it's loaded from that path;
+ * otherwise the specifier is treated as an npm package name and loaded via
+ * dynamic import. The built-in directory is scanned only once per process.
  */
 async function resolveSpecifier(specifier: string): Promise<{
   default?: AppstrateModule;
   appstrateModule?: AppstrateModule;
 }> {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const builtinPath = resolve(here, "../../modules", specifier, "index.ts");
-  if (existsSync(builtinPath)) {
+  const builtinPath = getBuiltinModules().get(specifier);
+  if (builtinPath) {
     return import(/* webpackIgnore: true */ builtinPath);
   }
   return import(/* webpackIgnore: true */ specifier);
@@ -159,6 +187,18 @@ export function registerModuleRoutes(app: Hono<AppEnv>): void {
       app.route("/api", router);
     }
   }
+}
+
+/**
+ * Collect app-scoped route prefixes contributed by loaded modules.
+ * Core prefixes (agents, runs, …) are declared separately in `index.ts`.
+ */
+export function getModuleAppScopedPaths(): string[] {
+  const paths: string[] = [];
+  for (const mod of _modules.values()) {
+    if (mod.appScopedPaths) paths.push(...mod.appScopedPaths);
+  }
+  return paths;
 }
 
 /** Collect OpenAPI path definitions from all loaded modules. */
