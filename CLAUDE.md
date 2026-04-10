@@ -163,11 +163,20 @@ Appstrate uses a formalized module system for optional features. The contract is
 
 - `packages/core/src/module.ts` — `AppstrateModule` interface, `ModuleInitContext` (framework-agnostic, published on npm)
 - `apps/api/src/lib/modules/module-loader.ts` — Loader with dynamic import, topological sort, agnostic hook system, AppConfig extension, shutdown
+- `apps/api/src/lib/modules/migrate.ts` — `applyModuleMigrations()` helper for module-owned Drizzle migrations (PostgreSQL + PGlite)
 - `apps/api/src/lib/modules/registry.ts` — `getModuleRegistry()` reads `APPSTRATE_MODULES` env var (comma-separated specifiers), `buildModuleInitContext()` provides platform services
 - `apps/api/src/lib/modules/hooks.ts` — Lifecycle hook helpers (`beforeRun`, `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`) — call hooks by name, never by module ID
 - `apps/api/src/lib/modules/example-module.ts` — Reference implementation
 
-**Module lifecycle:** registry (`APPSTRATE_MODULES` env var) → dynamic import → topological sort by `manifest.dependencies` → `init(ctx)` → `createRouter()` → running → `shutdown()` (reverse order). All declared modules are required — any import or init failure is fatal.
+**Module lifecycle:** core migrations → registry (`APPSTRATE_MODULES` env var) → dynamic import → topological sort by `manifest.dependencies` → `init(ctx)` (runs module migrations + workers) → `createRouter()` → running → `shutdown()` (reverse order). All declared modules are required — any import or init failure is fatal.
+
+**Module-owned schemas:** Each built-in module owns its database tables following the cloud pattern. Module schemas live in `apps/api/src/modules/<name>/schema.ts` with Drizzle migrations in `drizzle/migrations/`. Each module has its own migration tracking table (`__drizzle_migrations_<module_id>`). FKs to core tables are added via raw SQL (not Drizzle references) to maintain isolation. Modules apply their migrations in `init()` via `applyModuleMigrations()`.
+
+| Module              | Tables owned                      |
+| ------------------- | --------------------------------- |
+| scheduling          | `package_schedules`               |
+| webhooks            | `webhooks`, `webhook_deliveries`  |
+| provider-management | `org_provider_keys`, `org_models` |
 
 **Hooks vs Events:**
 
@@ -181,7 +190,7 @@ The platform calls hooks/events by name, never by module ID. This ensures zero k
 1. Import types from `@appstrate/core/module`
 2. Export a default `AppstrateModule` from your package
 3. Add the package specifier to the `APPSTRATE_MODULES` env var (comma-separated)
-4. Module contributes feature flags via `extendAppConfig()`, routes via `createRouter()`, auth-bypass paths via `publicPaths`, email template overrides via `emailOverrides`, request/response logic via `hooks` (e.g. `beforeRun`, `beforeSignup`, `resolveModel`), notifications via `events` (e.g. `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`)
+4. Module contributes feature flags via `features` property, routes via `createRouter()`, auth-bypass paths via `publicPaths`, email template overrides via `emailOverrides`, request/response logic via `hooks` (e.g. `beforeRun`, `beforeSignup`, `resolveModel`), notifications via `events` (e.g. `onRunStatusChange`, `onOrgCreate`, `onOrgDelete`), and database tables via module-owned Drizzle migrations (applied in `init()`)
 
 **Disabling a module = zero footprint:** remove it from `APPSTRATE_MODULES` = not imported = no tables, no routes, no middleware, no code loaded. Default is empty (OSS mode).
 
@@ -201,7 +210,8 @@ Tier 0 (zero-install) requires only Bun. Infrastructure adapters are in `apps/ap
 ### Development Workflow
 
 - **New API route**: Create route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi` to validate.
-- **DB migration**: Edit `packages/db/src/schema.ts` → `bun run db:generate` → `bun run db:migrate` (requires `DATABASE_URL` for drizzle-kit CLI). PGlite applies migrations automatically at boot.
+- **DB migration (core)**: Edit `packages/db/src/schema.ts` → `bun run db:generate` (requires `DATABASE_URL` for drizzle-kit CLI). Migrations are applied automatically at boot for both PGlite and PostgreSQL — no manual `db:migrate` needed.
+- **DB migration (module)**: Each built-in module owns its schema in `apps/api/src/modules/<name>/schema.ts` with migrations in `drizzle/migrations/`. Module migrations run automatically in `init()` via `applyModuleMigrations()`.
 - **Quality gate**: `bun run check` (turbo check = TypeScript across all packages + `verify-openapi` structural/lint validation).
 - **Tests**: `bun test` from monorepo root runs all 1000+ tests across all packages in a single process. See **Testing** section below for structure, conventions, and patterns.
 
@@ -211,7 +221,7 @@ Tier 0 (zero-install) requires only Bun. Infrastructure adapters are in `apps/ap
 - **Styling**: Tailwind 4 CSS (`@tailwindcss/vite` plugin + `tailwind-merge`). Single `styles.css` with `@import "tailwindcss"` and custom `@theme inline` dark theme variables. All components use Tailwind utility classes.
 - **Auth**: Better Auth React client → `credentials: "include"` on all `apiFetch()` calls. `X-Org-Id` header for org context, `X-App-Id` header for app context (sent automatically from `app-store` via `api.ts`).
 - **Realtime**: SSE EventSource hooks (`use-realtime.ts`) + `useGlobalRunSync` patches React Query cache directly. `useGlobalRunSync` deliberately uses `fetch()` + `ReadableStream` (NOT `EventSource`) to avoid Safari aggressive auto-reconnect — do not convert it. `GlobalRealtimeSync` is mounted inside `MainLayout` (not on onboarding/welcome routes) to avoid SSE reconnection loops when org state is settling.
-- **Feature gating**: `useAppConfig()` hook reads `window.__APP_CONFIG__` (injected into HTML at serve time via `<script>` tag, computed once at boot by `buildAppConfig()`). Returns `{ platform, features: { billing, models, providerKeys, googleAuth, emailVerification } }`. No API call — falls back to OSS defaults if undefined. Used to conditionally render routes, nav items, and onboarding steps. Models/provider keys UI hidden in Cloud mode; billing hidden in OSS mode. Google sign-in button and account linking UI hidden when `googleAuth` is false. Email verification hidden when `emailVerification` is false.
+- **Feature gating**: `useAppConfig()` hook reads `window.__APP_CONFIG__` (injected into HTML at serve time via `<script>` tag, computed once at boot by `buildAppConfig()`). Returns `{ features: { billing, models, providerKeys, scheduling, webhooks, googleAuth, githubAuth, smtp } }`. No API call — falls back to OSS defaults (all `false`) if undefined. Used to conditionally render routes, nav items, dashboard widgets, and onboarding steps. Module-owned features (models, providerKeys, scheduling, webhooks) default to `false` and are enabled when their module is loaded. Sidebar, routes, and tabs are fully gated — disabled modules have zero UI footprint.
 - **API helpers** (`api.ts`): `api<T>(path)` prepends `/api` + JSON parse; `apiFetch<T>(path)` raw path (for `/auth/*`); `uploadFormData<T>(path, formData)` for file uploads — never set `Content-Type` manually (browser sets multipart boundary); `apiBlob(path)` for binary downloads. All inject `X-Org-Id`, `X-App-Id` (from `app-store`), and `credentials: "include"`.
 - **React Query keys**: Org-scoped `[entity, orgId, id?]` or app-scoped `[entity, orgId, appId, id?]` for app-scoped resources (agents, runs, schedules, webhooks). Examples: `["agents", orgId, appId]`, `["runs", orgId, appId, packageId]`. Non-app-scoped: `["orgs"]` (global), `["connections", orgId]`. On org switch, `queryClient.removeQueries` wipes all except `["orgs"]`.
 - **Standard components**: Always use `<Modal>` (`components/modal.tsx`) for dialogs — never build raw overlays. Use `<LoadingState>`, `<ErrorState>`, `<EmptyState>` from `page-states.tsx` for page states. Use `<InputFields>` for JSON Schema-driven forms, `<FileField>` for uploads.
@@ -221,7 +231,7 @@ Tier 0 (zero-install) requires only Bun. Infrastructure adapters are in `apps/ap
 - **Multi-tenant**: All DB queries filter by `orgId`. App-scoped resources (agents, runs, schedules, webhooks, connections, end-users, api-keys, notifications, packages) additionally filter by `applicationId`. Admins = org role `admin` or `owner`.
 - **Service layer**: All function-based (no classes). `state.ts` is the central data-access layer (runs, logs, config, agent provider bindings). Drizzle ORM with `import { db } from "../lib/db.ts"` and schema from `@appstrate/db/schema`.
 - **Request pipeline**: error handler → Request-Id → CORS → health check (`/`) → OpenAPI docs → shutdown gate → Better Auth (`/api/auth/*`) → auth middleware (API key `ask_` first, then cookie → `Appstrate-User` resolution if present) → org context middleware (`X-Org-Id` → verify membership) → app context middleware (`X-App-Id` → verify app belongs to org, required for app-scoped routes: agents, runs, schedules, webhooks, end-users, api-keys, notifications, packages, providers, connections, app-profiles; realtime handles app-scoping internally via query param) → API version middleware (`Appstrate-Version` header) → route handler (per-route: `rateLimit()`, `idempotency()`) → cloud routes (if loaded).
-- **Platform config** (`buildAppConfig()` in `index.ts`): Computed once at boot. Serialized as `window.__APP_CONFIG__` and injected into `index.html` via `<script>` tag at serve time (`app.get("/*")`). Config is static — `useAppConfig()` reads it synchronously. In OSS: models/providerKeys visible, billing hidden. In Cloud: reversed. `googleAuth` and `emailVerification` flags are derived from env var presence (opt-in).
+- **Platform config** (`buildAppConfig()` in `index.ts`): Computed once at boot. Serialized as `window.__APP_CONFIG__` and injected into `index.html` via `<script>` tag at serve time (`app.get("/*")`). Config is static — `useAppConfig()` reads it synchronously. All module-owned features default to `false` and are enabled by their respective modules via `features` property. `googleAuth`, `githubAuth`, and `smtp` flags are derived from env var presence (opt-in).
 - **Cloud module**: Loaded via the module system when `APPSTRATE_MODULES=@appstrate/cloud` is set. All declared modules are required — if declared but not installed, the platform crashes at boot. Default is empty (OSS mode). `getModule("cloud")` returns the loaded module or `null`.
 - **Cost tracking**: `runs.cost` (doublePrecision) stores the dollar cost per run. Cost chain: `SYSTEM_PROVIDER_KEYS` cost config → `ModelDefinition.cost` → `ResolvedModel.cost` → `PromptContext.llmConfig.cost` → `MODEL_COST` env var in Pi container → Pi SDK calculates cost → `RunMessage.cost` → accumulated and persisted. DB models (`org_models`) also support optional `cost` (jsonb) for self-hosted cost tracking. OpenRouter models auto-populate cost from pricing API.
 - **Hono context** (`c.get(...)`): `user` (id, email, name), `orgId`, `orgRole` ("owner"/"admin"/"member"), `authMethod` ("session"/"api_key"), `apiKeyId`, `applicationId` (set by `requireAppContext()` from `X-App-Id` header, or from API key's `applicationId`), `endUser` (set via `Appstrate-User` header — `{ id, applicationId, name?, email? }`), `apiVersion` (resolved by api-version middleware), `agent` (set by `requireAgent()`).
@@ -427,7 +437,7 @@ When working on API routes, always consult the corresponding OpenAPI path file i
 
 ## Database
 
-Full schema: `packages/db/src/schema.ts` (31 tables + 5 enums, Drizzle ORM). Migrations: `bun run db:generate` + `bun run db:migrate`. No RLS — app-level security by `orgId` (+ `applicationId` for app-scoped resources). Key headless tables: `applications` (app* prefix), `endUsers` (eu* prefix), `webhooks` (wh\_ prefix), `webhookDeliveries`, `applicationPackages` (installed packages per app with config, model/proxy overrides, version pinning).
+Core schema: `packages/db/src/schema.ts` (Drizzle ORM). Module-owned tables live in `apps/api/src/modules/<name>/schema.ts`. All migrations (core + module) are applied automatically at boot — no manual `db:migrate` step. Use `bun run db:generate` to generate new core migrations after schema changes. No RLS — app-level security by `orgId` (+ `applicationId` for app-scoped resources). Key headless tables: `applications` (app\_ prefix), `endUsers` (eu\_ prefix), `applicationPackages` (installed packages per app with config, model/proxy overrides, version pinning).
 
 ## Environment Variables
 

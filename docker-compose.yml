@@ -121,18 +121,6 @@ services:
       appstrate-minio:
         condition: service_healthy
 
-  appstrate-migrate:
-    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-latest}
-    networks:
-      - appstrate-data
-    restart: "no"
-    command: ["bun", "packages/db/src/migrate.ts"]
-    environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
-    depends_on:
-      appstrate-postgres:
-        condition: service_healthy
-
   # Pre-pull runtime images so they're available when the first flow executes.
   # Without this, the first execution would block on a slow image pull.
   # These containers exit immediately after pulling.
@@ -184,8 +172,8 @@ services:
       retries: 3
       start_period: 15s
     depends_on:
-      appstrate-migrate:
-        condition: service_completed_successfully
+      appstrate-postgres:
+        condition: service_healthy
       appstrate-redis:
         condition: service_healthy
       appstrate-minio-init:

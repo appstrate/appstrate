@@ -37,16 +37,17 @@ import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 
 export async function boot(): Promise<void> {
-  // Log infrastructure mode + apply core migrations (before modules, so DB is ready)
+  // Apply core migrations at boot (before modules, so DB is ready).
+  // Both PGlite and PostgreSQL auto-migrate — no manual `db:migrate` step needed.
   const env = (await import("@appstrate/env")).getEnv();
   if (isEmbeddedDb) {
     logger.info("Database: PGlite (embedded)", { path: env.PGLITE_DATA_DIR });
-    // Apply core migrations programmatically for PGlite (no external drizzle-kit CLI)
     await applyEmbeddedMigrations();
   } else {
     logger.info("Database: PostgreSQL", {
       url: env.DATABASE_URL?.replace(/\/\/.*@/, "//***@") ?? "",
     });
+    await applyCoreMigrations();
   }
 
   // Load modules (cloud, scheduling, webhooks, etc.)
@@ -307,4 +308,19 @@ async function applyEmbeddedMigrations(): Promise<void> {
   }
 
   logger.info("PGlite migrations applied", { count: journal.entries.length - applied.size });
+}
+
+/**
+ * Apply Drizzle migrations for PostgreSQL using the standard migrator.
+ * Idempotent — already-applied migrations are skipped via the tracking table.
+ */
+async function applyCoreMigrations(): Promise<void> {
+  const { resolve } = await import("node:path");
+  const { migrate } = await import("drizzle-orm/postgres-js/migrator");
+
+  const migrationsFolder = resolve(import.meta.dir, "../../../../packages/db/drizzle");
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- db type is compatible but schema generic differs
+  await migrate(db as any, { migrationsFolder });
+  logger.info("Core migrations applied");
 }
