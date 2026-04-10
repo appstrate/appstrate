@@ -177,7 +177,7 @@ export interface OpenApiSchemaEntry {
 /** Parameters passed to the `beforeRun` hook. */
 export interface BeforeRunParams {
   orgId: string;
-  agentId: string;
+  packageId: string;
   runningCount: number;
 }
 
@@ -193,7 +193,7 @@ export interface RunRejection {
 export interface RunStatusChangeParams {
   orgId: string;
   runId: string;
-  agentId: string;
+  packageId: string;
   applicationId: string;
   status: "started" | "success" | "failed" | "timeout" | "cancelled";
   /** Cost in dollars (only on terminal status). */

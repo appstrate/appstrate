@@ -5,8 +5,34 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-import type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "@appstrate/shared-types";
-export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "@appstrate/shared-types";
+export interface WebhookInfo {
+  id: string;
+  object: "webhook";
+  applicationId: string;
+  url: string;
+  events: string[];
+  packageId: string | null;
+  payloadMode: "full" | "summary";
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WebhookCreateResponse extends WebhookInfo {
+  secret: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  eventId: string;
+  eventType: string;
+  status: "pending" | "success" | "failed";
+  statusCode: number | null;
+  latency: number | null;
+  attempt: number;
+  error: string | null;
+  createdAt: string;
+}
 
 /** Toggle an event in a state setter — shared by create and edit forms. */
 export function toggleEvent(event: string, setter: Dispatch<SetStateAction<string[]>>) {

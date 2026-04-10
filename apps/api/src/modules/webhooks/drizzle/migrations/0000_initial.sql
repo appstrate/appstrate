@@ -1,6 +1,6 @@
 -- Webhooks module: initial schema
 
-CREATE TABLE IF NOT EXISTS "webhooks" (
+CREATE TABLE "webhooks" (
   "id" text PRIMARY KEY NOT NULL,
   "org_id" uuid NOT NULL REFERENCES "organizations" ("id") ON DELETE CASCADE,
   "application_id" text NOT NULL REFERENCES "applications" ("id") ON DELETE CASCADE,
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS "webhooks" (
   "updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE IF NOT EXISTS "webhook_deliveries" (
+CREATE TABLE "webhook_deliveries" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "webhook_id" text NOT NULL REFERENCES "webhooks" ("id") ON DELETE CASCADE,
   "event_id" text NOT NULL,
@@ -29,14 +29,14 @@ CREATE TABLE IF NOT EXISTS "webhook_deliveries" (
   "created_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "idx_webhooks_org_id" ON "webhooks" USING btree ("org_id");
+CREATE INDEX "idx_webhooks_org_id" ON "webhooks" USING btree ("org_id");
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "idx_webhooks_application_id" ON "webhooks" USING btree ("application_id");
+CREATE INDEX "idx_webhooks_application_id" ON "webhooks" USING btree ("application_id");
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "idx_webhooks_app_enabled" ON "webhooks" USING btree ("application_id", "enabled");
+CREATE INDEX "idx_webhooks_app_enabled" ON "webhooks" USING btree ("application_id", "enabled");
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "idx_webhook_deliveries_webhook_id" ON "webhook_deliveries" USING btree ("webhook_id");
+CREATE INDEX "idx_webhook_deliveries_webhook_id" ON "webhook_deliveries" USING btree ("webhook_id");
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "idx_webhook_deliveries_event_id" ON "webhook_deliveries" USING btree ("event_id");
+CREATE INDEX "idx_webhook_deliveries_event_id" ON "webhook_deliveries" USING btree ("event_id");
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "idx_webhook_deliveries_status" ON "webhook_deliveries" USING btree ("webhook_id", "status");
+CREATE INDEX "idx_webhook_deliveries_status" ON "webhook_deliveries" USING btree ("webhook_id", "status");

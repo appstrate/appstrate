@@ -15,6 +15,7 @@ import {
 } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
 import { resolveProviderCredentialId } from "./helpers.ts";
+import { oauthStateStore } from "./oauth-state-store.ts";
 
 export function getOAuthCallbackUrl(): string {
   return `${getEnv().APP_URL}/api/connections/callback`;
@@ -33,11 +34,21 @@ export async function initiateConnection(
   // Route to OAuth1 if the provider uses it
   const providerDef = await getProvider(db, orgId, provider);
   if (providerDef?.authMode === "oauth1") {
-    return initiateOAuth1(db, orgId, actor, profileId, provider, redirectUri, applicationId);
+    return initiateOAuth1(
+      db,
+      oauthStateStore,
+      orgId,
+      actor,
+      profileId,
+      provider,
+      redirectUri,
+      applicationId,
+    );
   }
 
   return initiateOAuth(
     db,
+    oauthStateStore,
     orgId,
     actor,
     profileId,
@@ -49,7 +60,7 @@ export async function initiateConnection(
 }
 
 export async function handleCallback(code: string, state: string): Promise<OAuthCallbackResult> {
-  const result = await handleOAuthCallback(db, code, state);
+  const result = await handleOAuthCallback(db, oauthStateStore, code, state);
 
   const providerCredentialId = await resolveProviderCredentialId(
     result.applicationId,
@@ -85,7 +96,7 @@ export async function handleOAuth1CallbackAndSave(
   oauthToken: string,
   oauthVerifier: string,
 ): Promise<OAuth1CallbackResult> {
-  const result = await handleOAuth1Callback(db, oauthToken, oauthVerifier);
+  const result = await handleOAuth1Callback(db, oauthStateStore, oauthToken, oauthVerifier);
 
   const providerCredentialId = await resolveProviderCredentialId(
     result.applicationId,

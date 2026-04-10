@@ -199,7 +199,7 @@ async function triggerScheduledRun(
       void emitEvent("onRunStatusChange", {
         orgId,
         runId,
-        agentId: packageId,
+        packageId,
         applicationId,
         status: "failed",
         extra: { error },

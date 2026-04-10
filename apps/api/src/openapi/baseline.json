@@ -533,21 +533,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -619,21 +608,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -684,21 +662,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -768,21 +735,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -833,21 +789,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -900,21 +845,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "memoryId",
@@ -975,21 +909,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -1037,21 +960,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -1121,21 +1033,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -1220,21 +1121,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -1319,21 +1209,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -1385,21 +1264,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -1471,21 +1339,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -1555,21 +1412,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -1649,21 +1495,10 @@
             "$ref": "#/components/parameters/IdempotencyKey"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -1693,6 +1528,11 @@
                     "type": "string",
                     "description": "Proxy ID override for this run, or \"none\" to disable proxying. Takes priority over agent and org defaults."
                   }
+                }
+              },
+              "example": {
+                "input": {
+                  "message": "Summarize my latest emails"
                 }
               }
             },
@@ -1784,6 +1624,9 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -1802,21 +1645,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "limit",
@@ -1887,21 +1719,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -2010,10 +1831,10 @@
                   "state": {
                     "lastProcessedId": "msg_99f2a"
                   },
-                  "tokensUsed": 12450,
                   "tokenUsage": {
-                    "input": 8200,
-                    "output": 4250
+                    "inputTokens": 8200,
+                    "outputTokens": 4250,
+                    "totalTokens": 12450
                   },
                   "startedAt": "2026-01-15T10:30:00Z",
                   "completedAt": "2026-01-15T10:31:12Z",
@@ -2349,21 +2170,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -2406,21 +2216,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -2948,23 +2747,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Provider scope (e.g. @appstrate)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Provider name (e.g. gmail)"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -3038,23 +2824,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Provider scope (e.g. @appstrate)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Provider name (e.g. gmail)"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -3130,23 +2903,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Provider scope (e.g. @appstrate)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Provider name (e.g. gmail)"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -3293,23 +3053,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Provider scope (e.g. @appstrate)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Provider name (e.g. gmail)"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "profileId",
@@ -3499,21 +3246,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -3562,21 +3298,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -3629,21 +3354,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -3691,21 +3405,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -7855,21 +7558,10 @@
         ],
         "parameters": [
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -7940,21 +7632,10 @@
         ],
         "parameters": [
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -8756,21 +8437,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -8998,23 +8668,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -9070,23 +8727,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -9137,23 +8781,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -9228,23 +8859,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -9315,23 +8933,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -9419,23 +9024,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -9481,23 +9073,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -9540,23 +9119,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -9643,23 +9209,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -9877,23 +9430,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -9949,23 +9489,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -10016,23 +9543,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -10107,23 +9621,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -10194,23 +9695,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -10298,23 +9786,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -10360,23 +9835,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -10419,23 +9881,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -10522,23 +9971,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -10747,23 +10183,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -10811,23 +10234,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -10910,23 +10320,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -10964,23 +10361,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -11033,23 +10417,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -11100,23 +10471,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -11194,23 +10552,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -11280,23 +10625,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -11383,23 +10715,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -11463,24 +10782,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @other-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -11735,23 +11040,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -11807,23 +11099,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -11874,23 +11153,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -11965,23 +11231,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -12052,23 +11305,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -12156,23 +11396,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -12218,23 +11445,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -12277,23 +11491,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -12373,23 +11574,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -13257,6 +12445,1299 @@
         }
       }
     },
+    "/api/applications": {
+      "post": {
+        "operationId": "createApplication",
+        "tags": ["Applications"],
+        "summary": "Create an application",
+        "description": "Create a new application for the organization. Applications scope end-users and their sessions.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "description": "Human-readable application name"
+                  },
+                  "settings": {
+                    "type": "object",
+                    "properties": {
+                      "allowedRedirectDomains": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 20,
+                        "description": "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically."
+                      }
+                    },
+                    "description": "Application settings"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Application created",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationObject"
+                },
+                "example": {
+                  "id": "app_cm1xyz789ghi012",
+                  "object": "application",
+                  "orgId": "550e8400-e29b-41d4-a716-446655440000",
+                  "name": "My SaaS App",
+                  "isDefault": false,
+                  "settings": {
+                    "allowedRedirectDomains": ["myapp.com", "staging.myapp.com"]
+                  },
+                  "createdBy": "usr_k7x9m2p4q1",
+                  "createdAt": "2026-01-15T10:30:00Z",
+                  "updatedAt": "2026-01-15T10:30:00Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listApplications",
+        "tags": ["Applications"],
+        "summary": "List applications",
+        "description": "List all applications for the organization.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Application list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ApplicationObject"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "object": "list",
+                  "data": [
+                    {
+                      "id": "app_default001",
+                      "object": "application",
+                      "orgId": "550e8400-e29b-41d4-a716-446655440000",
+                      "name": "Default",
+                      "isDefault": true,
+                      "settings": {
+                        "allowedRedirectDomains": []
+                      },
+                      "createdBy": null,
+                      "createdAt": "2026-01-10T08:00:00Z",
+                      "updatedAt": "2026-01-10T08:00:00Z"
+                    },
+                    {
+                      "id": "app_cm1xyz789ghi012",
+                      "object": "application",
+                      "orgId": "550e8400-e29b-41d4-a716-446655440000",
+                      "name": "My SaaS App",
+                      "isDefault": false,
+                      "settings": {
+                        "allowedRedirectDomains": ["myapp.com"]
+                      },
+                      "createdBy": "usr_k7x9m2p4q1",
+                      "createdAt": "2026-01-15T10:30:00Z",
+                      "updatedAt": "2026-01-15T10:30:00Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/applications/{id}": {
+      "get": {
+        "operationId": "getApplication",
+        "tags": ["Applications"],
+        "summary": "Get an application",
+        "description": "Get a single application by ID.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Application detail",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateApplication",
+        "tags": ["Applications"],
+        "summary": "Update an application",
+        "description": "Update application name or settings.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "description": "Human-readable application name"
+                  },
+                  "settings": {
+                    "type": "object",
+                    "properties": {
+                      "allowedRedirectDomains": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 20,
+                        "description": "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically."
+                      }
+                    },
+                    "description": "Application settings"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Application updated",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteApplication",
+        "tags": ["Applications"],
+        "summary": "Delete an application",
+        "description": "Delete an application and all associated end-users. The default application cannot be deleted.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Application deleted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/applications/{appId}/packages": {
+      "get": {
+        "operationId": "listInstalledPackages",
+        "tags": ["Application Packages"],
+        "summary": "List installed packages",
+        "description": "List all packages installed in this application, with their config and version.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["agent", "skill", "tool", "provider"]
+            },
+            "description": "Filter by package type"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Installed packages list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ApplicationPackage"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "operationId": "installPackage",
+        "tags": ["Application Packages"],
+        "summary": "Install a package",
+        "description": "Install a package from the organization catalog into this application.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["packageId"],
+                "properties": {
+                  "packageId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Package ID from org catalog"
+                  },
+                  "config": {
+                    "type": "object",
+                    "description": "Initial configuration"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Package installed",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationPackage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Package already installed in this application",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/applications/{appId}/packages/{scope}/{name}": {
+      "get": {
+        "operationId": "getInstalledPackage",
+        "tags": ["Application Packages"],
+        "summary": "Get installed package",
+        "description": "Get an installed package detail with its config.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Installed package detail",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationPackage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateInstalledPackage",
+        "tags": ["Application Packages"],
+        "summary": "Update installed package config",
+        "description": "Update configuration, model/proxy overrides, or version pinning for an installed package.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "config": {
+                    "type": "object"
+                  },
+                  "modelId": {
+                    "type": ["string", "null"]
+                  },
+                  "proxyId": {
+                    "type": ["string", "null"]
+                  },
+                  "appProfileId": {
+                    "type": ["string", "null"]
+                  },
+                  "versionId": {
+                    "type": ["integer", "null"]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated package config",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationPackage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "uninstallPackage",
+        "tags": ["Application Packages"],
+        "summary": "Uninstall a package",
+        "description": "Remove a package from this application.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Package uninstalled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/applications/{appId}/providers": {
+      "get": {
+        "operationId": "listAppProviderOverrides",
+        "tags": ["Application Providers"],
+        "summary": "List app-level provider overrides",
+        "description": "List all application-level provider credential overrides and enablement status.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provider overrides list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "providerId": {
+                            "type": "string"
+                          },
+                          "hasAppCredentials": {
+                            "type": "boolean"
+                          },
+                          "appEnabled": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/applications/{appId}/providers/{scope}/{name}/credentials": {
+      "put": {
+        "operationId": "setAppProviderCredentials",
+        "tags": ["Application Providers"],
+        "summary": "Set app-level provider credentials",
+        "description": "Set or update application-level provider admin credentials (e.g. OAuth clientId/clientSecret). These override org-level credentials for this application. The provider must be enabled at org level.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "credentials": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Admin credentials (e.g. clientId, clientSecret for OAuth providers)"
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "Whether the provider is enabled for this application. Can only restrict (disable), not override an org-level disable."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credentials configured",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "configured": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteAppProviderCredentials",
+        "tags": ["Application Providers"],
+        "summary": "Remove app-level provider credentials",
+        "description": "Remove the application-level override for a provider, reverting to org-level credentials.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Override removed",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/end-users": {
+      "post": {
+        "operationId": "createEndUser",
+        "tags": ["End Users"],
+        "summary": "Create an end-user",
+        "description": "Create a new end-user within an application. At least one of name, email, or externalId should be provided for identification.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": ["string", "null"],
+                    "maxLength": 200,
+                    "description": "Display name of the end-user"
+                  },
+                  "email": {
+                    "type": ["string", "null"],
+                    "format": "email",
+                    "description": "Email address of the end-user"
+                  },
+                  "externalId": {
+                    "type": ["string", "null"],
+                    "maxLength": 255,
+                    "description": "Your system's unique identifier for this end-user"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
+                  }
+                }
+              },
+              "example": {
+                "name": "Alice Martin",
+                "email": "alice@example.com",
+                "externalId": "usr_12345",
+                "metadata": {
+                  "plan": "pro",
+                  "region": "eu-west"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "End-user created",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              },
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimitPolicy"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserObject"
+                },
+                "example": {
+                  "id": "eu_cm4jkl012",
+                  "object": "end_user",
+                  "applicationId": "app_cm4jkl013",
+                  "name": "Alice Martin",
+                  "email": "alice@example.com",
+                  "externalId": "usr_12345",
+                  "metadata": {
+                    "plan": "pro",
+                    "region": "eu-west"
+                  },
+                  "createdAt": "2026-01-15T10:30:00Z",
+                  "updatedAt": "2026-01-15T10:30:00Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/IdempotencyInProgress"
+          },
+          "422": {
+            "$ref": "#/components/responses/IdempotencyConflict"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listEndUsers",
+        "tags": ["End Users"],
+        "summary": "List end-users",
+        "description": "List end-users with cursor-based pagination. Filter by applicationId, externalId, or email.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "externalId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by external ID (exact match)"
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by email address (exact match)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "description": "Maximum number of end-users to return"
+          },
+          {
+            "name": "startingAfter",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Cursor for forward pagination (end-user ID to start after)"
+          },
+          {
+            "name": "endingBefore",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Cursor for backward pagination (end-user ID to end before)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated end-user list",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "RateLimit": {
+                "$ref": "#/components/headers/RateLimit"
+              },
+              "RateLimit-Policy": {
+                "$ref": "#/components/headers/RateLimitPolicy"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/EndUserObject"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean",
+                      "description": "Whether more results exist beyond this page"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "description": "The limit that was applied to this query"
+                    }
+                  }
+                },
+                "example": {
+                  "object": "list",
+                  "data": [
+                    {
+                      "id": "eu_cm4jkl012",
+                      "object": "end_user",
+                      "applicationId": "app_cm4jkl013",
+                      "name": "Alice Martin",
+                      "email": "alice@example.com",
+                      "externalId": "usr_12345",
+                      "metadata": {
+                        "plan": "pro"
+                      },
+                      "createdAt": "2026-01-15T10:30:00Z",
+                      "updatedAt": "2026-01-15T10:30:00Z"
+                    }
+                  ],
+                  "hasMore": false,
+                  "limit": 20
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/end-users/{id}": {
+      "get": {
+        "operationId": "getEndUser",
+        "tags": ["End Users"],
+        "summary": "Get an end-user",
+        "description": "Get a single end-user by ID.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "End-user detail",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserObject"
+                },
+                "example": {
+                  "id": "eu_cm4jkl012",
+                  "object": "end_user",
+                  "applicationId": "app_cm4jkl013",
+                  "name": "Alice Martin",
+                  "email": "alice@example.com",
+                  "externalId": "usr_12345",
+                  "metadata": {
+                    "plan": "pro",
+                    "region": "eu-west"
+                  },
+                  "createdAt": "2026-01-15T10:30:00Z",
+                  "updatedAt": "2026-01-15T10:30:00Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateEndUser",
+        "tags": ["End Users"],
+        "summary": "Update an end-user",
+        "description": "Update end-user name, email, externalId, or metadata.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": ["string", "null"],
+                    "maxLength": 200,
+                    "description": "Display name of the end-user"
+                  },
+                  "email": {
+                    "type": ["string", "null"],
+                    "format": "email",
+                    "description": "Email address of the end-user"
+                  },
+                  "externalId": {
+                    "type": ["string", "null"],
+                    "maxLength": 255,
+                    "description": "Your system's unique identifier for this end-user"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "End-user updated",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserObject"
+                },
+                "example": {
+                  "id": "eu_cm4jkl012",
+                  "object": "end_user",
+                  "applicationId": "app_cm4jkl013",
+                  "name": "Alice Martin Updated",
+                  "email": "alice@example.com",
+                  "externalId": "usr_12345",
+                  "metadata": {
+                    "plan": "enterprise",
+                    "region": "eu-west"
+                  },
+                  "createdAt": "2026-01-15T10:30:00Z",
+                  "updatedAt": "2026-01-20T14:00:00Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteEndUser",
+        "tags": ["End Users"],
+        "summary": "Delete an end-user",
+        "description": "Permanently delete an end-user.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "End-user deleted",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/api/webhooks": {
       "post": {
         "operationId": "createWebhook",
@@ -13316,6 +13797,13 @@
                     "default": true
                   }
                 }
+              },
+              "example": {
+                "url": "https://api.example.com/webhooks/appstrate",
+                "events": ["run.success", "run.failed"],
+                "packageId": null,
+                "payloadMode": "summary",
+                "enabled": true
               }
             }
           }
@@ -13920,1340 +14408,6 @@
           }
         }
       }
-    },
-    "/api/applications": {
-      "post": {
-        "operationId": "createApplication",
-        "tags": ["Applications"],
-        "summary": "Create an application",
-        "description": "Create a new application for the organization. Applications scope end-users and their sessions.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["name"],
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 100,
-                    "description": "Human-readable application name"
-                  },
-                  "settings": {
-                    "type": "object",
-                    "properties": {
-                      "allowedRedirectDomains": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        },
-                        "maxItems": 20,
-                        "description": "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically."
-                      }
-                    },
-                    "description": "Application settings"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Application created",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApplicationObject"
-                },
-                "example": {
-                  "id": "app_cm1xyz789ghi012",
-                  "object": "application",
-                  "orgId": "550e8400-e29b-41d4-a716-446655440000",
-                  "name": "My SaaS App",
-                  "isDefault": false,
-                  "settings": {
-                    "allowedRedirectDomains": ["myapp.com", "staging.myapp.com"]
-                  },
-                  "createdBy": "usr_k7x9m2p4q1",
-                  "createdAt": "2026-01-15T10:30:00Z",
-                  "updatedAt": "2026-01-15T10:30:00Z"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
-        }
-      },
-      "get": {
-        "operationId": "listApplications",
-        "tags": ["Applications"],
-        "summary": "List applications",
-        "description": "List all applications for the organization.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Application list",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/ApplicationObject"
-                      }
-                    }
-                  }
-                },
-                "example": {
-                  "object": "list",
-                  "data": [
-                    {
-                      "id": "app_default001",
-                      "object": "application",
-                      "orgId": "550e8400-e29b-41d4-a716-446655440000",
-                      "name": "Default",
-                      "isDefault": true,
-                      "settings": {
-                        "allowedRedirectDomains": []
-                      },
-                      "createdBy": null,
-                      "createdAt": "2026-01-10T08:00:00Z",
-                      "updatedAt": "2026-01-10T08:00:00Z"
-                    },
-                    {
-                      "id": "app_cm1xyz789ghi012",
-                      "object": "application",
-                      "orgId": "550e8400-e29b-41d4-a716-446655440000",
-                      "name": "My SaaS App",
-                      "isDefault": false,
-                      "settings": {
-                        "allowedRedirectDomains": ["myapp.com"]
-                      },
-                      "createdBy": "usr_k7x9m2p4q1",
-                      "createdAt": "2026-01-15T10:30:00Z",
-                      "updatedAt": "2026-01-15T10:30:00Z"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
-        }
-      }
-    },
-    "/api/applications/{id}": {
-      "get": {
-        "operationId": "getApplication",
-        "tags": ["Applications"],
-        "summary": "Get an application",
-        "description": "Get a single application by ID.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Application detail",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApplicationObject"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "patch": {
-        "operationId": "updateApplication",
-        "tags": ["Applications"],
-        "summary": "Update an application",
-        "description": "Update application name or settings.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 100,
-                    "description": "Human-readable application name"
-                  },
-                  "settings": {
-                    "type": "object",
-                    "properties": {
-                      "allowedRedirectDomains": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        },
-                        "maxItems": 20,
-                        "description": "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically."
-                      }
-                    },
-                    "description": "Application settings"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Application updated",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApplicationObject"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteApplication",
-        "tags": ["Applications"],
-        "summary": "Delete an application",
-        "description": "Delete an application and all associated end-users. The default application cannot be deleted.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Application deleted",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/api/applications/{appId}/packages": {
-      "get": {
-        "operationId": "listInstalledPackages",
-        "tags": ["Application Packages"],
-        "summary": "List installed packages",
-        "description": "List all packages installed in this application, with their config and version.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "name": "appId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "type",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["agent", "skill", "tool", "provider"]
-            },
-            "description": "Filter by package type"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Installed packages list",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/ApplicationPackage"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "post": {
-        "operationId": "installPackage",
-        "tags": ["Application Packages"],
-        "summary": "Install a package",
-        "description": "Install a package from the organization catalog into this application.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "name": "appId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["packageId"],
-                "properties": {
-                  "packageId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Package ID from org catalog"
-                  },
-                  "config": {
-                    "type": "object",
-                    "description": "Initial configuration"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Package installed",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApplicationPackage"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "description": "Package already installed in this application",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/applications/{appId}/packages/{scope}/{name}": {
-      "get": {
-        "operationId": "getInstalledPackage",
-        "tags": ["Application Packages"],
-        "summary": "Get installed package",
-        "description": "Get an installed package detail with its config.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "name": "appId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Installed package detail",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApplicationPackage"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "put": {
-        "operationId": "updateInstalledPackage",
-        "tags": ["Application Packages"],
-        "summary": "Update installed package config",
-        "description": "Update configuration, model/proxy overrides, or version pinning for an installed package.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "name": "appId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "config": {
-                    "type": "object"
-                  },
-                  "modelId": {
-                    "type": ["string", "null"]
-                  },
-                  "proxyId": {
-                    "type": ["string", "null"]
-                  },
-                  "appProfileId": {
-                    "type": ["string", "null"]
-                  },
-                  "versionId": {
-                    "type": ["integer", "null"]
-                  },
-                  "enabled": {
-                    "type": "boolean"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Updated package config",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApplicationPackage"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "uninstallPackage",
-        "tags": ["Application Packages"],
-        "summary": "Uninstall a package",
-        "description": "Remove a package from this application.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "name": "appId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Package uninstalled"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/api/applications/{appId}/providers": {
-      "get": {
-        "operationId": "listAppProviderOverrides",
-        "tags": ["Application Providers"],
-        "summary": "List app-level provider overrides",
-        "description": "List all application-level provider credential overrides and enablement status.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "name": "appId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Provider overrides list",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "providerId": {
-                            "type": "string"
-                          },
-                          "hasAppCredentials": {
-                            "type": "boolean"
-                          },
-                          "appEnabled": {
-                            "type": "boolean"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/api/applications/{appId}/providers/{scope}/{name}/credentials": {
-      "put": {
-        "operationId": "setAppProviderCredentials",
-        "tags": ["Application Providers"],
-        "summary": "Set app-level provider credentials",
-        "description": "Set or update application-level provider admin credentials (e.g. OAuth clientId/clientSecret). These override org-level credentials for this application. The provider must be enabled at org level.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "name": "appId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "credentials": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "type": "string"
-                    },
-                    "description": "Admin credentials (e.g. clientId, clientSecret for OAuth providers)"
-                  },
-                  "enabled": {
-                    "type": "boolean",
-                    "description": "Whether the provider is enabled for this application. Can only restrict (disable), not override an org-level disable."
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Credentials configured",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "configured": {
-                      "type": "boolean"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteAppProviderCredentials",
-        "tags": ["Application Providers"],
-        "summary": "Remove app-level provider credentials",
-        "description": "Remove the application-level override for a provider, reverting to org-level credentials.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "name": "appId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Override removed",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/api/end-users": {
-      "post": {
-        "operationId": "createEndUser",
-        "tags": ["End Users"],
-        "summary": "Create an end-user",
-        "description": "Create a new end-user within an application. At least one of name, email, or externalId should be provided for identification.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "name": {
-                    "type": ["string", "null"],
-                    "maxLength": 200,
-                    "description": "Display name of the end-user"
-                  },
-                  "email": {
-                    "type": ["string", "null"],
-                    "format": "email",
-                    "description": "Email address of the end-user"
-                  },
-                  "externalId": {
-                    "type": ["string", "null"],
-                    "maxLength": 255,
-                    "description": "Your system's unique identifier for this end-user"
-                  },
-                  "metadata": {
-                    "type": "object",
-                    "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "End-user created",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "Idempotent-Replayed": {
-                "$ref": "#/components/headers/IdempotentReplayed"
-              },
-              "RateLimit": {
-                "$ref": "#/components/headers/RateLimit"
-              },
-              "RateLimit-Policy": {
-                "$ref": "#/components/headers/RateLimitPolicy"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EndUserObject"
-                },
-                "example": {
-                  "id": "eu_cm4jkl012",
-                  "object": "end_user",
-                  "applicationId": "app_cm4jkl013",
-                  "name": "Alice Martin",
-                  "email": "alice@example.com",
-                  "externalId": "usr_12345",
-                  "metadata": {
-                    "plan": "pro",
-                    "region": "eu-west"
-                  },
-                  "createdAt": "2026-01-15T10:30:00Z",
-                  "updatedAt": "2026-01-15T10:30:00Z"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/IdempotencyInProgress"
-          },
-          "422": {
-            "$ref": "#/components/responses/IdempotencyConflict"
-          }
-        }
-      },
-      "get": {
-        "operationId": "listEndUsers",
-        "tags": ["End Users"],
-        "summary": "List end-users",
-        "description": "List end-users with cursor-based pagination. Filter by applicationId, externalId, or email.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "externalId",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Filter by external ID (exact match)"
-          },
-          {
-            "name": "email",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Filter by email address (exact match)"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "default": 20
-            },
-            "description": "Maximum number of end-users to return"
-          },
-          {
-            "name": "startingAfter",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Cursor for forward pagination (end-user ID to start after)"
-          },
-          {
-            "name": "endingBefore",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Cursor for backward pagination (end-user ID to end before)"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Paginated end-user list",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "RateLimit": {
-                "$ref": "#/components/headers/RateLimit"
-              },
-              "RateLimit-Policy": {
-                "$ref": "#/components/headers/RateLimitPolicy"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/EndUserObject"
-                      }
-                    },
-                    "hasMore": {
-                      "type": "boolean",
-                      "description": "Whether more results exist beyond this page"
-                    },
-                    "limit": {
-                      "type": "integer",
-                      "description": "The limit that was applied to this query"
-                    }
-                  }
-                },
-                "example": {
-                  "object": "list",
-                  "data": [
-                    {
-                      "id": "eu_cm4jkl012",
-                      "object": "end_user",
-                      "applicationId": "app_cm4jkl013",
-                      "name": "Alice Martin",
-                      "email": "alice@example.com",
-                      "externalId": "usr_12345",
-                      "metadata": {
-                        "plan": "pro"
-                      },
-                      "createdAt": "2026-01-15T10:30:00Z",
-                      "updatedAt": "2026-01-15T10:30:00Z"
-                    }
-                  ],
-                  "hasMore": false,
-                  "limit": 20
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
-        }
-      }
-    },
-    "/api/end-users/{id}": {
-      "get": {
-        "operationId": "getEndUser",
-        "tags": ["End Users"],
-        "summary": "Get an end-user",
-        "description": "Get a single end-user by ID.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "End-user detail",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EndUserObject"
-                },
-                "example": {
-                  "id": "eu_cm4jkl012",
-                  "object": "end_user",
-                  "applicationId": "app_cm4jkl013",
-                  "name": "Alice Martin",
-                  "email": "alice@example.com",
-                  "externalId": "usr_12345",
-                  "metadata": {
-                    "plan": "pro",
-                    "region": "eu-west"
-                  },
-                  "createdAt": "2026-01-15T10:30:00Z",
-                  "updatedAt": "2026-01-15T10:30:00Z"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "patch": {
-        "operationId": "updateEndUser",
-        "tags": ["End Users"],
-        "summary": "Update an end-user",
-        "description": "Update end-user name, email, externalId, or metadata.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "name": {
-                    "type": ["string", "null"],
-                    "maxLength": 200,
-                    "description": "Display name of the end-user"
-                  },
-                  "email": {
-                    "type": ["string", "null"],
-                    "format": "email",
-                    "description": "Email address of the end-user"
-                  },
-                  "externalId": {
-                    "type": ["string", "null"],
-                    "maxLength": 255,
-                    "description": "Your system's unique identifier for this end-user"
-                  },
-                  "metadata": {
-                    "type": "object",
-                    "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "End-user updated",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EndUserObject"
-                },
-                "example": {
-                  "id": "eu_cm4jkl012",
-                  "object": "end_user",
-                  "applicationId": "app_cm4jkl013",
-                  "name": "Alice Martin Updated",
-                  "email": "alice@example.com",
-                  "externalId": "usr_12345",
-                  "metadata": {
-                    "plan": "enterprise",
-                    "region": "eu-west"
-                  },
-                  "createdAt": "2026-01-15T10:30:00Z",
-                  "updatedAt": "2026-01-20T14:00:00Z"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteEndUser",
-        "tags": ["End Users"],
-        "summary": "Delete an end-user",
-        "description": "Permanently delete an end-user.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "End-user deleted",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
     }
   },
   "components": {
@@ -15354,7 +14508,26 @@
       "XAppId": {
         "name": "X-App-Id",
         "in": "header",
-        "description": "Application ID. Required for app-scoped routes (agents, runs, schedules, webhooks). Not needed for API key auth (app resolved from key).",
+        "description": "Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key).",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "PackageScope": {
+        "name": "scope",
+        "in": "path",
+        "required": true,
+        "description": "Package scope (e.g. @myorg)",
+        "schema": {
+          "type": "string",
+          "pattern": "^@[a-z0-9][a-z0-9-]*$"
+        }
+      },
+      "PackageName": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "description": "Package name",
         "schema": {
           "type": "string"
         }
@@ -15539,62 +14712,6 @@
           "packageSource": {
             "type": "string",
             "enum": ["system", "local"]
-          }
-        }
-      },
-      "WebhookObject": {
-        "type": "object",
-        "description": "Webhook configuration object",
-        "required": [
-          "id",
-          "object",
-          "applicationId",
-          "url",
-          "events",
-          "payloadMode",
-          "enabled",
-          "createdAt"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "Webhook ID (wh_ prefix)"
-          },
-          "object": {
-            "type": "string",
-            "enum": ["webhook"]
-          },
-          "applicationId": {
-            "type": "string",
-            "description": "Application ID (app_ prefix). All webhooks are application-scoped."
-          },
-          "url": {
-            "type": "string",
-            "format": "uri"
-          },
-          "events": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "packageId": {
-            "type": ["string", "null"]
-          },
-          "payloadMode": {
-            "type": "string",
-            "enum": ["full", "summary"]
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
@@ -16154,9 +15271,6 @@
           "error": {
             "type": "string"
           },
-          "tokensUsed": {
-            "type": "integer"
-          },
           "tokenUsage": {
             "type": "object"
           },
@@ -16230,6 +15344,10 @@
           "apiKeyName": {
             "type": ["string", "null"],
             "description": "Name of the API key that triggered the run"
+          },
+          "scheduleName": {
+            "type": ["string", "null"],
+            "description": "Name of the schedule that triggered the run"
           }
         }
       },
@@ -17312,6 +16430,62 @@
             }
           }
         }
+      },
+      "WebhookObject": {
+        "type": "object",
+        "description": "Webhook configuration object",
+        "required": [
+          "id",
+          "object",
+          "applicationId",
+          "url",
+          "events",
+          "payloadMode",
+          "enabled",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Webhook ID (wh_ prefix)"
+          },
+          "object": {
+            "type": "string",
+            "enum": ["webhook"]
+          },
+          "applicationId": {
+            "type": "string",
+            "description": "Application ID (app_ prefix). All webhooks are application-scoped."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "packageId": {
+            "type": ["string", "null"]
+          },
+          "payloadMode": {
+            "type": "string",
+            "enum": ["full", "summary"]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     },
     "responses": {
@@ -17438,6 +16612,24 @@
               "status": 409,
               "detail": "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
               "code": "idempotency_in_progress",
+              "requestId": "req_abc123"
+            }
+          }
+        }
+      },
+      "InternalServerError": {
+        "description": "Unexpected server error",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "https://docs.appstrate.dev/errors/internal-error",
+              "title": "Internal Server Error",
+              "status": 500,
+              "detail": "An unexpected error occurred. Please try again or contact support.",
+              "code": "internal_error",
               "requestId": "req_abc123"
             }
           }

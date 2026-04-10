@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Public types for the webhooks module.
- *
- * Lives under `shared-types/modules/webhooks.ts` as a naming boundary:
- * these types belong to the module, not to the core platform. They are
- * re-exported from the shared-types barrel so frontend code that already
- * imports from `@appstrate/shared-types` keeps working, and so the eventual
- * extraction of `@appstrate/webhooks-types` is mechanical.
+ * Public types for the webhooks module — consumed by the API service layer
+ * and the frontend via the `@appstrate/webhooks-client` re-exports.
  */
 
 export interface WebhookInfo {

@@ -82,7 +82,7 @@ export async function executeAgentInBackground(
     void emitEvent("onRunStatusChange", {
       orgId,
       runId,
-      agentId: agent.id,
+      packageId: agent.id,
       applicationId,
       status: "started",
     });
@@ -176,7 +176,7 @@ export async function executeAgentInBackground(
         const metadata = await collectAfterRunMetadata({
           orgId,
           runId,
-          agentId: agent.id,
+          packageId: agent.id,
           applicationId,
           status: "timeout",
           cost: accumulatedCost,
@@ -191,7 +191,6 @@ export async function executeAgentInBackground(
           notifiedAt: new Date().toISOString(),
           ...(totalTokens > 0
             ? {
-                tokensUsed: totalTokens,
                 tokenUsage: { ...accumulated } as Record<string, unknown>,
               }
             : {}),
@@ -212,7 +211,7 @@ export async function executeAgentInBackground(
         void emitEvent("onRunStatusChange", {
           orgId,
           runId,
-          agentId: agent.id,
+          packageId: agent.id,
           applicationId,
           status: "timeout",
           cost: accumulatedCost,
@@ -243,7 +242,7 @@ export async function executeAgentInBackground(
       const metadata = await collectAfterRunMetadata({
         orgId,
         runId,
-        agentId: agent.id,
+        packageId: agent.id,
         applicationId,
         status: "failed",
         cost: accumulatedCost,
@@ -270,7 +269,7 @@ export async function executeAgentInBackground(
       void emitEvent("onRunStatusChange", {
         orgId,
         runId,
-        agentId: agent.id,
+        packageId: agent.id,
         applicationId,
         status: "failed",
         cost: accumulatedCost,
@@ -321,7 +320,7 @@ export async function executeAgentInBackground(
       const metadata = await collectAfterRunMetadata({
         orgId,
         runId,
-        agentId: agent.id,
+        packageId: agent.id,
         applicationId,
         status: "success",
         cost: accumulatedCost,
@@ -336,7 +335,6 @@ export async function executeAgentInBackground(
         completedAt: new Date().toISOString(),
         duration,
         notifiedAt: new Date().toISOString(),
-        tokensUsed: totalTokens > 0 ? totalTokens : undefined,
         ...(totalTokens > 0 ? { tokenUsage: { ...accumulated } as Record<string, unknown> } : {}),
         cost: accumulatedCost > 0 ? accumulatedCost : null,
         ...(metadata ? { metadata } : {}),
@@ -357,7 +355,7 @@ export async function executeAgentInBackground(
       void emitEvent("onRunStatusChange", {
         orgId,
         runId,
-        agentId: agent.id,
+        packageId: agent.id,
         applicationId,
         status: "success",
         cost: accumulatedCost,
@@ -375,7 +373,7 @@ export async function executeAgentInBackground(
     const metadata = await collectAfterRunMetadata({
       orgId,
       runId,
-      agentId: agent.id,
+      packageId: agent.id,
       applicationId,
       status: "failed",
       cost: accumulatedCost,
@@ -406,7 +404,7 @@ export async function executeAgentInBackground(
     void emitEvent("onRunStatusChange", {
       orgId,
       runId,
-      agentId: agent.id,
+      packageId: agent.id,
       applicationId,
       status: "failed",
       cost: accumulatedCost,
@@ -654,7 +652,7 @@ export function createRunsRouter() {
     void emitEvent("onRunStatusChange", {
       orgId,
       runId,
-      agentId: run.packageId,
+      packageId: run.packageId,
       applicationId: c.get("applicationId"),
       status: "cancelled",
     });

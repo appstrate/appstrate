@@ -68,7 +68,7 @@ const webhooksModule: AppstrateModule = {
         params.applicationId,
         params.status,
         params.runId,
-        params.agentId,
+        params.packageId,
         {
           ...params.extra,
           ...(params.duration != null ? { duration: params.duration } : {}),

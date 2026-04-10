@@ -15,7 +15,6 @@ import type {
   appProfileProviderBindings,
   userProviderConnections,
   applicationProviderCredentials,
-  oauthStates,
   userAgentProviderProfiles,
 } from "./connections.ts";
 import type { applications, endUsers } from "./applications.ts";
@@ -59,8 +58,6 @@ export type ApplicationPackage = InferSelectModel<typeof applicationPackages>;
 export type UserProviderConnection = InferSelectModel<typeof userProviderConnections>;
 
 export type ApplicationProviderCredential = InferSelectModel<typeof applicationProviderCredentials>;
-
-export type OAuthState = InferSelectModel<typeof oauthStates>;
 
 export type Organization = InferSelectModel<typeof organizations>;
 

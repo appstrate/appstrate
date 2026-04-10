@@ -36,7 +36,7 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
     cache_read_input_tokens?: number;
   } | null;
   const metadata = run.metadata as Record<string, unknown> | null;
-  const hasUsage = run.cost != null || run.tokensUsed != null || run.modelLabel != null;
+  const hasUsage = run.cost != null || usage != null || run.modelLabel != null;
   const hasConfig = run.modelLabel != null || run.proxyLabel != null;
 
   return (

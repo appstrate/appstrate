@@ -178,7 +178,7 @@ describe("module-loader", () => {
   describe("hooks (first-match-wins)", () => {
     it("callHook returns undefined when no module provides the hook", async () => {
       await loadModulesFromInstances([], mockCtx());
-      const result = await callHook("beforeRun", { orgId: "o", agentId: "a", runningCount: 0 });
+      const result = await callHook("beforeRun", { orgId: "o", packageId: "a", runningCount: 0 });
       expect(result).toBeUndefined();
     });
 
@@ -189,7 +189,7 @@ describe("module-loader", () => {
       const b = mockModule("b", { hooks: { beforeRun: hookB } });
       await loadModulesFromInstances([a, b], mockCtx());
 
-      const result = await callHook("beforeRun", { orgId: "o", agentId: "a", runningCount: 0 });
+      const result = await callHook("beforeRun", { orgId: "o", packageId: "a", runningCount: 0 });
       expect(result).toEqual({ code: "blocked", message: "no" });
       expect(hookA).toHaveBeenCalledTimes(1);
       expect(hookB).toHaveBeenCalledTimes(0);
@@ -213,7 +213,7 @@ describe("module-loader", () => {
       const result = await callHook("afterRun", {
         orgId: "o",
         runId: "r",
-        agentId: "a",
+        packageId: "a",
         applicationId: "app",
         status: "success",
         cost: 0.05,
@@ -229,7 +229,7 @@ describe("module-loader", () => {
       const result = await callHook("afterRun", {
         orgId: "o",
         runId: "r",
-        agentId: "a",
+        packageId: "a",
         applicationId: "app",
         status: "success",
         cost: 0,
@@ -341,7 +341,7 @@ describe("module-loader", () => {
         emitEvent("onRunStatusChange", {
           orgId: "o",
           runId: "r",
-          agentId: "a",
+          packageId: "a",
           applicationId: "app",
           status: "success",
         }),

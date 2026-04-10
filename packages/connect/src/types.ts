@@ -40,6 +40,8 @@ export interface OAuthStateRecord {
   state: string;
   orgId: string;
   userId: string | null;
+  endUserId?: string | null;
+  applicationId: string;
   profileId: string;
   providerId: string;
   codeVerifier: string;
@@ -49,6 +51,17 @@ export interface OAuthStateRecord {
   expiresAt: string;
   authMode: string;
   oauthTokenSecret?: string;
+}
+
+/**
+ * Ephemeral OAuth state store — keyed by `state` (OAuth2) or `oauth_token` (OAuth1a).
+ * Implementations are expected to enforce TTL; expired records must be treated as absent.
+ * In-process Redis or local-memory impls are injected by the platform layer.
+ */
+export interface OAuthStateStore {
+  set(key: string, record: OAuthStateRecord, ttlSeconds: number): Promise<void>;
+  get(key: string): Promise<OAuthStateRecord | null>;
+  delete(key: string): Promise<void>;
 }
 
 export interface ScopeValidationResult {

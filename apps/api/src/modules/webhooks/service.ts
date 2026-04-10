@@ -14,7 +14,7 @@ import type {
   WebhookInfo,
   WebhookCreateResponse,
   WebhookDelivery as WebhookDeliveryInfo,
-} from "@appstrate/shared-types";
+} from "./types.ts";
 
 /**
  * Row types inferred directly from the module's Drizzle schema. Used as

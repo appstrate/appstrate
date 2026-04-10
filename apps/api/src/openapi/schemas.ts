@@ -355,7 +355,6 @@ export const schemas = {
       result: { type: "object" },
       state: { type: "object" },
       error: { type: "string" },
-      tokensUsed: { type: "integer" },
       tokenUsage: { type: "object" },
       startedAt: { type: "string", format: "date-time" },
       completedAt: { type: "string", format: "date-time" },

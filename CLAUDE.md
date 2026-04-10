@@ -51,9 +51,10 @@ appstrate/
 ├── apps/api/src/             # @appstrate/api — Hono backend (:3000)
 │   ├── index.ts              # Entry: middleware, auth, startup init, SPA config injection
 │   ├── lib/
-│   │   ├── cloud-loader.ts   # Dynamic import of @appstrate/cloud (optional EE module)
-│   │   └── boot.ts           # Boot sequence (loadModules → system init → scheduler)
-│   ├── routes/               # Route handlers (one file per domain)
+│   │   ├── boot.ts           # Boot sequence (loadModules → system init → scheduler)
+│   │   └── modules/          # Module loader, registry, migration helpers
+│   ├── modules/              # Built-in modules (webhooks, …) — each with schema, routes, migrations
+│   ├── routes/               # Core route handlers (one file per domain)
 │   ├── services/             # Business logic, Docker, adapters, scheduler
 │   ├── openapi/              # OpenAPI 3.1 spec (source of truth for all endpoints)
 │   │   ├── headers.ts        # Reusable response header definitions

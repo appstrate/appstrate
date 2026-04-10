@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { randomBytes, createHash } from "node:crypto";
-import { eq, and, gt } from "drizzle-orm";
-import { oauthStates } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
-import type { OAuthStateRecord } from "./types.ts";
+import type { OAuthStateRecord, OAuthStateStore } from "./types.ts";
 import type { Actor } from "./types.ts";
 import { getProviderOrThrow, getProviderOAuthCredentialsOrThrow } from "./registry.ts";
 import { parseTokenResponse, buildTokenHeaders } from "./token-utils.ts";
-import { extractErrorMessage, actorFromRow, actorToColumns } from "./utils.ts";
+import { extractErrorMessage } from "./utils.ts";
+
+const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 
 /**
  * Generate a cryptographically random base64url string.
@@ -37,6 +37,7 @@ export interface InitiateOAuthResult {
  */
 export async function initiateOAuth(
   db: Db,
+  store: OAuthStateStore,
   orgId: string,
   actor: Actor,
   profileId: string,
@@ -65,20 +66,23 @@ export async function initiateOAuth(
   const uniqueScopes = [...new Set(allScopes)];
   const scopeString = uniqueScopes.join(provider.scopeSeparator ?? " ");
 
-  // Store OAuth state in DB
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-  await db.insert(oauthStates).values({
+  const now = new Date();
+  const record: OAuthStateRecord = {
     state,
     orgId,
-    ...actorToColumns(actor),
+    userId: actor.type === "member" ? actor.id : null,
+    endUserId: actor.type === "end_user" ? actor.id : null,
+    applicationId,
     profileId,
     providerId,
-    applicationId,
     codeVerifier,
     scopesRequested: uniqueScopes,
     redirectUri,
-    expiresAt,
-  });
+    createdAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + OAUTH_STATE_TTL_SECONDS * 1000).toISOString(),
+    authMode: "oauth2",
+  };
+  await store.set(state, record, OAUTH_STATE_TTL_SECONDS);
 
   // Build authorization URL
   const params = new URLSearchParams({
@@ -121,46 +125,18 @@ export interface OAuthCallbackResult {
  */
 export async function handleOAuthCallback(
   db: Db,
+  store: OAuthStateStore,
   code: string,
   state: string,
 ): Promise<OAuthCallbackResult> {
-  // Look up the OAuth state
-  const rows = await db
-    .select()
-    .from(oauthStates)
-    .where(and(eq(oauthStates.state, state), gt(oauthStates.expiresAt, new Date())))
-    .limit(1);
-
-  if (rows.length === 0) {
+  const stateRow = await store.get(state);
+  if (!stateRow) {
     throw new Error("Invalid or expired OAuth state");
   }
 
-  const rawRow = rows[0]!;
-
-  // Reconstruct actor from the stored columns
-  const actor = actorFromRow(rawRow);
-
-  // Map to OAuthStateRecord
-  const stateRow: OAuthStateRecord = {
-    state: rawRow.state,
-    orgId: rawRow.orgId,
-    userId: rawRow.userId ?? null,
-    profileId: rawRow.profileId,
-    providerId: rawRow.providerId,
-    codeVerifier: rawRow.codeVerifier,
-    scopesRequested: (rawRow.scopesRequested as string[]) ?? [],
-    redirectUri: rawRow.redirectUri,
-    createdAt: rawRow.createdAt!.toISOString(),
-    expiresAt: rawRow.expiresAt.toISOString(),
-    authMode: rawRow.authMode,
-    oauthTokenSecret: rawRow.oauthTokenSecret ?? undefined,
-  };
-
-  // Check expiration
-  if (new Date(stateRow.expiresAt) < new Date()) {
-    await db.delete(oauthStates).where(eq(oauthStates.state, state));
-    throw new Error("OAuth state has expired");
-  }
+  const actor: Actor = stateRow.endUserId
+    ? { type: "end_user", id: stateRow.endUserId }
+    : { type: "member", id: stateRow.userId! };
 
   // Resolve the provider
   const provider = await getProviderOrThrow(db, stateRow.orgId, stateRow.providerId);
@@ -168,13 +144,10 @@ export async function handleOAuthCallback(
     throw new Error(`Provider '${stateRow.providerId}' has no token URL configured`);
   }
 
-  if (!rawRow.applicationId) {
-    throw new Error("Application context is required for OAuth2 callback");
-  }
   const oauthCreds = await getProviderOAuthCredentialsOrThrow(
     db,
     stateRow.providerId,
-    rawRow.applicationId,
+    stateRow.applicationId,
   );
 
   // Exchange code for tokens
@@ -224,7 +197,7 @@ export async function handleOAuthCallback(
   const parsed = parseTokenResponse(tokenData, stateRow.scopesRequested);
 
   // Clean up the OAuth state
-  await db.delete(oauthStates).where(eq(oauthStates.state, state));
+  await store.delete(state);
 
   return {
     providerId: stateRow.providerId,
@@ -232,7 +205,7 @@ export async function handleOAuthCallback(
     userId: stateRow.userId ?? null,
     actor,
     profileId: stateRow.profileId,
-    applicationId: rawRow.applicationId!,
+    applicationId: stateRow.applicationId,
     accessToken: parsed.accessToken,
     refreshToken: parsed.refreshToken,
     expiresAt: parsed.expiresAt,

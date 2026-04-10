@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, isEmbeddedDb, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
-import { oauthStates, packages, packageVersions } from "@appstrate/db/schema";
+import { packages, packageVersions } from "@appstrate/db/schema";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
@@ -46,7 +46,7 @@ export async function boot(): Promise<void> {
     await applyCoreMigrations();
   }
 
-  // Load modules (cloud, webhooks, provider-management, etc.)
+  // Load modules (cloud, webhooks, etc.)
   // Modules may run their own migrations in init() — core DB is ready.
   await loadModules(getModuleRegistry(), buildModuleInitContext());
 
@@ -140,15 +140,6 @@ export async function boot(): Promise<void> {
         error: err instanceof Error ? err.message : String(err),
       });
     }),
-    db
-      .delete(oauthStates)
-      .where(lt(oauthStates.expiresAt, new Date()))
-      .then((deleted) => logger.debug("Cleaned up expired OAuth states", { deleted }))
-      .catch((err) => {
-        logger.warn("Could not clean up expired OAuth states", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }),
     expireOldInvitations()
       .then((expiredCount) => {
         if (expiredCount > 0) logger.info("Expired old invitations", { count: expiredCount });

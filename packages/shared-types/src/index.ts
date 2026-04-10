@@ -486,10 +486,3 @@ export interface EndUserListResponse {
   hasMore: boolean;
   limit: number;
 }
-
-// --- Module Types ---
-// Module-owned public types live under `./modules/<id>.ts` and are re-exported
-// from the barrel so that consumers can keep importing from the single entry
-// point. When a module is extracted to its own npm package, the re-export can
-// be dropped without touching consumer code.
-export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./modules/webhooks.ts";

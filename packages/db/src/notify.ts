@@ -25,8 +25,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'error', NEW.error,
         'started_at', to_char(NEW.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'completed_at', to_char(NEW.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-        'duration', NEW.duration,
-        'tokens_used', NEW.tokens_used
+        'duration', NEW.duration
       )::text);
       RETURN NEW;
     END;

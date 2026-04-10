@@ -206,7 +206,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // --- Step 3: Pre-run module hook (quota, rate limits, feature gates, etc.) ---
   if (hasHook("beforeRun")) {
     const runningCount = await getRunningRunCountForOrg(orgId);
-    const rejection = await callHook("beforeRun", { orgId, agentId: agent.id, runningCount });
+    const rejection = await callHook("beforeRun", { orgId, packageId: agent.id, runningCount });
     if (rejection) {
       return {
         ok: false,

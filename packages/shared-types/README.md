@@ -8,7 +8,7 @@ Shared TypeScript type definitions used by both frontend (`apps/web`) and backen
 - **Enums**: `RunStatus`, `OrgRole`
 - **API response types**: `AgentListItem`, `AgentDetail`, `OrgPackageItem`, `AppConfig`, `Features`
 - **Provider types**: `ProviderStatus`, `ProviderConfig`, `ConnectionInfo`, `AvailableProvider`
-- **Headless types**: `ApplicationInfo`, `EndUserInfo`, `ApiKeyInfo`, `WebhookInfo`
+- **Headless types**: `ApplicationInfo`, `EndUserInfo`, `ApiKeyInfo`
 - **Utility functions**: `isPromptEmpty()`, `findMissingDependencies()`
 
 ## Usage

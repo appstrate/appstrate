@@ -5,43 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1775512040212,
-      "tag": "0000_peaceful_dreaming_celestial",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1775529020551,
-      "tag": "0001_awesome_silhouette",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1775530382933,
-      "tag": "0002_productive_blade",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1775656830201,
-      "tag": "0003_overrated_ozymandias",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1776067200000,
-      "tag": "0004_provider_management_into_core",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1775857672681,
-      "tag": "0005_reconcile_webhooks_module_extraction",
+      "when": 1775862589460,
+      "tag": "0000_initial",
       "breakpoints": true
     }
   ]
