@@ -40,13 +40,20 @@ async function applyPostgresMigrations(
 ): Promise<void> {
   const { db } = await import("@appstrate/db/client");
   const { migrate } = await import("drizzle-orm/postgres-js/migrator");
+  const { sql } = await import("drizzle-orm");
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- db type is compatible but schema generic differs
-  await migrate(db as any, {
-    migrationsFolder: migrationsDir,
-    migrationsTable,
-    migrationsSchema: "drizzle",
-  });
+  // Suppress NOTICE messages ("already exists, skipping") during migrations
+  await db.execute(sql`SET client_min_messages TO 'warning'`);
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- db type is compatible but schema generic differs
+    await migrate(db as any, {
+      migrationsFolder: migrationsDir,
+      migrationsTable,
+      migrationsSchema: "drizzle",
+    });
+  } finally {
+    await db.execute(sql`SET client_min_messages TO 'notice'`);
+  }
 }
 
 async function applyPGliteMigrations(

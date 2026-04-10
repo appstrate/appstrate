@@ -317,10 +317,17 @@ async function applyEmbeddedMigrations(): Promise<void> {
 async function applyCoreMigrations(): Promise<void> {
   const { resolve } = await import("node:path");
   const { migrate } = await import("drizzle-orm/postgres-js/migrator");
+  const { sql: rawSql } = await import("drizzle-orm");
 
   const migrationsFolder = resolve(import.meta.dir, "../../../../packages/db/drizzle");
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- db type is compatible but schema generic differs
-  await migrate(db as any, { migrationsFolder });
+  // Suppress NOTICE messages ("already exists, skipping") during migrations
+  await db.execute(rawSql`SET client_min_messages TO 'warning'`);
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- db type is compatible but schema generic differs
+    await migrate(db as any, { migrationsFolder });
+  } finally {
+    await db.execute(rawSql`SET client_min_messages TO 'notice'`);
+  }
   logger.info("Core migrations applied");
 }
