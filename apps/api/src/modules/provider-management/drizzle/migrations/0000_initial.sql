@@ -2,24 +2,24 @@
 
 CREATE TABLE IF NOT EXISTS "org_provider_keys" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-  "org_id" uuid NOT NULL,
+  "org_id" uuid NOT NULL REFERENCES "organizations" ("id") ON DELETE CASCADE,
   "label" text NOT NULL,
   "api" text NOT NULL,
   "base_url" text NOT NULL,
   "api_key_encrypted" text NOT NULL,
-  "created_by" text,
+  "created_by" text REFERENCES "user" ("id"),
   "created_at" timestamp DEFAULT now() NOT NULL,
   "updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "org_models" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-  "org_id" uuid NOT NULL,
+  "org_id" uuid NOT NULL REFERENCES "organizations" ("id") ON DELETE CASCADE,
   "label" text NOT NULL,
   "api" text NOT NULL,
   "base_url" text NOT NULL,
   "model_id" text NOT NULL,
-  "provider_key_id" uuid NOT NULL,
+  "provider_key_id" uuid NOT NULL REFERENCES "org_provider_keys" ("id") ON DELETE CASCADE,
   "input" jsonb,
   "context_window" integer,
   "max_tokens" integer,
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS "org_models" (
   "enabled" boolean DEFAULT true NOT NULL,
   "is_default" boolean DEFAULT false NOT NULL,
   "source" text DEFAULT 'custom' NOT NULL,
-  "created_by" text,
+  "created_by" text REFERENCES "user" ("id"),
   "created_at" timestamp DEFAULT now() NOT NULL,
   "updated_at" timestamp DEFAULT now() NOT NULL
 );

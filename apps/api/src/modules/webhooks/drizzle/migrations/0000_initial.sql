@@ -2,11 +2,11 @@
 
 CREATE TABLE IF NOT EXISTS "webhooks" (
   "id" text PRIMARY KEY NOT NULL,
-  "org_id" uuid NOT NULL,
-  "application_id" text NOT NULL,
+  "org_id" uuid NOT NULL REFERENCES "organizations" ("id") ON DELETE CASCADE,
+  "application_id" text NOT NULL REFERENCES "applications" ("id") ON DELETE CASCADE,
   "url" text NOT NULL,
   "events" text[] NOT NULL,
-  "package_id" text,
+  "package_id" text REFERENCES "packages" ("id") ON DELETE SET NULL,
   "payload_mode" text DEFAULT 'full' NOT NULL,
   "enabled" boolean DEFAULT true NOT NULL,
   "secret" text NOT NULL,
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS "webhooks" (
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "webhook_deliveries" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-  "webhook_id" text NOT NULL,
+  "webhook_id" text NOT NULL REFERENCES "webhooks" ("id") ON DELETE CASCADE,
   "event_id" text NOT NULL,
   "event_type" text NOT NULL,
   "status" text DEFAULT 'pending' NOT NULL,

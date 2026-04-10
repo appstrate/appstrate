@@ -9,27 +9,32 @@
  * Supports both PostgreSQL (via drizzle-orm migrator) and PGlite (via raw SQL).
  */
 
+import { isEmbeddedDb } from "@appstrate/db/client";
 import type { ModuleInitContext } from "@appstrate/core/module";
 import { logger } from "../logger.ts";
 
 /**
  * Apply Drizzle migrations for a module.
  *
- * @param ctx - Module init context (provides databaseUrl and isEmbeddedDb)
+ * `ctx` is accepted for contract symmetry with the module init signature but
+ * not read — the migrator targets the shared `db` client from @appstrate/db
+ * regardless of whether `ctx.databaseUrl` is set.
+ *
+ * @param _ctx - Module init context (unused, kept for API symmetry)
  * @param moduleId - Module identifier (used for migration tracking table name)
  * @param migrationsDir - Absolute path to the module's migrations directory
  */
 export async function applyModuleMigrations(
-  ctx: ModuleInitContext,
+  _ctx: ModuleInitContext,
   moduleId: string,
   migrationsDir: string,
 ): Promise<void> {
   const migrationsTable = `__drizzle_migrations_${moduleId.replace(/-/g, "_")}`;
 
-  if (ctx.isEmbeddedDb) {
+  if (isEmbeddedDb) {
     await applyPGliteMigrations(moduleId, migrationsDir, migrationsTable);
-  } else if (ctx.databaseUrl) {
-    await applyPostgresMigrations(ctx.databaseUrl, migrationsDir, migrationsTable);
+  } else {
+    await applyPostgresMigrations(migrationsDir, migrationsTable);
   }
 }
 
@@ -53,7 +58,6 @@ function lockKeyForModule(migrationsTable: string): bigint {
 }
 
 async function applyPostgresMigrations(
-  _databaseUrl: string,
   migrationsDir: string,
   migrationsTable: string,
 ): Promise<void> {

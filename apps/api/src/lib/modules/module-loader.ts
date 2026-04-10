@@ -9,9 +9,9 @@ import type {
   ModuleEvents,
   OpenApiSchemaEntry,
 } from "@appstrate/core/module";
-import { readdirSync, statSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import type { AppEnv } from "../../types/index.ts";
 import { logger } from "../logger.ts";
 
@@ -20,63 +20,20 @@ import { logger } from "../logger.ts";
 // ---------------------------------------------------------------------------
 
 const _modules: Map<string, AppstrateModule> = new Map();
-const _builtinLoaders = new Map<string, () => Promise<unknown>>();
-let _publicPathsCache: Set<string> | null = null;
 let _initialized = false;
-let _builtinsDiscovered = false;
 
 /**
- * Register a built-in platform module loader.
- * Built-in modules are resolved by short name (e.g. "webhooks")
- * instead of npm package specifier. They are only loaded if they
- * appear in the APPSTRATE_MODULES env var.
+ * Resolve a module specifier. If a directory `apps/api/src/modules/<specifier>/index.ts`
+ * exists, it's loaded as a built-in; otherwise the specifier is treated as an
+ * npm package name and loaded via dynamic import.
  */
-export function registerBuiltinModule(name: string, loader: () => Promise<unknown>): void {
-  _builtinLoaders.set(name, loader);
-}
-
-/**
- * Auto-discover built-in modules by scanning the modules directory.
- *
- * Each subdirectory containing an `index.ts` is registered as a built-in module
- * with id = directory name. Idempotent — safe to call multiple times.
- *
- * The modules dir is resolved relative to this file so it works in dev
- * (source layout) without requiring a build step.
- */
-export function discoverBuiltinModules(modulesDir?: string): string[] {
-  if (_builtinsDiscovered && !modulesDir) {
-    return Array.from(_builtinLoaders.keys());
-  }
-
+async function resolveSpecifier(specifier: string): Promise<unknown> {
   const here = dirname(fileURLToPath(import.meta.url));
-  const dir = modulesDir ?? resolve(here, "../../modules");
-  if (!existsSync(dir)) {
-    logger.warn("Modules directory not found", { dir });
-    return [];
+  const builtinPath = resolve(here, "../../modules", specifier, "index.ts");
+  if (existsSync(builtinPath)) {
+    return import(/* webpackIgnore: true */ builtinPath);
   }
-
-  const discovered: string[] = [];
-  for (const name of readdirSync(dir)) {
-    const subdir = join(dir, name);
-    let stat;
-    try {
-      stat = statSync(subdir);
-    } catch {
-      continue;
-    }
-    if (!stat.isDirectory()) continue;
-    const entry = join(subdir, "index.ts");
-    if (!existsSync(entry)) continue;
-
-    const loader = () => import(/* webpackIgnore: true */ entry);
-    registerBuiltinModule(name, loader);
-    discovered.push(name);
-  }
-
-  _builtinsDiscovered = true;
-  logger.debug("Built-in modules discovered", { modules: discovered });
-  return discovered;
+  return import(/* webpackIgnore: true */ specifier);
 }
 
 // ---------------------------------------------------------------------------
@@ -100,19 +57,16 @@ export async function loadModules(specifiers: string[], ctx: ModuleInitContext):
     return;
   }
 
-  // Ensure built-in module loaders are registered (idempotent, filesystem scan)
-  discoverBuiltinModules();
-
-  // Phase 1: Resolve all modules via dynamic import (or built-in loader)
+  // Phase 1: Resolve all modules via dynamic import (built-in path first, then npm specifier)
   const resolved: AppstrateModule[] = [];
   for (const specifier of specifiers) {
     try {
-      const builtinLoader = _builtinLoaders.get(specifier);
-      const raw = builtinLoader
-        ? await builtinLoader()
-        : await import(/* webpackIgnore: true */ specifier);
+      const raw = (await resolveSpecifier(specifier)) as {
+        default?: AppstrateModule;
+        appstrateModule?: AppstrateModule;
+      };
       // Support both default export and named `appstrateModule` export
-      const mod: AppstrateModule = raw.default ?? raw.appstrateModule;
+      const mod = (raw.default ?? raw.appstrateModule) as AppstrateModule | undefined;
       if (!mod?.manifest?.id) {
         throw new Error(`Module "${specifier}" is missing manifest.id`);
       }
@@ -190,11 +144,9 @@ export function getModules(): ReadonlyMap<string, AppstrateModule> {
   return _modules;
 }
 
-/** Collect all public paths from all loaded modules (cached as Set for O(1) lookup). */
+/** Collect all public paths from all loaded modules. */
 export function getModulePublicPaths(): Set<string> {
-  if (_publicPathsCache !== null) return _publicPathsCache;
-  _publicPathsCache = new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
-  return _publicPathsCache;
+  return new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
 }
 
 /** Collect routers from all modules and mount them on the app under `/api`. */
@@ -344,21 +296,13 @@ export async function shutdownModules(): Promise<void> {
     }
   }
   _modules.clear();
-  _publicPathsCache = null;
   _initialized = false;
 }
 
 /** Reset all state. Exported for tests only. */
 export function resetModules(): void {
   _modules.clear();
-  _publicPathsCache = null;
   _initialized = false;
-}
-
-/** Reset the built-in discovery cache. Exported for tests only. */
-export function resetBuiltinDiscovery(): void {
-  _builtinLoaders.clear();
-  _builtinsDiscovered = false;
 }
 
 // ---------------------------------------------------------------------------

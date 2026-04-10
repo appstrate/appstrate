@@ -20,9 +20,10 @@ import { applyModuleMigrations } from "./migrate.ts";
 // Registry — env-driven module specifiers
 // ---------------------------------------------------------------------------
 //
-// Built-in modules are auto-discovered at load time by scanning
-// `apps/api/src/modules/*/index.ts` (see `module-loader.ts:discoverBuiltinModules`).
-// Only modules listed in APPSTRATE_MODULES are actually initialized.
+// Each specifier in APPSTRATE_MODULES is resolved at boot by `loadModules`:
+// a matching `apps/api/src/modules/<specifier>/index.ts` directory is loaded
+// as a built-in, otherwise the specifier is treated as an npm package name
+// and resolved via dynamic import.
 // ---------------------------------------------------------------------------
 
 /**

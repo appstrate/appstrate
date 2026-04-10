@@ -14,33 +14,15 @@ describe("getModuleRegistry", () => {
     }
   });
 
-  it("returns empty array when APPSTRATE_MODULES is unset", () => {
+  it("returns empty array when APPSTRATE_MODULES is unset or empty", () => {
     delete process.env.APPSTRATE_MODULES;
     expect(getModuleRegistry()).toEqual([]);
-  });
-
-  it("returns empty array when APPSTRATE_MODULES is empty string", () => {
     process.env.APPSTRATE_MODULES = "";
     expect(getModuleRegistry()).toEqual([]);
   });
 
-  it("parses single module specifier", () => {
-    process.env.APPSTRATE_MODULES = "@appstrate/cloud";
-    expect(getModuleRegistry()).toEqual(["@appstrate/cloud"]);
-  });
-
-  it("parses multiple comma-separated specifiers", () => {
-    process.env.APPSTRATE_MODULES = "@appstrate/cloud,@acme/analytics";
+  it("parses comma-separated specifiers, trims whitespace, drops empty segments", () => {
+    process.env.APPSTRATE_MODULES = " @appstrate/cloud , @acme/analytics ,,";
     expect(getModuleRegistry()).toEqual(["@appstrate/cloud", "@acme/analytics"]);
-  });
-
-  it("trims whitespace around specifiers", () => {
-    process.env.APPSTRATE_MODULES = " @appstrate/cloud , @acme/analytics ";
-    expect(getModuleRegistry()).toEqual(["@appstrate/cloud", "@acme/analytics"]);
-  });
-
-  it("ignores empty segments from trailing commas", () => {
-    process.env.APPSTRATE_MODULES = "@appstrate/cloud,,,";
-    expect(getModuleRegistry()).toEqual(["@appstrate/cloud"]);
   });
 });
