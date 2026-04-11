@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { orgRoleEnum } from "@appstrate/db/schema";
+
+const ORG_ROLES = [...orgRoleEnum.enumValues];
+
 /**
  * All OpenAPI schema definitions (components/schemas).
  */
@@ -89,7 +93,7 @@ export const schemas = {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
-      role: { type: "string", enum: ["owner", "admin", "member"] },
+      role: { type: "string", enum: ORG_ROLES },
       createdAt: { type: "string", format: "date-time", description: "Creation timestamp" },
     },
   },
@@ -100,7 +104,7 @@ export const schemas = {
       userId: { type: "string" },
       displayName: { type: "string" },
       email: { type: "string" },
-      role: { type: "string", enum: ["owner", "admin", "member"] },
+      role: { type: "string", enum: ORG_ROLES },
       joinedAt: { type: "string", format: "date-time" },
     },
   },
@@ -110,7 +114,7 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       email: { type: "string" },
-      role: { type: "string", enum: ["owner", "admin", "member"] },
+      role: { type: "string", enum: ORG_ROLES },
       token: { type: "string" },
       expiresAt: { type: "string", format: "date-time" },
       createdAt: { type: "string", format: "date-time" },

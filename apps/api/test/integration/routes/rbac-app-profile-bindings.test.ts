@@ -24,15 +24,13 @@ import {
 import { seedConnectionProfile } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { appProfileProviderBindings } from "@appstrate/db/schema";
+import type { AssignableRole } from "../../../src/services/invitations.ts";
 
 const app = getTestApp();
 
 const PROVIDER_ID = "@system/test-provider";
 
-async function contextForRole(
-  ownerCtx: TestContext,
-  role: "admin" | "member" | "viewer",
-): Promise<TestContext> {
+async function contextForRole(ownerCtx: TestContext, role: AssignableRole): Promise<TestContext> {
   const user = await createTestUser();
   await addOrgMember(ownerCtx.orgId, user.id, role);
   return { ...ownerCtx, user, cookie: user.cookie };

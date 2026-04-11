@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ASSIGNABLE_ROLES } from "../../services/invitations.ts";
+
 export const organizationsPaths = {
   "/api/orgs": {
     get: {
@@ -230,7 +232,7 @@ export const organizationsPaths = {
               required: ["email", "role"],
               properties: {
                 email: { type: "string", format: "email" },
-                role: { type: "string", enum: ["admin", "member", "viewer"], default: "member" },
+                role: { type: "string", enum: [...ASSIGNABLE_ROLES], default: "member" },
               },
             },
           },
@@ -292,7 +294,7 @@ export const organizationsPaths = {
               type: "object",
               required: ["role"],
               properties: {
-                role: { type: "string", enum: ["viewer", "member", "admin"] },
+                role: { type: "string", enum: [...ASSIGNABLE_ROLES] },
               },
             },
           },
@@ -311,7 +313,7 @@ export const organizationsPaths = {
                 type: "object",
                 properties: {
                   userId: { type: "string" },
-                  role: { type: "string", enum: ["viewer", "member", "admin"] },
+                  role: { type: "string", enum: [...ASSIGNABLE_ROLES] },
                 },
               },
             },
@@ -368,7 +370,7 @@ export const organizationsPaths = {
               type: "object",
               required: ["role"],
               properties: {
-                role: { type: "string", enum: ["viewer", "member", "admin"] },
+                role: { type: "string", enum: [...ASSIGNABLE_ROLES] },
               },
             },
           },
@@ -387,7 +389,7 @@ export const organizationsPaths = {
                 type: "object",
                 properties: {
                   id: { type: "string" },
-                  role: { type: "string", enum: ["viewer", "member", "admin"] },
+                  role: { type: "string", enum: [...ASSIGNABLE_ROLES] },
                 },
               },
             },
