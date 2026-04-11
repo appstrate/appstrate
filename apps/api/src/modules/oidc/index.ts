@@ -25,9 +25,13 @@
  */
 
 import { resolve } from "node:path";
+import { z } from "zod";
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
 import { oidcAuthStrategy } from "./auth/strategy.ts";
 import { oidcBetterAuthPlugins } from "./auth/plugins.ts";
+import { createOidcRouter, createOAuthClientSchema, updateOAuthClientSchema } from "./routes.ts";
+import { oidcPaths } from "./openapi/paths.ts";
+import { oidcSchemas } from "./openapi/schemas.ts";
 
 const oidcModule: AppstrateModule = {
   manifest: { id: "oidc", name: "OIDC Identity Provider", version: "1.0.0" },
@@ -38,12 +42,47 @@ const oidcModule: AppstrateModule = {
     });
   },
 
+  createRouter() {
+    return createOidcRouter();
+  },
+
+  appScopedPaths: ["/api/oauth"],
+
   authStrategies() {
     return [oidcAuthStrategy];
   },
 
   betterAuthPlugins() {
     return oidcBetterAuthPlugins();
+  },
+
+  openApiPaths() {
+    return oidcPaths;
+  },
+
+  openApiComponentSchemas() {
+    return oidcSchemas;
+  },
+
+  openApiTags() {
+    return [{ name: "OAuth Clients", description: "OAuth 2.1 client registry for end-user auth" }];
+  },
+
+  openApiSchemas() {
+    return [
+      {
+        method: "POST",
+        path: "/api/oauth/clients",
+        jsonSchema: z.toJSONSchema(createOAuthClientSchema) as Record<string, unknown>,
+        description: "Create OAuth client",
+      },
+      {
+        method: "PATCH",
+        path: "/api/oauth/clients/{clientId}",
+        jsonSchema: z.toJSONSchema(updateOAuthClientSchema) as Record<string, unknown>,
+        description: "Update OAuth client",
+      },
+    ];
   },
 
   features: { oidc: true },
