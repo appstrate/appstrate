@@ -29,6 +29,7 @@
 
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { jwt } from "better-auth/plugins";
+import { getEnv } from "@appstrate/env";
 import { logger } from "../../../lib/logger.ts";
 import {
   resolveOrCreateEndUser,
@@ -73,6 +74,7 @@ async function sha256HexVerify(clientSecret: string, storedHash: string): Promis
 }
 
 export function oidcBetterAuthPlugins(): unknown[] {
+  const env = getEnv();
   return [
     // JWT plugin MUST be present before oauth-provider so that token
     // signing uses ES256 keys rotated through the module-owned `jwks`
@@ -92,6 +94,19 @@ export function oidcBetterAuthPlugins(): unknown[] {
       // mapper translates these into core RBAC strings at request time.
       scopes: APPSTRATE_SCOPES,
 
+      // `validAudiences` is what the plugin accepts on the RFC 8707
+      // `resource` parameter at the token endpoint. It drives the
+      // JWT-vs-opaque decision: `createUserTokens` only issues a JWT
+      // access token when `audience && !disableJwtPlugin`. Without a
+      // valid `resource`, the plugin mints opaque tokens that our OIDC
+      // auth strategy cannot match (it fast-rejects on `Bearer ey…`).
+      //
+      // We accept both `APP_URL` and `APP_URL/api/auth` so satellites
+      // can pass either the issuer or the Better Auth base URL as the
+      // resource indicator. The module README's satellite integration
+      // example documents `resource=<APP_URL>` as the canonical form.
+      validAudiences: [env.APP_URL, `${env.APP_URL}/api/auth`],
+
       // Match our existing admin-API hash so clients created before/without
       // the plugin continue to work.
       storeClientSecret: {
@@ -104,21 +119,36 @@ export function oidcBetterAuthPlugins(): unknown[] {
       // (We enforce `requirePKCE: true` at admin-API client creation time.)
 
       /**
-       * Inject `endUserId` + `applicationId` custom claims into every access
-       * token so the OIDC auth strategy can resolve the end-user from the
-       * JWT alone, without a DB lookup by email. Called once per token mint,
-       * including on refresh.
+       * Inject `endUserId` + `applicationId` + `orgId` custom claims into
+       * every access token so the OIDC auth strategy can resolve the
+       * end-user from the JWT alone, without a DB lookup by email. Called
+       * once per token mint, including on refresh.
+       *
+       * The owning Appstrate `applicationId` is recovered from the client
+       * metadata (stashed at `createClient` time — see
+       * `services/oauth-admin.ts`). The plugin does NOT natively thread
+       * `client.referenceId` through to this closure; `referenceId` here
+       * only reflects the consent-flow reference, which we don't use.
        *
        * Errors here fail the token issuance — we deliberately propagate
        * `UnverifiedEmailConflictError` so the end-user sees a "verify your
        * email" message instead of a silently-succeeded login that later
        * fails on every scoped request.
        */
-      customAccessTokenClaims: async ({ user, referenceId }) => {
-        if (!user || !referenceId) {
-          // Client-credentials grant (no user) or a client without a
-          // referenceId — nothing for us to inject. Return empty and let
-          // the plugin emit a standard token.
+      customAccessTokenClaims: async ({ user, metadata }) => {
+        if (!user) {
+          // Client-credentials grant (no user) — nothing for us to inject.
+          return {};
+        }
+        const applicationId =
+          metadata && typeof metadata === "object" && typeof metadata.applicationId === "string"
+            ? metadata.applicationId
+            : undefined;
+        if (!applicationId) {
+          logger.warn(
+            "oidc: oauth_client missing applicationId metadata — token will not carry end-user claims",
+            { module: "oidc", userId: user.id },
+          );
           return {};
         }
         try {
@@ -129,7 +159,7 @@ export function oidcBetterAuthPlugins(): unknown[] {
               name: user.name ?? null,
               emailVerified: user.emailVerified === true,
             },
-            referenceId,
+            applicationId,
           );
           return {
             endUserId: resolved.endUserId,
@@ -148,7 +178,7 @@ export function oidcBetterAuthPlugins(): unknown[] {
           logger.error("oidc: end-user resolution failed during token issuance", {
             module: "oidc",
             userId: user.id,
-            referenceId,
+            applicationId,
             error: err instanceof Error ? err.message : String(err),
           });
           throw err;
@@ -181,11 +211,13 @@ export function getOidcAuthApi(): {
   signInEmail: (args: {
     body: { email: string; password: string; rememberMe?: boolean };
     headers: Headers;
+    request?: Request;
     asResponse?: boolean;
   }) => Promise<Response | unknown>;
   oauth2Consent: (args: {
-    body: { accept: boolean; scope?: string; consent_code?: string };
+    body: { accept: boolean; scope?: string; oauth_query?: string };
     headers: Headers;
+    request?: Request;
     asResponse?: boolean;
   }) => Promise<Response | unknown>;
 } {

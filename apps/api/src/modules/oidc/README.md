@@ -187,6 +187,12 @@ const authorizeUrl =
 // res.redirect(authorizeUrl);
 
 // 3. Callback handler exchanges the code for tokens.
+//    IMPORTANT: `resource=<APPSTRATE_URL>` is REQUIRED for the plugin
+//    to issue a JWT access token (RFC 8707 resource indicator). Without
+//    it, `@better-auth/oauth-provider` mints an opaque token that the
+//    module's `Bearer ey…` auth strategy cannot match — all scoped
+//    requests would 401. The module's `validAudiences` config accepts
+//    both `APPSTRATE_URL` and `APPSTRATE_URL/api/auth`.
 const body = new URLSearchParams({
   grant_type: "authorization_code",
   code, // from ?code= on the callback URL
@@ -194,6 +200,7 @@ const body = new URLSearchParams({
   client_id: APPSTRATE_CLIENT_ID,
   client_secret: APPSTRATE_CLIENT_SECRET,
   code_verifier: verifier,
+  resource: APPSTRATE_URL, // REQUIRED — drives JWT vs opaque issuance
 });
 const tokenRes = await fetch(`${APPSTRATE_URL}/api/auth/oauth2/token`, {
   method: "POST",

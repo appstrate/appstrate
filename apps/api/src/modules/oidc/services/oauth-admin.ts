@@ -124,6 +124,13 @@ export async function createClient(
       redirectUris: input.redirectUris,
       scopes: input.scopes ?? ["openid", "profile", "email"],
       referenceId: applicationId,
+      // Stash the applicationId inside `metadata` as well so the Better
+      // Auth oauth-provider plugin's `customAccessTokenClaims` callback
+      // can recover it at mint time. The plugin does NOT natively pipe
+      // `client.referenceId` into the claims closure — it only passes
+      // `parseClientMetadata(client.metadata)` — so we use metadata as
+      // the side-channel. Changing this shape will break token minting.
+      metadata: JSON.stringify({ applicationId }),
       disabled: false,
       type: "web",
       tokenEndpointAuthMethod: "client_secret_basic",

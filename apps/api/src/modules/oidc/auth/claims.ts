@@ -20,6 +20,7 @@ const KNOWN_SCOPES = [
   "openid",
   "profile",
   "email",
+  "offline_access",
   "agents",
   "agents:write",
   "runs",
@@ -35,9 +36,13 @@ export function scopesToPermissions(scope?: string): Set<string> {
     if (s === "") continue;
     switch (s) {
       // Identity scopes — no resource permission.
+      // `offline_access` gates refresh-token issuance in the oauth-provider
+      // plugin; it does not grant any core API permission on its own but is
+      // a legitimate scope value carried in the access token's `scope` claim.
       case "openid":
       case "profile":
       case "email":
+      case "offline_access":
         break;
 
       case "agents":

@@ -254,9 +254,13 @@ export function createOidcRouter() {
       // signInEmail sets the session cookie on the response. We `asResponse:
       // true` so we can forward the Set-Cookie header, then issue our own
       // 302 back into the authorize endpoint with the original signed query.
+      // `request: c.req.raw` is required so Better Auth's endpoint wrapper
+      // populates `ctx.request` — missing it causes plugins that check
+      // `ctx.request` to throw 401 "request not found".
       const authApi = getOidcAuthApi();
       const authResponse = (await authApi.signInEmail({
         body: { email, password },
+        request: c.req.raw,
         headers: c.req.raw.headers,
         asResponse: true,
       })) as Response;
@@ -344,9 +348,18 @@ export function createOidcRouter() {
   });
 
   // POST /api/oauth/enduser/consent — verify CSRF then forward to Better
-  // Auth's `/oauth2/consent` endpoint with the plugin's consent_code so the
-  // authorization code is issued and the flow returns to the satellite's
-  // redirect_uri. Session cookie (from the login step) carries the user.
+  // Auth's `/oauth2/consent` endpoint with the signed `oauth_query` from
+  // the authorize redirect. The plugin's before-hook reads `oauth_query`
+  // from the body, verifies the HMAC signature against `ctx.context.secret`,
+  // and rehydrates the pending authorization state into `oAuthState` so the
+  // consent endpoint can mint the authorization code.
+  //
+  // The signed query lands here via `url.search`: our GET /consent handler
+  // echoes `url.search` into the form action, so the browser POSTs back to
+  // the same path with the signed query still attached. We strip the leading
+  // `?` and forward the remainder as `oauth_query`. Anything we injected
+  // ourselves (e.g. internal params) would break the signature — we don't
+  // add any, so the round-trip is verbatim.
   router.post("/oauth/enduser/consent", rateLimitByIp(60), async (c) => {
     const url = new URL(c.req.url);
 
@@ -357,21 +370,33 @@ export function createOidcRouter() {
     }
 
     const accept = readFormString(form, "accept") === "true";
-    const consentCode =
-      url.searchParams.get("consent_code") ?? url.searchParams.get("code") ?? undefined;
+    const oauthQuery = url.search.startsWith("?") ? url.search.slice(1) : url.search;
+    if (!oauthQuery) {
+      throw invalidRequest(
+        "consent page must be reached from the OAuth authorize endpoint — missing signed query",
+      );
+    }
 
     const authApi = getOidcAuthApi();
     const consentResponse = (await authApi.oauth2Consent({
       body: {
         accept,
-        ...(consentCode ? { consent_code: consentCode } : {}),
+        oauth_query: oauthQuery,
       },
+      // Better Auth's endpoint wrapper (`to-auth-endpoints.mjs`) checks
+      // `context.request instanceof Request` and the oauth-provider plugin
+      // throws "request not found" (401) inside `authorizeEndpoint` if it
+      // is missing — pass the raw Hono request through so `ctx.request` is
+      // populated end-to-end.
+      request: c.req.raw,
       headers: c.req.raw.headers,
       asResponse: true,
     })) as Response;
 
     // Forward the plugin's response verbatim (typically a 302 redirect to
-    // the client's redirect_uri with `?code=...` or `?error=...`).
+    // the client's redirect_uri with `?code=...` or `?error=...`, or a
+    // 200 JSON payload `{ redirect_uri: "..." }` depending on the Accept
+    // header the client sent).
     return consentResponse;
   });
 

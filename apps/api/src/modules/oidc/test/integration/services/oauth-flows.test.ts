@@ -9,16 +9,21 @@
  *    Auth's canonical endpoint, reachable via the module's public alias.
  *  - Client registration via `/api/oauth/clients` admin CRUD returns a
  *    plaintext secret exactly once.
- *  - `/oauth2/authorize` → login → consent → `/oauth2/token` PKCE flow
- *    produces a valid Bearer access token.
- *  - The minted access token can verify against the module's
+ *  - Full `/oauth2/authorize` → module consent POST → `/oauth2/token` PKCE
+ *    flow. The flow drives the module's custom consent handler (which
+ *    forwards the signed `oauth_query` to Better Auth's `/oauth2/consent`
+ *    endpoint) so we catch the exact production path — not a direct call
+ *    to Better Auth that would bypass our wiring.
+ *  - The minted access token verifies against the module's
  *    `verifyEndUserAccessToken` — proving the JWT is ES256-signed by the
- *    `jwks` table + carries the `endUserId` custom claim.
+ *    `jwks` table + carries the `endUserId` + `applicationId` custom
+ *    claims injected by `customAccessTokenClaims`.
  *  - PKCE enforcement: a tampered `code_verifier` fails exchange.
- *  - `/oauth2/token` with `grant_type=refresh_token` returns a new access
- *    token when the original flow issued `offline_access`.
  *
  * What this test intentionally does NOT assert:
+ *  - Refresh token grant (`grant_type=refresh_token`). Covered by the
+ *    upstream `@better-auth/oauth-provider` test suite and guaranteed by
+ *    `offline_access` being in the module's scope vocabulary.
  *  - Full `/userinfo` contents. That endpoint is served by Better Auth
  *    and covered by the upstream package's own test suite.
  *  - Browser consent screen rendering. Covered in
@@ -34,7 +39,8 @@ import {
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
-import { verifyEndUserAccessToken, resetJwksCache } from "../../../services/enduser-token.ts";
+import { resetJwksCache } from "../../../services/enduser-token.ts";
+import { decodeJwt } from "jose";
 
 const app = getTestApp({ modules: [oidcModule] });
 
@@ -125,13 +131,18 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     }
   });
 
-  it("mints an access token via the full PKCE flow and the token verifies against the JWKS", async () => {
+  it("mints an access token via the full PKCE flow through the module consent handler", async () => {
     const { cookie } = await signUpEndUser();
 
     const verifier = randomVerifier();
     const challenge = await sha256Base64Url(verifier);
     const state = base64url(crypto.getRandomValues(new Uint8Array(16)));
 
+    // ── Step 1 ── GET /oauth2/authorize with the session cookie. Better
+    // Auth persists the pending authorization state (in AsyncLocalStorage
+    // per-request) and replies with a 302 to our custom consent page,
+    // carrying the signed query string (`?...&exp=...&sig=...`) that the
+    // consent POST will echo back as `oauth_query`.
     const authorizeUrl =
       `/api/auth/oauth2/authorize?` +
       new URLSearchParams({
@@ -149,88 +160,128 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
       headers: { cookie, accept: "text/html" },
       redirect: "manual",
     });
+    expect(authorizeRes.status).toBe(302);
+    const consentLocation = authorizeRes.headers.get("location");
+    expect(consentLocation).toBeTruthy();
+    const consentUrl = new URL(consentLocation!, "http://localhost");
+    expect(consentUrl.pathname).toBe("/api/oauth/enduser/consent");
+    // Better Auth has signed the query — both params must be present.
+    expect(consentUrl.searchParams.get("sig")).toBeTruthy();
+    expect(consentUrl.searchParams.get("exp")).toBeTruthy();
 
-    // Authorized sessions land on the consent page (we did NOT set
-    // skipConsent on the client). The response is either a 302 redirect to
-    // the consent page or the consent page HTML — both are acceptable
-    // entry points for the next step.
-    expect([200, 302]).toContain(authorizeRes.status);
+    // ── Step 2 ── GET the consent page to obtain the CSRF token + cookie.
+    const consentPageRes = await app.request(consentUrl.pathname + consentUrl.search, {
+      method: "GET",
+      headers: { cookie, accept: "text/html" },
+    });
+    expect(consentPageRes.status).toBe(200);
+    const csrfCookie = (consentPageRes.headers.get("set-cookie") ?? "")
+      .split(",")
+      .map((c) => c.trim())
+      .find((c) => c.startsWith("oidc_csrf="));
+    expect(csrfCookie).toBeTruthy();
+    const csrfCookieValue = csrfCookie!.split(";")[0]!;
+    const consentHtml = await consentPageRes.text();
+    const csrfMatch = consentHtml.match(/name="_csrf" value="([^"]+)"/);
+    expect(csrfMatch).not.toBeNull();
+    const csrfToken = csrfMatch![1]!;
 
-    // Accept consent via Better Auth's endpoint. Session cookie carries the
-    // signed-in user; the plugin knows which pending authorization this
-    // corresponds to from the session state.
-    const consentRes = await app.request("/api/auth/oauth2/consent", {
+    // ── Step 3 ── POST /api/oauth/enduser/consent — our custom handler
+    // verifies CSRF, then forwards `oauth_query` (the signed query from the
+    // URL) to Better Auth's `/oauth2/consent`. This is the step that was
+    // silently broken before the `oauth_query` fix — previously we passed
+    // a non-existent `consent_code` parameter and Better Auth never found
+    // the pending authorization state.
+    const consentFormBody = new URLSearchParams({
+      _csrf: csrfToken,
+      accept: "true",
+    });
+    const consentRes = await app.request(consentUrl.pathname + consentUrl.search, {
       method: "POST",
       headers: {
-        cookie,
-        "Content-Type": "application/json",
+        cookie: `${cookie}; ${csrfCookieValue}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        // Request JSON back from Better Auth so we can parse the
+        // redirect_uri deterministically.
+        accept: "application/json",
+        origin: "http://localhost:3000",
       },
-      body: JSON.stringify({ accept: true }),
+      body: consentFormBody.toString(),
       redirect: "manual",
     });
+    expect([200, 302]).toContain(consentRes.status);
 
-    // Plugin replies with either a redirect carrying `code=...` or a
-    // JSON payload containing the redirect URL — both are valid.
-    let code: string | null = null;
-    if (consentRes.status === 200 || consentRes.status === 302) {
-      const location = consentRes.headers.get("location");
-      if (location) {
-        const cb = new URL(location, "http://localhost");
-        code = cb.searchParams.get("code");
-      } else {
-        try {
-          const json = (await consentRes.json()) as { redirectURI?: string };
-          if (json.redirectURI) {
-            const cb = new URL(json.redirectURI);
-            code = cb.searchParams.get("code");
-          }
-        } catch {
-          // Ignore — plugin version may return HTML.
-        }
-      }
+    // Extract the authorization code from either the Location header (302)
+    // or the JSON body (200). Body shape can be `{ redirect_uri }`,
+    // `{ url }`, or `{ redirect: true, url }` depending on plugin version.
+    let code: string | null;
+    const loc = consentRes.headers.get("location");
+    if (loc) {
+      code = new URL(loc, "http://localhost").searchParams.get("code");
+    } else {
+      const json = (await consentRes.json()) as {
+        redirect_uri?: string;
+        redirectURI?: string;
+        url?: string;
+      };
+      const redirectUri = json.redirect_uri ?? json.redirectURI ?? json.url;
+      expect(redirectUri).toBeTruthy();
+      code = new URL(redirectUri!).searchParams.get("code");
     }
+    expect(code).toBeTruthy();
 
-    // The plugin's exact response shape is version-specific. If we could
-    // not extract a code, the plugin is still at an intermediate state —
-    // skip the assertion chain below but keep the flow exercise: a failure
-    // at this point usually indicates a plugin regression, not our wiring.
-    if (!code) {
-      return;
-    }
-
-    // Exchange code for tokens.
-    const body = new URLSearchParams({
+    // ── Step 4 ── Exchange code + PKCE verifier for tokens. Must succeed.
+    // CRITICAL: `resource` is REQUIRED on the token request for the plugin
+    // to issue a JWT access token (RFC 8707 resource indicator). Without
+    // an audience, `createUserTokens → checkResource` returns undefined,
+    // `isJwtAccessToken = audience && !disableJwtPlugin` falls to false,
+    // and the plugin mints an opaque access token that our `Bearer ey...`
+    // strategy cannot match. Satellites MUST pass this on /token — see
+    // the module README satellite integration example.
+    const tokenBody = new URLSearchParams({
       grant_type: "authorization_code",
-      code,
+      code: code!,
       redirect_uri: "https://satellite.example.com/callback",
       client_id: clientId,
       client_secret: clientSecret,
       code_verifier: verifier,
+      resource: "http://localhost:3000",
     });
     const tokenRes = await app.request("/api/auth/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
+      body: tokenBody.toString(),
     });
-    expect([200, 400, 401]).toContain(tokenRes.status);
+    expect(tokenRes.status).toBe(200);
+    const tokens = (await tokenRes.json()) as {
+      access_token: string;
+      id_token?: string;
+      refresh_token?: string;
+      token_type?: string;
+      expires_in?: number;
+    };
+    expect(typeof tokens.access_token).toBe("string");
+    // Offline access was requested — refresh token must be issued.
+    expect(typeof tokens.refresh_token).toBe("string");
 
-    if (tokenRes.status === 200) {
-      const tokens = (await tokenRes.json()) as {
-        access_token?: string;
-        id_token?: string;
-        refresh_token?: string;
-      };
-      expect(typeof tokens.access_token).toBe("string");
-
-      // The access token should verify against the module's JWKS + decode
-      // into an `endUserId` custom claim thanks to
-      // `customAccessTokenClaims`. If the plugin version issues opaque
-      // tokens here (not JWTs), verify returns null — we degrade gracefully.
-      const verified = await verifyEndUserAccessToken(tokens.access_token!);
-      if (verified) {
-        expect(verified).toHaveProperty("sub");
-      }
-    }
+    // ── Step 5 ── Decode the access token (signature verification is
+    // covered by `test/integration/middleware/enduser-token-auth.test.ts`
+    // which spins up a local JWKS server). Here we assert the payload
+    // shape — proving `customAccessTokenClaims` actually ran and injected
+    // `endUserId` + `applicationId` + `orgId` via `resolveOrCreateEndUser`.
+    const payload = decodeJwt(tokens.access_token) as {
+      sub?: string;
+      scope?: string;
+      endUserId?: string;
+      applicationId?: string;
+      orgId?: string;
+    };
+    expect(payload.sub).toBeTruthy();
+    expect(payload.scope).toContain("openid");
+    expect(payload.scope).toContain("offline_access");
+    expect(payload.endUserId).toMatch(/^eu_/);
+    expect(payload.applicationId).toBeTruthy();
+    expect(payload.orgId).toBeTruthy();
   });
 
   it("PKCE enforcement rejects a tampered code_verifier at /oauth2/token", async () => {
@@ -251,27 +302,53 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
         code_challenge_method: "S256",
       }).toString();
 
-    await app.request(authorizeUrl, {
+    const authorizeRes = await app.request(authorizeUrl, {
       method: "GET",
       headers: { cookie, accept: "text/html" },
       redirect: "manual",
     });
+    expect(authorizeRes.status).toBe(302);
+    const consentUrl = new URL(authorizeRes.headers.get("location")!, "http://localhost");
 
-    const consentRes = await app.request("/api/auth/oauth2/consent", {
+    // GET consent page for CSRF token.
+    const consentPageRes = await app.request(consentUrl.pathname + consentUrl.search, {
+      headers: { cookie, accept: "text/html" },
+    });
+    const csrfCookie = (consentPageRes.headers.get("set-cookie") ?? "")
+      .split(",")
+      .map((c) => c.trim())
+      .find((c) => c.startsWith("oidc_csrf="))!
+      .split(";")[0]!;
+    const csrfToken = (await consentPageRes.text()).match(/name="_csrf" value="([^"]+)"/)![1]!;
+
+    // Accept consent via the module handler.
+    const consentRes = await app.request(consentUrl.pathname + consentUrl.search, {
       method: "POST",
-      headers: { cookie, "Content-Type": "application/json" },
-      body: JSON.stringify({ accept: true }),
+      headers: {
+        cookie: `${cookie}; ${csrfCookie}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        accept: "application/json",
+      },
+      body: new URLSearchParams({ _csrf: csrfToken, accept: "true" }).toString(),
       redirect: "manual",
     });
+    expect([200, 302]).toContain(consentRes.status);
 
-    let code: string | null = null;
-    const location = consentRes.headers.get("location");
-    if (location) {
-      const cb = new URL(location, "http://localhost");
-      code = cb.searchParams.get("code");
+    // Extract the authorization code.
+    let code: string | null;
+    const loc = consentRes.headers.get("location");
+    if (loc) {
+      code = new URL(loc, "http://localhost").searchParams.get("code");
+    } else {
+      const json = (await consentRes.json()) as {
+        redirect_uri?: string;
+        redirectURI?: string;
+        url?: string;
+      };
+      const redirectUri = json.redirect_uri ?? json.redirectURI ?? json.url;
+      code = new URL(redirectUri!).searchParams.get("code");
     }
-
-    if (!code) return; // Plugin-version-specific — skip if no code surfaced.
+    expect(code).toBeTruthy();
 
     // Exchange with a DIFFERENT verifier than the one that hashed into the
     // challenge — must fail.
@@ -280,14 +357,15 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "authorization_code",
-        code,
+        code: code!,
         redirect_uri: "https://satellite.example.com/callback",
         client_id: clientId,
         client_secret: clientSecret,
         code_verifier: randomVerifier(), // wrong verifier
       }).toString(),
     });
-    expect([400, 401, 403]).toContain(tokenRes.status);
+    // Plugin returns 401 UNAUTHORIZED on PKCE verification failure.
+    expect([400, 401]).toContain(tokenRes.status);
   });
 
   it("oauth-provider plugin is wired — /oauth2/authorize returns something other than 404", async () => {
