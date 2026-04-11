@@ -54,13 +54,23 @@ export interface LoadedPackage {
 export type AppEnv = {
   Variables: {
     user: { id: string; email: string; name: string };
-    endUser?: { id: string; applicationId: string; name: string | null; email: string | null };
+    endUser?: {
+      id: string;
+      applicationId: string;
+      name: string | null;
+      email: string | null;
+    };
     agent: LoadedPackage;
     orgId: string;
     orgSlug: string;
     orgRole: import("@appstrate/shared-types").OrgRole;
     permissions?: Set<string>;
-    authMethod: "session" | "api_key";
+    /**
+     * Auth method that resolved the request. Core values: `"session"`,
+     * `"api_key"`. Auth-strategy modules set their own identifier (e.g.
+     * `"oidc"`, `"mtls"`).
+     */
+    authMethod: string;
     apiKeyId: string | null;
     applicationId: string; // from API key auth or resolved by app-context middleware (X-App-Id)
     requestId: string;

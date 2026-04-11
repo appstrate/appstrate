@@ -13,8 +13,10 @@ import {
   emitEvent,
   shutdownModules,
   resetModules,
+  getModuleAuthStrategies,
+  getModuleBetterAuthPlugins,
 } from "../../../src/lib/modules/module-loader.ts";
-import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
+import type { AppstrateModule, ModuleInitContext, AuthStrategy } from "@appstrate/core/module";
 import type { AppConfig } from "@appstrate/shared-types";
 
 function mockModule(id: string, overrides: Partial<AppstrateModule> = {}): AppstrateModule {
@@ -346,6 +348,128 @@ describe("module-loader", () => {
           status: "success",
         }),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe("getModuleAuthStrategies", () => {
+    it("returns empty array in OSS mode (no modules loaded)", () => {
+      // resetModules() in beforeEach ensures clean state
+      expect(getModuleAuthStrategies()).toEqual([]);
+    });
+
+    it("flattens strategies from multiple modules in load order", async () => {
+      const stratA: AuthStrategy = {
+        id: "strat-a",
+        async authenticate() {
+          return null;
+        },
+      };
+      const stratB1: AuthStrategy = {
+        id: "strat-b1",
+        async authenticate() {
+          return null;
+        },
+      };
+      const stratB2: AuthStrategy = {
+        id: "strat-b2",
+        async authenticate() {
+          return null;
+        },
+      };
+      await loadModulesFromInstances(
+        [
+          mockModule("a", { authStrategies: () => [stratA] }),
+          mockModule("b", { authStrategies: () => [stratB1, stratB2] }),
+        ],
+        mockCtx(),
+      );
+      expect(getModuleAuthStrategies().map((s) => s.id)).toEqual([
+        "strat-a",
+        "strat-b1",
+        "strat-b2",
+      ]);
+    });
+
+    it("caches results — subsequent calls return the same array reference", async () => {
+      await loadModulesFromInstances(
+        [
+          mockModule("a", {
+            authStrategies: () => [
+              {
+                id: "s1",
+                async authenticate() {
+                  return null;
+                },
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      const first = getModuleAuthStrategies();
+      const second = getModuleAuthStrategies();
+      expect(second).toBe(first);
+    });
+
+    it("cache is invalidated on resetModules()", async () => {
+      await loadModulesFromInstances(
+        [
+          mockModule("a", {
+            authStrategies: () => [
+              {
+                id: "s1",
+                async authenticate() {
+                  return null;
+                },
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      expect(getModuleAuthStrategies()).toHaveLength(1);
+      resetModules();
+      expect(getModuleAuthStrategies()).toEqual([]);
+    });
+  });
+
+  describe("getModuleBetterAuthPlugins", () => {
+    it("returns empty array in OSS mode (no modules loaded)", () => {
+      expect(getModuleBetterAuthPlugins()).toEqual([]);
+    });
+
+    it("flattens plugins from multiple modules in load order", async () => {
+      const plugA = { id: "plug-a" };
+      const plugB1 = { id: "plug-b1" };
+      const plugB2 = { id: "plug-b2" };
+      await loadModulesFromInstances(
+        [
+          mockModule("a", { betterAuthPlugins: () => [plugA] }),
+          mockModule("b", { betterAuthPlugins: () => [plugB1, plugB2] }),
+        ],
+        mockCtx(),
+      );
+      expect(getModuleBetterAuthPlugins()).toEqual([plugA, plugB1, plugB2]);
+    });
+
+    it("caches results across calls", async () => {
+      await loadModulesFromInstances(
+        [mockModule("a", { betterAuthPlugins: () => [{ id: "x" }] })],
+        mockCtx(),
+      );
+      const first = getModuleBetterAuthPlugins();
+      const second = getModuleBetterAuthPlugins();
+      expect(second).toBe(first);
+    });
+
+    it("cache is invalidated on resetModules()", async () => {
+      await loadModulesFromInstances(
+        [mockModule("a", { betterAuthPlugins: () => [{ id: "x" }] })],
+        mockCtx(),
+      );
+      expect(getModuleBetterAuthPlugins()).toHaveLength(1);
+      resetModules();
+      expect(getModuleBetterAuthPlugins()).toEqual([]);
     });
   });
 });

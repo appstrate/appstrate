@@ -178,6 +178,15 @@ for (const moduleDir of moduleDirs) {
 const { registerTruncationTables } = await import("../../apps/api/test/helpers/db.ts");
 const { registerTestModule } = await import("../../apps/api/test/helpers/test-modules.ts");
 
+// Initialize Better Auth singleton for tests.
+// The production code path calls createAuth() from boot.ts after loadModules();
+// tests don't go through boot(), so we initialize directly here. Module-specific
+// integration tests that want to exercise auth strategies build their own app
+// via getTestApp({ modules }) — this createAuth() call just makes sure the
+// `auth` Proxy is backed by a real instance for the core/default tests.
+const { createAuth } = await import("../../packages/db/src/auth.ts");
+createAuth([]);
+
 for (const moduleDir of moduleDirs) {
   // Register the module itself so getTestApp() can mount its router
   const indexFile = join(moduleDir, "index.ts");

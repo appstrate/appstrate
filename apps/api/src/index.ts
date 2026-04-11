@@ -43,6 +43,7 @@ import { buildOpenApiSpec } from "./openapi/index.ts";
 import {
   getModulePublicPaths,
   getModuleAppScopedPaths,
+  getModuleAuthStrategies,
   getModuleOpenApiPaths,
   getModuleOpenApiComponentSchemas,
   getModuleOpenApiTags,
@@ -131,9 +132,44 @@ function skipOrgContext(path: string): boolean {
   return false;
 }
 
-// Auth middleware: verify Bearer API key OR Better Auth session (cookie-based)
+// Auth middleware: module auth strategies → Bearer API key → Better Auth session (cookie)
 app.use("*", async (c, next) => {
   if (skipAuth(c.req.path)) return next();
+
+  // Module-contributed auth strategies run first (first-match-wins).
+  // Strategies MUST return `null` fast when the request does not match their
+  // signature (e.g. a JWT strategy only claims `Bearer ey…`, never
+  // `Bearer ask_…`). A strategy claiming every request would shadow core API
+  // key auth — this is documented in `apps/api/src/modules/README.md`.
+  const strategies = getModuleAuthStrategies();
+  if (strategies.length > 0) {
+    const strategyReq = {
+      headers: c.req.raw.headers,
+      method: c.req.method,
+      path: c.req.path,
+    };
+    for (const strategy of strategies) {
+      const resolution = await strategy.authenticate(strategyReq);
+      if (!resolution) continue;
+      c.set("user", resolution.user);
+      c.set("orgId", resolution.orgId);
+      if (resolution.orgSlug !== undefined) c.set("orgSlug", resolution.orgSlug);
+      c.set("orgRole", resolution.orgRole);
+      // permissions: strategy-provided strings, cast to Set to match core `Set<string>` shape
+      c.set("permissions", new Set(resolution.permissions));
+      c.set("authMethod", resolution.authMethod);
+      c.set("applicationId", resolution.applicationId);
+      if (resolution.endUser) {
+        c.set("endUser", {
+          id: resolution.endUser.id,
+          applicationId: resolution.endUser.applicationId,
+          name: resolution.endUser.name ?? null,
+          email: resolution.endUser.email ?? null,
+        });
+      }
+      return next();
+    }
+  }
 
   // Try Bearer API key first
   const authHeader = c.req.header("Authorization");
@@ -234,7 +270,9 @@ app.use("*", async (c, next) => {
   const path = c.req.path;
   if (skipAuth(path)) return next(); // public paths also skip org context
   if (!c.get("user")) return next(); // no auth resolved — nothing to do
-  if (c.get("authMethod") === "api_key") return next(); // API key already resolved orgId + permissions
+  // Non-session auth (API key, module strategies) already resolved orgId
+  // and permissions inline. Only session auth reads X-Org-Id here.
+  if (c.get("authMethod") !== "session") return next();
   if (skipOrgContext(path)) return next();
 
   return requireOrgContext()(c, next);
@@ -242,7 +280,9 @@ app.use("*", async (c, next) => {
 
 // Permission resolution for session auth (after org context sets orgRole)
 app.use("*", async (c, next) => {
-  if (c.get("authMethod") === "api_key") return next(); // already resolved
+  // Non-session auth methods (API key, module strategies) set permissions
+  // inline from their own resolution — skip the role-based derivation.
+  if (c.get("authMethod") !== "session") return next();
   const orgRole = c.get("orgRole");
   if (orgRole) {
     c.set("permissions", resolvePermissions(orgRole));

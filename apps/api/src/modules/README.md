@@ -99,6 +99,89 @@ The trade-off is that disabling a module leaves a handful of inert permission st
 
 Names are defined in `packages/core/src/module.ts` (`ModuleHooks`, `ModuleEvents`). To add a new hook or event, update that file first so both platform and modules see the same contract.
 
+## Auth strategies
+
+Modules can contribute custom authentication strategies that run in the request pipeline **before** core auth (Bearer ask\_ API key → session cookie). This is how OIDC/JWT, mTLS, SAML, webhook-HMAC, and similar auth mechanisms plug in without touching `apps/api/src/index.ts`.
+
+A strategy is a plain object implementing `AuthStrategy` from `@appstrate/core/module`:
+
+```ts
+import type { AppstrateModule, AuthStrategy } from "@appstrate/core/module";
+
+const jwtStrategy: AuthStrategy = {
+  id: "my-jwt",
+  async authenticate({ headers, method, path }) {
+    const auth = headers.get("authorization") ?? "";
+    // Fast no-match path — return null immediately for anything not ours
+    if (!auth.startsWith("Bearer ey")) return null;
+
+    const payload = await verifyJwt(auth.slice(7));
+    if (!payload) return null;
+
+    return {
+      user: { id: payload.sub, email: payload.email, name: payload.name },
+      orgId: payload.org_id,
+      orgRole: "admin",
+      authMethod: "my-jwt",
+      applicationId: payload.app_id,
+      permissions: ["runs:read", "runs:write"],
+      // Optional end-user impersonation
+      endUser: {
+        id: payload.enduser_id,
+        applicationId: payload.app_id,
+        role: payload.role ?? null,
+      },
+    };
+  },
+};
+
+const myModule: AppstrateModule = {
+  manifest: { id: "my-auth", name: "My Auth", version: "1.0.0" },
+  async init() {},
+  authStrategies() {
+    return [jwtStrategy];
+  },
+};
+```
+
+**Strategy discipline — critically important.** Each strategy MUST return `null` as early as possible when the request is not for it. A strategy that claims every request would shadow core API key auth (`Bearer ask_…`) and the session cookie fallback. The framework does not enforce this — it is the strategy author's responsibility to write a fast-path check on the header shape (JWT strategies check `Bearer ey…`, mTLS checks client cert presence, etc.).
+
+**Ordering.** Strategies are tried in module load order (topological sort by `manifest.dependencies`). First non-null resolution wins. Core auth (API key + cookie) runs only when every strategy has returned `null`.
+
+**What a resolution sets on `c`.** Mirrors what core API-key auth sets: `user`, `orgId`, `orgSlug?`, `orgRole`, `authMethod`, `applicationId`, `permissions` (as a string set), optional `endUser`. Downstream middleware treats strategy-authenticated requests the same as API-key requests — org-context and permission-resolution middlewares are skipped because the strategy has already resolved everything.
+
+**`permissions` type.** `readonly string[]` at the contract layer (not the typed `Permission[]` union) to keep the core RBAC catalog out of `@appstrate/core`. Use permission strings that match core's `resource:action` vocabulary — `requirePermission()` guards will 403 on unknown strings at request time.
+
+## Better Auth plugins
+
+Modules can contribute Better Auth plugins (e.g. `jwt`, `oauthProvider`, `passkey`, a future SAML plugin) via `betterAuthPlugins()`. The contributed plugins are merged with the platform's base plugins when the Better Auth singleton is constructed at boot:
+
+```ts
+import type { AppstrateModule } from "@appstrate/core/module";
+import type { BetterAuthPluginList } from "@appstrate/db/auth";
+import { jwt } from "better-auth/plugins/jwt";
+
+const myModule: AppstrateModule = {
+  manifest: { id: "my-auth", name: "My Auth", version: "1.0.0" },
+  async init() {},
+  betterAuthPlugins(): BetterAuthPluginList {
+    return [jwt({ jwks: { keyPairConfig: { alg: "ES256" } } })];
+  },
+};
+```
+
+The return type is `unknown[]` at the core contract level (to keep Better Auth types out of `@appstrate/core`, which is published on npm). Modules that want strong typing can import `BetterAuthPluginList` from `@appstrate/db/auth` and annotate their return value — the boot integration site narrows `unknown[]` to the correct type via a cast.
+
+**Lifecycle.** `createAuth()` runs exactly once at boot, after `loadModules()`. By then every module has been initialized and had the chance to declare its plugin contributions. The Better Auth singleton is then constructed with `[...basePlugins, ...modulePlugins]`. The `auth` export is a Proxy that forwards to the singleton — do not read properties off `auth` at module-evaluation time (before boot), only at request time inside handlers.
+
+## End-user run visibility
+
+Core enforces a single hard rule: when an end-user is in the request context (via `Appstrate-User` impersonation or via a module auth strategy setting `endUser` on `AuthResolution`), the runs endpoints (`list/get/logs` in `apps/api/src/routes/runs.ts`) filter strictly to `endUser.id`. There is no core knob, hook, or role vocabulary to widen this. Core has no opinion on RBAC.
+
+A module that needs a different visibility model (team-wide, org-admin end-users, etc.) expresses it out-of-band — typically by exposing its own routes under its own prefix (e.g. `/api/<mod>/runs`) that call the `listPackageRuns` service directly with whatever filters the module decides. Core stays strict and predictable; modules compose alternative UX on top.
+
+Applications embedding Appstrate headlessly that want an "admin dashboard" view simply don't send `Appstrate-User` on admin calls — a raw API key request has no `endUser` context, so the self-filter doesn't apply and the caller sees every run in the application (which `applicationId` still scopes).
+
 ## OpenAPI contributions
 
 Modules that expose HTTP routes should also provide `openApiPaths()` (path items) and, if they use shared response/request shapes, `openApiComponentSchemas()` (component schemas) plus `openApiSchemas()` (Zod → OpenAPI registry entries for request-body validation). The loader merges contributions from every loaded module into the final spec; `scripts/verify-openapi.ts` replays the same merge at check time and flags any mismatch between declared paths and the baseline.

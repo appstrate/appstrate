@@ -7,10 +7,15 @@ import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
-import { loadModules, getModules, callHook } from "./modules/module-loader.ts";
+import {
+  loadModules,
+  getModules,
+  callHook,
+  getModuleBetterAuthPlugins,
+} from "./modules/module-loader.ts";
 import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
 import { registerEmailOverrides } from "@appstrate/emails";
-import { setBeforeSignupHook } from "@appstrate/db/auth";
+import { setBeforeSignupHook, createAuth, type BetterAuthPluginList } from "@appstrate/db/auth";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
@@ -49,6 +54,11 @@ export async function boot(): Promise<void> {
   // Load modules (cloud, webhooks, etc.)
   // Modules may run their own migrations in init() — core DB is ready.
   await loadModules(getModuleRegistry(), buildModuleInitContext());
+
+  // Initialize Better Auth AFTER modules have registered their plugin
+  // contributions. `createAuth()` narrows the `unknown[]` from the core
+  // contract to Better Auth's plugin list type at this integration site.
+  createAuth(getModuleBetterAuthPlugins() as BetterAuthPluginList);
 
   // Wire module contributions that were declared on the module contract
   for (const mod of getModules().values()) {

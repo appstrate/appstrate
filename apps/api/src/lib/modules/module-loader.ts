@@ -7,6 +7,7 @@ import type {
   ModuleInitContext,
   ModuleHooks,
   ModuleEvents,
+  AuthStrategy,
 } from "@appstrate/core/module";
 import { readdirSync, statSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,8 @@ import { logger } from "../logger.ts";
 
 const _modules: Map<string, AppstrateModule> = new Map();
 let _publicPathsCache: Set<string> | null = null;
+let _authStrategiesCache: AuthStrategy[] | null = null;
+let _betterAuthPluginsCache: unknown[] | null = null;
 let _initialized = false;
 
 // Built-in module discovery: scanned once, then cached for the process lifetime.
@@ -259,6 +262,46 @@ export function getModuleOpenApiTags(): Array<{ name: string; description?: stri
 }
 
 /**
+ * Collect auth strategies contributed by all loaded modules.
+ *
+ * Strategies run in module load order, BEFORE core auth (Bearer ask_ API key
+ * → session cookie). First-match-wins: the first strategy returning a
+ * non-null resolution claims the request. Cached on first call.
+ *
+ * OSS invariant: returns `[]` when no module provides `authStrategies()`.
+ */
+export function getModuleAuthStrategies(): AuthStrategy[] {
+  if (_authStrategiesCache !== null) return _authStrategiesCache;
+  const strategies: AuthStrategy[] = [];
+  for (const mod of _modules.values()) {
+    const contrib = mod.authStrategies?.();
+    if (contrib) strategies.push(...contrib);
+  }
+  _authStrategiesCache = strategies;
+  return strategies;
+}
+
+/**
+ * Collect Better Auth plugins contributed by all loaded modules.
+ *
+ * Passed through as `unknown[]` at this layer — the boot integration site
+ * in `packages/db/src/auth.ts` narrows to `BetterAuthPluginList` before
+ * calling `createAuth(plugins)`. Keeps Better Auth types out of core.
+ *
+ * OSS invariant: returns `[]` when no module provides `betterAuthPlugins()`.
+ */
+export function getModuleBetterAuthPlugins(): unknown[] {
+  if (_betterAuthPluginsCache !== null) return _betterAuthPluginsCache;
+  const plugins: unknown[] = [];
+  for (const mod of _modules.values()) {
+    const contrib = mod.betterAuthPlugins?.();
+    if (contrib) plugins.push(...contrib);
+  }
+  _betterAuthPluginsCache = plugins;
+  return plugins;
+}
+
+/**
  * Merge module feature flags into the base AppConfig.
  * Each module's `features` is a `Record<string, boolean>` merged via `Object.assign`.
  */
@@ -372,6 +415,8 @@ export async function shutdownModules(): Promise<void> {
   }
   _modules.clear();
   _publicPathsCache = null;
+  _authStrategiesCache = null;
+  _betterAuthPluginsCache = null;
   _initialized = false;
 }
 
@@ -379,6 +424,8 @@ export async function shutdownModules(): Promise<void> {
 export function resetModules(): void {
   _modules.clear();
   _publicPathsCache = null;
+  _authStrategiesCache = null;
+  _betterAuthPluginsCache = null;
   _builtinCache = null;
   _initialized = false;
 }

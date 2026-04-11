@@ -59,8 +59,21 @@ const socialProviders: Record<string, { clientId: string; clientSecret: string }
     : undefined;
 
 // ─── Plugins ─────────────────────────────────────────────────
+//
+// `basePlugins` are the platform-owned plugins (always present, gated on env).
+// Module-contributed plugins are merged in at boot via `createAuth(extras)`.
 
-const plugins = [
+/**
+ * Better Auth plugin list type. Exported so modules can strongly type their
+ * `betterAuthPlugins()` return value without going through the `unknown[]`
+ * erasure at the `@appstrate/core` contract layer.
+ */
+export type BetterAuthPluginList = NonNullable<Parameters<typeof betterAuth>[0]["plugins"]>;
+
+// Note: NO type annotation on `basePlugins` — TypeScript infers the specific
+// plugin types (e.g. magicLink's `signInMagicLink` method), which flow through
+// to `buildAuth()` so consumers retain typed access to plugin-contributed API.
+const basePlugins = [
   ...(smtpEnabled
     ? [
         magicLink({
@@ -152,128 +165,197 @@ const plugins = [
     : []),
 ];
 
-// ─── Auth ──────────────────────────────────────────────────
+// ─── Auth — lazy factory + Proxy shim ─────────────────────
+//
+// IMPORTANT: the `auth` export is a Proxy backed by a lazy-initialized
+// singleton. The underlying Better Auth instance is constructed only when
+// `createAuth(extraPlugins)` is called during boot — AFTER modules have
+// registered their plugin contributions via `AppstrateModule.betterAuthPlugins()`.
+//
+// Do NOT read properties off `auth` at module-evaluation time (top-level
+// code paths that import `auth` and immediately touch `auth.api.*` will
+// crash because `createAuth()` has not yet run). All consumers must defer
+// access to request-time (inside Hono handlers) or post-boot code paths.
+//
+// Test harness: `apps/api/test/setup/preload.ts` calls `createAuth([])`
+// during preload so module test runs boot cleanly.
 
-export const auth = betterAuth({
-  database: drizzleAdapter(db, {
-    provider: "pg",
-    schema,
-  }),
-
-  baseURL: env.APP_URL,
-  basePath: "/api/auth",
-  secret: env.BETTER_AUTH_SECRET,
-
-  plugins,
-
-  emailAndPassword: {
-    enabled: true,
-    minPasswordLength: 8,
-    requireEmailVerification: smtpEnabled,
-    ...(smtpEnabled && {
-      sendResetPassword: async ({ user, url }) => {
-        try {
-          const { subject, html } = renderEmail("reset-password", {
-            email: user.email,
-            url,
-            locale: "fr",
-          });
-          await smtpTransport!.sendMail({
-            from: env.SMTP_FROM,
-            to: user.email,
-            subject,
-            html,
-          });
-        } catch {
-          // Fire-and-forget — don't block reset flow if email fails
-        }
-      },
+function buildAuth(extraPlugins: BetterAuthPluginList = []) {
+  return betterAuth({
+    database: drizzleAdapter(db, {
+      provider: "pg",
+      schema,
     }),
-  },
 
-  ...(smtpEnabled && {
-    emailVerification: {
-      sendOnSignUp: true,
-      autoSignInAfterVerification: true,
-      sendVerificationEmail: async ({ user, url }) => {
-        try {
-          const { subject, html } = renderEmail("verification", {
-            user,
-            url,
-            locale: "fr",
-          });
-          await smtpTransport!.sendMail({
-            from: env.SMTP_FROM,
-            to: user.email,
-            subject,
-            html,
-          });
-        } catch {
-          // Fire-and-forget — don't block signup if email fails
-        }
-      },
-    },
-  }),
+    baseURL: env.APP_URL,
+    basePath: "/api/auth",
+    secret: env.BETTER_AUTH_SECRET,
 
-  socialProviders,
+    plugins: [...basePlugins, ...extraPlugins],
 
-  account: {
-    accountLinking: {
-      enabled: anySocialEnabled,
-      trustedProviders: [
-        ...(googleEnabled ? ["google" as const] : []),
-        ...(githubEnabled ? ["github" as const] : []),
-      ],
-      allowDifferentEmails: true,
-    },
-  },
-
-  session: {
-    expiresIn: 60 * 60 * 24 * 7, // 7 days
-    updateAge: 60 * 60 * 24, // Refresh every 24h
-    cookieCache: {
+    emailAndPassword: {
       enabled: true,
-      maxAge: 5 * 60, // 5 minutes
-    },
-  },
-
-  user: {
-    additionalFields: {},
-    changeEmail: {
-      enabled: true,
-      updateEmailWithoutVerification: !smtpEnabled,
-    },
-  },
-
-  trustedOrigins: env.TRUSTED_ORIGINS,
-
-  ...(env.COOKIE_DOMAIN
-    ? {
-        advanced: {
-          crossSubDomainCookies: {
-            enabled: true,
-            domain: env.COOKIE_DOMAIN,
-          },
-        },
-      }
-    : {}),
-
-  databaseHooks: {
-    user: {
-      create: {
-        before: async (user) => {
-          if (_beforeSignupHook) {
-            await _beforeSignupHook(user.email);
+      minPasswordLength: 8,
+      requireEmailVerification: smtpEnabled,
+      ...(smtpEnabled && {
+        sendResetPassword: async ({ user, url }) => {
+          try {
+            const { subject, html } = renderEmail("reset-password", {
+              email: user.email,
+              url,
+              locale: "fr",
+            });
+            await smtpTransport!.sendMail({
+              from: env.SMTP_FROM,
+              to: user.email,
+              subject,
+              html,
+            });
+          } catch {
+            // Fire-and-forget — don't block reset flow if email fails
           }
         },
-        after: async (user) => {
-          await db.insert(profiles).values({
-            id: user.id,
-            displayName: user.name || user.email,
-            language: "fr",
-          });
+      }),
+    },
+
+    ...(smtpEnabled && {
+      emailVerification: {
+        sendOnSignUp: true,
+        autoSignInAfterVerification: true,
+        sendVerificationEmail: async ({ user, url }) => {
+          try {
+            const { subject, html } = renderEmail("verification", {
+              user,
+              url,
+              locale: "fr",
+            });
+            await smtpTransport!.sendMail({
+              from: env.SMTP_FROM,
+              to: user.email,
+              subject,
+              html,
+            });
+          } catch {
+            // Fire-and-forget — don't block signup if email fails
+          }
+        },
+      },
+    }),
+
+    socialProviders,
+
+    account: {
+      accountLinking: {
+        enabled: anySocialEnabled,
+        trustedProviders: [
+          ...(googleEnabled ? ["google" as const] : []),
+          ...(githubEnabled ? ["github" as const] : []),
+        ],
+        allowDifferentEmails: true,
+      },
+    },
+
+    session: {
+      expiresIn: 60 * 60 * 24 * 7, // 7 days
+      updateAge: 60 * 60 * 24, // Refresh every 24h
+      cookieCache: {
+        enabled: true,
+        maxAge: 5 * 60, // 5 minutes
+      },
+    },
+
+    user: {
+      additionalFields: {},
+      changeEmail: {
+        enabled: true,
+        updateEmailWithoutVerification: !smtpEnabled,
+      },
+    },
+
+    trustedOrigins: env.TRUSTED_ORIGINS,
+
+    ...(env.COOKIE_DOMAIN
+      ? {
+          advanced: {
+            crossSubDomainCookies: {
+              enabled: true,
+              domain: env.COOKIE_DOMAIN,
+            },
+          },
+        }
+      : {}),
+
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (user) => {
+            if (_beforeSignupHook) {
+              await _beforeSignupHook(user.email);
+            }
+          },
+          after: async (user) => {
+            await db.insert(profiles).values({
+              id: user.id,
+              displayName: user.name || user.email,
+              language: "fr",
+            });
+          },
         },
       },
     },
+  });
+}
+
+// ─── Factory + lazy singleton ────────────────────────────
+//
+// `_auth` is typed from `ReturnType<typeof buildAuth>` so the full inferred
+// plugin-contributed API (e.g. `auth.api.signInMagicLink` from magicLink)
+// stays visible to consumers via the `auth` Proxy.
+
+type AuthInstance = ReturnType<typeof buildAuth>;
+
+let _auth: AuthInstance | null = null;
+
+/**
+ * Construct the Better Auth singleton. Idempotent — subsequent calls are
+ * no-ops. Must be called once during boot, after modules have loaded, so
+ * that any plugins contributed via `AppstrateModule.betterAuthPlugins()`
+ * are merged with `basePlugins` before the instance is built.
+ *
+ * Tests: `apps/api/test/setup/preload.ts` calls `createAuth([])` so that
+ * later imports of `auth` find an initialized instance.
+ */
+export function createAuth(extraPlugins: BetterAuthPluginList = []): void {
+  if (_auth) return;
+  _auth = buildAuth(extraPlugins);
+}
+
+/** Get the Better Auth instance. Throws if `createAuth()` has not yet run. */
+export function getAuth(): AuthInstance {
+  if (!_auth) {
+    throw new Error(
+      "auth not initialized — createAuth() must run during boot before any auth access",
+    );
+  }
+  return _auth;
+}
+
+/**
+ * Back-compat `auth` export. A Proxy that forwards all property access to
+ * the lazy-initialized singleton. Exists so existing `import { auth }` sites
+ * (apps/api/src/index.ts, test helpers) don't need a mechanical rewrite.
+ *
+ * Methods are `.bind()`-wrapped so Better Auth calls that rely on `this`
+ * continue to work. Property reads happen at request time (inside Hono
+ * handlers), well after `createAuth()` has run in boot.
+ */
+export const auth = new Proxy({} as AuthInstance, {
+  get(_target, prop) {
+    const instance = getAuth() as unknown as Record<string | symbol, unknown>;
+    const value = instance[prop];
+    if (typeof value === "function") {
+      return (value as (...args: unknown[]) => unknown).bind(instance);
+    }
+    return value;
   },
-});
+}) as AuthInstance;

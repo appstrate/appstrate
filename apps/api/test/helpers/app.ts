@@ -137,9 +137,44 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     return auth.handler(c.req.raw);
   });
 
+  // Module auth strategies — collected from `extraModules` (the test harness
+  // doesn't go through the production module loader, so we iterate directly
+  // over the module list passed via `options.modules` / discovery).
+  const moduleAuthStrategies = extraModules.flatMap((m) => m.authStrategies?.() ?? []);
+
   // Auth middleware (same as production)
   app.use("*", async (c, next) => {
     if (skipAuth(c.req.path)) return next();
+
+    // Module-contributed auth strategies run first (first-match-wins).
+    // Mirrors the production path in `apps/api/src/index.ts`.
+    if (moduleAuthStrategies.length > 0) {
+      const strategyReq = {
+        headers: c.req.raw.headers,
+        method: c.req.method,
+        path: c.req.path,
+      };
+      for (const strategy of moduleAuthStrategies) {
+        const resolution = await strategy.authenticate(strategyReq);
+        if (!resolution) continue;
+        c.set("user", resolution.user);
+        c.set("orgId", resolution.orgId);
+        if (resolution.orgSlug !== undefined) c.set("orgSlug", resolution.orgSlug);
+        c.set("orgRole", resolution.orgRole);
+        c.set("permissions", new Set(resolution.permissions));
+        c.set("authMethod", resolution.authMethod);
+        c.set("applicationId", resolution.applicationId);
+        if (resolution.endUser) {
+          c.set("endUser", {
+            id: resolution.endUser.id,
+            applicationId: resolution.endUser.applicationId,
+            name: resolution.endUser.name ?? null,
+            email: resolution.endUser.email ?? null,
+          });
+        }
+        return next();
+      }
+    }
 
     // Try Bearer API key first
     const authHeader = c.req.header("Authorization");
@@ -221,14 +256,16 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     const path = c.req.path;
     if (skipAuth(path)) return next();
     if (!c.get("user")) return next();
-    if (c.get("authMethod") === "api_key") return next();
+    // Non-session auth (API key, module strategies) already resolved orgId.
+    if (c.get("authMethod") !== "session") return next();
     if (skipOrgContext(path)) return next();
     return requireOrgContext()(c, next);
   });
 
   // Permission resolution for session auth (after org context sets orgRole)
   app.use("*", async (c, next) => {
-    if (c.get("authMethod") === "api_key") return next();
+    // Non-session auth methods set permissions inline — skip derivation.
+    if (c.get("authMethod") !== "session") return next();
     const orgRole = c.get("orgRole");
     if (orgRole) {
       c.set("permissions", resolvePermissions(orgRole));

@@ -100,6 +100,37 @@ export interface AppstrateModule {
   features?: Record<string, boolean>;
 
   /**
+   * Custom authentication strategies contributed by this module.
+   *
+   * Strategies are tried in module load order, BEFORE core auth (Bearer ask_
+   * API key → session cookie). The first strategy whose `authenticate()` returns
+   * a non-null `AuthResolution` claims the request; subsequent strategies and
+   * core auth are skipped.
+   *
+   * Strategies MUST return `null` fast when the request does not match their
+   * signature (e.g. a JWT strategy should return `null` for anything not
+   * starting with `Bearer ey...`). A strategy that claims every request would
+   * shadow core API key auth — this is author discipline, not a framework
+   * guarantee. See `apps/api/src/modules/README.md` for the full contract.
+   */
+  authStrategies?(): AuthStrategy[];
+
+  /**
+   * Plugins to contribute to the Better Auth instance.
+   *
+   * Returned values are passed through as `unknown[]` at this contract layer
+   * to keep Better Auth types out of `@appstrate/core` (which is published on
+   * npm). The boot integration site in `packages/db/src/auth.ts` narrows them
+   * to Better Auth's `BetterAuthPluginList` before constructing the auth
+   * instance.
+   *
+   * Called once at boot, after `init()`, during `createAuth()`. Modules that
+   * want strong typing can import `BetterAuthPluginList` from
+   * `@appstrate/db/auth` and annotate their return type.
+   */
+  betterAuthPlugins?(): unknown[];
+
+  /**
    * Named hooks (first-match-wins).
    * The platform invokes hooks by name — only the first module that provides
    * a given hook is called. For broadcast-to-all semantics, use `events`.
@@ -182,6 +213,79 @@ export interface OpenApiSchemaEntry {
   jsonSchema: Record<string, unknown>;
   /** Human-readable description for reporting. */
   description: string;
+}
+
+// ---------------------------------------------------------------------------
+// Auth strategy contribution types
+//
+// Generic framework-agnostic interface. OIDC/JWT, mTLS, SAML, webhook-HMAC,
+// etc. all implement the same `AuthStrategy` shape. Naming intentionally
+// avoids OIDC vocabulary — this is a general auth-pipeline extension point.
+// ---------------------------------------------------------------------------
+
+/** Request context passed to an `AuthStrategy.authenticate()` call. */
+export interface AuthStrategyRequest {
+  /** Raw request headers (direct ref to `c.req.raw.headers`). */
+  headers: Headers;
+  /** HTTP method (uppercase, e.g. "POST"). */
+  method: string;
+  /** Request path (e.g. "/api/runs"). */
+  path: string;
+}
+
+/**
+ * Resolution returned by a successful `AuthStrategy.authenticate()` call.
+ * Mirrors the shape the core auth middleware sets on `c` via `c.set(...)`.
+ *
+ * `permissions` is `readonly string[]` (not the typed `Permission` union) to
+ * avoid dragging the RBAC permission catalog into `@appstrate/core`. At
+ * request time, `requirePermission(resource, action)` validates membership;
+ * invalid strings from a strategy surface as a 403 at the guard site.
+ */
+export interface AuthResolution {
+  user: { id: string; email: string; name: string };
+  orgId: string;
+  orgSlug?: string;
+  orgRole: "owner" | "admin" | "member";
+  /**
+   * Strategy-chosen identifier for this auth method (e.g. "oidc", "mtls",
+   * "webhook-hmac"). Written to `c.set("authMethod", ...)`. NOT constrained
+   * to the core values `"session" | "api_key"`.
+   */
+  authMethod: string;
+  applicationId: string;
+  /** Permission strings already resolved by the strategy. */
+  permissions: readonly string[];
+  /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
+  endUser?: {
+    id: string;
+    applicationId: string;
+    name?: string;
+    email?: string;
+  };
+  /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */
+  extra?: Record<string, unknown>;
+}
+
+/**
+ * A custom authentication strategy. Implementations parse request headers
+ * (JWT, mTLS cert, HMAC sig, …), resolve the caller, and return an
+ * `AuthResolution`.
+ *
+ * Discipline: return `null` as early as possible when the request is clearly
+ * not for this strategy. A strategy that claims `true` on every request would
+ * shadow core API-key auth — authors are responsible for fast no-match paths.
+ */
+export interface AuthStrategy {
+  /** Stable id for logging / telemetry (e.g. "oidc-jwt", "mtls"). */
+  id: string;
+  /**
+   * Attempt to authenticate a request. Return `AuthResolution` to claim the
+   * request, `null` to pass to the next strategy / core auth. Throwing is
+   * allowed for hard auth errors (e.g. malformed JWT) and will surface as a
+   * 500 unless the strategy wraps it in an `ApiError`.
+   */
+  authenticate(req: AuthStrategyRequest): Promise<AuthResolution | null>;
 }
 
 // ---------------------------------------------------------------------------
