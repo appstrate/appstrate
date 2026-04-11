@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/core",
-  "version": "2.10.6",
+  "version": "2.10.7",
   "description": "Shared validation, storage, and utility library for Appstrate packages",
   "license": "Apache-2.0",
   "type": "module",
@@ -60,7 +60,7 @@
     "./module": "./src/module.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "^1.2.1",
+    "@afps-spec/schema": "^1.3.1",
     "fflate": "^0.8.0",
     "pino": "^10.3.1",
     "semver": "^7.7.1",
