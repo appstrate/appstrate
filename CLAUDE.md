@@ -176,11 +176,12 @@ Lifecycle hooks/events are invoked directly via `callHook("beforeRun", …)` / `
 
 **Module-owned schemas:** Each built-in module owns its database tables following the cloud pattern. Module schemas live in `apps/api/src/modules/<name>/schema.ts` with Drizzle migrations in `drizzle/migrations/`. Each module has its own migration tracking table (`__drizzle_migrations_<module_id>`). Modules apply their migrations in `init()` via `applyModuleMigrations()`.
 
-| Module   | Tables owned                     |
-| -------- | -------------------------------- |
-| webhooks | `webhooks`, `webhook_deliveries` |
+| Module   | Tables owned                                                                                                   |
+| -------- | -------------------------------------------------------------------------------------------------------------- |
+| webhooks | `webhooks`, `webhook_deliveries`                                                                               |
+| oidc     | `jwks`, `oauth_client`, `oauth_access_token`, `oauth_refresh_token`, `oauth_consent`, `oidc_end_user_profiles` |
 
-Scheduling and provider management both live in core (scheduler in `apps/api/src/services/scheduler.ts` + `package_schedules` table, models/provider-keys in `apps/api/src/services/org-models.ts` + `apps/api/src/services/org-provider-keys.ts` + `org_models`/`org_provider_keys` tables in `packages/db/src/schema/provider-keys.ts`). Both were briefly extracted as modules during the `feat/platform-modules` iteration, then moved back once it became clear that the coupling with `runs` (FK, filtering, enrichment, realtime, model resolution on the hot path) made module isolation cost more than it delivered. Only webhooks remains a module because it has a truly clean boundary with core — a single `onRunStatusChange` event listener, no reach-backs, isolated BullMQ delivery worker.
+Scheduling and provider management both live in core (scheduler in `apps/api/src/services/scheduler.ts` + `package_schedules` table, models/provider-keys in `apps/api/src/services/org-models.ts` + `apps/api/src/services/org-provider-keys.ts` + `org_models`/`org_provider_keys` tables in `packages/db/src/schema/provider-keys.ts`). Both were briefly extracted as modules during the `feat/platform-modules` iteration, then moved back once it became clear that the coupling with `runs` (FK, filtering, enrichment, realtime, model resolution on the hot path) made module isolation cost more than it delivered. The remaining built-ins are `webhooks` (clean `onRunStatusChange` boundary — no reach-backs, isolated BullMQ delivery worker) and `oidc` (the reference consumer of the Phase 0 `authStrategies()` + `betterAuthPlugins()` extension points — end-user OAuth 2.1 / OIDC Identity Provider for embedding apps, owns a shadow `oidc_end_user_profiles` table so core `end_users` stays vocabulary-free).
 
 **FK direction rule:** Backward references (module → core) use Drizzle `.references()` inline in the module schema — safe because core tables always exist before any module migration runs. Forward references (core → module) are impossible to express via Drizzle without leaking the module schema into core, so if a future module ever needs one it must add it via raw SQL inside its own migration. Core schemas never reference module-owned tables.
 
