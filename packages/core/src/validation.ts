@@ -10,6 +10,9 @@ import {
   providerManifestSchema as afpsProviderManifestSchema,
   authModeEnum as afpsAuthModeEnum,
   setupGuide as afpsSetupGuide,
+  oauthTokenAuthMethodEnum as afpsOAuthTokenAuthMethodEnum,
+  oauthTokenContentTypeEnum as afpsOAuthTokenContentTypeEnum,
+  credentialEncodingEnum as afpsCredentialEncodingEnum,
 } from "@afps-spec/schema";
 
 // ─────────────────────────────────────────────
@@ -137,9 +140,14 @@ export const providerManifestSchema = afpsProviderManifestSchema.safeExtend({
 /** Inferred type from the provider manifest schema. */
 export type ProviderManifest = z.infer<typeof providerManifestSchema>;
 
-export type OAuthTokenAuthMethod = "client_secret_basic" | "client_secret_post";
-export type OAuthTokenContentType = "application/json" | "application/x-www-form-urlencoded";
-export type CredentialEncoding = "basic_api_key_x" | "basic_email_token";
+/**
+ * OAuth2 token-endpoint auth method, `tokenContentType` and API-key credential
+ * pre-encoding are part of AFPS v1 (§7.2 and §7.4, since @afps-spec/schema@1.2.2).
+ * Types are derived from the canonical Zod enums so appstrate cannot drift.
+ */
+export type OAuthTokenAuthMethod = z.infer<typeof afpsOAuthTokenAuthMethodEnum>;
+export type OAuthTokenContentType = z.infer<typeof afpsOAuthTokenContentTypeEnum>;
+export type CredentialEncoding = z.infer<typeof afpsCredentialEncodingEnum>;
 
 /** Resolved provider definition built from a raw manifest JSONB object. */
 export interface ResolvedProviderDefinition {

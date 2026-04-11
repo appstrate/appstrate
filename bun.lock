@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@afps-spec/schema": "^1.2.1",
+        "@afps-spec/schema": "^1.2.2",
         "@appstrate/core": "workspace:*",
         "@electric-sql/pglite": "^0.4.3",
         "ajv": "^8.18.0",
@@ -147,7 +147,7 @@
       "name": "@appstrate/core",
       "version": "2.10.5",
       "dependencies": {
-        "@afps-spec/schema": "^1.2.1",
+        "@afps-spec/schema": "^1.2.2",
         "fflate": "^0.8.0",
         "pino": "^10.3.1",
         "semver": "^7.7.1",
@@ -222,7 +222,7 @@
     "@redocly/openapi-core@2.25.2": "patches/@redocly%2Fopenapi-core@2.25.2.patch",
   },
   "packages": {
-    "@afps-spec/schema": ["@afps-spec/schema@1.2.1", "", { "dependencies": { "ajv": "^8.17.1", "semver": "^7.7.4", "zod": "^4.3.6" } }, "sha512-x1t5HSsoqTTuk6m8H+bwg6gkA3JXeTh5USi4/+O7yAUtOVm4QXhHiNBTNupMxpSYcwM7J0mDwoMIzRoTmTPcJA=="],
+    "@afps-spec/schema": ["@afps-spec/schema@1.2.2", "", { "dependencies": { "ajv": "^8.17.1", "semver": "^7.7.4", "zod": "^4.3.6" } }, "sha512-Fe0eQ/PLXCKXnghlZ6iSFXzUqJDRv+dlhlGfOINtmaAWrWuEkMpgavNhTaVFTw7mNrWyX17GbVPUWaTsrmMuAg=="],
 
     "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.73.0", "", { "dependencies": { "json-schema-to-ts": "^3.1.1" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-URURVzhxXGJDGUGFunIOtBlSl7KWvZiAAKY/ttTkZAkXT9bTPqdk2eK0b8qqSxXpikh3QKPnPYpiyX98zf5ebw=="],
 
