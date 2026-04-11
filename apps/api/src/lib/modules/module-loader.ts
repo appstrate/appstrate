@@ -23,6 +23,7 @@ const _modules: Map<string, AppstrateModule> = new Map();
 let _publicPathsCache: Set<string> | null = null;
 let _authStrategiesCache: AuthStrategy[] | null = null;
 let _betterAuthPluginsCache: unknown[] | null = null;
+let _drizzleSchemasCache: Record<string, unknown> | null = null;
 let _initialized = false;
 
 // Built-in module discovery: scanned once, then cached for the process lifetime.
@@ -302,6 +303,28 @@ export function getModuleBetterAuthPlugins(): unknown[] {
 }
 
 /**
+ * Collect Drizzle table definitions contributed by all loaded modules.
+ *
+ * Better Auth's Drizzle adapter needs these to resolve `findOne({ model })`
+ * calls against module-owned tables (e.g. the OIDC module's `jwks` and
+ * `oauthClient` tables). Passed through as `Record<string, unknown>` at
+ * this layer — the boot integration site narrows the values to Drizzle
+ * tables before passing to `createAuth(plugins, schemas)`.
+ *
+ * OSS invariant: returns `{}` when no module provides `drizzleSchemas()`.
+ */
+export function getModuleDrizzleSchemas(): Record<string, unknown> {
+  if (_drizzleSchemasCache !== null) return _drizzleSchemasCache;
+  const schemas: Record<string, unknown> = {};
+  for (const mod of _modules.values()) {
+    const contrib = mod.drizzleSchemas?.();
+    if (contrib) Object.assign(schemas, contrib);
+  }
+  _drizzleSchemasCache = schemas;
+  return schemas;
+}
+
+/**
  * Merge module feature flags into the base AppConfig.
  * Each module's `features` is a `Record<string, boolean>` merged via `Object.assign`.
  */
@@ -417,6 +440,7 @@ export async function shutdownModules(): Promise<void> {
   _publicPathsCache = null;
   _authStrategiesCache = null;
   _betterAuthPluginsCache = null;
+  _drizzleSchemasCache = null;
   _initialized = false;
 }
 
@@ -426,6 +450,7 @@ export function resetModules(): void {
   _publicPathsCache = null;
   _authStrategiesCache = null;
   _betterAuthPluginsCache = null;
+  _drizzleSchemasCache = null;
   _builtinCache = null;
   _initialized = false;
 }

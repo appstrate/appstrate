@@ -12,6 +12,7 @@ import {
   getModules,
   callHook,
   getModuleBetterAuthPlugins,
+  getModuleDrizzleSchemas,
 } from "./modules/module-loader.ts";
 import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
 import { registerEmailOverrides } from "@appstrate/emails";
@@ -55,10 +56,12 @@ export async function boot(): Promise<void> {
   // Modules may run their own migrations in init() — core DB is ready.
   await loadModules(getModuleRegistry(), buildModuleInitContext());
 
-  // Initialize Better Auth AFTER modules have registered their plugin
-  // contributions. `createAuth()` narrows the `unknown[]` from the core
-  // contract to Better Auth's plugin list type at this integration site.
-  createAuth(getModuleBetterAuthPlugins() as BetterAuthPluginList);
+  // Initialize Better Auth AFTER modules have registered their plugin +
+  // schema contributions. `createAuth()` narrows the `unknown[]` from the
+  // core contract to Better Auth's plugin list type, and merges module
+  // Drizzle schemas into the adapter's model map so plugins like
+  // @better-auth/oauth-provider can resolve their own tables.
+  createAuth(getModuleBetterAuthPlugins() as BetterAuthPluginList, getModuleDrizzleSchemas());
 
   // Wire module contributions that were declared on the module contract
   for (const mod of getModules().values()) {

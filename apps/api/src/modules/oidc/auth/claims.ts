@@ -8,16 +8,31 @@
  * core Permission strings that `requirePermission()` checks against on every
  * route handler.
  *
- * We deliberately keep the mapping narrow in Phase 1: only scopes that map to
- * an existing core resource are honored. Unknown scopes are silently dropped
- * (they do not produce an error — the token may be valid for a different
- * embedding app's scope vocabulary).
+ * Unknown scopes are dropped (they do not produce an error — the token may be
+ * valid for a different embedding app's scope vocabulary) but emit a warn log
+ * so operators can spot silent authorization drift when a satellite upgrades
+ * its scope catalog faster than the platform.
  */
+
+import { logger } from "../../../lib/logger.ts";
+
+const KNOWN_SCOPES = [
+  "openid",
+  "profile",
+  "email",
+  "agents",
+  "agents:write",
+  "runs",
+  "runs:write",
+  "connections",
+  "connections:write",
+] as const;
 
 export function scopesToPermissions(scope?: string): Set<string> {
   const permissions = new Set<string>();
   if (!scope) return permissions;
   for (const s of scope.split(/\s+/)) {
+    if (s === "") continue;
     switch (s) {
       // Identity scopes — no resource permission.
       case "openid":
@@ -50,8 +65,11 @@ export function scopesToPermissions(scope?: string): Set<string> {
         permissions.add("connections:disconnect");
         break;
 
-      // Unknown scope — drop silently.
       default:
+        logger.warn(
+          "oidc: unknown OAuth scope dropped — token carries a scope not recognized by core permissions",
+          { module: "oidc", scope: s, knownScopes: KNOWN_SCOPES as unknown as string[] },
+        );
         break;
     }
   }

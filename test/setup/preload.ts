@@ -178,14 +178,13 @@ for (const moduleDir of moduleDirs) {
 const { registerTruncationTables } = await import("../../apps/api/test/helpers/db.ts");
 const { registerTestModule } = await import("../../apps/api/test/helpers/test-modules.ts");
 
-// Initialize Better Auth singleton for tests.
-// The production code path calls createAuth() from boot.ts after loadModules();
-// tests don't go through boot(), so we initialize directly here. Module-specific
-// integration tests that want to exercise auth strategies build their own app
-// via getTestApp({ modules }) — this createAuth() call just makes sure the
-// `auth` Proxy is backed by a real instance for the core/default tests.
-const { createAuth } = await import("../../packages/db/src/auth.ts");
-createAuth([]);
+// Phase 1: discover modules, register them, and collect any Better Auth
+// plugins they contribute. We must do this BEFORE `createAuth()` so the
+// singleton is built with every module's auth pipeline in place — the
+// OIDC module for example contributes `oauth-provider` which backs the
+// `/api/auth/oauth2/*` endpoints exercised by its integration tests.
+const allBetterAuthPlugins: unknown[] = [];
+const allDrizzleSchemas: Record<string, unknown> = {};
 
 for (const moduleDir of moduleDirs) {
   // Register the module itself so getTestApp() can mount its router
@@ -194,6 +193,13 @@ for (const moduleDir of moduleDirs) {
     const imported: { default?: AppstrateModule } = await import(indexFile);
     if (imported.default) {
       registerTestModule(imported.default);
+      if (typeof imported.default.betterAuthPlugins === "function") {
+        const plugins = imported.default.betterAuthPlugins() ?? [];
+        for (const p of plugins) allBetterAuthPlugins.push(p);
+      }
+      if (typeof imported.default.drizzleSchemas === "function") {
+        Object.assign(allDrizzleSchemas, imported.default.drizzleSchemas() ?? {});
+      }
     }
   }
 
@@ -209,3 +215,15 @@ for (const moduleDir of moduleDirs) {
     );
   }
 }
+
+// Phase 2: initialize Better Auth singleton with every module's plugins.
+// The production code path calls createAuth() from boot.ts after loadModules();
+// tests don't go through boot(), so we initialize directly here with the
+// same plugin list. Subsequent `getTestApp({ modules })` calls reuse this
+// singleton so strategy tests and E2E OAuth flow tests see a coherent
+// auth surface with no double-initialization cost.
+const { createAuth } = await import("../../packages/db/src/auth.ts");
+// `allBetterAuthPlugins` is typed as `unknown[]` at the module contract
+// layer; createAuth takes a `BetterAuthPluginList`. The cast is safe because
+// each module's own typecheck verified its return type at compile time.
+createAuth(allBetterAuthPlugins as never, allDrizzleSchemas);

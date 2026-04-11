@@ -59,3 +59,76 @@ describe("renderConsentPage", () => {
     expect(out).toContain("Vos connexions (lecture et écriture)");
   });
 });
+
+describe("page branding + CSRF", () => {
+  const branding = {
+    name: "Mon Workspace",
+    logoUrl: "https://cdn.example.com/logo.png",
+    primaryColor: "#22c55e",
+    accentColor: "#16a34a",
+    supportEmail: null,
+    fromName: "Mon Workspace",
+  } as const;
+
+  it("login page shows branded header with logo + primary color in buttons", () => {
+    const out = renderLoginPage({
+      queryString: "?client_id=c1",
+      branding,
+    }).value;
+    expect(out).toContain('src="https://cdn.example.com/logo.png"');
+    expect(out).toContain("Mon Workspace");
+    expect(out).toContain("background: #22c55e");
+    // Title reflects the branded name
+    expect(out).toContain("<title>Connexion à Mon Workspace</title>");
+  });
+
+  it("login page injects CSRF hidden field when token provided", () => {
+    const out = renderLoginPage({
+      queryString: "",
+      csrfToken: "tok_abcdef",
+    }).value;
+    expect(out).toContain('name="_csrf" value="tok_abcdef"');
+  });
+
+  it("login page omits CSRF field when token absent (backward compat)", () => {
+    const out = renderLoginPage({ queryString: "" }).value;
+    expect(out).not.toContain('name="_csrf"');
+  });
+
+  it("consent page adds CSRF to both accept and deny forms", () => {
+    const out = renderConsentPage({
+      clientName: "Acme",
+      scopes: ["openid"],
+      action: "/api/oauth/enduser/consent",
+      csrfToken: "tok_consent",
+    }).value;
+    const csrfMatches = out.match(/name="_csrf" value="tok_consent"/g);
+    expect(csrfMatches).toHaveLength(2);
+  });
+
+  it("consent page uses branded name in the body sentence", () => {
+    const out = renderConsentPage({
+      clientName: "Acme",
+      scopes: ["openid"],
+      action: "/x",
+      branding,
+    }).value;
+    expect(out).toContain("votre compte\n          Mon Workspace.");
+  });
+
+  it("sanitizes malformed primaryColor hex to platform default", () => {
+    const out = renderLoginPage({
+      queryString: "",
+      branding: {
+        name: "Acme",
+        logoUrl: null,
+        primaryColor: "'; alert(1); //" as string,
+        accentColor: "#4338ca",
+        supportEmail: null,
+        fromName: "Acme",
+      },
+    }).value;
+    expect(out).not.toContain("alert(1)");
+    expect(out).toContain("background: #4f46e5");
+  });
+});

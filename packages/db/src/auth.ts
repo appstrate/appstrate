@@ -180,11 +180,14 @@ const basePlugins = [
 // Test harness: `apps/api/test/setup/preload.ts` calls `createAuth([])`
 // during preload so module test runs boot cleanly.
 
-function buildAuth(extraPlugins: BetterAuthPluginList = []) {
+function buildAuth(
+  extraPlugins: BetterAuthPluginList = [],
+  extraSchemas: Record<string, unknown> = {},
+) {
   return betterAuth({
     database: drizzleAdapter(db, {
       provider: "pg",
-      schema,
+      schema: { ...schema, ...extraSchemas },
     }),
 
     baseURL: env.APP_URL,
@@ -320,14 +323,20 @@ let _auth: AuthInstance | null = null;
  * Construct the Better Auth singleton. Idempotent — subsequent calls are
  * no-ops. Must be called once during boot, after modules have loaded, so
  * that any plugins contributed via `AppstrateModule.betterAuthPlugins()`
- * are merged with `basePlugins` before the instance is built.
+ * (and their companion Drizzle tables via
+ * `AppstrateModule.drizzleSchemas()`) are merged with `basePlugins` and the
+ * core schema before the instance is built.
  *
- * Tests: `apps/api/test/setup/preload.ts` calls `createAuth([])` so that
- * later imports of `auth` find an initialized instance.
+ * Tests: `apps/api/test/setup/preload.ts` calls `createAuth(...)` with the
+ * full module plugin + schema list so strategy tests and OAuth E2E tests
+ * see a coherent auth surface.
  */
-export function createAuth(extraPlugins: BetterAuthPluginList = []): void {
+export function createAuth(
+  extraPlugins: BetterAuthPluginList = [],
+  extraSchemas: Record<string, unknown> = {},
+): void {
   if (_auth) return;
-  _auth = buildAuth(extraPlugins);
+  _auth = buildAuth(extraPlugins, extraSchemas);
 }
 
 /** Get the Better Auth instance. Throws if `createAuth()` has not yet run. */

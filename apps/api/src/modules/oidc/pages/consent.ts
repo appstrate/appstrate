@@ -9,12 +9,13 @@
  * scopes and clicks "Autoriser" or "Refuser". The form POST completes the
  * authorization code exchange back inside the plugin.
  *
- * Stage 5 scope: GET page renders from a pre-loaded `ConsentContext`
- * (client name + scope list). POST is stubbed with 501 until Stage 5.5
- * lands the plugin wiring.
+ * A CSRF token pairs with a signed cookie to prevent cross-site consent
+ * forgery — the POST handler rejects any submission where the token body
+ * field does not match the cookie.
  */
 
 import { html, type RawHtml } from "./html.ts";
+import type { ResolvedAppBranding } from "../services/branding.ts";
 
 const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
   openid: "Votre identité",
@@ -37,16 +38,25 @@ export interface ConsentPageProps {
   scopes: string[];
   /** Form action — typically `/api/oauth/enduser/consent${queryString}`. */
   action: string;
+  /** CSRF token injected into the form + paired cookie. Empty string disables. */
+  csrfToken?: string;
+  /** Resolved branding for the owning application. */
+  branding?: ResolvedAppBranding;
 }
 
 export function renderConsentPage(props: ConsentPageProps): RawHtml {
   const scopeItems = props.scopes.map((s) => html`<li>${describeScope(s)}</li>`);
+  const brandName = props.branding?.name ?? null;
+  const logoUrl = props.branding?.logoUrl ?? null;
+  const primary = sanitizeColor(props.branding?.primaryColor, "#4f46e5");
+  const accent = sanitizeColor(props.branding?.accentColor, "#4338ca");
+  const title = brandName ? `Autorisation — ${brandName}` : "Autorisation";
   return html`<!doctype html>
     <html lang="fr">
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Autorisation</title>
+        <title>${title}</title>
         <style>
           body {
             font-family: system-ui, sans-serif;
@@ -54,6 +64,22 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
             margin: 80px auto;
             padding: 0 20px;
             color: #111;
+          }
+          header.brand {
+            text-align: center;
+            margin-bottom: 24px;
+          }
+          header.brand img {
+            max-height: 48px;
+            max-width: 200px;
+            display: block;
+            margin: 0 auto 12px;
+          }
+          header.brand .name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #111;
+            letter-spacing: 0.02em;
           }
           h1 {
             font-size: 1.5rem;
@@ -93,11 +119,11 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
             cursor: pointer;
           }
           .allow {
-            background: #4f46e5;
+            background: ${primary};
             color: white;
           }
           .allow:hover {
-            background: #4338ca;
+            background: ${accent};
           }
           .deny {
             background: #e5e7eb;
@@ -109,9 +135,16 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
         </style>
       </head>
       <body>
+        ${brandName
+          ? html`<header class="brand">
+              ${logoUrl ? html`<img src="${logoUrl}" alt="${brandName}" />` : null}
+              <div class="name">${brandName}</div>
+            </header>`
+          : null}
         <h1>Autorisation</h1>
         <p>
-          <span class="client">${props.clientName}</span> souhaite accéder à votre compte Appstrate.
+          <span class="client">${props.clientName}</span> souhaite accéder à votre compte
+          ${brandName ?? "Appstrate"}.
         </p>
         <p>Cette application aura accès à :</p>
         <ul class="scopes">
@@ -119,14 +152,25 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
         </ul>
         <div class="actions">
           <form method="POST" action="${props.action}">
+            ${props.csrfToken
+              ? html`<input type="hidden" name="_csrf" value="${props.csrfToken}" />`
+              : null}
             <input type="hidden" name="accept" value="false" />
             <button type="submit" class="deny">Refuser</button>
           </form>
           <form method="POST" action="${props.action}">
+            ${props.csrfToken
+              ? html`<input type="hidden" name="_csrf" value="${props.csrfToken}" />`
+              : null}
             <input type="hidden" name="accept" value="true" />
             <button type="submit" class="allow">Autoriser</button>
           </form>
         </div>
       </body>
     </html> `;
+}
+
+function sanitizeColor(input: string | undefined, fallback: string): string {
+  if (!input) return fallback;
+  return /^#[0-9a-fA-F]{6}$/.test(input) ? input : fallback;
 }

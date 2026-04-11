@@ -7,11 +7,13 @@
 
 import { escapeHtml } from "../pages/html.ts";
 import { renderEmailShell } from "./layout.ts";
+import type { ResolvedAppBranding } from "../services/branding.ts";
 
 export interface EndUserWelcomeProps {
   name: string;
   email: string;
   applicationName: string;
+  branding?: ResolvedAppBranding;
 }
 
 export interface RenderedEmail {
@@ -21,8 +23,9 @@ export interface RenderedEmail {
 
 export function renderEndUserWelcomeEmail(props: EndUserWelcomeProps): RenderedEmail {
   const safeName = escapeHtml(props.name);
-  const safeApp = escapeHtml(props.applicationName);
-  const subject = `Bienvenue sur ${props.applicationName}`;
+  const safeApp = escapeHtml(props.branding?.name ?? props.applicationName);
+  const displayName = props.branding?.name ?? props.applicationName;
+  const subject = `Bienvenue sur ${displayName}`;
   const bodyHtml = `
     <h1 style="font-size:20px;margin:0 0 16px;">Bienvenue, ${safeName}.</h1>
     <p style="margin:0 0 12px;color:#444;line-height:1.5;">
@@ -35,5 +38,8 @@ export function renderEndUserWelcomeEmail(props: EndUserWelcomeProps): RenderedE
       aucune action n'a été prise.
     </p>
   `;
-  return { subject, html: renderEmailShell({ title: subject, bodyHtml }) };
+  return {
+    subject,
+    html: renderEmailShell({ title: subject, bodyHtml, branding: props.branding }),
+  };
 }

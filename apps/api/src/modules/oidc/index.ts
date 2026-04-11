@@ -32,6 +32,7 @@ import { oidcBetterAuthPlugins } from "./auth/plugins.ts";
 import { createOidcRouter, createOAuthClientSchema, updateOAuthClientSchema } from "./routes.ts";
 import { oidcPaths } from "./openapi/paths.ts";
 import { oidcSchemas } from "./openapi/schemas.ts";
+import { jwks, oauthClient, oauthAccessToken, oauthRefreshToken, oauthConsent } from "./schema.ts";
 
 const oidcModule: AppstrateModule = {
   manifest: { id: "oidc", name: "OIDC Identity Provider", version: "1.0.0" },
@@ -48,7 +49,14 @@ const oidcModule: AppstrateModule = {
 
   appScopedPaths: ["/api/oauth"],
 
-  publicPaths: ["/api/oauth/enduser/login", "/api/oauth/enduser/consent"],
+  publicPaths: [
+    "/api/oauth/enduser/login",
+    "/api/oauth/enduser/consent",
+    "/api/oauth/.well-known/openid-configuration",
+    "/api/oauth/.well-known/oauth-authorization-server",
+    "/.well-known/openid-configuration",
+    "/.well-known/oauth-authorization-server",
+  ],
 
   authStrategies() {
     return [oidcAuthStrategy];
@@ -56,6 +64,19 @@ const oidcModule: AppstrateModule = {
 
   betterAuthPlugins() {
     return oidcBetterAuthPlugins();
+  },
+
+  drizzleSchemas() {
+    // Names must match the camelCase model ids Better Auth's oauth-provider
+    // and jwt plugins use internally (see `@better-auth/oauth-provider`
+    // `schema` + `better-auth/plugins/jwt/schema`).
+    return {
+      jwks,
+      oauthClient,
+      oauthAccessToken,
+      oauthRefreshToken,
+      oauthConsent,
+    };
   },
 
   openApiPaths() {

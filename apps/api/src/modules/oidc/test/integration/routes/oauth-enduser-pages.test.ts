@@ -3,10 +3,9 @@
 /**
  * Integration tests for the OIDC module's public login + consent pages.
  *
- * Scope: GET rendering + XSS safety + client_id validation. The POST
- * handlers currently return 501 (plugin wiring deferred to Stage 5.5);
- * that contract is also asserted here so any future plugin landing
- * forces the test to be updated deliberately.
+ * Scope: GET rendering + XSS safety + client_id validation + CSRF
+ * enforcement on POST. The full Authorization Code + PKCE flow lives in
+ * `test/integration/services/oauth-flows.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -136,7 +135,7 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
     expect(res.status).toBe(404);
   });
 
-  it("POST /login returns 501 (Stage 5.5 plugin wiring pending)", async () => {
+  it("POST /login without a CSRF token is rejected 403", async () => {
     const { clientId } = await registerClient(ctx);
     const res = await app.request(
       `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
@@ -146,10 +145,10 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
         body: "email=a@b.com&password=hunter2",
       },
     );
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(403);
   });
 
-  it("POST /consent returns 501 (Stage 5.5 plugin wiring pending)", async () => {
+  it("POST /consent without a CSRF token is rejected 403", async () => {
     const { clientId } = await registerClient(ctx);
     const res = await app.request(
       `/api/oauth/enduser/consent?client_id=${encodeURIComponent(clientId)}`,
@@ -159,6 +158,52 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
         body: "accept=true",
       },
     );
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(403);
+  });
+
+  it("GET /login issues an httpOnly oidc_csrf cookie that matches the hidden form field", async () => {
+    const { clientId } = await registerClient(ctx);
+    const res = await app.request(
+      `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
+    );
+    expect(res.status).toBe(200);
+    const cookieHeader = res.headers.get("set-cookie") ?? "";
+    const cookieMatch = cookieHeader.match(/oidc_csrf=([^;]+)/);
+    expect(cookieMatch).not.toBeNull();
+    const cookieToken = cookieMatch![1]!;
+    const html = await res.text();
+    const formMatch = html.match(/name="_csrf" value="([^"]+)"/);
+    expect(formMatch).not.toBeNull();
+    expect(formMatch![1]).toBe(cookieToken);
+    // httpOnly + SameSite=Lax for CSRF hardening.
+    expect(cookieHeader.toLowerCase()).toContain("httponly");
+    expect(cookieHeader.toLowerCase()).toContain("samesite=lax");
+  });
+
+  it("POST /login with a valid CSRF but wrong credentials re-renders the form with an error", async () => {
+    const { clientId } = await registerClient(ctx);
+    const getRes = await app.request(
+      `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
+    );
+    const cookie = (getRes.headers.get("set-cookie") ?? "").split(";")[0]!;
+    const html = await getRes.text();
+    const csrf = html.match(/name="_csrf" value="([^"]+)"/)![1]!;
+
+    const res = await app.request(
+      `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          cookie,
+        },
+        body: `_csrf=${encodeURIComponent(csrf)}&email=nobody@example.com&password=wrong`,
+      },
+    );
+    // Credentials bad — 401 with the login form re-rendered, not the 302
+    // redirect to the authorize endpoint.
+    expect([401, 400]).toContain(res.status);
+    const out = await res.text();
+    expect(out).toContain("Email ou mot de passe incorrect");
   });
 });

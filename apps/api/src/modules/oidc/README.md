@@ -8,17 +8,17 @@ When an embedding app needs to delegate end-user authentication to Appstrate, th
 
 ## Phase 1 status
 
-Phase 1 shipped in seven stages. Stages 1–4 and 6–7 are complete; Stage 5 is **partial** — login/consent pages + emails landed, but token-issuance plugin wiring is deferred to Stage 5.5. See the "Deferred to Stage 5.5" section at the bottom.
+Phase 1 is **complete**. All seven stages shipped, including token-issuance plugin wiring via `@better-auth/oauth-provider` (Stage 5.5), CSRF-hardened login + consent POST handlers, discovery alias endpoints, per-application email branding, and the end-to-end Authorization Code + PKCE test suite. The module is now a fully functional OAuth 2.1 / OIDC authorization server for Appstrate applications.
 
 ## Owned tables
 
 | Table                    | Purpose                                                                                                                                    |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `jwks`                   | ES256 keypair storage for the Better Auth `jwt` plugin (90-day rotation, 7-day grace) — **schema ready, plugin not wired yet**             |
+| `jwks`                   | ES256 keypair storage for the Better Auth `jwt` plugin (rotated automatically).                                                            |
 | `oauth_client`           | Registered OAuth clients, scoped to an Appstrate `applicationId` via `reference_id`. SHA-256-hashed `client_secret` at rest.               |
-| `oauth_access_token`     | Access-token tracking table for the OAuth provider plugin — unused until Stage 5.5                                                         |
-| `oauth_refresh_token`    | Refresh-token tracking table — unused until Stage 5.5                                                                                      |
-| `oauth_consent`          | Per-user consent grants — unused until Stage 5.5                                                                                           |
+| `oauth_access_token`     | Access-token tracking table used by `@better-auth/oauth-provider` at token exchange + introspection time.                                  |
+| `oauth_refresh_token`    | Refresh-token tracking table used by `@better-auth/oauth-provider` for `grant_type=refresh_token`.                                         |
+| `oauth_consent`          | Per-user consent grants written by `/api/auth/oauth2/consent` on accept.                                                                   |
 | `oidc_end_user_profiles` | Shadow table linking `end_users.id` ↔ Better Auth `user.id` + verification status + `active` / `pending_verification` / `suspended` status |
 
 The core `end_users` table is NEVER modified by this module — all OIDC-specific fields live on the shadow table. Core runs filtering continues to strict-filter by `end_users.id` alone.
@@ -36,10 +36,17 @@ Frontend reads `useAppConfig().features.oidc` to conditionally show the OAuth ta
 ## Public paths (auth bypass)
 
 ```ts
-publicPaths: ["/api/oauth/enduser/login", "/api/oauth/enduser/consent"];
+publicPaths: [
+  "/api/oauth/enduser/login",
+  "/api/oauth/enduser/consent",
+  "/api/oauth/.well-known/openid-configuration",
+  "/api/oauth/.well-known/oauth-authorization-server",
+  "/.well-known/openid-configuration",
+  "/.well-known/oauth-authorization-server",
+];
 ```
 
-The login and consent pages are anonymous — they validate `client_id` against the `oauth_client` registry before rendering. Any unknown or disabled client id returns 404 before the HTML is assembled.
+The login and consent pages are anonymous — they validate `client_id` against the `oauth_client` registry before rendering. Any unknown or disabled client id returns 404 before the HTML is assembled. The discovery alias endpoints proxy Better Auth's authoritative `/api/auth/.well-known/*` payloads so OIDC clients can auto-configure from the root of the issuer URL.
 
 ## App-scoped route prefixes
 
@@ -51,18 +58,20 @@ Client admin routes (`/api/oauth/clients*`) require `X-App-Id`.
 
 ## Routes
 
-| Method | Path                                  | Permission             | Purpose                                                       |
-| ------ | ------------------------------------- | ---------------------- | ------------------------------------------------------------- |
-| POST   | `/api/oauth/clients`                  | `oauth-clients:write`  | Register a new client. Returns plaintext `clientSecret` once. |
-| GET    | `/api/oauth/clients`                  | `oauth-clients:read`   | List clients for the current app.                             |
-| GET    | `/api/oauth/clients/:clientId`        | `oauth-clients:read`   | Get one client (secret hidden).                               |
-| PATCH  | `/api/oauth/clients/:clientId`        | `oauth-clients:write`  | Update `redirectUris` / `disabled`.                           |
-| DELETE | `/api/oauth/clients/:clientId`        | `oauth-clients:delete` | Delete a client.                                              |
-| POST   | `/api/oauth/clients/:clientId/rotate` | `oauth-clients:write`  | Issue a fresh plaintext secret.                               |
-| GET    | `/api/oauth/enduser/login`            | public                 | Server-rendered login form. Validates `client_id`.            |
-| POST   | `/api/oauth/enduser/login`            | public                 | **501 — pending Stage 5.5 plugin wiring.**                    |
-| GET    | `/api/oauth/enduser/consent`          | public                 | Server-rendered consent form with scope descriptions.         |
-| POST   | `/api/oauth/enduser/consent`          | public                 | **501 — pending Stage 5.5 plugin wiring.**                    |
+| Method | Path                                          | Permission             | Purpose                                                                                                                                         |
+| ------ | --------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/oauth/clients`                          | `oauth-clients:write`  | Register a new client. Returns plaintext `clientSecret` once.                                                                                   |
+| GET    | `/api/oauth/clients`                          | `oauth-clients:read`   | List clients for the current app.                                                                                                               |
+| GET    | `/api/oauth/clients/:clientId`                | `oauth-clients:read`   | Get one client (secret hidden).                                                                                                                 |
+| PATCH  | `/api/oauth/clients/:clientId`                | `oauth-clients:write`  | Update `redirectUris` / `disabled`.                                                                                                             |
+| DELETE | `/api/oauth/clients/:clientId`                | `oauth-clients:delete` | Delete a client.                                                                                                                                |
+| POST   | `/api/oauth/clients/:clientId/rotate`         | `oauth-clients:write`  | Issue a fresh plaintext secret.                                                                                                                 |
+| GET    | `/api/oauth/enduser/login`                    | public                 | Server-rendered login form. Validates `client_id`, loads app branding, issues a one-shot CSRF token paired with an httpOnly `oidc_csrf` cookie. |
+| POST   | `/api/oauth/enduser/login`                    | public                 | Verifies CSRF, calls `auth.api.signInEmail`, redirects to `/api/auth/oauth2/authorize` on success (preserving the signed query string).         |
+| GET    | `/api/oauth/enduser/consent`                  | public                 | Server-rendered consent form with app branding + scope descriptions + CSRF token.                                                               |
+| POST   | `/api/oauth/enduser/consent`                  | public                 | Verifies CSRF, calls `auth.api.oauth2Consent` (accept/deny), forwards the plugin's redirect response.                                           |
+| GET    | `/.well-known/openid-configuration`           | public                 | OIDC discovery alias proxying Better Auth's metadata endpoint. Root-level alias for strict OIDC clients.                                        |
+| GET    | `/api/oauth/.well-known/openid-configuration` | public                 | Module-prefixed alias for callers that speak the module path layout.                                                                            |
 
 `oauth-clients` is a new core RBAC resource added to `apps/api/src/lib/permissions.ts` in the same PR as Stage 4 (per CLAUDE.md: modules that introduce new RBAC resources must edit `permissions.ts` alongside).
 
@@ -80,7 +89,18 @@ Refuses when:
 
 ## Better Auth plugins contributed
 
-Stage 3 ships `betterAuthPlugins()` returning an **empty array**. The strategy is fully wired and unit-tested via a local JWKS server harness — it will verify tokens issued by whatever plugin Stage 5.5 lands without further changes.
+`betterAuthPlugins()` returns `[jwt, oauthProvider]` (both from `better-auth/plugins` and `@better-auth/oauth-provider@^1.6`).
+
+- **`jwt`**: configured with ES256 keypair. Populates the module's `jwks` table and serves `/api/auth/jwks` automatically. Required by `@better-auth/oauth-provider` (it throws `jwt_config` at token mint time otherwise).
+- **`oauthProvider`**: OAuth 2.1 authorization server. Wires `/api/auth/oauth2/authorize`, `/token`, `/userinfo`, `/revoke`, `/introspect`, plus `/api/auth/.well-known/openid-configuration`. Reads and writes the module-owned `oauth_client`, `oauth_access_token`, `oauth_refresh_token`, and `oauth_consent` tables through the `drizzleSchemas()` hook on the module manifest (which merges them into the Better Auth Drizzle adapter's model map at boot).
+
+Plugin configuration highlights:
+
+- `loginPage: "/api/oauth/enduser/login"` + `consentPage: "/api/oauth/enduser/consent"` — Better Auth redirects unauthenticated authorize attempts here with a signed query string, and the module's POST handlers orchestrate the rest.
+- `scopes` — the full Appstrate scope vocabulary (`openid`, `profile`, `email`, `offline_access`, `agents[:write]`, `runs[:write]`, `connections[:write]`).
+- `storeClientSecret` — custom `hash` + `verify` functions matching the module's `oauth-admin` service (SHA-256 hex) so secrets created by the admin API verify correctly at token exchange.
+- `customAccessTokenClaims` — on every access token mint (including refresh), calls `resolveOrCreateEndUser()` with the Better Auth user + the client's `referenceId` (= Appstrate `applicationId`), then injects `{ endUserId, applicationId, orgId }` as custom claims. The OIDC auth strategy then picks these up from the Bearer JWT and sets `endUser` context for every subsequent core request. `UnverifiedEmailConflictError` propagates as a token-issuance failure so unverified-email attempts fail loudly instead of silently taking over an existing row.
+- `customUserInfoClaims` — surfaces the same `endUserId` + `applicationId` on the `/userinfo` endpoint so satellites can read them without decoding the JWT.
 
 ## Services
 
@@ -108,6 +128,23 @@ Three module-owned email templates in `emails/`:
 
 Rendered directly by the module — they do **not** go through `@appstrate/emails`'s strictly-typed `EmailType` registry, since adding new keys there would require a core edit. Every dynamic string (name, application name, URL) passes through `escapeHtml` before reaching the HTML body.
 
+### Per-application branding
+
+Each template + the login/consent pages accept an optional `branding: ResolvedAppBranding` prop, loaded at request time via `services/branding.ts → resolveAppBranding(applicationId)`. The helper reads `applications.settings.branding` (shape defined by the module-owned `AppBrandingSchema` Zod schema) and falls back to the application's raw `name` field when the setting is missing or malformed. Fields supported:
+
+```ts
+{
+  name?: string;           // Display name (defaults to applications.name)
+  logoUrl?: string;        // Header logo URL (escaped)
+  primaryColor?: string;   // Hex #RRGGBB — sanitized, falls back to #4f46e5
+  accentColor?: string;    // Hex #RRGGBB — sanitized
+  supportEmail?: string;
+  fromName?: string;       // Email sender display name
+}
+```
+
+Malformed hex values are replaced with the platform default so a misconfigured branding JSONB never breaks the render. The shell header, button colors, email subject lines, and `<title>` tags all reflect the resolved branding — an end-user receives an email titled "Bienvenue sur Mon Workspace" instead of "Bienvenue sur Appstrate".
+
 ## Enabling OAuth for an application
 
 **Admin UI:** Settings → Application → OAuth tab → "New client". Captures the name + redirect URIs; displays `clientId` + `clientSecret` exactly once. Subsequent operations (rotate secret, disable, delete, update URIs) happen through the same tab.
@@ -122,18 +159,54 @@ Rendered directly by the module — they do **not** go through `@appstrate/email
 - **`reference_id` → `applicationId` invariant**: every OAuth client row carries a `reference_id` matching an existing `applications.id`. The admin route enforces this on create, and the auth strategy double-checks `endUser.applicationId === claims.applicationId` on every request.
 - **Admin bypass is not shipped**: Phase 0 made core runs filtering strict with no hook. Embedding apps that want an "admin sees all runs" view authenticate admins via API key (no `endUser` in context), not via an OIDC JWT. See `apps/api/src/modules/README.md` for the end-user run-visibility contract.
 
-## Deferred to Stage 5.5
+## Satellite integration example
 
-Phase 1 consciously defers token issuance wiring to a follow-up stage because the Better Auth plugin landscape is in flux:
+A minimal "Login with Appstrate" flow from a satellite app (PKCE + authorization code grant):
 
-- **Plugin package choice**: PR #66 used the separate `@better-auth/oauth-provider` npm package, which is not currently in the lockfile. Better Auth ships a built-in `oidcProvider` plugin, but its `oauthApplication` schema does not match the `oauth_client` shape this module already persists. Stage 5.5 will pick one and reconcile.
-- **POST handlers**: `POST /api/oauth/enduser/login` and `POST /api/oauth/enduser/consent` currently return 501 `"Not Implemented"` with a clear pointer to this stage. The integration test asserts the 501 contract so the next PR is forced to update it deliberately.
-- **End-to-end PKCE test**: planned in `test/integration/services/oauth-flows.test.ts`, blocked on the plugin wiring.
+```ts
+// 1. Generate PKCE verifier + challenge on the satellite backend.
+const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+const challenge = base64url(
+  new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))),
+);
+const state = base64url(crypto.getRandomValues(new Uint8Array(16)));
+// Store `verifier` + `state` in a short-lived session cookie.
 
-Everything else ships today:
+// 2. Redirect the user to Appstrate's authorize endpoint.
+const authorizeUrl =
+  `${APPSTRATE_URL}/api/auth/oauth2/authorize?` +
+  new URLSearchParams({
+    response_type: "code",
+    client_id: APPSTRATE_CLIENT_ID,
+    redirect_uri: "https://satellite.example.com/callback",
+    scope: "openid profile email offline_access runs connections",
+    state,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+  });
+// res.redirect(authorizeUrl);
 
-- Client CRUD + rotate (Stage 4)
-- Auth strategy + unit + integration tests (Stage 3)
-- Login/consent HTML pages + XSS safety tests (Stage 5)
-- Email templates + render tests (Stage 5)
-- Admin UI tab + React Query hooks (Stage 6)
+// 3. Callback handler exchanges the code for tokens.
+const body = new URLSearchParams({
+  grant_type: "authorization_code",
+  code, // from ?code= on the callback URL
+  redirect_uri: "https://satellite.example.com/callback",
+  client_id: APPSTRATE_CLIENT_ID,
+  client_secret: APPSTRATE_CLIENT_SECRET,
+  code_verifier: verifier,
+});
+const tokenRes = await fetch(`${APPSTRATE_URL}/api/auth/oauth2/token`, {
+  method: "POST",
+  headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  body,
+});
+const { access_token, refresh_token } = await tokenRes.json();
+
+// 4. Call Appstrate APIs as the end-user.
+const runs = await fetch(`${APPSTRATE_URL}/api/runs`, {
+  headers: { Authorization: `Bearer ${access_token}` },
+}).then((r) => r.json());
+// Core's strict end-user visibility filter scopes the result to this user.
+```
+
+Discovery is available at `${APPSTRATE_URL}/.well-known/openid-configuration` for clients that auto-configure.

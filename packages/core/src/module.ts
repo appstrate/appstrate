@@ -131,6 +131,27 @@ export interface AppstrateModule {
   betterAuthPlugins?(): unknown[];
 
   /**
+   * Drizzle tables contributed to the Better Auth adapter.
+   *
+   * Better Auth's Drizzle adapter resolves `findOne({ model: "name" })` calls
+   * against a flat `schema` record. When a module's plugins (e.g. the JWT or
+   * OAuth provider plugin) operate on module-owned tables, those tables must
+   * be registered with the adapter — otherwise the plugin fails with
+   * `"Drizzle Adapter: The model X was not found in the schema object."`.
+   *
+   * Return a flat map whose keys are the camelCase model names Better Auth
+   * expects (e.g. `"jwks"`, `"oauthClient"`, `"oauthAccessToken"`) and whose
+   * values are the Drizzle table instances from the module's `schema.ts`.
+   * The values are typed as `unknown` here to keep `drizzle-orm` out of the
+   * published core surface — the boot integration site in
+   * `packages/db/src/auth.ts` merges them into the adapter config as-is.
+   *
+   * Called once at boot, during `createAuth()`, immediately before the
+   * Better Auth instance is constructed.
+   */
+  drizzleSchemas?(): Record<string, unknown>;
+
+  /**
    * Named hooks (first-match-wins).
    * The platform invokes hooks by name — only the first module that provides
    * a given hook is called. For broadcast-to-all semantics, use `events`.
