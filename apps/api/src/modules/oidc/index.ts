@@ -48,6 +48,8 @@ const oidcModule: AppstrateModule = {
 
   appScopedPaths: ["/api/oauth"],
 
+  publicPaths: ["/api/oauth/enduser/login", "/api/oauth/enduser/consent"],
+
   authStrategies() {
     return [oidcAuthStrategy];
   },

@@ -17,11 +17,14 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 import type { AppEnv } from "../../types/index.ts";
-import { rateLimit } from "../../middleware/rate-limit.ts";
+import { rateLimit, rateLimitByIp } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
 import { requirePermission } from "../../middleware/require-permission.ts";
-import { parseBody, notFound } from "../../lib/errors.ts";
+import { parseBody, notFound, invalidRequest, ApiError } from "../../lib/errors.ts";
+import { db } from "@appstrate/db/client";
+import { oauthClient } from "./schema.ts";
 import {
   listClientsForApp,
   getClient,
@@ -31,6 +34,8 @@ import {
   setClientDisabled,
   updateClientRedirectUris,
 } from "./services/oauth-admin.ts";
+import { renderLoginPage } from "./pages/login.ts";
+import { renderConsentPage } from "./pages/consent.ts";
 
 export const createOAuthClientSchema = z.object({
   name: z.string().min(1, "name is required").max(200),
@@ -137,6 +142,76 @@ export function createOidcRouter() {
       return c.json(rotated);
     },
   );
+
+  // ─── Public end-user pages (anonymous, listed in publicPaths) ──────────────
+
+  // GET /api/oauth/enduser/login — server-rendered login form.
+  // Validates the `client_id` query param against the registry so unknown
+  // clients can't render the form at all (prevents phishing the HTML).
+  router.get("/oauth/enduser/login", rateLimitByIp(60), async (c) => {
+    const url = new URL(c.req.url);
+    const clientId = url.searchParams.get("client_id");
+    if (!clientId) throw invalidRequest("client_id is required", "client_id");
+
+    const [row] = await db
+      .select({ id: oauthClient.clientId, disabled: oauthClient.disabled })
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, clientId))
+      .limit(1);
+    if (!row || row.disabled) throw notFound("Unknown OAuth client");
+
+    const body = renderLoginPage({ queryString: url.search });
+    return c.html(body.value);
+  });
+
+  // POST /api/oauth/enduser/login — stub (Stage 5.5 plugin wiring).
+  router.post("/oauth/enduser/login", async () => {
+    throw new ApiError({
+      status: 501,
+      code: "not_implemented",
+      title: "Not Implemented",
+      detail:
+        "OIDC login submission is pending Better Auth oauth-provider plugin wiring — see Stage 5.5.",
+    });
+  });
+
+  // GET /api/oauth/enduser/consent — server-rendered consent form.
+  router.get("/oauth/enduser/consent", rateLimitByIp(60), async (c) => {
+    const url = new URL(c.req.url);
+    const clientId = url.searchParams.get("client_id");
+    const scope = url.searchParams.get("scope") ?? "openid";
+    if (!clientId) throw invalidRequest("client_id is required", "client_id");
+
+    const [row] = await db
+      .select({
+        id: oauthClient.clientId,
+        name: oauthClient.name,
+        disabled: oauthClient.disabled,
+      })
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, clientId))
+      .limit(1);
+    if (!row || row.disabled) throw notFound("Unknown OAuth client");
+
+    const scopes = scope.split(/\s+/).filter(Boolean);
+    const body = renderConsentPage({
+      clientName: row.name ?? row.id,
+      scopes,
+      action: `/api/oauth/enduser/consent${url.search}`,
+    });
+    return c.html(body.value);
+  });
+
+  // POST /api/oauth/enduser/consent — stub (Stage 5.5 plugin wiring).
+  router.post("/oauth/enduser/consent", async () => {
+    throw new ApiError({
+      status: 501,
+      code: "not_implemented",
+      title: "Not Implemented",
+      detail:
+        "OIDC consent submission is pending Better Auth oauth-provider plugin wiring — see Stage 5.5.",
+    });
+  });
 
   return router;
 }

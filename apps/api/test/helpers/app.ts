@@ -114,6 +114,11 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // Health check (no auth)
   app.route("/", healthRouter);
 
+  // Module-contributed public paths (e.g. inbound webhooks, OIDC login page).
+  // Mirrors the production `getModulePublicPaths()` path but reads directly
+  // from `extraModules` — the test harness bypasses the real module loader.
+  const modulePublicPaths = new Set(extraModules.flatMap((m) => m.publicPaths ?? []));
+
   // Auth paths that skip auth middleware
   function skipAuth(path: string): boolean {
     if (!path.startsWith("/api/")) return true;
@@ -121,6 +126,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     if (path.startsWith("/api/realtime/")) return true;
     if (path === "/api/connections/callback") return true;
     if (path === "/api/docs" || path === "/api/openapi.json") return true;
+    if (modulePublicPaths.has(path)) return true;
     return false;
   }
 
