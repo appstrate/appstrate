@@ -98,6 +98,13 @@ export interface AppstrateModule {
    * a given hook is called. For broadcast-to-all semantics, use `events`.
    *
    * Naming: `beforeX` (gates), `afterX` (post-lifecycle patches).
+   *
+   * Priority order: topological order from `manifest.dependencies`. Modules
+   * without dependencies keep the order they appear in `APPSTRATE_MODULES`.
+   *
+   * Example: `APPSTRATE_MODULES=cloud,quota` — if both provide `beforeRun`,
+   * cloud runs first. To force ordering, add `dependencies: ["cloud"]` on
+   * quota so the topo sort always places cloud earlier.
    */
   hooks?: Partial<ModuleHooks>;
 

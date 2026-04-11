@@ -110,6 +110,9 @@ export async function loadModules(specifiers: string[], ctx: ModuleInitContext):
   // Phase 2: Topological sort by dependencies
   const sorted = topoSort(resolved);
 
+  // Phase 2.5: Fail fast on duplicate route prefixes before any init runs
+  validateNoDuplicatePrefixes(sorted);
+
   // Phase 3: Init in dependency order
   for (const mod of sorted) {
     try {
@@ -144,6 +147,7 @@ export async function loadModulesFromInstances(
   }
 
   const sorted = topoSort(modules);
+  validateNoDuplicatePrefixes(sorted);
   for (const mod of sorted) {
     try {
       await mod.init(ctx);
@@ -160,6 +164,29 @@ export async function loadModulesFromInstances(
   }
 
   _initialized = true;
+}
+
+/**
+ * Throw if any two modules declare the same `appScopedPaths` prefix.
+ *
+ * Without this guard, Hono silently routes to the first match and the second
+ * module becomes inert — a nasty class of silent override. We run the check
+ * both at module load time and in the test harness so collisions surface
+ * immediately with a clear error message.
+ */
+export function validateNoDuplicatePrefixes(modules: readonly AppstrateModule[]): void {
+  const seen = new Map<string, string>();
+  for (const mod of modules) {
+    for (const prefix of mod.appScopedPaths ?? []) {
+      const existing = seen.get(prefix);
+      if (existing && existing !== mod.manifest.id) {
+        throw new Error(
+          `Duplicate module appScopedPath "${prefix}" declared by both "${existing}" and "${mod.manifest.id}"`,
+        );
+      }
+      seen.set(prefix, mod.manifest.id);
+    }
+  }
 }
 
 /** Get a loaded module by ID, or null if not loaded. */
@@ -247,7 +274,13 @@ export function applyModuleFeatures(base: AppConfig): AppConfig {
  * **First-match-wins:** Modules are iterated in topological init order.
  * If the first module that provides a hook returns a value (including `null`),
  * subsequent modules are never consulted. Load order (determined by
- * `manifest.dependencies` topological sort) defines priority.
+ * `manifest.dependencies` topological sort) defines priority — modules with
+ * no dependencies keep the order they appear in `APPSTRATE_MODULES`.
+ *
+ * Example: `APPSTRATE_MODULES=cloud,quota` — if both provide `beforeRun`,
+ * cloud runs first. To force ordering regardless of env order, add
+ * `dependencies: ["cloud"]` on quota so the topo sort always places cloud
+ * earlier.
  *
  * For broadcast-to-all semantics, use `emitEvent()` instead.
  */

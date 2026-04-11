@@ -12,11 +12,17 @@
  * Consumers only use getDiscoveredModules().
  */
 import type { AppstrateModule } from "@appstrate/core/module";
+import { validateNoDuplicatePrefixes } from "../../src/lib/modules/module-loader.ts";
 
 const discovered: AppstrateModule[] = [];
 
 export function registerTestModule(mod: AppstrateModule): void {
-  if (!discovered.includes(mod)) discovered.push(mod);
+  if (discovered.includes(mod)) return;
+  discovered.push(mod);
+  // Fail fast on duplicate route prefixes — mirrors the prod guard in
+  // loadModules(). Without this a second module with the same prefix would
+  // become silently inert under Hono's first-match-wins routing.
+  validateNoDuplicatePrefixes(discovered);
 }
 
 export function getDiscoveredModules(): readonly AppstrateModule[] {

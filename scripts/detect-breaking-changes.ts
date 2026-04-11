@@ -21,44 +21,29 @@
  *   bun scripts/detect-breaking-changes.ts                  # Compare against baseline
  *   bun scripts/detect-breaking-changes.ts --update-baseline # Save current spec as baseline
  */
-import { readdirSync, existsSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
-import type { AppstrateModule } from "@appstrate/core/module";
+import { collectModuleOpenApi, stripModulePaths } from "./lib/module-openapi.ts";
 
 const BASELINE_PATH = resolve(import.meta.dir, "../apps/api/src/openapi/baseline.json");
 
 // ═══════════════════════════════════════════════════
 // Auto-discover built-in modules and collect their OpenAPI contributions
 // ═══════════════════════════════════════════════════
-// Mirrors the discovery block in scripts/verify-openapi.ts — we cannot boot
-// the module loader here, so we scan apps/api/src/modules/*/index.ts directly
-// and call each module's openApiPaths()/openApiComponentSchemas() statically.
+// Uses the shared helper in scripts/lib/module-openapi.ts so discovery logic
+// stays in one place (also consumed by verify-openapi.ts). We cannot boot the
+// module loader here since it requires a full init context — the helper
+// imports each module's default export statically.
+//
+// NOTE: module-owned paths are stripped from BOTH the baseline and the current
+// spec before comparison. This keeps the breaking-change detector agnostic of
+// modules — disabling a module should not register as a breaking change.
 
-const scriptDir = dirname(fileURLToPath(import.meta.url));
-const modulesDir = resolve(scriptDir, "../apps/api/src/modules");
-const discoveredModules: string[] = existsSync(modulesDir)
-  ? readdirSync(modulesDir).filter((name) => {
-      const subdir = join(modulesDir, name);
-      try {
-        return statSync(subdir).isDirectory() && existsSync(join(subdir, "index.ts"));
-      } catch {
-        return false;
-      }
-    })
-  : [];
-
-const modulePaths: Record<string, unknown> = {};
-const moduleComponentSchemas: Record<string, unknown> = {};
-
-for (const name of discoveredModules) {
-  const mod: AppstrateModule = (await import(join(modulesDir, name, "index.ts"))).default;
-  const paths = mod.openApiPaths?.();
-  if (paths) Object.assign(modulePaths, paths);
-  const compSchemas = mod.openApiComponentSchemas?.();
-  if (compSchemas) Object.assign(moduleComponentSchemas, compSchemas);
-}
+const {
+  paths: modulePaths,
+  componentSchemas: moduleComponentSchemas,
+  ownedPathKeys,
+} = await collectModuleOpenApi();
 
 const openApiSpec = buildOpenApiSpec(modulePaths, moduleComponentSchemas);
 
@@ -378,13 +363,17 @@ function compareSpecs(baseline: Spec, current: Spec): Change[] {
 // ═══════════════════════════════════════════════════
 
 const updateBaseline = process.argv.includes("--update-baseline");
-const currentSpec = JSON.parse(JSON.stringify(openApiSpec));
+
+// Strip module-owned paths from the current spec — the baseline tracks core
+// API surface only, so disabling or removing a module is never a breaking change.
+const fullCurrentSpec = JSON.parse(JSON.stringify(openApiSpec));
+const currentSpec = stripModulePaths(fullCurrentSpec, ownedPathKeys);
 
 if (updateBaseline) {
   await Bun.write(BASELINE_PATH, JSON.stringify(currentSpec, null, 2) + "\n");
   console.log(`\n  Baseline updated: ${BASELINE_PATH}`);
   console.log(
-    `  Endpoints: ${Object.entries(currentSpec.paths || {}).reduce((n: number, [, m]) => n + Object.keys(m as object).length, 0)}`,
+    `  Endpoints: ${Object.entries(currentSpec.paths || {}).reduce((n: number, [, m]) => n + Object.keys(m as object).length, 0)} (core only; module paths excluded)`,
   );
   console.log();
   process.exit(0);
@@ -398,7 +387,9 @@ if (!(await baselineFile.exists())) {
   process.exit(1);
 }
 
-const baseline = JSON.parse(await baselineFile.text());
+// Also strip from the baseline in case an older baseline still contains
+// module-owned paths — the comparison must be symmetric.
+const baseline = stripModulePaths(JSON.parse(await baselineFile.text()), ownedPathKeys);
 const changes = compareSpecs(baseline, currentSpec);
 
 const breaking = changes.filter((c) => c.level === "breaking");

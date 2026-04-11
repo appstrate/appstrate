@@ -193,15 +193,15 @@ describe("errorHandler middleware", () => {
     app.get("/test", () => {
       throw new ApiError({
         status: 400,
-        code: "webhook_url_invalid",
-        title: "Webhook URL Invalid",
+        code: "invalid_foo_bar",
+        title: "Invalid Foo Bar",
         detail: "test",
       });
     });
 
     const res = await app.request("/test");
     const body = (await res.json()) as any;
-    expect(body.type).toBe("https://docs.appstrate.dev/errors/webhook-url-invalid");
+    expect(body.type).toBe("https://docs.appstrate.dev/errors/invalid-foo-bar");
   });
 
   it("requestId in body matches Request-Id header", async () => {

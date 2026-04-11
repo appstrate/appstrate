@@ -15,9 +15,6 @@
  *
  * Usage: bun scripts/verify-openapi.ts
  */
-import { readdirSync, existsSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
 import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
@@ -25,7 +22,7 @@ import {
   buildZodSchemaRegistry,
   type ZodSchemaEntry,
 } from "../apps/api/src/openapi/zod-schema-registry.ts";
-import type { AppstrateModule, OpenApiSchemaEntry } from "@appstrate/core/module";
+import { collectModuleOpenApi } from "./lib/module-openapi.ts";
 
 // ---------------------------------------------------------------------------
 // Auto-discover built-in modules and collect their OpenAPI contributions
@@ -35,35 +32,11 @@ import type { AppstrateModule, OpenApiSchemaEntry } from "@appstrate/core/module
 // External modules (e.g. @appstrate/cloud) are not validated here; they're
 // loaded at runtime via APPSTRATE_MODULES and can't be imported without full boot.
 
-const scriptDir = dirname(fileURLToPath(import.meta.url));
-const modulesDir = resolve(scriptDir, "../apps/api/src/modules");
-const discoveredModules: string[] = existsSync(modulesDir)
-  ? readdirSync(modulesDir).filter((name) => {
-      const subdir = join(modulesDir, name);
-      try {
-        return statSync(subdir).isDirectory() && existsSync(join(subdir, "index.ts"));
-      } catch {
-        return false;
-      }
-    })
-  : [];
-
-const loadedModules: AppstrateModule[] = [];
-const modulePaths: Record<string, unknown> = {};
-const moduleComponentSchemas: Record<string, unknown> = {};
-const moduleSchemas: OpenApiSchemaEntry[] = [];
-
-for (const name of discoveredModules) {
-  const entry = join(modulesDir, name, "index.ts");
-  const mod: AppstrateModule = (await import(entry)).default;
-  loadedModules.push(mod);
-  const paths = mod.openApiPaths?.();
-  if (paths) Object.assign(modulePaths, paths);
-  const compSchemas = mod.openApiComponentSchemas?.();
-  if (compSchemas) Object.assign(moduleComponentSchemas, compSchemas);
-  const schemas = mod.openApiSchemas?.();
-  if (schemas) moduleSchemas.push(...schemas);
-}
+const {
+  paths: modulePaths,
+  componentSchemas: moduleComponentSchemas,
+  schemas: moduleSchemas,
+} = await collectModuleOpenApi();
 
 // Build the full spec and registry with module contributions
 const openApiSpec = buildOpenApiSpec(modulePaths, moduleComponentSchemas);

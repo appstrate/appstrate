@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Shared helper: discover built-in modules and collect their OpenAPI
+ * contributions (paths, component schemas, Zod schema registry entries).
+ *
+ * Used by both `scripts/verify-openapi.ts` and `scripts/detect-breaking-changes.ts`
+ * so discovery stays in one place and both scripts see the same view of module
+ * contributions without booting the platform.
+ *
+ * We scan `apps/api/src/modules/*​/index.ts` directly rather than going through
+ * the module loader because the loader requires a full init context (DB, Redis,
+ * etc.) that build-time scripts don't have.
+ */
+import { readdirSync, existsSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import type { AppstrateModule, OpenApiSchemaEntry } from "@appstrate/core/module";
+
+export interface CollectedModuleOpenApi {
+  /** OpenAPI 3.1 path items, keyed by path string. */
+  paths: Record<string, unknown>;
+  /** OpenAPI 3.1 component schemas, keyed by schema name. */
+  componentSchemas: Record<string, unknown>;
+  /** Zod ↔ OpenAPI registry entries for request-body schema comparison. */
+  schemas: OpenApiSchemaEntry[];
+  /** Set of path keys owned by any loaded module (for filtering). */
+  ownedPathKeys: Set<string>;
+}
+
+/**
+ * Scan `apps/api/src/modules/*​/index.ts` and return the merged OpenAPI
+ * contributions of every discovered module.
+ */
+export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  const modulesDir = resolve(scriptDir, "../../apps/api/src/modules");
+
+  const discoveredModules: string[] = existsSync(modulesDir)
+    ? readdirSync(modulesDir).filter((name) => {
+        const subdir = join(modulesDir, name);
+        try {
+          return statSync(subdir).isDirectory() && existsSync(join(subdir, "index.ts"));
+        } catch {
+          return false;
+        }
+      })
+    : [];
+
+  const paths: Record<string, unknown> = {};
+  const componentSchemas: Record<string, unknown> = {};
+  const schemas: OpenApiSchemaEntry[] = [];
+  const ownedPathKeys = new Set<string>();
+
+  for (const name of discoveredModules) {
+    const entry = join(modulesDir, name, "index.ts");
+    const mod: AppstrateModule = (await import(entry)).default;
+    const modPaths = mod.openApiPaths?.();
+    if (modPaths) {
+      for (const key of Object.keys(modPaths)) ownedPathKeys.add(key);
+      Object.assign(paths, modPaths);
+    }
+    const compSchemas = mod.openApiComponentSchemas?.();
+    if (compSchemas) Object.assign(componentSchemas, compSchemas);
+    const modSchemas = mod.openApiSchemas?.();
+    if (modSchemas) schemas.push(...modSchemas);
+  }
+
+  return { paths, componentSchemas, schemas, ownedPathKeys };
+}
+
+/**
+ * Return a shallow copy of an OpenAPI spec with all module-owned paths removed.
+ * Used by `detect-breaking-changes.ts` to keep the baseline comparison agnostic
+ * of modules — disabling a module should not register as a breaking change.
+ */
+export function stripModulePaths<T extends { paths?: Record<string, unknown> }>(
+  spec: T,
+  ownedPathKeys: ReadonlySet<string>,
+): T {
+  if (!spec.paths || ownedPathKeys.size === 0) return spec;
+  const filtered: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(spec.paths)) {
+    if (!ownedPathKeys.has(key)) filtered[key] = value;
+  }
+  return { ...spec, paths: filtered };
+}
