@@ -5,7 +5,7 @@ import type { AppEnv } from "../types/index.ts";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
-import { invalidRequest, notFound } from "../lib/errors.ts";
+import { forbidden, invalidRequest, notFound } from "../lib/errors.ts";
 
 /**
  * Validate that an application belongs to the given org.
@@ -28,16 +28,29 @@ export async function validateApplicationInOrg(
  * Middleware: resolve application context for app-scoped routes.
  *
  * Resolution order:
- * 1. X-App-Id header (session auth — dashboard users)
- * 2. applicationId from API key (already set by auth middleware)
+ * 1. applicationId already pinned by an auth strategy (API key, OIDC JWT, …)
+ * 2. X-App-Id header (session auth — dashboard users)
+ *
+ * If a strategy already pinned an application and the request also carries
+ * an `X-App-Id` header, the header MUST match the pinned value. Otherwise
+ * a holder of a Bearer token scoped to App A could spoof `X-App-Id: App B`
+ * (same org) and reach a second application's data. Session callers never
+ * pin an application, so their header is still honoured as the primary
+ * signal.
  *
  * Validates that the application belongs to the current org.
  * Sets c.set("applicationId") on success.
  */
 export function requireAppContext() {
   return async (c: Context<AppEnv>, next: Next) => {
-    // Resolution order: X-App-Id header (session auth) → applicationId from API key auth
-    const appId = c.req.header("X-App-Id") ?? c.get("applicationId");
+    const pinned = c.get("applicationId");
+    const headerApp = c.req.header("X-App-Id");
+
+    if (pinned && headerApp && headerApp !== pinned) {
+      throw forbidden("X-App-Id does not match authenticated application");
+    }
+
+    const appId = pinned ?? headerApp;
 
     if (!appId) {
       throw invalidRequest(

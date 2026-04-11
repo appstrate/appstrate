@@ -9,11 +9,25 @@
  * returned in plaintext from `createClient` / `rotateClientSecret` —
  * subsequent reads never expose them.
  *
- * Stage 4 scope: this service does NOT go through Better Auth. It owns the
- * row directly so OAuth client admin works regardless of whether the Better
- * Auth oauth-provider plugin is wired. Stage 5 will hand the plaintext
- * secret to the plugin's token exchange code path; the hash-at-rest /
- * return-once pattern is already compatible with that.
+ * Why we bypass `auth.api.adminCreateOAuthClient`: the plugin derives
+ * `reference_id` from `clientReference({ session })` at creation time.
+ * Appstrate's active `applicationId` is threaded via the `X-App-Id`
+ * header + Hono context middleware, not through the Better Auth session
+ * — so `clientReference` has no access to it. Rather than rewire the
+ * whole session object to carry app context, we keep direct Drizzle
+ * writes here.
+ *
+ * Why the `referenceId` + `metadata.applicationId` dual-write: the
+ * plugin's `customAccessTokenClaims` / `customIdTokenClaims` closures
+ * receive `metadata = parseClientMetadata(oauth_client.metadata)` — they
+ * do NOT receive `oauth_client.reference_id`. (The `referenceId` closure
+ * argument in `customAccessTokenClaims` carries `postLogin.consentReferenceId`,
+ * a different feature we don't use.) So the applicationId has to live on
+ * the `metadata` column to reach custom claims. The `reference_id` column
+ * is populated in lockstep so the plugin's own client-ACL path
+ * (`clientReference`-based admin CRUD gates) stays consistent if it is
+ * ever wired. `buildOauthClientApplicationBinding()` is the single write
+ * site for this invariant.
  */
 
 import { eq, and } from "drizzle-orm";
@@ -71,12 +85,18 @@ async function hashSecret(plaintext: string): Promise<string> {
 
 /**
  * Produce the paired `referenceId` + `metadata` values that bind an oauth
- * client row to its owning Appstrate application. Both fields are written
- * in lockstep: the module reads `referenceId` directly (branding, admin
- * CRUD), while Better Auth's `customAccessTokenClaims` closure only
- * receives `parseClientMetadata(client.metadata)` and must recover the
- * same id from there. Any future mutation touching one MUST call this
- * helper to preserve the invariant.
+ * client row to its owning Appstrate application. Both fields MUST be
+ * written in lockstep:
+ * - `metadata.applicationId` is what the plugin surfaces to
+ *   `customAccessTokenClaims` / `customIdTokenClaims` — the actual source
+ *   of the end-user claims at token-mint time.
+ * - `referenceId` matches so the plugin's native client-ACL path stays
+ *   consistent (e.g. `clientReference({ session })` admin gates).
+ *
+ * Any future mutation touching one MUST call this helper to preserve the
+ * invariant. The invariant is defended at read time by
+ * `buildEndUserClaims()` in `auth/plugins.ts`, which logs and fails-open
+ * if `metadata.applicationId` is missing.
  */
 export function buildOauthClientApplicationBinding(applicationId: string): {
   referenceId: string;

@@ -9,16 +9,20 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { db } from "@appstrate/db/client";
+import { endUsers } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import {
   createTestContext,
+  createTestUser,
   authHeaders,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
+import { prefixedId } from "../../../../../lib/ids.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 
@@ -242,6 +246,62 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
       const throttled = await submitLogin(clientId, "  mixed@example.com  ", "wrong");
       expect(throttled.status).toBe(429);
     });
+  });
+
+  // C3 — surface `UnverifiedEmailConflictError` while we still control the
+  // response. Previously this error fired inside `customAccessTokenClaims`
+  // during the subsequent token mint, long after the POST /login handler
+  // had already 302'd away, so the user saw an opaque 500. We now pre-
+  // resolve the end-user at the end of the login handler and render the
+  // friendly FR error page from there.
+  it("POST /login proactively detects an unverified email conflict and 409s", async () => {
+    const { clientId } = await registerClient(ctx);
+
+    // Seed a distinct end-user row in the same app carrying the conflict
+    // email. The auth identity about to sign in has this same email but
+    // has NOT verified it — the strict === true guard in
+    // `resolveOrCreateEndUser` must refuse to silently adopt the row.
+    const conflictEmail = `c3conflict-${Date.now()}@example.com`;
+    await db.insert(endUsers).values({
+      id: prefixedId("eu"),
+      applicationId: ctx.defaultAppId,
+      orgId: ctx.org.id,
+      externalId: conflictEmail,
+      email: conflictEmail,
+      name: "Pre-existing",
+    });
+
+    // Create the Better Auth user that will attempt the login. Better Auth
+    // default sign-up leaves `emailVerified = false`.
+    await createTestUser({ email: conflictEmail });
+
+    const getRes = await app.request(
+      `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
+    );
+    const cookie = (getRes.headers.get("set-cookie") ?? "").split(";")[0]!;
+    const formHtml = await getRes.text();
+    const csrf = formHtml.match(/name="_csrf" value="([^"]+)"/)![1]!;
+
+    const res = await app.request(
+      `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          cookie,
+        },
+        body:
+          `_csrf=${encodeURIComponent(csrf)}` +
+          `&email=${encodeURIComponent(conflictEmail)}` +
+          `&password=TestPassword123!`,
+      },
+    );
+
+    expect(res.status).toBe(409);
+    const body = await res.text();
+    // HTML-escaped (apostrophe becomes &#39;) — match on a stable substring.
+    expect(body).toContain("pas vérifié");
+    expect(body).toContain("Un compte existe déjà");
   });
 
   it("POST /login with a valid CSRF but wrong credentials re-renders the form with an error", async () => {

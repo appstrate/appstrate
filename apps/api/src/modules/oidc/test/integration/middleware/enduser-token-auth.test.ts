@@ -74,12 +74,14 @@ async function mintToken(payload: Record<string, unknown>) {
   // Real Better Auth tokens carry `iss = ${APP_URL}${basePath}` where
   // basePath is `/api/auth`. The production verifier in `enduser-token.ts`
   // matches against that shape; the test harness must mint tokens with the
-  // same `iss` claim or it will exercise the wrong code path.
+  // same `iss` claim or it will exercise the wrong code path. Audience must
+  // also be in `validAudiences` (APP_URL or APP_URL/api/auth) — C1 added
+  // explicit `aud` verification for defense-in-depth.
   const issuer = `${process.env.APP_URL!}/api/auth`;
   return new jose.SignJWT(payload)
     .setProtectedHeader({ alg: "ES256", kid })
     .setIssuer(issuer)
-    .setAudience("appstrate-test")
+    .setAudience(process.env.APP_URL!)
     .setIssuedAt()
     .setExpirationTime("2m")
     .setSubject(typeof payload.sub === "string" ? payload.sub : "auth_user_stage3")
@@ -206,6 +208,50 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       },
     });
     expect(res.status).toBe(401);
+  });
+
+  it("rejects a spoofed X-App-Id header when the JWT pinned a different application", async () => {
+    // A1 — cross-application escalation guard. Holder of a valid JWT for
+    // App A must not be able to reach App B (same org) by attaching a
+    // spoofed `X-App-Id: App B` header. `requireAppContext()` pins
+    // applicationId from the auth strategy first and rejects any header
+    // that contradicts the pinned value.
+    const { id: otherOwnerId } = await createTestUser();
+    const { defaultAppId: otherAppId } = await createTestOrg(otherOwnerId, {
+      slug: "escalateapp",
+    });
+    expect(otherAppId).not.toBe(applicationId);
+
+    const token = await mintToken({
+      sub: authUserId,
+      endUserId,
+      applicationId, // JWT legitimately scoped to App A
+    });
+    const res = await app.request(`/api/end-users/${endUserId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-App-Id": otherAppId, // spoof attempt: App B
+      },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("accepts a matching X-App-Id header when the JWT already pinned the application", async () => {
+    // Regression guard for A1: the common case (satellite sends both
+    // Authorization and X-App-Id with matching values) must still reach
+    // the route handler.
+    const token = await mintToken({
+      sub: authUserId,
+      endUserId,
+      applicationId,
+    });
+    const res = await app.request(`/api/end-users/${endUserId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-App-Id": applicationId,
+      },
+    });
+    expect(res.status).toBe(200);
   });
 
   it("rejects a token whose claim applicationId mismatches the end-user row", async () => {

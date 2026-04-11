@@ -48,12 +48,14 @@ async function startJwksServer() {
   _resetCacheForTesting();
 }
 
-async function mintToken(payload: Record<string, unknown>) {
+async function mintToken(payload: Record<string, unknown>, audience?: string) {
   const env = process.env.APP_URL ?? "http://127.0.0.1";
+  // Default to the platform APP_URL which matches `validAudiences` in
+  // `auth/plugins.ts` — the production verifier now enforces `aud`.
   return new jose.SignJWT(payload)
     .setProtectedHeader({ alg: "ES256", kid })
     .setIssuer(`${env}/api/auth`)
-    .setAudience("test-aud")
+    .setAudience(audience ?? env)
     .setIssuedAt()
     .setExpirationTime("2m")
     .setSubject(typeof payload.sub === "string" ? payload.sub : "auth_user_1")
@@ -140,6 +142,28 @@ describe("verifyEndUserAccessToken", () => {
       .setExpirationTime(Math.floor(Date.now() / 1000) - 60)
       .sign(privateKey);
     expect(await verifyEndUserAccessToken(expired)).toBeNull();
+  });
+
+  // C1 — audience must match `validAudiences` from `auth/plugins.ts`.
+  // Before the fix the verifier only checked `iss`, so a token minted for a
+  // different audience (e.g. a rogue plugin update) would slip through.
+  it("returns null when the audience does not match APP_URL", async () => {
+    const { verifyEndUserAccessToken } = await import("../../services/enduser-token.ts");
+    await installLocalJwks();
+    const wrongAud = await mintToken({ sub: "auth_user_1" }, "https://evil.example.com");
+    expect(await verifyEndUserAccessToken(wrongAud)).toBeNull();
+  });
+
+  it("returns claims when the audience matches APP_URL/api/auth", async () => {
+    // Second accepted audience in the allowlist — satellites can pass either
+    // the issuer or the Better Auth base URL as their `resource` parameter.
+    const { verifyEndUserAccessToken } = await import("../../services/enduser-token.ts");
+    await installLocalJwks();
+    const env = process.env.APP_URL!;
+    const token = await mintToken({ sub: "auth_user_1", endUserId: "eu_abc" }, `${env}/api/auth`);
+    const claims = await verifyEndUserAccessToken(token);
+    expect(claims).not.toBeNull();
+    expect(claims!.endUserId).toBe("eu_abc");
   });
 
   it("returns null when the issuer does not match APP_URL", async () => {

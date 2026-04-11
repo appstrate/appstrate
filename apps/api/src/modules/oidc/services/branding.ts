@@ -19,14 +19,34 @@
 
 import { z } from "zod";
 import { eq } from "drizzle-orm";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 
+/**
+ * Branding logos are injected into `<img src="...">` on server-rendered
+ * login/consent pages. A tenant admin compromise (or mistake) could
+ * otherwise turn this into a tracking pixel pointed at an attacker host,
+ * or worse a reference to an internal metadata endpoint. Reject any URL
+ * that is not https:// and any URL that resolves to a blocked network
+ * (RFC1918, link-local, cloud metadata, loopback, etc.).
+ */
+function isValidLogoUrl(raw: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  return !isBlockedUrl(raw);
+}
+
 export const AppBrandingSchema = z
   .object({
     name: z.string().min(1).max(200).optional(),
-    logoUrl: z.url().optional(),
+    logoUrl: z.url().refine(isValidLogoUrl, "logoUrl must be a public HTTPS URL").optional(),
     primaryColor: z
       .string()
       .regex(/^#[0-9a-fA-F]{6}$/, "primaryColor must be a 6-digit hex color")

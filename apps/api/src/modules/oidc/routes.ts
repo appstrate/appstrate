@@ -25,7 +25,10 @@ import { requirePermission } from "../../middleware/require-permission.ts";
 import { parseBody, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { isDevEnvironment, LOCALHOST_HOSTS } from "../../services/redirect-validation.ts";
 import { db } from "@appstrate/db/client";
+import { user as betterAuthUser } from "@appstrate/db/schema";
 import { oauthClient } from "./schema.ts";
 import {
   listClientsForApp,
@@ -37,6 +40,7 @@ import {
   updateClientRedirectUris,
 } from "./services/oauth-admin.ts";
 import { resolveAppBranding } from "./services/branding.ts";
+import { resolveOrCreateEndUser } from "./services/enduser-mapping.ts";
 import { issueCsrfToken, verifyCsrfToken } from "./services/csrf.ts";
 import { getOidcAuthApi } from "./auth/api.ts";
 import { APPSTRATE_SCOPES } from "./auth/plugins.ts";
@@ -45,14 +49,54 @@ import { UnverifiedEmailConflictError } from "./services/enduser-mapping.ts";
 import { renderLoginPage } from "./pages/login.ts";
 import { renderConsentPage } from "./pages/consent.ts";
 
+/**
+ * Validate an OAuth `redirect_uri` candidate.
+ *
+ * Defense layers (in order):
+ * 1. Must parse as an absolute URL.
+ * 2. Scheme must be `https:` — `http:` is only allowed when pointing at
+ *    `localhost`/`127.0.0.1` AND the platform itself is running in dev
+ *    mode (`APP_URL` is HTTP/localhost). Production cannot register HTTP
+ *    redirect URIs at all.
+ * 3. Host must not resolve to a blocked network: SSRF targets (RFC1918,
+ *    link-local `169.254.0.0/16`, cloud metadata, loopback in production,
+ *    IPv6 variants), `javascript:`/`data:`/`file:` schemes. Enforced via
+ *    `@appstrate/core/ssrf:isBlockedUrl`, which is the same helper used by
+ *    the webhooks delivery path.
+ *
+ * Dev-mode localhost is explicitly re-allowed after the SSRF check so
+ * satellites can register `http://localhost:5173/callback` etc. during
+ * local development — only when `APP_URL` is itself a localhost URL.
+ */
+function isValidRedirectUri(raw: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+  const isLocalhost = LOCALHOST_HOSTS.has(parsed.hostname);
+  if (parsed.protocol === "https:") {
+    return !isBlockedUrl(raw);
+  }
+  if (parsed.protocol === "http:" && isLocalhost && isDevEnvironment()) {
+    return true;
+  }
+  return false;
+}
+
+const redirectUriSchema = z
+  .url("redirectUris must be valid URLs")
+  .refine(isValidRedirectUri, "redirectUri scheme or host is not allowed");
+
 export const createOAuthClientSchema = z.object({
   name: z.string().min(1, "name is required").max(200),
-  redirectUris: z.array(z.url("redirectUris must be valid URLs")).min(1),
+  redirectUris: z.array(redirectUriSchema).min(1),
   scopes: z.array(z.string().min(1)).optional(),
 });
 
 export const updateOAuthClientSchema = z.object({
-  redirectUris: z.array(z.url()).min(1).optional(),
+  redirectUris: z.array(redirectUriSchema).min(1).optional(),
   disabled: z.boolean().optional(),
 });
 
@@ -285,73 +329,116 @@ export function createOidcRouter() {
       return c.html(page.value, 429);
     }
 
-    try {
-      // signInEmail sets the session cookie on the response. We `asResponse:
-      // true` so we can forward the Set-Cookie header, then issue our own
-      // 302 back into the authorize endpoint with the original signed query.
-      // `request: c.req.raw` is required so Better Auth's endpoint wrapper
-      // populates `ctx.request` — missing it causes plugins that check
-      // `ctx.request` to throw 401 "request not found".
-      const authApi = getOidcAuthApi();
-      const authResponse = (await authApi.signInEmail({
-        body: { email, password },
-        request: c.req.raw,
-        headers: c.req.raw.headers,
-        asResponse: true,
-      })) as Response;
+    // signInEmail sets the session cookie on the response. We `asResponse:
+    // true` so we can forward the Set-Cookie header, then issue our own
+    // 302 back into the authorize endpoint with the original signed query.
+    // `request: c.req.raw` is required so Better Auth's endpoint wrapper
+    // populates `ctx.request` — missing it causes plugins that check
+    // `ctx.request` to throw 401 "request not found".
+    const authApi = getOidcAuthApi();
+    const authResponse = (await authApi.signInEmail({
+      body: { email, password },
+      request: c.req.raw,
+      headers: c.req.raw.headers,
+      asResponse: true,
+    })) as Response;
 
-      if (!authResponse.ok) {
-        const [row] = await db
-          .select({ referenceId: oauthClient.referenceId })
-          .from(oauthClient)
-          .where(eq(oauthClient.clientId, clientId))
-          .limit(1);
-        const branding = row?.referenceId ? await resolveAppBranding(row.referenceId) : undefined;
-        const csrfToken = issueCsrfToken(c);
-        const page = renderLoginPage({
-          queryString: url.search,
-          branding,
-          csrfToken,
-          error: "Email ou mot de passe incorrect.",
-          email,
-        });
-        return c.html(page.value, 401);
-      }
+    if (!authResponse.ok) {
+      const [row] = await db
+        .select({ referenceId: oauthClient.referenceId })
+        .from(oauthClient)
+        .where(eq(oauthClient.clientId, clientId))
+        .limit(1);
+      const branding = row?.referenceId ? await resolveAppBranding(row.referenceId) : undefined;
+      const csrfToken = issueCsrfToken(c);
+      const page = renderLoginPage({
+        queryString: url.search,
+        branding,
+        csrfToken,
+        error: "Email ou mot de passe incorrect.",
+        email,
+      });
+      return c.html(page.value, 401);
+    }
 
-      // Successful sign-in — clear the per-email attempt counter so the
-      // next visitor to this account is not throttled by past failures.
-      await resetLoginEmailAttempts(email);
+    // Successful sign-in — clear the per-email attempt counter so the
+    // next visitor to this account is not throttled by past failures.
+    await resetLoginEmailAttempts(email);
 
-      // Forward every Set-Cookie from Better Auth + redirect into authorize.
-      const redirect = new Response(null, { status: 302 });
-      for (const [name, value] of authResponse.headers) {
-        if (name.toLowerCase() === "set-cookie") {
-          redirect.headers.append("set-cookie", value);
+    // Proactively resolve (or create) the Appstrate end-user *before*
+    // redirecting into authorize, so an `UnverifiedEmailConflictError`
+    // surfaces as a friendly FR error page on this handler rather than
+    // as a generic 500 propagated through the plugin's token-mint path.
+    //
+    // The original code had a post-hoc catch at this call site, but the
+    // error is actually thrown from `customAccessTokenClaims` during
+    // token mint — *after* we have already 302'd away — so that catch
+    // was unreachable. Resolving up front here lets us handle the error
+    // while we still control the response.
+    //
+    // We fetch the Better Auth user by email (unique index) because
+    // `asResponse: true` above returns a raw Response, not the typed
+    // `{ user }` object that the non-response form would give us.
+    const [clientRow] = await db
+      .select({
+        referenceId: oauthClient.referenceId,
+        disabled: oauthClient.disabled,
+      })
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, clientId))
+      .limit(1);
+    if (!clientRow || clientRow.disabled) throw notFound("Unknown OAuth client");
+    const applicationId = clientRow.referenceId;
+    if (applicationId) {
+      const [authUserRow] = await db
+        .select({
+          id: betterAuthUser.id,
+          email: betterAuthUser.email,
+          name: betterAuthUser.name,
+          emailVerified: betterAuthUser.emailVerified,
+        })
+        .from(betterAuthUser)
+        .where(eq(betterAuthUser.email, email))
+        .limit(1);
+      if (authUserRow) {
+        try {
+          await resolveOrCreateEndUser(
+            {
+              id: authUserRow.id,
+              email: authUserRow.email,
+              name: authUserRow.name,
+              emailVerified: authUserRow.emailVerified === true,
+            },
+            applicationId,
+          );
+        } catch (err) {
+          if (err instanceof UnverifiedEmailConflictError) {
+            const branding = await resolveAppBranding(applicationId);
+            const csrfToken = issueCsrfToken(c);
+            const page = renderLoginPage({
+              queryString: url.search,
+              branding,
+              csrfToken,
+              error:
+                "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
+              email,
+            });
+            return c.html(page.value, 409);
+          }
+          throw err;
         }
       }
-      redirect.headers.set("location", `/api/auth/oauth2/authorize${url.search}`);
-      return redirect;
-    } catch (err) {
-      if (err instanceof UnverifiedEmailConflictError) {
-        const [row] = await db
-          .select({ referenceId: oauthClient.referenceId })
-          .from(oauthClient)
-          .where(eq(oauthClient.clientId, clientId))
-          .limit(1);
-        const branding = row?.referenceId ? await resolveAppBranding(row.referenceId) : undefined;
-        const csrfToken = issueCsrfToken(c);
-        const page = renderLoginPage({
-          queryString: url.search,
-          branding,
-          csrfToken,
-          error:
-            "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
-          email,
-        });
-        return c.html(page.value, 409);
-      }
-      throw err;
     }
+
+    // Forward every Set-Cookie from Better Auth + redirect into authorize.
+    const redirect = new Response(null, { status: 302 });
+    for (const [name, value] of authResponse.headers) {
+      if (name.toLowerCase() === "set-cookie") {
+        redirect.headers.append("set-cookie", value);
+      }
+    }
+    redirect.headers.set("location", `/api/auth/oauth2/authorize${url.search}`);
+    return redirect;
   });
 
   // GET /api/oauth/enduser/consent — server-rendered consent form.

@@ -16,11 +16,20 @@
  * The Drizzle schema in `../schema.ts` was designed to match the plugin's
  * expected shape 1:1 so no schema reconciliation is required at runtime.
  *
- * Custom access token claims inject `endUserId` + `applicationId` by
- * resolving/creating the end-user via `resolveOrCreateEndUser()`. The OIDC
- * auth strategy then picks them up from the Bearer JWT and sets the
- * `endUser` context for every subsequent core route, so the strict
- * end-user run visibility filter kicks in automatically.
+ * The owning Appstrate `applicationId` is stashed in the plugin-native
+ * `oauth_client.metadata` JSON column at client registration time by
+ * `services/oauth-admin.ts`. The plugin parses it on every token/id_token
+ * mint and forwards it as the `metadata` closure argument of
+ * `customAccessTokenClaims` and `customIdTokenClaims`. We deliberately do
+ * NOT use the `referenceId` closure argument: in this plugin version it
+ * reflects `postLogin.consentReferenceId` (a consent-time account-selection
+ * feature we don't use), not `oauth_client.reference_id`. The column is
+ * still populated in lockstep with `metadata.applicationId` for the
+ * plugin's own client-ACL path (`clientReference` + admin CRUD gates).
+ *
+ * The OIDC auth strategy picks the claims up from the Bearer JWT and
+ * sets the `endUser` context for every subsequent core route, so the
+ * strict end-user run visibility filter kicks in automatically.
  *
  * Client secret storage matches the existing `oauth-admin` service hash
  * (SHA-256 hex) so clients registered via our admin API are accepted
@@ -129,6 +138,11 @@ export function oidcBetterAuthPlugins(): unknown[] {
         verify: sha256HexVerify,
       },
 
+      // `storeTokens` defaults to "hashed" in the plugin. Opaque access
+      // tokens + refresh tokens are stored as SHA-256 hashes so a DB dump
+      // cannot be replayed against the token endpoint. We rely on the
+      // default — declaring it explicitly would be redundant noise.
+
       // OAuth 2.1 default: PKCE required for every authorization code flow.
       // Opt-out only possible per-client via `requirePKCE: false` on the row.
       // (We enforce `requirePKCE: true` at admin-API client creation time.)
@@ -139,66 +153,24 @@ export function oidcBetterAuthPlugins(): unknown[] {
        * end-user from the JWT alone, without a DB lookup by email. Called
        * once per token mint, including on refresh.
        *
-       * The owning Appstrate `applicationId` is recovered from the client
-       * metadata (stashed at `createClient` time — see
-       * `services/oauth-admin.ts`). The plugin does NOT natively thread
-       * `client.referenceId` through to this closure; `referenceId` here
-       * only reflects the consent-flow reference, which we don't use.
+       * `metadata` is `parseClientMetadata(oauth_client.metadata)` — the
+       * plugin parses the JSON column for us. `services/oauth-admin.ts`
+       * writes `{ applicationId }` there at registration time.
        *
        * Errors here fail the token issuance — we deliberately propagate
        * `UnverifiedEmailConflictError` so the end-user sees a "verify your
        * email" message instead of a silently-succeeded login that later
        * fails on every scoped request.
        */
-      customAccessTokenClaims: async ({ user, metadata }) => {
-        if (!user) {
-          // Client-credentials grant (no user) — nothing for us to inject.
-          return {};
-        }
-        const applicationId =
-          metadata && typeof metadata === "object" && typeof metadata.applicationId === "string"
-            ? metadata.applicationId
-            : undefined;
-        if (!applicationId) {
-          logger.warn(
-            "oidc: oauth_client missing applicationId metadata — token will not carry end-user claims",
-            { module: "oidc", userId: user.id },
-          );
-          return {};
-        }
-        try {
-          const resolved = await resolveOrCreateEndUser(
-            {
-              id: user.id,
-              email: user.email,
-              name: user.name ?? null,
-              emailVerified: user.emailVerified === true,
-            },
-            applicationId,
-          );
-          return {
-            endUserId: resolved.endUserId,
-            applicationId: resolved.applicationId,
-            orgId: resolved.orgId,
-          };
-        } catch (err) {
-          if (err instanceof UnverifiedEmailConflictError) {
-            logger.warn("oidc: unverified-email conflict during token issuance", {
-              module: "oidc",
-              applicationId: err.applicationId,
-              email: err.email,
-            });
-            throw err;
-          }
-          logger.error("oidc: end-user resolution failed during token issuance", {
-            module: "oidc",
-            userId: user.id,
-            applicationId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          throw err;
-        }
-      },
+      customAccessTokenClaims: async ({ user, metadata }) => buildEndUserClaims(user, metadata),
+
+      // NOTE: `customIdTokenClaims` is deliberately NOT wired. The plugin
+      // mints access_token + id_token in parallel via Promise.all in
+      // `createUserTokens`. Wiring both closures triggers two concurrent
+      // `resolveOrCreateEndUser` calls on the first mint for a new user
+      // and races on the `end_users` unique index. Satellites that need
+      // `applicationId` read it from the access token (custom claims) or
+      // from `/userinfo` (mirrored via `customUserInfoClaims` below).
 
       // Surface the same custom claims on the /userinfo endpoint so
       // satellites can read `endUserId` without decoding the JWT themselves.
@@ -213,6 +185,76 @@ export function oidcBetterAuthPlugins(): unknown[] {
       },
     }),
   ];
+}
+
+/**
+ * Shared resolver for the `customAccessTokenClaims` closure (and any other
+ * closure that mints end-user claims in the future). Reads the owning
+ * Appstrate `applicationId` from the plugin-provided `metadata` (which is
+ * already parsed JSON from `oauth_client.metadata`),
+ * resolves/creates the end-user, and returns the custom claim set. Returns
+ * an empty object when context is missing so the plugin still mints a valid
+ * token — just without end-user context.
+ *
+ * Propagates `UnverifiedEmailConflictError` so the caller (the plugin) can
+ * surface it to the end-user instead of silently succeeding and then failing
+ * on every scoped request.
+ *
+ * `user` is declared optional by the plugin's TypeScript surface to cover
+ * the `client_credentials` path. We do not advertise that grant at client
+ * registration (`services/oauth-admin.ts` only sets `["authorization_code",
+ * "refresh_token"]`), so the branch is not reachable today — but we keep
+ * the defensive null-check to satisfy the plugin's type contract.
+ */
+async function buildEndUserClaims(
+  user:
+    | { id: string; email: string; name?: string | null; emailVerified?: boolean }
+    | null
+    | undefined,
+  metadata: Record<string, unknown> | undefined,
+): Promise<Record<string, string>> {
+  if (!user) return {};
+  const applicationId =
+    metadata && typeof metadata.applicationId === "string" ? metadata.applicationId : undefined;
+  if (!applicationId) {
+    logger.warn(
+      "oidc: oauth_client missing applicationId metadata — token will not carry end-user claims",
+      { module: "oidc", userId: user.id },
+    );
+    return {};
+  }
+  try {
+    const resolved = await resolveOrCreateEndUser(
+      {
+        id: user.id,
+        email: user.email,
+        name: user.name ?? null,
+        emailVerified: user.emailVerified === true,
+      },
+      applicationId,
+    );
+    return {
+      endUserId: resolved.endUserId,
+      applicationId: resolved.applicationId,
+      orgId: resolved.orgId,
+    };
+  } catch (err) {
+    if (err instanceof UnverifiedEmailConflictError) {
+      logger.warn("oidc: unverified-email conflict during token issuance", {
+        module: "oidc",
+        applicationId: err.applicationId,
+        email: err.email,
+      });
+      throw err;
+    }
+    logger.error("oidc: end-user resolution failed during token issuance", {
+      module: "oidc",
+      userId: user.id,
+      applicationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 }
 
 export { getOidcAuthApi } from "./api.ts";

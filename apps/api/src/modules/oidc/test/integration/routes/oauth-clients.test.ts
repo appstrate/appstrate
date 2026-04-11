@@ -74,6 +74,64 @@ describe("OAuth clients admin routes", () => {
     expect(res.status).toBe(400);
   });
 
+  // A2 — redirect_uri scheme + SSRF allowlist.
+  // `z.url()` alone accepts `javascript:`, `data:`, IPs like 169.254.169.254
+  // (cloud metadata) and 10.0.0.1 (RFC1918). The custom refinement wraps
+  // `@appstrate/core/ssrf:isBlockedUrl` to reject them.
+  // NOTE: test preload sets APP_URL=http://localhost:3000 so `isDevEnvironment()`
+  // returns true — loopback http:// URIs are intentionally accepted here (see
+  // the "accepts http://localhost in dev" case below). Production (non-dev
+  // APP_URL) rejects them because the scheme check requires https.
+  const blockedRedirectUris: Array<[string, string]> = [
+    ["javascript scheme", "javascript:alert(1)"],
+    ["data scheme", "data:text/html,<script>alert(1)</script>"],
+    ["file scheme", "file:///etc/passwd"],
+    ["cloud metadata", "http://169.254.169.254/latest/meta-data/"],
+    ["RFC1918 10/8", "http://10.0.0.1/callback"],
+    ["RFC1918 192.168/16", "http://192.168.1.1/callback"],
+    ["public http host", "http://satellite.example.com/callback"],
+  ];
+  for (const [label, uri] of blockedRedirectUris) {
+    it(`POST rejects blocked redirect URI (${label})`, async () => {
+      const res = await app.request("/api/oauth/clients", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Evil",
+          redirectUris: [uri],
+        }),
+      });
+      expect(res.status).toBe(400);
+    });
+  }
+
+  it("POST accepts https redirect URI on a public host", async () => {
+    const res = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Legit",
+        redirectUris: ["https://satellite.example.com/oauth/callback"],
+      }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("POST accepts http://localhost redirect URI in dev mode", async () => {
+    // `isDevEnvironment()` is true because test preload sets
+    // APP_URL=http://localhost:3000. Satellites running against a local
+    // platform instance can register their Vite dev server callback.
+    const res = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Dev",
+        redirectUris: ["http://localhost:5173/auth/callback"],
+      }),
+    });
+    expect(res.status).toBe(201);
+  });
+
   it("POST rejects missing name", async () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",

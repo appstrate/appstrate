@@ -87,6 +87,36 @@ describe("resolveAppBranding", () => {
     expect(resolved.primaryColor).toBe("#4f46e5");
   });
 
+  // C4 — logoUrl host/scheme allowlist.
+  // Arbitrary URLs in <img src> would let a compromised admin plant
+  // tracking beacons or point at internal metadata endpoints. The schema
+  // refinement rejects non-HTTPS schemes and SSRF targets; the resolver
+  // falls back to defaults instead of throwing.
+  const blockedLogoUrls: Array<[string, string]> = [
+    ["javascript scheme", "javascript:alert(1)"],
+    ["data scheme", "data:image/png;base64,AAAA"],
+    ["http scheme", "http://cdn.example.com/logo.png"],
+    ["cloud metadata", "https://169.254.169.254/latest/meta-data/"],
+    ["RFC1918", "https://10.0.0.1/logo.png"],
+  ];
+  for (const [label, logoUrl] of blockedLogoUrls) {
+    it(`safely falls back when logoUrl is blocked (${label})`, async () => {
+      const appId = await seedAppWithSettings({
+        branding: { name: "X", logoUrl },
+      });
+      const resolved = await resolveAppBranding(appId);
+      expect(resolved.logoUrl).toBeNull();
+    });
+  }
+
+  it("accepts a public https logoUrl", async () => {
+    const appId = await seedAppWithSettings({
+      branding: { logoUrl: "https://cdn.example.com/logo.png" },
+    });
+    const resolved = await resolveAppBranding(appId);
+    expect(resolved.logoUrl).toBe("https://cdn.example.com/logo.png");
+  });
+
   it("accentColor inherits from primaryColor when primary is set and accent is not", async () => {
     const appId = await seedAppWithSettings({
       branding: { primaryColor: "#22c55e" },

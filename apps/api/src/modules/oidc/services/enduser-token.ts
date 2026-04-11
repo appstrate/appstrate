@@ -111,8 +111,14 @@ export async function verifyEndUserAccessToken(token: string): Promise<EndUserCl
     // (see `packages/db/src/auth.ts` basePath). Verifying against `APP_URL`
     // alone rejects every real token.
     const jwks = await getJwks();
+    // Audience validation matches `validAudiences` in `auth/plugins.ts` —
+    // RFC 8707 enforcement already happens at the token endpoint via
+    // `oidcGuardsPlugin`, but the local verifier adds defense-in-depth so
+    // a future plugin update that mints tokens with an unexpected `aud`
+    // cannot slip through unchecked.
     const { payload } = await jose.jwtVerify(token, jwks, {
       issuer: `${env.APP_URL}/api/auth`,
+      audience: [env.APP_URL, `${env.APP_URL}/api/auth`],
       algorithms: ["ES256"],
     });
     if (!payload.sub) return null;
