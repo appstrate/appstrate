@@ -7,14 +7,12 @@
  * Used by `scripts/verify-openapi.ts` (Step 4) to compare Zod-derived
  * JSON Schemas against the hand-written OpenAPI requestBody schemas.
  *
- * Schemas are imported directly from route/service files — no duplicated
- * inline definitions. Aliases are used where names collide across files.
+ * Core schemas are defined statically here. Module-owned schemas are
+ * contributed dynamically via `openApiSchemas()` — they only appear when
+ * the module is loaded. Call `buildZodSchemaRegistry()` after module init.
  */
 
 import { z } from "zod";
-
-// --- Webhook schemas (routes/webhooks.ts) ---
-import { createWebhookSchema, updateWebhookSchema } from "../routes/webhooks.ts";
 
 // --- End-User schemas (routes/end-users.ts) ---
 import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts";
@@ -40,9 +38,6 @@ import {
 
 // --- Org settings schema (services/organizations.ts) ---
 import { orgSettingsSchema } from "../services/organizations.ts";
-
-// --- Schedule schemas (routes/schedules.ts) ---
-import { createScheduleSchema, updateScheduleSchema } from "../routes/schedules.ts";
 
 // --- User-agent schemas (routes/user-agents.ts) ---
 import { updateSkillsSchema, updateToolsSchema } from "../routes/user-agents.ts";
@@ -121,7 +116,7 @@ import {
 export interface ZodSchemaEntry {
   /** HTTP method (uppercase) */
   method: string;
-  /** OpenAPI path (e.g. "/api/webhooks") */
+  /** OpenAPI path (e.g. "/api/agents") */
   path: string;
   /** The Zod schema converted to JSON Schema via z.toJSONSchema() */
   jsonSchema: Record<string, unknown>;
@@ -137,29 +132,9 @@ function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
 }
 
 /**
- * Registry of Zod request-body schemas mapped to their OpenAPI path+method.
- *
- * Each entry pre-converts the Zod schema to JSON Schema so the verify script
- * does not need to import Zod directly (zod is only available in apps/api).
- *
- * Add new entries here as you add or modify routes. The verify-openapi script
- * will automatically pick them up and compare against the OpenAPI spec.
+ * Core Zod request-body schemas (always present, not module-owned).
  */
-export const zodSchemaRegistry: ZodSchemaEntry[] = [
-  // ─── Webhooks ───────────────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/api/webhooks",
-    jsonSchema: toJsonSchema(createWebhookSchema),
-    description: "Create webhook",
-  },
-  {
-    method: "PUT",
-    path: "/api/webhooks/{id}",
-    jsonSchema: toJsonSchema(updateWebhookSchema),
-    description: "Update webhook",
-  },
-
+const coreSchemas: ZodSchemaEntry[] = [
   // ─── End-Users ──────────────────────────────────────────────────────────
   {
     method: "POST",
@@ -244,20 +219,6 @@ export const zodSchemaRegistry: ZodSchemaEntry[] = [
     path: "/api/orgs/{orgId}/settings",
     jsonSchema: toJsonSchema(orgSettingsSchema.partial()),
     description: "Update org settings",
-  },
-
-  // ─── Schedules ──────────────────────────────────────────────────────────
-  {
-    method: "POST",
-    path: "/api/agents/{scope}/{name}/schedules",
-    jsonSchema: toJsonSchema(createScheduleSchema),
-    description: "Create schedule",
-  },
-  {
-    method: "PUT",
-    path: "/api/schedules/{id}",
-    jsonSchema: toJsonSchema(updateScheduleSchema),
-    description: "Update schedule",
   },
 
   // ─── User-Agent config (skills/tools) ───────────────────────────────────
@@ -506,3 +467,12 @@ export const zodSchemaRegistry: ZodSchemaEntry[] = [
     description: "Report auth failure from sidecar",
   },
 ];
+
+/**
+ * Build the full Zod schema registry by merging core schemas with module contributions.
+ * Must be called after modules are initialized (or after static filesystem discovery
+ * in build-time scripts).
+ */
+export function buildZodSchemaRegistry(moduleSchemas: ZodSchemaEntry[] = []): ZodSchemaEntry[] {
+  return [...coreSchemas, ...moduleSchemas];
+}

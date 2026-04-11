@@ -12,7 +12,7 @@ import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/index.ts";
-import { dispatchRunWebhook } from "./webhooks.ts";
+import { emitEvent } from "../lib/modules/module-loader.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "./run-pipeline.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
 import { getPackage, packageExists } from "./agent-service.ts";
@@ -182,7 +182,7 @@ async function triggerScheduledRun(
   applicationId: string,
   input: Record<string, unknown> | undefined,
 ) {
-  /** Create a failed run record + dispatch webhook so the user is notified. */
+  /** Create a failed run record + emit onRunStatusChange so modules (webhooks, …) can notify. */
   async function failSchedule(error: string, actor: Actor | null = null): Promise<void> {
     const runId = `run_${crypto.randomUUID()}`;
     try {
@@ -196,7 +196,14 @@ async function triggerScheduledRun(
         scheduleId,
         connectionProfileId,
       );
-      dispatchRunWebhook(orgId, applicationId, "failed", runId, packageId, { error });
+      void emitEvent("onRunStatusChange", {
+        orgId,
+        runId,
+        packageId,
+        applicationId,
+        status: "failed",
+        extra: { error },
+      });
     } catch (err) {
       logger.error("Failed to create failed schedule run record", {
         scheduleId,

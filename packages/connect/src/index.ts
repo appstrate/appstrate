@@ -7,6 +7,8 @@ export type {
   ProviderDefinition,
   ConnectionRecord,
   ScopeValidationResult,
+  OAuthStateRecord,
+  OAuthStateStore,
 } from "./types.ts";
 // Encryption
 export { encrypt, decrypt, encryptCredentials, decryptCredentials } from "./encryption.ts";

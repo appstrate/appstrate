@@ -4,11 +4,11 @@ Shared TypeScript type definitions used by both frontend (`apps/web`) and backen
 
 ## What it provides
 
-- **DB model re-exports**: `Profile`, `Run`, `RunLog`, `ConnectionProfile`, `PackageSchedule`
+- **DB model re-exports**: `Profile`, `Run`, `RunLog`, `ConnectionProfile`, `Schedule`
 - **Enums**: `RunStatus`, `OrgRole`
 - **API response types**: `AgentListItem`, `AgentDetail`, `OrgPackageItem`, `AppConfig`, `Features`
 - **Provider types**: `ProviderStatus`, `ProviderConfig`, `ConnectionInfo`, `AvailableProvider`
-- **Headless types**: `ApplicationInfo`, `EndUserInfo`, `ApiKeyInfo`, `WebhookInfo`
+- **Headless types**: `ApplicationInfo`, `EndUserInfo`, `ApiKeyInfo`
 - **Utility functions**: `isPromptEmpty()`, `findMissingDependencies()`
 
 ## Usage

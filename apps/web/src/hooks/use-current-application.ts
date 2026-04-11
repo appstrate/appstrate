@@ -6,6 +6,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { appStore, getCurrentApplicationId } from "../stores/app-store";
 import { useApplications } from "./use-applications";
 import { useAutoSelect } from "./use-auto-select";
+import { useAppConfig } from "./use-app-config";
+import { getEnabledModuleQueryKeys } from "../lib/module-query-keys";
 
 // Re-export non-hook accessor
 export { getCurrentApplicationId };
@@ -15,8 +17,8 @@ export function useCurrentApplicationId(): string | null {
   return useStore(appStore, (s) => s.id);
 }
 
-/** App-scoped query key prefixes — invalidated on app switch. */
-const APP_SCOPED_KEYS = [
+/** Core app-scoped query key prefixes — invalidated on app switch. */
+const CORE_APP_SCOPED_KEYS = [
   "packages",
   "agents",
   "agent-memories",
@@ -31,7 +33,6 @@ const APP_SCOPED_KEYS = [
   "schedules",
   "schedule",
   "schedule-runs",
-  "webhooks",
   "api-keys",
   "end-users",
   "providers",
@@ -54,6 +55,7 @@ const APP_SCOPED_KEYS = [
  */
 export function useAppSwitcher() {
   const queryClient = useQueryClient();
+  const { features } = useAppConfig();
 
   const switchApp = useCallback(
     (appId: string) => {
@@ -62,15 +64,19 @@ export function useAppSwitcher() {
 
       appStore.getState().setId(appId);
 
+      // Assemble the invalidation set: core keys + enabled module contributions.
+      const moduleKeys = getEnabledModuleQueryKeys(features);
+      const appScopedKeys = new Set<string>([...CORE_APP_SCOPED_KEYS, ...moduleKeys]);
+
       // Invalidate all app-scoped queries so they refetch with the new X-App-Id
       queryClient.removeQueries({
         predicate: (q) => {
           const key = q.queryKey[0];
-          return typeof key === "string" && APP_SCOPED_KEYS.includes(key);
+          return typeof key === "string" && appScopedKeys.has(key);
         },
       });
     },
-    [queryClient],
+    [queryClient, features],
   );
 
   return { switchApp };

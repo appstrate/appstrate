@@ -6,12 +6,12 @@
  */
 
 import { randomBytes, createHmac } from "node:crypto";
-import { eq, and, gt } from "drizzle-orm";
-import { oauthStates } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
-import type { Actor } from "./types.ts";
+import type { Actor, OAuthStateRecord, OAuthStateStore } from "./types.ts";
 import { getProviderOrThrow, getProviderOAuth1CredentialsOrThrow } from "./registry.ts";
-import { extractErrorMessage, actorFromRow, actorToColumns } from "./utils.ts";
+import { extractErrorMessage } from "./utils.ts";
+
+const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 
 // ─── RFC 5849 Signing Internals ──────────────────────────────
 
@@ -76,6 +76,7 @@ export interface InitiateOAuth1Result {
  */
 export async function initiateOAuth1(
   db: Db,
+  store: OAuthStateStore,
   orgId: string,
   actor: Actor,
   profileId: string,
@@ -145,22 +146,25 @@ export async function initiateOAuth1(
     throw new Error(`OAuth1 request token response missing oauth_token or oauth_token_secret`);
   }
 
-  // Store in oauth_states — use oauth_token as the state key (lookup key in callback)
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-  await db.insert(oauthStates).values({
+  // Store keyed by oauth_token (used as lookup key in the callback)
+  const now = new Date();
+  const record: OAuthStateRecord = {
     state: oauthToken,
     orgId,
-    ...actorToColumns(actor),
+    userId: actor.type === "member" ? actor.id : null,
+    endUserId: actor.type === "end_user" ? actor.id : null,
+    applicationId,
     profileId,
     providerId,
-    applicationId,
-    codeVerifier: "", // Not used for OAuth1, column is NOT NULL
+    codeVerifier: "",
     oauthTokenSecret,
     authMode: "oauth1",
     scopesRequested: [],
     redirectUri: callbackUrl,
-    expiresAt,
-  });
+    createdAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + OAUTH_STATE_TTL_SECONDS * 1000).toISOString(),
+  };
+  await store.set(oauthToken, record, OAUTH_STATE_TTL_SECONDS);
 
   // Build authorization URL (append provider-specific params like scope, expiration, name)
   const authParams = new URLSearchParams({ oauth_token: oauthToken });
@@ -192,21 +196,14 @@ export interface OAuth1CallbackResult {
  */
 export async function handleOAuth1Callback(
   db: Db,
+  store: OAuthStateStore,
   oauthToken: string,
   oauthVerifier: string,
 ): Promise<OAuth1CallbackResult> {
-  // Look up the stored state by oauth_token
-  const rows = await db
-    .select()
-    .from(oauthStates)
-    .where(and(eq(oauthStates.state, oauthToken), gt(oauthStates.expiresAt, new Date())))
-    .limit(1);
-
-  if (rows.length === 0) {
+  const stateRow = await store.get(oauthToken);
+  if (!stateRow) {
     throw new Error("Invalid or expired OAuth1 state");
   }
-
-  const stateRow = rows[0]!;
 
   if (stateRow.authMode !== "oauth1") {
     throw new Error("OAuth state is not an OAuth1 flow");
@@ -223,9 +220,6 @@ export async function handleOAuth1Callback(
     throw new Error(`Provider '${stateRow.providerId}' has no accessTokenUrl configured`);
   }
 
-  if (!stateRow.applicationId) {
-    throw new Error("Application context is required for OAuth1 callback");
-  }
   const creds = await getProviderOAuth1CredentialsOrThrow(
     db,
     stateRow.providerId,
@@ -282,11 +276,11 @@ export async function handleOAuth1Callback(
     throw new Error("OAuth1 access token response missing oauth_token or oauth_token_secret");
   }
 
-  // Clean up the OAuth state
-  await db.delete(oauthStates).where(eq(oauthStates.state, oauthToken));
+  await store.delete(oauthToken);
 
-  // Reconstruct actor from the stored columns
-  const actor = actorFromRow(stateRow);
+  const actor: Actor = stateRow.endUserId
+    ? { type: "end_user", id: stateRow.endUserId }
+    : { type: "member", id: stateRow.userId! };
 
   return {
     providerId: stateRow.providerId,
@@ -294,7 +288,7 @@ export async function handleOAuth1Callback(
     userId: stateRow.userId ?? null,
     actor,
     profileId: stateRow.profileId,
-    applicationId: stateRow.applicationId!,
+    applicationId: stateRow.applicationId,
     consumerKey: creds.consumerKey,
     accessToken,
     accessTokenSecret,

@@ -11,175 +11,19 @@
  * the wrong type for a field.
  */
 import { describe, it, expect, beforeEach } from "bun:test";
-import Ajv from "ajv";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedWebhook, seedEndUser, seedApiKey } from "../../helpers/seed.ts";
-import { openApiSpec } from "../../../src/openapi/index.ts";
+import { seedEndUser, seedApiKey } from "../../helpers/seed.ts";
+import { buildOpenApiSpec } from "../../../src/openapi/index.ts";
+import { createOpenApiValidator } from "../../helpers/openapi-validator.ts";
+
+// Core-only OpenAPI spec. Module routes (e.g. webhooks) are validated in
+// their respective module test suites with their own spec bundles.
+const openApiSpec = buildOpenApiSpec();
+const { getResponseSchema, validateResponse, dereference } = createOpenApiValidator(openApiSpec);
 
 const app = getTestApp();
-
-// ─── Schema resolution helpers ──────────────────────────────────
-
-/**
- * Resolve a JSON Reference ($ref) against the OpenAPI spec object.
- * Supports paths like "#/components/schemas/AgentListItem".
- */
-function resolveRef(ref: string, root: Record<string, any> = openApiSpec as any): any {
-  if (!ref.startsWith("#/")) throw new Error(`Unsupported $ref format: ${ref}`);
-  const path = ref.slice(2).split("/");
-  let current: any = root;
-  for (const segment of path) {
-    current = current?.[segment];
-    if (current === undefined) {
-      throw new Error(`Could not resolve $ref "${ref}" — missing segment "${segment}"`);
-    }
-  }
-  return current;
-}
-
-/**
- * Recursively resolve all $ref pointers in a schema object.
- * Returns a new object with all references inlined (deep copy).
- */
-function dereferenceSchema(
-  schema: any,
-  root: Record<string, any> = openApiSpec as any,
-  seen = new Set<string>(),
-): any {
-  if (schema === null || schema === undefined) return schema;
-
-  if (schema.$ref) {
-    const ref = schema.$ref as string;
-    if (seen.has(ref)) {
-      // Circular reference — return permissive schema to avoid infinite loop
-      return {};
-    }
-    seen.add(ref);
-    const resolved = resolveRef(ref, root);
-    return dereferenceSchema(resolved, root, new Set(seen));
-  }
-
-  if (Array.isArray(schema)) {
-    return schema.map((item) => dereferenceSchema(item, root, new Set(seen)));
-  }
-
-  if (typeof schema === "object") {
-    const result: Record<string, any> = {};
-    for (const [key, value] of Object.entries(schema)) {
-      result[key] = dereferenceSchema(value, root, new Set(seen));
-    }
-    return result;
-  }
-
-  return schema;
-}
-
-/**
- * Extract the response body schema for a given path + method + status code
- * from the OpenAPI spec, fully dereferenced.
- */
-function getResponseSchema(path: string, method: string, statusCode: string): any {
-  const specPaths = (openApiSpec as any).paths;
-  const pathObj = specPaths[path];
-  if (!pathObj) throw new Error(`Path "${path}" not found in OpenAPI spec`);
-
-  const operation = pathObj[method.toLowerCase()];
-  if (!operation) throw new Error(`Method "${method}" not found for path "${path}"`);
-
-  let responseObj = operation.responses?.[statusCode];
-  if (!responseObj) throw new Error(`Status ${statusCode} not found for ${method} ${path}`);
-
-  // Resolve response-level $ref (e.g. { $ref: "#/components/responses/Unauthorized" })
-  if (responseObj.$ref) {
-    responseObj = resolveRef(responseObj.$ref);
-  }
-
-  const content = responseObj.content;
-  if (!content) return null; // No body schema for this response
-
-  // Prefer application/json, fall back to application/problem+json
-  const mediaType = content["application/json"] ?? content["application/problem+json"];
-  if (!mediaType?.schema) return null;
-
-  return dereferenceSchema(mediaType.schema);
-}
-
-// ─── AJV setup ──────────────────────────────────────────────────
-
-/**
- * Create an AJV instance configured for OpenAPI 3.1 schema validation.
- *
- * - allErrors: report all validation failures, not just the first
- * - strict: false — OpenAPI uses keywords AJV strict mode rejects (e.g. "example")
- * - validateFormats: false — focus on structural shape, not format semantics
- */
-function createValidator(): Ajv {
-  return new Ajv({
-    allErrors: true,
-    strict: false,
-    validateFormats: false,
-  });
-}
-
-// ─── Validation helper ──────────────────────────────────────────
-
-interface ValidationResult {
-  valid: boolean;
-  errors: string[];
-  extraFields: string[];
-  missingRequiredFields: string[];
-}
-
-/**
- * Validate a response body against the OpenAPI schema for a given endpoint.
- *
- * Returns structured results including:
- * - Whether the body matches the schema
- * - Which required fields are missing
- * - Which fields exist in the response but not in the schema (informational)
- */
-function validateResponse(body: unknown, schema: any): ValidationResult {
-  const ajv = createValidator();
-
-  const result: ValidationResult = {
-    valid: true,
-    errors: [],
-    extraFields: [],
-    missingRequiredFields: [],
-  };
-
-  // AJV validation (types, required fields, enum values)
-  const validate = ajv.compile(schema);
-  const valid = validate(body);
-
-  if (!valid && validate.errors) {
-    result.valid = false;
-    for (const err of validate.errors) {
-      const path = err.instancePath || "(root)";
-      result.errors.push(`${path}: ${err.message} (${err.keyword})`);
-
-      if (err.keyword === "required") {
-        const missing = (err.params as any)?.missingProperty;
-        if (missing) result.missingRequiredFields.push(`${path}/${missing}`);
-      }
-    }
-  }
-
-  // Detect extra fields (informational — not a failure, but useful to track drift)
-  if (schema.properties && typeof body === "object" && body !== null) {
-    const schemaKeys = new Set(Object.keys(schema.properties));
-    const bodyKeys = Object.keys(body as Record<string, unknown>);
-    for (const key of bodyKeys) {
-      if (!schemaKeys.has(key)) {
-        result.extraFields.push(key);
-      }
-    }
-  }
-
-  return result;
-}
 
 // ─── Tests ──────────────────────────────────────────────────────
 
@@ -299,9 +143,7 @@ describe("OpenAPI response validation", () => {
     });
 
     it("each application item conforms to ApplicationObject schema", async () => {
-      const appSchema = dereferenceSchema(
-        (openApiSpec as any).components.schemas.ApplicationObject,
-      );
+      const appSchema = dereference((openApiSpec as any).components.schemas.ApplicationObject);
       expect(appSchema).toBeDefined();
 
       const res = await app.request("/api/applications", {
@@ -354,7 +196,7 @@ describe("OpenAPI response validation", () => {
     });
 
     it("each organization item conforms to Organization schema", async () => {
-      const orgSchema = dereferenceSchema((openApiSpec as any).components.schemas.Organization);
+      const orgSchema = dereference((openApiSpec as any).components.schemas.Organization);
       expect(orgSchema).toBeDefined();
 
       const res = await app.request("/api/orgs", {
@@ -463,121 +305,6 @@ describe("OpenAPI response validation", () => {
 
       expect(result.valid).toBe(true);
       expect(body).toHaveProperty("counts");
-    });
-  });
-
-  // ── Webhooks CRUD (auth + app-scoped) ──────────────────────
-
-  describe("POST /api/webhooks -> 201", () => {
-    it("response body conforms to OpenAPI schema", async () => {
-      const schema = getResponseSchema("/api/webhooks", "POST", "201");
-      expect(schema).not.toBeNull();
-
-      const res = await app.request("/api/webhooks", {
-        method: "POST",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: "https://example.com/hook",
-          events: ["run.completed"],
-        }),
-      });
-      expect(res.status).toBe(201);
-
-      const body = await res.json();
-      const result = validateResponse(body, schema);
-
-      if (!result.valid) {
-        console.error("POST /api/webhooks 201 validation errors:", result.errors);
-      }
-      if (result.extraFields.length > 0) {
-        console.warn("POST /api/webhooks 201 extra fields not in spec:", result.extraFields);
-      }
-
-      expect(result.valid).toBe(true);
-    });
-  });
-
-  describe("GET /api/webhooks -> 200", () => {
-    it("response body conforms to OpenAPI schema", async () => {
-      const schema = getResponseSchema("/api/webhooks", "GET", "200");
-      expect(schema).not.toBeNull();
-
-      // Seed a webhook so the list is non-empty
-      await seedWebhook({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
-
-      const res = await app.request("/api/webhooks", {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-
-      const body = await res.json();
-      const result = validateResponse(body, schema);
-
-      if (!result.valid) {
-        console.error("GET /api/webhooks 200 validation errors:", result.errors);
-      }
-      if (result.extraFields.length > 0) {
-        console.warn("GET /api/webhooks 200 extra fields not in spec:", result.extraFields);
-      }
-
-      expect(result.valid).toBe(true);
-      expect(body).toHaveProperty("data");
-      expect((body as any).data).toBeArray();
-      expect((body as any).data.length).toBeGreaterThanOrEqual(1);
-    });
-  });
-
-  describe("GET /api/webhooks/{id} -> 200", () => {
-    it("response body conforms to OpenAPI schema", async () => {
-      const schema = getResponseSchema("/api/webhooks/{id}", "GET", "200");
-      expect(schema).not.toBeNull();
-
-      const wh = await seedWebhook({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
-
-      const res = await app.request(`/api/webhooks/${wh.id}`, {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-
-      const body = await res.json();
-      const result = validateResponse(body, schema);
-
-      if (!result.valid) {
-        console.error("GET /api/webhooks/{id} 200 validation errors:", result.errors);
-      }
-      if (result.extraFields.length > 0) {
-        console.warn("GET /api/webhooks/{id} 200 extra fields not in spec:", result.extraFields);
-      }
-
-      expect(result.valid).toBe(true);
-      expect((body as any).id).toBe(wh.id);
-    });
-  });
-
-  // ── Webhooks error response ────────────────────────────────
-
-  describe("POST /api/webhooks -> 400 (invalid body)", () => {
-    it("error response conforms to ProblemDetail schema", async () => {
-      const schema = getResponseSchema("/api/webhooks", "POST", "400");
-      expect(schema).not.toBeNull();
-
-      const res = await app.request("/api/webhooks", {
-        method: "POST",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ url: "not-a-url" }), // missing events, invalid url
-      });
-      expect(res.status).toBe(400);
-
-      const body = await res.json();
-      const result = validateResponse(body, schema);
-
-      if (!result.valid) {
-        console.error("POST /api/webhooks 400 validation errors:", result.errors);
-      }
-
-      expect(result.valid).toBe(true);
-      expect(body).toHaveProperty("status");
-      expect((body as any).status).toBe(400);
     });
   });
 
@@ -929,33 +656,8 @@ describe("OpenAPI response validation", () => {
   // ── Helper function tests ──────────────────────────────────
 
   describe("schema resolution helpers", () => {
-    it("resolveRef resolves component schema references", () => {
-      const resolved = resolveRef("#/components/schemas/ProblemDetail");
-      expect(resolved).toBeDefined();
-      expect(resolved.type).toBe("object");
-      expect(resolved.properties).toHaveProperty("status");
-    });
-
-    it("resolveRef resolves component response references", () => {
-      const resolved = resolveRef("#/components/responses/Unauthorized");
-      expect(resolved).toBeDefined();
-      expect(resolved.description).toContain("authentication");
-    });
-
-    it("dereferenceSchema inlines nested $ref pointers", () => {
-      const schema = {
-        type: "object",
-        properties: {
-          detail: { $ref: "#/components/schemas/ProblemDetail" },
-        },
-      };
-      const resolved = dereferenceSchema(schema);
-      expect(resolved.properties.detail.type).toBe("object");
-      expect(resolved.properties.detail.properties.status.type).toBe("integer");
-    });
-
     it("getResponseSchema returns a fully resolved schema", () => {
-      const schema = getResponseSchema("/health", "GET", "200");
+      const schema = getResponseSchema("/health", "GET", "200") as any;
       expect(schema).not.toBeNull();
       expect(schema.type).toBe("object");
       expect(schema.properties).toHaveProperty("status");
@@ -964,7 +666,7 @@ describe("OpenAPI response validation", () => {
 
     it("getResponseSchema resolves $ref in response objects", () => {
       // /api/agents GET 401 uses { $ref: "#/components/responses/Unauthorized" }
-      const schema = getResponseSchema("/api/agents", "GET", "401");
+      const schema = getResponseSchema("/api/agents", "GET", "401") as any;
       expect(schema).not.toBeNull();
       expect(schema.type).toBe("object");
       expect(schema.required).toContain("status");

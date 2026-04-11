@@ -194,7 +194,7 @@ export function validateOutput(
   if (!schema.properties || Object.keys(schema.properties).length === 0) {
     return { valid: true, errors: [] };
   }
-  // Use additionalProperties: true to allow extra fields (state, tokensUsed, etc.)
+  // Use additionalProperties: true to allow extra fields (state, tokenUsage, etc.)
   const looseSchema: JSONSchemaObject & { additionalProperties: boolean } = {
     ...schema,
     additionalProperties: true,
