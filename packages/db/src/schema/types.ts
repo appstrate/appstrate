@@ -15,12 +15,10 @@ import type {
   appProfileProviderBindings,
   userProviderConnections,
   applicationProviderCredentials,
-  oauthStates,
   userAgentProviderProfiles,
 } from "./connections.ts";
 import type { applications, endUsers } from "./applications.ts";
 import type { user, session, account, verification } from "./auth.ts";
-import type { webhooks, webhookDeliveries } from "./webhooks.ts";
 import type {
   organizations,
   organizationMembers,
@@ -60,12 +58,6 @@ export type ApplicationPackage = InferSelectModel<typeof applicationPackages>;
 export type UserProviderConnection = InferSelectModel<typeof userProviderConnections>;
 
 export type ApplicationProviderCredential = InferSelectModel<typeof applicationProviderCredentials>;
-
-export type OAuthState = InferSelectModel<typeof oauthStates>;
-
-export type Webhook = InferSelectModel<typeof webhooks>;
-
-export type WebhookDelivery = InferSelectModel<typeof webhookDeliveries>;
 
 export type Organization = InferSelectModel<typeof organizations>;
 

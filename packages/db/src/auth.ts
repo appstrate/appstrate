@@ -13,11 +13,11 @@ import { getEnv } from "@appstrate/env";
 
 const env = getEnv();
 
-// ─── Before-signup hook (injected at boot by cloud module) ───
+// ─── Before-signup hook (injected at boot via module system) ───
 
-let _beforeSignupHook: ((email: string) => void) | null = null;
+let _beforeSignupHook: ((email: string) => void | Promise<void>) | null = null;
 
-export function setBeforeSignupHook(hook: (email: string) => void): void {
+export function setBeforeSignupHook(hook: (email: string) => void | Promise<void>): void {
   _beforeSignupHook = hook;
 }
 
@@ -263,7 +263,7 @@ export const auth = betterAuth({
       create: {
         before: async (user) => {
           if (_beforeSignupHook) {
-            _beforeSignupHook(user.email);
+            await _beforeSignupHook(user.email);
           }
         },
         after: async (user) => {

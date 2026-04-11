@@ -50,13 +50,13 @@ describe("OpenAPI response header validation", () => {
       expect(requestId!.startsWith("req_")).toBe(true);
     });
 
-    it("POST /api/webhooks includes Request-Id on 201", async () => {
-      const res = await app.request("/api/webhooks", {
+    it("POST /api/end-users includes Request-Id on 201", async () => {
+      const res = await app.request("/api/end-users", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          url: "https://example.com/hook",
-          events: ["run.completed"],
+          externalId: "ext_req_id_check",
+          name: "Req ID Check",
         }),
       });
       expect(res.status).toBe(201);
@@ -75,11 +75,11 @@ describe("OpenAPI response header validation", () => {
       expect(requestId!.startsWith("req_")).toBe(true);
     });
 
-    it("POST /api/webhooks with invalid body (400) includes Request-Id", async () => {
-      const res = await app.request("/api/webhooks", {
+    it("POST /api/end-users with invalid body (400) includes Request-Id", async () => {
+      const res = await app.request("/api/end-users", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ url: "not-a-url" }),
+        body: JSON.stringify({ email: "not-an-email" }),
       });
       expect(res.status).toBe(400);
 
@@ -162,29 +162,21 @@ describe("OpenAPI response header validation", () => {
   // ── RateLimit headers ─────────────────────────────────────
 
   describe("RateLimit headers on rate-limited endpoints", () => {
-    it("POST /api/webhooks includes RateLimit headers on success", async () => {
-      const res = await app.request("/api/webhooks", {
+    it("POST /api/api-keys includes RateLimit headers on success", async () => {
+      const res = await app.request("/api/api-keys", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: "https://example.com/hook-rl",
-          events: ["run.completed"],
-        }),
+        body: JSON.stringify({ name: "rate-limit-check" }),
       });
 
-      // Webhooks POST may or may not be rate-limited — check if headers are present
-      // and if so, validate their format
       const rateLimit = res.headers.get("RateLimit");
       const rateLimitPolicy = res.headers.get("RateLimit-Policy");
 
       if (rateLimit) {
-        // IETF structured header: limit=N, remaining=M, reset=S
         expect(rateLimit).toMatch(/limit=\d+, remaining=\d+, reset=\d+/);
         expect(rateLimitPolicy).not.toBeNull();
-        // Policy format: N;w=60
         expect(rateLimitPolicy).toMatch(/\d+;w=60/);
       }
-      // If no RateLimit headers, this endpoint isn't rate-limited — that's fine
     });
 
     it("POST /api/end-users includes RateLimit headers if rate-limited", async () => {
@@ -213,16 +205,16 @@ describe("OpenAPI response header validation", () => {
 
   describe("header consistency across HTTP methods", () => {
     it("GET and POST on same domain both include Request-Id and Appstrate-Version", async () => {
-      const getRes = await app.request("/api/webhooks", {
+      const getRes = await app.request("/api/end-users", {
         headers: authHeaders(ctx),
       });
 
-      const postRes = await app.request("/api/webhooks", {
+      const postRes = await app.request("/api/end-users", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          url: "https://example.com/consistency-test",
-          events: ["run.started"],
+          externalId: "ext_header_consistency",
+          name: "Header Consistency",
         }),
       });
 

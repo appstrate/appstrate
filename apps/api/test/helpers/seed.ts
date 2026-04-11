@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Entity factories for seeding test data.
+ * Core entity factories for seeding test data.
  *
  * All factories insert real records into the test database.
  * They return the created record for assertions.
+ *
+ * Module-owned entities have their own seed helpers next to each module
+ * (e.g. apps/api/src/modules/webhooks/test/helpers/seed.ts) so core tests
+ * running alone have zero dependency on module schemas.
  */
 import { db } from "./db.ts";
 import {
@@ -13,7 +17,6 @@ import {
   runLogs,
   applications,
   endUsers,
-  webhooks,
   packageSchedules,
   apiKeys,
   orgProxies,
@@ -164,29 +167,6 @@ export async function seedEndUser(
     })
     .returning();
   return eu!;
-}
-
-// ─── Webhooks ─────────────────────────────────────────────
-
-type WebhookInsert = Partial<InferInsertModel<typeof webhooks>> & {
-  orgId: string;
-  applicationId: string;
-};
-
-export async function seedWebhook(
-  overrides: WebhookInsert,
-): Promise<InferSelectModel<typeof webhooks>> {
-  const [wh] = await db
-    .insert(webhooks)
-    .values({
-      id: `wh_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
-      url: "https://example.com/webhook",
-      events: ["run.completed"],
-      secret: crypto.randomUUID(),
-      ...overrides,
-    } as InferInsertModel<typeof webhooks>)
-    .returning();
-  return wh!;
 }
 
 // ─── Schedules ────────────────────────────────────────────

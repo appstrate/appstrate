@@ -321,7 +321,6 @@ export async function testModelConfig(config: {
     };
   }
 
-  // Build request based on API type — all providers use lightweight GET /models (no tokens consumed)
   const base = config.baseUrl.replace(/\/+$/, "");
   let url: string;
   const headers: Record<string, string> = {};

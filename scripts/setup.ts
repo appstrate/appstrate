@@ -195,10 +195,8 @@ if (tier === 0) {
     );
   }
 
-  // ── Step 5: Database migrations ────────────────────────────
-
-  console.log("");
-  run("bun run db:migrate", "Running database migrations", "Check DATABASE_URL in .env");
+  // Database migrations are applied automatically at boot (both PGlite and PostgreSQL).
+  // No manual `db:migrate` step needed.
 }
 
 // ── Step 6: Build ─────────────────────────────────────────────

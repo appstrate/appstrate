@@ -56,7 +56,8 @@
     "./system-packages": "./src/system-packages.ts",
     "./ssrf": "./src/ssrf.ts",
     "./schemas": "./src/schemas.ts",
-    "./form": "./src/form.ts"
+    "./form": "./src/form.ts",
+    "./module": "./src/module.ts"
   },
   "dependencies": {
     "@afps-spec/schema": "^1.2.1",
@@ -67,10 +68,14 @@
   },
   "peerDependencies": {
     "@aws-sdk/client-s3": "^3",
+    "hono": "^4.12.9",
     "typescript": "^5"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-s3": {
+      "optional": true
+    },
+    "hono": {
       "optional": true
     }
   },

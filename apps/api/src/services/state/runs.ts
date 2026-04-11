@@ -3,6 +3,7 @@
 import { eq, and, ne, desc, isNotNull, inArray, count, max, type SQL, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, runLogs, profiles, endUsers, apiKeys, packageSchedules } from "@appstrate/db/schema";
+import type { RunProviderSnapshot } from "@appstrate/shared-types";
 import { logger } from "../../lib/logger.ts";
 import { type Actor, actorInsert, actorFilter } from "../../lib/actor.ts";
 import { asRecordOrNull } from "../../lib/safe-json.ts";
@@ -43,7 +44,7 @@ interface CreateRunParams {
   modelLabel?: string;
   modelSource?: string;
   providerProfileIds?: Record<string, string>;
-  providerStatuses?: unknown[];
+  providerStatuses?: RunProviderSnapshot[];
   apiKeyId?: string;
 }
 
@@ -119,7 +120,6 @@ export async function updateRun(
     result?: Record<string, unknown>;
     state?: Record<string, unknown>;
     error?: string;
-    tokensUsed?: number;
     completedAt?: string;
     duration?: number;
     tokenUsage?: Record<string, unknown>;
@@ -132,7 +132,6 @@ export async function updateRun(
 
   if (updates.status !== undefined) set.status = updates.status;
   if (updates.error !== undefined) set.error = updates.error;
-  if (updates.tokensUsed !== undefined) set.tokensUsed = updates.tokensUsed;
   if (updates.completedAt !== undefined) set.completedAt = new Date(updates.completedAt);
   if (updates.duration !== undefined) set.duration = updates.duration;
   if (updates.result !== undefined) set.result = updates.result;

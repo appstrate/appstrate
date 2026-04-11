@@ -2,7 +2,13 @@
 
 /**
  * OpenAPI 3.1 specification for the Appstrate API.
- * Assembled from sub-modules — no runtime code generation.
+ *
+ * Core paths are assembled statically. Module-owned paths are contributed
+ * dynamically via `openApiPaths()` — they only appear when the module is
+ * loaded.
+ *
+ * Call `buildOpenApiSpec()` after modules are initialized to get the
+ * final spec with all module contributions merged in.
  */
 import { openApiInfo } from "./info.ts";
 import { schemas } from "./schemas.ts";
@@ -34,44 +40,67 @@ import { welcomePaths } from "./paths/welcome.ts";
 import { metaPaths } from "./paths/meta.ts";
 import { notificationsPaths } from "./paths/notifications.ts";
 import { packagesPaths } from "./paths/packages.ts";
-import { webhooksPaths } from "./paths/webhooks.ts";
 import { applicationsPaths } from "./paths/applications.ts";
 import { endUsersPaths } from "./paths/end-users.ts";
 
-export const openApiSpec = {
-  ...openApiInfo,
-  paths: {
-    ...healthPaths,
-    ...authPaths,
-    ...agentsPaths,
-    ...runsPaths,
-    ...realtimePaths,
-    ...schedulesPaths,
-    ...connectionsPaths,
-    ...providersPaths,
-    ...modelsPaths,
-    ...providerKeysPaths,
-    ...proxiesPaths,
-    ...connectionProfilesPaths,
-    ...appProfilesPaths,
-    ...apiKeysPaths,
-    ...organizationsPaths,
-    ...profilePaths,
-    ...invitationsPaths,
-    ...internalPaths,
-    ...welcomePaths,
-    ...metaPaths,
-    ...notificationsPaths,
-    ...packagesPaths,
-    ...webhooksPaths,
-    ...applicationsPaths,
-    ...endUsersPaths,
-  },
-  components: {
-    securitySchemes,
-    parameters,
-    headers,
-    schemas,
-    responses,
-  },
-} as const;
+const corePaths = {
+  ...healthPaths,
+  ...authPaths,
+  ...agentsPaths,
+  ...runsPaths,
+  ...realtimePaths,
+  ...schedulesPaths,
+  ...connectionsPaths,
+  ...providersPaths,
+  ...modelsPaths,
+  ...providerKeysPaths,
+  ...proxiesPaths,
+  ...connectionProfilesPaths,
+  ...appProfilesPaths,
+  ...apiKeysPaths,
+  ...organizationsPaths,
+  ...profilePaths,
+  ...invitationsPaths,
+  ...internalPaths,
+  ...welcomePaths,
+  ...metaPaths,
+  ...notificationsPaths,
+  ...packagesPaths,
+  ...applicationsPaths,
+  ...endUsersPaths,
+};
+
+const components = {
+  securitySchemes,
+  parameters,
+  headers,
+  schemas,
+  responses,
+};
+
+/**
+ * Build the final OpenAPI spec by merging core paths and schemas with module contributions.
+ * Must be called after modules are initialized (or after static filesystem discovery
+ * in build-time scripts).
+ */
+export function buildOpenApiSpec(
+  modulePaths: Record<string, unknown> = {},
+  moduleComponentSchemas: Record<string, unknown> = {},
+  moduleTags: ReadonlyArray<{ name: string; description?: string }> = [],
+) {
+  return {
+    ...openApiInfo,
+    tags: [...openApiInfo.tags, ...moduleTags],
+    paths: {
+      ...corePaths,
+      ...modulePaths,
+    },
+    components: {
+      ...components,
+      schemas: {
+        ...schemas,
+        ...moduleComponentSchemas,
+      },
+    },
+  } as const;
+}

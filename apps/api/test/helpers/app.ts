@@ -6,8 +6,19 @@
  * Creates a Hono app with the same middleware chain and routes as the production app,
  * but WITHOUT calling boot() (no Docker, no S3, no system packages, no scheduler).
  *
- * This allows integration tests to exercise the full HTTP → middleware → auth → service → DB
- * pipeline with a real database.
+ * Mounts core routes plus every module discovered by the root test preload (see
+ * test/setup/preload.ts and test-modules.ts). Discovery is filesystem-based — any
+ * directory under apps/api/src/modules/<name>/ with an index.ts is picked up.
+ *
+ * Default behavior: the preload populates a shared registry before any test
+ * file runs, and getTestApp() reads from it. Core tests and module tests thus
+ * share a single cached app, which matters when `bun test` runs from the repo
+ * root with its recursive file glob (one process, one app).
+ *
+ * Escape hatch: pass `{ modules: [...] }` to bypass discovery and get a fresh
+ * app with an explicit module list. Use `{ modules: [] }` to assert the
+ * zero-footprint invariant (no modules → no module routes, no module
+ * app-scoped prefixes). The explicit path never touches the singleton cache.
  */
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -23,7 +34,6 @@ import { resolvePermissions, resolveApiKeyPermissions } from "../../src/lib/perm
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { requireAppContext } from "../../src/middleware/app-context.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
-import { loadCloud } from "../../src/lib/cloud-loader.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 
@@ -45,7 +55,7 @@ import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
-import { createWebhooksRouter } from "../../src/routes/webhooks.ts";
+import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createConnectionsRouter } from "../../src/routes/connections.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
@@ -53,13 +63,24 @@ import profileRouter from "../../src/routes/profile.ts";
 import invitationsRouter from "../../src/routes/invitations.ts";
 import welcomeRouter from "../../src/routes/welcome.ts";
 
+import type { AppstrateModule } from "@appstrate/core/module";
 import type { AppEnv } from "../../src/types/index.ts";
+
+export interface GetTestAppOptions {
+  /**
+   * Explicit module list to mount. When provided, bypasses the preload-
+   * populated discovery registry and returns a fresh (non-cached) app.
+   *
+   * Pass `[]` to assert the zero-footprint invariant: a core-only app with
+   * no module routes, no module app-scoped prefixes, no module-contributed
+   * middleware. Core tests that want to prove isolation should use this.
+   */
+  modules?: readonly AppstrateModule[];
+}
 
 let cachedApp: Hono<AppEnv> | null = null;
 
-// Initialize boot-time singletons that routes depend on.
-// In production these are called by boot(). For tests, we call them directly.
-await loadCloud().catch(() => {}); // sets _cloud to null (OSS mode)
+// Initialize boot-time singletons that core routes depend on.
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
 initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 
@@ -71,8 +92,13 @@ initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empt
  *
  * Skips: boot(), static files, SPA fallback, shutdown gate, OpenAPI docs, cloud routes.
  */
-export function getTestApp(): Hono<AppEnv> {
-  if (cachedApp) return cachedApp;
+export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
+  // Explicit module list → always return a fresh app (never touches the
+  // singleton cache, so core "modules: []" tests stay isolated from the
+  // preload-discovered default app used by every other test).
+  const explicit = options?.modules !== undefined;
+  if (!explicit && cachedApp) return cachedApp;
+  const extraModules = explicit ? options!.modules! : getDiscoveredModules();
 
   const app = new Hono<AppEnv>();
 
@@ -210,12 +236,13 @@ export function getTestApp(): Hono<AppEnv> {
     return next();
   });
 
-  // App context middleware: resolve X-App-Id for app-scoped routes
+  // App context middleware: resolve X-App-Id for app-scoped routes.
+  // Core prefixes listed statically; any module-owned prefixes come from the
+  // modules passed via options.modules so tests mirror the production aggregation.
   const APP_SCOPED_PREFIXES = [
     "/api/agents",
     "/api/runs",
     "/api/schedules",
-    "/api/webhooks",
     "/api/end-users",
     "/api/api-keys",
     "/api/notifications",
@@ -223,6 +250,7 @@ export function getTestApp(): Hono<AppEnv> {
     "/api/providers",
     "/api/connections",
     "/api/app-profiles",
+    ...extraModules.flatMap((m) => m.appScopedPaths ?? []),
   ];
 
   const appContextMiddleware = requireAppContext();
@@ -258,7 +286,10 @@ export function getTestApp(): Hono<AppEnv> {
   app.route("/api", schedulesRouter);
   app.route("/api/packages", createPackagesRouter());
   app.route("/api/end-users", createEndUsersRouter());
-  app.route("/api/webhooks", createWebhooksRouter());
+  for (const mod of extraModules) {
+    const moduleRouter = mod.createRouter?.();
+    if (moduleRouter) app.route("/api", moduleRouter);
+  }
   app.route("/api/providers", createProvidersRouter());
   app.route("/api/api-keys", createApiKeysRouter());
   app.route("/api/proxies", createProxiesRouter());
@@ -274,6 +305,6 @@ export function getTestApp(): Hono<AppEnv> {
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());
 
-  cachedApp = app;
+  if (!explicit) cachedApp = app;
   return app;
 }

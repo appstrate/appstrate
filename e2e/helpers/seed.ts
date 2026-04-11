@@ -202,7 +202,7 @@ export async function createWebhook(
 ): Promise<{ id: string; url: string; secret: string }> {
   const res = await client.post("/webhooks", {
     url: overrides.url ?? "https://example.com/hook",
-    events: overrides.events ?? ["run.completed"],
+    events: overrides.events ?? ["run.success"],
   });
 
   if (res.status() !== 201) {

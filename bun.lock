@@ -143,7 +143,7 @@
     },
     "packages/core": {
       "name": "@appstrate/core",
-      "version": "2.10.3",
+      "version": "2.10.5",
       "dependencies": {
         "@afps-spec/schema": "^1.2.1",
         "fflate": "^0.8.0",
@@ -153,10 +153,12 @@
       },
       "peerDependencies": {
         "@aws-sdk/client-s3": "^3",
+        "hono": "^4.12.9",
         "typescript": "^5",
       },
       "optionalPeers": [
         "@aws-sdk/client-s3",
+        "hono",
       ],
     },
     "packages/db": {
@@ -210,7 +212,7 @@
     "runtime-pi/sidecar": {
       "name": "appstrate-sidecar",
       "dependencies": {
-        "hono": "^4.0.0",
+        "hono": "^4.11.9",
       },
     },
   },

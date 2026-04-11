@@ -84,7 +84,7 @@ export function OrgSettingsPage() {
   const validTabs = [
     "general",
     "members",
-    ...(isAdmin && features.models ? ["models" as const] : []),
+    ...(isAdmin ? ["models" as const] : []),
     ...(isAdmin ? ["proxies" as const] : []),
     ...(features.billing ? ["billing" as const] : []),
   ] as const;
@@ -314,9 +314,7 @@ export function OrgSettingsPage() {
             <TabsTrigger value="members">
               {t("orgSettings.tabMembers", { count: members.length })}
             </TabsTrigger>
-            {isAdmin && features.models && (
-              <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>
-            )}
+            {isAdmin && <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>}
             {isAdmin && <TabsTrigger value="proxies">{t("proxies.tabTitle")}</TabsTrigger>}
             {features.billing && <TabsTrigger value="billing">{t("billing.tabTitle")}</TabsTrigger>}
           </TabsList>
@@ -575,7 +573,7 @@ export function OrgSettingsPage() {
         </>
       )}
 
-      {tab === "models" && features.models && (
+      {tab === "models" && (
         <>
           <Tabs
             value={modelsSubTab}
@@ -583,9 +581,7 @@ export function OrgSettingsPage() {
           >
             <TabsList className="mb-4">
               <TabsTrigger value="models-list">{t("models.tabTitle")}</TabsTrigger>
-              {features.providerKeys && (
-                <TabsTrigger value="provider-keys">{t("providerKeys.title")}</TabsTrigger>
-              )}
+              <TabsTrigger value="provider-keys">{t("providerKeys.title")}</TabsTrigger>
             </TabsList>
           </Tabs>
 
@@ -610,7 +606,7 @@ export function OrgSettingsPage() {
             />
           )}
 
-          {modelsSubTab === "provider-keys" && features.providerKeys && (
+          {modelsSubTab === "provider-keys" && (
             <ProviderKeysSection
               providerKeys={providerKeys}
               isLoading={pkLoading}
