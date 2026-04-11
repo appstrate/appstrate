@@ -52,10 +52,8 @@ const oidcModule: AppstrateModule = {
   publicPaths: [
     "/api/oauth/enduser/login",
     "/api/oauth/enduser/consent",
-    "/api/oauth/.well-known/openid-configuration",
-    "/api/oauth/.well-known/oauth-authorization-server",
-    "/.well-known/openid-configuration",
-    "/.well-known/oauth-authorization-server",
+    "/api/.well-known/openid-configuration",
+    "/api/.well-known/oauth-authorization-server",
   ],
 
   authStrategies() {

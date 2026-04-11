@@ -2,12 +2,7 @@
 
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { _resetCacheForTesting } from "@appstrate/env";
-import {
-  getClientIpFromRequest,
-  stampClientIp,
-  resetClientIpCache,
-  _TRUSTED_CLIENT_IP_HEADER,
-} from "../../../src/lib/client-ip.ts";
+import { getClientIpFromRequest, resetClientIpCache } from "../../../src/lib/client-ip.ts";
 
 const SNAPSHOT_TRUST_PROXY = process.env.TRUST_PROXY;
 
@@ -34,7 +29,7 @@ function requestWith(headers: Record<string, string>): Request {
 }
 
 describe("getClientIpFromRequest — TRUST_PROXY=false (default)", () => {
-  it("ignores X-Forwarded-For spoofing — returns 'unknown' without stamp", () => {
+  it("ignores X-Forwarded-For spoofing — returns 'unknown'", () => {
     const req = requestWith({ "x-forwarded-for": "1.2.3.4" });
     expect(getClientIpFromRequest(req)).toBe("unknown");
   });
@@ -42,13 +37,6 @@ describe("getClientIpFromRequest — TRUST_PROXY=false (default)", () => {
   it("ignores X-Real-IP spoofing", () => {
     const req = requestWith({ "x-real-ip": "1.2.3.4" });
     expect(getClientIpFromRequest(req)).toBe("unknown");
-  });
-
-  it("returns the stamped IP when set by the outer mount", () => {
-    const original = requestWith({ "x-forwarded-for": "1.2.3.4" });
-    const stamped = stampClientIp(original, "127.0.0.1");
-    expect(stamped.headers.get(_TRUSTED_CLIENT_IP_HEADER)).toBe("127.0.0.1");
-    expect(getClientIpFromRequest(stamped)).toBe("127.0.0.1");
   });
 
   it("returns 'unknown' when request is undefined", () => {
@@ -74,12 +62,6 @@ describe("getClientIpFromRequest — TRUST_PROXY=true (1 hop)", () => {
   it("falls back to X-Real-IP when XFF is absent", () => {
     const req = requestWith({ "x-real-ip": "5.6.7.8" });
     expect(getClientIpFromRequest(req)).toBe("5.6.7.8");
-  });
-
-  it("stamped header still wins over XFF", () => {
-    const original = requestWith({ "x-forwarded-for": "1.2.3.4" });
-    const stamped = stampClientIp(original, "stamped-value");
-    expect(getClientIpFromRequest(stamped)).toBe("stamped-value");
   });
 });
 

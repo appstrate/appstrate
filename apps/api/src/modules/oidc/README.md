@@ -39,14 +39,12 @@ Frontend reads `useAppConfig().features.oidc` to conditionally show the OAuth ta
 publicPaths: [
   "/api/oauth/enduser/login",
   "/api/oauth/enduser/consent",
-  "/api/oauth/.well-known/openid-configuration",
-  "/api/oauth/.well-known/oauth-authorization-server",
-  "/.well-known/openid-configuration",
-  "/.well-known/oauth-authorization-server",
+  "/api/.well-known/openid-configuration",
+  "/api/.well-known/oauth-authorization-server",
 ];
 ```
 
-The login and consent pages are anonymous — they validate `client_id` against the `oauth_client` registry before rendering. Any unknown or disabled client id returns 404 before the HTML is assembled. The discovery alias endpoints proxy Better Auth's authoritative `/api/auth/.well-known/*` payloads so OIDC clients can auto-configure from the root of the issuer URL.
+The login and consent pages are anonymous — they validate `client_id` against the `oauth_client` registry before rendering. Any unknown or disabled client id returns 404 before the HTML is assembled. The root-level discovery alias endpoints proxy Better Auth's authoritative `/api/auth/.well-known/*` payloads so OIDC clients can auto-configure from the root of the issuer URL.
 
 ## App-scoped route prefixes
 
@@ -58,20 +56,19 @@ Client admin routes (`/api/oauth/clients*`) require `X-App-Id`.
 
 ## Routes
 
-| Method | Path                                          | Permission             | Purpose                                                                                                                                         |
-| ------ | --------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/oauth/clients`                          | `oauth-clients:write`  | Register a new client. Returns plaintext `clientSecret` once.                                                                                   |
-| GET    | `/api/oauth/clients`                          | `oauth-clients:read`   | List clients for the current app.                                                                                                               |
-| GET    | `/api/oauth/clients/:clientId`                | `oauth-clients:read`   | Get one client (secret hidden).                                                                                                                 |
-| PATCH  | `/api/oauth/clients/:clientId`                | `oauth-clients:write`  | Update `redirectUris` / `disabled`.                                                                                                             |
-| DELETE | `/api/oauth/clients/:clientId`                | `oauth-clients:delete` | Delete a client.                                                                                                                                |
-| POST   | `/api/oauth/clients/:clientId/rotate`         | `oauth-clients:write`  | Issue a fresh plaintext secret.                                                                                                                 |
-| GET    | `/api/oauth/enduser/login`                    | public                 | Server-rendered login form. Validates `client_id`, loads app branding, issues a one-shot CSRF token paired with an httpOnly `oidc_csrf` cookie. |
-| POST   | `/api/oauth/enduser/login`                    | public                 | Verifies CSRF, calls `auth.api.signInEmail`, redirects to `/api/auth/oauth2/authorize` on success (preserving the signed query string).         |
-| GET    | `/api/oauth/enduser/consent`                  | public                 | Server-rendered consent form with app branding + scope descriptions + CSRF token.                                                               |
-| POST   | `/api/oauth/enduser/consent`                  | public                 | Verifies CSRF, calls `auth.api.oauth2Consent` (accept/deny), forwards the plugin's redirect response.                                           |
-| GET    | `/.well-known/openid-configuration`           | public                 | OIDC discovery alias proxying Better Auth's metadata endpoint. Root-level alias for strict OIDC clients.                                        |
-| GET    | `/api/oauth/.well-known/openid-configuration` | public                 | Module-prefixed alias for callers that speak the module path layout.                                                                            |
+| Method | Path                                    | Permission             | Purpose                                                                                                                                         |
+| ------ | --------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/oauth/clients`                    | `oauth-clients:write`  | Register a new client. Returns plaintext `clientSecret` once.                                                                                   |
+| GET    | `/api/oauth/clients`                    | `oauth-clients:read`   | List clients for the current app.                                                                                                               |
+| GET    | `/api/oauth/clients/:clientId`          | `oauth-clients:read`   | Get one client (secret hidden).                                                                                                                 |
+| PATCH  | `/api/oauth/clients/:clientId`          | `oauth-clients:write`  | Update `redirectUris` / `disabled`.                                                                                                             |
+| DELETE | `/api/oauth/clients/:clientId`          | `oauth-clients:delete` | Delete a client.                                                                                                                                |
+| POST   | `/api/oauth/clients/:clientId/rotate`   | `oauth-clients:write`  | Issue a fresh plaintext secret.                                                                                                                 |
+| GET    | `/api/oauth/enduser/login`              | public                 | Server-rendered login form. Validates `client_id`, loads app branding, issues a one-shot CSRF token paired with an httpOnly `oidc_csrf` cookie. |
+| POST   | `/api/oauth/enduser/login`              | public                 | Verifies CSRF, calls `auth.api.signInEmail`, redirects to `/api/auth/oauth2/authorize` on success (preserving the signed query string).         |
+| GET    | `/api/oauth/enduser/consent`            | public                 | Server-rendered consent form with app branding + scope descriptions + CSRF token.                                                               |
+| POST   | `/api/oauth/enduser/consent`            | public                 | Verifies CSRF, calls `auth.api.oauth2Consent` (accept/deny), forwards the plugin's redirect response.                                           |
+| GET    | `/api/.well-known/openid-configuration` | public                 | OIDC discovery alias proxying Better Auth's metadata endpoint for strict OIDC clients.                                                          |
 
 `oauth-clients` is a new core RBAC resource added to `apps/api/src/lib/permissions.ts` in the same PR as Stage 4 (per CLAUDE.md: modules that introduce new RBAC resources must edit `permissions.ts` alongside).
 

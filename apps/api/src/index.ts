@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
-import { auth } from "@appstrate/db/auth";
+import { getAuth } from "@appstrate/db/auth";
 import { logger } from "./lib/logger.ts";
 import { boot } from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
@@ -55,7 +55,7 @@ import { isEndUserInApp } from "./services/end-users.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
 import { getAppConfig } from "./lib/app-config.ts";
-import { getClientIp, stampClientIp } from "./lib/client-ip.ts";
+import { getClientIp } from "./lib/client-ip.ts";
 import type { AppEnv } from "./types/index.ts";
 
 // Fail-fast: validate all env vars at startup
@@ -108,12 +108,8 @@ app.use("*", async (c, next) => {
 });
 
 // Mount Better Auth handler — handles signup, signin, session, etc.
-// Stamp the resolved trusted client IP onto the request so Better Auth
-// plugin hooks (e.g. OIDC guards rate-limiting) do not have to re-parse
-// `X-Forwarded-For` — which would be spoofable from outside our trust
-// boundary. `getClientIp` honors `TRUST_PROXY`.
 app.on(["POST", "GET"], "/api/auth/*", (c) => {
-  return auth.handler(stampClientIp(c.req.raw, getClientIp(c)));
+  return getAuth().handler(c.req.raw);
 });
 
 // Paths that skip both auth and org-context middleware (handled by other means or public)
@@ -165,12 +161,7 @@ app.use("*", async (c, next) => {
       c.set("authMethod", resolution.authMethod);
       c.set("applicationId", resolution.applicationId);
       if (resolution.endUser) {
-        c.set("endUser", {
-          id: resolution.endUser.id,
-          applicationId: resolution.endUser.applicationId,
-          name: resolution.endUser.name ?? null,
-          email: resolution.endUser.email ?? null,
-        });
+        c.set("endUser", resolution.endUser);
       }
       return next();
     }
@@ -233,7 +224,7 @@ app.use("*", async (c, next) => {
   }
 
   // Fallback: cookie session
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
   if (!session?.user) {
     throw unauthorized("Invalid or missing session");
   }

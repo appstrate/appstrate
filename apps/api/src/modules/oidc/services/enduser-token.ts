@@ -11,10 +11,6 @@
  * verify time (tests, Hono's `app.request()`, air-gapped deployments),
  * and guarantees the keys we verify against are exactly the keys the
  * local plugin just minted with — no staleness window.
- *
- * If the in-process fetch fails (e.g. `getAuth()` throws because the
- * singleton has not yet been built), we fall back to `jose.createRemoteJWKSet`
- * over HTTP so pre-boot code paths and external callers still work.
  */
 
 import * as jose from "jose";
@@ -43,43 +39,28 @@ let _jwks: JwksResolver | null = null;
 
 /**
  * Build an in-process JWKS resolver by fetching keys from the Better Auth
- * singleton's `jwt` plugin endpoint. Returns `null` if the singleton is not
- * yet initialized or the endpoint is unavailable — callers fall back to the
- * remote URL resolver.
+ * singleton's `jwt` plugin endpoint.
  */
-async function buildLocalJwks(): Promise<JwksResolver | null> {
-  let auth: ReturnType<typeof getAuth>;
-  try {
-    auth = getAuth();
-  } catch {
-    return null;
-  }
+async function buildLocalJwks(): Promise<JwksResolver> {
+  const auth = getAuth();
   const api = (auth as unknown as { api: Record<string, unknown> }).api;
   const getJwksFn = api?.getJwks;
-  if (typeof getJwksFn !== "function") return null;
-  try {
-    const result = (await (getJwksFn as (args: { headers: Headers }) => Promise<unknown>)({
-      headers: new Headers(),
-    })) as { keys?: jose.JWK[] } | null;
-    const keys = result?.keys;
-    if (!Array.isArray(keys) || keys.length === 0) return null;
-    return jose.createLocalJWKSet({ keys }) as unknown as JwksResolver;
-  } catch {
-    return null;
+  if (typeof getJwksFn !== "function") {
+    throw new Error("oidc: auth.api.getJwks is not available");
   }
-}
-
-function remoteJwks(): JwksResolver {
-  const env = getEnv();
-  return jose.createRemoteJWKSet(new URL("/api/auth/jwks", env.APP_URL), {
-    cacheMaxAge: 60 * 60 * 1000, // 1h
-  }) as unknown as JwksResolver;
+  const result = (await (getJwksFn as (args: { headers: Headers }) => Promise<unknown>)({
+    headers: new Headers(),
+  })) as { keys?: jose.JWK[] } | null;
+  const keys = result?.keys;
+  if (!Array.isArray(keys) || keys.length === 0) {
+    throw new Error("oidc: jwks endpoint returned no keys");
+  }
+  return jose.createLocalJWKSet({ keys }) as unknown as JwksResolver;
 }
 
 async function getJwks(): Promise<JwksResolver> {
   if (_jwks) return _jwks;
-  const local = await buildLocalJwks();
-  _jwks = local ?? remoteJwks();
+  _jwks = await buildLocalJwks();
   return _jwks;
 }
 

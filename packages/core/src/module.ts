@@ -278,14 +278,22 @@ export interface AuthResolution {
   /** Permission strings already resolved by the strategy. */
   permissions: readonly string[];
   /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
-  endUser?: {
-    id: string;
-    applicationId: string;
-    name?: string;
-    email?: string;
-  };
+  endUser?: EndUserContext;
   /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */
   extra?: Record<string, unknown>;
+}
+
+/**
+ * End-user impersonation context. Set on the Hono request context under
+ * `endUser` by auth strategies that resolve an end-user (cookie auth with
+ * `Appstrate-User` header, OIDC JWT, etc.). Consumed by core routes that
+ * filter runs to the end-user's own data.
+ */
+export interface EndUserContext {
+  id: string;
+  applicationId: string;
+  name?: string;
+  email?: string;
 }
 
 /**

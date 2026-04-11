@@ -245,34 +245,24 @@ export function createOidcRouter() {
     },
   );
 
-  // ─── OIDC discovery aliases ────────────────────────────────────────────────
+  // ─── OIDC discovery root aliases ───────────────────────────────────────────
   //
   // Better Auth's oauth-provider plugin serves the authoritative OIDC metadata
-  // under its own basePath (`/api/auth/.well-known/openid-configuration`).
-  // The OIDC spec + most satellite libraries expect the document to live at
-  // the root `/.well-known/openid-configuration` of the `issuer` URL, so we
-  // expose the same payload at both the root and the module-scoped paths as
-  // thin proxies. No CORS, no auth — this is a public, well-known endpoint.
+  // under its own basePath (`/api/auth/.well-known/*`). The OIDC spec + most
+  // satellite libraries expect the document to live at the root
+  // `/.well-known/openid-configuration` of the `issuer` URL, so we expose the
+  // same payload at the root as thin proxies. No CORS, no auth — public.
 
-  const proxyOidcMetadata = async (c: Context<AppEnv>) => {
+  router.get("/.well-known/openid-configuration", async (c: Context<AppEnv>) => {
     const payload = await getOidcAuthApi().getOpenIdConfig({ headers: c.req.raw.headers });
     c.header("cache-control", "public, max-age=3600");
     return c.json(payload as never);
-  };
-
-  const proxyOauthServerMetadata = async (c: Context<AppEnv>) => {
+  });
+  router.get("/.well-known/oauth-authorization-server", async (c: Context<AppEnv>) => {
     const payload = await getOidcAuthApi().getOAuthServerConfig({ headers: c.req.raw.headers });
     c.header("cache-control", "public, max-age=3600");
     return c.json(payload as never);
-  };
-
-  router.get("/oauth/.well-known/openid-configuration", proxyOidcMetadata);
-  router.get("/oauth/.well-known/oauth-authorization-server", proxyOauthServerMetadata);
-  // Root aliases — Hono strips the `/api` prefix when mounted, so the core
-  // router sees these as `/.well-known/*`. The module's `publicPaths` lists
-  // both forms so the auth middleware lets them through in every scenario.
-  router.get("/.well-known/openid-configuration", proxyOidcMetadata);
-  router.get("/.well-known/oauth-authorization-server", proxyOauthServerMetadata);
+  });
 
   // ─── Public end-user pages (anonymous, listed in publicPaths) ──────────────
 
@@ -536,15 +526,12 @@ export function prefersHtml(acceptHeader: string | undefined | null): boolean {
 
 /**
  * Convert a Better Auth `oauth2Consent` JSON redirect response into a real
- * HTTP 302 when the caller prefers HTML, preserving any `Set-Cookie`
- * headers the plugin attached. Already-302 responses and non-JSON bodies
- * are passed through unchanged. Programmatic JSON callers (`acceptsHtml`
- * false) always see the verbatim plugin response so existing tests and
- * API clients keep working.
+ * HTTP 302 when the caller prefers HTML, preserving any `Set-Cookie` headers
+ * the plugin attached. Already-302 responses and non-JSON bodies are passed
+ * through unchanged. Programmatic JSON callers (`acceptsHtml` false) always
+ * see the verbatim plugin response.
  *
- * Better Auth returns one of: `{ redirect: true, url: "..." }`,
- * `{ redirect_uri: "..." }`, `{ redirectURI: "..." }`, or `{ url: "..." }`
- * depending on plugin version — accept all shapes.
+ * `@better-auth/oauth-provider@^1.6` returns `{ redirect: true, url: "..." }`.
  */
 export async function maybeJsonRedirectToLocation(
   response: Response,
@@ -562,13 +549,8 @@ export async function maybeJsonRedirectToLocation(
     return response;
   }
   if (!body || typeof body !== "object") return response;
-  const obj = body as Record<string, unknown>;
-  const target =
-    (typeof obj.url === "string" && obj.url) ||
-    (typeof obj.redirect_uri === "string" && obj.redirect_uri) ||
-    (typeof obj.redirectURI === "string" && obj.redirectURI) ||
-    null;
-  if (!target) return response;
+  const target = (body as { url?: unknown }).url;
+  if (typeof target !== "string") return response;
 
   const redirect = new Response(null, { status: 302 });
   redirect.headers.set("location", target);

@@ -100,7 +100,7 @@ ALTER TABLE "oauth_client"
 --> statement-breakpoint
 ALTER TABLE "oauth_refresh_token"
   ADD CONSTRAINT "oauth_refresh_token_client_id_oauth_client_client_id_fk"
-  FOREIGN KEY ("client_id") REFERENCES "public"."oauth_client"("client_id") ON DELETE no action ON UPDATE no action;
+  FOREIGN KEY ("client_id") REFERENCES "public"."oauth_client"("client_id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
 ALTER TABLE "oauth_refresh_token"
   ADD CONSTRAINT "oauth_refresh_token_session_id_session_id_fk"
@@ -112,7 +112,7 @@ ALTER TABLE "oauth_refresh_token"
 --> statement-breakpoint
 ALTER TABLE "oauth_access_token"
   ADD CONSTRAINT "oauth_access_token_client_id_oauth_client_client_id_fk"
-  FOREIGN KEY ("client_id") REFERENCES "public"."oauth_client"("client_id") ON DELETE no action ON UPDATE no action;
+  FOREIGN KEY ("client_id") REFERENCES "public"."oauth_client"("client_id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
 ALTER TABLE "oauth_access_token"
   ADD CONSTRAINT "oauth_access_token_session_id_session_id_fk"
@@ -124,11 +124,11 @@ ALTER TABLE "oauth_access_token"
 --> statement-breakpoint
 ALTER TABLE "oauth_access_token"
   ADD CONSTRAINT "oauth_access_token_refresh_id_oauth_refresh_token_id_fk"
-  FOREIGN KEY ("refresh_id") REFERENCES "public"."oauth_refresh_token"("id") ON DELETE no action ON UPDATE no action;
+  FOREIGN KEY ("refresh_id") REFERENCES "public"."oauth_refresh_token"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
 ALTER TABLE "oauth_consent"
   ADD CONSTRAINT "oauth_consent_client_id_oauth_client_client_id_fk"
-  FOREIGN KEY ("client_id") REFERENCES "public"."oauth_client"("client_id") ON DELETE no action ON UPDATE no action;
+  FOREIGN KEY ("client_id") REFERENCES "public"."oauth_client"("client_id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
 ALTER TABLE "oauth_consent"
   ADD CONSTRAINT "oauth_consent_user_id_user_id_fk"

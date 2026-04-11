@@ -22,7 +22,7 @@
  */
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { auth } from "@appstrate/db/auth";
+import { getAuth } from "@appstrate/db/auth";
 import { validateApiKey } from "../../src/services/api-keys.ts";
 import { ensureDefaultProfile } from "../../src/services/connection-profiles.ts";
 import { requireOrgContext } from "../../src/middleware/org-context.ts";
@@ -140,7 +140,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
 
   // Better Auth handler
   app.on(["POST", "GET"], "/api/auth/*", (c) => {
-    return auth.handler(c.req.raw);
+    return getAuth().handler(c.req.raw);
   });
 
   // Module auth strategies — collected from `extraModules` (the test harness
@@ -171,12 +171,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
         c.set("authMethod", resolution.authMethod);
         c.set("applicationId", resolution.applicationId);
         if (resolution.endUser) {
-          c.set("endUser", {
-            id: resolution.endUser.id,
-            applicationId: resolution.endUser.applicationId,
-            name: resolution.endUser.name ?? null,
-            email: resolution.endUser.email ?? null,
-          });
+          c.set("endUser", resolution.endUser);
         }
         return next();
       }
@@ -228,7 +223,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     }
 
     // Fallback: cookie session
-    const sessionResult = await auth.api.getSession({ headers: c.req.raw.headers });
+    const sessionResult = await getAuth().api.getSession({ headers: c.req.raw.headers });
     if (!sessionResult?.user) {
       throw unauthorized("Invalid or missing session");
     }

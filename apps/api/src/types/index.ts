@@ -54,12 +54,7 @@ export interface LoadedPackage {
 export type AppEnv = {
   Variables: {
     user: { id: string; email: string; name: string };
-    endUser?: {
-      id: string;
-      applicationId: string;
-      name: string | null;
-      email: string | null;
-    };
+    endUser?: import("@appstrate/core/module").EndUserContext;
     agent: LoadedPackage;
     orgId: string;
     orgSlug: string;

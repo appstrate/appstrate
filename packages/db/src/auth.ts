@@ -310,10 +310,6 @@ function buildAuth(
 }
 
 // ─── Factory + lazy singleton ────────────────────────────
-//
-// `_auth` is typed from `ReturnType<typeof buildAuth>` so the full inferred
-// plugin-contributed API (e.g. `auth.api.signInMagicLink` from magicLink)
-// stays visible to consumers via the `auth` Proxy.
 
 type AuthInstance = ReturnType<typeof buildAuth>;
 
@@ -326,10 +322,6 @@ let _auth: AuthInstance | null = null;
  * (and their companion Drizzle tables via
  * `AppstrateModule.drizzleSchemas()`) are merged with `basePlugins` and the
  * core schema before the instance is built.
- *
- * Tests: `apps/api/test/setup/preload.ts` calls `createAuth(...)` with the
- * full module plugin + schema list so strategy tests and OAuth E2E tests
- * see a coherent auth surface.
  */
 export function createAuth(
   extraPlugins: BetterAuthPluginList = [],
@@ -348,23 +340,3 @@ export function getAuth(): AuthInstance {
   }
   return _auth;
 }
-
-/**
- * Back-compat `auth` export. A Proxy that forwards all property access to
- * the lazy-initialized singleton. Exists so existing `import { auth }` sites
- * (apps/api/src/index.ts, test helpers) don't need a mechanical rewrite.
- *
- * Methods are `.bind()`-wrapped so Better Auth calls that rely on `this`
- * continue to work. Property reads happen at request time (inside Hono
- * handlers), well after `createAuth()` has run in boot.
- */
-export const auth = new Proxy({} as AuthInstance, {
-  get(_target, prop) {
-    const instance = getAuth() as unknown as Record<string | symbol, unknown>;
-    const value = instance[prop];
-    if (typeof value === "function") {
-      return (value as (...args: unknown[]) => unknown).bind(instance);
-    }
-    return value;
-  },
-}) as AuthInstance;

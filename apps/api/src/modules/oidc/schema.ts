@@ -58,13 +58,10 @@ export const oauthClient = pgTable("oauth_client", {
   public: boolean("public"),
   type: text("type"),
   requirePKCE: boolean("require_pkce"),
-  // Invariant: `referenceId` and `metadata.applicationId` must stay equal.
-  // `referenceId` is what module code reads directly (branding, admin CRUD);
-  // `metadata.applicationId` is what Better Auth's `customAccessTokenClaims`
-  // receives (the plugin does not forward `referenceId` to the closure).
-  // Always write both via `buildOauthClientApplicationBinding()`. Enforced
-  // NOT NULL at the column level so an unbound client row cannot exist —
-  // `mapRow` doesn't need a silent `?? ""` fallback.
+  // `referenceId` holds the Appstrate `applicationId` for filter queries;
+  // `metadata` holds the same value as JSON because the plugin's
+  // `customAccessTokenClaims` closure only receives `metadata`, not the
+  // client row. Written in lockstep in `services/oauth-admin.ts#createClient`.
   referenceId: text("reference_id").notNull(),
   metadata: text("metadata"),
 });

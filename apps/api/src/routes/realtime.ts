@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { auth } from "@appstrate/db/auth";
+import { getAuth } from "@appstrate/db/auth";
 import { organizationMembers } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
 import type { RealtimeEvent } from "../services/realtime.ts";
@@ -63,7 +63,7 @@ async function validateSSEAuth(c: {
   }
 
   // 2. Fallback: cookie session
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
   if (!session?.user) return null;
 
   const orgId = c.req.query("orgId");

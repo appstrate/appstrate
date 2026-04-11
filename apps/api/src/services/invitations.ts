@@ -6,7 +6,7 @@ import { eq, and, lt, desc } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { getAppConfig } from "../lib/app-config.ts";
 import { sendEmail } from "./email.ts";
-import { auth } from "@appstrate/db/auth";
+import { getAuth } from "@appstrate/db/auth";
 import { logger } from "../lib/logger.ts";
 
 /** Roles assignable via invitation (excludes owner — transferred, not invited). */
@@ -175,7 +175,7 @@ export async function sendMagicLinkInvitation(invitation: {
   email: string;
 }) {
   try {
-    await auth.api.signInMagicLink({
+    await getAuth().api.signInMagicLink({
       body: {
         email: invitation.email,
         callbackURL: `/invite/${invitation.token}/accept`,

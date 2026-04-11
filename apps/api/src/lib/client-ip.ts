@@ -4,8 +4,6 @@ import type { Context } from "hono";
 import { getConnInfo } from "hono/bun";
 import { getEnv } from "@appstrate/env";
 
-const TRUSTED_HEADER = "x-appstrate-client-ip";
-
 function parseTrustProxy(raw: string): number {
   if (raw === "false") return 0;
   if (raw === "true") return 1;
@@ -35,12 +33,14 @@ function pickFromXff(xff: string | null | undefined, hops: number): string | und
   return idx >= 0 ? parts[idx] : parts[0];
 }
 
-function socketAddress(c: Context): string | undefined {
-  try {
-    return getConnInfo(c).remote.address ?? undefined;
-  } catch {
-    return undefined;
-  }
+function resolveFromHeaders(headers: Headers): string | undefined {
+  const hops = trustedHops();
+  if (hops <= 0) return undefined;
+  const fromXff = pickFromXff(headers.get("x-forwarded-for"), hops);
+  if (fromXff) return fromXff;
+  const real = headers.get("x-real-ip");
+  if (real) return real;
+  return undefined;
 }
 
 /**
@@ -52,45 +52,22 @@ function socketAddress(c: Context): string | undefined {
  * remote address is returned.
  */
 export function getClientIp(c: Context): string {
-  const hops = trustedHops();
-  if (hops > 0) {
-    const fromXff = pickFromXff(c.req.header("x-forwarded-for"), hops);
-    if (fromXff) return fromXff;
-    const real = c.req.header("x-real-ip");
-    if (real) return real;
+  const fromHeaders = resolveFromHeaders(c.req.raw.headers);
+  if (fromHeaders) return fromHeaders;
+  try {
+    return getConnInfo(c).remote.address ?? "unknown";
+  } catch {
+    return "unknown";
   }
-  return socketAddress(c) ?? "unknown";
 }
 
 /**
  * Resolve the client IP from a raw `Request`. Used inside contexts that do
- * not own a Hono `Context` (e.g. Better Auth plugin hooks). The outer
- * `/api/auth/*` mount stamps a `TRUSTED_HEADER` with the already-resolved
- * trusted IP so nested code does not need to re-parse `X-Forwarded-For`.
+ * not own a Hono `Context` (e.g. Better Auth plugin hooks). Returns
+ * `"unknown"` when `TRUST_PROXY` is disabled — the socket address is not
+ * available on a bare `Request`.
  */
 export function getClientIpFromRequest(request: Request | undefined): string {
   if (!request) return "unknown";
-  const stamped = request.headers.get(TRUSTED_HEADER);
-  if (stamped) return stamped;
-  const hops = trustedHops();
-  if (hops > 0) {
-    const fromXff = pickFromXff(request.headers.get("x-forwarded-for"), hops);
-    if (fromXff) return fromXff;
-    const real = request.headers.get("x-real-ip");
-    if (real) return real;
-  }
-  return "unknown";
+  return resolveFromHeaders(request.headers) ?? "unknown";
 }
-
-/**
- * Stamp a Request with the trusted client IP header for downstream code
- * that only has access to `Request` (Better Auth handler). Callers should
- * pass the result of `getClientIp(c)`.
- */
-export function stampClientIp(request: Request, ip: string): Request {
-  const headers = new Headers(request.headers);
-  headers.set(TRUSTED_HEADER, ip);
-  return new Request(request, { headers });
-}
-
-export { TRUSTED_HEADER as _TRUSTED_CLIENT_IP_HEADER };

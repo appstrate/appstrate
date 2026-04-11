@@ -54,26 +54,6 @@ describe("maybeJsonRedirectToLocation", () => {
     );
   });
 
-  it("accepts the alternative redirect_uri key", async () => {
-    const jsonResp = new Response(
-      JSON.stringify({ redirect_uri: "https://a.example.com/cb?code=1" }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    );
-    const out = await maybeJsonRedirectToLocation(jsonResp, true);
-    expect(out.status).toBe(302);
-    expect(out.headers.get("location")).toBe("https://a.example.com/cb?code=1");
-  });
-
-  it("accepts the alternative redirectURI key", async () => {
-    const jsonResp = new Response(
-      JSON.stringify({ redirectURI: "https://a.example.com/cb?code=2" }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    );
-    const out = await maybeJsonRedirectToLocation(jsonResp, true);
-    expect(out.status).toBe(302);
-    expect(out.headers.get("location")).toBe("https://a.example.com/cb?code=2");
-  });
-
   it("preserves Set-Cookie headers from the plugin response", async () => {
     const jsonResp = new Response(JSON.stringify({ url: "https://a.example.com/cb" }), {
       status: 200,
