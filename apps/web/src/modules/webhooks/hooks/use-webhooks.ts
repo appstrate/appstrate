@@ -2,9 +2,9 @@
 
 import type { Dispatch, SetStateAction } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
-import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { api } from "@/api";
+import { useCurrentOrgId } from "@/hooks/use-org";
+import { useCurrentApplicationId } from "@/hooks/use-current-application";
 export interface WebhookInfo {
   id: string;
   object: "webhook";

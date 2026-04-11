@@ -6,10 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/page-header";
 import { LoadingState, ErrorState } from "@/components/page-states";
-import { WebhookDeliveriesTab } from "@/components/webhook-deliveries-tab";
-import { WebhookSettingsTab } from "@/components/webhook-settings-tab";
+import { WebhookDeliveriesTab } from "../components/webhook-deliveries-tab";
+import { WebhookSettingsTab } from "../components/webhook-settings-tab";
 import { useTabWithHash } from "@/hooks/use-tab-with-hash";
-import { useWebhook } from "@/hooks/use-webhooks";
+import { useWebhook } from "../hooks/use-webhooks";
 
 export function WebhookDetailPage() {
   const { t } = useTranslation(["settings", "common"]);

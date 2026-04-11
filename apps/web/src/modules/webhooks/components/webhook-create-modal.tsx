@@ -3,14 +3,14 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm } from "react-hook-form";
-import { Modal } from "./modal";
+import { Modal } from "@/components/modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Spinner } from "./spinner";
+import { Spinner } from "@/components/spinner";
 import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleEvent } from "../hooks/use-webhooks";
-import { SecretRevealModal } from "./secret-reveal-modal";
+import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { useCreateWebhook } from "../hooks/use-webhooks";
 
 interface Props {

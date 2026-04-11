@@ -6,11 +6,11 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Modal } from "./modal";
-import { Spinner } from "./spinner";
+import { Modal } from "@/components/modal";
+import { Spinner } from "@/components/spinner";
 import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleEvent } from "../hooks/use-webhooks";
-import { SecretRevealModal } from "./secret-reveal-modal";
+import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { toast } from "sonner";
 import {
   useUpdateWebhook,

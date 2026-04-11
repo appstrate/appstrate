@@ -7,10 +7,10 @@ import { Webhook } from "lucide-react";
 import { usePermissions } from "@/hooks/use-permissions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useWebhooks } from "@/hooks/use-webhooks";
+import { useWebhooks } from "../hooks/use-webhooks";
 import { PageHeader } from "@/components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
-import { WebhookCreateModal } from "@/components/webhook-create-modal";
+import { WebhookCreateModal } from "../components/webhook-create-modal";
 
 export function WebhooksPage() {
   const { t } = useTranslation(["settings", "common"]);

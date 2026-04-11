@@ -10,10 +10,15 @@
  * test/setup/preload.ts and test-modules.ts). Discovery is filesystem-based — any
  * directory under apps/api/src/modules/<name>/ with an index.ts is picked up.
  *
- * Tests never pass modules explicitly: the preload populates a shared registry
- * before any test file runs, and getTestApp() reads from it. Core tests and
- * module tests thus share a single consistent app, which matters when `bun test`
- * runs from the repo root with its recursive file glob (one process, one app).
+ * Default behavior: the preload populates a shared registry before any test
+ * file runs, and getTestApp() reads from it. Core tests and module tests thus
+ * share a single cached app, which matters when `bun test` runs from the repo
+ * root with its recursive file glob (one process, one app).
+ *
+ * Escape hatch: pass `{ modules: [...] }` to bypass discovery and get a fresh
+ * app with an explicit module list. Use `{ modules: [] }` to assert the
+ * zero-footprint invariant (no modules → no module routes, no module
+ * app-scoped prefixes). The explicit path never touches the singleton cache.
  */
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -58,7 +63,20 @@ import profileRouter from "../../src/routes/profile.ts";
 import invitationsRouter from "../../src/routes/invitations.ts";
 import welcomeRouter from "../../src/routes/welcome.ts";
 
+import type { AppstrateModule } from "@appstrate/core/module";
 import type { AppEnv } from "../../src/types/index.ts";
+
+export interface GetTestAppOptions {
+  /**
+   * Explicit module list to mount. When provided, bypasses the preload-
+   * populated discovery registry and returns a fresh (non-cached) app.
+   *
+   * Pass `[]` to assert the zero-footprint invariant: a core-only app with
+   * no module routes, no module app-scoped prefixes, no module-contributed
+   * middleware. Core tests that want to prove isolation should use this.
+   */
+  modules?: readonly AppstrateModule[];
+}
 
 let cachedApp: Hono<AppEnv> | null = null;
 
@@ -74,9 +92,13 @@ initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empt
  *
  * Skips: boot(), static files, SPA fallback, shutdown gate, OpenAPI docs, cloud routes.
  */
-export function getTestApp(): Hono<AppEnv> {
-  if (cachedApp) return cachedApp;
-  const extraModules = getDiscoveredModules();
+export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
+  // Explicit module list → always return a fresh app (never touches the
+  // singleton cache, so core "modules: []" tests stay isolated from the
+  // preload-discovered default app used by every other test).
+  const explicit = options?.modules !== undefined;
+  if (!explicit && cachedApp) return cachedApp;
+  const extraModules = explicit ? options!.modules! : getDiscoveredModules();
 
   const app = new Hono<AppEnv>();
 
@@ -283,6 +305,6 @@ export function getTestApp(): Hono<AppEnv> {
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());
 
-  cachedApp = app;
+  if (!explicit) cachedApp = app;
   return app;
 }
