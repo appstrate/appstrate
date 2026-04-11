@@ -18,10 +18,13 @@ import {
 import { createOpenApiValidator } from "../../../../../../test/helpers/openapi-validator.ts";
 import { buildOpenApiSpec } from "../../../../../openapi/index.ts";
 import { seedWebhook } from "../../helpers/seed.ts";
-import { webhooksPaths } from "../../../openapi/paths.ts";
-import { webhooksSchemas } from "../../../openapi/schemas.ts";
+import webhooksModule from "../../../index.ts";
 
-const openApiSpec = buildOpenApiSpec(webhooksPaths, webhooksSchemas);
+const openApiSpec = buildOpenApiSpec(
+  webhooksModule.openApiPaths?.() ?? {},
+  webhooksModule.openApiComponentSchemas?.() ?? {},
+  webhooksModule.openApiTags?.() ?? [],
+);
 const { getResponseSchema, validateResponse } = createOpenApiValidator(openApiSpec);
 
 const app = getTestApp();

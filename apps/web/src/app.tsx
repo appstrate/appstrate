@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import { Routes, Route, Outlet, useLocation, Navigate, Link } from "react-router-dom";
 import { PackageList } from "./pages/package-list";
 import { UnifiedPackageDetailPage } from "./pages/unified-package-detail";
@@ -18,8 +18,6 @@ import { OnboardingProvidersStep } from "./pages/onboarding/providers-step";
 import { OnboardingMembersStep } from "./pages/onboarding/members-step";
 import { OnboardingDoneStep } from "./pages/onboarding/done-step";
 import { OrgSettingsPage } from "./pages/org-settings";
-import { WebhooksPage } from "./pages/webhooks-page";
-import { WebhookDetailPage } from "./pages/webhook-detail-page";
 import { ApplicationsPage } from "./pages/applications-page";
 import { ApiKeysPage } from "./pages/api-keys-page";
 import { EndUsersPage } from "./pages/end-users-page";
@@ -42,6 +40,7 @@ import { MagicLinkPage } from "./pages/magic-link";
 import { ErrorBoundary } from "./components/error-boundary";
 import { AppSidebar } from "./components/app-sidebar";
 import { NotificationBell } from "./components/notification-bell";
+import { LoadingState } from "./components/page-states";
 
 import { useAuth } from "./hooks/use-auth";
 import { useAppConfig } from "./hooks/use-app-config";
@@ -54,6 +53,18 @@ import { Spinner } from "./components/spinner";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
+
+// Module-owned pages live under `apps/web/src/modules/<name>/` and are
+// lazy-loaded so their bundle is never fetched when the corresponding module
+// is disabled (zero-footprint invariant).
+const WebhooksPage = lazy(() =>
+  import("./modules/webhooks/pages/webhooks-page").then((m) => ({ default: m.WebhooksPage })),
+);
+const WebhookDetailPage = lazy(() =>
+  import("./modules/webhooks/pages/webhook-detail-page").then((m) => ({
+    default: m.WebhookDetailPage,
+  })),
+);
 
 function MainLayout() {
   const { resolvedTheme } = useTheme();
@@ -281,8 +292,22 @@ export function App() {
             <Route path="/preferences" element={<PreferencesPage />} />
             {features.webhooks && (
               <>
-                <Route path="/webhooks" element={<WebhooksPage />} />
-                <Route path="/webhooks/:id" element={<WebhookDetailPage />} />
+                <Route
+                  path="/webhooks"
+                  element={
+                    <Suspense fallback={<LoadingState />}>
+                      <WebhooksPage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/webhooks/:id"
+                  element={
+                    <Suspense fallback={<LoadingState />}>
+                      <WebhookDetailPage />
+                    </Suspense>
+                  }
+                />
               </>
             )}
             {/* App-scoped routes (read applicationId from store, like orgId) */}

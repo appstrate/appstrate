@@ -35,11 +35,12 @@ import { collectModuleOpenApi } from "./lib/module-openapi.ts";
 const {
   paths: modulePaths,
   componentSchemas: moduleComponentSchemas,
+  tags: moduleTags,
   schemas: moduleSchemas,
 } = await collectModuleOpenApi();
 
 // Build the full spec and registry with module contributions
-const openApiSpec = buildOpenApiSpec(modulePaths, moduleComponentSchemas);
+const openApiSpec = buildOpenApiSpec(modulePaths, moduleComponentSchemas, moduleTags);
 const zodSchemaRegistry = buildZodSchemaRegistry(moduleSchemas);
 
 let exitCode = 0;

@@ -22,10 +22,16 @@ export interface CollectedModuleOpenApi {
   paths: Record<string, unknown>;
   /** OpenAPI 3.1 component schemas, keyed by schema name. */
   componentSchemas: Record<string, unknown>;
+  /** OpenAPI 3.1 tags contributed by modules. */
+  tags: Array<{ name: string; description?: string }>;
   /** Zod ↔ OpenAPI registry entries for request-body schema comparison. */
   schemas: OpenApiSchemaEntry[];
   /** Set of path keys owned by any loaded module (for filtering). */
   ownedPathKeys: Set<string>;
+  /** Set of component schema names owned by any loaded module (for filtering). */
+  ownedSchemaNames: Set<string>;
+  /** Set of tag names owned by any loaded module (for filtering). */
+  ownedTagNames: Set<string>;
 }
 
 /**
@@ -49,8 +55,11 @@ export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
 
   const paths: Record<string, unknown> = {};
   const componentSchemas: Record<string, unknown> = {};
+  const tags: Array<{ name: string; description?: string }> = [];
   const schemas: OpenApiSchemaEntry[] = [];
   const ownedPathKeys = new Set<string>();
+  const ownedSchemaNames = new Set<string>();
+  const ownedTagNames = new Set<string>();
 
   for (const name of discoveredModules) {
     const entry = join(modulesDir, name, "index.ts");
@@ -61,27 +70,75 @@ export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
       Object.assign(paths, modPaths);
     }
     const compSchemas = mod.openApiComponentSchemas?.();
-    if (compSchemas) Object.assign(componentSchemas, compSchemas);
+    if (compSchemas) {
+      for (const key of Object.keys(compSchemas)) ownedSchemaNames.add(key);
+      Object.assign(componentSchemas, compSchemas);
+    }
+    const modTags = mod.openApiTags?.();
+    if (modTags) {
+      for (const tag of modTags) {
+        ownedTagNames.add(tag.name);
+        tags.push(tag);
+      }
+    }
     const modSchemas = mod.openApiSchemas?.();
     if (modSchemas) schemas.push(...modSchemas);
   }
 
-  return { paths, componentSchemas, schemas, ownedPathKeys };
+  return {
+    paths,
+    componentSchemas,
+    tags,
+    schemas,
+    ownedPathKeys,
+    ownedSchemaNames,
+    ownedTagNames,
+  };
 }
 
+/** Minimal OpenAPI shape touched by the strip helper. */
+type SpecWithContributions = {
+  paths?: Record<string, unknown>;
+  components?: { schemas?: Record<string, unknown> } & Record<string, unknown>;
+  tags?: Array<{ name: string; description?: string }>;
+};
+
 /**
- * Return a shallow copy of an OpenAPI spec with all module-owned paths removed.
- * Used by `detect-breaking-changes.ts` to keep the baseline comparison agnostic
- * of modules — disabling a module should not register as a breaking change.
+ * Return a shallow copy of an OpenAPI spec with all module-owned contributions
+ * removed: paths, component schemas, and tags. Used by `detect-breaking-changes.ts`
+ * to keep the baseline comparison agnostic of modules — disabling a module should
+ * not register as a breaking change, and an older baseline that still contains
+ * module contributions should not produce a false diff either.
  */
-export function stripModulePaths<T extends { paths?: Record<string, unknown> }>(
+export function stripModuleContributions<T extends SpecWithContributions>(
   spec: T,
-  ownedPathKeys: ReadonlySet<string>,
+  owned: {
+    paths: ReadonlySet<string>;
+    schemaNames: ReadonlySet<string>;
+    tagNames: ReadonlySet<string>;
+  },
 ): T {
-  if (!spec.paths || ownedPathKeys.size === 0) return spec;
-  const filtered: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(spec.paths)) {
-    if (!ownedPathKeys.has(key)) filtered[key] = value;
+  const out: T = { ...spec };
+
+  if (spec.paths && owned.paths.size > 0) {
+    const filteredPaths: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(spec.paths)) {
+      if (!owned.paths.has(key)) filteredPaths[key] = value;
+    }
+    out.paths = filteredPaths;
   }
-  return { ...spec, paths: filtered };
+
+  if (spec.components?.schemas && owned.schemaNames.size > 0) {
+    const filteredSchemas: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(spec.components.schemas)) {
+      if (!owned.schemaNames.has(key)) filteredSchemas[key] = value;
+    }
+    out.components = { ...spec.components, schemas: filteredSchemas };
+  }
+
+  if (Array.isArray(spec.tags) && owned.tagNames.size > 0) {
+    out.tags = spec.tags.filter((tag) => !owned.tagNames.has(tag.name));
+  }
+
+  return out;
 }

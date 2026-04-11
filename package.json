@@ -66,6 +66,7 @@
     "build-runtime": "docker build --platform linux/amd64 -t appstrate-pi ./runtime-pi",
     "build-sidecar": "docker build --platform linux/amd64 -t appstrate-sidecar ./runtime-pi/sidecar",
     "db:generate": "cd packages/db && bunx drizzle-kit generate",
+    "db:drop-module": "bun scripts/drop-module.ts",
     "db:migrate": "cd packages/db && bunx drizzle-kit migrate",
     "preinstall": "which bun > /dev/null 2>&1 || (echo '\\033[31mThis project requires Bun. Install it: https://bun.sh\\033[0m' && exit 1)",
     "setup": "bun scripts/setup.ts",

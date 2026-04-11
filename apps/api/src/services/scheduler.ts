@@ -182,7 +182,7 @@ async function triggerScheduledRun(
   applicationId: string,
   input: Record<string, unknown> | undefined,
 ) {
-  /** Create a failed run record + dispatch webhook so the user is notified. */
+  /** Create a failed run record + emit onRunStatusChange so modules (webhooks, …) can notify. */
   async function failSchedule(error: string, actor: Actor | null = null): Promise<void> {
     const runId = `run_${crypto.randomUUID()}`;
     try {

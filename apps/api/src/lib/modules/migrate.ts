@@ -21,17 +21,79 @@ import { logger } from "../logger.ts";
  *
  * @param moduleId - Module identifier (used for migration tracking table name)
  * @param migrationsDir - Absolute path to the module's migrations directory
+ * @param opts.requireCoreTables - Optional list of core table names that MUST
+ *   exist before the module migration runs. Modules that use backward FK
+ *   references (`.references()` pointing at core tables) should declare them
+ *   here so a broken boot order fails loudly instead of producing a cryptic
+ *   Postgres error deep inside Drizzle.
  */
 export async function applyModuleMigrations(
   moduleId: string,
   migrationsDir: string,
+  opts: { requireCoreTables?: readonly string[] } = {},
 ): Promise<void> {
   const migrationsTable = `__drizzle_migrations_${moduleId.replace(/-/g, "_")}`;
+
+  if (opts.requireCoreTables && opts.requireCoreTables.length > 0) {
+    await assertCoreTablesExist(moduleId, opts.requireCoreTables);
+  }
 
   if (isEmbeddedDb) {
     await applyPGliteMigrations(moduleId, migrationsDir, migrationsTable);
   } else {
     await applyPostgresMigrations(migrationsDir, migrationsTable);
+  }
+}
+
+/**
+ * Fail fast if any of the core tables a module depends on via backward FK
+ * references are missing. Protects against a broken boot order where module
+ * migrations would run before core migrations and produce an opaque FK error.
+ *
+ * Issues a single `information_schema.tables` lookup in the `public` schema
+ * and compares the returned set against the declared requirements.
+ */
+async function assertCoreTablesExist(moduleId: string, tables: readonly string[]): Promise<void> {
+  const unique = Array.from(new Set(tables));
+  let found: Set<string>;
+
+  if (isEmbeddedDb) {
+    const { getPGliteClient } = await import("@appstrate/db/client");
+    const pg = getPGliteClient();
+    if (!pg) {
+      throw new Error(
+        `Module "${moduleId}": PGlite client is not initialized — cannot verify core tables.`,
+      );
+    }
+    const { rows } = await pg.query<{ table_name: string }>(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = ANY($1::text[])`,
+      [unique],
+    );
+    found = new Set(rows.map((r) => r.table_name));
+  } else {
+    const reserved = await reservePgConnection();
+    if (!reserved) {
+      throw new Error("reservePgConnection() returned null — expected PostgreSQL client");
+    }
+    const { sql: reservedSql, release } = reserved;
+    try {
+      const rows = await reservedSql<{ table_name: string }[]>`
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = ANY(${unique}::text[])
+      `;
+      found = new Set(rows.map((r) => r.table_name));
+    } finally {
+      release();
+    }
+  }
+
+  const missing = unique.filter((t) => !found.has(t));
+  if (missing.length > 0) {
+    throw new Error(
+      `Module "${moduleId}" requires core tables that do not exist: ${missing.join(", ")}. ` +
+        `This usually means core migrations have not run yet — check the boot order.`,
+    );
   }
 }
 

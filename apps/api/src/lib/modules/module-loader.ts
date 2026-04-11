@@ -248,6 +248,16 @@ export function getModuleOpenApiComponentSchemas(): Record<string, unknown> {
   return schemas;
 }
 
+/** Collect OpenAPI tags contributed by all loaded modules. */
+export function getModuleOpenApiTags(): Array<{ name: string; description?: string }> {
+  const tags: Array<{ name: string; description?: string }> = [];
+  for (const mod of _modules.values()) {
+    const moduleTags = mod.openApiTags?.();
+    if (moduleTags) tags.push(...moduleTags);
+  }
+  return tags;
+}
+
 /**
  * Merge module feature flags into the base AppConfig.
  * Each module's `features` is a `Record<string, boolean>` merged via `Object.assign`.

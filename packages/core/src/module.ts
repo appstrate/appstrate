@@ -78,6 +78,13 @@ export interface AppstrateModule {
   openApiComponentSchemas?(): Record<string, unknown>;
 
   /**
+   * Return OpenAPI 3.1 tags owned by this module.
+   * Merged into the spec `tags` array at boot — absent when the module is disabled.
+   * Keeps core `openApiInfo.tags` free of module-specific entries.
+   */
+  openApiTags?(): Array<{ name: string; description?: string }>;
+
+  /**
    * Return Zod ↔ OpenAPI schema registry entries owned by this module.
    * Used by verify-openapi to compare Zod request-body schemas against OpenAPI specs.
    */
@@ -235,8 +242,15 @@ export interface ModuleInitContext {
    *
    * @param moduleId - Module identifier (e.g. "webhooks", "cloud")
    * @param migrationsDir - Absolute path to the module's migrations directory
+   * @param opts.requireCoreTables - Optional list of core table names that MUST
+   *   exist before the module migration runs. Modules that use backward FK
+   *   references should declare them here so a broken boot order fails loudly.
    */
-  applyMigrations: (moduleId: string, migrationsDir: string) => Promise<void>;
+  applyMigrations: (
+    moduleId: string,
+    migrationsDir: string,
+    opts?: { requireCoreTables?: readonly string[] },
+  ) => Promise<void>;
   /** Lazy email sender (breaks circular deps at module load time). */
   getSendMail: () => Promise<(to: string, subject: string, html: string) => void>;
   /** Query helper: get org admin emails. */

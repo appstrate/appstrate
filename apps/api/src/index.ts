@@ -45,6 +45,7 @@ import {
   getModuleAppScopedPaths,
   getModuleOpenApiPaths,
   getModuleOpenApiComponentSchemas,
+  getModuleOpenApiTags,
   registerModuleRoutes,
 } from "./lib/modules/module-loader.ts";
 import { ApiError, unauthorized } from "./lib/errors.ts";
@@ -79,7 +80,11 @@ app.route("/", healthRouter);
 let _openApiSpec: ReturnType<typeof buildOpenApiSpec> | null = null;
 function getOpenApiSpec() {
   if (!_openApiSpec)
-    _openApiSpec = buildOpenApiSpec(getModuleOpenApiPaths(), getModuleOpenApiComponentSchemas());
+    _openApiSpec = buildOpenApiSpec(
+      getModuleOpenApiPaths(),
+      getModuleOpenApiComponentSchemas(),
+      getModuleOpenApiTags(),
+    );
   return _openApiSpec;
 }
 app.get("/api/openapi.json", (c) => c.json(getOpenApiSpec()));

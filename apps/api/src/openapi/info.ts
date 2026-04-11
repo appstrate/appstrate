@@ -57,6 +57,5 @@ export const openApiInfo = {
     },
     { name: "End Users", description: "End-user management for headless API" },
     { name: "Provider Keys", description: "Organization provider keys and credentials" },
-    { name: "Webhooks", description: "Webhook configuration and delivery" },
   ],
 } as const;

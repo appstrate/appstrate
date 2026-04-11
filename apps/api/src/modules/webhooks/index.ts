@@ -24,7 +24,9 @@ const webhooksModule: AppstrateModule = {
   manifest: { id: "webhooks", name: "Webhooks", version: "1.0.0" },
 
   async init(ctx: ModuleInitContext) {
-    await ctx.applyMigrations("webhooks", resolve(import.meta.dir, "drizzle/migrations"));
+    await ctx.applyMigrations("webhooks", resolve(import.meta.dir, "drizzle/migrations"), {
+      requireCoreTables: ["organizations", "applications", "packages"],
+    });
     await initWebhookWorker();
   },
 
@@ -40,6 +42,10 @@ const webhooksModule: AppstrateModule = {
 
   openApiComponentSchemas() {
     return webhooksSchemas;
+  },
+
+  openApiTags() {
+    return [{ name: "Webhooks", description: "Webhook configuration and delivery" }];
   },
 
   openApiSchemas() {

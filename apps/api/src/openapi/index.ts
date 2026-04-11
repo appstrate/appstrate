@@ -86,9 +86,11 @@ const components = {
 export function buildOpenApiSpec(
   modulePaths: Record<string, unknown> = {},
   moduleComponentSchemas: Record<string, unknown> = {},
+  moduleTags: ReadonlyArray<{ name: string; description?: string }> = [],
 ) {
   return {
     ...openApiInfo,
+    tags: [...openApiInfo.tags, ...moduleTags],
     paths: {
       ...corePaths,
       ...modulePaths,
