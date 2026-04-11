@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Entity factories for seeding test data.
+ * Core entity factories for seeding test data.
  *
  * All factories insert real records into the test database.
  * They return the created record for assertions.
  *
- * NOTE on module imports: the webhooks module schema is imported directly
- * from the module directory. Tests deliberately exercise every built-in
- * module regardless of `APPSTRATE_MODULES`; the zero-footprint rule in
- * CLAUDE.md applies to the production boot path, not to shared test fixtures.
+ * Module-owned entities have their own seed helpers next to each module
+ * (e.g. apps/api/src/modules/webhooks/test/helpers/seed.ts) so core tests
+ * running alone have zero dependency on module schemas.
  */
 import { db } from "./db.ts";
 import {
@@ -29,7 +28,6 @@ import {
   packageVersions,
   applicationProviderCredentials,
 } from "@appstrate/db/schema";
-import { webhooks } from "../../src/modules/webhooks/schema.ts";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
 // ─── Packages / Agents ───────────────────────────────────
@@ -169,29 +167,6 @@ export async function seedEndUser(
     })
     .returning();
   return eu!;
-}
-
-// ─── Webhooks ─────────────────────────────────────────────
-
-type WebhookInsert = Partial<InferInsertModel<typeof webhooks>> & {
-  orgId: string;
-  applicationId: string;
-};
-
-export async function seedWebhook(
-  overrides: WebhookInsert,
-): Promise<InferSelectModel<typeof webhooks>> {
-  const [wh] = await db
-    .insert(webhooks)
-    .values({
-      id: `wh_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
-      url: "https://example.com/webhook",
-      events: ["run.success"],
-      secret: crypto.randomUUID(),
-      ...overrides,
-    } as InferInsertModel<typeof webhooks>)
-    .returning();
-  return wh!;
 }
 
 // ─── Schedules ────────────────────────────────────────────

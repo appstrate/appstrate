@@ -30,8 +30,6 @@ describe("401 — unauthenticated requests", () => {
     { method: "GET", path: "/api/applications" },
     { method: "POST", path: "/api/applications" },
     { method: "GET", path: "/api/end-users" },
-    { method: "GET", path: "/api/webhooks" },
-    { method: "POST", path: "/api/webhooks" },
     { method: "GET", path: "/api/models" },
     { method: "GET", path: "/api/proxies" },
     { method: "POST", path: "/api/proxies" },
@@ -67,7 +65,6 @@ describe("400 — missing X-Org-Id header on org-scoped routes", () => {
     { method: "GET", path: "/api/api-keys" },
     { method: "GET", path: "/api/providers" },
     { method: "GET", path: "/api/applications" },
-    { method: "GET", path: "/api/webhooks" },
     { method: "GET", path: "/api/models" },
     { method: "GET", path: "/api/proxies" },
     { method: "GET", path: "/api/provider-keys" },
@@ -107,14 +104,6 @@ describe("404 — non-existent resources", () => {
 
   it("DELETE /api/api-keys/nonexistent returns 404", async () => {
     const res = await app.request("/api/api-keys/nonexistent", {
-      method: "DELETE",
-      headers: authHeaders(ctx),
-    });
-    expect(res.status).toBe(404);
-  });
-
-  it("DELETE /api/webhooks/nonexistent returns 404", async () => {
-    const res = await app.request("/api/webhooks/nonexistent", {
       method: "DELETE",
       headers: authHeaders(ctx),
     });
@@ -217,13 +206,13 @@ describe("400 — validation errors", () => {
     expect(res.status).toBe(400);
   });
 
-  it("POST /api/webhooks with invalid URL returns 400", async () => {
-    const res = await app.request("/api/webhooks", {
+  it("POST /api/end-users with invalid email returns 400", async () => {
+    const res = await app.request("/api/end-users", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({
-        url: "not-a-valid-url",
-        events: ["run.success"],
+        externalId: "ext_123",
+        email: "not-a-valid-email",
       }),
     });
     expect(res.status).toBe(400);

@@ -137,24 +137,6 @@ describe("RBAC — Permission enforcement", () => {
     });
   });
 
-  // ─── Webhooks (admin-only) ─────────────────────────────────
-
-  describe("webhooks:read (admin-only)", () => {
-    it("admin can list webhooks", async () => {
-      const res = await app.request("/api/webhooks", {
-        headers: authHeaders(admin),
-      });
-      expect(res.status).toBe(200);
-    });
-
-    it("member gets 403 on list webhooks", async () => {
-      const res = await app.request("/api/webhooks", {
-        headers: authHeaders(member),
-      });
-      expect(res.status).toBe(403);
-    });
-  });
-
   // ─── Provider keys (admin-only read) ───────────────────────
 
   describe("provider-keys:read (admin-only)", () => {

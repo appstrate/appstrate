@@ -30,7 +30,11 @@ import { applyModuleMigrations } from "./migrate.ts";
 /**
  * Returns the list of module entries to load at boot.
  *
- * Reads from the APPSTRATE_MODULES env var (comma-separated specifiers).
+ * Reads `APPSTRATE_MODULES` (comma-separated specifiers) directly from
+ * `process.env` rather than the cached `getEnv()`, so callers can mutate
+ * the env in tests without flushing the whole env cache. The field is a
+ * plain comma-separated string — no validation beyond trim/filter is useful.
+ *
  * Empty by default (OSS mode). Cloud deployments set:
  *   APPSTRATE_MODULES=@appstrate/cloud
  *
@@ -38,8 +42,8 @@ import { applyModuleMigrations } from "./migrate.ts";
  * load and init successfully or the platform crashes.
  */
 export function getModuleRegistry(): string[] {
-  return getEnv()
-    .APPSTRATE_MODULES.split(",")
+  return (process.env.APPSTRATE_MODULES ?? "")
+    .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 }

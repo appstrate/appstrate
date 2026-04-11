@@ -6,15 +6,14 @@
  * Creates a Hono app with the same middleware chain and routes as the production app,
  * but WITHOUT calling boot() (no Docker, no S3, no system packages, no scheduler).
  *
- * This allows integration tests to exercise the full HTTP → middleware → auth → service → DB
- * pipeline with a real database.
+ * Mounts core routes plus every module discovered by the root test preload (see
+ * test/setup/preload.ts and test-modules.ts). Discovery is filesystem-based — any
+ * directory under apps/api/src/modules/<name>/ with an index.ts is picked up.
  *
- * NOTE on module imports: the built-in module routes (webhooks) are
- * imported statically below. This is intentional — test fixtures deliberately
- * exercise all built-in modules regardless of the `APPSTRATE_MODULES` env var,
- * whereas production loads them dynamically through the module loader. The
- * zero-footprint rule in CLAUDE.md applies to the production boot path, not
- * to shared test helpers.
+ * Tests never pass modules explicitly: the preload populates a shared registry
+ * before any test file runs, and getTestApp() reads from it. Core tests and
+ * module tests thus share a single consistent app, which matters when `bun test`
+ * runs from the repo root with its recursive file glob (one process, one app).
  */
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -51,7 +50,7 @@ import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
-import webhooksModule from "../../src/modules/webhooks/index.ts";
+import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createConnectionsRouter } from "../../src/routes/connections.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
@@ -63,10 +62,7 @@ import type { AppEnv } from "../../src/types/index.ts";
 
 let cachedApp: Hono<AppEnv> | null = null;
 
-// Initialize boot-time singletons that routes depend on.
-// The webhooks module router is mounted statically below without going through
-// the module loader — tests don't need BullMQ workers or migrations, and RBAC
-// is owned by core.
+// Initialize boot-time singletons that core routes depend on.
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
 initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
 
@@ -80,6 +76,7 @@ initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empt
  */
 export function getTestApp(): Hono<AppEnv> {
   if (cachedApp) return cachedApp;
+  const extraModules = getDiscoveredModules();
 
   const app = new Hono<AppEnv>();
 
@@ -218,8 +215,8 @@ export function getTestApp(): Hono<AppEnv> {
   });
 
   // App context middleware: resolve X-App-Id for app-scoped routes.
-  // Core prefixes listed statically; module-owned prefixes are pulled from
-  // the module manifest so tests mirror the production aggregation logic.
+  // Core prefixes listed statically; any module-owned prefixes come from the
+  // modules passed via options.modules so tests mirror the production aggregation.
   const APP_SCOPED_PREFIXES = [
     "/api/agents",
     "/api/runs",
@@ -231,7 +228,7 @@ export function getTestApp(): Hono<AppEnv> {
     "/api/providers",
     "/api/connections",
     "/api/app-profiles",
-    ...(webhooksModule.appScopedPaths ?? []),
+    ...extraModules.flatMap((m) => m.appScopedPaths ?? []),
   ];
 
   const appContextMiddleware = requireAppContext();
@@ -267,8 +264,10 @@ export function getTestApp(): Hono<AppEnv> {
   app.route("/api", schedulesRouter);
   app.route("/api/packages", createPackagesRouter());
   app.route("/api/end-users", createEndUsersRouter());
-  const webhooksRouter = webhooksModule.createRouter?.();
-  if (webhooksRouter) app.route("/api", webhooksRouter);
+  for (const mod of extraModules) {
+    const moduleRouter = mod.createRouter?.();
+    if (moduleRouter) app.route("/api", moduleRouter);
+  }
   app.route("/api/providers", createProvidersRouter());
   app.route("/api/api-keys", createApiKeysRouter());
   app.route("/api/proxies", createProxiesRouter());

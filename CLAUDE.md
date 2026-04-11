@@ -280,31 +280,48 @@ Appstrate exposes a headless API for developers to integrate agents into their o
 ### Running Tests
 
 ```sh
-bun test                          # All tests (1000+), all packages, single process
-bun test apps/api/test/unit/      # API unit tests only
-bun test apps/api/test/           # API unit + integration
-bun test runtime-pi/              # Runtime Pi + sidecar tests
-bun test packages/core/           # Core library tests (367+ tests, no DB)
-bun test packages/connect/        # Connect package tests
+bun test                          # Full suite — core + every module, single process
+bun test apps/api/test            # Core only
+bun test apps/api/src/modules     # All modules
+bun run test:unit                 # API unit tests only (no DB)
+bun run test:e2e                  # Playwright e2e suite
+```
+
+Per-module tests can also be run directly (uses the module's own `bunfig.toml`):
+
+```sh
+cd apps/api/src/modules/webhooks && bun test
 ```
 
 Requires Docker (PostgreSQL, Redis, MinIO, DinD started automatically by preload).
 
 ### Configuration
 
-Single `bunfig.toml` at monorepo root — no per-package bunfig:
+Single `bunfig.toml` at the repo root drives core tests. Each module directory has its own `bunfig.toml` that points at the same root preload, so `cd <module> && bun test` works with the same setup:
 
 ```toml
+# root bunfig.toml
 [test]
-preload = ["./test/setup/preload.ts"]   # Starts Docker infra, sets env, runs migrations
+preload = ["./test/setup/preload.ts"]
 timeout = 15000
 ```
 
-The preload (`test/setup/preload.ts`) is shared infrastructure: Docker Compose (PostgreSQL on :5433, Redis on :6380, MinIO on :9002, DinD on :2375), env vars, Drizzle migrations, alpine image pre-pull. Non-API tests (runtime-pi, connect) don't use the DB but the overhead is negligible (~5s one-time).
+```toml
+# apps/api/src/modules/webhooks/bunfig.toml
+[test]
+preload = ["../../../../../test/setup/preload.ts"]
+timeout = 15000
+```
+
+The root preload (`test/setup/preload.ts`) runs Docker Compose (PostgreSQL :5433, Redis :6380, MinIO :9002, DinD :2375), sets env vars, applies core Drizzle migrations, pre-pulls the alpine image, then auto-discovers every directory under `apps/api/src/modules/*/` and wires:
+
+- `drizzle/migrations/*.sql` → applied in alphabetical order via `apply-module-migration.ts`
+- `index.ts` → dynamic-imported, default export registered in `test-modules.ts` so `getTestApp()` can mount its router + app-scoped paths
+- `test/tables.ts` → default-exported `string[]` registered via `registerTruncationTables()` in `apps/api/test/helpers/db.ts`
+
+Adding a new built-in module is entirely mechanical: drop the directory with its `index.ts`, `drizzle/migrations/`, and `test/tables.ts`. The preload picks it up on the next run — no edits to core test infrastructure.
 
 ### Test Structure
-
-All packages use `test/` directories (not `__tests__/` or `tests/`):
 
 ```
 apps/api/test/
@@ -313,14 +330,25 @@ apps/api/test/
 │   ├── middleware/         # org-context, guards (with real DB)
 │   ├── routes/            # HTTP integration per route domain + error-paths.test.ts
 │   └── services/          # Service-level (Docker API, scheduler, OAuth, packages)
-└── helpers/               # Shared test utilities (app, auth, db, seed, assertions, sse, redis, oauth-server)
+└── helpers/               # Core test utilities (app, auth, db, seed, assertions, sse, redis, oauth-server, openapi-validator)
+
+apps/api/src/modules/<name>/
+├── bunfig.toml            # Module-local preload config
+└── test/
+    ├── setup/preload.ts    # Imports root preload + applies module migrations + registers truncation
+    ├── helpers/app.ts      # Wraps getTestApp({ modules: [module] })
+    ├── helpers/seed.ts     # Module-owned seed factories
+    ├── unit/               # Module unit tests (pure, no DB)
+    └── integration/        # Module integration tests
 
 apps/web/src/**/test/      # Frontend unit tests (colocated with components)
 runtime-pi/test/           # Extension wrapper tests
 runtime-pi/sidecar/test/   # Sidecar proxy, helpers, forward proxy tests
-packages/core/test/        # Core library tests (367+ pure function tests, no DB/network)
+packages/core/test/        # Core library tests (pure, no DB/network)
 packages/connect/test/     # Provider doc heuristic tests
 ```
+
+**Zero-footprint test invariant**: Core tests must have zero knowledge of any module. `getTestApp()` takes an optional `{ modules }` parameter — core tests call it with no arguments; module test helpers pass their own module in. `truncateAll()` uses core tables plus any module tables registered at preload time via `registerTruncationTables()`. Anything cross-module (e.g. a live run → webhook delivery contract) is covered by e2e tests, not by loading multiple modules in one integration process.
 
 ### Conventions
 

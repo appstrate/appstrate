@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { getTestApp } from "../../../../../../test/helpers/app.ts";
+import { truncateAll } from "../../../../../../test/helpers/db.ts";
+import {
+  createTestContext,
+  authHeaders,
+  type TestContext,
+} from "../../../../../../test/helpers/auth.ts";
 
 const app = getTestApp();
 
@@ -54,7 +58,6 @@ describe("Webhooks API", () => {
       expect(typeof body.secret).toBe("string");
       expect(body.secret.length).toBeGreaterThan(0);
 
-      // Get the same webhook — secret should NOT be present
       const getRes = await app.request(`/api/webhooks/${body.id}`, {
         headers: authHeaders(ctx),
       });

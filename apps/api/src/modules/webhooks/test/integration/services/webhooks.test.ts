@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { truncateAll, db } from "../../../../../../test/helpers/db.ts";
+import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
+import { seedPackage } from "../../../../../../test/helpers/seed.ts";
 import {
   createWebhook,
   listWebhooks,
@@ -11,8 +11,8 @@ import {
   deleteWebhook,
   rotateSecret,
   listDeliveries,
-} from "../../../src/modules/webhooks/service.ts";
-import { webhookDeliveries } from "../../../src/modules/webhooks/schema.ts";
+} from "../../../service.ts";
+import { webhookDeliveries } from "../../../schema.ts";
 
 describe("webhooks service", () => {
   let userId: string;
@@ -244,7 +244,6 @@ describe("webhooks service", () => {
         appWebhookParams({ url: "https://example.com/deliveries" }),
       );
 
-      // Insert delivery records directly into DB
       await db.insert(webhookDeliveries).values([
         {
           webhookId: created.id,
