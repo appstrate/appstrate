@@ -67,13 +67,96 @@ function updateAuthSub(
   return { ...m, definition: { ...def, [mode]: { ...getAuthSub(m, mode), ...patch } } };
 }
 
-// ─── Component ─────────────────────────────────────────────
+// ─── Types ─────────────────────────────────────────────────
 
 interface ProviderEditorState {
   manifest: Record<string, unknown>;
   content: string;
   lockVersion?: number;
 }
+
+// ─── Credential modes ──────────────────────────────────────
+
+const CREDENTIAL_MODES = ["api_key", "basic", "custom"] as const;
+type CredentialMode = (typeof CREDENTIAL_MODES)[number];
+
+function isCredentialMode(mode: string): mode is CredentialMode {
+  return (CREDENTIAL_MODES as readonly string[]).includes(mode);
+}
+
+function makeDefaultCredentialFields(mode: CredentialMode): SchemaField[] {
+  const make = (key: string, format?: string): SchemaField => ({
+    _id: crypto.randomUUID(),
+    key,
+    type: "string",
+    description: "",
+    required: true,
+    ...(format ? { format } : {}),
+  });
+  switch (mode) {
+    case "api_key":
+      return [make("api_key")];
+    case "basic":
+      return [make("username"), make("password", "password")];
+    case "custom":
+      return [];
+  }
+}
+
+/** Return a new definition with `credentials` written from fields, or removed if empty. */
+function writeCredentialsToDef(
+  def: Record<string, unknown>,
+  fields: SchemaField[],
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...def };
+  const wrapper = fieldsToSchema(fields, "credentials");
+  if (wrapper) {
+    next.credentials = { schema: wrapper.schema };
+  } else {
+    delete next.credentials;
+  }
+  return next;
+}
+
+/**
+ * Normalize the initial editor state: extract credential fields from the manifest,
+ * and seed defaults in-place if the manifest declares a credential authMode but
+ * lacks a schema (repairs legacy drafts so they pass AFPS validation on save).
+ */
+function normalizeProviderInitialState(initial: ProviderEditorState): {
+  state: ProviderEditorState;
+  credentialFields: SchemaField[];
+} {
+  const def = getDef(initial.manifest);
+  const authMode = (def.authMode as string) || "oauth2";
+  const creds = def.credentials as { schema?: JSONSchemaObject } | undefined;
+
+  if (!isCredentialMode(authMode)) {
+    return { state: initial, credentialFields: [] };
+  }
+
+  if (creds?.schema) {
+    return {
+      state: initial,
+      credentialFields: schemaToFields(creds.schema, "credentials"),
+    };
+  }
+
+  const seeded = makeDefaultCredentialFields(authMode);
+  if (seeded.length === 0) {
+    return { state: initial, credentialFields: [] };
+  }
+
+  return {
+    state: {
+      ...initial,
+      manifest: { ...initial.manifest, definition: writeCredentialsToDef(def, seeded) },
+    },
+    credentialFields: seeded,
+  };
+}
+
+// ─── Component ─────────────────────────────────────────────
 
 export interface ProviderEditorInnerProps {
   initialState: ProviderEditorState;
@@ -88,18 +171,17 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
   const createPkg = useCreatePackage("provider");
   const updatePkg = useUpdatePackage("provider", packageId || "");
 
-  const [state, setState] = useState(initialState);
+  // Normalize once at mount: extract credential fields, repair legacy drafts
+  // that declare a credential authMode without a schema. The normalized state
+  // becomes the baseline for both `state` and `isDirty` comparisons.
+  const [initialNormalized] = useState(() => normalizeProviderInitialState(initialState));
+  const [state, setState] = useState(initialNormalized.state);
+  const [credentialFields, setCredentialFields] = useState<SchemaField[]>(
+    initialNormalized.credentialFields,
+  );
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ProviderEditorTab>("general");
   const [jsonEditorKey, setJsonEditorKey] = useState(0);
-
-  // Transient schema fields for custom credential editing
-  const [credentialFields, setCredentialFields] = useState<SchemaField[]>(() => {
-    const creds = getDef(initialState.manifest).credentials as
-      | { schema?: JSONSchemaObject }
-      | undefined;
-    return creds?.schema ? schemaToFields(creds.schema, "credentials") : [];
-  });
 
   const updateManifest = (patch: Record<string, unknown>) =>
     setState((s) => ({ ...s, manifest: { ...s.manifest, ...patch } }));
@@ -120,8 +202,8 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
 
   // --- Unsaved changes detection ---
   const isDirty = useMemo(
-    () => JSON.stringify(initialState) !== JSON.stringify(state),
-    [initialState, state],
+    () => JSON.stringify(initialNormalized.state) !== JSON.stringify(state),
+    [initialNormalized, state],
   );
   const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
 
@@ -174,16 +256,55 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
   // --- Credential fields sync to manifest ---
   const onCredentialFieldsChange = (fields: SchemaField[]) => {
     setCredentialFields(fields);
-    const wrapper = fieldsToSchema(fields, "credentials");
-    if (wrapper) {
-      patchDef({ credentials: { schema: wrapper.schema } });
-    } else {
-      setState((s) => {
-        const d = { ...getDef(s.manifest) };
-        delete d.credentials;
-        return { ...s, manifest: { ...s.manifest, definition: d } };
-      });
+    setState((s) => ({
+      ...s,
+      manifest: { ...s.manifest, definition: writeCredentialsToDef(getDef(s.manifest), fields) },
+    }));
+  };
+
+  // --- AuthMode transition: keep definition.credentials consistent with mode ---
+  const handleAuthModeChange = (newMode: string) => {
+    const oldMode = authMode;
+    if (newMode === oldMode) return;
+
+    const wasCredMode = isCredentialMode(oldMode);
+    const isNewCredMode = isCredentialMode(newMode);
+
+    // Leaving the credential family → drop credentials entirely.
+    if (wasCredMode && !isNewCredMode) {
+      setCredentialFields([]);
+      setState((s) => ({
+        ...s,
+        manifest: {
+          ...s.manifest,
+          definition: writeCredentialsToDef({ ...getDef(s.manifest), authMode: newMode }, []),
+        },
+      }));
+      return;
     }
+
+    // Entering (or switching within) the credential family.
+    // api_key and basic have canonical shapes → always reset to defaults.
+    // custom is user-defined → preserve existing fields as a starting point.
+    if (isNewCredMode) {
+      const keepExisting = newMode === "custom" && credentialFields.length > 0;
+      const nextFields = keepExisting ? credentialFields : makeDefaultCredentialFields(newMode);
+      if (!keepExisting) setCredentialFields(nextFields);
+      setState((s) => ({
+        ...s,
+        manifest: {
+          ...s.manifest,
+          definition: writeCredentialsToDef(
+            { ...getDef(s.manifest), authMode: newMode },
+            nextFields,
+          ),
+        },
+      }));
+      return;
+    }
+
+    // Transitioning between two non-credential modes (oauth2 ↔ oauth1).
+    patchDef({ authMode: newMode });
   };
 
   return (
@@ -212,11 +333,7 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
           <SectionCard title={t("providers.form.sectionProvider")}>
             <div className="space-y-2">
               <Label htmlFor="pe-authMode">{t("providers.form.authMode")}</Label>
-              <Select
-                value={authMode}
-                onValueChange={(v) => patchDef({ authMode: v })}
-                disabled={isEdit}
-              >
+              <Select value={authMode} onValueChange={handleAuthModeChange} disabled={isEdit}>
                 <SelectTrigger id="pe-authMode">
                   <SelectValue />
                 </SelectTrigger>
@@ -529,7 +646,17 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
             </>
           )}
 
-          {/* API Key */}
+          {/* Credential schema — shared across api_key / basic / custom */}
+          {isCredentialMode(authMode) && (
+            <SchemaSection
+              title={t("providers.form.sectionCredentials")}
+              mode="credentials"
+              fields={credentialFields}
+              onChange={onCredentialFieldsChange}
+            />
+          )}
+
+          {/* API key — sidecar injection routing (references a field from the schema above) */}
           {authMode === "api_key" && (
             <>
               <div className="text-muted-foreground text-sm font-medium">
@@ -543,7 +670,7 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
                   type="text"
                   value={(def.credentialFieldName as string) ?? ""}
                   onChange={(e) => patchDef({ credentialFieldName: e.target.value })}
-                  placeholder="api_key"
+                  placeholder={credentialFields[0]?.key || "api_key"}
                 />
               </div>
 
@@ -556,7 +683,7 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
                   type="text"
                   value={(def.credentialHeaderName as string) ?? ""}
                   onChange={(e) => patchDef({ credentialHeaderName: e.target.value })}
-                  placeholder="api-key"
+                  placeholder="Authorization"
                 />
               </div>
 
@@ -573,26 +700,6 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
                 />
               </div>
             </>
-          )}
-
-          {/* Custom credential schema */}
-          {authMode === "custom" && (
-            <SchemaSection
-              title={t("providers.form.sectionCredentials")}
-              mode="credentials"
-              fields={credentialFields}
-              onChange={onCredentialFieldsChange}
-            />
-          )}
-
-          {/* Basic — no extra fields */}
-          {authMode === "basic" && (
-            <div className="text-muted-foreground py-4 text-sm">
-              {t("providers.authMode.basic")} —{" "}
-              {t("providers.form.secretUnchanged", {
-                defaultValue: "No additional configuration needed.",
-              })}
-            </div>
           )}
         </div>
       )}
