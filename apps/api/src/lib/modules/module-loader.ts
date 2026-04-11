@@ -20,10 +20,6 @@ import { logger } from "../logger.ts";
 // ---------------------------------------------------------------------------
 
 const _modules: Map<string, AppstrateModule> = new Map();
-let _publicPathsCache: Set<string> | null = null;
-let _authStrategiesCache: AuthStrategy[] | null = null;
-let _betterAuthPluginsCache: unknown[] | null = null;
-let _drizzleSchemasCache: Record<string, unknown> | null = null;
 let _initialized = false;
 
 // Built-in module discovery: scanned once, then cached for the process lifetime.
@@ -111,30 +107,7 @@ export async function loadModules(specifiers: string[], ctx: ModuleInitContext):
     }
   }
 
-  // Phase 2: Topological sort by dependencies
-  const sorted = topoSort(resolved);
-
-  // Phase 2.5: Fail fast on duplicate route prefixes before any init runs
-  validateNoDuplicatePrefixes(sorted);
-
-  // Phase 3: Init in dependency order
-  for (const mod of sorted) {
-    try {
-      await mod.init(ctx);
-      if (_modules.has(mod.manifest.id)) {
-        logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
-      }
-      _modules.set(mod.manifest.id, mod);
-      logger.info("Module loaded", { id: mod.manifest.id, version: mod.manifest.version });
-    } catch (err) {
-      throw new Error(
-        `Module "${mod.manifest.id}" failed to initialize: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err },
-      );
-    }
-  }
-
-  _initialized = true;
+  await initSortedModules(resolved, ctx);
 }
 
 /**
@@ -149,7 +122,17 @@ export async function loadModulesFromInstances(
     logger.debug("Modules already initialized, skipping");
     return;
   }
+  await initSortedModules(modules, ctx);
+}
 
+/**
+ * Shared init pipeline: topo-sort → duplicate-prefix guard → init in
+ * dependency order → register. Fatal on first failure.
+ */
+async function initSortedModules(
+  modules: AppstrateModule[],
+  ctx: ModuleInitContext,
+): Promise<void> {
   const sorted = topoSort(modules);
   validateNoDuplicatePrefixes(sorted);
   for (const mod of sorted) {
@@ -165,8 +148,8 @@ export async function loadModulesFromInstances(
       logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
     }
     _modules.set(mod.manifest.id, mod);
+    logger.info("Module loaded", { id: mod.manifest.id, version: mod.manifest.version });
   }
-
   _initialized = true;
 }
 
@@ -203,11 +186,9 @@ export function getModules(): ReadonlyMap<string, AppstrateModule> {
   return _modules;
 }
 
-/** Collect all public paths from all loaded modules (cached as Set for O(1) lookup). */
+/** Collect all public paths from all loaded modules (Set for O(1) lookup). */
 export function getModulePublicPaths(): Set<string> {
-  if (_publicPathsCache !== null) return _publicPathsCache;
-  _publicPathsCache = new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
-  return _publicPathsCache;
+  return new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
 }
 
 /** Collect routers from all modules and mount them on the app under `/api`. */
@@ -267,18 +248,16 @@ export function getModuleOpenApiTags(): Array<{ name: string; description?: stri
  *
  * Strategies run in module load order, BEFORE core auth (Bearer ask_ API key
  * → session cookie). First-match-wins: the first strategy returning a
- * non-null resolution claims the request. Cached on first call.
+ * non-null resolution claims the request.
  *
  * OSS invariant: returns `[]` when no module provides `authStrategies()`.
  */
 export function getModuleAuthStrategies(): AuthStrategy[] {
-  if (_authStrategiesCache !== null) return _authStrategiesCache;
   const strategies: AuthStrategy[] = [];
   for (const mod of _modules.values()) {
     const contrib = mod.authStrategies?.();
     if (contrib) strategies.push(...contrib);
   }
-  _authStrategiesCache = strategies;
   return strategies;
 }
 
@@ -292,13 +271,11 @@ export function getModuleAuthStrategies(): AuthStrategy[] {
  * OSS invariant: returns `[]` when no module provides `betterAuthPlugins()`.
  */
 export function getModuleBetterAuthPlugins(): unknown[] {
-  if (_betterAuthPluginsCache !== null) return _betterAuthPluginsCache;
   const plugins: unknown[] = [];
   for (const mod of _modules.values()) {
     const contrib = mod.betterAuthPlugins?.();
     if (contrib) plugins.push(...contrib);
   }
-  _betterAuthPluginsCache = plugins;
   return plugins;
 }
 
@@ -314,13 +291,11 @@ export function getModuleBetterAuthPlugins(): unknown[] {
  * OSS invariant: returns `{}` when no module provides `drizzleSchemas()`.
  */
 export function getModuleDrizzleSchemas(): Record<string, unknown> {
-  if (_drizzleSchemasCache !== null) return _drizzleSchemasCache;
   const schemas: Record<string, unknown> = {};
   for (const mod of _modules.values()) {
     const contrib = mod.drizzleSchemas?.();
     if (contrib) Object.assign(schemas, contrib);
   }
-  _drizzleSchemasCache = schemas;
   return schemas;
 }
 
@@ -436,21 +411,16 @@ export async function shutdownModules(): Promise<void> {
       });
     }
   }
-  _modules.clear();
-  _publicPathsCache = null;
-  _authStrategiesCache = null;
-  _betterAuthPluginsCache = null;
-  _drizzleSchemasCache = null;
-  _initialized = false;
+  clearAllState();
 }
 
-/** Reset all state. Exported for tests only. */
+/** Reset all state. Exported for tests only (skips `mod.shutdown`). */
 export function resetModules(): void {
+  clearAllState();
+}
+
+function clearAllState(): void {
   _modules.clear();
-  _publicPathsCache = null;
-  _authStrategiesCache = null;
-  _betterAuthPluginsCache = null;
-  _drizzleSchemasCache = null;
   _builtinCache = null;
   _initialized = false;
 }

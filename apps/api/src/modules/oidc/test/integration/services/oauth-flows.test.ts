@@ -39,7 +39,7 @@ import {
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
-import { resetJwksCache } from "../../../services/enduser-token.ts";
+import { overrideJwksResolver } from "../../../services/enduser-token.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import { decodeJwt } from "jose";
@@ -61,6 +61,27 @@ async function sha256Base64Url(input: string): Promise<string> {
 
 function randomVerifier(): string {
   return base64url(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+/**
+ * Extract the authorization code from a consent-endpoint response. The
+ * plugin's response shape depends on its version — 302 with a `Location`
+ * header, or 200 with a JSON body containing the redirect URL under one
+ * of `redirect_uri` / `redirectURI` / `url`.
+ */
+async function extractCodeFromConsentResponse(res: Response): Promise<string | null> {
+  const loc = res.headers.get("location");
+  if (loc) {
+    return new URL(loc, "http://localhost").searchParams.get("code");
+  }
+  const json = (await res.json()) as {
+    redirect_uri?: string;
+    redirectURI?: string;
+    url?: string;
+  };
+  const redirectUri = json.redirect_uri ?? json.redirectURI ?? json.url;
+  if (!redirectUri) return null;
+  return new URL(redirectUri).searchParams.get("code");
 }
 
 async function registerClient(
@@ -110,13 +131,13 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
   beforeAll(() => {
     // Make sure the JWKS cache starts clean so verifyEndUserAccessToken
     // fetches the ES256 keys the jwt plugin just installed.
-    resetJwksCache();
+    overrideJwksResolver(null);
   });
 
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
-    resetJwksCache();
+    overrideJwksResolver(null);
     resetOidcGuardsLimiters();
     ctx = await createTestContext({ orgSlug: "e2eoauth" });
     const client = await registerClient(ctx);
@@ -232,23 +253,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     });
     expect([200, 302]).toContain(consentRes.status);
 
-    // Extract the authorization code from either the Location header (302)
-    // or the JSON body (200). Body shape can be `{ redirect_uri }`,
-    // `{ url }`, or `{ redirect: true, url }` depending on plugin version.
-    let code: string | null;
-    const loc = consentRes.headers.get("location");
-    if (loc) {
-      code = new URL(loc, "http://localhost").searchParams.get("code");
-    } else {
-      const json = (await consentRes.json()) as {
-        redirect_uri?: string;
-        redirectURI?: string;
-        url?: string;
-      };
-      const redirectUri = json.redirect_uri ?? json.redirectURI ?? json.url;
-      expect(redirectUri).toBeTruthy();
-      code = new URL(redirectUri!).searchParams.get("code");
-    }
+    const code = await extractCodeFromConsentResponse(consentRes);
     expect(code).toBeTruthy();
 
     // ── Step 4 ── Exchange code + PKCE verifier for tokens. Must succeed.
@@ -382,20 +387,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     });
     expect([200, 302]).toContain(consentRes.status);
 
-    // Extract the authorization code.
-    let code: string | null;
-    const loc = consentRes.headers.get("location");
-    if (loc) {
-      code = new URL(loc, "http://localhost").searchParams.get("code");
-    } else {
-      const json = (await consentRes.json()) as {
-        redirect_uri?: string;
-        redirectURI?: string;
-        url?: string;
-      };
-      const redirectUri = json.redirect_uri ?? json.redirectURI ?? json.url;
-      code = new URL(redirectUri!).searchParams.get("code");
-    }
+    const code = await extractCodeFromConsentResponse(consentRes);
     expect(code).toBeTruthy();
 
     // Exchange with a DIFFERENT verifier than the one that hashed into the
@@ -477,19 +469,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
       body: new URLSearchParams({ _csrf: csrfToken, accept: "true" }).toString(),
       redirect: "manual",
     });
-    let code: string | null;
-    const loc = consentRes.headers.get("location");
-    if (loc) {
-      code = new URL(loc, "http://localhost").searchParams.get("code");
-    } else {
-      const json = (await consentRes.json()) as {
-        redirect_uri?: string;
-        redirectURI?: string;
-        url?: string;
-      };
-      const redirectUri = json.redirect_uri ?? json.redirectURI ?? json.url;
-      code = new URL(redirectUri!).searchParams.get("code");
-    }
+    const code = await extractCodeFromConsentResponse(consentRes);
     return { code: code!, verifier };
   }
 

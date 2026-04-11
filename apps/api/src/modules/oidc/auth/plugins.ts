@@ -40,34 +40,13 @@ import { oauthProvider } from "@better-auth/oauth-provider";
 import { jwt } from "better-auth/plugins";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../../lib/logger.ts";
-import { OIDC_ALLOWED_SCOPES } from "../../../lib/permissions.ts";
 import {
   resolveOrCreateEndUser,
   UnverifiedEmailConflictError,
 } from "../services/enduser-mapping.ts";
 import { hashSecret } from "../services/oauth-admin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
-
-/**
- * OIDC protocol scopes that grant no Appstrate permission. Required by the
- * oauth-provider plugin (`openid`/`profile`/`email`) and by every standard
- * OIDC client library. `offline_access` gates refresh-token issuance.
- */
-export const OIDC_IDENTITY_SCOPES = ["openid", "profile", "email", "offline_access"] as const;
-
-/**
- * Canonical scope vocabulary served by the OIDC module. Identity scopes
- * first, then core `Permission` strings drawn from `OIDC_ALLOWED_SCOPES` —
- * no second vocabulary, no translation layer. The scope `agents:run`
- * grants the `agents:run` permission verbatim.
- *
- * The admin UI, the consent page, and `/.well-known/openid-configuration`
- * all read from this array via `GET /api/oauth/scopes`.
- */
-export const APPSTRATE_SCOPES: readonly string[] = [
-  ...OIDC_IDENTITY_SCOPES,
-  ...OIDC_ALLOWED_SCOPES,
-];
+import { APPSTRATE_SCOPES } from "./scopes.ts";
 
 async function sha256HexVerify(clientSecret: string, storedHash: string): Promise<boolean> {
   const computed = await hashSecret(clientSecret);

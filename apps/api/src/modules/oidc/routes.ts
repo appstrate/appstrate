@@ -43,7 +43,7 @@ import { resolveAppBranding } from "./services/branding.ts";
 import { resolveOrCreateEndUser } from "./services/enduser-mapping.ts";
 import { issueCsrfToken, verifyCsrfToken } from "./services/csrf.ts";
 import { getOidcAuthApi } from "./auth/api.ts";
-import { APPSTRATE_SCOPES } from "./auth/plugins.ts";
+import { APPSTRATE_SCOPES } from "./auth/scopes.ts";
 import { consumeLoginEmailAttempt, resetLoginEmailAttempts } from "./auth/guards.ts";
 import { UnverifiedEmailConflictError } from "./services/enduser-mapping.ts";
 import { renderLoginPage } from "./pages/login.ts";
@@ -111,7 +111,7 @@ async function loadClientContext(
   clientId: string,
 ): Promise<{
   client: { id: string; name: string | null };
-  applicationId: string | null;
+  applicationId: string;
   branding: Awaited<ReturnType<typeof resolveAppBranding>>;
   csrfToken: string;
 }> {
@@ -126,10 +126,14 @@ async function loadClientContext(
     .where(eq(oauthClient.clientId, clientId))
     .limit(1);
   if (!row || row.disabled) throw notFound("Unknown OAuth client");
-  const applicationId = row.referenceId ?? null;
-  const branding = await resolveAppBranding(applicationId);
+  const branding = await resolveAppBranding(row.referenceId);
   const csrfToken = issueCsrfToken(c);
-  return { client: { id: row.id, name: row.name }, applicationId, branding, csrfToken };
+  return {
+    client: { id: row.id, name: row.name },
+    applicationId: row.referenceId,
+    branding,
+    csrfToken,
+  };
 }
 
 export function createOidcRouter() {
@@ -372,38 +376,42 @@ export function createOidcRouter() {
     // We fetch the Better Auth user by email (unique index) because
     // `asResponse: true` above returns a raw Response, not the typed
     // `{ user }` object that the non-response form would give us.
-    if (ctx.applicationId) {
-      const [authUserRow] = await db
-        .select({
-          id: betterAuthUser.id,
-          email: betterAuthUser.email,
-          name: betterAuthUser.name,
-          emailVerified: betterAuthUser.emailVerified,
-        })
-        .from(betterAuthUser)
-        .where(eq(betterAuthUser.email, email))
-        .limit(1);
-      if (authUserRow) {
-        try {
-          await resolveOrCreateEndUser(
-            {
-              id: authUserRow.id,
-              email: authUserRow.email,
-              name: authUserRow.name,
-              emailVerified: authUserRow.emailVerified === true,
-            },
-            ctx.applicationId,
+    //
+    // Note: `resolveOrCreateEndUser` runs here (proactive) AND inside
+    // `customAccessTokenClaims` (lazy at token mint) — intentional.
+    // The proactive call converts `UnverifiedEmailConflictError` into
+    // a FR page while we still control the response; the lazy call is
+    // how the plugin gets the claims it needs. See `auth/plugins.ts`.
+    const [authUserRow] = await db
+      .select({
+        id: betterAuthUser.id,
+        email: betterAuthUser.email,
+        name: betterAuthUser.name,
+        emailVerified: betterAuthUser.emailVerified,
+      })
+      .from(betterAuthUser)
+      .where(eq(betterAuthUser.email, email))
+      .limit(1);
+    if (authUserRow) {
+      try {
+        await resolveOrCreateEndUser(
+          {
+            id: authUserRow.id,
+            email: authUserRow.email,
+            name: authUserRow.name,
+            emailVerified: authUserRow.emailVerified === true,
+          },
+          ctx.applicationId,
+        );
+      } catch (err) {
+        if (err instanceof UnverifiedEmailConflictError) {
+          return renderError(
+            "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
+            409,
+            email,
           );
-        } catch (err) {
-          if (err instanceof UnverifiedEmailConflictError) {
-            return renderError(
-              "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
-              409,
-              email,
-            );
-          }
-          throw err;
         }
+        throw err;
       }
     }
 

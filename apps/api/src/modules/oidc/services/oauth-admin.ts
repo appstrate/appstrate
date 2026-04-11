@@ -61,7 +61,7 @@ function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
     redirectUris: row.redirectUris ?? [],
     scopes: row.scopes ?? [],
     disabled: row.disabled ?? false,
-    applicationId: row.referenceId ?? "",
+    applicationId: row.referenceId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

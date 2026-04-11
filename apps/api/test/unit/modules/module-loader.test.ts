@@ -390,28 +390,7 @@ describe("module-loader", () => {
       ]);
     });
 
-    it("caches results — subsequent calls return the same array reference", async () => {
-      await loadModulesFromInstances(
-        [
-          mockModule("a", {
-            authStrategies: () => [
-              {
-                id: "s1",
-                async authenticate() {
-                  return null;
-                },
-              },
-            ],
-          }),
-        ],
-        mockCtx(),
-      );
-      const first = getModuleAuthStrategies();
-      const second = getModuleAuthStrategies();
-      expect(second).toBe(first);
-    });
-
-    it("cache is invalidated on resetModules()", async () => {
+    it("returns empty array after resetModules()", async () => {
       await loadModulesFromInstances(
         [
           mockModule("a", {
@@ -452,17 +431,7 @@ describe("module-loader", () => {
       expect(getModuleBetterAuthPlugins()).toEqual([plugA, plugB1, plugB2]);
     });
 
-    it("caches results across calls", async () => {
-      await loadModulesFromInstances(
-        [mockModule("a", { betterAuthPlugins: () => [{ id: "x" }] })],
-        mockCtx(),
-      );
-      const first = getModuleBetterAuthPlugins();
-      const second = getModuleBetterAuthPlugins();
-      expect(second).toBe(first);
-    });
-
-    it("cache is invalidated on resetModules()", async () => {
+    it("returns empty array after resetModules()", async () => {
       await loadModulesFromInstances(
         [mockModule("a", { betterAuthPlugins: () => [{ id: "x" }] })],
         mockCtx(),

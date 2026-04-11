@@ -13,7 +13,7 @@
  * `.references()` inline. Core → module is never permitted.
  */
 
-import { pgTable, text, timestamp, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
 import { user, session, endUsers } from "@appstrate/db/schema";
 
 // ─── Better Auth: jwt plugin ──────────────────────────────────────────────────
@@ -62,8 +62,10 @@ export const oauthClient = pgTable("oauth_client", {
   // `referenceId` is what module code reads directly (branding, admin CRUD);
   // `metadata.applicationId` is what Better Auth's `customAccessTokenClaims`
   // receives (the plugin does not forward `referenceId` to the closure).
-  // Always write both via `buildOauthClientApplicationBinding()`.
-  referenceId: text("reference_id"),
+  // Always write both via `buildOauthClientApplicationBinding()`. Enforced
+  // NOT NULL at the column level so an unbound client row cannot exist —
+  // `mapRow` doesn't need a silent `?? ""` fallback.
+  referenceId: text("reference_id").notNull(),
   metadata: text("metadata"),
 });
 
@@ -131,10 +133,5 @@ export const oidcEndUserProfiles = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
-  (table) => [
-    index("idx_oidc_profiles_auth_user").on(table.authUserId),
-    // A single global auth identity may have multiple end-user profiles (one per app),
-    // but never two profiles for the same auth user against the same end_users row.
-    uniqueIndex("idx_oidc_profiles_end_user_unique").on(table.endUserId),
-  ],
+  (table) => [index("idx_oidc_profiles_auth_user").on(table.authUserId)],
 );

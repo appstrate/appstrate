@@ -34,7 +34,7 @@ export interface EndUserClaims {
   scope?: string;
 }
 
-type JwksResolver = (
+export type JwksResolver = (
   protectedHeader?: jose.JWSHeaderParameters,
   token?: jose.FlattenedJWSInput,
 ) => Promise<jose.CryptoKey>;
@@ -84,33 +84,26 @@ async function getJwks(): Promise<JwksResolver> {
 }
 
 /**
- * Test hook — install a pre-built JWKS resolver, bypassing both the
- * in-process Better Auth lookup and the remote URL fallback. Tests that
- * spin up a local JWKS server and need verification to go through HTTP
- * (or that want to inject a specific public key) call this with their
- * own `jose.createLocalJWKSet(...)` or `jose.createRemoteJWKSet(...)`.
- *
- * Exported so test harness files can opt-out of the production resolver
- * chain without touching internal module state.
- */
-export function _setJwksResolverForTesting(resolver: JwksResolver | null): void {
-  _jwks = resolver;
-}
-
-/**
  * Verify a Bearer access token and return its claims, or `null` if the token
  * is malformed, has an invalid signature, is expired, or fails issuer/audience
  * checks. Never throws — designed to be called from the auth middleware hot
  * path where the token is just as likely to be a random opaque string.
+ *
+ * Pass `deps.jwks` to inject a pre-built resolver (unit tests that pin a
+ * specific keypair without rebuilding the Better Auth singleton). Production
+ * callers pass nothing and get the cached in-process / remote resolver.
  */
-export async function verifyEndUserAccessToken(token: string): Promise<EndUserClaims | null> {
+export async function verifyEndUserAccessToken(
+  token: string,
+  deps?: { jwks?: JwksResolver },
+): Promise<EndUserClaims | null> {
   try {
     const env = getEnv();
     // Better Auth's oauth-provider plugin mints tokens with `iss` set to
     // `${baseURL}${basePath}` — in this codebase that is `${APP_URL}/api/auth`
     // (see `packages/db/src/auth.ts` basePath). Verifying against `APP_URL`
     // alone rejects every real token.
-    const jwks = await getJwks();
+    const jwks = deps?.jwks ?? (await getJwks());
     // Audience validation matches `validAudiences` in `auth/plugins.ts` —
     // RFC 8707 enforcement already happens at the token endpoint via
     // `oidcGuardsPlugin`, but the local verifier adds defense-in-depth so
@@ -137,9 +130,15 @@ export async function verifyEndUserAccessToken(token: string): Promise<EndUserCl
 }
 
 /**
- * Test hook — reset the cached JWKS client so each test run can rebind the
- * endpoint URL (e.g. after spinning up a new Better Auth instance).
+ * Test harness override — install a pre-built JWKS resolver, or pass `null`
+ * to clear the cache. Integration tests that rebuild the Better Auth
+ * singleton between runs call this with `null` so the next verify
+ * re-fetches the fresh ES256 keys. Tests that need to bypass the real
+ * singleton entirely (e.g. a module-loaded preload with a different
+ * keypair than the test's own mint key) call this with their own
+ * `jose.createLocalJWKSet(...)`. Not intended for production callers —
+ * use the `deps.jwks` param on `verifyEndUserAccessToken` for DI.
  */
-export function resetJwksCache(): void {
-  _jwks = null;
+export function overrideJwksResolver(resolver: JwksResolver | null): void {
+  _jwks = resolver;
 }

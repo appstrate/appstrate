@@ -15,15 +15,13 @@
 
 import { logger } from "../../../lib/logger.ts";
 import { OIDC_ALLOWED_SCOPES, type Permission } from "../../../lib/permissions.ts";
-import { OIDC_IDENTITY_SCOPES } from "./plugins.ts";
-
-const IDENTITY = new Set<string>(OIDC_IDENTITY_SCOPES);
+import { OIDC_IDENTITY_SCOPE_SET } from "./scopes.ts";
 
 export function scopesToPermissions(scope?: string): Set<Permission> {
   const permissions = new Set<Permission>();
   if (!scope) return permissions;
   for (const s of scope.split(/\s+/)) {
-    if (s === "" || IDENTITY.has(s)) continue;
+    if (s === "" || OIDC_IDENTITY_SCOPE_SET.has(s)) continue;
     if (OIDC_ALLOWED_SCOPES.has(s as Permission)) {
       permissions.add(s as Permission);
       continue;

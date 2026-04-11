@@ -86,18 +86,13 @@ export const PLATFORM_DEFAULT_BRANDING: ResolvedAppBranding = {
 
 /**
  * Read `applications.settings.branding` for the given app, validate it,
- * and return a fully-resolved branding with sensible fallbacks. Pass
- * `null` to get the platform default branding (used when a client row
- * is not yet bound to an application).
+ * and return a fully-resolved branding with sensible fallbacks.
  *
  * Validation failures are logged (warn) but never throw — the page still
  * renders with defaults so a bad branding config can't take down an
  * end-user flow.
  */
-export async function resolveAppBranding(
-  applicationId: string | null,
-): Promise<ResolvedAppBranding> {
-  if (!applicationId) return PLATFORM_DEFAULT_BRANDING;
+export async function resolveAppBranding(applicationId: string): Promise<ResolvedAppBranding> {
   const [row] = await db
     .select({ name: applications.name, settings: applications.settings })
     .from(applications)

@@ -98,11 +98,9 @@ beforeAll(async () => {
   // key set) and the remote URL path (which would need a real HTTP
   // listener on APP_URL). Tokens minted by `mintToken()` below verify
   // cleanly against this resolver.
-  const { _setJwksResolverForTesting } = await import("../../../services/enduser-token.ts");
+  const { overrideJwksResolver } = await import("../../../services/enduser-token.ts");
   const localSet = jose.createLocalJWKSet({ keys: [publicJwk] });
-  _setJwksResolverForTesting(
-    localSet as unknown as Parameters<typeof _setJwksResolverForTesting>[0],
-  );
+  overrideJwksResolver(localSet as unknown as Parameters<typeof overrideJwksResolver>[0]);
   app = getTestApp({ modules: [oidcModule] });
 });
 

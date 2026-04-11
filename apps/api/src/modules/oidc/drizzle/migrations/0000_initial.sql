@@ -42,7 +42,7 @@ CREATE TABLE "oauth_client" (
   "public" boolean,
   "type" text,
   "require_pkce" boolean,
-  "reference_id" text,
+  "reference_id" text NOT NULL,
   "metadata" text,
   CONSTRAINT "oauth_client_client_id_unique" UNIQUE("client_id")
 );
