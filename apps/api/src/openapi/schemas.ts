@@ -543,8 +543,29 @@ export const schemas = {
       credentialEncoding: {
         type: "string",
         enum: ["basic_api_key_x", "basic_email_token"],
+        deprecated: true,
         description:
-          "Pre-encoding applied to api_key credentials before injection into the sidecar. basic_api_key_x → base64(api_key:X) (Freshdesk/Teamwork); basic_email_token → base64(email/token:api_key) (Zendesk).",
+          'Deprecated (AFPS 1.3+): use credentialTransform instead. Legacy pre-encoding for api_key credentials. basic_api_key_x ≡ credentialTransform { template: "{{api_key}}:X", encoding: "base64" }; basic_email_token ≡ credentialTransform { template: "{{email}}/token:{{api_key}}", encoding: "base64" }.',
+      },
+      credentialTransform: {
+        type: "object",
+        required: ["template", "encoding"],
+        properties: {
+          template: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
+          },
+          encoding: {
+            type: "string",
+            enum: ["base64"],
+            description:
+              "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
+          },
+        },
+        description:
+          "Generic, template-based pre-encoding for api_key credentials. Replaces the legacy credentialEncoding enum; lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
       },
       availableScopes: {
         type: "array",
@@ -603,8 +624,29 @@ export const schemas = {
       credentialEncoding: {
         type: "string",
         enum: ["basic_api_key_x", "basic_email_token"],
+        deprecated: true,
         description:
-          "Pre-encoding applied to api_key credentials before injection into the sidecar. basic_api_key_x → base64(api_key:X) (Freshdesk/Teamwork); basic_email_token → base64(email/token:api_key) (Zendesk).",
+          'Deprecated (AFPS 1.3+): use credentialTransform instead. Legacy pre-encoding for api_key credentials. basic_api_key_x ≡ credentialTransform { template: "{{api_key}}:X", encoding: "base64" }; basic_email_token ≡ credentialTransform { template: "{{email}}/token:{{api_key}}", encoding: "base64" }.',
+      },
+      credentialTransform: {
+        type: "object",
+        required: ["template", "encoding"],
+        properties: {
+          template: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
+          },
+          encoding: {
+            type: "string",
+            enum: ["base64"],
+            description:
+              "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
+          },
+        },
+        description:
+          "Generic, template-based pre-encoding for api_key credentials. Replaces the legacy credentialEncoding enum; lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
       },
       availableScopes: {
         type: "array",
@@ -661,8 +703,29 @@ export const schemas = {
       credentialEncoding: {
         type: "string",
         enum: ["basic_api_key_x", "basic_email_token"],
+        deprecated: true,
         description:
-          "Pre-encoding applied to api_key credentials before injection into the sidecar. basic_api_key_x → base64(api_key:X) (Freshdesk/Teamwork); basic_email_token → base64(email/token:api_key) (Zendesk).",
+          'Deprecated (AFPS 1.3+): use credentialTransform instead. Legacy pre-encoding for api_key credentials. basic_api_key_x ≡ credentialTransform { template: "{{api_key}}:X", encoding: "base64" }; basic_email_token ≡ credentialTransform { template: "{{email}}/token:{{api_key}}", encoding: "base64" }.',
+      },
+      credentialTransform: {
+        type: "object",
+        required: ["template", "encoding"],
+        properties: {
+          template: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
+          },
+          encoding: {
+            type: "string",
+            enum: ["base64"],
+            description:
+              "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
+          },
+        },
+        description:
+          "Generic, template-based pre-encoding for api_key credentials. Replaces the legacy credentialEncoding enum; lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
       },
       availableScopes: {
         type: "array",

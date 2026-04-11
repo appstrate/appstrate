@@ -167,6 +167,26 @@
             "basic_email_token"
           ]
         },
+        "credentialTransform": {
+          "type": "object",
+          "properties": {
+            "template": {
+              "type": "string",
+              "minLength": 1
+            },
+            "encoding": {
+              "type": "string",
+              "enum": [
+                "base64"
+              ]
+            }
+          },
+          "required": [
+            "template",
+            "encoding"
+          ],
+          "additionalProperties": {}
+        },
         "authorizedUris": {
           "type": "array",
           "items": {

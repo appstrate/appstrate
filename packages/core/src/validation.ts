@@ -13,6 +13,8 @@ import {
   oauthTokenAuthMethodEnum as afpsOAuthTokenAuthMethodEnum,
   oauthTokenContentTypeEnum as afpsOAuthTokenContentTypeEnum,
   credentialEncodingEnum as afpsCredentialEncodingEnum,
+  credentialTransform as afpsCredentialTransform,
+  credentialTransformEncodingEnum as afpsCredentialTransformEncodingEnum,
 } from "@afps-spec/schema";
 
 // ─────────────────────────────────────────────
@@ -141,13 +143,43 @@ export const providerManifestSchema = afpsProviderManifestSchema.safeExtend({
 export type ProviderManifest = z.infer<typeof providerManifestSchema>;
 
 /**
- * OAuth2 token-endpoint auth method, `tokenContentType` and API-key credential
- * pre-encoding are part of AFPS v1 (§7.2 and §7.4, since @afps-spec/schema@1.2.2).
+ * OAuth2 token-endpoint auth method, `tokenContentType`, `credentialTransform`
+ * and the legacy `credentialEncoding` are part of AFPS v1 (§7.2 and §7.4).
  * Types are derived from the canonical Zod enums so appstrate cannot drift.
+ *
+ * `credentialEncoding` is deprecated since @afps-spec/schema@1.3.0; new
+ * manifests should use `credentialTransform` instead. The legacy type is
+ * still exported because the enum lives in the spec for backward compat.
  */
 export type OAuthTokenAuthMethod = z.infer<typeof afpsOAuthTokenAuthMethodEnum>;
 export type OAuthTokenContentType = z.infer<typeof afpsOAuthTokenContentTypeEnum>;
+/** @deprecated Use {@link CredentialTransform} instead. */
 export type CredentialEncoding = z.infer<typeof afpsCredentialEncodingEnum>;
+
+/**
+ * Whitelisted post-substitution transforms for `credentialTransform.encoding`.
+ * AFPS v1 defines a single value (`base64`); extend by updating the spec.
+ * Derived from the canonical AFPS enum so appstrate cannot drift.
+ */
+export type CredentialTransformEncoding = z.infer<typeof afpsCredentialTransformEncodingEnum>;
+
+/**
+ * Generic, template-based replacement for {@link CredentialEncoding}.
+ *
+ * The `template` string is rendered with the same `{{var}}` substitution
+ * engine used for URLs and headers (keys resolved against the user-provided
+ * credential fields), then passed through `encoding` to produce the final
+ * value injected under `credentials.fieldName`.
+ *
+ * Derived from the canonical AFPS schema (`afpsCredentialTransform`). The
+ * base shape requires `template` and `encoding`; because the AFPS schema is
+ * declared as `looseObject`, extra keys are permitted but appstrate ignores
+ * them.
+ */
+export type CredentialTransform = Pick<
+  z.infer<typeof afpsCredentialTransform>,
+  "template" | "encoding"
+>;
 
 /** Resolved provider definition built from a raw manifest JSONB object. */
 export interface ResolvedProviderDefinition {
@@ -168,7 +200,9 @@ export interface ResolvedProviderDefinition {
   credentialFieldName?: string;
   credentialHeaderName?: string;
   credentialHeaderPrefix?: string;
+  /** @deprecated Use {@link ResolvedProviderDefinition.credentialTransform} instead. */
   credentialEncoding?: CredentialEncoding;
+  credentialTransform?: CredentialTransform;
   authorizedUris?: string[];
   allowAllUris: boolean;
   availableScopes?: AvailableScope[];
@@ -230,6 +264,7 @@ export function buildProviderDefinitionFromManifest(
     credentialHeaderName: rawDef.credentialHeaderName as string | undefined,
     credentialHeaderPrefix: rawDef.credentialHeaderPrefix as string | undefined,
     credentialEncoding: rawDef.credentialEncoding as CredentialEncoding | undefined,
+    credentialTransform: rawDef.credentialTransform as CredentialTransform | undefined,
     // Transversal fields
     authorizedUris: (rawDef.authorizedUris as string[])?.length
       ? (rawDef.authorizedUris as string[])

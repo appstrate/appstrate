@@ -30,12 +30,13 @@
         "required": ["api_key", "email", "subdomain"]
       }
     },
-    "credentialEncoding": "basic_email_token",
+    "credentialTransform": {
+      "template": "{{email}}/token:{{api_key}}",
+      "encoding": "base64"
+    },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Basic",
-    "authorizedUris": [
-      "https://*.zendesk.com/*"
-    ]
+    "authorizedUris": ["https://*.zendesk.com/*"]
   },
   "setupGuide": {
     "steps": [

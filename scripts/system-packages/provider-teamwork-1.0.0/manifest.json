@@ -27,12 +27,13 @@
       },
       "fieldName": "api_key"
     },
-    "credentialEncoding": "basic_api_key_x",
+    "credentialTransform": {
+      "template": "{{api_key}}:X",
+      "encoding": "base64"
+    },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Basic",
-    "authorizedUris": [
-      "https://*.teamwork.com/*"
-    ]
+    "authorizedUris": ["https://*.teamwork.com/*"]
   },
   "setupGuide": {
     "steps": [

@@ -13,6 +13,7 @@ import { forceRefresh, type RefreshContext } from "./token-refresh.ts";
 import type {
   AuthMode,
   CredentialEncoding,
+  CredentialTransform,
   OAuthTokenAuthMethod,
   OAuthTokenContentType,
 } from "@appstrate/core/validation";
@@ -370,17 +371,71 @@ async function buildRefreshContext(
   };
 }
 
-/** Placeholder password used by the Freshdesk/Teamwork "basic_api_key_x" Basic auth convention. */
-const BASIC_API_KEY_PASSWORD_PLACEHOLDER = "X";
+/** Render `{{var}}` placeholders using the given credential fields. Unknown refs become empty. */
+function substituteTemplate(template: string, credentials: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_match, key) => credentials[key] ?? "");
+}
+
+/** Apply a whitelisted post-substitution transform. Throws on unknown encodings. */
+function applyTransformEncoding(value: string, encoding: CredentialTransform["encoding"]): string {
+  if (encoding === "base64") return Buffer.from(value, "utf8").toString("base64");
+  // Exhaustiveness guard — new AFPS encodings must be wired here explicitly.
+  throw new Error(`Unsupported credentialTransform encoding: ${encoding as string}`);
+}
+
+/**
+ * Evaluate {@link CredentialTransform} against a credential set. Returns the
+ * transformed value, or `null` if the template references a missing field (in
+ * which case the caller should fall through to the standard `fieldName` mapping).
+ */
+function evaluateCredentialTransform(
+  transform: CredentialTransform,
+  credentials: Record<string, string>,
+): string | null {
+  const refs = [...transform.template.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]!);
+  for (const ref of refs) {
+    if (!credentials[ref]) return null;
+  }
+  return applyTransformEncoding(
+    substituteTemplate(transform.template, credentials),
+    transform.encoding,
+  );
+}
+
+/**
+ * Translate {@link CredentialEncoding} into an equivalent {@link CredentialTransform}.
+ * Used for backward compatibility with AFPS <= 1.2.2 manifests; should be
+ * removed once all system providers have migrated to `credentialTransform`.
+ *
+ * @deprecated Remove once {@link CredentialEncoding} is dropped from AFPS.
+ */
+function legacyEncodingToTransform(
+  encoding: CredentialEncoding | undefined,
+): CredentialTransform | undefined {
+  if (encoding === "basic_api_key_x") {
+    return { template: "{{api_key}}:X", encoding: "base64" };
+  }
+  if (encoding === "basic_email_token") {
+    return { template: "{{email}}/token:{{api_key}}", encoding: "base64" };
+  }
+  return undefined;
+}
 
 /**
  * Map decrypted credentials to the sidecar format.
- * For oauth2/api_key with a named field, maps to a single credential variable.
- * For api_key providers with credentialEncoding, pre-encodes the credential.
  *
- * Supported credentialEncoding values:
- * - "basic_api_key_x": base64(api_key:X) — Freshdesk/Teamwork pattern
- * - "basic_email_token": base64(email/token:api_key) — Zendesk API token pattern
+ * For `api_key` providers with a `credentialTransform`, the transform's template
+ * is rendered with `{{var}}` substitution and the result passed through the
+ * declared encoding. The transformed value replaces `credentials.fieldName`;
+ * other credential fields (subdomain, email, …) are preserved so they stay
+ * available for URL and header substitution downstream in the sidecar.
+ *
+ * The legacy `credentialEncoding` enum (AFPS <= 1.2.2) is honored by
+ * translating it into an equivalent `credentialTransform` and reusing the
+ * same code path. `credentialTransform` wins when both are present.
+ *
+ * For OAuth2 / api_key without any transform, the value is mapped to a single
+ * `{ [fieldName]: value }` variable — this matches the prior behavior.
  *
  * @internal Exported for direct unit testing — not part of the public API.
  */
@@ -389,24 +444,21 @@ export function buildSidecarCredentials(
   def: Record<string, unknown>,
   authMode: AuthMode | undefined,
 ): Record<string, string> {
-  const credentialEncoding = def.credentialEncoding as CredentialEncoding | undefined;
+  if (authMode === "api_key") {
+    // credentialTransform wins over the deprecated credentialEncoding.
+    const transform =
+      (def.credentialTransform as CredentialTransform | undefined) ??
+      legacyEncodingToTransform(def.credentialEncoding as CredentialEncoding | undefined);
 
-  // Apply credential encoding transformations for api_key providers.
-  // Returns ALL credential fields (not just the mapped fieldName) because
-  // extra fields like subdomain/email are needed for URL substitution via {{variable}}.
-  if (authMode === "api_key" && credentialEncoding) {
-    const apiKey = credentials.api_key;
-    if (credentialEncoding === "basic_api_key_x" && apiKey) {
-      // Freshdesk/Teamwork: Basic auth with api_key as username, "X" as password
-      const encoded = Buffer.from(`${apiKey}:${BASIC_API_KEY_PASSWORD_PLACEHOLDER}`).toString(
-        "base64",
-      );
-      return { ...credentials, api_key: encoded };
-    }
-    if (credentialEncoding === "basic_email_token" && apiKey && credentials.email) {
-      // Zendesk: Basic auth with email/token as username, api_token as password
-      const encoded = Buffer.from(`${credentials.email}/token:${apiKey}`).toString("base64");
-      return { ...credentials, api_key: encoded };
+    if (transform) {
+      const encoded = evaluateCredentialTransform(transform, credentials);
+      if (encoded !== null) {
+        const fieldName =
+          ((def.credentials as Record<string, unknown>)?.fieldName as string | undefined) ??
+          "api_key";
+        return { ...credentials, [fieldName]: encoded };
+      }
+      // Fall through: template referenced a missing field (e.g. Zendesk without email).
     }
   }
 
