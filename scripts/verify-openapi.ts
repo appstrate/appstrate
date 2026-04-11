@@ -404,7 +404,23 @@ try {
     },
   });
 
-  const source = JSON.stringify(openApiSpec, null, 2);
+  // Strip remote $refs (AFPS schema URLs) before linting — Redocly's lintFromString
+  // has no option equivalent to validateOpenAPI's `resolve: { external: false }`, and
+  // fetching the 4 AFPS schemas over HTTPS adds ~20s with no disk cache. The AFPS
+  // schemas are validated separately by the afps-spec repo, so replacing them with a
+  // stub object is safe and drops this step from ~20s to ~150ms.
+  const strippedSpec = JSON.parse(JSON.stringify(openApiSpec), (_key, value) => {
+    if (
+      value &&
+      typeof value === "object" &&
+      typeof (value as { $ref?: unknown }).$ref === "string" &&
+      /^https?:\/\//.test((value as { $ref: string }).$ref)
+    ) {
+      return { type: "object", description: `external: ${(value as { $ref: string }).$ref}` };
+    }
+    return value;
+  });
+  const source = JSON.stringify(strippedSpec, null, 2);
   const problems = await lintFromString({ source, config });
 
   const errors = problems.filter((p) => p.severity === "error");
