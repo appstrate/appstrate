@@ -14,7 +14,7 @@ import {
   shutdownModules,
   resetModules,
   getModuleAuthStrategies,
-  getModuleBetterAuthPlugins,
+  getModuleContributions,
 } from "../../../src/lib/modules/module-loader.ts";
 import type { AppstrateModule, ModuleInitContext, AuthStrategy } from "@appstrate/core/module";
 import type { AppConfig } from "@appstrate/shared-types";
@@ -412,33 +412,49 @@ describe("module-loader", () => {
     });
   });
 
-  describe("getModuleBetterAuthPlugins", () => {
-    it("returns empty array in OSS mode (no modules loaded)", () => {
-      expect(getModuleBetterAuthPlugins()).toEqual([]);
+  describe("getModuleContributions", () => {
+    it("returns empty shape in OSS mode (no modules loaded)", () => {
+      expect(getModuleContributions()).toEqual({
+        betterAuthPlugins: [],
+        drizzleSchemas: {},
+      });
     });
 
-    it("flattens plugins from multiple modules in load order", async () => {
+    it("flattens plugins + schemas from multiple modules in load order", async () => {
       const plugA = { id: "plug-a" };
       const plugB1 = { id: "plug-b1" };
       const plugB2 = { id: "plug-b2" };
+      const tableA = { __table: "a" };
+      const tableB = { __table: "b" };
       await loadModulesFromInstances(
         [
-          mockModule("a", { betterAuthPlugins: () => [plugA] }),
-          mockModule("b", { betterAuthPlugins: () => [plugB1, plugB2] }),
+          mockModule("a", {
+            betterAuthPlugins: () => [plugA],
+            drizzleSchemas: () => ({ tableA }),
+          }),
+          mockModule("b", {
+            betterAuthPlugins: () => [plugB1, plugB2],
+            drizzleSchemas: () => ({ tableB }),
+          }),
         ],
         mockCtx(),
       );
-      expect(getModuleBetterAuthPlugins()).toEqual([plugA, plugB1, plugB2]);
+      const contributions = getModuleContributions();
+      expect(contributions.betterAuthPlugins).toEqual([plugA, plugB1, plugB2]);
+      expect(contributions.drizzleSchemas).toEqual({ tableA, tableB });
     });
 
-    it("returns empty array after resetModules()", async () => {
+    it("returns empty shape after resetModules()", async () => {
       await loadModulesFromInstances(
         [mockModule("a", { betterAuthPlugins: () => [{ id: "x" }] })],
         mockCtx(),
       );
-      expect(getModuleBetterAuthPlugins()).toHaveLength(1);
+      expect(getModuleContributions().betterAuthPlugins).toHaveLength(1);
       resetModules();
-      expect(getModuleBetterAuthPlugins()).toEqual([]);
+      expect(getModuleContributions()).toEqual({
+        betterAuthPlugins: [],
+        drizzleSchemas: {},
+      });
     });
   });
 });

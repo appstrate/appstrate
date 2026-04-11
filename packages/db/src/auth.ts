@@ -165,20 +165,16 @@ const basePlugins = [
     : []),
 ];
 
-// ─── Auth — lazy factory + Proxy shim ─────────────────────
+// ─── Auth — lazy factory ──────────────────────────────────
 //
-// IMPORTANT: the `auth` export is a Proxy backed by a lazy-initialized
-// singleton. The underlying Better Auth instance is constructed only when
-// `createAuth(extraPlugins)` is called during boot — AFTER modules have
-// registered their plugin contributions via `AppstrateModule.betterAuthPlugins()`.
+// The Better Auth instance is constructed lazily by `createAuth()` during
+// boot, AFTER modules have registered their plugin contributions via
+// `AppstrateModule.betterAuthPlugins()` (and companion Drizzle tables via
+// `AppstrateModule.drizzleSchemas()`). All consumers must call `getAuth()`
+// at request time / post-boot — never at module-evaluation time.
 //
-// Do NOT read properties off `auth` at module-evaluation time (top-level
-// code paths that import `auth` and immediately touch `auth.api.*` will
-// crash because `createAuth()` has not yet run). All consumers must defer
-// access to request-time (inside Hono handlers) or post-boot code paths.
-//
-// Test harness: `apps/api/test/setup/preload.ts` calls `createAuth([])`
-// during preload so module test runs boot cleanly.
+// Test harness: `test/setup/preload.ts` calls `createAuth([], {})` during
+// preload so module test runs boot cleanly.
 
 function buildAuth(
   extraPlugins: BetterAuthPluginList = [],

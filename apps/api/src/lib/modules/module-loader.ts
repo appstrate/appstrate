@@ -262,41 +262,57 @@ export function getModuleAuthStrategies(): AuthStrategy[] {
 }
 
 /**
- * Collect Better Auth plugins contributed by all loaded modules.
+ * Shape of the aggregated auth contributions that need to reach Better Auth
+ * at `createAuth()` time: plugins (merged with `basePlugins`) and Drizzle
+ * table definitions (merged into the adapter's model map so plugins like
+ * `@better-auth/oauth-provider` can resolve their own tables).
  *
- * Passed through as `unknown[]` at this layer — the boot integration site
- * in `packages/db/src/auth.ts` narrows to `BetterAuthPluginList` before
- * calling `createAuth(plugins)`. Keeps Better Auth types out of core.
- *
- * OSS invariant: returns `[]` when no module provides `betterAuthPlugins()`.
+ * Both fields are erased to `unknown` at this layer — the boot integration
+ * site in `packages/db/src/auth.ts` narrows to `BetterAuthPluginList` before
+ * calling `createAuth(plugins, schemas)`. Keeps Better Auth types out of
+ * core.
  */
-export function getModuleBetterAuthPlugins(): unknown[] {
-  const plugins: unknown[] = [];
-  for (const mod of _modules.values()) {
-    const contrib = mod.betterAuthPlugins?.();
-    if (contrib) plugins.push(...contrib);
-  }
-  return plugins;
+export interface ModuleContributions {
+  betterAuthPlugins: unknown[];
+  drizzleSchemas: Record<string, unknown>;
 }
 
 /**
- * Collect Drizzle table definitions contributed by all loaded modules.
+ * Aggregate Better Auth plugins and Drizzle schema tables from a list of
+ * modules. The input is explicit so the production registry path and the
+ * test preload path can share one implementation:
  *
- * Better Auth's Drizzle adapter needs these to resolve `findOne({ model })`
- * calls against module-owned tables (e.g. the OIDC module's `jwks` and
- * `oauthClient` tables). Passed through as `Record<string, unknown>` at
- * this layer — the boot integration site narrows the values to Drizzle
- * tables before passing to `createAuth(plugins, schemas)`.
+ * - Production: `boot.ts` calls `collectModuleContributions(Array.from(getModules().values()))`
+ *   after `loadModules()` has populated the singleton registry.
+ * - Tests: `test/setup/preload.ts` imports modules off disk into a local
+ *   array and calls this helper directly — it cannot use
+ *   `getModules()` because the preload builds the Better Auth singleton
+ *   before `getTestApp()` / `loadModulesFromInstances()` has run.
  *
- * OSS invariant: returns `{}` when no module provides `drizzleSchemas()`.
+ * OSS invariant: returns `{ betterAuthPlugins: [], drizzleSchemas: {} }`
+ * when no module contributes.
  */
-export function getModuleDrizzleSchemas(): Record<string, unknown> {
-  const schemas: Record<string, unknown> = {};
-  for (const mod of _modules.values()) {
-    const contrib = mod.drizzleSchemas?.();
-    if (contrib) Object.assign(schemas, contrib);
+export function collectModuleContributions(
+  modules: readonly AppstrateModule[],
+): ModuleContributions {
+  const betterAuthPlugins: unknown[] = [];
+  const drizzleSchemas: Record<string, unknown> = {};
+  for (const mod of modules) {
+    const plugins = mod.betterAuthPlugins?.();
+    if (plugins) betterAuthPlugins.push(...plugins);
+    const schemas = mod.drizzleSchemas?.();
+    if (schemas) Object.assign(drizzleSchemas, schemas);
   }
-  return schemas;
+  return { betterAuthPlugins, drizzleSchemas };
+}
+
+/**
+ * Production collector — aggregates contributions from every module that
+ * has been loaded into the singleton registry. Thin wrapper around
+ * `collectModuleContributions()` that reads from `_modules`.
+ */
+export function getModuleContributions(): ModuleContributions {
+  return collectModuleContributions(Array.from(_modules.values()));
 }
 
 /**

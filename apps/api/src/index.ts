@@ -4,13 +4,9 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
-import { getAuth } from "@appstrate/db/auth";
 import { logger } from "./lib/logger.ts";
 import { boot } from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
-import { validateApiKey } from "./services/api-keys.ts";
-import { ensureDefaultProfile } from "./services/connection-profiles.ts";
-import { requireOrgContext } from "./middleware/org-context.ts";
 import { requireAppContext } from "./middleware/app-context.ts";
 import { requestId } from "./middleware/request-id.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
@@ -49,13 +45,11 @@ import {
   getModuleOpenApiTags,
   registerModuleRoutes,
 } from "./lib/modules/module-loader.ts";
-import { ApiError, unauthorized } from "./lib/errors.ts";
-import { resolvePermissions, resolveApiKeyPermissions } from "./lib/permissions.ts";
-import { isEndUserInApp } from "./services/end-users.ts";
+import { ApiError } from "./lib/errors.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
 import { getAppConfig } from "./lib/app-config.ts";
-import { getClientIp } from "./lib/client-ip.ts";
+import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
 import type { AppEnv } from "./types/index.ts";
 
 // Fail-fast: validate all env vars at startup
@@ -107,180 +101,16 @@ app.use("*", async (c, next) => {
   return next();
 });
 
-// Mount Better Auth handler — handles signup, signin, session, etc.
-app.on(["POST", "GET"], "/api/auth/*", (c) => {
-  return getAuth().handler(c.req.raw);
-});
-
-// Paths that skip both auth and org-context middleware (handled by other means or public)
-function skipAuth(path: string): boolean {
-  if (!path.startsWith("/api/")) return true;
-  if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
-  if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
-  if (path === "/api/connections/callback") return true; // OAuth redirect — no session
-  if (path === "/api/docs" || path === "/api/openapi.json") return true;
-  if (getModulePublicPaths().has(path)) return true; // e.g. Stripe webhook
-  return false;
-}
-
-// Paths that need auth but not org-context (user-scoped or self-resolving)
-function skipOrgContext(path: string): boolean {
-  if (path === "/api/orgs" || path === "/api/orgs/") return true; // list/create orgs
-  if (path.startsWith("/api/orgs/")) return true; // /api/orgs/:id/* handle their own auth
-  if (path === "/api/profile" || path === "/api/profile/") return true;
-
-  if (path === "/api/welcome/setup") return true;
-  return false;
-}
-
-// Auth middleware: module auth strategies → Bearer API key → Better Auth session (cookie)
-app.use("*", async (c, next) => {
-  if (skipAuth(c.req.path)) return next();
-
-  // Module-contributed auth strategies run first (first-match-wins).
-  // Strategies MUST return `null` fast when the request does not match their
-  // signature (e.g. a JWT strategy only claims `Bearer ey…`, never
-  // `Bearer ask_…`). A strategy claiming every request would shadow core API
-  // key auth — this is documented in `apps/api/src/modules/README.md`.
-  const strategies = getModuleAuthStrategies();
-  if (strategies.length > 0) {
-    const strategyReq = {
-      headers: c.req.raw.headers,
-      method: c.req.method,
-      path: c.req.path,
-    };
-    for (const strategy of strategies) {
-      const resolution = await strategy.authenticate(strategyReq);
-      if (!resolution) continue;
-      c.set("user", resolution.user);
-      c.set("orgId", resolution.orgId);
-      if (resolution.orgSlug !== undefined) c.set("orgSlug", resolution.orgSlug);
-      c.set("orgRole", resolution.orgRole);
-      // permissions: strategy-provided strings, cast to Set to match core `Set<string>` shape
-      c.set("permissions", new Set(resolution.permissions));
-      c.set("authMethod", resolution.authMethod);
-      c.set("applicationId", resolution.applicationId);
-      if (resolution.endUser) {
-        c.set("endUser", resolution.endUser);
-      }
-      return next();
-    }
-  }
-
-  // Try Bearer API key first
-  const authHeader = c.req.header("Authorization");
-  if (authHeader?.startsWith("Bearer ask_")) {
-    const rawKey = authHeader.slice(7); // "Bearer ".length
-    const keyInfo = await validateApiKey(rawKey);
-    if (!keyInfo) {
-      throw unauthorized("Invalid or expired API key");
-    }
-    c.set("user", { id: keyInfo.userId, email: keyInfo.email, name: keyInfo.name });
-    c.set("orgId", keyInfo.orgId);
-    c.set("orgSlug", keyInfo.orgSlug);
-    c.set("orgRole", keyInfo.creatorRole);
-    c.set("permissions", resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole));
-    c.set("authMethod", "api_key");
-    c.set("apiKeyId", keyInfo.keyId);
-    c.set("applicationId", keyInfo.applicationId);
-
-    // Appstrate-User header: resolve end-user context (API key only)
-    const targetEndUserId = c.req.header("Appstrate-User");
-    if (targetEndUserId) {
-      if (!targetEndUserId.startsWith("eu_")) {
-        throw new ApiError({
-          status: 400,
-          code: "invalid_end_user_id",
-          title: "Invalid End-User ID",
-          detail: `Appstrate-User header must be an end-user ID with 'eu_' prefix, got '${targetEndUserId}'`,
-          param: "Appstrate-User",
-        });
-      }
-      const endUser = await isEndUserInApp(keyInfo.applicationId, targetEndUserId);
-      if (!endUser) {
-        throw new ApiError({
-          status: 403,
-          code: "invalid_end_user",
-          title: "Invalid End-User",
-          detail: `End-user '${targetEndUserId}' does not exist or does not belong to this application`,
-          param: "Appstrate-User",
-        });
-      }
-      logger.info("Appstrate-User end-user context", {
-        requestId: c.get("requestId"),
-        apiKeyId: keyInfo.keyId,
-        authenticatedMember: keyInfo.userId,
-        endUserId: endUser.id,
-        applicationId: endUser.applicationId,
-        method: c.req.method,
-        path: c.req.path,
-        ip: getClientIp(c),
-        userAgent: c.req.header("user-agent") || "unknown",
-      });
-      c.set("endUser", endUser);
-    }
-
-    return next();
-  }
-
-  // Fallback: cookie session
-  const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
-  if (!session?.user) {
-    throw unauthorized("Invalid or missing session");
-  }
-
-  // Appstrate-User header is NOT allowed with cookie auth
-  if (c.req.header("Appstrate-User")) {
-    throw new ApiError({
-      status: 400,
-      code: "header_not_allowed",
-      title: "Header Not Allowed",
-      detail: "Appstrate-User header is not allowed with cookie authentication",
-      param: "Appstrate-User",
-    });
-  }
-
-  c.set("user", {
-    id: session.user.id,
-    email: session.user.email ?? "",
-    name: session.user.name ?? "",
-  });
-  c.set("authMethod", "session");
-
-  // Ensure the user has a default connection profile
-  ensureDefaultProfile({ type: "member", id: session.user.id }).catch((err) => {
-    logger.warn("Failed to ensure default profile", {
-      userId: session.user.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  });
-
-  return next();
-});
-
-// Org context middleware: require X-Org-Id for org-scoped /api/* routes
-app.use("*", async (c, next) => {
-  const path = c.req.path;
-  if (skipAuth(path)) return next(); // public paths also skip org context
-  if (!c.get("user")) return next(); // no auth resolved — nothing to do
-  // Non-session auth (API key, module strategies) already resolved orgId
-  // and permissions inline. Only session auth reads X-Org-Id here.
-  if (c.get("authMethod") !== "session") return next();
-  if (skipOrgContext(path)) return next();
-
-  return requireOrgContext()(c, next);
-});
-
-// Permission resolution for session auth (after org context sets orgRole)
-app.use("*", async (c, next) => {
-  // Non-session auth methods (API key, module strategies) set permissions
-  // inline from their own resolution — skip the role-based derivation.
-  if (c.get("authMethod") !== "session") return next();
-  const orgRole = c.get("orgRole");
-  if (orgRole) {
-    c.set("permissions", resolvePermissions(orgRole));
-  }
-  return next();
+// Shared auth pipeline — mounts Better Auth handler, installs module
+// auth strategies → Bearer API key → cookie session middleware, org
+// context, and session permission resolution. The test harness
+// (`apps/api/test/helpers/app.ts`) calls the same helper so the two
+// cannot drift. Accessors are lazy: this is wired before `await boot()`
+// finishes loading modules, so snapshotting here would miss module
+// contributions.
+applyAuthPipeline(app, {
+  publicPaths: getModulePublicPaths,
+  authStrategies: getModuleAuthStrategies,
 });
 
 // App context middleware: resolve X-App-Id for app-scoped routes.
@@ -309,7 +139,7 @@ function getAppScopedPrefixes(): string[] {
 
 const appContextMiddleware = requireAppContext();
 app.use("*", async (c, next) => {
-  if (skipAuth(c.req.path)) return next();
+  if (skipAuth(c.req.path, getModulePublicPaths())) return next();
   if (!c.get("user")) return next();
   if (!getAppScopedPrefixes().some((p) => c.req.path.startsWith(p))) return next();
   return appContextMiddleware(c, next);
@@ -321,7 +151,7 @@ const apiVersionMiddleware = apiVersion(async (orgId) => {
   return settings.apiVersion ?? null;
 });
 app.use("*", async (c, next) => {
-  if (skipAuth(c.req.path)) return next();
+  if (skipAuth(c.req.path, getModulePublicPaths())) return next();
   if (!c.get("user")) return next();
   return apiVersionMiddleware(c, next);
 });

@@ -178,13 +178,12 @@ for (const moduleDir of moduleDirs) {
 const { registerTruncationTables } = await import("../../apps/api/test/helpers/db.ts");
 const { registerTestModule } = await import("../../apps/api/test/helpers/test-modules.ts");
 
-// Phase 1: discover modules, register them, and collect any Better Auth
-// plugins they contribute. We must do this BEFORE `createAuth()` so the
-// singleton is built with every module's auth pipeline in place — the
-// OIDC module for example contributes `oauth-provider` which backs the
-// `/api/auth/oauth2/*` endpoints exercised by its integration tests.
-const allBetterAuthPlugins: unknown[] = [];
-const allDrizzleSchemas: Record<string, unknown> = {};
+// Phase 1: discover modules and register them. We collect imported modules
+// into a local list, then use the shared `collectModuleContributions()`
+// helper from module-loader.ts to aggregate Better Auth plugins + Drizzle
+// schemas in one place — the production boot path uses the same helper
+// (via `getModuleContributions()`), so tests and prod cannot drift.
+const importedModules: AppstrateModule[] = [];
 
 for (const moduleDir of moduleDirs) {
   // Register the module itself so getTestApp() can mount its router
@@ -193,13 +192,7 @@ for (const moduleDir of moduleDirs) {
     const imported: { default?: AppstrateModule } = await import(indexFile);
     if (imported.default) {
       registerTestModule(imported.default);
-      if (typeof imported.default.betterAuthPlugins === "function") {
-        const plugins = imported.default.betterAuthPlugins() ?? [];
-        for (const p of plugins) allBetterAuthPlugins.push(p);
-      }
-      if (typeof imported.default.drizzleSchemas === "function") {
-        Object.assign(allDrizzleSchemas, imported.default.drizzleSchemas() ?? {});
-      }
+      importedModules.push(imported.default);
     }
   }
 
@@ -217,13 +210,18 @@ for (const moduleDir of moduleDirs) {
 }
 
 // Phase 2: initialize Better Auth singleton with every module's plugins.
-// The production code path calls createAuth() from boot.ts after loadModules();
-// tests don't go through boot(), so we initialize directly here with the
-// same plugin list. Subsequent `getTestApp({ modules })` calls reuse this
-// singleton so strategy tests and E2E OAuth flow tests see a coherent
-// auth surface with no double-initialization cost.
+// The production code path calls createAuth() from boot.ts after
+// loadModules(); tests don't go through boot(), so we initialize directly
+// here. `collectModuleContributions()` is the shared aggregator used by
+// both paths — types flow through as `BetterAuthPluginList`, no `never`
+// cast needed at this layer. Subsequent `getTestApp({ modules })` calls
+// reuse this singleton so strategy tests and E2E OAuth flow tests see a
+// coherent auth surface with no double-initialization cost.
+const { collectModuleContributions } =
+  await import("../../apps/api/src/lib/modules/module-loader.ts");
 const { createAuth } = await import("../../packages/db/src/auth.ts");
-// `allBetterAuthPlugins` is typed as `unknown[]` at the module contract
-// layer; createAuth takes a `BetterAuthPluginList`. The cast is safe because
-// each module's own typecheck verified its return type at compile time.
-createAuth(allBetterAuthPlugins as never, allDrizzleSchemas);
+const contributions = collectModuleContributions(importedModules);
+createAuth(
+  contributions.betterAuthPlugins as Parameters<typeof createAuth>[0],
+  contributions.drizzleSchemas,
+);
