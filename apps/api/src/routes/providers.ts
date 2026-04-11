@@ -60,7 +60,6 @@ function buildProviderDefinition(data: {
   credentialFieldName?: string;
   credentialHeaderName?: string;
   credentialHeaderPrefix?: string;
-  credentialEncoding?: string;
   credentialTransform?: { template: string; encoding: "base64" };
 }): Record<string, unknown> {
   const definition: Record<string, unknown> = {
@@ -105,9 +104,6 @@ function buildProviderDefinition(data: {
   if (data.credentialHeaderPrefix !== undefined) {
     definition.credentialHeaderPrefix = data.credentialHeaderPrefix;
   }
-  if (data.credentialEncoding !== undefined) {
-    definition.credentialEncoding = data.credentialEncoding;
-  }
   if (data.credentialTransform !== undefined) {
     definition.credentialTransform = data.credentialTransform;
   }
@@ -140,7 +136,6 @@ export const createProviderSchema = z.object({
   credentialFieldName: z.string().optional(),
   credentialHeaderName: z.string().optional(),
   credentialHeaderPrefix: z.string().optional(),
-  credentialEncoding: z.enum(["basic_api_key_x", "basic_email_token"]).optional(),
   credentialTransform: z
     .object({
       template: z.string().min(1),

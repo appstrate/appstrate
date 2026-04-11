@@ -540,13 +540,6 @@ export const schemas = {
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
-      credentialEncoding: {
-        type: "string",
-        enum: ["basic_api_key_x", "basic_email_token"],
-        deprecated: true,
-        description:
-          'Deprecated (AFPS 1.3+): use credentialTransform instead. Legacy pre-encoding for api_key credentials. basic_api_key_x ≡ credentialTransform { template: "{{api_key}}:X", encoding: "base64" }; basic_email_token ≡ credentialTransform { template: "{{email}}/token:{{api_key}}", encoding: "base64" }.',
-      },
       credentialTransform: {
         type: "object",
         required: ["template", "encoding"],
@@ -565,7 +558,7 @@ export const schemas = {
           },
         },
         description:
-          "Generic, template-based pre-encoding for api_key credentials. Replaces the legacy credentialEncoding enum; lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
+          "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
       },
       availableScopes: {
         type: "array",
@@ -621,13 +614,6 @@ export const schemas = {
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
-      credentialEncoding: {
-        type: "string",
-        enum: ["basic_api_key_x", "basic_email_token"],
-        deprecated: true,
-        description:
-          'Deprecated (AFPS 1.3+): use credentialTransform instead. Legacy pre-encoding for api_key credentials. basic_api_key_x ≡ credentialTransform { template: "{{api_key}}:X", encoding: "base64" }; basic_email_token ≡ credentialTransform { template: "{{email}}/token:{{api_key}}", encoding: "base64" }.',
-      },
       credentialTransform: {
         type: "object",
         required: ["template", "encoding"],
@@ -646,7 +632,7 @@ export const schemas = {
           },
         },
         description:
-          "Generic, template-based pre-encoding for api_key credentials. Replaces the legacy credentialEncoding enum; lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
+          "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
       },
       availableScopes: {
         type: "array",
@@ -700,13 +686,6 @@ export const schemas = {
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
-      credentialEncoding: {
-        type: "string",
-        enum: ["basic_api_key_x", "basic_email_token"],
-        deprecated: true,
-        description:
-          'Deprecated (AFPS 1.3+): use credentialTransform instead. Legacy pre-encoding for api_key credentials. basic_api_key_x ≡ credentialTransform { template: "{{api_key}}:X", encoding: "base64" }; basic_email_token ≡ credentialTransform { template: "{{email}}/token:{{api_key}}", encoding: "base64" }.',
-      },
       credentialTransform: {
         type: "object",
         required: ["template", "encoding"],
@@ -725,7 +704,7 @@ export const schemas = {
           },
         },
         description:
-          "Generic, template-based pre-encoding for api_key credentials. Replaces the legacy credentialEncoding enum; lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
+          "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
       },
       availableScopes: {
         type: "array",

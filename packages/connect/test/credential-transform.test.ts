@@ -117,49 +117,6 @@ describe("buildSidecarCredentials", () => {
     });
   });
 
-  describe("credentialEncoding (legacy, deprecated)", () => {
-    it("basic_api_key_x still works via the legacy compatibility path", () => {
-      const result = buildSidecarCredentials(
-        { api_key: "my_api_key_123", subdomain: "mycompany" },
-        { credentialEncoding: "basic_api_key_x", credentials: { fieldName: "api_key" } },
-        "api_key",
-      );
-      expect(Buffer.from(result.api_key!, "base64").toString()).toBe("my_api_key_123:X");
-      expect(result.subdomain).toBe("mycompany");
-    });
-
-    it("basic_email_token still works via the legacy compatibility path", () => {
-      const result = buildSidecarCredentials(
-        { api_key: "zendesk_token", email: "a@b.com" },
-        { credentialEncoding: "basic_email_token", credentials: { fieldName: "api_key" } },
-        "api_key",
-      );
-      expect(Buffer.from(result.api_key!, "base64").toString()).toBe("a@b.com/token:zendesk_token");
-    });
-
-    it("credentialTransform wins when both are present", () => {
-      const result = buildSidecarCredentials(
-        { api_key: "k" },
-        {
-          credentialTransform: { template: "transform_wins:{{api_key}}", encoding: "base64" },
-          credentialEncoding: "basic_api_key_x",
-          credentials: { fieldName: "api_key" },
-        },
-        "api_key",
-      );
-      expect(Buffer.from(result.api_key!, "base64").toString()).toBe("transform_wins:k");
-    });
-
-    it("falls through to fieldName mapping for unknown legacy encoding values", () => {
-      const result = buildSidecarCredentials(
-        { api_key: "my_key", subdomain: "myco" },
-        { credentialEncoding: "unknown_method", credentials: { fieldName: "api_key" } },
-        "api_key",
-      );
-      expect(result).toEqual({ api_key: "my_key" });
-    });
-  });
-
   describe("no transform (standard fieldName mapping)", () => {
     it("maps to fieldName for oauth2", () => {
       const result = buildSidecarCredentials(

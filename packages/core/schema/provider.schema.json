@@ -160,13 +160,6 @@
           ],
           "additionalProperties": {}
         },
-        "credentialEncoding": {
-          "type": "string",
-          "enum": [
-            "basic_api_key_x",
-            "basic_email_token"
-          ]
-        },
         "credentialTransform": {
           "type": "object",
           "properties": {

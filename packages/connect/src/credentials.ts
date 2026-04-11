@@ -12,7 +12,6 @@ import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { forceRefresh, type RefreshContext } from "./token-refresh.ts";
 import type {
   AuthMode,
-  CredentialEncoding,
   CredentialTransform,
   OAuthTokenAuthMethod,
   OAuthTokenContentType,
@@ -403,25 +402,6 @@ function evaluateCredentialTransform(
 }
 
 /**
- * Translate {@link CredentialEncoding} into an equivalent {@link CredentialTransform}.
- * Used for backward compatibility with AFPS <= 1.2.2 manifests; should be
- * removed once all system providers have migrated to `credentialTransform`.
- *
- * @deprecated Remove once {@link CredentialEncoding} is dropped from AFPS.
- */
-function legacyEncodingToTransform(
-  encoding: CredentialEncoding | undefined,
-): CredentialTransform | undefined {
-  if (encoding === "basic_api_key_x") {
-    return { template: "{{api_key}}:X", encoding: "base64" };
-  }
-  if (encoding === "basic_email_token") {
-    return { template: "{{email}}/token:{{api_key}}", encoding: "base64" };
-  }
-  return undefined;
-}
-
-/**
  * Map decrypted credentials to the sidecar format.
  *
  * For `api_key` providers with a `credentialTransform`, the transform's template
@@ -430,12 +410,8 @@ function legacyEncodingToTransform(
  * other credential fields (subdomain, email, …) are preserved so they stay
  * available for URL and header substitution downstream in the sidecar.
  *
- * The legacy `credentialEncoding` enum (AFPS <= 1.2.2) is honored by
- * translating it into an equivalent `credentialTransform` and reusing the
- * same code path. `credentialTransform` wins when both are present.
- *
- * For OAuth2 / api_key without any transform, the value is mapped to a single
- * `{ [fieldName]: value }` variable — this matches the prior behavior.
+ * For OAuth2 / api_key without a transform, the value is mapped to a single
+ * `{ [fieldName]: value }` variable.
  *
  * @internal Exported for direct unit testing — not part of the public API.
  */
@@ -445,11 +421,7 @@ export function buildSidecarCredentials(
   authMode: AuthMode | undefined,
 ): Record<string, string> {
   if (authMode === "api_key") {
-    // credentialTransform wins over the deprecated credentialEncoding.
-    const transform =
-      (def.credentialTransform as CredentialTransform | undefined) ??
-      legacyEncodingToTransform(def.credentialEncoding as CredentialEncoding | undefined);
-
+    const transform = def.credentialTransform as CredentialTransform | undefined;
     if (transform) {
       const encoded = evaluateCredentialTransform(transform, credentials);
       if (encoded !== null) {
