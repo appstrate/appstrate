@@ -15,6 +15,7 @@
 
 import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import type { Context } from "hono";
+import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../../../types/index.ts";
 
 const COOKIE_NAME = "oidc_csrf";
@@ -23,13 +24,17 @@ const COOKIE_MAX_AGE = 10 * 60; // 10 minutes — long enough for login, short e
 /**
  * Generate a new CSRF token, set the paired cookie on the response, and
  * return the token string to embed in the form body.
+ *
+ * The `secure` flag is derived from `APP_URL` scheme — browsers silently
+ * drop `Secure` cookies over HTTP, which would break Tier 0 dev mode
+ * (`http://localhost:3000`). In HTTPS deployments the flag is set.
  */
 export function issueCsrfToken(c: Context<AppEnv>): string {
   const token = generateToken();
   setCookie(c, COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "Lax",
-    secure: true,
+    secure: getEnv().APP_URL.startsWith("https://"),
     path: "/api/oauth/enduser",
     maxAge: COOKIE_MAX_AGE,
   });
