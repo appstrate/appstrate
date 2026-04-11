@@ -195,20 +195,32 @@ export function OAuthClientCreateModal({ open, onClose }: Props) {
               const required = REQUIRED_SCOPES.has(scope);
               const checked = selectedScopes.has(scope);
               return (
-                <label key={scope} className="flex items-center gap-2 text-sm">
+                <label key={scope} className="flex items-start gap-2 text-sm">
                   <input
                     type="checkbox"
                     checked={checked}
                     disabled={required}
                     onChange={() => toggleScope(scope)}
-                    className="accent-primary h-4 w-4"
+                    className="accent-primary mt-0.5 h-4 w-4"
                   />
-                  <span className="font-mono text-xs">{scope}</span>
-                  {required && (
-                    <span className="text-muted-foreground text-xs">
-                      ({t("settings:oauthClients.scopeRequired")})
+                  <span className="flex flex-col">
+                    <span className="flex items-center gap-2">
+                      <span>
+                        {t(`oauthClients.scopeLabels.${scope}`, {
+                          ns: "settings",
+                          keySeparator: false,
+                          nsSeparator: false,
+                          defaultValue: scope,
+                        })}
+                      </span>
+                      {required && (
+                        <span className="text-muted-foreground text-xs">
+                          ({t("settings:oauthClients.scopeRequired")})
+                        </span>
+                      )}
                     </span>
-                  )}
+                    <span className="text-muted-foreground font-mono text-xs">{scope}</span>
+                  </span>
                 </label>
               );
             })}

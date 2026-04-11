@@ -21,12 +21,14 @@ const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
   openid: "Votre identité",
   profile: "Votre profil",
   email: "Votre adresse email",
-  connections: "Vos connexions (lecture)",
-  "connections:write": "Vos connexions (lecture et écriture)",
-  runs: "Votre historique d'exécutions (lecture)",
-  "runs:write": "Lancer des agents pour vous",
-  agents: "Vos agents (lecture)",
-  "agents:write": "Vos agents (lecture et exécution)",
+  offline_access: "Rester connecté (jeton de rafraîchissement)",
+  "agents:read": "Lister vos agents",
+  "agents:run": "Lancer des agents pour vous",
+  "runs:read": "Consulter votre historique d'exécutions",
+  "runs:cancel": "Annuler vos exécutions en cours",
+  "connections:read": "Lister vos connexions",
+  "connections:connect": "Ajouter des connexions en votre nom",
+  "connections:disconnect": "Retirer vos connexions",
 };
 
 function describeScope(scope: string): string {

@@ -299,6 +299,36 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "oauth-clients:delete",
 ]);
 
+/**
+ * Permissions that can be granted to end-user OIDC JWTs.
+ *
+ * End-users are NOT org members — they impersonate through an application
+ * via a JWT minted by the OIDC module's oauth-provider. This allowlist is
+ * the intersection of (a) safe-for-end-user permissions and (b) permissions
+ * whose routes are compatible with the strict end-user run-filter.
+ *
+ * Destructive and admin-scoped permissions (`agents:write`, `agents:delete`,
+ * `runs:delete`, `api-keys:*`, `webhooks:*`, `applications:*`, `end-users:*`,
+ * `provider-keys:*`, etc.) are excluded — they are admin work, not end-user
+ * work, and granting them through a user-consented OAuth flow would let an
+ * embedding app silently escalate.
+ *
+ * This list is the single source of truth for the OIDC scope vocabulary.
+ * The OIDC module's `APPSTRATE_SCOPES` export composes this set with the
+ * OIDC identity scopes (`openid`/`profile`/`email`/`offline_access`) — no
+ * translation layer, no second vocabulary. The scope string `agents:run`
+ * grants the `agents:run` permission verbatim.
+ */
+export const OIDC_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>([
+  "agents:read",
+  "agents:run",
+  "runs:read",
+  "runs:cancel",
+  "connections:read",
+  "connections:connect",
+  "connections:disconnect",
+]);
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

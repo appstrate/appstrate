@@ -157,7 +157,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       applicationId,
       email: "stage3@example.com",
       name: "Stage Three",
-      scope: "openid runs",
+      scope: "openid runs:read",
     });
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {

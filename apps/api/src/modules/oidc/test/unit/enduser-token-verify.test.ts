@@ -99,7 +99,7 @@ describe("verifyEndUserAccessToken", () => {
       applicationId: "app_xyz",
       email: "user@example.com",
       name: "User One",
-      scope: "openid runs",
+      scope: "openid runs:read",
     });
     const claims = await verifyEndUserAccessToken(token);
     expect(claims).not.toBeNull();
@@ -107,7 +107,7 @@ describe("verifyEndUserAccessToken", () => {
     expect(claims!.endUserId).toBe("eu_abc");
     expect(claims!.applicationId).toBe("app_xyz");
     expect(claims!.email).toBe("user@example.com");
-    expect(claims!.scope).toBe("openid runs");
+    expect(claims!.scope).toBe("openid runs:read");
   });
 
   it("returns null for a malformed token", async () => {

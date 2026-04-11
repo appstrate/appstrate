@@ -31,6 +31,7 @@ import { oauthProvider } from "@better-auth/oauth-provider";
 import { jwt } from "better-auth/plugins";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../../lib/logger.ts";
+import { OIDC_ALLOWED_SCOPES } from "../../../lib/permissions.ts";
 import {
   resolveOrCreateEndUser,
   UnverifiedEmailConflictError,
@@ -38,22 +39,24 @@ import {
 import { oidcGuardsPlugin } from "./guards.ts";
 
 /**
- * Canonical scope vocabulary the OIDC module supports. Exported so both
- * the plugin config here and the admin API (`GET /api/oauth/scopes`)
- * stay DRY — the frontend checkbox group reads this list over HTTP and
- * never hardcodes scope strings.
+ * OIDC protocol scopes that grant no Appstrate permission. Required by the
+ * oauth-provider plugin (`openid`/`profile`/`email`) and by every standard
+ * OIDC client library. `offline_access` gates refresh-token issuance.
+ */
+export const OIDC_IDENTITY_SCOPES = ["openid", "profile", "email", "offline_access"] as const;
+
+/**
+ * Canonical scope vocabulary served by the OIDC module. Identity scopes
+ * first, then core `Permission` strings drawn from `OIDC_ALLOWED_SCOPES` —
+ * no second vocabulary, no translation layer. The scope `agents:run`
+ * grants the `agents:run` permission verbatim.
+ *
+ * The admin UI, the consent page, and `/.well-known/openid-configuration`
+ * all read from this array via `GET /api/oauth/scopes`.
  */
 export const APPSTRATE_SCOPES: readonly string[] = [
-  "openid",
-  "profile",
-  "email",
-  "offline_access",
-  "agents",
-  "agents:write",
-  "runs",
-  "runs:write",
-  "connections",
-  "connections:write",
+  ...OIDC_IDENTITY_SCOPES,
+  ...OIDC_ALLOWED_SCOPES,
 ];
 
 /**

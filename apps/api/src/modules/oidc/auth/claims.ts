@@ -1,82 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OAuth scope → Appstrate permission mapping.
+ * OAuth scope → Appstrate permission filter.
  *
  * The oauth-provider plugin issues JWTs carrying a space-separated `scope`
- * claim. The OIDC auth strategy translates those scopes into the concrete
- * core Permission strings that `requirePermission()` checks against on every
- * route handler.
+ * claim. Every scope value is either an OIDC identity scope (openid /
+ * profile / email / offline_access — no permission) or a core `Permission`
+ * string drawn from `OIDC_ALLOWED_SCOPES` (used verbatim — no translation).
  *
- * Unknown scopes are dropped (they do not produce an error — the token may be
- * valid for a different embedding app's scope vocabulary) but emit a warn log
- * so operators can spot silent authorization drift when a satellite upgrades
+ * Unknown scopes (not in either set) are dropped with a warn log so
+ * operators can spot silent authorization drift when a satellite upgrades
  * its scope catalog faster than the platform.
  */
 
 import { logger } from "../../../lib/logger.ts";
+import { OIDC_ALLOWED_SCOPES, type Permission } from "../../../lib/permissions.ts";
+import { OIDC_IDENTITY_SCOPES } from "./plugins.ts";
 
-const KNOWN_SCOPES = [
-  "openid",
-  "profile",
-  "email",
-  "offline_access",
-  "agents",
-  "agents:write",
-  "runs",
-  "runs:write",
-  "connections",
-  "connections:write",
-] as const;
+const IDENTITY = new Set<string>(OIDC_IDENTITY_SCOPES);
 
-export function scopesToPermissions(scope?: string): Set<string> {
-  const permissions = new Set<string>();
+export function scopesToPermissions(scope?: string): Set<Permission> {
+  const permissions = new Set<Permission>();
   if (!scope) return permissions;
   for (const s of scope.split(/\s+/)) {
-    if (s === "") continue;
-    switch (s) {
-      // Identity scopes — no resource permission.
-      // `offline_access` gates refresh-token issuance in the oauth-provider
-      // plugin; it does not grant any core API permission on its own but is
-      // a legitimate scope value carried in the access token's `scope` claim.
-      case "openid":
-      case "profile":
-      case "email":
-      case "offline_access":
-        break;
-
-      case "agents":
-        permissions.add("agents:read");
-        break;
-      case "agents:write":
-        permissions.add("agents:read");
-        permissions.add("agents:run");
-        break;
-
-      case "runs":
-        permissions.add("runs:read");
-        break;
-      case "runs:write":
-        permissions.add("runs:read");
-        permissions.add("runs:cancel");
-        break;
-
-      case "connections":
-        permissions.add("connections:read");
-        break;
-      case "connections:write":
-        permissions.add("connections:read");
-        permissions.add("connections:connect");
-        permissions.add("connections:disconnect");
-        break;
-
-      default:
-        logger.warn(
-          "oidc: unknown OAuth scope dropped — token carries a scope not recognized by core permissions",
-          { module: "oidc", scope: s, knownScopes: KNOWN_SCOPES as unknown as string[] },
-        );
-        break;
+    if (s === "" || IDENTITY.has(s)) continue;
+    if (OIDC_ALLOWED_SCOPES.has(s as Permission)) {
+      permissions.add(s as Permission);
+      continue;
     }
+    logger.warn(
+      "oidc: unknown OAuth scope dropped — token carries a scope not in OIDC_ALLOWED_SCOPES",
+      { module: "oidc", scope: s },
+    );
   }
   return permissions;
 }

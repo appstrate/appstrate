@@ -47,7 +47,7 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
 
   it("GET /login renders a form with the escaped query string and no auth required", async () => {
     const { clientId } = await registerClient(ctx);
-    const qs = `?client_id=${encodeURIComponent(clientId)}&state=xyz&scope=openid%20runs`;
+    const qs = `?client_id=${encodeURIComponent(clientId)}&state=xyz&scope=openid%20runs%3Aread`;
     const res = await app.request(`/api/oauth/enduser/login${qs}`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
@@ -106,14 +106,14 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
       redirectUris: ["https://team.example.com/cb"],
     });
     const qs = `?client_id=${encodeURIComponent(clientId)}&scope=${encodeURIComponent(
-      "openid runs agents:write",
+      "openid runs:read agents:run",
     )}&state=s1`;
     const res = await app.request(`/api/oauth/enduser/consent${qs}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Team Portal");
-    expect(html).toContain("Votre historique d&#39;exécutions (lecture)");
-    expect(html).toContain("Vos agents (lecture et exécution)");
+    expect(html).toContain("Consulter votre historique d&#39;exécutions");
+    expect(html).toContain("Lancer des agents pour vous");
     // Two forms (deny + allow) both posting back to the same action.
     const escapedQs = qs.replace(/&/g, "&amp;");
     expect(html).toContain(`action="/api/oauth/enduser/consent${escapedQs}"`);

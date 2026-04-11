@@ -37,7 +37,7 @@ describe("renderConsentPage", () => {
   it("escapes client name and scope list", () => {
     const out = renderConsentPage({
       clientName: `<img src=x>`,
-      scopes: ["openid", "runs", `<evil>`],
+      scopes: ["openid", "runs:read", `<evil>`],
       action: "/api/oauth/enduser/consent?state=x",
     }).value;
     expect(out).not.toContain(`<img src=x>`);
@@ -48,15 +48,15 @@ describe("renderConsentPage", () => {
     expect(out).toContain('action="/api/oauth/enduser/consent?state=x"');
   });
 
-  it("renders French labels for known scopes", () => {
+  it("renders French labels for known permission-style scopes", () => {
     const out = renderConsentPage({
       clientName: "Acme",
-      scopes: ["openid", "runs:write", "connections:write"],
+      scopes: ["openid", "agents:run", "connections:connect"],
       action: "/x",
     }).value;
     expect(out).toContain("Votre identité");
     expect(out).toContain("Lancer des agents pour vous");
-    expect(out).toContain("Vos connexions (lecture et écriture)");
+    expect(out).toContain("Ajouter des connexions en votre nom");
   });
 });
 

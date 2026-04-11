@@ -3,6 +3,7 @@
 import { describe, it, expect, spyOn } from "bun:test";
 import { scopesToPermissions } from "../../auth/claims.ts";
 import { logger } from "../../../../lib/logger.ts";
+import { OIDC_ALLOWED_SCOPES, resolvePermissions } from "../../../../lib/permissions.ts";
 
 describe("scopesToPermissions", () => {
   it("returns an empty set for undefined / empty scope", () => {
@@ -11,51 +12,38 @@ describe("scopesToPermissions", () => {
     expect(scopesToPermissions("   ").size).toBe(0);
   });
 
-  it("drops identity-only scopes (openid profile email)", () => {
-    expect(scopesToPermissions("openid profile email").size).toBe(0);
+  it("drops identity-only scopes (openid profile email offline_access)", () => {
+    expect(scopesToPermissions("openid profile email offline_access").size).toBe(0);
   });
 
-  it("maps `runs` to read-only", () => {
-    const perms = scopesToPermissions("runs");
-    expect([...perms].sort()).toEqual(["runs:read"]);
+  it("passes through a single allowed core permission verbatim", () => {
+    const perms = scopesToPermissions("runs:read");
+    expect([...perms]).toEqual(["runs:read"]);
   });
 
-  it("maps `runs:write` to read + cancel (write is a superset)", () => {
-    const perms = scopesToPermissions("runs:write");
-    expect([...perms].sort()).toEqual(["runs:cancel", "runs:read"]);
+  it("passes through multiple allowed core permissions", () => {
+    const perms = scopesToPermissions("agents:run runs:read");
+    expect([...perms].sort()).toEqual(["agents:run", "runs:read"]);
   });
 
-  it("maps `agents:write` to read + run", () => {
-    const perms = scopesToPermissions("agents:write");
-    expect([...perms].sort()).toEqual(["agents:read", "agents:run"]);
+  it("strips identity scopes and keeps allowed core permissions in the same call", () => {
+    const perms = scopesToPermissions("openid profile agents:run runs:read");
+    expect([...perms].sort()).toEqual(["agents:run", "runs:read"]);
   });
 
-  it("maps `connections:write` to read + connect + disconnect", () => {
-    const perms = scopesToPermissions("connections:write");
-    expect([...perms].sort()).toEqual([
-      "connections:connect",
-      "connections:disconnect",
-      "connections:read",
-    ]);
-  });
-
-  it("merges multiple scopes into a single permission set", () => {
-    const perms = scopesToPermissions("openid runs agents:write");
-    expect([...perms].sort()).toEqual(["agents:read", "agents:run", "runs:read"]);
-  });
-
-  it("drops unknown scopes but keeps known ones", () => {
+  it("drops destructive permissions that are not in OIDC_ALLOWED_SCOPES", () => {
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      const perms = scopesToPermissions("runs totally:unknown other:scope");
+      const perms = scopesToPermissions("openid runs:read agents:delete webhooks:write");
       expect([...perms]).toEqual(["runs:read"]);
+      // Two non-identity, non-allowed scopes → two warn calls.
       expect(warnSpy).toHaveBeenCalledTimes(2);
     } finally {
       warnSpy.mockRestore();
     }
   });
 
-  it("warn-logs unknown scopes with module+scope metadata for operator visibility", () => {
+  it("drops unknown scopes with warn log carrying module + scope metadata", () => {
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       scopesToPermissions("mystery:scope");
@@ -69,7 +57,17 @@ describe("scopesToPermissions", () => {
   });
 
   it("splits on any whitespace, not just single spaces", () => {
-    const perms = scopesToPermissions("runs\tagents");
-    expect([...perms].sort()).toEqual(["agents:read", "runs:read"]);
+    const perms = scopesToPermissions("agents:run\truns:read");
+    expect([...perms].sort()).toEqual(["agents:run", "runs:read"]);
+  });
+
+  it("every OIDC_ALLOWED_SCOPES entry is a real core permission", () => {
+    // Regression guard: the allowlist must stay a subset of the actual core
+    // Permission vocabulary — a member role already holds all of them by
+    // design (see permissions.ts MEMBER_PERMISSIONS).
+    const memberPerms = resolvePermissions("member");
+    for (const scope of OIDC_ALLOWED_SCOPES) {
+      expect(memberPerms.has(scope)).toBe(true);
+    }
   });
 });

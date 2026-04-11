@@ -72,7 +72,7 @@ async function registerClient(
     body: JSON.stringify({
       name: "E2E Satellite",
       redirectUris: ["https://satellite.example.com/callback"],
-      scopes: ["openid", "profile", "email", "offline_access", "connections", "runs"],
+      scopes: ["openid", "profile", "email", "offline_access", "connections:read", "runs:read"],
     }),
   });
   expect(res.status).toBe(201);
