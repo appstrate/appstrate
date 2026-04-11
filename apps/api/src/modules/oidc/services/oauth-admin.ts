@@ -4,10 +4,10 @@
  * OAuth client admin service.
  *
  * Direct CRUD against the module-owned `oauth_client` table, scoped by
- * `referenceId` = Appstrate `applicationId`. Secrets are generated as
- * base64url-encoded random bytes, hashed with SHA-256 at rest, and only
- * returned in plaintext from `createClient` / `rotateClientSecret` —
- * subsequent reads never expose them.
+ * Appstrate `applicationId`. Secrets are generated as base64url-encoded
+ * random bytes, hashed with SHA-256 at rest, and only returned in
+ * plaintext from `createClient` / `rotateClientSecret` — subsequent reads
+ * never expose them.
  *
  * Why we bypass `auth.api.adminCreateOAuthClient`: the plugin derives
  * `reference_id` from `clientReference({ session })` at creation time.
@@ -17,36 +17,58 @@
  * whole session object to carry app context, we keep direct Drizzle
  * writes here.
  *
- * Why `metadata.applicationId` is written: the plugin's
- * `customAccessTokenClaims` closure receives `metadata =
- * parseClientMetadata(oauth_client.metadata)` and nothing else from the
- * client row, so the applicationId has to live on `metadata` to reach
- * custom claims. `referenceId` is populated with the same value for the
- * filter queries below (indexed equality is cheaper than a JSON probe).
+ * Single source of truth for "which app owns this client" is
+ * `oauth_client.metadata.applicationId`. It is the only value the
+ * `@better-auth/oauth-provider` plugin exposes to its
+ * `customAccessTokenClaims` closure (which receives `parseClientMetadata(
+ * oauth_client.metadata)` and nothing else from the client row). Every
+ * admin filter query below therefore reads the JSON path via
+ * `byApplicationId()`, never the `referenceId` column.
+ *
+ * We still write `reference_id` in lockstep because the plugin's own
+ * Drizzle schema declares the column `notNull` and emits it in internal
+ * SELECTs (the `clientReference` ACL path at `oauth-provider/index.mjs`
+ * line 1370 reads it if `opts.clientReference` is set — we don't set it,
+ * so the value is functionally inert, but the column must exist and must
+ * be non-null on every row). Treat it as a legacy mirror kept alive to
+ * satisfy the plugin's schema contract, not as a lookup key.
  */
 
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "@appstrate/db/client";
-import { applications } from "@appstrate/db/schema";
 import { oauthClient } from "../schema.ts";
 import { prefixedId } from "../../../lib/ids.ts";
+import type { AppContextRow } from "../../../middleware/app-context.ts";
 
-export interface OAuthClientRecord {
-  id: string;
-  clientId: string;
-  name: string | null;
-  redirectUris: string[];
-  scopes: string[];
-  disabled: boolean;
-  applicationId: string;
-  createdAt: Date | null;
-  updatedAt: Date | null;
-}
+/**
+ * Single source of truth for the OAuth client shape returned by this
+ * module. Backends, OpenAPI component schemas, and frontend hooks all
+ * derive their types + JSON Schema from this definition.
+ *
+ * Dates are serialized to ISO 8601 strings at the service boundary so the
+ * wire shape matches the frontend and OpenAPI contract — the DB column is
+ * a `timestamp`, but consumers only ever see strings.
+ */
+export const oauthClientSchema = z.object({
+  id: z.string(),
+  clientId: z.string(),
+  name: z.string().nullable(),
+  applicationId: z.string(),
+  redirectUris: z.array(z.url()),
+  scopes: z.array(z.string()),
+  disabled: z.boolean(),
+  createdAt: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+});
 
 /** Returned only on create + rotate — the plaintext secret is never re-readable. */
-export interface OAuthClientWithSecret extends OAuthClientRecord {
-  clientSecret: string;
-}
+export const oauthClientWithSecretSchema = oauthClientSchema.extend({
+  clientSecret: z.string(),
+});
+
+export type OAuthClientRecord = z.infer<typeof oauthClientSchema>;
+export type OAuthClientWithSecret = z.infer<typeof oauthClientWithSecretSchema>;
 
 function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
   return {
@@ -57,9 +79,22 @@ function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
     scopes: row.scopes ?? [],
     disabled: row.disabled ?? false,
     applicationId: row.referenceId,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    createdAt: row.createdAt ? row.createdAt.toISOString() : null,
+    updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
   };
+}
+
+/**
+ * JSON path filter shared by every admin CRUD query. The single source of
+ * truth for "which app owns this client" is `oauth_client.metadata.applicationId`
+ * (the value the Better Auth plugin forwards to `customAccessTokenClaims`).
+ * `oauth_client.reference_id` is kept populated in lockstep for compatibility
+ * with the oauth-provider plugin's own schema — see the comment on the
+ * `referenceId` column in `../schema.ts` — but queries should never filter
+ * on it directly.
+ */
+function byApplicationId(applicationId: string) {
+  return sql`(${oauthClient.metadata}::jsonb->>'applicationId') = ${applicationId}`;
 }
 
 function randomSecret(): string {
@@ -79,10 +114,7 @@ export async function hashSecret(plaintext: string): Promise<string> {
 }
 
 export async function listClientsForApp(applicationId: string): Promise<OAuthClientRecord[]> {
-  const rows = await db
-    .select()
-    .from(oauthClient)
-    .where(eq(oauthClient.referenceId, applicationId));
+  const rows = await db.select().from(oauthClient).where(byApplicationId(applicationId));
   return rows.map(mapRow);
 }
 
@@ -93,7 +125,7 @@ export async function getClient(
   const [row] = await db
     .select()
     .from(oauthClient)
-    .where(and(eq(oauthClient.referenceId, applicationId), eq(oauthClient.clientId, clientId)))
+    .where(and(byApplicationId(applicationId), eq(oauthClient.clientId, clientId)))
     .limit(1);
   return row ? mapRow(row) : null;
 }
@@ -105,18 +137,10 @@ export interface CreateClientInput {
 }
 
 export async function createClient(
-  applicationId: string,
+  app: AppContextRow,
   input: CreateClientInput,
 ): Promise<OAuthClientWithSecret> {
-  const [app] = await db
-    .select({ id: applications.id })
-    .from(applications)
-    .where(eq(applications.id, applicationId))
-    .limit(1);
-  if (!app) {
-    throw new Error(`OIDC: application '${applicationId}' not found`);
-  }
-
+  const applicationId = app.id;
   const id = prefixedId("oac");
   const clientId = `oauth_${randomSecret().slice(0, 24)}`;
   const plaintextSecret = randomSecret();
@@ -156,7 +180,7 @@ export async function deleteClient(
 ): Promise<OAuthClientRecord | null> {
   const [row] = await db
     .delete(oauthClient)
-    .where(and(eq(oauthClient.referenceId, applicationId), eq(oauthClient.clientId, clientId)))
+    .where(and(byApplicationId(applicationId), eq(oauthClient.clientId, clientId)))
     .returning();
   return row ? mapRow(row) : null;
 }
@@ -170,7 +194,7 @@ export async function rotateClientSecret(
   const [row] = await db
     .update(oauthClient)
     .set({ clientSecret: hashedSecret, updatedAt: new Date() })
-    .where(and(eq(oauthClient.referenceId, applicationId), eq(oauthClient.clientId, clientId)))
+    .where(and(byApplicationId(applicationId), eq(oauthClient.clientId, clientId)))
     .returning();
   return row ? { ...mapRow(row), clientSecret: plaintextSecret } : null;
 }
@@ -183,7 +207,7 @@ export async function setClientDisabled(
   const [row] = await db
     .update(oauthClient)
     .set({ disabled, updatedAt: new Date() })
-    .where(and(eq(oauthClient.referenceId, applicationId), eq(oauthClient.clientId, clientId)))
+    .where(and(byApplicationId(applicationId), eq(oauthClient.clientId, clientId)))
     .returning();
   return row ? mapRow(row) : null;
 }
@@ -196,7 +220,7 @@ export async function updateClientRedirectUris(
   const [row] = await db
     .update(oauthClient)
     .set({ redirectUris, updatedAt: new Date() })
-    .where(and(eq(oauthClient.referenceId, applicationId), eq(oauthClient.clientId, clientId)))
+    .where(and(byApplicationId(applicationId), eq(oauthClient.clientId, clientId)))
     .returning();
   return row ? mapRow(row) : null;
 }

@@ -32,7 +32,37 @@ import { db } from "@appstrate/db/client";
 import { endUsers, applications } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import { prefixedId } from "../../../lib/ids.ts";
+import type { AppContextRow } from "../../../middleware/app-context.ts";
 import { oidcEndUserProfiles } from "../schema.ts";
+
+/**
+ * Load an application row by id — shared helper for callers that need the
+ * full `AppContextRow` shape outside the Hono middleware chain (e.g. the
+ * `customAccessTokenClaims` closure in `auth/plugins.ts`, which only has
+ * the `metadata.applicationId` string at token-mint time). Returns `null`
+ * if the application has been deleted between client registration and
+ * token mint.
+ */
+export async function loadAppById(applicationId: string): Promise<AppContextRow | null> {
+  const [row] = await db
+    .select({
+      id: applications.id,
+      orgId: applications.orgId,
+      isDefault: applications.isDefault,
+    })
+    .from(applications)
+    .where(eq(applications.id, applicationId))
+    .limit(1);
+  return row ?? null;
+}
+
+async function requireAppById(applicationId: string): Promise<AppContextRow> {
+  const app = await loadAppById(applicationId);
+  if (!app) {
+    throw new Error(`OIDC: application '${applicationId}' not found`);
+  }
+  return app;
+}
 
 export interface AuthIdentity {
   /** Better Auth `user.id`. */
@@ -73,10 +103,23 @@ export class UnverifiedEmailConflictError extends Error {
   }
 }
 
+/**
+ * Resolve (or create) the application-scoped end-user for an authenticated
+ * Better Auth identity.
+ *
+ * Accepts either a fully-loaded `AppContextRow` (preferred — callers on the
+ * hot path like `customAccessTokenClaims` in `auth/plugins.ts` load the app
+ * once per token mint and pass it through) or a bare `applicationId` string
+ * (kept for the integration tests and any caller that hasn't threaded the
+ * middleware-resolved `app` through yet — the function loads the row itself
+ * and throws a clear error if the application is missing).
+ */
 export async function resolveOrCreateEndUser(
   authUser: AuthIdentity,
-  applicationId: string,
+  appOrId: AppContextRow | string,
 ): Promise<ResolvedEndUser> {
+  const app = typeof appOrId === "string" ? await requireAppById(appOrId) : appOrId;
+  const applicationId = app.id;
   // Step 1: already linked via oidc_end_user_profiles → return existing end-user.
   const linked = await findLinkedEndUser(authUser.id, applicationId);
   if (linked) return linked;
@@ -103,7 +146,7 @@ export async function resolveOrCreateEndUser(
   }
 
   // Step 3: create fresh end_users + oidc_end_user_profiles rows.
-  return createEndUser(authUser, applicationId);
+  return createEndUser(authUser, app);
 }
 
 async function findLinkedEndUser(
@@ -221,19 +264,8 @@ async function linkProfileAtomic(endUserId: string, authUserId: string): Promise
   return rows.length > 0;
 }
 
-async function createEndUser(
-  authUser: AuthIdentity,
-  applicationId: string,
-): Promise<ResolvedEndUser> {
-  const [app] = await db
-    .select({ orgId: applications.orgId })
-    .from(applications)
-    .where(eq(applications.id, applicationId))
-    .limit(1);
-  if (!app) {
-    throw new Error(`OIDC: application '${applicationId}' not found`);
-  }
-
+async function createEndUser(authUser: AuthIdentity, app: AppContextRow): Promise<ResolvedEndUser> {
+  const applicationId = app.id;
   const endUserId = prefixedId("eu");
   const email = authUser.email ? authUser.email.toLowerCase().trim() : null;
   const now = new Date();

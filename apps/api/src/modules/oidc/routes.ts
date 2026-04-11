@@ -28,7 +28,6 @@ import { getClientIp } from "../../lib/client-ip.ts";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { isDevEnvironment, LOCALHOST_HOSTS } from "../../services/redirect-validation.ts";
 import { db } from "@appstrate/db/client";
-import { user as betterAuthUser } from "@appstrate/db/schema";
 import { oauthClient } from "./schema.ts";
 import {
   listClientsForApp,
@@ -40,7 +39,6 @@ import {
   updateClientRedirectUris,
 } from "./services/oauth-admin.ts";
 import { resolveAppBranding } from "./services/branding.ts";
-import { resolveOrCreateEndUser } from "./services/enduser-mapping.ts";
 import { issueCsrfToken, verifyCsrfToken } from "./services/csrf.ts";
 import { getOidcAuthApi } from "./auth/api.ts";
 import { APPSTRATE_SCOPES } from "./auth/scopes.ts";
@@ -147,10 +145,11 @@ export function createOidcRouter() {
     idempotency(),
     requirePermission("oauth-clients", "write"),
     async (c) => {
-      const applicationId = c.get("applicationId");
+      const app = c.get("app");
+      if (!app) throw notFound("Application context not loaded");
       const body = await c.req.json();
       const data = parseBody(createOAuthClientSchema, body);
-      const created = await createClient(applicationId, data);
+      const created = await createClient(app, data);
       return c.json(created, 201);
     },
   );
@@ -355,55 +354,11 @@ export function createOidcRouter() {
     // next visitor to this account is not throttled by past failures.
     await resetLoginEmailAttempts(email);
 
-    // Proactively resolve (or create) the Appstrate end-user *before*
-    // redirecting into authorize, so an `UnverifiedEmailConflictError`
-    // surfaces as a friendly FR error page on this handler rather than
-    // as a generic 500 propagated through the plugin's token-mint path.
-    // The original post-hoc catch at this call site was unreachable: the
-    // error is actually thrown from `customAccessTokenClaims` during
-    // token mint — *after* we have already 302'd away.
-    //
-    // We fetch the Better Auth user by email (unique index) because
-    // `asResponse: true` above returns a raw Response, not the typed
-    // `{ user }` object that the non-response form would give us.
-    //
-    // Note: `resolveOrCreateEndUser` runs here (proactive) AND inside
-    // `customAccessTokenClaims` (lazy at token mint) — intentional.
-    // The proactive call converts `UnverifiedEmailConflictError` into
-    // a FR page while we still control the response; the lazy call is
-    // how the plugin gets the claims it needs. See `auth/plugins.ts`.
-    const [authUserRow] = await db
-      .select({
-        id: betterAuthUser.id,
-        email: betterAuthUser.email,
-        name: betterAuthUser.name,
-        emailVerified: betterAuthUser.emailVerified,
-      })
-      .from(betterAuthUser)
-      .where(eq(betterAuthUser.email, email))
-      .limit(1);
-    if (authUserRow) {
-      try {
-        await resolveOrCreateEndUser(
-          {
-            id: authUserRow.id,
-            email: authUserRow.email,
-            name: authUserRow.name,
-            emailVerified: authUserRow.emailVerified === true,
-          },
-          ctx.applicationId,
-        );
-      } catch (err) {
-        if (err instanceof UnverifiedEmailConflictError) {
-          return renderError(
-            "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
-            409,
-            email,
-          );
-        }
-        throw err;
-      }
-    }
+    // End-user resolution is deferred to `customAccessTokenClaims` in
+    // `auth/plugins.ts`, which runs lazily at token mint time with access
+    // to the already-authenticated Better Auth user. The downstream
+    // `oauth2Consent` handler catches `UnverifiedEmailConflictError`
+    // propagated through that path and renders the same FR error page.
 
     // Forward every Set-Cookie from Better Auth + redirect into authorize.
     const redirect = new Response(null, { status: 302 });
@@ -485,20 +440,46 @@ export function createOidcRouter() {
     });
 
     const authApi = getOidcAuthApi();
-    const consentResponse = (await authApi.oauth2Consent({
-      body: {
-        accept,
-        oauth_query: oauthQuery,
-      },
-      // Better Auth's endpoint wrapper (`to-auth-endpoints.mjs`) checks
-      // `context.request instanceof Request` and the oauth-provider plugin
-      // throws "request not found" (401) inside `authorizeEndpoint` if it
-      // is missing — pass the raw Hono request through so `ctx.request` is
-      // populated end-to-end.
-      request: c.req.raw,
-      headers: c.req.raw.headers,
-      asResponse: true,
-    })) as Response;
+    let consentResponse: Response;
+    try {
+      consentResponse = (await authApi.oauth2Consent({
+        body: {
+          accept,
+          oauth_query: oauthQuery,
+        },
+        // Better Auth's endpoint wrapper (`to-auth-endpoints.mjs`) checks
+        // `context.request instanceof Request` and the oauth-provider plugin
+        // throws "request not found" (401) inside `authorizeEndpoint` if it
+        // is missing — pass the raw Hono request through so `ctx.request` is
+        // populated end-to-end.
+        request: c.req.raw,
+        headers: c.req.raw.headers,
+        asResponse: true,
+      })) as Response;
+    } catch (err) {
+      // `customAccessTokenClaims` (in `auth/plugins.ts`) runs during token
+      // mint and propagates `UnverifiedEmailConflictError` so the end-user
+      // sees a proper "verify your email" message instead of a silently
+      // succeeded login that later fails on every scoped request. Catch it
+      // here — the only place we still control the HTTP response before
+      // the browser follows Better Auth's redirect — and render the same
+      // FR error page the login form uses.
+      if (err instanceof UnverifiedEmailConflictError) {
+        const clientId = consentParams.get("client_id");
+        if (clientId) {
+          const ctx = await loadClientContext(c, clientId);
+          const page = renderLoginPage({
+            queryString: `?${oauthQuery}`,
+            branding: ctx.branding,
+            csrfToken: ctx.csrfToken,
+            error:
+              "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
+          });
+          return c.html(page.value, 409);
+        }
+      }
+      throw err;
+    }
 
     // Browser form submits (our server-rendered consent page) must see a
     // real HTTP redirect — otherwise the browser renders the JSON

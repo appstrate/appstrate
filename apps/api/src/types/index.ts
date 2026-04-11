@@ -68,6 +68,15 @@ export type AppEnv = {
     authMethod: string;
     apiKeyId: string | null;
     applicationId: string; // from API key auth or resolved by app-context middleware (X-App-Id)
+    /**
+     * Resolved application row (id/orgId/isDefault) set by
+     * `requireAppContext()` alongside `applicationId`. Services called from
+     * app-scoped routes should accept this shape directly instead of taking
+     * an `applicationId` string and re-SELECTing the row. Optional because
+     * auth strategies set `applicationId` before the middleware runs, but
+     * the `app` row is only loaded once the middleware executes.
+     */
+    app?: import("../middleware/app-context.ts").AppContextRow;
     requestId: string;
     apiVersion: string;
   };

@@ -8,16 +8,31 @@ import { applications } from "@appstrate/db/schema";
 import { forbidden, invalidRequest, notFound } from "../lib/errors.ts";
 
 /**
+ * Resolved application row exposed on the Hono context under `c.get("app")`.
+ * Carries the fields every app-scoped route currently needs — keep the set
+ * tight so downstream services can destructure without re-reading the row.
+ */
+export interface AppContextRow {
+  id: string;
+  orgId: string;
+  isDefault: boolean;
+}
+
+/**
  * Validate that an application belongs to the given org.
- * Returns `{ id, isDefault }` or null if not found.
+ * Returns the full `AppContextRow` or null if not found.
  * Shared by the app-context middleware and SSE auth.
  */
 export async function validateApplicationInOrg(
   appId: string,
   orgId: string,
-): Promise<{ id: string; isDefault: boolean } | null> {
+): Promise<AppContextRow | null> {
   const [app] = await db
-    .select({ id: applications.id, isDefault: applications.isDefault })
+    .select({
+      id: applications.id,
+      orgId: applications.orgId,
+      isDefault: applications.isDefault,
+    })
     .from(applications)
     .where(and(eq(applications.id, appId), eq(applications.orgId, orgId)))
     .limit(1);
@@ -67,6 +82,7 @@ export function requireAppContext() {
     }
 
     c.set("applicationId", appId);
+    c.set("app", app);
     return next();
   };
 }

@@ -11,6 +11,7 @@
  * strict on their own types — no ad-hoc casts elsewhere in the module.
  */
 
+import type * as jose from "jose";
 import { getAuth } from "@appstrate/db/auth";
 
 interface SignInEmailArgs {
@@ -31,11 +32,16 @@ interface DiscoveryArgs {
   headers: Headers;
 }
 
+interface JwksArgs {
+  headers: Headers;
+}
+
 export interface OidcAuthApi {
   signInEmail(args: SignInEmailArgs): Promise<Response | unknown>;
   oauth2Consent(args: OAuth2ConsentArgs): Promise<Response | unknown>;
   getOpenIdConfig(args: DiscoveryArgs): Promise<unknown>;
   getOAuthServerConfig(args: DiscoveryArgs): Promise<unknown>;
+  getJwks(args: JwksArgs): Promise<{ keys?: jose.JWK[] } | null>;
 }
 
 export function getOidcAuthApi(): OidcAuthApi {

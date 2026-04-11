@@ -15,6 +15,7 @@
  */
 
 import { html, type RawHtml } from "./html.ts";
+import { renderLayout } from "./layout.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
 
 const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
@@ -52,117 +53,29 @@ export interface ConsentPageProps {
 
 export function renderConsentPage(props: ConsentPageProps): RawHtml {
   const scopeItems = props.scopes.map((s) => html`<li>${describeScope(s)}</li>`);
-  const { name: brandName, logoUrl, primaryColor: primary, accentColor: accent } = props.branding;
-  const title = `Autorisation — ${brandName}`;
-  return html`<!doctype html>
-    <html lang="fr">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>${title}</title>
-        <style>
-          body {
-            font-family: system-ui, sans-serif;
-            max-width: 440px;
-            margin: 80px auto;
-            padding: 0 20px;
-            color: #111;
-          }
-          header.brand {
-            text-align: center;
-            margin-bottom: 24px;
-          }
-          header.brand img {
-            max-height: 48px;
-            max-width: 200px;
-            display: block;
-            margin: 0 auto 12px;
-          }
-          header.brand .name {
-            font-size: 14px;
-            font-weight: 600;
-            color: #111;
-            letter-spacing: 0.02em;
-          }
-          h1 {
-            font-size: 1.5rem;
-          }
-          p {
-            color: #555;
-          }
-          .client {
-            font-weight: 600;
-            color: #111;
-          }
-          ul.scopes {
-            list-style: none;
-            padding: 0;
-            margin: 16px 0 24px;
-            border-top: 1px solid #eee;
-          }
-          ul.scopes li {
-            padding: 10px 0;
-            border-bottom: 1px solid #eee;
-          }
-          .actions {
-            display: flex;
-            gap: 12px;
-            margin-top: 24px;
-          }
-          .actions form {
-            flex: 1;
-            margin: 0;
-          }
-          button {
-            width: 100%;
-            padding: 12px;
-            border: none;
-            border-radius: 6px;
-            font-size: 16px;
-            cursor: pointer;
-          }
-          .allow {
-            background: ${primary};
-            color: white;
-          }
-          .allow:hover {
-            background: ${accent};
-          }
-          .deny {
-            background: #e5e7eb;
-            color: #374151;
-          }
-          .deny:hover {
-            background: #d1d5db;
-          }
-        </style>
-      </head>
-      <body>
-        <header class="brand">
-          ${logoUrl ? html`<img src="${logoUrl}" alt="${brandName}" />` : null}
-          <div class="name">${brandName}</div>
-        </header>
-        <h1>Autorisation</h1>
-        <p>
-          <span class="client">${props.clientName}</span> souhaite accéder à votre compte
-          ${brandName}.
-        </p>
-        <p>Cette application aura accès à :</p>
-        <ul class="scopes">
-          ${scopeItems}
-        </ul>
-        <div class="actions">
-          <form method="POST" action="${props.action}">
-            <input type="hidden" name="_csrf" value="${props.csrfToken}" />
-            <input type="hidden" name="accept" value="false" />
-            <button type="submit" class="deny">Refuser</button>
-          </form>
-          <form method="POST" action="${props.action}">
-            <input type="hidden" name="_csrf" value="${props.csrfToken}" />
-            <input type="hidden" name="accept" value="true" />
-            <button type="submit" class="allow">Autoriser</button>
-          </form>
-        </div>
-      </body>
-    </html> `;
+  const title = `Autorisation — ${props.branding.name}`;
+  const bodyHtml = html`
+    <h1>Autorisation</h1>
+    <p>
+      <span class="client">${props.clientName}</span> souhaite accéder à votre compte
+      ${props.branding.name}.
+    </p>
+    <p>Cette application aura accès à :</p>
+    <ul class="scopes">
+      ${scopeItems}
+    </ul>
+    <div class="actions">
+      <form method="POST" action="${props.action}">
+        <input type="hidden" name="_csrf" value="${props.csrfToken}" />
+        <input type="hidden" name="accept" value="false" />
+        <button type="submit" class="deny">Refuser</button>
+      </form>
+      <form method="POST" action="${props.action}">
+        <input type="hidden" name="_csrf" value="${props.csrfToken}" />
+        <input type="hidden" name="accept" value="true" />
+        <button type="submit" class="allow">Autoriser</button>
+      </form>
+    </div>
+  `;
+  return renderLayout({ branding: props.branding, title, maxWidth: 440, bodyHtml });
 }

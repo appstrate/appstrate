@@ -58,10 +58,15 @@ export const oauthClient = pgTable("oauth_client", {
   public: boolean("public"),
   type: text("type"),
   requirePKCE: boolean("require_pkce"),
-  // `referenceId` holds the Appstrate `applicationId` for filter queries;
-  // `metadata` holds the same value as JSON because the plugin's
-  // `customAccessTokenClaims` closure only receives `metadata`, not the
-  // client row. Written in lockstep in `services/oauth-admin.ts#createClient`.
+  // Source of truth for "which Appstrate application owns this client" is
+  // `metadata.applicationId` (parsed from the JSON column by the plugin's
+  // `customAccessTokenClaims` closure). `reference_id` is kept populated
+  // only because the `@better-auth/oauth-provider` plugin's own Drizzle
+  // schema declares the column `notNull` and reads it from its internal
+  // ACL path when `opts.clientReference` is configured (we do not configure
+  // it, so the value is inert). Admin filter queries read the metadata
+  // JSON path via `services/oauth-admin.ts#byApplicationId()`, never this
+  // column. See the service-level doc comment for the full rationale.
   referenceId: text("reference_id").notNull(),
   metadata: text("metadata"),
 });

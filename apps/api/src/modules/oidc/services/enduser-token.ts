@@ -15,7 +15,7 @@
 
 import * as jose from "jose";
 import { getEnv } from "@appstrate/env";
-import { getAuth } from "@appstrate/db/auth";
+import { getOidcAuthApi } from "../auth/api.ts";
 
 export interface EndUserClaims {
   /** Better Auth `user.id` (the JWT `sub` claim). */
@@ -42,15 +42,8 @@ let _jwks: JwksResolver | null = null;
  * singleton's `jwt` plugin endpoint.
  */
 async function buildLocalJwks(): Promise<JwksResolver> {
-  const auth = getAuth();
-  const api = (auth as unknown as { api: Record<string, unknown> }).api;
-  const getJwksFn = api?.getJwks;
-  if (typeof getJwksFn !== "function") {
-    throw new Error("oidc: auth.api.getJwks is not available");
-  }
-  const result = (await (getJwksFn as (args: { headers: Headers }) => Promise<unknown>)({
-    headers: new Headers(),
-  })) as { keys?: jose.JWK[] } | null;
+  const api = getOidcAuthApi();
+  const result = await api.getJwks({ headers: new Headers() });
   const keys = result?.keys;
   if (!Array.isArray(keys) || keys.length === 0) {
     throw new Error("oidc: jwks endpoint returned no keys");

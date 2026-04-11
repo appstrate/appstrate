@@ -9,22 +9,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { useCurrentApplicationId } from "@/hooks/use-current-application";
+import type {
+  OAuthClientRecord as OAuthClient,
+  OAuthClientWithSecret,
+} from "../../../../../api/src/modules/oidc/services/oauth-admin.ts";
 
-export interface OAuthClient {
-  id: string;
-  clientId: string;
-  name: string | null;
-  applicationId: string;
-  redirectUris: string[];
-  scopes: string[];
-  disabled: boolean;
-  createdAt: string | null;
-  updatedAt: string | null;
-}
-
-export interface OAuthClientWithSecret extends OAuthClient {
-  clientSecret: string;
-}
+export type { OAuthClient, OAuthClientWithSecret };
 
 export function useOAuthClients() {
   const orgId = useCurrentOrgId();

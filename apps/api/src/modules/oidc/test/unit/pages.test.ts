@@ -123,6 +123,8 @@ describe("page branding + CSRF", () => {
       branding,
       csrfToken: "tok_test",
     }).value;
-    expect(out).toContain("votre compte\n          Mon Workspace.");
+    // Indentation is irrelevant — we only care that the branded name is
+    // rendered in the consent body sentence ("votre compte {brand}.").
+    expect(out.replace(/\s+/g, " ")).toContain("votre compte Mon Workspace.");
   });
 });

@@ -43,6 +43,7 @@ import { logger } from "../../../lib/logger.ts";
 import {
   resolveOrCreateEndUser,
   UnverifiedEmailConflictError,
+  loadAppById,
 } from "../services/enduser-mapping.ts";
 import { hashSecret } from "../services/oauth-admin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
@@ -190,6 +191,20 @@ async function buildEndUserClaims(
     );
     return {};
   }
+  // Load the owning application row once per token mint so the downstream
+  // `resolveOrCreateEndUser` + `createEndUser` path never needs to re-SELECT.
+  // This closure runs outside the Hono middleware chain, so the resolved
+  // `app` context normally provided by `requireAppContext()` is not
+  // available — we load it manually here instead.
+  const app = await loadAppById(applicationId);
+  if (!app) {
+    logger.warn("oidc: application referenced by oauth_client has been deleted", {
+      module: "oidc",
+      userId: user.id,
+      applicationId,
+    });
+    return {};
+  }
   try {
     const resolved = await resolveOrCreateEndUser(
       {
@@ -198,7 +213,7 @@ async function buildEndUserClaims(
         name: user.name ?? null,
         emailVerified: user.emailVerified === true,
       },
-      applicationId,
+      app,
     );
     return {
       endUserId: resolved.endUserId,
