@@ -5,6 +5,16 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.6] — 2026-04-11
+
+### Added
+
+- `module` export — `AppstrateModule` contract, `ModuleManifest`, `ModuleInitContext`, hook & event type maps. Enables external modules to implement the Appstrate module system without depending on the API package.
+
+### Changed
+
+- Updated `Run` schema with enrichment fields (`userName`, `endUserName`, `apiKeyName`, `scheduleName`).
+
 ## [2.10.3] — 2026-04-02
 
 ### Changed
