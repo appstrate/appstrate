@@ -10,9 +10,12 @@ import type { Db } from "@appstrate/db/client";
 import type { ConnectionRecord, DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { forceRefresh, type RefreshContext } from "./token-refresh.ts";
-import type { OAuthTokenAuthMethod, OAuthTokenContentType } from "./token-utils.ts";
-
-type CredentialEncoding = "basic_api_key_x" | "basic_email_token";
+import type {
+  AuthMode,
+  CredentialEncoding,
+  OAuthTokenAuthMethod,
+  OAuthTokenContentType,
+} from "@appstrate/core/validation";
 
 /**
  * Get a connection by profile + provider + org + provider credential.
@@ -133,7 +136,7 @@ export async function resolveCredentialsForProxy(
   if (!result) return null;
 
   const def = result.definition;
-  const authMode = def.authMode as string | undefined;
+  const authMode = def.authMode as AuthMode | undefined;
 
   return {
     credentials: buildSidecarCredentials(result.credentials, def, authMode),
@@ -161,7 +164,7 @@ export async function forceRefreshCredentials(
   if (!connection) return null;
 
   const def = await getProviderDefinition(db, providerId);
-  const authMode = def.authMode as string | undefined;
+  const authMode = def.authMode as AuthMode | undefined;
 
   let decrypted: DecryptedCredentials;
 
@@ -367,6 +370,9 @@ async function buildRefreshContext(
   };
 }
 
+/** Placeholder password used by the Freshdesk/Teamwork "basic_api_key_x" Basic auth convention. */
+const BASIC_API_KEY_PASSWORD_PLACEHOLDER = "X";
+
 /**
  * Map decrypted credentials to the sidecar format.
  * For oauth2/api_key with a named field, maps to a single credential variable.
@@ -375,12 +381,13 @@ async function buildRefreshContext(
  * Supported credentialEncoding values:
  * - "basic_api_key_x": base64(api_key:X) — Freshdesk/Teamwork pattern
  * - "basic_email_token": base64(email/token:api_key) — Zendesk API token pattern
+ *
+ * @internal Exported for direct unit testing — not part of the public API.
  */
-/** @internal Exported for testing only. */
 export function buildSidecarCredentials(
   credentials: Record<string, string>,
   def: Record<string, unknown>,
-  authMode: string | undefined,
+  authMode: AuthMode | undefined,
 ): Record<string, string> {
   const credentialEncoding = def.credentialEncoding as CredentialEncoding | undefined;
 
@@ -391,7 +398,9 @@ export function buildSidecarCredentials(
     const apiKey = credentials.api_key;
     if (credentialEncoding === "basic_api_key_x" && apiKey) {
       // Freshdesk/Teamwork: Basic auth with api_key as username, "X" as password
-      const encoded = Buffer.from(`${apiKey}:X`).toString("base64");
+      const encoded = Buffer.from(`${apiKey}:${BASIC_API_KEY_PASSWORD_PLACEHOLDER}`).toString(
+        "base64",
+      );
       return { ...credentials, api_key: encoded };
     }
     if (credentialEncoding === "basic_email_token" && apiKey && credentials.email) {

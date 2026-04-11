@@ -117,3 +117,68 @@ describe("buildTokenBody", () => {
     expect(body).toBe("key=value");
   });
 });
+
+// Exercises the exact body/header shape that token-refresh.ts builds in doRefresh().
+// Guards against regressions on the Atlassian/Jira JSON refresh flow without requiring
+// a full fetch/Db integration test.
+describe("refresh flow request shape", () => {
+  const ctx = {
+    clientId: "jira_client",
+    clientSecret: "jira_secret",
+    refreshToken: "rt_abc",
+  };
+
+  function buildRefreshBodyParams(useBasicAuth: boolean) {
+    return {
+      grant_type: "refresh_token",
+      refresh_token: ctx.refreshToken,
+      ...(useBasicAuth ? {} : { client_id: ctx.clientId, client_secret: ctx.clientSecret }),
+    };
+  }
+
+  it("builds a JSON body without client credentials when using client_secret_basic + JSON", () => {
+    const params = buildRefreshBodyParams(true);
+    const body = buildTokenBody(params, "application/json");
+    const headers = buildTokenHeaders(
+      "client_secret_basic",
+      ctx.clientId,
+      ctx.clientSecret,
+      "application/json",
+    );
+
+    const parsed = JSON.parse(body);
+    expect(parsed).toEqual({ grant_type: "refresh_token", refresh_token: "rt_abc" });
+    expect(parsed.client_id).toBeUndefined();
+    expect(parsed.client_secret).toBeUndefined();
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers["Authorization"]).toStartWith("Basic ");
+  });
+
+  it("builds a JSON body including client credentials for client_secret_post + JSON", () => {
+    const params = buildRefreshBodyParams(false);
+    const body = buildTokenBody(params, "application/json");
+    const headers = buildTokenHeaders(
+      "client_secret_post",
+      ctx.clientId,
+      ctx.clientSecret,
+      "application/json",
+    );
+
+    const parsed = JSON.parse(body);
+    expect(parsed.client_id).toBe("jira_client");
+    expect(parsed.client_secret).toBe("jira_secret");
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers["Authorization"]).toBeUndefined();
+  });
+
+  it("falls back to form-urlencoded when tokenContentType is undefined", () => {
+    const params = buildRefreshBodyParams(false);
+    const body = buildTokenBody(params, undefined);
+    const headers = buildTokenHeaders(undefined, ctx.clientId, ctx.clientSecret, undefined);
+
+    expect(body).toContain("grant_type=refresh_token");
+    expect(body).toContain("refresh_token=rt_abc");
+    expect(body).toContain("client_id=jira_client");
+    expect(headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+  });
+});

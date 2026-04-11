@@ -5,13 +5,8 @@ import { userProviderConnections } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
-import {
-  parseTokenResponse,
-  buildTokenHeaders,
-  buildTokenBody,
-  type OAuthTokenAuthMethod,
-  type OAuthTokenContentType,
-} from "./token-utils.ts";
+import type { OAuthTokenAuthMethod, OAuthTokenContentType } from "@appstrate/core/validation";
+import { parseTokenResponse, buildTokenHeaders, buildTokenBody } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
 
 /** In-memory concurrency lock: one refresh at a time per connection. */

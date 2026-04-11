@@ -538,12 +538,24 @@ export const schemas = {
       scopeSeparator: { type: "string" },
       pkceEnabled: { type: "boolean" },
       tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
+      tokenContentType: {
+        type: "string",
+        enum: ["application/x-www-form-urlencoded", "application/json"],
+        description:
+          "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
+      },
       authorizationParams: { type: "object" },
       tokenParams: { type: "object" },
       credentialSchema: { type: "object" },
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
+      credentialEncoding: {
+        type: "string",
+        enum: ["basic_api_key_x", "basic_email_token"],
+        description:
+          "Pre-encoding applied to api_key credentials before injection into the sidecar. basic_api_key_x → base64(api_key:X) (Freshdesk/Teamwork); basic_email_token → base64(email/token:api_key) (Zendesk).",
+      },
       availableScopes: {
         type: "array",
         items: {
@@ -586,12 +598,24 @@ export const schemas = {
       scopeSeparator: { type: "string" },
       pkceEnabled: { type: "boolean" },
       tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
+      tokenContentType: {
+        type: "string",
+        enum: ["application/x-www-form-urlencoded", "application/json"],
+        description:
+          "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
+      },
       authorizationParams: { type: "object" },
       tokenParams: { type: "object" },
       credentialSchema: { type: "object", description: "JSON Schema for custom credential fields" },
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
+      credentialEncoding: {
+        type: "string",
+        enum: ["basic_api_key_x", "basic_email_token"],
+        description:
+          "Pre-encoding applied to api_key credentials before injection into the sidecar. basic_api_key_x → base64(api_key:X) (Freshdesk/Teamwork); basic_email_token → base64(email/token:api_key) (Zendesk).",
+      },
       availableScopes: {
         type: "array",
         items: {
@@ -632,12 +656,24 @@ export const schemas = {
       scopeSeparator: { type: "string" },
       pkceEnabled: { type: "boolean" },
       tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
+      tokenContentType: {
+        type: "string",
+        enum: ["application/x-www-form-urlencoded", "application/json"],
+        description:
+          "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
+      },
       authorizationParams: { type: "object" },
       tokenParams: { type: "object" },
       credentialSchema: { type: "object", description: "JSON Schema for custom credential fields" },
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
+      credentialEncoding: {
+        type: "string",
+        enum: ["basic_api_key_x", "basic_email_token"],
+        description:
+          "Pre-encoding applied to api_key credentials before injection into the sidecar. basic_api_key_x → base64(api_key:X) (Freshdesk/Teamwork); basic_email_token → base64(email/token:api_key) (Zendesk).",
+      },
       availableScopes: {
         type: "array",
         items: {

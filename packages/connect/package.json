@@ -12,6 +12,7 @@
     "test": "bun test test/"
   },
   "dependencies": {
+    "@appstrate/core": "workspace:*",
     "@appstrate/db": "workspace:*",
     "@appstrate/env": "workspace:*",
     "@appstrate/shared-types": "workspace:*",

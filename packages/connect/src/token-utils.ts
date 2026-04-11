@@ -3,10 +3,12 @@
 /**
  * Shared token utilities.
  * Used by both oauth.ts (initial token exchange) and token-refresh.ts (refresh flow).
+ *
+ * OAuthTokenAuthMethod and OAuthTokenContentType live in @appstrate/core/validation
+ * as the single source of truth and are imported directly there by callers.
  */
 
-export type OAuthTokenAuthMethod = "client_secret_basic" | "client_secret_post";
-export type OAuthTokenContentType = "application/json" | "application/x-www-form-urlencoded";
+import type { OAuthTokenAuthMethod, OAuthTokenContentType } from "@appstrate/core/validation";
 
 /**
  * Build headers for an OAuth2 token endpoint request.
