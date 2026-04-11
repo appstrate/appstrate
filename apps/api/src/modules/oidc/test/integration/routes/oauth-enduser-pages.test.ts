@@ -11,12 +11,14 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
+import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import {
   createTestContext,
   authHeaders,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
+import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 
@@ -178,6 +180,68 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
     // httpOnly + SameSite=Lax for CSRF hardening.
     expect(cookieHeader.toLowerCase()).toContain("httponly");
     expect(cookieHeader.toLowerCase()).toContain("samesite=lax");
+  });
+
+  describe("POST /login per-email rate limit (H2)", () => {
+    beforeEach(async () => {
+      await flushRedis();
+      resetOidcGuardsLimiters();
+    });
+
+    async function submitLogin(
+      clientId: string,
+      email: string,
+      password: string,
+    ): Promise<Response> {
+      const getRes = await app.request(
+        `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
+      );
+      const cookie = (getRes.headers.get("set-cookie") ?? "").split(";")[0]!;
+      const formHtml = await getRes.text();
+      const csrf = formHtml.match(/name="_csrf" value="([^"]+)"/)![1]!;
+      return app.request(`/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          cookie,
+        },
+        body:
+          `_csrf=${encodeURIComponent(csrf)}` +
+          `&email=${encodeURIComponent(email)}` +
+          `&password=${encodeURIComponent(password)}`,
+      });
+    }
+
+    it("lets 5 failures through, 429s on the 6th for the same email", async () => {
+      const { clientId } = await registerClient(ctx);
+      for (let i = 0; i < 5; i++) {
+        const res = await submitLogin(clientId, "victim@example.com", "wrong");
+        expect(res.status).toBe(401);
+      }
+      const throttled = await submitLogin(clientId, "victim@example.com", "wrong");
+      expect(throttled.status).toBe(429);
+      expect(throttled.headers.get("retry-after")).toMatch(/^\d+$/);
+      const body = await throttled.text();
+      expect(body).toContain("Trop de tentatives");
+    });
+
+    it("isolates counters per email — throttling victim@ does not affect other@", async () => {
+      const { clientId } = await registerClient(ctx);
+      for (let i = 0; i < 6; i++) {
+        await submitLogin(clientId, "victim@example.com", "wrong");
+      }
+      const other = await submitLogin(clientId, "other@example.com", "wrong");
+      expect(other.status).toBe(401);
+    });
+
+    it("normalizes email case + whitespace (limiter key is lowercased + trimmed)", async () => {
+      const { clientId } = await registerClient(ctx);
+      for (let i = 0; i < 5; i++) {
+        await submitLogin(clientId, "Mixed@Example.COM", "wrong");
+      }
+      const throttled = await submitLogin(clientId, "  mixed@example.com  ", "wrong");
+      expect(throttled.status).toBe(429);
+    });
   });
 
   it("POST /login with a valid CSRF but wrong credentials re-renders the form with an error", async () => {

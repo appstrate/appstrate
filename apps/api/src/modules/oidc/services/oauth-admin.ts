@@ -69,6 +69,25 @@ async function hashSecret(plaintext: string): Promise<string> {
   return Buffer.from(new Uint8Array(digest)).toString("hex");
 }
 
+/**
+ * Produce the paired `referenceId` + `metadata` values that bind an oauth
+ * client row to its owning Appstrate application. Both fields are written
+ * in lockstep: the module reads `referenceId` directly (branding, admin
+ * CRUD), while Better Auth's `customAccessTokenClaims` closure only
+ * receives `parseClientMetadata(client.metadata)` and must recover the
+ * same id from there. Any future mutation touching one MUST call this
+ * helper to preserve the invariant.
+ */
+export function buildOauthClientApplicationBinding(applicationId: string): {
+  referenceId: string;
+  metadata: string;
+} {
+  return {
+    referenceId: applicationId,
+    metadata: JSON.stringify({ applicationId }),
+  };
+}
+
 export async function listClientsForApp(applicationId: string): Promise<OAuthClientRecord[]> {
   const rows = await db
     .select()
@@ -123,14 +142,7 @@ export async function createClient(
       name: input.name,
       redirectUris: input.redirectUris,
       scopes: input.scopes ?? ["openid", "profile", "email"],
-      referenceId: applicationId,
-      // Stash the applicationId inside `metadata` as well so the Better
-      // Auth oauth-provider plugin's `customAccessTokenClaims` callback
-      // can recover it at mint time. The plugin does NOT natively pipe
-      // `client.referenceId` into the claims closure — it only passes
-      // `parseClientMetadata(client.metadata)` — so we use metadata as
-      // the side-channel. Changing this shape will break token minting.
-      metadata: JSON.stringify({ applicationId }),
+      ...buildOauthClientApplicationBinding(applicationId),
       disabled: false,
       type: "web",
       tokenEndpointAuthMethod: "client_secret_basic",

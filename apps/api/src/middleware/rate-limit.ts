@@ -5,6 +5,7 @@ import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getRateLimiterFactory } from "../infra/index.ts";
 import { ApiError } from "../lib/errors.ts";
+import { getClientIp } from "../lib/client-ip.ts";
 
 async function createLimiter(
   points: number,
@@ -130,12 +131,6 @@ export const rateLimitByBearer = createRateLimitMiddleware({
 /** IP-based rate limiter for public (unauthenticated) routes. */
 export const rateLimitByIp = createRateLimitMiddleware({
   category: "ip",
-  extractKey: (c) => {
-    const ip =
-      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
-      c.req.header("x-real-ip") ||
-      "unknown";
-    return `ip:${c.req.method}:${c.req.path}:${ip}`;
-  },
+  extractKey: (c) => `ip:${c.req.method}:${c.req.path}:${getClientIp(c)}`,
   emitHeaders: true,
 });

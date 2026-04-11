@@ -35,11 +35,15 @@
 import { createAuthMiddleware, APIError } from "better-auth/api";
 import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import { getRateLimiterFactory } from "../../../infra/index.ts";
+import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
 
 const TOKEN_RL_POINTS = 30;
 const AUTHORIZE_RL_POINTS = 30;
 const INTROSPECT_RL_POINTS = 60;
 const REVOKE_RL_POINTS = 60;
+
+const LOGIN_EMAIL_POINTS = 5;
+const LOGIN_EMAIL_DURATION_SEC = 900;
 
 const limiterCache = new Map<string, RateLimiterAbstract>();
 
@@ -54,18 +58,61 @@ async function getLimiter(category: string, points: number): Promise<RateLimiter
   return limiter;
 }
 
+let loginEmailLimiter: RateLimiterAbstract | null = null;
+async function getLoginEmailLimiter(): Promise<RateLimiterAbstract> {
+  if (!loginEmailLimiter) {
+    const factory = await getRateLimiterFactory();
+    loginEmailLimiter = await factory.create(
+      LOGIN_EMAIL_POINTS,
+      LOGIN_EMAIL_DURATION_SEC,
+      "rl:oidc:login-email:",
+    );
+  }
+  return loginEmailLimiter;
+}
+
+function normalizeLoginEmailKey(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 /** Test helper — drops cached limiters between runs. */
 export function resetOidcGuardsLimiters(): void {
   limiterCache.clear();
+  loginEmailLimiter = null;
 }
 
-function extractIp(request: Request | undefined): string {
-  if (!request) return "unknown";
-  const fwd = request.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]!.trim();
-  const real = request.headers.get("x-real-ip");
-  if (real) return real;
-  return "unknown";
+export interface LoginEmailLimitResult {
+  allowed: boolean;
+  retryAfterSeconds: number;
+}
+
+/**
+ * Reserve one attempt for a given email on the login rate-limiter. Safe to
+ * call before `signInEmail` — reset on successful authentication via
+ * `resetLoginEmailAttempts`.
+ */
+export async function consumeLoginEmailAttempt(email: string): Promise<LoginEmailLimitResult> {
+  const limiter = await getLoginEmailLimiter();
+  try {
+    await limiter.consume(normalizeLoginEmailKey(email));
+    return { allowed: true, retryAfterSeconds: 0 };
+  } catch (rej) {
+    const retry =
+      rej && typeof rej === "object" && "msBeforeNext" in rej
+        ? Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000)
+        : LOGIN_EMAIL_DURATION_SEC;
+    return { allowed: false, retryAfterSeconds: Math.max(1, retry) };
+  }
+}
+
+/** Reset the attempt counter for an email on successful sign-in. */
+export async function resetLoginEmailAttempts(email: string): Promise<void> {
+  const limiter = await getLoginEmailLimiter();
+  try {
+    await limiter.delete(normalizeLoginEmailKey(email));
+  } catch {
+    // Best-effort — rate limit cleanup failures must not block the login.
+  }
 }
 
 async function enforceRateLimit(
@@ -74,7 +121,7 @@ async function enforceRateLimit(
   request: Request | undefined,
 ): Promise<void> {
   const limiter = await getLimiter(category, points);
-  const ip = extractIp(request);
+  const ip = getClientIpFromRequest(request);
   try {
     await limiter.consume(`${category}:${ip}`);
   } catch (rej) {

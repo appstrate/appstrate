@@ -35,10 +35,15 @@ import {
   resolveOrCreateEndUser,
   UnverifiedEmailConflictError,
 } from "../services/enduser-mapping.ts";
-import { getAuth } from "@appstrate/db/auth";
 import { oidcGuardsPlugin } from "./guards.ts";
 
-const APPSTRATE_SCOPES: string[] = [
+/**
+ * Canonical scope vocabulary the OIDC module supports. Exported so both
+ * the plugin config here and the admin API (`GET /api/oauth/scopes`)
+ * stay DRY — the frontend checkbox group reads this list over HTTP and
+ * never hardcodes scope strings.
+ */
+export const APPSTRATE_SCOPES: readonly string[] = [
   "openid",
   "profile",
   "email",
@@ -99,7 +104,7 @@ export function oidcBetterAuthPlugins(): unknown[] {
 
       // Full canonical scope vocabulary. The strategy's `scopesToPermissions`
       // mapper translates these into core RBAC strings at request time.
-      scopes: APPSTRATE_SCOPES,
+      scopes: [...APPSTRATE_SCOPES],
 
       // `validAudiences` is what the plugin accepts on the RFC 8707
       // `resource` parameter at the token endpoint. It drives the
@@ -207,32 +212,4 @@ export function oidcBetterAuthPlugins(): unknown[] {
   ];
 }
 
-/**
- * Typed accessor for the Better Auth singleton's oauth-provider endpoints.
- * Keeping the `any` escape here instead of leaking better-auth generics
- * through the module's public surface — consumer code in `routes.ts` only
- * uses two endpoints (`signInEmail`, `oauth2Consent`) and stays strict on
- * its own types.
- */
-export function getOidcAuthApi(): {
-  signInEmail: (args: {
-    body: { email: string; password: string; rememberMe?: boolean };
-    headers: Headers;
-    request?: Request;
-    asResponse?: boolean;
-  }) => Promise<Response | unknown>;
-  oauth2Consent: (args: {
-    body: { accept: boolean; scope?: string; oauth_query?: string };
-    headers: Headers;
-    request?: Request;
-    asResponse?: boolean;
-  }) => Promise<Response | unknown>;
-} {
-  const auth = getAuth() as unknown as {
-    api: Record<string, (...args: unknown[]) => Promise<unknown>>;
-  };
-  return {
-    signInEmail: auth.api.signInEmail as never,
-    oauth2Consent: auth.api.oauth2Consent as never,
-  };
-}
+export { getOidcAuthApi } from "./api.ts";

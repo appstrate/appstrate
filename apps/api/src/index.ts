@@ -55,6 +55,7 @@ import { isEndUserInApp } from "./services/end-users.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
 import { getAppConfig } from "./lib/app-config.ts";
+import { getClientIp, stampClientIp } from "./lib/client-ip.ts";
 import type { AppEnv } from "./types/index.ts";
 
 // Fail-fast: validate all env vars at startup
@@ -107,8 +108,12 @@ app.use("*", async (c, next) => {
 });
 
 // Mount Better Auth handler — handles signup, signin, session, etc.
+// Stamp the resolved trusted client IP onto the request so Better Auth
+// plugin hooks (e.g. OIDC guards rate-limiting) do not have to re-parse
+// `X-Forwarded-For` — which would be spoofable from outside our trust
+// boundary. `getClientIp` honors `TRUST_PROXY`.
 app.on(["POST", "GET"], "/api/auth/*", (c) => {
-  return auth.handler(c.req.raw);
+  return auth.handler(stampClientIp(c.req.raw, getClientIp(c)));
 });
 
 // Paths that skip both auth and org-context middleware (handled by other means or public)
@@ -218,10 +223,7 @@ app.use("*", async (c, next) => {
         applicationId: endUser.applicationId,
         method: c.req.method,
         path: c.req.path,
-        ip:
-          c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
-          c.req.header("x-real-ip") ||
-          "unknown",
+        ip: getClientIp(c),
         userAgent: c.req.header("user-agent") || "unknown",
       });
       c.set("endUser", endUser);

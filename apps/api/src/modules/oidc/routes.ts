@@ -24,6 +24,7 @@ import { idempotency } from "../../middleware/idempotency.ts";
 import { requirePermission } from "../../middleware/require-permission.ts";
 import { parseBody, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
+import { getClientIp } from "../../lib/client-ip.ts";
 import { db } from "@appstrate/db/client";
 import { oauthClient } from "./schema.ts";
 import {
@@ -37,8 +38,9 @@ import {
 } from "./services/oauth-admin.ts";
 import { resolveAppBranding } from "./services/branding.ts";
 import { issueCsrfToken, verifyCsrfToken } from "./services/csrf.ts";
-import { getOidcAuthApi } from "./auth/plugins.ts";
-import { getAuth } from "@appstrate/db/auth";
+import { getOidcAuthApi } from "./auth/api.ts";
+import { APPSTRATE_SCOPES } from "./auth/plugins.ts";
+import { consumeLoginEmailAttempt, resetLoginEmailAttempts } from "./auth/guards.ts";
 import { UnverifiedEmailConflictError } from "./services/enduser-mapping.ts";
 import { renderLoginPage } from "./pages/login.ts";
 import { renderConsentPage } from "./pages/consent.ts";
@@ -82,6 +84,20 @@ export function createOidcRouter() {
       const applicationId = c.get("applicationId");
       const data = await listClientsForApp(applicationId);
       return c.json({ object: "list", data });
+    },
+  );
+
+  // GET /api/oauth/scopes — canonical scope vocabulary for the admin UI.
+  // Read-only, org-member, no app context needed. The create-client modal
+  // reads this list to render its checkbox group so the frontend never
+  // hardcodes scope strings — adding a new scope to the server list is
+  // enough to surface it in the UI.
+  router.get(
+    "/oauth/scopes",
+    rateLimit(300),
+    requirePermission("oauth-clients", "read"),
+    async (c) => {
+      return c.json({ data: [...APPSTRATE_SCOPES] });
     },
   );
 
@@ -159,19 +175,13 @@ export function createOidcRouter() {
   // thin proxies. No CORS, no auth — this is a public, well-known endpoint.
 
   const proxyOidcMetadata = async (c: Context<AppEnv>) => {
-    const auth = getAuth() as unknown as {
-      api: { getOpenIdConfig: (args: { headers: Headers }) => Promise<unknown> };
-    };
-    const payload = await auth.api.getOpenIdConfig({ headers: c.req.raw.headers });
+    const payload = await getOidcAuthApi().getOpenIdConfig({ headers: c.req.raw.headers });
     c.header("cache-control", "public, max-age=3600");
     return c.json(payload as never);
   };
 
   const proxyOauthServerMetadata = async (c: Context<AppEnv>) => {
-    const auth = getAuth() as unknown as {
-      api: { getOAuthServerConfig: (args: { headers: Headers }) => Promise<unknown> };
-    };
-    const payload = await auth.api.getOAuthServerConfig({ headers: c.req.raw.headers });
+    const payload = await getOidcAuthApi().getOAuthServerConfig({ headers: c.req.raw.headers });
     c.header("cache-control", "public, max-age=3600");
     return c.json(payload as never);
   };
@@ -251,6 +261,30 @@ export function createOidcRouter() {
       return c.html(page.value, 400);
     }
 
+    // Per-email brute-force protection — complements the IP limiter.
+    // IP-only throttling lets distributed attackers hammer a single
+    // account from many addresses.
+    const attempt = await consumeLoginEmailAttempt(email);
+    if (!attempt.allowed) {
+      const [row] = await db
+        .select({ referenceId: oauthClient.referenceId })
+        .from(oauthClient)
+        .where(eq(oauthClient.clientId, clientId))
+        .limit(1);
+      const branding = row?.referenceId ? await resolveAppBranding(row.referenceId) : undefined;
+      const csrfToken = issueCsrfToken(c);
+      const minutes = Math.ceil(attempt.retryAfterSeconds / 60);
+      const page = renderLoginPage({
+        queryString: url.search,
+        branding,
+        csrfToken,
+        error: `Trop de tentatives. Réessayez dans ${minutes} minute${minutes > 1 ? "s" : ""}.`,
+        email,
+      });
+      c.header("Retry-After", String(attempt.retryAfterSeconds));
+      return c.html(page.value, 429);
+    }
+
     try {
       // signInEmail sets the session cookie on the response. We `asResponse:
       // true` so we can forward the Set-Cookie header, then issue our own
@@ -283,6 +317,10 @@ export function createOidcRouter() {
         });
         return c.html(page.value, 401);
       }
+
+      // Successful sign-in — clear the per-email attempt counter so the
+      // next visitor to this account is not throttled by past failures.
+      await resetLoginEmailAttempts(email);
 
       // Forward every Set-Cookie from Better Auth + redirect into authorize.
       const redirect = new Response(null, { status: 302 });
@@ -392,10 +430,7 @@ export function createOidcRouter() {
       clientId: consentParams.get("client_id") ?? undefined,
       scope: consentParams.get("scope") ?? undefined,
       redirectUri: consentParams.get("redirect_uri") ?? undefined,
-      ip:
-        c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
-        c.req.header("x-real-ip") ??
-        "unknown",
+      ip: getClientIp(c),
       userAgent: c.req.header("user-agent") ?? "unknown",
       requestId: c.get("requestId"),
     });
@@ -416,14 +451,74 @@ export function createOidcRouter() {
       asResponse: true,
     })) as Response;
 
-    // Forward the plugin's response verbatim (typically a 302 redirect to
-    // the client's redirect_uri with `?code=...` or `?error=...`, or a
-    // 200 JSON payload `{ redirect_uri: "..." }` depending on the Accept
-    // header the client sent).
-    return consentResponse;
+    // Browser form submits (our server-rendered consent page) must see a
+    // real HTTP redirect — otherwise the browser renders the JSON
+    // `{redirect:true,url:"..."}` body as the new document. Programmatic
+    // callers (tests, JSON API clients) keep the verbatim JSON shape.
+    const acceptsHtml = prefersHtml(c.req.header("accept"));
+    return maybeJsonRedirectToLocation(consentResponse, acceptsHtml);
   });
 
   return router;
+}
+
+/**
+ * Detect whether an `Accept` header prefers HTML over JSON. Used by the
+ * consent handler to decide whether to materialize Better Auth's JSON
+ * redirect response into a real 302 (for browser form submits) or pass it
+ * through verbatim (for programmatic JSON callers).
+ */
+export function prefersHtml(acceptHeader: string | undefined | null): boolean {
+  if (!acceptHeader) return false;
+  const lower = acceptHeader.toLowerCase();
+  if (lower.includes("application/json")) return false;
+  return lower.includes("text/html") || lower.includes("*/*");
+}
+
+/**
+ * Convert a Better Auth `oauth2Consent` JSON redirect response into a real
+ * HTTP 302 when the caller prefers HTML, preserving any `Set-Cookie`
+ * headers the plugin attached. Already-302 responses and non-JSON bodies
+ * are passed through unchanged. Programmatic JSON callers (`acceptsHtml`
+ * false) always see the verbatim plugin response so existing tests and
+ * API clients keep working.
+ *
+ * Better Auth returns one of: `{ redirect: true, url: "..." }`,
+ * `{ redirect_uri: "..." }`, `{ redirectURI: "..." }`, or `{ url: "..." }`
+ * depending on plugin version — accept all shapes.
+ */
+export async function maybeJsonRedirectToLocation(
+  response: Response,
+  acceptsHtml: boolean,
+): Promise<Response> {
+  if (!acceptsHtml) return response;
+  if (response.status === 302 || response.status === 303) return response;
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) return response;
+
+  let body: unknown;
+  try {
+    body = await response.clone().json();
+  } catch {
+    return response;
+  }
+  if (!body || typeof body !== "object") return response;
+  const obj = body as Record<string, unknown>;
+  const target =
+    (typeof obj.url === "string" && obj.url) ||
+    (typeof obj.redirect_uri === "string" && obj.redirect_uri) ||
+    (typeof obj.redirectURI === "string" && obj.redirectURI) ||
+    null;
+  if (!target) return response;
+
+  const redirect = new Response(null, { status: 302 });
+  redirect.headers.set("location", target);
+  for (const [name, value] of response.headers) {
+    if (name.toLowerCase() === "set-cookie") {
+      redirect.headers.append("set-cookie", value);
+    }
+  }
+  return redirect;
 }
 
 /**

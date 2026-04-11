@@ -58,8 +58,11 @@ export const oauthClient = pgTable("oauth_client", {
   public: boolean("public"),
   type: text("type"),
   requirePKCE: boolean("require_pkce"),
-  // `referenceId` on oauth_client is the Appstrate application_id the client is scoped to.
-  // Better Auth stores it as opaque text; we interpret it in the module's services.
+  // Invariant: `referenceId` and `metadata.applicationId` must stay equal.
+  // `referenceId` is what module code reads directly (branding, admin CRUD);
+  // `metadata.applicationId` is what Better Auth's `customAccessTokenClaims`
+  // receives (the plugin does not forward `referenceId` to the closure).
+  // Always write both via `buildOauthClientApplicationBinding()`.
   referenceId: text("reference_id"),
   metadata: text("metadata"),
 });
@@ -69,7 +72,7 @@ export const oauthRefreshToken = pgTable("oauth_refresh_token", {
   token: text("token").notNull(),
   clientId: text("client_id")
     .notNull()
-    .references(() => oauthClient.clientId),
+    .references(() => oauthClient.clientId, { onDelete: "cascade" }),
   sessionId: text("session_id").references(() => session.id, { onDelete: "set null" }),
   userId: text("user_id")
     .notNull()
@@ -87,11 +90,11 @@ export const oauthAccessToken = pgTable("oauth_access_token", {
   token: text("token").unique(),
   clientId: text("client_id")
     .notNull()
-    .references(() => oauthClient.clientId),
+    .references(() => oauthClient.clientId, { onDelete: "cascade" }),
   sessionId: text("session_id").references(() => session.id, { onDelete: "set null" }),
   userId: text("user_id").references(() => user.id),
   referenceId: text("reference_id"),
-  refreshId: text("refresh_id").references(() => oauthRefreshToken.id),
+  refreshId: text("refresh_id").references(() => oauthRefreshToken.id, { onDelete: "cascade" }),
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow(),
   scopes: text("scopes").array().notNull(),
@@ -101,7 +104,7 @@ export const oauthConsent = pgTable("oauth_consent", {
   id: text("id").primaryKey(),
   clientId: text("client_id")
     .notNull()
-    .references(() => oauthClient.clientId),
+    .references(() => oauthClient.clientId, { onDelete: "cascade" }),
   userId: text("user_id").references(() => user.id),
   referenceId: text("reference_id"),
   scopes: text("scopes").array().notNull(),
