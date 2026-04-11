@@ -37,6 +37,9 @@ export type { InitiateOAuthResult, OAuthCallbackResult } from "./oauth.ts";
 export { initiateOAuth1, handleOAuth1Callback } from "./oauth1.ts";
 export type { OAuth1CallbackResult } from "./oauth1.ts";
 
+// Token refresh
+export { RefreshError } from "./token-refresh.ts";
+
 // Credentials
 export {
   getConnection,

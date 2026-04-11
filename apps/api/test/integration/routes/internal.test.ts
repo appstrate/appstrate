@@ -4,8 +4,16 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedRun,
+  seedConnectionProfile,
+  seedConnectionForApp,
+} from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
+import { db } from "../../helpers/db.ts";
+import { userProviderConnections } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
 
 const app = getTestApp();
 
@@ -267,6 +275,170 @@ describe("Internal API", () => {
       });
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  // ─── POST /internal/credentials/:scope/:name/refresh ─────────
+
+  describe("POST /internal/credentials/:scope/:name/refresh", () => {
+    const providerId = "@internalorg/gmail";
+
+    async function seedRunWithProfile(expiresAt: string | null): Promise<{
+      runToken: string;
+      profileId: string;
+    }> {
+      const profile = await seedConnectionProfile({
+        userId: ctx.user.id,
+        name: "Default",
+        isDefault: true,
+      });
+      await seedConnectionForApp(
+        profile.id,
+        providerId,
+        ctx.orgId,
+        ctx.defaultAppId,
+        { api_key: "stored-key-xyz" },
+        { expiresAt },
+      );
+      const run = await seedRun({
+        packageId: pkgId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "running",
+        providerProfileIds: { [providerId]: profile.id },
+      });
+      return { runToken: signRunToken(run.id), profileId: profile.id };
+    }
+
+    it("returns 401 without token", async () => {
+      const res = await app.request(`/internal/credentials/${providerId}/refresh`, {
+        method: "POST",
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("skips the refresh when the stored token is still fresh", async () => {
+      // 30 minutes of lifetime left — well above the 60s safety margin
+      const freshExpiry = new Date(Date.now() + 30 * 60_000).toISOString();
+      const { runToken, profileId } = await seedRunWithProfile(freshExpiry);
+
+      const rowBefore = (
+        await db
+          .select()
+          .from(userProviderConnections)
+          .where(
+            and(
+              eq(userProviderConnections.profileId, profileId),
+              eq(userProviderConnections.providerId, providerId),
+            ),
+          )
+      )[0]!;
+
+      const res = await app.request(`/internal/credentials/${providerId}/refresh`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${runToken}` },
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { credentials: Record<string, string> };
+      expect(body.credentials).toBeDefined();
+
+      // The connection row must be untouched — no updatedAt bump, no
+      // needsReconnection flag, no re-encryption.
+      const rowAfter = (
+        await db
+          .select()
+          .from(userProviderConnections)
+          .where(
+            and(
+              eq(userProviderConnections.profileId, profileId),
+              eq(userProviderConnections.providerId, providerId),
+            ),
+          )
+      )[0]!;
+      expect(rowAfter.updatedAt.getTime()).toBe(rowBefore.updatedAt.getTime());
+      expect(rowAfter.credentialsEncrypted).toBe(rowBefore.credentialsEncrypted);
+      expect(rowAfter.needsReconnection).toBe(false);
+    });
+
+    it("falls through to the refresh path when expiresAt is null", async () => {
+      // No expiresAt → isTokenFresh returns false → proceeds to
+      // forceRefreshCredentials. For an api_key-style connection with no
+      // provider definition, the refresh path returns the current credentials
+      // unchanged (no throw, no mutation) — so we just verify the request
+      // completes successfully.
+      const { runToken } = await seedRunWithProfile(null);
+
+      const res = await app.request(`/internal/credentials/${providerId}/refresh`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${runToken}` },
+      });
+
+      expect(res.status).toBe(200);
+    });
+
+    it("returns 404 when the provider is not mapped to a profile in the run", async () => {
+      // Run without providerProfileIds — refresh has no profile to resolve.
+      const res = await app.request(`/internal/credentials/${providerId}/refresh`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // ─── POST /internal/connections/report-auth-failure ──────────
+
+  describe("POST /internal/connections/report-auth-failure", () => {
+    const providerId = "@internalorg/gmail";
+
+    it("logs the failure but does NOT mutate the connection", async () => {
+      // A 401 reported by the sidecar is ambiguous (agent error vs dead
+      // credential) and must never flag needsReconnection on its own.
+      const profile = await seedConnectionProfile({
+        userId: ctx.user.id,
+        name: "Default",
+        isDefault: true,
+      });
+      await seedConnectionForApp(profile.id, providerId, ctx.orgId, ctx.defaultAppId, {
+        api_key: "stored-key",
+      });
+      const run = await seedRun({
+        packageId: pkgId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "running",
+        providerProfileIds: { [providerId]: profile.id },
+      });
+      const token = signRunToken(run.id);
+
+      const res = await app.request("/internal/connections/report-auth-failure", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ providerId }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { flagged: boolean };
+      expect(body.flagged).toBe(false);
+
+      const row = (
+        await db
+          .select()
+          .from(userProviderConnections)
+          .where(
+            and(
+              eq(userProviderConnections.profileId, profile.id),
+              eq(userProviderConnections.providerId, providerId),
+            ),
+          )
+      )[0]!;
+      expect(row.needsReconnection).toBe(false);
     });
   });
 });
