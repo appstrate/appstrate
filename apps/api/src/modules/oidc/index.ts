@@ -26,6 +26,8 @@
 
 import { resolve } from "node:path";
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
+import { oidcAuthStrategy } from "./auth/strategy.ts";
+import { oidcBetterAuthPlugins } from "./auth/plugins.ts";
 
 const oidcModule: AppstrateModule = {
   manifest: { id: "oidc", name: "OIDC Identity Provider", version: "1.0.0" },
@@ -34,6 +36,14 @@ const oidcModule: AppstrateModule = {
     await ctx.applyMigrations("oidc", resolve(import.meta.dir, "drizzle/migrations"), {
       requireCoreTables: ["end_users", "user", "session"],
     });
+  },
+
+  authStrategies() {
+    return [oidcAuthStrategy];
+  },
+
+  betterAuthPlugins() {
+    return oidcBetterAuthPlugins();
   },
 
   features: { oidc: true },

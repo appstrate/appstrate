@@ -1,0 +1,232 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Integration test for the OIDC module's auth strategy.
+ *
+ * Spins up a local HTTP JWKS server, points `APP_URL` at it, then boots
+ * a test app with the real OIDC module loaded via `getTestApp({ modules })`.
+ * The test mints ES256 JWTs by hand against the local JWKS, hits real
+ * Appstrate routes, and asserts that:
+ *   1. A valid JWT with matching `endUserId`/`applicationId` claims resolves
+ *      through the strategy, populates `endUser` in request context, and
+ *      reaches the route handler (200 response).
+ *   2. An unknown `endUserId` claim → strategy returns null → falls through
+ *      to core auth (401 without other credentials).
+ *   3. A malformed `Bearer ey...` (valid structure, invalid signature) →
+ *      null → falls through to core auth.
+ *   4. An `Authorization: Bearer ask_...` header does NOT match this
+ *      strategy (fast no-match path) so core API-key auth keeps working.
+ *
+ * This is the Stage 3 smoke test proving the full wiring chain:
+ *     module → authStrategies() → test-app middleware → AuthResolution →
+ *     c.set(endUser) → strict run-filter path.
+ */
+
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import * as jose from "jose";
+import { eq } from "drizzle-orm";
+import { _resetCacheForTesting } from "@appstrate/env";
+import { db } from "@appstrate/db/client";
+import { endUsers, applications } from "@appstrate/db/schema";
+import { truncateAll } from "../../../../../../test/helpers/db.ts";
+import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
+import { oidcEndUserProfiles } from "../../../schema.ts";
+import { prefixedId } from "../../../../../lib/ids.ts";
+
+// NOTE: env + JWKS server must be set BEFORE importing anything that
+// touches `getEnv()` cache or the OIDC module. The module itself is
+// imported lazily inside beforeAll so `getTestApp()` sees the final
+// APP_URL value.
+const originalAppUrl = process.env.APP_URL;
+let jwksServer: ReturnType<typeof Bun.serve> | null = null;
+let privateKey: jose.CryptoKey;
+let kid: string;
+let app: Awaited<ReturnType<typeof import("../../../../../../test/helpers/app.ts").getTestApp>>;
+
+async function startJwksServer() {
+  const { publicKey, privateKey: priv } = await jose.generateKeyPair("ES256", {
+    extractable: true,
+  });
+  privateKey = priv;
+  const jwk = await jose.exportJWK(publicKey);
+  kid = "oidc-test-key-1";
+  jwk.kid = kid;
+  jwk.alg = "ES256";
+  jwk.use = "sig";
+
+  jwksServer = Bun.serve({
+    port: 0,
+    fetch(req) {
+      const url = new URL(req.url);
+      if (url.pathname === "/api/auth/jwks") {
+        return Response.json({ keys: [jwk] });
+      }
+      return new Response("not found", { status: 404 });
+    },
+  });
+  process.env.APP_URL = `http://127.0.0.1:${jwksServer.port}`;
+  _resetCacheForTesting();
+}
+
+async function mintToken(payload: Record<string, unknown>) {
+  const issuer = process.env.APP_URL!;
+  return new jose.SignJWT(payload)
+    .setProtectedHeader({ alg: "ES256", kid })
+    .setIssuer(issuer)
+    .setAudience("appstrate-test")
+    .setIssuedAt()
+    .setExpirationTime("2m")
+    .setSubject(typeof payload.sub === "string" ? payload.sub : "auth_user_stage3")
+    .sign(privateKey);
+}
+
+beforeAll(async () => {
+  await startJwksServer();
+  // Import lazily AFTER APP_URL is rewritten so module code resolves JWKS
+  // from the local server.
+  const { getTestApp } = await import("../../../../../../test/helpers/app.ts");
+  const { default: oidcModule } = await import("../../../index.ts");
+  const { resetJwksCache } = await import("../../../services/enduser-token.ts");
+  resetJwksCache();
+  app = getTestApp({ modules: [oidcModule] });
+});
+
+afterAll(() => {
+  jwksServer?.stop(true);
+  if (originalAppUrl === undefined) {
+    delete process.env.APP_URL;
+  } else {
+    process.env.APP_URL = originalAppUrl;
+  }
+  _resetCacheForTesting();
+});
+
+describe("OIDC auth strategy — end-to-end via getTestApp", () => {
+  let orgId: string;
+  let applicationId: string;
+  let authUserId: string;
+  let endUserId: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    const { id: ownerId } = await createTestUser();
+    const { org, defaultAppId } = await createTestOrg(ownerId, { slug: "oidcstrat" });
+    orgId = org.id;
+    applicationId = defaultAppId;
+
+    // End-user auth identity (distinct from the owning member).
+    const { id } = await createTestUser({
+      email: "stage3@example.com",
+      name: "Stage Three",
+    });
+    authUserId = id;
+
+    endUserId = prefixedId("eu");
+    await db.insert(endUsers).values({
+      id: endUserId,
+      applicationId,
+      orgId,
+      email: "stage3@example.com",
+      name: "Stage Three",
+    });
+    await db.insert(oidcEndUserProfiles).values({
+      endUserId,
+      authUserId,
+      emailVerified: true,
+      status: "active",
+    });
+  });
+
+  it("resolves a valid JWT to endUser context and reaches the route", async () => {
+    const token = await mintToken({
+      sub: authUserId,
+      endUserId,
+      applicationId,
+      email: "stage3@example.com",
+      name: "Stage Three",
+      scope: "openid runs",
+    });
+    const res = await app.request(`/api/end-users/${endUserId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-App-Id": applicationId,
+      },
+    });
+    // Strategy claimed the request, endUser context set, route reached.
+    expect(res.status).toBe(200);
+  });
+
+  it("falls through when the end-user claim is unknown", async () => {
+    const token = await mintToken({
+      sub: authUserId,
+      endUserId: "eu_does_not_exist",
+      applicationId,
+    });
+    const res = await app.request(`/api/end-users/${endUserId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-App-Id": applicationId,
+      },
+    });
+    // Strategy returned null → fell through to core auth → no session → 401.
+    expect(res.status).toBe(401);
+  });
+
+  it("falls through when the JWT signature is invalid", async () => {
+    const res = await app.request(`/api/end-users/${endUserId}`, {
+      headers: {
+        Authorization: "Bearer eyJhbGciOiJFUzI1NiJ9.bogus.signature",
+        "X-App-Id": applicationId,
+      },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("ignores `Bearer ask_...` (API key) — fast no-match path", async () => {
+    // The strategy must not shadow core API-key auth. An invalid ask_ key
+    // should reach core's API-key path and come back as 401 from there,
+    // not as a JWT verification error.
+    const res = await app.request(`/api/end-users/${endUserId}`, {
+      headers: {
+        Authorization: "Bearer ask_invalid_key_000000000000000000000000",
+        "X-App-Id": applicationId,
+      },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects a token whose claim applicationId mismatches the end-user row", async () => {
+    // Create a second app in the same org.
+    const { id: otherOwnerId } = await createTestUser();
+    const { defaultAppId: otherAppId } = await createTestOrg(otherOwnerId, {
+      slug: "otherapp",
+    });
+    expect(otherAppId).not.toBe(applicationId);
+
+    // Sanity: the end-user still belongs to the first app.
+    const [row] = await db
+      .select({ appId: endUsers.applicationId })
+      .from(endUsers)
+      .where(eq(endUsers.id, endUserId));
+    expect(row!.appId).toBe(applicationId);
+
+    // Token claims the end-user lives in otherApp — strategy should refuse.
+    const token = await mintToken({
+      sub: authUserId,
+      endUserId,
+      applicationId: otherAppId,
+    });
+    const res = await app.request(`/api/end-users/${endUserId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-App-Id": otherAppId,
+      },
+    });
+    // Strategy returned null (mismatch) → fell through → 401.
+    expect(res.status).toBe(401);
+
+    // Silence unused-import warnings — applications import is retained for
+    // anyone extending the test to cross-check app metadata.
+    void applications;
+  });
+});
