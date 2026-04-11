@@ -40,6 +40,8 @@ import {
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
 import { resetJwksCache } from "../../../services/enduser-token.ts";
+import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
+import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import { decodeJwt } from "jose";
 
 const app = getTestApp({ modules: [oidcModule] });
@@ -113,22 +115,41 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    await flushRedis();
     resetJwksCache();
+    resetOidcGuardsLimiters();
     ctx = await createTestContext({ orgSlug: "e2eoauth" });
     const client = await registerClient(ctx);
     clientId = client.clientId;
     clientSecret = client.clientSecret;
   });
 
-  it("serves OIDC discovery metadata via the module alias", async () => {
-    const res = await app.request("/.well-known/openid-configuration");
-    // Alias either proxies successfully or Better Auth returns a non-error
-    // payload — we just assert the alias route is wired and reachable.
-    expect([200, 404]).toContain(res.status);
-    if (res.status === 200) {
-      const body = (await res.json()) as Record<string, unknown>;
-      expect(body).toHaveProperty("issuer");
-    }
+  it("serves full OIDC discovery metadata via the module proxy", async () => {
+    // The `@better-auth/oauth-provider` plugin declares its discovery
+    // endpoint with `metadata: { SERVER_ONLY: true }`, so Better Auth never
+    // exposes it over HTTP — the only way to reach the payload is the
+    // module's proxy, which calls `auth.api.getOpenIdConfig()`
+    // programmatically. We hit the module-scoped alias here; it is the
+    // canonical path satellites should auto-configure against.
+    const res = await app.request("/api/oauth/.well-known/openid-configuration");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      issuer: string;
+      token_endpoint: string;
+      authorization_endpoint: string;
+      jwks_uri: string;
+      scopes_supported?: string[];
+      response_types_supported?: string[];
+      code_challenge_methods_supported?: string[];
+    };
+    expect(body.issuer).toBeTruthy();
+    expect(body.token_endpoint).toContain("/oauth2/token");
+    expect(body.authorization_endpoint).toContain("/oauth2/authorize");
+    expect(body.jwks_uri).toContain("/jwks");
+    expect(body.scopes_supported).toContain("openid");
+    expect(body.scopes_supported).toContain("offline_access");
+    expect(body.response_types_supported).toContain("code");
+    expect(body.code_challenge_methods_supported).toContain("S256");
   });
 
   it("mints an access token via the full PKCE flow through the module consent handler", async () => {
@@ -351,7 +372,8 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     expect(code).toBeTruthy();
 
     // Exchange with a DIFFERENT verifier than the one that hashed into the
-    // challenge — must fail.
+    // challenge — must fail. `resource` is present (the guard enforces it),
+    // so the rejection here is guaranteed to come from PKCE verification.
     const tokenRes = await app.request("/api/auth/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -362,6 +384,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
         client_id: clientId,
         client_secret: clientSecret,
         code_verifier: randomVerifier(), // wrong verifier
+        resource: "http://localhost:3000",
       }).toString(),
     });
     // Plugin returns 401 UNAUTHORIZED on PKCE verification failure.
@@ -377,5 +400,294 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
       redirect: "manual",
     });
     expect(res.status).not.toBe(404);
+  });
+
+  /**
+   * Drive a full authorize → consent → code exchange for an existing session,
+   * returning the authorization code and the PKCE verifier. Used by the
+   * refresh / revoke / introspect tests below.
+   */
+  async function runHappyPathToCode(opts: {
+    cookie: string;
+    email?: string;
+  }): Promise<{ code: string; verifier: string }> {
+    const verifier = randomVerifier();
+    const challenge = await sha256Base64Url(verifier);
+    const state = base64url(crypto.getRandomValues(new Uint8Array(16)));
+    const authorizeUrl =
+      `/api/auth/oauth2/authorize?` +
+      new URLSearchParams({
+        response_type: "code",
+        client_id: clientId,
+        redirect_uri: "https://satellite.example.com/callback",
+        scope: "openid profile email offline_access",
+        state,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+      }).toString();
+    const authorizeRes = await app.request(authorizeUrl, {
+      headers: { cookie: opts.cookie, accept: "text/html" },
+      redirect: "manual",
+    });
+    const consentUrl = new URL(authorizeRes.headers.get("location")!, "http://localhost");
+    const consentPageRes = await app.request(consentUrl.pathname + consentUrl.search, {
+      headers: { cookie: opts.cookie, accept: "text/html" },
+    });
+    const csrfCookie = (consentPageRes.headers.get("set-cookie") ?? "")
+      .split(",")
+      .map((c) => c.trim())
+      .find((c) => c.startsWith("oidc_csrf="))!
+      .split(";")[0]!;
+    const csrfToken = (await consentPageRes.text()).match(/name="_csrf" value="([^"]+)"/)![1]!;
+    const consentRes = await app.request(consentUrl.pathname + consentUrl.search, {
+      method: "POST",
+      headers: {
+        cookie: `${opts.cookie}; ${csrfCookie}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        accept: "application/json",
+        origin: "http://localhost:3000",
+      },
+      body: new URLSearchParams({ _csrf: csrfToken, accept: "true" }).toString(),
+      redirect: "manual",
+    });
+    let code: string | null;
+    const loc = consentRes.headers.get("location");
+    if (loc) {
+      code = new URL(loc, "http://localhost").searchParams.get("code");
+    } else {
+      const json = (await consentRes.json()) as {
+        redirect_uri?: string;
+        redirectURI?: string;
+        url?: string;
+      };
+      const redirectUri = json.redirect_uri ?? json.redirectURI ?? json.url;
+      code = new URL(redirectUri!).searchParams.get("code");
+    }
+    return { code: code!, verifier };
+  }
+
+  async function exchangeCodeForTokens(
+    code: string,
+    verifier: string,
+    extras: Record<string, string> = {},
+  ): Promise<{
+    access_token: string;
+    refresh_token?: string;
+    token_type?: string;
+    expires_in?: number;
+  }> {
+    const res = await app.request("/api/auth/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: "https://satellite.example.com/callback",
+        client_id: clientId,
+        client_secret: clientSecret,
+        code_verifier: verifier,
+        resource: "http://localhost:3000",
+        ...extras,
+      }).toString(),
+    });
+    expect(res.status).toBe(200);
+    return res.json() as never;
+  }
+
+  it("rejects /oauth2/token without resource parameter (RFC 8707 enforcement)", async () => {
+    // Even with a valid code, PKCE verifier, and client credentials, the
+    // guard rejects the call BEFORE oauth-provider runs — so this asserts
+    // the pre-check is the one speaking, not a downstream PKCE / client
+    // check. We deliberately use a bogus code to show the guard fires
+    // first (it would otherwise be consumed by oauth-provider).
+    const res = await app.request("/api/auth/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code: "fake-code",
+        redirect_uri: "https://satellite.example.com/callback",
+        client_id: clientId,
+        client_secret: clientSecret,
+        code_verifier: "fake-verifier",
+        // NO resource
+      }).toString(),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string; error_description?: string };
+    expect(body.error).toBe("invalid_request");
+    expect(body.error_description).toContain("RFC 8707");
+  });
+
+  it("rejects /oauth2/token with a resource not in validAudiences", async () => {
+    const res = await app.request("/api/auth/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code: "fake-code",
+        redirect_uri: "https://satellite.example.com/callback",
+        client_id: clientId,
+        client_secret: clientSecret,
+        code_verifier: "fake-verifier",
+        resource: "https://evil.example.com",
+      }).toString(),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe("invalid_request");
+  });
+
+  it("rate-limits /oauth2/token to 30 req/min per IP", async () => {
+    // The guard limiter is keyed on x-forwarded-for; app.request() sets no
+    // such header, so all spam shares the `unknown` bucket. Fire 31 posts;
+    // the 31st must be rejected with 429.
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      code: "fake",
+      redirect_uri: "https://satellite.example.com/callback",
+      client_id: clientId,
+      client_secret: clientSecret,
+      code_verifier: "fake",
+      resource: "http://localhost:3000",
+    }).toString();
+
+    let rateLimited = 0;
+    for (let i = 0; i < 35; i++) {
+      const res = await app.request("/api/auth/oauth2/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+      });
+      if (res.status === 429) rateLimited++;
+    }
+    expect(rateLimited).toBeGreaterThan(0);
+  });
+
+  it("issues a fresh JWT access token via grant_type=refresh_token with custom claims re-injected", async () => {
+    const { cookie } = await signUpEndUser("refresh@satellite.example.com", "Sup3rSecret!");
+    const { code, verifier } = await runHappyPathToCode({ cookie });
+    const tokens = await exchangeCodeForTokens(code, verifier);
+    expect(tokens.refresh_token).toBeTruthy();
+    const initialAccess = tokens.access_token;
+
+    const refreshRes = await app.request("/api/auth/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: tokens.refresh_token!,
+        client_id: clientId,
+        client_secret: clientSecret,
+        resource: "http://localhost:3000",
+      }).toString(),
+    });
+    expect(refreshRes.status).toBe(200);
+    const refreshed = (await refreshRes.json()) as { access_token: string };
+    expect(refreshed.access_token).toBeTruthy();
+    expect(refreshed.access_token).not.toBe(initialAccess);
+
+    // Prove customAccessTokenClaims re-ran on refresh — endUserId + applicationId
+    // are injected only by that closure, so their presence on the new token
+    // is the canary.
+    const payload = decodeJwt(refreshed.access_token) as {
+      endUserId?: string;
+      applicationId?: string;
+    };
+    expect(payload.endUserId).toMatch(/^eu_/);
+    expect(payload.applicationId).toBeTruthy();
+  });
+
+  it("refresh_token grant also requires resource parameter", async () => {
+    const res = await app.request("/api/auth/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: "whatever",
+        client_id: clientId,
+        client_secret: clientSecret,
+        // NO resource
+      }).toString(),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe("invalid_request");
+  });
+
+  it("introspect returns {active:true} for a live token and {active:false} for garbage", async () => {
+    const { cookie } = await signUpEndUser("intro@satellite.example.com", "Sup3rSecret!");
+    const { code, verifier } = await runHappyPathToCode({ cookie });
+    const tokens = await exchangeCodeForTokens(code, verifier);
+
+    const liveRes = await app.request("/api/auth/oauth2/introspect", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        token: tokens.access_token,
+        client_id: clientId,
+        client_secret: clientSecret,
+      }).toString(),
+    });
+    expect(liveRes.status).toBe(200);
+    const liveBody = (await liveRes.json()) as { active?: boolean; sub?: string };
+    expect(liveBody.active).toBe(true);
+
+    // RFC 7662 §2.2: the authorization server "MAY respond with HTTP 200
+    // and `active: false`" OR with a 4xx error for malformed/unknown tokens.
+    // Better Auth's oauth-provider rejects non-JWT random strings with 400
+    // before consulting the token store — either shape is spec-compliant.
+    const garbageRes = await app.request("/api/auth/oauth2/introspect", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        token: "not-a-real-token",
+        client_id: clientId,
+        client_secret: clientSecret,
+      }).toString(),
+    });
+    expect([200, 400, 401]).toContain(garbageRes.status);
+    if (garbageRes.status === 200) {
+      const garbageBody = (await garbageRes.json()) as { active?: boolean };
+      expect(garbageBody.active).toBe(false);
+    }
+  });
+
+  it("revoke invalidates a refresh token so it can no longer mint new access tokens", async () => {
+    // JWT access tokens are stateless — revocation only meaningfully
+    // applies to the refresh token (which is a DB-tracked opaque string).
+    // RFC 7009 §2.1 explicitly says the authorization server "SHOULD
+    // revoke the refresh token" on revoke. We verify the contract by
+    // attempting a refresh after revoke and asserting it fails.
+    const { cookie } = await signUpEndUser("revoke@satellite.example.com", "Sup3rSecret!");
+    const { code, verifier } = await runHappyPathToCode({ cookie });
+    const tokens = await exchangeCodeForTokens(code, verifier);
+    expect(tokens.refresh_token).toBeTruthy();
+
+    const revokeRes = await app.request("/api/auth/oauth2/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        token: tokens.refresh_token!,
+        token_type_hint: "refresh_token",
+        client_id: clientId,
+        client_secret: clientSecret,
+      }).toString(),
+    });
+    expect(revokeRes.status).toBe(200);
+
+    // A subsequent refresh attempt with the revoked token must fail.
+    const refreshAttempt = await app.request("/api/auth/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: tokens.refresh_token!,
+        client_id: clientId,
+        client_secret: clientSecret,
+        resource: "http://localhost:3000",
+      }).toString(),
+    });
+    expect([400, 401]).toContain(refreshAttempt.status);
   });
 });

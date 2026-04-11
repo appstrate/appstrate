@@ -36,6 +36,7 @@ import {
   UnverifiedEmailConflictError,
 } from "../services/enduser-mapping.ts";
 import { getAuth } from "@appstrate/db/auth";
+import { oidcGuardsPlugin } from "./guards.ts";
 
 const APPSTRATE_SCOPES: string[] = [
   "openid",
@@ -75,7 +76,13 @@ async function sha256HexVerify(clientSecret: string, storedHash: string): Promis
 
 export function oidcBetterAuthPlugins(): unknown[] {
   const env = getEnv();
+  const validAudiences = [env.APP_URL, `${env.APP_URL}/api/auth`];
   return [
+    // Guards must run BEFORE oauth-provider so that `hooks.before` can
+    // reject malformed token/authorize requests and enforce per-IP rate
+    // limits before any opaque token is minted or client_secret is
+    // probed. See `guards.ts` for the full rationale.
+    oidcGuardsPlugin({ validAudiences }),
     // JWT plugin MUST be present before oauth-provider so that token
     // signing uses ES256 keys rotated through the module-owned `jwks`
     // table. `oauth-provider` throws `jwt_config` at token mint time if
@@ -105,7 +112,7 @@ export function oidcBetterAuthPlugins(): unknown[] {
       // can pass either the issuer or the Better Auth base URL as the
       // resource indicator. The module README's satellite integration
       // example documents `resource=<APP_URL>` as the canonical form.
-      validAudiences: [env.APP_URL, `${env.APP_URL}/api/auth`],
+      validAudiences,
 
       // Match our existing admin-API hash so clients created before/without
       // the plugin continue to work.

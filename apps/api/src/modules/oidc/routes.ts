@@ -23,6 +23,7 @@ import { rateLimit, rateLimitByIp } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
 import { requirePermission } from "../../middleware/require-permission.ts";
 import { parseBody, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
+import { logger } from "../../lib/logger.ts";
 import { db } from "@appstrate/db/client";
 import { oauthClient } from "./schema.ts";
 import {
@@ -376,6 +377,28 @@ export function createOidcRouter() {
         "consent page must be reached from the OAuth authorize endpoint — missing signed query",
       );
     }
+
+    // Audit log — record the decision before forwarding to Better Auth.
+    // The signed query carries the full OAuth2 context (client_id, scope,
+    // redirect_uri) which was HMAC-verified by the consent endpoint's own
+    // before-hook on the way in, so we can trust its contents here. The
+    // `audit: true` marker is the filter downstream log shippers use to
+    // forward consent events to SIEM / compliance storage.
+    const consentParams = new URLSearchParams(oauthQuery);
+    logger.info("oidc: consent decision", {
+      module: "oidc",
+      audit: true,
+      decision: accept ? "accept" : "deny",
+      clientId: consentParams.get("client_id") ?? undefined,
+      scope: consentParams.get("scope") ?? undefined,
+      redirectUri: consentParams.get("redirect_uri") ?? undefined,
+      ip:
+        c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
+        c.req.header("x-real-ip") ??
+        "unknown",
+      userAgent: c.req.header("user-agent") ?? "unknown",
+      requestId: c.get("requestId"),
+    });
 
     const authApi = getOidcAuthApi();
     const consentResponse = (await authApi.oauth2Consent({

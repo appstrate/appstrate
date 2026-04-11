@@ -158,6 +158,17 @@ Malformed hex values are replaced with the platform default so a misconfigured b
 - **Unverified email guard**: `resolveOrCreateEndUser` throws `UnverifiedEmailConflictError` when an auth identity with an unverified email clashes with an existing `end_users` row in the same application. This prevents silent account takeover via SMTP verification being disabled or an auth provider reporting `emailVerified: false`.
 - **`reference_id` → `applicationId` invariant**: every OAuth client row carries a `reference_id` matching an existing `applications.id`. The admin route enforces this on create, and the auth strategy double-checks `endUser.applicationId === claims.applicationId` on every request.
 - **Admin bypass is not shipped**: Phase 0 made core runs filtering strict with no hook. Embedding apps that want an "admin sees all runs" view authenticate admins via API key (no `endUser` in context), not via an OIDC JWT. See `apps/api/src/modules/README.md` for the end-user run-visibility contract.
+- **Production guards plugin** (`auth/guards.ts`): a small Better Auth plugin mounted before `@better-auth/oauth-provider` that uses `hooks.before` on `/oauth2/token`, `/oauth2/authorize`, `/oauth2/introspect`, `/oauth2/revoke` to (1) enforce RFC 8707 resource indicators on token requests and (2) rate-limit each endpoint per client IP via the shared `rate-limiter-flexible` Redis backend. Limits: token 30/min, authorize 30/min, introspect 60/min, revoke 60/min. Rejections surface as `better-call` `APIError` → OAuth2-shaped 400/429 bodies.
+
+## Production deployment checklist
+
+Before exposing the module to external satellites:
+
+- **`APP_URL` must match the public issuer**: `validAudiences` is derived from `env.APP_URL` (accepts both `APP_URL` and `APP_URL/api/auth`). Satellites will use one of these as their `resource=` value — a mismatch causes `invalid_request` at token exchange.
+- **Rate-limit backend must be Redis** in multi-instance deployments: the guards plugin uses `getRateLimiterFactory()` which falls back to in-memory when `REDIS_URL` is unset. In-memory limits are per-instance and trivially bypassed by round-robin.
+- **Audit log shipping**: the consent POST handler emits `logger.info("oidc: consent decision", { audit: true, ... })` on every accept/deny. Route `module=oidc audit=true` log lines to your SIEM / compliance storage for the full decision trail (RGPD proof-of-consent).
+- **JWKS rotation**: Better Auth's `jwt` plugin auto-rotates the ES256 keypair every 90 days with a 7-day grace window. Satellites that cache JWKS for longer WILL see transient `invalid_signature` errors. Document a 7-day cache ceiling in your satellite integration guide.
+- **`resource` parameter is now enforced**: `/oauth2/token` rejects `authorization_code` / `refresh_token` grants without a whitelisted `resource=` parameter. This is a **compat-break** vs. earlier Stage 5.5 builds which silently issued opaque tokens — satellites that previously "worked" (received opaque tokens) now fail fast with a diagnosable 400. See the satellite integration example below for the correct shape.
 
 ## Satellite integration example
 
