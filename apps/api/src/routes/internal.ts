@@ -15,12 +15,39 @@ import {
   resolveCredentialsForProxy,
   forceRefreshCredentials,
   getProviderCredentialId,
+  getConnection,
+  RefreshError,
 } from "@appstrate/connect";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { unauthorized, forbidden, notFound, invalidRequest, internalError } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 
 export const reportAuthFailureSchema = z.object({ providerId: z.string().min(1) });
+
+/**
+ * Safety margin used when deciding whether a stored access token is still
+ * "fresh enough" that a forced refresh would be wasteful. The sidecar calls
+ * the refresh endpoint on any upstream 401; if the stored token has more
+ * than this much lifetime remaining, the 401 cannot be an expiry issue and
+ * must come from the agent's request itself (wrong header, wrong endpoint,
+ * missing scope) — so we skip the refresh entirely. Keeping a full minute
+ * absorbs reasonable clock skew between this server and the OAuth provider.
+ */
+const REFRESH_FRESHNESS_THRESHOLD_MS = 60_000;
+
+/**
+ * Returns true when the stored access token still has enough lifetime left
+ * that refreshing it would be pointless. Null / missing / unparseable
+ * `expiresAt` (providers without `expires_in`, legacy connections, non-OAuth2
+ * auth modes) returns false — we fall back to the existing refresh behavior
+ * in that case.
+ */
+export function isTokenFresh(expiresAt: string | Date | null | undefined): boolean {
+  if (!expiresAt) return false;
+  const ts = expiresAt instanceof Date ? expiresAt.getTime() : Date.parse(expiresAt);
+  if (Number.isNaN(ts)) return false;
+  return ts - Date.now() > REFRESH_FRESHNESS_THRESHOLD_MS;
+}
 
 /**
  * Verify the run token from the Authorization header.
@@ -213,6 +240,36 @@ export function createInternalRouter() {
     if (!credentialId) {
       throw notFound(`No provider credentials configured for '${providerId}' in application`);
     }
+
+    // Skip the OAuth refresh round-trip if the stored token still has
+    // significant lifetime left. A 401 on a demonstrably-fresh token cannot
+    // be an expiry issue — it must come from the agent's request itself
+    // (wrong header, wrong endpoint, missing scope). Refreshing here would
+    // burn provider rate limits, add latency, and churn rotating
+    // refresh_tokens for no benefit.
+    const connection = await getConnection(db, profileId, providerId, run.orgId, credentialId);
+    if (connection && isTokenFresh(connection.expiresAt)) {
+      const passthrough = await resolveCredentialsForProxy(
+        db,
+        profileId,
+        providerId,
+        run.orgId,
+        credentialId,
+      );
+      if (!passthrough) {
+        throw notFound(`No credentials for provider '${providerId}'`);
+      }
+
+      logger.info("Skipping refresh — stored token still fresh", {
+        runId,
+        providerId,
+        profileId,
+        expiresInMs: Date.parse(connection.expiresAt!) - Date.now(),
+      });
+
+      return c.json(passthrough);
+    }
+
     try {
       const result = await forceRefreshCredentials(
         db,
@@ -228,31 +285,66 @@ export function createInternalRouter() {
       logger.info("Forced credential refresh", { runId, providerId, profileId });
       return c.json(result);
     } catch (err) {
-      // Refresh failed (invalid_grant, network error) — flag the connection
-      await db
-        .update(userProviderConnections)
-        .set({ needsReconnection: true, updatedAt: new Date() })
-        .where(
-          and(
-            eq(userProviderConnections.profileId, profileId),
-            eq(userProviderConnections.providerId, providerId),
-            eq(userProviderConnections.orgId, run.orgId),
-            eq(userProviderConnections.providerCredentialId, credentialId),
-          ),
-        );
+      // Only a definitive "refresh_token is dead" signal (RFC 6749 §5.2:
+      // HTTP 400 + body.error === "invalid_grant") justifies flagging the
+      // connection. Transient failures (network, 5xx, timeout, non-JSON,
+      // other OAuth error codes) must not flag — the credential might still
+      // be valid and the initial 401 that triggered this refresh may have
+      // come from a malformed agent request, not a dead token.
+      if (err instanceof RefreshError && err.kind === "revoked") {
+        await db
+          .update(userProviderConnections)
+          .set({ needsReconnection: true, updatedAt: new Date() })
+          .where(
+            and(
+              eq(userProviderConnections.profileId, profileId),
+              eq(userProviderConnections.providerId, providerId),
+              eq(userProviderConnections.orgId, run.orgId),
+              eq(userProviderConnections.providerCredentialId, credentialId),
+            ),
+          );
 
-      logger.warn("Forced refresh failed, connection flagged for reconnection", {
+        logger.warn("Refresh token revoked, connection flagged for reconnection", {
+          runId,
+          providerId,
+          profileId,
+          status: err.status,
+        });
+
+        throw unauthorized(`Token refresh failed for provider '${providerId}': credential revoked`);
+      }
+
+      logger.warn("Transient refresh failure, connection left unchanged", {
         runId,
         providerId,
         profileId,
+        kind: err instanceof RefreshError ? err.kind : "unknown",
+        status: err instanceof RefreshError ? err.status : undefined,
         error: err instanceof Error ? err.message : String(err),
       });
 
-      throw unauthorized(`Token refresh failed for provider '${providerId}'`);
+      throw unauthorized(`Token refresh failed for provider '${providerId}' (transient)`);
     }
   });
 
   // POST /internal/connections/report-auth-failure — sidecar reports upstream 401
+  //
+  // A single 401 on an agent-generated request is NOT reliable evidence that
+  // the stored credential is dead. LLM agents frequently produce malformed
+  // requests (wrong header name, wrong auth scheme, wrong endpoint, missing
+  // API version header, wrong HTTP method) that providers reject with 401
+  // even when the token is perfectly valid. Flagging the connection on that
+  // basis forces users to reconnect unnecessarily and blocks all subsequent
+  // runs via dependency-validation.
+  //
+  // The only reliable "credential is dead" signal is a failed token refresh
+  // with HTTP 400 + body.error === "invalid_grant" (RFC 6749 §5.2), handled
+  // in the /credentials/:scope/:name/refresh route above.
+  //
+  // This endpoint is kept for telemetry — the sidecar still reports the
+  // failure so we can surface patterns in logs (provider returning 401
+  // frequently, specific agent generating malformed requests) — but it
+  // never mutates the connection.
   router.post("/connections/report-auth-failure", async (c) => {
     const { runId, run } = await verifyRunToken(c);
     const body = await c.req.json();
@@ -261,38 +353,16 @@ export function createInternalRouter() {
       throw invalidRequest("Missing or invalid providerId");
     }
     const { providerId } = parsed.data;
-
     const profileId = run.providerProfileIds?.[providerId];
-    if (!profileId) {
-      logger.warn("Auth failure report for unknown provider profile", { runId, providerId });
-      return c.json({ flagged: false });
-    }
 
-    const credentialId = await getProviderCredentialId(db, run.applicationId, providerId);
-    if (!credentialId) {
-      logger.warn("No provider credential found for auth failure report", { runId, providerId });
-      return c.json({ flagged: false });
-    }
-
-    await db
-      .update(userProviderConnections)
-      .set({ needsReconnection: true, updatedAt: new Date() })
-      .where(
-        and(
-          eq(userProviderConnections.profileId, profileId),
-          eq(userProviderConnections.providerId, providerId),
-          eq(userProviderConnections.orgId, run.orgId),
-          eq(userProviderConnections.providerCredentialId, credentialId),
-        ),
-      );
-
-    logger.info("Connection flagged for reconnection after upstream 401", {
+    logger.info("Upstream 401 reported by sidecar (connection not flagged)", {
       runId,
       providerId,
-      profileId,
+      profileId: profileId ?? null,
+      reason: "single-request 401 is ambiguous (agent syntax error vs dead credential)",
     });
 
-    return c.json({ flagged: true });
+    return c.json({ flagged: false });
   });
 
   return router;
