@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { db } from "@appstrate/db/client";
-import { orgInvitations, organizations, user, profiles } from "@appstrate/db/schema";
+import { orgInvitations, organizations, user, profiles, orgRoleEnum } from "@appstrate/db/schema";
 import { eq, and, lt, desc } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { getAppConfig } from "../lib/app-config.ts";
@@ -12,6 +12,16 @@ import { logger } from "../lib/logger.ts";
 /** Roles assignable via invitation (excludes owner — transferred, not invited). */
 export const ASSIGNABLE_ROLES = ["viewer", "member", "admin"] as const;
 export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
+
+// Compile-time exhaustiveness check: if `orgRoleEnum` gains a new value, this
+// line fails to type-check until it is added to `ASSIGNABLE_ROLES` above (or
+// explicitly excluded like `owner`).
+type _MissingAssignableRoles = Exclude<
+  Exclude<(typeof orgRoleEnum.enumValues)[number], "owner">,
+  AssignableRole
+>;
+const _assertAssignableRolesExhaustive: _MissingAssignableRoles extends never ? true : never = true;
+void _assertAssignableRolesExhaustive;
 
 function generateToken(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");

@@ -12,6 +12,7 @@ import {
   markInvitationAccepted,
   getInviterName,
   getOrgName,
+  type AssignableRole,
 } from "../services/invitations.ts";
 import { addMember } from "../services/organizations.ts";
 
@@ -115,7 +116,7 @@ router.post("/:token/accept", async (c) => {
       });
 
       // Add member to org
-      await addMember(invitation.orgId, newUserId, invitation.role as "member" | "admin");
+      await addMember(invitation.orgId, newUserId, invitation.role as AssignableRole);
 
       await markInvitationAccepted(invitation.id, newUserId);
 
@@ -157,7 +158,7 @@ router.post("/:token/accept", async (c) => {
       });
     }
 
-    await addMember(invitation.orgId, existingUser.id, invitation.role as "member" | "admin");
+    await addMember(invitation.orgId, existingUser.id, invitation.role as AssignableRole);
 
     await markInvitationAccepted(invitation.id, existingUser.id);
 
