@@ -40,6 +40,51 @@ import { db } from "@appstrate/db/client";
 import { oauthClient } from "../schema.ts";
 import { prefixedId } from "../../../lib/ids.ts";
 import type { AppContextRow } from "../../../middleware/app-context.ts";
+import { APPSTRATE_SCOPES } from "../auth/scopes.ts";
+import { isValidRedirectUri } from "./redirect-uri.ts";
+
+/**
+ * Thrown by the service layer when a caller passes scopes or redirect URIs
+ * that fail the canonical whitelist. Route handlers already validate via
+ * Zod (`createOAuthClientSchema` / `updateOAuthClientSchema`), but these
+ * re-checks at the service boundary are the defense-in-depth net for any
+ * future internal caller that bypasses the route layer.
+ */
+export class OAuthAdminValidationError extends Error {
+  readonly field: "scopes" | "redirectUris";
+  constructor(field: "scopes" | "redirectUris", message: string) {
+    super(message);
+    this.name = "OAuthAdminValidationError";
+    this.field = field;
+  }
+}
+
+const APPSTRATE_SCOPE_SET = new Set<string>(APPSTRATE_SCOPES);
+
+function assertValidScopes(scopes: readonly string[] | undefined): void {
+  if (!scopes || scopes.length === 0) return;
+  const invalid = scopes.filter((s) => !APPSTRATE_SCOPE_SET.has(s));
+  if (invalid.length > 0) {
+    throw new OAuthAdminValidationError(
+      "scopes",
+      `OIDC: unknown scopes rejected at service boundary: ${invalid.join(", ")}. ` +
+        `Only scopes in APPSTRATE_SCOPES (identity scopes + OIDC_ALLOWED_SCOPES) may be registered.`,
+    );
+  }
+}
+
+function assertValidRedirectUris(uris: readonly string[]): void {
+  if (uris.length === 0) {
+    throw new OAuthAdminValidationError("redirectUris", "OIDC: at least one redirectUri required");
+  }
+  const bad = uris.filter((uri) => !isValidRedirectUri(uri));
+  if (bad.length > 0) {
+    throw new OAuthAdminValidationError(
+      "redirectUris",
+      `OIDC: redirectUri scheme or host not allowed: ${bad.join(", ")}`,
+    );
+  }
+}
 
 /**
  * Single source of truth for the OAuth client shape returned by this
@@ -140,6 +185,16 @@ export async function createClient(
   app: AppContextRow,
   input: CreateClientInput,
 ): Promise<OAuthClientWithSecret> {
+  // Defense-in-depth — the route-layer Zod schemas already validate both
+  // fields, but any future internal caller (programmatic provisioning, a
+  // migration script, another module) that invokes `createClient` directly
+  // must not be able to slip in arbitrary scopes or unsafe redirect URIs.
+  // Failing at the service boundary is the only way to guarantee the
+  // `oauth_client` table never contains a value the plugin would otherwise
+  // reject — or worse, silently honor.
+  assertValidRedirectUris(input.redirectUris);
+  assertValidScopes(input.scopes);
+
   const applicationId = app.id;
   const id = prefixedId("oac");
   const clientId = `oauth_${randomSecret().slice(0, 24)}`;
@@ -217,6 +272,8 @@ export async function updateClientRedirectUris(
   clientId: string,
   redirectUris: string[],
 ): Promise<OAuthClientRecord | null> {
+  // Defense-in-depth — see `createClient` for the rationale.
+  assertValidRedirectUris(redirectUris);
   const [row] = await db
     .update(oauthClient)
     .set({ redirectUris, updatedAt: new Date() })

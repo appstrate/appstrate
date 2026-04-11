@@ -11,10 +11,27 @@
  * verify time (tests, Hono's `app.request()`, air-gapped deployments),
  * and guarantees the keys we verify against are exactly the keys the
  * local plugin just minted with — no staleness window.
+ *
+ * ## Rotation safety
+ *
+ * The Better Auth `jwt` plugin rotates ES256 keys every 90 days with a
+ * 7-day grace window. If we cached the JWKS indefinitely, rotation would
+ * silently break verification until the process restarts. Two mechanisms
+ * guard against that:
+ *
+ * 1. **TTL-based refresh** — the cached keyset expires after
+ *    `JWKS_CACHE_TTL_MS` (5 minutes). The next verify after expiry
+ *    re-fetches in-process, picking up any newly published key.
+ * 2. **Unknown-kid refetch** — if `jose.jwtVerify` throws
+ *    `JWKSNoMatchingKey` (the token header carries a `kid` we don't know
+ *    about — i.e. a key rotated in since our last fetch), we refresh the
+ *    cache eagerly once and retry. Repeated unknown-kid failures still
+ *    fail closed so a bogus token doesn't trigger a DOS refetch loop.
  */
 
 import * as jose from "jose";
 import { getEnv } from "@appstrate/env";
+import { logger } from "../../../lib/logger.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
 
 export interface EndUserClaims {
@@ -35,7 +52,18 @@ export type JwksResolver = (
   token?: jose.FlattenedJWSInput,
 ) => Promise<jose.CryptoKey>;
 
-let _jwks: JwksResolver | null = null;
+interface JwksCacheEntry {
+  resolver: JwksResolver;
+  /** Epoch ms at which this resolver must be refetched. */
+  expiresAt: number;
+}
+
+/** 5 minutes — short enough to propagate rotations quickly, long enough that
+ *  steady-state verification never touches Better Auth. */
+const JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let _cache: JwksCacheEntry | null = null;
+let _pendingRefresh: Promise<JwksResolver> | null = null;
 
 /**
  * Build an in-process JWKS resolver by fetching keys from the Better Auth
@@ -51,10 +79,42 @@ async function buildLocalJwks(): Promise<JwksResolver> {
   return jose.createLocalJWKSet({ keys }) as unknown as JwksResolver;
 }
 
-async function getJwks(): Promise<JwksResolver> {
-  if (_jwks) return _jwks;
-  _jwks = await buildLocalJwks();
-  return _jwks;
+/**
+ * Returns the cached JWKS resolver, refetching if the TTL has elapsed.
+ * Concurrent callers share a single in-flight refetch so the Better Auth
+ * API is not hammered under load.
+ */
+async function getJwks(options?: { forceRefresh?: boolean }): Promise<JwksResolver> {
+  const now = Date.now();
+  const fresh = _cache && _cache.expiresAt > now;
+  if (!options?.forceRefresh && fresh) return _cache!.resolver;
+
+  if (_pendingRefresh) return _pendingRefresh;
+
+  _pendingRefresh = (async () => {
+    try {
+      const resolver = await buildLocalJwks();
+      _cache = { resolver, expiresAt: Date.now() + JWKS_CACHE_TTL_MS };
+      return resolver;
+    } finally {
+      _pendingRefresh = null;
+    }
+  })();
+  return _pendingRefresh;
+}
+
+/**
+ * Narrow detection for `jose`'s `JWKSNoMatchingKey` error — the signal that
+ * the token header carries a `kid` our cached keyset does not know. We
+ * cannot `instanceof JWKSNoMatchingKey` because jose's error classes are
+ * stable via `.code` only.
+ */
+function isUnknownKidError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    "code" in err &&
+    (err as { code?: string }).code === "ERR_JWKS_NO_MATCHING_KEY"
+  );
 }
 
 /**
@@ -65,42 +125,72 @@ async function getJwks(): Promise<JwksResolver> {
  *
  * Pass `deps.jwks` to inject a pre-built resolver (unit tests that pin a
  * specific keypair without rebuilding the Better Auth singleton). Production
- * callers pass nothing and get the cached in-process / remote resolver.
+ * callers pass nothing and get the TTL-cached in-process resolver, with an
+ * automatic one-shot refresh if jose reports an unknown `kid`.
  */
 export async function verifyEndUserAccessToken(
   token: string,
   deps?: { jwks?: JwksResolver },
 ): Promise<EndUserClaims | null> {
+  const env = getEnv();
+  // Better Auth's oauth-provider plugin mints tokens with `iss` set to
+  // `${baseURL}${basePath}` — in this codebase that is `${APP_URL}/api/auth`
+  // (see `packages/db/src/auth.ts` basePath). Verifying against `APP_URL`
+  // alone rejects every real token.
+  const issuer = `${env.APP_URL}/api/auth`;
+  // Audience validation matches `validAudiences` in `auth/plugins.ts` —
+  // RFC 8707 enforcement already happens at the token endpoint via
+  // `oidcGuardsPlugin`, but the local verifier adds defense-in-depth so
+  // a future plugin update that mints tokens with an unexpected `aud`
+  // cannot slip through unchecked.
+  const audience = [env.APP_URL, `${env.APP_URL}/api/auth`];
+
+  const tryVerify = async (jwks: JwksResolver) =>
+    jose.jwtVerify(token, jwks, { issuer, audience, algorithms: ["ES256"] });
+
+  let payload: jose.JWTPayload;
   try {
-    const env = getEnv();
-    // Better Auth's oauth-provider plugin mints tokens with `iss` set to
-    // `${baseURL}${basePath}` — in this codebase that is `${APP_URL}/api/auth`
-    // (see `packages/db/src/auth.ts` basePath). Verifying against `APP_URL`
-    // alone rejects every real token.
     const jwks = deps?.jwks ?? (await getJwks());
-    // Audience validation matches `validAudiences` in `auth/plugins.ts` —
-    // RFC 8707 enforcement already happens at the token endpoint via
-    // `oidcGuardsPlugin`, but the local verifier adds defense-in-depth so
-    // a future plugin update that mints tokens with an unexpected `aud`
-    // cannot slip through unchecked.
-    const { payload } = await jose.jwtVerify(token, jwks, {
-      issuer: `${env.APP_URL}/api/auth`,
-      audience: [env.APP_URL, `${env.APP_URL}/api/auth`],
-      algorithms: ["ES256"],
-    });
-    if (!payload.sub) return null;
-    const extra = payload as Record<string, unknown>;
-    return {
-      authUserId: payload.sub,
-      endUserId: typeof extra.endUserId === "string" ? extra.endUserId : undefined,
-      applicationId: typeof extra.applicationId === "string" ? extra.applicationId : undefined,
-      email: typeof extra.email === "string" ? extra.email : undefined,
-      name: typeof extra.name === "string" ? extra.name : undefined,
-      scope: typeof extra.scope === "string" ? extra.scope : undefined,
-    };
-  } catch {
-    return null;
+    ({ payload } = await tryVerify(jwks));
+  } catch (err) {
+    // Unknown-kid path: refresh the keyset once and retry. Handles the
+    // 7-day rotation grace window — after rotation, clients continue to
+    // present tokens signed by the old key for a few minutes until the
+    // new kid propagates through our TTL, so a single refetch restores
+    // steady-state verification without waiting on the TTL expiry.
+    //
+    // Skipped when the caller injected their own `deps.jwks` (tests) —
+    // they own their key lifecycle and a refetch would defeat the DI.
+    if (!deps?.jwks && isUnknownKidError(err)) {
+      try {
+        const refreshed = await getJwks({ forceRefresh: true });
+        ({ payload } = await tryVerify(refreshed));
+      } catch (retryErr) {
+        logger.debug("oidc: verifyEndUserAccessToken retry-after-refresh failed", {
+          module: "oidc",
+          error: retryErr instanceof Error ? retryErr.message : String(retryErr),
+        });
+        return null;
+      }
+    } else {
+      logger.debug("oidc: verifyEndUserAccessToken failed", {
+        module: "oidc",
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
   }
+
+  if (!payload.sub) return null;
+  const extra = payload as Record<string, unknown>;
+  return {
+    authUserId: payload.sub,
+    endUserId: typeof extra.endUserId === "string" ? extra.endUserId : undefined,
+    applicationId: typeof extra.applicationId === "string" ? extra.applicationId : undefined,
+    email: typeof extra.email === "string" ? extra.email : undefined,
+    name: typeof extra.name === "string" ? extra.name : undefined,
+    scope: typeof extra.scope === "string" ? extra.scope : undefined,
+  };
 }
 
 /**
@@ -114,5 +204,6 @@ export async function verifyEndUserAccessToken(
  * use the `deps.jwks` param on `verifyEndUserAccessToken` for DI.
  */
 export function overrideJwksResolver(resolver: JwksResolver | null): void {
-  _jwks = resolver;
+  _cache = resolver ? { resolver, expiresAt: Date.now() + JWKS_CACHE_TTL_MS } : null;
+  _pendingRefresh = null;
 }

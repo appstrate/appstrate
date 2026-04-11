@@ -191,12 +191,20 @@ export function getModulePublicPaths(): Set<string> {
   return new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
 }
 
-/** Collect routers from all modules and mount them on the app under `/api`. */
+/**
+ * Collect routers from all modules and mount them at the HTTP origin root
+ * (`/`). Modules declare their routes with their full paths (`/api/...`
+ * for business endpoints, `/.well-known/...` for RFC-specified well-known
+ * URIs) — the platform does NOT inject an `/api` prefix.
+ *
+ * Mount order: MUST be called BEFORE the SPA static fallback / `/*`
+ * catch-all, otherwise the catch-all shadows every module-owned path.
+ */
 export function registerModuleRoutes(app: Hono<AppEnv>): void {
   for (const mod of _modules.values()) {
     const router = mod.createRouter?.();
     if (router) {
-      app.route("/api", router);
+      app.route("/", router);
     }
   }
 }
@@ -297,11 +305,32 @@ export function collectModuleContributions(
 ): ModuleContributions {
   const betterAuthPlugins: unknown[] = [];
   const drizzleSchemas: Record<string, unknown> = {};
+  // Provenance map: model name → module id that contributed it. Enables a
+  // clear error message at boot when two modules declare the same Drizzle
+  // model. Without this guard, `Object.assign` silently overwrites the
+  // first contribution and a Better Auth plugin's `findOne({ model })`
+  // call resolves to the wrong table — a nasty class of silent override
+  // that only surfaces at runtime on the hot path.
+  const modelProvenance: Record<string, string> = {};
   for (const mod of modules) {
     const plugins = mod.betterAuthPlugins?.();
     if (plugins) betterAuthPlugins.push(...plugins);
     const schemas = mod.drizzleSchemas?.();
-    if (schemas) Object.assign(drizzleSchemas, schemas);
+    if (schemas) {
+      for (const modelName of Object.keys(schemas)) {
+        const existing = modelProvenance[modelName];
+        if (existing && existing !== mod.manifest.id) {
+          throw new Error(
+            `Duplicate Drizzle model "${modelName}" contributed by both "${existing}" and ` +
+              `"${mod.manifest.id}". Two modules cannot expose the same Better Auth model name ` +
+              `— the second contribution would silently overwrite the first and break plugin ` +
+              `table resolution. Rename one of the models in the offending module's schema.ts.`,
+          );
+        }
+        modelProvenance[modelName] = mod.manifest.id;
+      }
+      Object.assign(drizzleSchemas, schemas);
+    }
   }
   return { betterAuthPlugins, drizzleSchemas };
 }

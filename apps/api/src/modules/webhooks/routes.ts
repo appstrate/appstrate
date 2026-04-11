@@ -46,7 +46,7 @@ export function createWebhooksRouter() {
 
   // POST /api/webhooks — create a webhook (returns secret once)
   router.post(
-    "/webhooks",
+    "/api/webhooks",
     rateLimit(10),
     idempotency(),
     requirePermission("webhooks", "write"),
@@ -68,7 +68,7 @@ export function createWebhooksRouter() {
   );
 
   // GET /api/webhooks — list webhooks for the current application
-  router.get("/webhooks", rateLimit(300), requirePermission("webhooks", "read"), async (c) => {
+  router.get("/api/webhooks", rateLimit(300), requirePermission("webhooks", "read"), async (c) => {
     const orgId = c.get("orgId");
     const applicationId = c.get("applicationId");
     const result = await listWebhooks(orgId, applicationId);
@@ -76,27 +76,37 @@ export function createWebhooksRouter() {
   });
 
   // GET /api/webhooks/:id — get webhook detail
-  router.get("/webhooks/:id", rateLimit(300), requirePermission("webhooks", "read"), async (c) => {
-    const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
-    const result = await getWebhook(orgId, applicationId, c.req.param("id")!);
-    return c.json(result);
-  });
+  router.get(
+    "/api/webhooks/:id",
+    rateLimit(300),
+    requirePermission("webhooks", "read"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const applicationId = c.get("applicationId");
+      const result = await getWebhook(orgId, applicationId, c.req.param("id")!);
+      return c.json(result);
+    },
+  );
 
   // PUT /api/webhooks/:id — update webhook (url, events, filters — not secret)
-  router.put("/webhooks/:id", rateLimit(10), requirePermission("webhooks", "write"), async (c) => {
-    const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
-    const body = await c.req.json();
-    const data = parseBody(updateWebhookSchema, body);
+  router.put(
+    "/api/webhooks/:id",
+    rateLimit(10),
+    requirePermission("webhooks", "write"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const applicationId = c.get("applicationId");
+      const body = await c.req.json();
+      const data = parseBody(updateWebhookSchema, body);
 
-    const result = await updateWebhook(orgId, applicationId, c.req.param("id")!, data);
-    return c.json(result);
-  });
+      const result = await updateWebhook(orgId, applicationId, c.req.param("id")!, data);
+      return c.json(result);
+    },
+  );
 
   // DELETE /api/webhooks/:id — delete webhook
   router.delete(
-    "/webhooks/:id",
+    "/api/webhooks/:id",
     rateLimit(10),
     requirePermission("webhooks", "delete"),
     async (c) => {
@@ -109,7 +119,7 @@ export function createWebhooksRouter() {
 
   // POST /api/webhooks/:id/test — send a synthetic test.ping event
   router.post(
-    "/webhooks/:id/test",
+    "/api/webhooks/:id/test",
     rateLimit(5),
     requirePermission("webhooks", "write"),
     async (c) => {
@@ -131,7 +141,7 @@ export function createWebhooksRouter() {
 
   // POST /api/webhooks/:id/rotate — rotate secret (24h grace period)
   router.post(
-    "/webhooks/:id/rotate",
+    "/api/webhooks/:id/rotate",
     rateLimit(5),
     requirePermission("webhooks", "write"),
     async (c) => {
@@ -144,7 +154,7 @@ export function createWebhooksRouter() {
 
   // GET /api/webhooks/:id/deliveries — delivery history
   router.get(
-    "/webhooks/:id/deliveries",
+    "/api/webhooks/:id/deliveries",
     rateLimit(300),
     requirePermission("webhooks", "read"),
     async (c) => {

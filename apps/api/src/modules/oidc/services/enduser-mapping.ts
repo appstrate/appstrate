@@ -113,6 +113,26 @@ export class UnverifiedEmailConflictError extends Error {
  * (kept for the integration tests and any caller that hasn't threaded the
  * middleware-resolved `app` through yet — the function loads the row itself
  * and throws a clear error if the application is missing).
+ *
+ * ## Race-safety invariant
+ *
+ * Two concurrent token-mint closures for the same `authUser.id` +
+ * `applicationId` are race-safe without a top-level transaction because
+ * each step is individually atomic:
+ *
+ *  1. `findLinkedEndUser` — single SELECT. Idempotent.
+ *  2. `adoptEndUserByEmail` — SELECT then `linkProfileAtomic` which is an
+ *     upsert with `WHERE auth_user_id IS NULL`. Only one caller wins; the
+ *     loser re-fetches via step 1.
+ *  3. `createEndUser` — INSERT `end_users` + INSERT `oidc_end_user_profiles`
+ *     wrapped in `db.transaction()`. If the email index collides (another
+ *     concurrent insert won), the whole transaction rolls back and we
+ *     retry from step 1.
+ *
+ * A single enveloping transaction would NOT make this safer — two
+ * concurrent SERIALIZABLE transactions doing the same SELECT-then-INSERT
+ * still collide at commit time. The retry-on-unique-violation pattern
+ * below is the correct concurrent-insert idiom.
  */
 export async function resolveOrCreateEndUser(
   authUser: AuthIdentity,
@@ -264,6 +284,18 @@ async function linkProfileAtomic(endUserId: string, authUserId: string): Promise
   return rows.length > 0;
 }
 
+/**
+ * Atomically create a new `end_users` row + companion
+ * `oidc_end_user_profiles` row in a single DB transaction. If the profile
+ * insert fails, the end-user insert is rolled back so we never leave a
+ * dangling `end_users` row with no shadow profile.
+ *
+ * On unique-constraint violation (another concurrent sign-in won the race
+ * and created the same email/authUserId first), we fall through to
+ * `findLinkedEndUser` / `adoptEndUserByEmail` — the committed row from the
+ * other transaction is now visible and the resolution completes without
+ * a duplicate.
+ */
 async function createEndUser(authUser: AuthIdentity, app: AppContextRow): Promise<ResolvedEndUser> {
   const applicationId = app.id;
   const endUserId = prefixedId("eu");
@@ -271,36 +303,38 @@ async function createEndUser(authUser: AuthIdentity, app: AppContextRow): Promis
   const now = new Date();
 
   try {
-    const inserted = await db
-      .insert(endUsers)
-      .values({
-        id: endUserId,
-        applicationId,
-        orgId: app.orgId,
-        externalId: email, // OIDC-created end-users use email as externalId by default
-        email,
-        name: authUser.name ?? email,
+    const row = await db.transaction(async (tx) => {
+      const inserted = await tx
+        .insert(endUsers)
+        .values({
+          id: endUserId,
+          applicationId,
+          orgId: app.orgId,
+          externalId: email, // OIDC-created end-users use email as externalId by default
+          email,
+          name: authUser.name ?? email,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({
+          endUserId: endUsers.id,
+          applicationId: endUsers.applicationId,
+          orgId: endUsers.orgId,
+          email: endUsers.email,
+          name: endUsers.name,
+        });
+      if (inserted.length === 0) {
+        throw new Error("OIDC: failed to create end-user row");
+      }
+      await tx.insert(oidcEndUserProfiles).values({
+        endUserId,
+        authUserId: authUser.id,
+        emailVerified: authUser.emailVerified === true,
+        status: "active",
         createdAt: now,
         updatedAt: now,
-      })
-      .returning({
-        endUserId: endUsers.id,
-        applicationId: endUsers.applicationId,
-        orgId: endUsers.orgId,
-        email: endUsers.email,
-        name: endUsers.name,
       });
-    if (inserted.length === 0) {
-      throw new Error("OIDC: failed to create end-user row");
-    }
-    const row = inserted[0]!;
-    await db.insert(oidcEndUserProfiles).values({
-      endUserId,
-      authUserId: authUser.id,
-      emailVerified: authUser.emailVerified === true,
-      status: "active",
-      createdAt: now,
-      updatedAt: now,
+      return inserted[0]!;
     });
     logger.info("Created end-user via OIDC", {
       module: "oidc",
@@ -311,6 +345,9 @@ async function createEndUser(authUser: AuthIdentity, app: AppContextRow): Promis
     return row;
   } catch (err) {
     // Unique-constraint race on the email index → re-run step 1, then step 2.
+    // The losing transaction was rolled back wholesale (end_users + profile
+    // row both absent), so we retry against the committed state of the
+    // winning transaction.
     if (isUniqueViolation(err)) {
       const linked = await findLinkedEndUser(authUser.id, applicationId);
       if (linked) return linked;

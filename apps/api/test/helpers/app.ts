@@ -175,7 +175,11 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/end-users", createEndUsersRouter());
   for (const mod of extraModules) {
     const moduleRouter = mod.createRouter?.();
-    if (moduleRouter) app.route("/api", moduleRouter);
+    // Modules mount at the HTTP origin root — they declare full paths
+    // (`/api/*` for business endpoints, `/.well-known/*` for RFC-specified
+    // well-known URIs). Matches production wiring in
+    // `apps/api/src/index.ts` → `registerModuleRoutes`.
+    if (moduleRouter) app.route("/", moduleRouter);
   }
   app.route("/api/providers", createProvidersRouter());
   app.route("/api/api-keys", createApiKeysRouter());

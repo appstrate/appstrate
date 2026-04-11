@@ -152,7 +152,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // module's proxy, which calls `auth.api.getOpenIdConfig()`
     // programmatically. We hit the module-scoped alias here; it is the
     // canonical path satellites should auto-configure against.
-    const res = await app.request("/api/.well-known/openid-configuration");
+    const res = await app.request("/.well-known/openid-configuration");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       issuer: string;

@@ -8,7 +8,7 @@ When an embedding app needs to delegate end-user authentication to Appstrate, th
 
 ## Phase 1 status
 
-Phase 1 is **complete**. All seven stages shipped, including token-issuance plugin wiring via `@better-auth/oauth-provider` (Stage 5.5), CSRF-hardened login + consent POST handlers, discovery alias endpoints, per-application email branding, and the end-to-end Authorization Code + PKCE test suite. The module is now a fully functional OAuth 2.1 / OIDC authorization server for Appstrate applications.
+Phase 1 is **complete**. Token-issuance plugin wiring via `@better-auth/oauth-provider`, CSRF-hardened login + consent POST handlers, discovery alias endpoints, per-application email branding, and the end-to-end Authorization Code + PKCE test suite are all in place. The module is a fully functional OAuth 2.1 / OIDC authorization server for Appstrate applications.
 
 ## Owned tables
 
@@ -22,6 +22,32 @@ Phase 1 is **complete**. All seven stages shipped, including token-issuance plug
 | `oidc_end_user_profiles` | Shadow table linking `end_users.id` ↔ Better Auth `user.id` + verification status + `active` / `pending_verification` / `suspended` status |
 
 The core `end_users` table is NEVER modified by this module — all OIDC-specific fields live on the shadow table. Core runs filtering continues to strict-filter by `end_users.id` alone.
+
+### The `oidc_end_user_profiles` shadow table
+
+Core's `end_users` table has zero OIDC vocabulary by design (Phase 0 invariant — no `authUserId`, no `emailVerified`, no OIDC status). Every OIDC-specific field the module needs to track about an end-user lives on this shadow table, keyed by `end_user_id`:
+
+```
+oidc_end_user_profiles
+  end_user_id     text PK / FK → end_users.id
+  auth_user_id    text? FK → user.id (Better Auth)   -- nullable: API-created end-users have no auth identity yet
+  status          enum("active", "pending_verification", "suspended")
+  email_verified  boolean                              -- tracks whether the auth identity verified the email
+  created_at      timestamp
+  updated_at      timestamp
+```
+
+### Three-step link-or-create (`resolveOrCreateEndUser`)
+
+When an end-user authenticates via the OIDC flow, the module resolves the application-scoped `end_users` row in three ordered steps:
+
+1. **Linked** — INNER JOIN `end_users ⋈ oidc_end_user_profiles` on `auth_user_id` + `applicationId`. If a profile already links this Better Auth identity to an end-user in this app, return it. Single SELECT, idempotent.
+2. **Adopt by verified email** — If the auth identity's email is **strictly** verified (`emailVerified === true`), look for an API-created `end_users` row in this app with the same email and no profile row yet (or a profile row with `auth_user_id IS NULL`). If found, link it via `linkProfileAtomic()` (upsert with `WHERE auth_user_id IS NULL`, so only one caller wins the race; the loser falls back to step 1 on the next call).
+3. **Create fresh** — Insert a new `end_users` row + companion `oidc_end_user_profiles` row in a single `db.transaction()` so the shadow row can never be missing. On unique-index violation (another concurrent sign-in committed first), retry from step 1.
+
+### `UnverifiedEmailConflictError`
+
+Thrown in step 2 when an `end_users` row with the same email already exists in the application **and** the authenticating identity has not strictly verified the email address. Rather than silently create a duplicate or adopt the row (either would enable account takeover when SMTP verification is disabled), the module refuses and propagates the error all the way up to `customAccessTokenClaims` → the plugin's `/oauth2/consent` endpoint → the module's consent handler, which catches it and renders an FR error page asking the user to verify their email before logging in. Unverified-email attempts therefore fail loudly at the edge, never at a later scoped request.
 
 ## Feature flag
 
@@ -39,12 +65,12 @@ Frontend reads `useAppConfig().features.oidc` to conditionally show the OAuth ta
 publicPaths: [
   "/api/oauth/enduser/login",
   "/api/oauth/enduser/consent",
-  "/api/.well-known/openid-configuration",
-  "/api/.well-known/oauth-authorization-server",
+  "/.well-known/openid-configuration",
+  "/.well-known/oauth-authorization-server",
 ];
 ```
 
-The login and consent pages are anonymous — they validate `client_id` against the `oauth_client` registry before rendering. Any unknown or disabled client id returns 404 before the HTML is assembled. The root-level discovery alias endpoints proxy Better Auth's authoritative `/api/auth/.well-known/*` payloads so OIDC clients can auto-configure from the root of the issuer URL.
+The login and consent pages are anonymous — they validate `client_id` against the `oauth_client` registry before rendering. Any unknown or disabled client id returns 404 before the HTML is assembled. The `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server` endpoints are served at the HTTP origin root (RFC 5785 / RFC 8414 compliant) — the module router is mounted at `/`, not `/api`, so the module can register any path its routes need. Real-world OIDC client libraries look for discovery at this exact location without applying any path-insertion rules.
 
 ## App-scoped route prefixes
 
@@ -56,21 +82,22 @@ Client admin routes (`/api/oauth/clients*`) require `X-App-Id`.
 
 ## Routes
 
-| Method | Path                                    | Permission             | Purpose                                                                                                                                         |
-| ------ | --------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/oauth/clients`                    | `oauth-clients:write`  | Register a new client. Returns plaintext `clientSecret` once.                                                                                   |
-| GET    | `/api/oauth/clients`                    | `oauth-clients:read`   | List clients for the current app.                                                                                                               |
-| GET    | `/api/oauth/clients/:clientId`          | `oauth-clients:read`   | Get one client (secret hidden).                                                                                                                 |
-| PATCH  | `/api/oauth/clients/:clientId`          | `oauth-clients:write`  | Update `redirectUris` / `disabled`.                                                                                                             |
-| DELETE | `/api/oauth/clients/:clientId`          | `oauth-clients:delete` | Delete a client.                                                                                                                                |
-| POST   | `/api/oauth/clients/:clientId/rotate`   | `oauth-clients:write`  | Issue a fresh plaintext secret.                                                                                                                 |
-| GET    | `/api/oauth/enduser/login`              | public                 | Server-rendered login form. Validates `client_id`, loads app branding, issues a one-shot CSRF token paired with an httpOnly `oidc_csrf` cookie. |
-| POST   | `/api/oauth/enduser/login`              | public                 | Verifies CSRF, calls `auth.api.signInEmail`, redirects to `/api/auth/oauth2/authorize` on success (preserving the signed query string).         |
-| GET    | `/api/oauth/enduser/consent`            | public                 | Server-rendered consent form with app branding + scope descriptions + CSRF token.                                                               |
-| POST   | `/api/oauth/enduser/consent`            | public                 | Verifies CSRF, calls `auth.api.oauth2Consent` (accept/deny), forwards the plugin's redirect response.                                           |
-| GET    | `/api/.well-known/openid-configuration` | public                 | OIDC discovery alias proxying Better Auth's metadata endpoint for strict OIDC clients.                                                          |
+| Method | Path                                      | Permission             | Purpose                                                                                                                                         |
+| ------ | ----------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/oauth/clients`                      | `oauth-clients:write`  | Register a new client. Returns plaintext `clientSecret` once.                                                                                   |
+| GET    | `/api/oauth/clients`                      | `oauth-clients:read`   | List clients for the current app.                                                                                                               |
+| GET    | `/api/oauth/clients/:clientId`            | `oauth-clients:read`   | Get one client (secret hidden).                                                                                                                 |
+| PATCH  | `/api/oauth/clients/:clientId`            | `oauth-clients:write`  | Update `redirectUris` / `disabled`.                                                                                                             |
+| DELETE | `/api/oauth/clients/:clientId`            | `oauth-clients:delete` | Delete a client.                                                                                                                                |
+| POST   | `/api/oauth/clients/:clientId/rotate`     | `oauth-clients:write`  | Issue a fresh plaintext secret.                                                                                                                 |
+| GET    | `/api/oauth/enduser/login`                | public                 | Server-rendered login form. Validates `client_id`, loads app branding, issues a one-shot CSRF token paired with an httpOnly `oidc_csrf` cookie. |
+| POST   | `/api/oauth/enduser/login`                | public                 | Verifies CSRF, calls `auth.api.signInEmail`, redirects to `/api/auth/oauth2/authorize` on success (preserving the signed query string).         |
+| GET    | `/api/oauth/enduser/consent`              | public                 | Server-rendered consent form with app branding + scope descriptions + CSRF token.                                                               |
+| POST   | `/api/oauth/enduser/consent`              | public                 | Verifies CSRF, calls `auth.api.oauth2Consent` (accept/deny), forwards the plugin's redirect response.                                           |
+| GET    | `/.well-known/openid-configuration`       | public                 | RFC-compliant OIDC discovery document at the HTTP origin root. Proxies `auth.api.getOpenIdConfig`.                                              |
+| GET    | `/.well-known/oauth-authorization-server` | public                 | RFC 8414 authorization server metadata at the HTTP origin root. Proxies `auth.api.getOAuthServerConfig`.                                        |
 
-`oauth-clients` is a new core RBAC resource added to `apps/api/src/lib/permissions.ts` in the same PR as Stage 4 (per CLAUDE.md: modules that introduce new RBAC resources must edit `permissions.ts` alongside).
+`oauth-clients` is a core RBAC resource added to `apps/api/src/lib/permissions.ts` in the same PR (per CLAUDE.md: modules that introduce new RBAC resources must edit `permissions.ts` alongside).
 
 ## Auth strategy contributed
 
@@ -140,12 +167,12 @@ Colors are validated by `AppBrandingSchema` at resolve time, so a misconfigured 
 
 ## Security notes
 
-- **JWKS rotation**: once Stage 5.5 wires the `jwt` plugin, it auto-rotates the ES256 keypair every 90 days with a 7-day grace window. Clients that cache JWKS for longer may see transient verification failures at rotation time.
+- **JWKS rotation**: the Better Auth `jwt` plugin auto-rotates the ES256 keypair every 90 days with a 7-day grace window. Internally, `services/enduser-token.ts` caches the parsed keyset for 5 minutes and eagerly refetches on any `ERR_JWKS_NO_MATCHING_KEY` from `jose`, so key rotation propagates to verification within one token-verify cycle — no process restart required. External clients that cache the JWKS document directly should stay under a 5-minute ceiling for the same reason.
 - **Client secret hashing**: secrets are stored as 64-char hex SHA-256 hashes; the plaintext is returned exactly once on create and rotate. No "show secret" UI — lose it and rotate.
 - **Unverified email guard**: `resolveOrCreateEndUser` throws `UnverifiedEmailConflictError` when an auth identity with an unverified email clashes with an existing `end_users` row in the same application. This prevents silent account takeover via SMTP verification being disabled or an auth provider reporting `emailVerified: false`.
 - **`reference_id` → `applicationId` invariant**: every OAuth client row carries a `reference_id` matching an existing `applications.id`. The admin route enforces this on create, and the auth strategy double-checks `endUser.applicationId === claims.applicationId` on every request.
 - **Admin bypass is not shipped**: Phase 0 made core runs filtering strict with no hook. Embedding apps that want an "admin sees all runs" view authenticate admins via API key (no `endUser` in context), not via an OIDC JWT. See `apps/api/src/modules/README.md` for the end-user run-visibility contract.
-- **Production guards plugin** (`auth/guards.ts`): a small Better Auth plugin mounted before `@better-auth/oauth-provider` that uses `hooks.before` on `/oauth2/token`, `/oauth2/authorize`, `/oauth2/introspect`, `/oauth2/revoke` to (1) enforce RFC 8707 resource indicators on token requests and (2) rate-limit each endpoint per client IP via the shared `rate-limiter-flexible` Redis backend. Limits: token 30/min, authorize 30/min, introspect 60/min, revoke 60/min. Rejections surface as `better-call` `APIError` → OAuth2-shaped 400/429 bodies.
+- **Production guards plugin** (`auth/guards.ts`): a small Better Auth plugin mounted before `@better-auth/oauth-provider` that uses `hooks.before` on `/oauth2/token`, `/oauth2/authorize`, `/oauth2/introspect`, `/oauth2/revoke` to (1) enforce RFC 8707 resource indicators on token requests and (2) rate-limit each endpoint via the shared `rate-limiter-flexible` Redis backend. Limits: token 30/min/IP + 20/min/`client_id` (brute-force protection against distributed attacks or XFF-spoofed sources), authorize 30/min/IP, introspect 60/min/IP, revoke 60/min/IP. The login POST also has a per-email limit of 5 attempts / 15 min. The guards plugin deliberately supersedes `@better-auth/oauth-provider`'s own `rateLimit` config so there is only one limiter chain — see `auth/plugins.ts` for why. Rejections surface as `better-call` `APIError` → OAuth2-shaped 400/429 bodies.
 
 ## Production deployment checklist
 
@@ -155,7 +182,8 @@ Before exposing the module to external satellites:
 - **Rate-limit backend must be Redis** in multi-instance deployments: the guards plugin uses `getRateLimiterFactory()` which falls back to in-memory when `REDIS_URL` is unset. In-memory limits are per-instance and trivially bypassed by round-robin.
 - **Audit log shipping**: the consent POST handler emits `logger.info("oidc: consent decision", { audit: true, ... })` on every accept/deny. Route `module=oidc audit=true` log lines to your SIEM / compliance storage for the full decision trail (RGPD proof-of-consent).
 - **JWKS rotation**: Better Auth's `jwt` plugin auto-rotates the ES256 keypair every 90 days with a 7-day grace window. Satellites that cache JWKS for longer WILL see transient `invalid_signature` errors. Document a 7-day cache ceiling in your satellite integration guide.
-- **`resource` parameter is now enforced**: `/oauth2/token` rejects `authorization_code` / `refresh_token` grants without a whitelisted `resource=` parameter. This is a **compat-break** vs. earlier Stage 5.5 builds which silently issued opaque tokens — satellites that previously "worked" (received opaque tokens) now fail fast with a diagnosable 400. See the satellite integration example below for the correct shape.
+- **`resource` parameter is now enforced**: `/oauth2/token` rejects `authorization_code` / `refresh_token` grants without a whitelisted `resource=` parameter. This is a **compat-break** vs. earlier builds which silently issued opaque tokens — satellites that previously "worked" (received opaque tokens) now fail fast with a diagnosable 400. See the satellite integration example below for the correct shape.
+- **`TRUST_PROXY` must match the deployment topology**: the OIDC rate limiters key on client IP, read via `lib/client-ip.ts` → `getClientIpFromRequest()`. That helper returns `X-Forwarded-For` when `TRUST_PROXY` is `"true"` or a positive integer, otherwise it falls back to the socket peer. If `TRUST_PROXY` is enabled but any hop between the public internet and the app does not strip untrusted XFF, an attacker can spoof the header and bypass per-IP limits. The per-`client_id` limiter on `/oauth2/token` is the defense-in-depth for this scenario — but do not rely on it alone: set `TRUST_PROXY` correctly for your topology (default `"false"` is the safe choice when in doubt).
 
 ## Satellite integration example
 

@@ -57,8 +57,27 @@ export interface AppstrateModule {
   appScopedPaths?: string[];
 
   /**
-   * Create and return a Hono router to be mounted on the app under `/api`.
-   * The platform calls `app.route("/api", router)` with the returned instance.
+   * Create and return a Hono router to be mounted at the HTTP origin root
+   * (`/`). The router declares its routes with their **full paths** — the
+   * platform does NOT inject an `/api` prefix.
+   *
+   * Convention: business endpoints MUST live under `/api/*` to stay
+   * consistent with core (e.g. `/api/webhooks`, `/api/oauth/clients`).
+   * The only paths that legitimately live outside `/api/*` are those
+   * whose location is dictated by an external specification — RFC 5785
+   * well-known URIs (`/.well-known/openid-configuration`,
+   * `/.well-known/oauth-authorization-server`), `robots.txt`, etc.
+   *
+   * Route paths declared here must match the entries the module lists in
+   * `publicPaths` and `appScopedPaths` (which also use full paths). Two
+   * modules cannot register the same path — collisions surface as Hono
+   * first-match-wins silent shadowing, so authors are responsible for
+   * keeping prefixes distinct.
+   *
+   * Mount order: the platform calls `app.route("/", router)` for each
+   * module **before** the SPA static fallback, so module-owned paths take
+   * precedence over the SPA catch-all. Modules that return `undefined`
+   * contribute nothing — the OSS zero-footprint invariant is preserved.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createRouter?(): Hono<any>;

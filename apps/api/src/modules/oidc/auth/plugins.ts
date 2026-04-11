@@ -64,9 +64,25 @@ export function oidcBetterAuthPlugins(): unknown[] {
   const validAudiences = [env.APP_URL, `${env.APP_URL}/api/auth`];
   return [
     // Guards must run BEFORE oauth-provider so that `hooks.before` can
-    // reject malformed token/authorize requests and enforce per-IP rate
-    // limits before any opaque token is minted or client_secret is
-    // probed. See `guards.ts` for the full rationale.
+    // reject malformed token/authorize requests and enforce rate limits
+    // before any opaque token is minted or client_secret is probed.
+    //
+    // Note: `@better-auth/oauth-provider` exposes its own `rateLimit`
+    // config option. We deliberately do NOT set it — the guards plugin
+    // supersedes it for three reasons:
+    //   1. The guards plugin uses the shared `rate-limiter-flexible`
+    //      Redis backend that the rest of the API already relies on,
+    //      so limits are distributed across instances (the plugin's
+    //      built-in limiter is per-process).
+    //   2. We need a per-email brute-force limit on the login page
+    //      (`rl:oidc:login-email:`) that the plugin's config doesn't
+    //      support — keyed on email, not endpoint.
+    //   3. We need a per-`client_id` brute-force limit on `/oauth2/token`
+    //      on top of the per-IP limit, which the plugin's flat config
+    //      also doesn't support.
+    // Wiring `opts.rateLimit` in addition to the guards would stack two
+    // independent limiters and produce confusing behavior. See
+    // `guards.ts` for the full rationale + limit table.
     oidcGuardsPlugin({ validAudiences }),
     // JWT plugin MUST be present before oauth-provider so that token
     // signing uses ES256 keys rotated through the module-owned `jwks`

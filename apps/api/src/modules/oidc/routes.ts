@@ -25,9 +25,8 @@ import { requirePermission } from "../../middleware/require-permission.ts";
 import { parseBody, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
-import { isBlockedUrl } from "@appstrate/core/ssrf";
-import { isDevEnvironment, LOCALHOST_HOSTS } from "../../services/redirect-validation.ts";
 import { db } from "@appstrate/db/client";
+import { user } from "@appstrate/db/schema";
 import { oauthClient } from "./schema.ts";
 import {
   listClientsForApp,
@@ -37,60 +36,47 @@ import {
   rotateClientSecret,
   setClientDisabled,
   updateClientRedirectUris,
+  OAuthAdminValidationError,
 } from "./services/oauth-admin.ts";
+import { isValidRedirectUri } from "./services/redirect-uri.ts";
 import { resolveAppBranding } from "./services/branding.ts";
 import { issueCsrfToken, verifyCsrfToken } from "./services/csrf.ts";
 import { getOidcAuthApi } from "./auth/api.ts";
 import { APPSTRATE_SCOPES } from "./auth/scopes.ts";
 import { consumeLoginEmailAttempt, resetLoginEmailAttempts } from "./auth/guards.ts";
-import { UnverifiedEmailConflictError } from "./services/enduser-mapping.ts";
+import {
+  UnverifiedEmailConflictError,
+  resolveOrCreateEndUser,
+  loadAppById,
+} from "./services/enduser-mapping.ts";
 import { renderLoginPage } from "./pages/login.ts";
 import { renderConsentPage } from "./pages/consent.ts";
-
-/**
- * Validate an OAuth `redirect_uri` candidate.
- *
- * Defense layers (in order):
- * 1. Must parse as an absolute URL.
- * 2. Scheme must be `https:` — `http:` is only allowed when pointing at
- *    `localhost`/`127.0.0.1` AND the platform itself is running in dev
- *    mode (`APP_URL` is HTTP/localhost). Production cannot register HTTP
- *    redirect URIs at all.
- * 3. Host must not resolve to a blocked network: SSRF targets (RFC1918,
- *    link-local `169.254.0.0/16`, cloud metadata, loopback in production,
- *    IPv6 variants), `javascript:`/`data:`/`file:` schemes. Enforced via
- *    `@appstrate/core/ssrf:isBlockedUrl`, which is the same helper used by
- *    the webhooks delivery path.
- *
- * Dev-mode localhost is explicitly re-allowed after the SSRF check so
- * satellites can register `http://localhost:5173/callback` etc. during
- * local development — only when `APP_URL` is itself a localhost URL.
- */
-function isValidRedirectUri(raw: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    return false;
-  }
-  const isLocalhost = LOCALHOST_HOSTS.has(parsed.hostname);
-  if (parsed.protocol === "https:") {
-    return !isBlockedUrl(raw);
-  }
-  if (parsed.protocol === "http:" && isLocalhost && isDevEnvironment()) {
-    return true;
-  }
-  return false;
-}
 
 const redirectUriSchema = z
   .url("redirectUris must be valid URLs")
   .refine(isValidRedirectUri, "redirectUri scheme or host is not allowed");
 
+// Scope whitelist — only values the module actually advertises via
+// `APPSTRATE_SCOPES` (identity scopes + `OIDC_ALLOWED_SCOPES` from core
+// permissions) can be registered on a client. Because the admin CRUD
+// bypasses `auth.api.adminCreateOAuthClient` (see `services/oauth-admin.ts`
+// header comment), the plugin's own scope validation never runs — any
+// arbitrary string passed through here would end up in the access token
+// claims and be translated to RBAC permissions by `scopesToPermissions()`.
+// Enforcing the enum at the edge is the only place scope integrity is
+// guaranteed for admin-created clients.
+const APPSTRATE_SCOPE_SET = new Set(APPSTRATE_SCOPES);
+const allowedScopeSchema = z
+  .string()
+  .min(1)
+  .refine((s) => APPSTRATE_SCOPE_SET.has(s), {
+    message: `scope must be one of the supported values (see GET /api/oauth/scopes)`,
+  });
+
 export const createOAuthClientSchema = z.object({
   name: z.string().min(1, "name is required").max(200),
   redirectUris: z.array(redirectUriSchema).min(1),
-  scopes: z.array(z.string().min(1)).optional(),
+  scopes: z.array(allowedScopeSchema).optional(),
 });
 
 export const updateOAuthClientSchema = z.object({
@@ -140,7 +126,7 @@ export function createOidcRouter() {
   // POST /api/oauth/clients — register a new OAuth client for the current app.
   // Returns the plaintext clientSecret exactly once (hashed at rest).
   router.post(
-    "/oauth/clients",
+    "/api/oauth/clients",
     rateLimit(10),
     idempotency(),
     requirePermission("oauth-clients", "write"),
@@ -149,14 +135,21 @@ export function createOidcRouter() {
       if (!app) throw notFound("Application context not loaded");
       const body = await c.req.json();
       const data = parseBody(createOAuthClientSchema, body);
-      const created = await createClient(app, data);
-      return c.json(created, 201);
+      try {
+        const created = await createClient(app, data);
+        return c.json(created, 201);
+      } catch (err) {
+        if (err instanceof OAuthAdminValidationError) {
+          throw invalidRequest(err.message, err.field);
+        }
+        throw err;
+      }
     },
   );
 
   // GET /api/oauth/clients — list registered clients for the current app.
   router.get(
-    "/oauth/clients",
+    "/api/oauth/clients",
     rateLimit(300),
     requirePermission("oauth-clients", "read"),
     async (c) => {
@@ -172,7 +165,7 @@ export function createOidcRouter() {
   // hardcodes scope strings — adding a new scope to the server list is
   // enough to surface it in the UI.
   router.get(
-    "/oauth/scopes",
+    "/api/oauth/scopes",
     rateLimit(300),
     requirePermission("oauth-clients", "read"),
     async (c) => {
@@ -182,7 +175,7 @@ export function createOidcRouter() {
 
   // GET /api/oauth/clients/:clientId — retrieve a single client.
   router.get(
-    "/oauth/clients/:clientId",
+    "/api/oauth/clients/:clientId",
     rateLimit(300),
     requirePermission("oauth-clients", "read"),
     async (c) => {
@@ -195,7 +188,7 @@ export function createOidcRouter() {
 
   // PATCH /api/oauth/clients/:clientId — update redirectUris or disabled flag.
   router.patch(
-    "/oauth/clients/:clientId",
+    "/api/oauth/clients/:clientId",
     rateLimit(10),
     requirePermission("oauth-clients", "write"),
     async (c) => {
@@ -207,9 +200,16 @@ export function createOidcRouter() {
       let current = await getClient(applicationId, clientId);
       if (!current) throw notFound("OAuth client not found");
 
-      if (data.redirectUris !== undefined) {
-        current =
-          (await updateClientRedirectUris(applicationId, clientId, data.redirectUris)) ?? current;
+      try {
+        if (data.redirectUris !== undefined) {
+          current =
+            (await updateClientRedirectUris(applicationId, clientId, data.redirectUris)) ?? current;
+        }
+      } catch (err) {
+        if (err instanceof OAuthAdminValidationError) {
+          throw invalidRequest(err.message, err.field);
+        }
+        throw err;
       }
       if (data.disabled !== undefined) {
         current = (await setClientDisabled(applicationId, clientId, data.disabled)) ?? current;
@@ -220,7 +220,7 @@ export function createOidcRouter() {
 
   // DELETE /api/oauth/clients/:clientId — remove a client.
   router.delete(
-    "/oauth/clients/:clientId",
+    "/api/oauth/clients/:clientId",
     rateLimit(10),
     requirePermission("oauth-clients", "delete"),
     async (c) => {
@@ -233,7 +233,7 @@ export function createOidcRouter() {
 
   // POST /api/oauth/clients/:clientId/rotate — issue a fresh clientSecret.
   router.post(
-    "/oauth/clients/:clientId/rotate",
+    "/api/oauth/clients/:clientId/rotate",
     rateLimit(5),
     requirePermission("oauth-clients", "write"),
     async (c) => {
@@ -244,25 +244,6 @@ export function createOidcRouter() {
     },
   );
 
-  // ─── OIDC discovery root aliases ───────────────────────────────────────────
-  //
-  // Better Auth's oauth-provider plugin serves the authoritative OIDC metadata
-  // under its own basePath (`/api/auth/.well-known/*`). The OIDC spec + most
-  // satellite libraries expect the document to live at the root
-  // `/.well-known/openid-configuration` of the `issuer` URL, so we expose the
-  // same payload at the root as thin proxies. No CORS, no auth — public.
-
-  router.get("/.well-known/openid-configuration", async (c: Context<AppEnv>) => {
-    const payload = await getOidcAuthApi().getOpenIdConfig({ headers: c.req.raw.headers });
-    c.header("cache-control", "public, max-age=3600");
-    return c.json(payload as never);
-  });
-  router.get("/.well-known/oauth-authorization-server", async (c: Context<AppEnv>) => {
-    const payload = await getOidcAuthApi().getOAuthServerConfig({ headers: c.req.raw.headers });
-    c.header("cache-control", "public, max-age=3600");
-    return c.json(payload as never);
-  });
-
   // ─── Public end-user pages (anonymous, listed in publicPaths) ──────────────
 
   // GET /api/oauth/enduser/login — server-rendered login form.
@@ -270,7 +251,7 @@ export function createOidcRouter() {
   // clients can't render the form at all (prevents phishing the HTML).
   // Loads the owning application's branding + issues a one-shot CSRF token
   // paired to an httpOnly cookie for the POST handler.
-  router.get("/oauth/enduser/login", rateLimitByIp(60), async (c) => {
+  router.get("/api/oauth/enduser/login", rateLimitByIp(60), async (c) => {
     const url = new URL(c.req.url);
     const clientId = url.searchParams.get("client_id");
     if (!clientId) throw invalidRequest("client_id is required", "client_id");
@@ -286,7 +267,7 @@ export function createOidcRouter() {
   //
   // CSRF token paired with the `oidc_csrf` cookie (set on the GET) MUST
   // match exactly — mismatch → 403, no sign-in attempt made.
-  router.post("/oauth/enduser/login", rateLimitByIp(60), async (c) => {
+  router.post("/api/oauth/enduser/login", rateLimitByIp(60), async (c) => {
     const url = new URL(c.req.url);
     const clientId = url.searchParams.get("client_id");
     if (!clientId) throw invalidRequest("client_id is required", "client_id");
@@ -354,11 +335,51 @@ export function createOidcRouter() {
     // next visitor to this account is not throttled by past failures.
     await resetLoginEmailAttempts(email);
 
-    // End-user resolution is deferred to `customAccessTokenClaims` in
-    // `auth/plugins.ts`, which runs lazily at token mint time with access
-    // to the already-authenticated Better Auth user. The downstream
-    // `oauth2Consent` handler catches `UnverifiedEmailConflictError`
-    // propagated through that path and renders the same FR error page.
+    // Proactively resolve the end-user for this application NOW, while we
+    // still own the HTTP response. `resolveOrCreateEndUser` is the same
+    // call `customAccessTokenClaims` will make later at token-mint time,
+    // but doing it here lets us surface `UnverifiedEmailConflictError` as
+    // a friendly 409 error page on the login form — if we deferred until
+    // token mint, the browser would already have followed the 302 to
+    // `/oauth2/authorize` and the error would surface as an opaque 500
+    // three redirects away. The idempotent resolution also means the
+    // token-mint-time call is a no-op fast-path for users who already
+    // exist.
+    const [authUserRow] = await db
+      .select({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        emailVerified: user.emailVerified,
+      })
+      .from(user)
+      .where(eq(user.email, email))
+      .limit(1);
+    if (authUserRow) {
+      const app = await loadAppById(ctx.applicationId);
+      if (app) {
+        try {
+          await resolveOrCreateEndUser(
+            {
+              id: authUserRow.id,
+              email: authUserRow.email,
+              name: authUserRow.name ?? null,
+              emailVerified: authUserRow.emailVerified === true,
+            },
+            app,
+          );
+        } catch (err) {
+          if (err instanceof UnverifiedEmailConflictError) {
+            return renderError(
+              "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
+              409,
+              email,
+            );
+          }
+          throw err;
+        }
+      }
+    }
 
     // Forward every Set-Cookie from Better Auth + redirect into authorize.
     const redirect = new Response(null, { status: 302 });
@@ -372,7 +393,7 @@ export function createOidcRouter() {
   });
 
   // GET /api/oauth/enduser/consent — server-rendered consent form.
-  router.get("/oauth/enduser/consent", rateLimitByIp(60), async (c) => {
+  router.get("/api/oauth/enduser/consent", rateLimitByIp(60), async (c) => {
     const url = new URL(c.req.url);
     const clientId = url.searchParams.get("client_id");
     const scope = url.searchParams.get("scope") ?? "openid";
@@ -403,7 +424,7 @@ export function createOidcRouter() {
   // `?` and forward the remainder as `oauth_query`. Anything we injected
   // ourselves (e.g. internal params) would break the signature — we don't
   // add any, so the round-trip is verbatim.
-  router.post("/oauth/enduser/consent", rateLimitByIp(60), async (c) => {
+  router.post("/api/oauth/enduser/consent", rateLimitByIp(60), async (c) => {
     const url = new URL(c.req.url);
 
     const form = await c.req.parseBody();
@@ -487,6 +508,42 @@ export function createOidcRouter() {
     // callers (tests, JSON API clients) keep the verbatim JSON shape.
     const acceptsHtml = prefersHtml(c.req.header("accept"));
     return maybeJsonRedirectToLocation(consentResponse, acceptsHtml);
+  });
+
+  // ─── RFC-compliant OIDC discovery at the HTTP origin root ──────────────────
+  //
+  // The module router is mounted at the HTTP origin (`/`, not `/api`), so
+  // routes declared here with their full paths are served verbatim. Two
+  // discovery specs apply:
+  //
+  //  1. OpenID Connect Discovery 1.0 — clients append
+  //     `/.well-known/openid-configuration` to the issuer URL. Appstrate's
+  //     issuer is `${APP_URL}/api/auth`, so the canonical OIDC 1.0 location
+  //     is `${APP_URL}/api/auth/.well-known/openid-configuration`, already
+  //     served natively by Better Auth.
+  //
+  //  2. RFC 8414 — for an issuer with a path component, clients insert
+  //     `/.well-known/<suffix>` between the host and the path. The same spec
+  //     also permits serving the OIDC 1.0 variant at the HTTP origin root
+  //     for backward compat.
+  //
+  // In practice, most satellite libraries simply GET
+  // `${ORIGIN}/.well-known/openid-configuration` at the HTTP origin root and
+  // do not apply the issuer-path insertion rule. Serving the payload at the
+  // root is what maximises interop with real-world OIDC clients.
+  //
+  // The previous implementation exposed `/api/.well-known/*` — that path is
+  // neither OIDC 1.0 nor RFC 8414, and no spec-compliant client would look
+  // there. Dropped in favor of these root paths.
+  router.get("/.well-known/openid-configuration", async (c: Context<AppEnv>) => {
+    const payload = await getOidcAuthApi().getOpenIdConfig({ headers: c.req.raw.headers });
+    c.header("cache-control", "public, max-age=3600");
+    return c.json(payload as never);
+  });
+  router.get("/.well-known/oauth-authorization-server", async (c: Context<AppEnv>) => {
+    const payload = await getOidcAuthApi().getOAuthServerConfig({ headers: c.req.raw.headers });
+    c.header("cache-control", "public, max-age=3600");
+    return c.json(payload as never);
   });
 
   return router;

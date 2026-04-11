@@ -208,7 +208,11 @@ app.route("/api", welcomeRouter);
 const internalRouter = createInternalRouter();
 app.route("/internal", internalRouter);
 
-// Module routes (cloud billing, future OIDC, etc. — no-op if no modules loaded)
+// Module routes — mounted at root. Modules declare full paths (typically
+// `/api/<name>/*` for business endpoints, plus `/.well-known/*` for any
+// RFC-specified well-known URI). MUST be mounted BEFORE the SPA `/*`
+// catch-all below, otherwise the static fallback shadows module paths.
+// No-op when no module exposes `createRouter()`.
 registerModuleRoutes(app);
 
 // Static files for UI (JS, CSS, images, fonts — skip index.html, served with config below)

@@ -132,6 +132,38 @@ describe("OAuth clients admin routes", () => {
     expect(res.status).toBe(201);
   });
 
+  it("POST rejects scopes outside the APPSTRATE_SCOPES whitelist", async () => {
+    // Scope whitelist is enforced at both the Zod layer and the service
+    // boundary (defense-in-depth). Arbitrary strings like `superadmin:*`
+    // must never reach the `oauth_client.scopes` column — they would
+    // otherwise propagate through `scopesToPermissions()` and grant
+    // unauthorized RBAC permissions to any end-user JWT minted against
+    // this client.
+    const res = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Malicious",
+        redirectUris: ["https://acme.example.com/oauth/callback"],
+        scopes: ["openid", "profile", "email", "superadmin:*"],
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST accepts the full APPSTRATE_SCOPES vocabulary", async () => {
+    const res = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Legit",
+        redirectUris: ["https://acme.example.com/oauth/callback"],
+        scopes: ["openid", "profile", "email", "offline_access", "runs:read"],
+      }),
+    });
+    expect(res.status).toBe(201);
+  });
+
   it("POST rejects missing name", async () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",

@@ -12,14 +12,17 @@
  * Architecture:
  *  - `betterAuthPlugins()` contributes `jwt` + `@better-auth/oauth-provider`
  *    at boot so the Better Auth singleton knows how to mint + sign end-user
- *    tokens. Better Auth serves `/api/auth/oauth2/*`, `/.well-known/*`, and
- *    `/api/auth/jwks` automatically — no core route mount needed.
+ *    tokens. Better Auth serves `/api/auth/oauth2/*` and `/api/auth/jwks`
+ *    automatically.
  *  - `authStrategies()` contributes a strategy that matches `Bearer ey…`,
  *    verifies the JWT via the local JWKS, looks up the end-user via this
  *    module's shadow table, and emits an `AuthResolution` with `endUser`
  *    in context. Core's strict run-visibility filter then applies.
- *  - `createRouter()` mounts OAuth client admin endpoints (enable/rotate/
- *    disable) and server-rendered login + consent pages.
+ *  - `createRouter()` (mounted at the HTTP origin root by the platform)
+ *    owns the `/api/oauth/*` admin endpoints, the server-rendered
+ *    `/api/oauth/enduser/{login,consent}` pages, and the RFC-compliant
+ *    `/.well-known/openid-configuration` + `/.well-known/oauth-authorization-server`
+ *    discovery endpoints.
  *  - `init()` runs module-owned Drizzle migrations for the Better Auth
  *    oauth-provider tables plus the `oidc_end_user_profiles` shadow table.
  */
@@ -43,6 +46,11 @@ const oidcModule: AppstrateModule = {
     });
   },
 
+  // Router mounted at HTTP origin root. Declares full paths — `/api/oauth/*`
+  // for business endpoints + `/.well-known/openid-configuration` +
+  // `/.well-known/oauth-authorization-server` for RFC-compliant OIDC
+  // discovery. See `createOidcRouter` in `routes.ts` for the spec
+  // rationale behind serving well-known at the HTTP origin root.
   createRouter() {
     return createOidcRouter();
   },
@@ -52,8 +60,8 @@ const oidcModule: AppstrateModule = {
   publicPaths: [
     "/api/oauth/enduser/login",
     "/api/oauth/enduser/consent",
-    "/api/.well-known/openid-configuration",
-    "/api/.well-known/oauth-authorization-server",
+    "/.well-known/openid-configuration",
+    "/.well-known/oauth-authorization-server",
   ],
 
   authStrategies() {

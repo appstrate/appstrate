@@ -42,6 +42,17 @@ const AUTHORIZE_RL_POINTS = 30;
 const INTROSPECT_RL_POINTS = 60;
 const REVOKE_RL_POINTS = 60;
 
+/**
+ * Per-client_id brute-force limit on `/oauth2/token`. Complements the
+ * per-IP limiter above: an attacker distributing a `client_secret`
+ * brute-force attack across many IPs (or spoofing XFF behind a
+ * misconfigured `TRUST_PROXY`) is constrained by this secondary limit
+ * keyed on `client_id` alone. Legitimate satellites exchange codes at a
+ * rate far below this ceiling; anything approaching 20 attempts/minute
+ * per client_id is either a misbehaving client or an attack.
+ */
+const TOKEN_CLIENT_RL_POINTS = 20;
+
 const LOGIN_EMAIL_POINTS = 5;
 const LOGIN_EMAIL_DURATION_SEC = 900;
 
@@ -148,6 +159,47 @@ interface OidcGuardsOptions {
 interface TokenRequestBody {
   grant_type?: string;
   resource?: string | string[];
+  client_id?: string;
+}
+
+/**
+ * Extract the `client_id` a token request is acting on, either from the
+ * parsed body or from HTTP Basic auth header (`client_secret_basic`).
+ * Returns `null` if neither path yields a value — the downstream limiter
+ * then degrades to IP-only limiting for that specific request.
+ */
+function extractClientId(body: TokenRequestBody, request: Request | undefined): string | null {
+  if (typeof body.client_id === "string" && body.client_id.length > 0) return body.client_id;
+  const authHeader = request?.headers.get("authorization");
+  if (!authHeader || !authHeader.toLowerCase().startsWith("basic ")) return null;
+  try {
+    const decoded = atob(authHeader.slice(6).trim());
+    const sep = decoded.indexOf(":");
+    if (sep <= 0) return null;
+    return decoded.slice(0, sep);
+  } catch {
+    return null;
+  }
+}
+
+async function enforceClientRateLimit(clientId: string): Promise<void> {
+  const limiter = await getLimiter("oauth-token-client", TOKEN_CLIENT_RL_POINTS);
+  try {
+    await limiter.consume(`client:${clientId}`);
+  } catch (rej) {
+    const retry =
+      rej && typeof rej === "object" && "msBeforeNext" in rej
+        ? Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000)
+        : 60;
+    throw new APIError(
+      "TOO_MANY_REQUESTS",
+      {
+        error: "rate_limited",
+        error_description: `Too many token requests for this client_id. Retry after ${retry}s.`,
+      },
+      { "Retry-After": String(retry) },
+    );
+  }
 }
 
 /**
@@ -168,6 +220,16 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
             await enforceRateLimit("oauth-token", TOKEN_RL_POINTS, ctx.request);
 
             const body = (ctx.body ?? {}) as TokenRequestBody;
+            // Per-client_id throttle on top of per-IP — protects against
+            // distributed `client_secret` brute-force that spreads the
+            // attack across many source IPs (or bypasses per-IP limits
+            // entirely via XFF spoofing behind a misconfigured
+            // TRUST_PROXY). Keyed on `client_id` so a single
+            // misbehaving / compromised satellite is rate-limited
+            // regardless of where its requests come from.
+            const clientId = extractClientId(body, ctx.request);
+            if (clientId) await enforceClientRateLimit(clientId);
+
             const grantType = body.grant_type;
             if (grantType === "authorization_code" || grantType === "refresh_token") {
               const resource = Array.isArray(body.resource) ? body.resource[0] : body.resource;

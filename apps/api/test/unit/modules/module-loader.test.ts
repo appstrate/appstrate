@@ -149,18 +149,28 @@ describe("module-loader", () => {
   });
 
   describe("registerModuleRoutes", () => {
-    it("mounts routers returned by createRouter under /api", async () => {
+    it("mounts routers returned by createRouter at the HTTP origin root", async () => {
+      // Modules declare full paths — the platform does NOT inject an /api
+      // prefix. This lets a single module expose both `/api/*` business
+      // endpoints AND RFC-specified root paths like `/.well-known/*` from
+      // one router.
       const { Hono } = await import("hono");
       const router = new Hono();
-      router.get("/ping", (c) => c.json({ ok: true }));
+      router.get("/api/ping", (c) => c.json({ ok: true, scope: "api" }));
+      router.get("/.well-known/ping", (c) => c.json({ ok: true, scope: "root" }));
       const mod = mockModule("routed", { createRouter: () => router });
       await loadModulesFromInstances([mod], mockCtx());
 
       const app = new Hono();
       registerModuleRoutes(app as never);
-      const res = await app.request("/api/ping");
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true });
+
+      const apiRes = await app.request("/api/ping");
+      expect(apiRes.status).toBe(200);
+      expect(await apiRes.json()).toEqual({ ok: true, scope: "api" });
+
+      const rootRes = await app.request("/.well-known/ping");
+      expect(rootRes.status).toBe(200);
+      expect(await rootRes.json()).toEqual({ ok: true, scope: "root" });
     });
   });
 
