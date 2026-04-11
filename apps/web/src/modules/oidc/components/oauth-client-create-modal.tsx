@@ -16,7 +16,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/spinner";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
-import { useCreateOAuthClient } from "../hooks/use-oauth-clients";
+import { useCreateOAuthClient, useOAuthScopes } from "../hooks/use-oauth-clients";
+
+/** Scopes that are always granted — cannot be unchecked in the UI. */
+const REQUIRED_SCOPES = new Set(["openid", "profile", "email"]);
 
 interface Props {
   open: boolean;
@@ -30,7 +33,9 @@ interface FormData {
 export function OAuthClientCreateModal({ open, onClose }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateOAuthClient();
+  const { data: availableScopes } = useOAuthScopes();
   const [redirectUris, setRedirectUris] = useState<string[]>([""]);
+  const [selectedScopes, setSelectedScopes] = useState<Set<string>>(() => new Set(REQUIRED_SCOPES));
   const [createdSecret, setCreatedSecret] = useState<{
     clientId: string;
     clientSecret: string;
@@ -47,9 +52,20 @@ export function OAuthClientCreateModal({ open, onClose }: Props) {
   function handleClose() {
     reset({ name: "" });
     setRedirectUris([""]);
+    setSelectedScopes(new Set(REQUIRED_SCOPES));
     setCreatedSecret(null);
     createMutation.reset();
     onClose();
+  }
+
+  function toggleScope(scope: string) {
+    if (REQUIRED_SCOPES.has(scope)) return;
+    setSelectedScopes((prev) => {
+      const next = new Set(prev);
+      if (next.has(scope)) next.delete(scope);
+      else next.add(scope);
+      return next;
+    });
   }
 
   function onSubmit(data: FormData) {
@@ -72,7 +88,11 @@ export function OAuthClientCreateModal({ open, onClose }: Props) {
     }
 
     createMutation.mutate(
-      { name: data.name.trim(), redirectUris: cleaned },
+      {
+        name: data.name.trim(),
+        redirectUris: cleaned,
+        scopes: Array.from(selectedScopes),
+      },
       {
         onSuccess: (result) => {
           setCreatedSecret({ clientId: result.clientId, clientSecret: result.clientSecret });
@@ -164,6 +184,34 @@ export function OAuthClientCreateModal({ open, onClose }: Props) {
             >
               <Plus className="h-4 w-4" /> {t("settings:oauthClients.addRedirectUri")}
             </Button>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>{t("settings:oauthClients.scopesLabel")}</Label>
+          <p className="text-muted-foreground text-xs">{t("settings:oauthClients.scopesHint")}</p>
+          <div className="flex flex-col gap-1.5">
+            {(availableScopes ?? Array.from(REQUIRED_SCOPES)).map((scope) => {
+              const required = REQUIRED_SCOPES.has(scope);
+              const checked = selectedScopes.has(scope);
+              return (
+                <label key={scope} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={required}
+                    onChange={() => toggleScope(scope)}
+                    className="accent-primary h-4 w-4"
+                  />
+                  <span className="font-mono text-xs">{scope}</span>
+                  {required && (
+                    <span className="text-muted-foreground text-xs">
+                      ({t("settings:oauthClients.scopeRequired")})
+                    </span>
+                  )}
+                </label>
+              );
+            })}
           </div>
         </div>
 

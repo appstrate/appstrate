@@ -41,6 +41,7 @@ const originalAppUrl = process.env.APP_URL;
 let jwksServer: ReturnType<typeof Bun.serve> | null = null;
 let privateKey: jose.CryptoKey;
 let kid: string;
+let publicJwk: jose.JWK;
 let app: Awaited<ReturnType<typeof import("../../../../../../test/helpers/app.ts").getTestApp>>;
 
 async function startJwksServer() {
@@ -53,6 +54,7 @@ async function startJwksServer() {
   jwk.kid = kid;
   jwk.alg = "ES256";
   jwk.use = "sig";
+  publicJwk = jwk;
 
   jwksServer = Bun.serve({
     port: 0,
@@ -69,7 +71,11 @@ async function startJwksServer() {
 }
 
 async function mintToken(payload: Record<string, unknown>) {
-  const issuer = process.env.APP_URL!;
+  // Real Better Auth tokens carry `iss = ${APP_URL}${basePath}` where
+  // basePath is `/api/auth`. The production verifier in `enduser-token.ts`
+  // matches against that shape; the test harness must mint tokens with the
+  // same `iss` claim or it will exercise the wrong code path.
+  const issuer = `${process.env.APP_URL!}/api/auth`;
   return new jose.SignJWT(payload)
     .setProtectedHeader({ alg: "ES256", kid })
     .setIssuer(issuer)
@@ -82,12 +88,19 @@ async function mintToken(payload: Record<string, unknown>) {
 
 beforeAll(async () => {
   await startJwksServer();
-  // Import lazily AFTER APP_URL is rewritten so module code resolves JWKS
-  // from the local server.
   const { getTestApp } = await import("../../../../../../test/helpers/app.ts");
   const { default: oidcModule } = await import("../../../index.ts");
-  const { resetJwksCache } = await import("../../../services/enduser-token.ts");
-  resetJwksCache();
+  // Install an in-process JWKS resolver built from the test public key.
+  // This bypasses both the `auth.api.getJwks()` path (which would resolve
+  // against the Better Auth singleton the preload built with a different
+  // key set) and the remote URL path (which would need a real HTTP
+  // listener on APP_URL). Tokens minted by `mintToken()` below verify
+  // cleanly against this resolver.
+  const { _setJwksResolverForTesting } = await import("../../../services/enduser-token.ts");
+  const localSet = jose.createLocalJWKSet({ keys: [publicJwk] });
+  _setJwksResolverForTesting(
+    localSet as unknown as Parameters<typeof _setJwksResolverForTesting>[0],
+  );
   app = getTestApp({ modules: [oidcModule] });
 });
 

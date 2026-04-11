@@ -180,6 +180,36 @@ export const oidcPaths = {
       },
     },
   },
+  "/api/oauth/scopes": {
+    get: {
+      operationId: "listOAuthScopes",
+      tags: ["OAuth Clients"],
+      summary: "List supported OAuth scopes",
+      description:
+        "Return the canonical OAuth scope vocabulary the authorization server supports. Used by the admin UI to render the create-client scope checkbox group so the frontend never hardcodes scope strings.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+      ],
+      responses: {
+        "200": {
+          description: "List of supported OAuth scopes.",
+          headers: commonHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["data"],
+                properties: {
+                  data: { type: "array", items: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
   "/api/oauth/clients/{clientId}/rotate": {
     post: {
       operationId: "rotateOAuthClientSecret",

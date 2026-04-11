@@ -20,6 +20,7 @@ const originalAppUrl = process.env.APP_URL;
 let server: ReturnType<typeof Bun.serve> | null = null;
 let privateKey: jose.CryptoKey;
 let kid: string;
+let publicJwk: jose.JWK;
 
 async function startJwksServer() {
   const { publicKey, privateKey: priv } = await jose.generateKeyPair("ES256", {
@@ -31,6 +32,7 @@ async function startJwksServer() {
   jwk.kid = kid;
   jwk.alg = "ES256";
   jwk.use = "sig";
+  publicJwk = jwk;
 
   server = Bun.serve({
     port: 0, // ephemeral
@@ -50,7 +52,7 @@ async function mintToken(payload: Record<string, unknown>) {
   const env = process.env.APP_URL ?? "http://127.0.0.1";
   return new jose.SignJWT(payload)
     .setProtectedHeader({ alg: "ES256", kid })
-    .setIssuer(env)
+    .setIssuer(`${env}/api/auth`)
     .setAudience("test-aud")
     .setIssuedAt()
     .setExpirationTime("2m")
@@ -72,11 +74,25 @@ afterAll(() => {
   _resetCacheForTesting();
 });
 
+/**
+ * Install the same local JWKS the tests' mint key belongs to, bypassing
+ * both the in-process `auth.api.getJwks()` path (which would hit the real
+ * Better Auth singleton this module's preload built against a different
+ * key set) and the remote URL path. Every test calls this after importing
+ * the service so each case sees a clean resolver pointing at the test key.
+ */
+async function installLocalJwks() {
+  const { _setJwksResolverForTesting } = await import("../../services/enduser-token.ts");
+  const localSet = jose.createLocalJWKSet({ keys: [publicJwk] });
+  _setJwksResolverForTesting(
+    localSet as unknown as Parameters<typeof _setJwksResolverForTesting>[0],
+  );
+}
+
 describe("verifyEndUserAccessToken", () => {
   it("returns claims for a valid ES256 token", async () => {
-    const { verifyEndUserAccessToken, resetJwksCache } =
-      await import("../../services/enduser-token.ts");
-    resetJwksCache();
+    const { verifyEndUserAccessToken } = await import("../../services/enduser-token.ts");
+    await installLocalJwks();
     const token = await mintToken({
       sub: "auth_user_1",
       endUserId: "eu_abc",
@@ -95,21 +111,19 @@ describe("verifyEndUserAccessToken", () => {
   });
 
   it("returns null for a malformed token", async () => {
-    const { verifyEndUserAccessToken, resetJwksCache } =
-      await import("../../services/enduser-token.ts");
-    resetJwksCache();
+    const { verifyEndUserAccessToken } = await import("../../services/enduser-token.ts");
+    await installLocalJwks();
     expect(await verifyEndUserAccessToken("not-a-jwt")).toBeNull();
     expect(await verifyEndUserAccessToken("ey.foo.bar")).toBeNull();
   });
 
   it("returns null for a token signed by the wrong key", async () => {
-    const { verifyEndUserAccessToken, resetJwksCache } =
-      await import("../../services/enduser-token.ts");
-    resetJwksCache();
+    const { verifyEndUserAccessToken } = await import("../../services/enduser-token.ts");
+    await installLocalJwks();
     const { privateKey: rogue } = await jose.generateKeyPair("ES256", { extractable: true });
     const rogueToken = await new jose.SignJWT({ sub: "auth_user_1" })
       .setProtectedHeader({ alg: "ES256", kid })
-      .setIssuer(process.env.APP_URL!)
+      .setIssuer(`${process.env.APP_URL!}/api/auth`)
       .setIssuedAt()
       .setExpirationTime("2m")
       .sign(rogue);
@@ -117,12 +131,11 @@ describe("verifyEndUserAccessToken", () => {
   });
 
   it("returns null for an expired token", async () => {
-    const { verifyEndUserAccessToken, resetJwksCache } =
-      await import("../../services/enduser-token.ts");
-    resetJwksCache();
+    const { verifyEndUserAccessToken } = await import("../../services/enduser-token.ts");
+    await installLocalJwks();
     const expired = await new jose.SignJWT({ sub: "auth_user_1" })
       .setProtectedHeader({ alg: "ES256", kid })
-      .setIssuer(process.env.APP_URL!)
+      .setIssuer(`${process.env.APP_URL!}/api/auth`)
       .setIssuedAt(Math.floor(Date.now() / 1000) - 3600)
       .setExpirationTime(Math.floor(Date.now() / 1000) - 60)
       .sign(privateKey);
@@ -130,9 +143,8 @@ describe("verifyEndUserAccessToken", () => {
   });
 
   it("returns null when the issuer does not match APP_URL", async () => {
-    const { verifyEndUserAccessToken, resetJwksCache } =
-      await import("../../services/enduser-token.ts");
-    resetJwksCache();
+    const { verifyEndUserAccessToken } = await import("../../services/enduser-token.ts");
+    await installLocalJwks();
     const bad = await new jose.SignJWT({ sub: "auth_user_1" })
       .setProtectedHeader({ alg: "ES256", kid })
       .setIssuer("https://evil.example.com")
@@ -143,12 +155,11 @@ describe("verifyEndUserAccessToken", () => {
   });
 
   it("returns null when the sub claim is missing", async () => {
-    const { verifyEndUserAccessToken, resetJwksCache } =
-      await import("../../services/enduser-token.ts");
-    resetJwksCache();
+    const { verifyEndUserAccessToken } = await import("../../services/enduser-token.ts");
+    await installLocalJwks();
     const noSub = await new jose.SignJWT({ endUserId: "eu_foo" })
       .setProtectedHeader({ alg: "ES256", kid })
-      .setIssuer(process.env.APP_URL!)
+      .setIssuer(`${process.env.APP_URL!}/api/auth`)
       .setIssuedAt()
       .setExpirationTime("2m")
       .sign(privateKey);

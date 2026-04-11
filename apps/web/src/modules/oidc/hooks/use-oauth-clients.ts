@@ -37,6 +37,22 @@ export function useOAuthClients() {
   });
 }
 
+/**
+ * Canonical scope vocabulary served by `GET /api/oauth/scopes`. Used by
+ * the create-client modal checkbox group so the frontend never hardcodes
+ * scope strings.
+ */
+export function useOAuthScopes() {
+  const orgId = useCurrentOrgId();
+  const appId = useCurrentApplicationId();
+  return useQuery({
+    queryKey: ["oauth-scopes", orgId, appId],
+    queryFn: () => api<{ data: string[] }>("/oauth/scopes").then((d) => d.data),
+    enabled: !!orgId && !!appId,
+    staleTime: Infinity, // scope list is static within a deploy
+  });
+}
+
 export function useCreateOAuthClient() {
   const qc = useQueryClient();
   return useMutation({

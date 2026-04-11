@@ -4,18 +4,22 @@
  * End-user token verification service.
  *
  * Verifies ES256-signed JWT access tokens issued by the Better Auth
- * `oauth-provider` plugin. Uses `jose` for signature verification via the
- * module-owned JWKS endpoint (`/api/auth/jwks`, served automatically by the
- * Better Auth handler once the `jwt` plugin is registered).
+ * `oauth-provider` plugin. Fetches the JWKS directly from the Better Auth
+ * singleton via `auth.api.getJwks()` (in-process) instead of doing an HTTP
+ * round-trip to `${APP_URL}/api/auth/jwks`. This keeps the hot path fast,
+ * removes any dependency on the platform being reachable over HTTP at
+ * verify time (tests, Hono's `app.request()`, air-gapped deployments),
+ * and guarantees the keys we verify against are exactly the keys the
+ * local plugin just minted with — no staleness window.
  *
- * The JWKS fetch is lazy: at module init time the Better Auth singleton is
- * not yet built (`createAuth()` runs strictly after `init()`), so we cannot
- * probe the endpoint. Instead the remote JWKS client is constructed on
- * first verification and the URL resolved from `APP_URL` env at that moment.
+ * If the in-process fetch fails (e.g. `getAuth()` throws because the
+ * singleton has not yet been built), we fall back to `jose.createRemoteJWKSet`
+ * over HTTP so pre-boot code paths and external callers still work.
  */
 
 import * as jose from "jose";
 import { getEnv } from "@appstrate/env";
+import { getAuth } from "@appstrate/db/auth";
 
 export interface EndUserClaims {
   /** Better Auth `user.id` (the JWT `sub` claim). */
@@ -30,16 +34,67 @@ export interface EndUserClaims {
   scope?: string;
 }
 
-let _jwks: ReturnType<typeof jose.createRemoteJWKSet> | null = null;
+type JwksResolver = (
+  protectedHeader?: jose.JWSHeaderParameters,
+  token?: jose.FlattenedJWSInput,
+) => Promise<jose.CryptoKey>;
 
-function getJwks(): ReturnType<typeof jose.createRemoteJWKSet> {
-  if (!_jwks) {
-    const env = getEnv();
-    _jwks = jose.createRemoteJWKSet(new URL("/api/auth/jwks", env.APP_URL), {
-      cacheMaxAge: 60 * 60 * 1000, // 1h
-    });
+let _jwks: JwksResolver | null = null;
+
+/**
+ * Build an in-process JWKS resolver by fetching keys from the Better Auth
+ * singleton's `jwt` plugin endpoint. Returns `null` if the singleton is not
+ * yet initialized or the endpoint is unavailable — callers fall back to the
+ * remote URL resolver.
+ */
+async function buildLocalJwks(): Promise<JwksResolver | null> {
+  let auth: ReturnType<typeof getAuth>;
+  try {
+    auth = getAuth();
+  } catch {
+    return null;
   }
+  const api = (auth as unknown as { api: Record<string, unknown> }).api;
+  const getJwksFn = api?.getJwks;
+  if (typeof getJwksFn !== "function") return null;
+  try {
+    const result = (await (getJwksFn as (args: { headers: Headers }) => Promise<unknown>)({
+      headers: new Headers(),
+    })) as { keys?: jose.JWK[] } | null;
+    const keys = result?.keys;
+    if (!Array.isArray(keys) || keys.length === 0) return null;
+    return jose.createLocalJWKSet({ keys }) as unknown as JwksResolver;
+  } catch {
+    return null;
+  }
+}
+
+function remoteJwks(): JwksResolver {
+  const env = getEnv();
+  return jose.createRemoteJWKSet(new URL("/api/auth/jwks", env.APP_URL), {
+    cacheMaxAge: 60 * 60 * 1000, // 1h
+  }) as unknown as JwksResolver;
+}
+
+async function getJwks(): Promise<JwksResolver> {
+  if (_jwks) return _jwks;
+  const local = await buildLocalJwks();
+  _jwks = local ?? remoteJwks();
   return _jwks;
+}
+
+/**
+ * Test hook — install a pre-built JWKS resolver, bypassing both the
+ * in-process Better Auth lookup and the remote URL fallback. Tests that
+ * spin up a local JWKS server and need verification to go through HTTP
+ * (or that want to inject a specific public key) call this with their
+ * own `jose.createLocalJWKSet(...)` or `jose.createRemoteJWKSet(...)`.
+ *
+ * Exported so test harness files can opt-out of the production resolver
+ * chain without touching internal module state.
+ */
+export function _setJwksResolverForTesting(resolver: JwksResolver | null): void {
+  _jwks = resolver;
 }
 
 /**
@@ -51,8 +106,13 @@ function getJwks(): ReturnType<typeof jose.createRemoteJWKSet> {
 export async function verifyEndUserAccessToken(token: string): Promise<EndUserClaims | null> {
   try {
     const env = getEnv();
-    const { payload } = await jose.jwtVerify(token, getJwks(), {
-      issuer: env.APP_URL,
+    // Better Auth's oauth-provider plugin mints tokens with `iss` set to
+    // `${baseURL}${basePath}` — in this codebase that is `${APP_URL}/api/auth`
+    // (see `packages/db/src/auth.ts` basePath). Verifying against `APP_URL`
+    // alone rejects every real token.
+    const jwks = await getJwks();
+    const { payload } = await jose.jwtVerify(token, jwks, {
+      issuer: `${env.APP_URL}/api/auth`,
       algorithms: ["ES256"],
     });
     if (!payload.sub) return null;

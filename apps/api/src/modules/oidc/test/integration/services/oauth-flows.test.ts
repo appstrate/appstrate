@@ -305,6 +305,33 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     expect(payload.orgId).toBeTruthy();
   });
 
+  it("a real minted Bearer JWT authenticates against a core route via the OIDC strategy", async () => {
+    // End-to-end regression for the issuer-mismatch bug that made the
+    // module's headline promise ("Bearer JWT against core routes") silently
+    // fail in production: the auth strategy called `jose.jwtVerify` with
+    // `issuer: env.APP_URL`, but Better Auth mints `iss = ${APP_URL}/api/auth`.
+    // The check threw, `verifyEndUserAccessToken` returned null, the strategy
+    // fell through, and every Bearer call got 401.
+    //
+    // The happy-path test above decodes the JWT with `decodeJwt` (no
+    // signature check), so it could not catch this. This test round-trips
+    // a REAL minted token through the full core auth middleware.
+    const { cookie } = await signUpEndUser("e2e-bearer@satellite.example.com", "Sup3rSecret!");
+    const { code, verifier } = await runHappyPathToCode({ cookie });
+    const tokens = await exchangeCodeForTokens(code, verifier);
+    expect(tokens.access_token).toBeTruthy();
+
+    // Hit a core, non-app-scoped route with the minted token. The OIDC
+    // strategy must: verify the signature via the local JWKS, pass the
+    // issuer check (`${APP_URL}/api/auth`), resolve the end-user from the
+    // `endUserId` custom claim, and emit an AuthResolution — otherwise the
+    // request falls through to core auth and returns 401.
+    const res = await app.request("/api/profile", {
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    });
+    expect(res.status).toBe(200);
+  });
+
   it("PKCE enforcement rejects a tampered code_verifier at /oauth2/token", async () => {
     const { cookie } = await signUpEndUser("bob@satellite.example.com", "AnotherSecret123!");
     const verifier = randomVerifier();

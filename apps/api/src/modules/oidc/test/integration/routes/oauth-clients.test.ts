@@ -19,7 +19,7 @@ import {
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
-import { oauthClient } from "../../../schema.ts";
+import { oauthClient, oauthAccessToken, oauthRefreshToken, oauthConsent } from "../../../schema.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 
@@ -210,6 +210,70 @@ describe("OAuth clients admin routes", () => {
       headers: authHeaders(ctx),
     });
     expect(get404.status).toBe(404);
+  });
+
+  it("DELETE cascades child tokens + consent rows (regression: used clients were unreleasable)", async () => {
+    // Before the cascade migration, FKs from oauth_access_token /
+    // oauth_refresh_token / oauth_consent → oauth_client were ON DELETE NO
+    // ACTION, so any client that had ever minted a token raised a
+    // constraint violation on DELETE → 500 from the admin API.
+    const createRes = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Used client", redirectUris: ["https://c.example.com/cb"] }),
+    });
+    const { clientId } = (await createRes.json()) as { clientId: string };
+
+    // Seed the three child row types directly — we're testing the schema,
+    // not the full plugin path (which is covered by oauth-flows.test.ts).
+    const now = new Date();
+    await db.insert(oauthRefreshToken).values({
+      id: "rt_test_1",
+      token: "rt_token_1",
+      clientId,
+      userId: ctx.user.id,
+      scopes: ["openid"],
+      createdAt: now,
+    });
+    await db.insert(oauthAccessToken).values({
+      id: "at_test_1",
+      token: "at_token_1",
+      clientId,
+      userId: ctx.user.id,
+      refreshId: "rt_test_1",
+      scopes: ["openid"],
+      createdAt: now,
+    });
+    await db.insert(oauthConsent).values({
+      id: "cs_test_1",
+      clientId,
+      userId: ctx.user.id,
+      scopes: ["openid"],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const del = await app.request(`/api/oauth/clients/${clientId}`, {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(del.status).toBe(204);
+
+    // Parent gone + all children cascaded.
+    expect(
+      (await db.select().from(oauthClient).where(eq(oauthClient.clientId, clientId))).length,
+    ).toBe(0);
+    expect(
+      (await db.select().from(oauthAccessToken).where(eq(oauthAccessToken.clientId, clientId)))
+        .length,
+    ).toBe(0);
+    expect(
+      (await db.select().from(oauthRefreshToken).where(eq(oauthRefreshToken.clientId, clientId)))
+        .length,
+    ).toBe(0);
+    expect(
+      (await db.select().from(oauthConsent).where(eq(oauthConsent.clientId, clientId))).length,
+    ).toBe(0);
   });
 
   it("isolates clients per application", async () => {
