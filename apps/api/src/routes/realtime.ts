@@ -90,7 +90,7 @@ async function validateSSEAuth(c: {
   return {
     userId: session.user.id,
     orgId,
-    role: rows[0].role as OrgRole,
+    role: rows[0].role,
     applicationId,
   };
 }
