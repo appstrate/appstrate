@@ -22,20 +22,17 @@ export interface LoginPageProps {
   error?: string;
   /** Optional pre-filled email (e.g. after a failed submission). */
   email?: string;
-  /** CSRF token injected into the form + paired cookie — empty string disables CSRF. */
-  csrfToken?: string;
-  /** Resolved branding for the owning application — overrides the platform default. */
-  branding?: ResolvedAppBranding;
+  /** CSRF token injected into the form + paired cookie. */
+  csrfToken: string;
+  /** Resolved branding for the owning application. */
+  branding: ResolvedAppBranding;
 }
 
 export function renderLoginPage(props: LoginPageProps): RawHtml {
   // queryString is interpolated through the `html` tag below and auto-escaped.
   const action = `/api/oauth/enduser/login${props.queryString}`;
-  const title = props.branding?.name ? `Connexion à ${props.branding.name}` : "Connexion";
-  const brandName = props.branding?.name ?? null;
-  const logoUrl = props.branding?.logoUrl ?? null;
-  const primary = sanitizeColor(props.branding?.primaryColor, "#4f46e5");
-  const accent = sanitizeColor(props.branding?.accentColor, "#4338ca");
+  const { name: brandName, logoUrl, primaryColor: primary, accentColor: accent } = props.branding;
+  const title = `Connexion à ${brandName}`;
   return html`<!doctype html>
     <html lang="fr">
       <head>
@@ -107,19 +104,15 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
         </style>
       </head>
       <body>
-        ${brandName
-          ? html`<header class="brand">
-              ${logoUrl ? html`<img src="${logoUrl}" alt="${brandName}" />` : null}
-              <div class="name">${brandName}</div>
-            </header>`
-          : null}
+        <header class="brand">
+          ${logoUrl ? html`<img src="${logoUrl}" alt="${brandName}" />` : null}
+          <div class="name">${brandName}</div>
+        </header>
         <h1>Connexion</h1>
         <p>Connectez-vous pour autoriser l'application.</p>
         ${props.error ? html`<div class="error">${props.error}</div>` : null}
         <form method="POST" action="${action}" autocomplete="on">
-          ${props.csrfToken
-            ? html`<input type="hidden" name="_csrf" value="${props.csrfToken}" />`
-            : null}
+          <input type="hidden" name="_csrf" value="${props.csrfToken}" />
           <input
             type="email"
             name="email"
@@ -133,9 +126,4 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
         </form>
       </body>
     </html> `;
-}
-
-function sanitizeColor(input: string | undefined, fallback: string): string {
-  if (!input) return fallback;
-  return /^#[0-9a-fA-F]{6}$/.test(input) ? input : fallback;
 }

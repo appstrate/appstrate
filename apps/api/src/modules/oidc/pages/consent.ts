@@ -44,19 +44,16 @@ export interface ConsentPageProps {
   scopes: string[];
   /** Form action — typically `/api/oauth/enduser/consent${queryString}`. */
   action: string;
-  /** CSRF token injected into the form + paired cookie. Empty string disables. */
-  csrfToken?: string;
+  /** CSRF token injected into the form + paired cookie. */
+  csrfToken: string;
   /** Resolved branding for the owning application. */
-  branding?: ResolvedAppBranding;
+  branding: ResolvedAppBranding;
 }
 
 export function renderConsentPage(props: ConsentPageProps): RawHtml {
   const scopeItems = props.scopes.map((s) => html`<li>${describeScope(s)}</li>`);
-  const brandName = props.branding?.name ?? null;
-  const logoUrl = props.branding?.logoUrl ?? null;
-  const primary = sanitizeColor(props.branding?.primaryColor, "#4f46e5");
-  const accent = sanitizeColor(props.branding?.accentColor, "#4338ca");
-  const title = brandName ? `Autorisation — ${brandName}` : "Autorisation";
+  const { name: brandName, logoUrl, primaryColor: primary, accentColor: accent } = props.branding;
+  const title = `Autorisation — ${brandName}`;
   return html`<!doctype html>
     <html lang="fr">
       <head>
@@ -141,16 +138,14 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
         </style>
       </head>
       <body>
-        ${brandName
-          ? html`<header class="brand">
-              ${logoUrl ? html`<img src="${logoUrl}" alt="${brandName}" />` : null}
-              <div class="name">${brandName}</div>
-            </header>`
-          : null}
+        <header class="brand">
+          ${logoUrl ? html`<img src="${logoUrl}" alt="${brandName}" />` : null}
+          <div class="name">${brandName}</div>
+        </header>
         <h1>Autorisation</h1>
         <p>
           <span class="client">${props.clientName}</span> souhaite accéder à votre compte
-          ${brandName ?? "Appstrate"}.
+          ${brandName}.
         </p>
         <p>Cette application aura accès à :</p>
         <ul class="scopes">
@@ -158,25 +153,16 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
         </ul>
         <div class="actions">
           <form method="POST" action="${props.action}">
-            ${props.csrfToken
-              ? html`<input type="hidden" name="_csrf" value="${props.csrfToken}" />`
-              : null}
+            <input type="hidden" name="_csrf" value="${props.csrfToken}" />
             <input type="hidden" name="accept" value="false" />
             <button type="submit" class="deny">Refuser</button>
           </form>
           <form method="POST" action="${props.action}">
-            ${props.csrfToken
-              ? html`<input type="hidden" name="_csrf" value="${props.csrfToken}" />`
-              : null}
+            <input type="hidden" name="_csrf" value="${props.csrfToken}" />
             <input type="hidden" name="accept" value="true" />
             <button type="submit" class="allow">Autoriser</button>
           </form>
         </div>
       </body>
     </html> `;
-}
-
-function sanitizeColor(input: string | undefined, fallback: string): string {
-  if (!input) return fallback;
-  return /^#[0-9a-fA-F]{6}$/.test(input) ? input : fallback;
 }

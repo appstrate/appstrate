@@ -3,10 +3,17 @@
 import { describe, it, expect } from "bun:test";
 import { renderLoginPage } from "../../pages/login.ts";
 import { renderConsentPage } from "../../pages/consent.ts";
+import { PLATFORM_DEFAULT_BRANDING } from "../../services/branding.ts";
+
+const DEFAULT_PROPS = {
+  branding: PLATFORM_DEFAULT_BRANDING,
+  csrfToken: "tok_test",
+};
 
 describe("renderLoginPage", () => {
   it("escapes raw HTML characters from an error message", () => {
     const out = renderLoginPage({
+      ...DEFAULT_PROPS,
       queryString: "?client_id=c1&state=x",
       error: `<img src=x onerror=alert(1)>`,
     }).value;
@@ -16,6 +23,7 @@ describe("renderLoginPage", () => {
 
   it("escapes raw HTML characters from the query string", () => {
     const out = renderLoginPage({
+      ...DEFAULT_PROPS,
       queryString: `?state=<x"y>&scope=openid`,
     }).value;
     expect(out).not.toContain(`<x"y>`);
@@ -25,6 +33,7 @@ describe("renderLoginPage", () => {
 
   it("pre-fills the email field without breaking out of the attribute", () => {
     const out = renderLoginPage({
+      ...DEFAULT_PROPS,
       queryString: "",
       email: `hack"><script>x()</script>`,
     }).value;
@@ -36,6 +45,7 @@ describe("renderLoginPage", () => {
 describe("renderConsentPage", () => {
   it("escapes client name and scope list", () => {
     const out = renderConsentPage({
+      ...DEFAULT_PROPS,
       clientName: `<img src=x>`,
       scopes: ["openid", "runs:read", `<evil>`],
       action: "/api/oauth/enduser/consent?state=x",
@@ -50,6 +60,7 @@ describe("renderConsentPage", () => {
 
   it("renders French labels for known permission-style scopes", () => {
     const out = renderConsentPage({
+      ...DEFAULT_PROPS,
       clientName: "Acme",
       scopes: ["openid", "agents:run", "connections:connect"],
       action: "/x",
@@ -74,6 +85,7 @@ describe("page branding + CSRF", () => {
     const out = renderLoginPage({
       queryString: "?client_id=c1",
       branding,
+      csrfToken: "tok_abcdef",
     }).value;
     expect(out).toContain('src="https://cdn.example.com/logo.png"');
     expect(out).toContain("Mon Workspace");
@@ -82,21 +94,18 @@ describe("page branding + CSRF", () => {
     expect(out).toContain("<title>Connexion à Mon Workspace</title>");
   });
 
-  it("login page injects CSRF hidden field when token provided", () => {
+  it("login page injects CSRF hidden field", () => {
     const out = renderLoginPage({
+      ...DEFAULT_PROPS,
       queryString: "",
       csrfToken: "tok_abcdef",
     }).value;
     expect(out).toContain('name="_csrf" value="tok_abcdef"');
   });
 
-  it("login page omits CSRF field when token absent (backward compat)", () => {
-    const out = renderLoginPage({ queryString: "" }).value;
-    expect(out).not.toContain('name="_csrf"');
-  });
-
   it("consent page adds CSRF to both accept and deny forms", () => {
     const out = renderConsentPage({
+      ...DEFAULT_PROPS,
       clientName: "Acme",
       scopes: ["openid"],
       action: "/api/oauth/enduser/consent",
@@ -112,23 +121,8 @@ describe("page branding + CSRF", () => {
       scopes: ["openid"],
       action: "/x",
       branding,
+      csrfToken: "tok_test",
     }).value;
     expect(out).toContain("votre compte\n          Mon Workspace.");
-  });
-
-  it("sanitizes malformed primaryColor hex to platform default", () => {
-    const out = renderLoginPage({
-      queryString: "",
-      branding: {
-        name: "Acme",
-        logoUrl: null,
-        primaryColor: "'; alert(1); //" as string,
-        accentColor: "#4338ca",
-        supportEmail: null,
-        fromName: "Acme",
-      },
-    }).value;
-    expect(out).not.toContain("alert(1)");
-    expect(out).toContain("background: #4f46e5");
   });
 });

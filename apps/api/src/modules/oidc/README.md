@@ -118,32 +118,22 @@ Plugin configuration highlights:
 
 `pages/login.ts` and `pages/consent.ts` render the public-facing forms. Login accepts an optional `error` banner + prefilled `email`; consent shows French-localized descriptions for the identity scopes (`openid`/`profile`/`email`/`offline_access`) and for every `OIDC_ALLOWED_SCOPES` permission (`agents:read`, `agents:run`, `runs:read`, `runs:cancel`, `connections:read`, `connections:connect`, `connections:disconnect`), and falls back to the raw scope name (escaped) for anything else.
 
-## Emails
-
-Three module-owned email templates in `emails/`:
-
-- `enduser-welcome.ts` — sent on first successful sign-in (application name in subject)
-- `enduser-verification.ts` — email verification link (1h expiry)
-- `enduser-reset-password.ts` — password reset link (1h expiry)
-
-Rendered directly by the module — they do **not** go through `@appstrate/emails`'s strictly-typed `EmailType` registry, since adding new keys there would require a core edit. Every dynamic string (name, application name, URL) passes through `escapeHtml` before reaching the HTML body.
-
 ### Per-application branding
 
-Each template + the login/consent pages accept an optional `branding: ResolvedAppBranding` prop, loaded at request time via `services/branding.ts → resolveAppBranding(applicationId)`. The helper reads `applications.settings.branding` (shape defined by the module-owned `AppBrandingSchema` Zod schema) and falls back to the application's raw `name` field when the setting is missing or malformed. Fields supported:
+Both pages accept a `branding: ResolvedAppBranding` prop, loaded at request time via `services/branding.ts → resolveAppBranding(applicationId)`. The helper reads `applications.settings.branding` (shape defined by the module-owned `AppBrandingSchema` Zod schema) and falls back to the application's raw `name` field when the setting is missing or malformed. Fields supported:
 
 ```ts
 {
   name?: string;           // Display name (defaults to applications.name)
   logoUrl?: string;        // Header logo URL (escaped)
-  primaryColor?: string;   // Hex #RRGGBB — sanitized, falls back to #4f46e5
-  accentColor?: string;    // Hex #RRGGBB — sanitized
+  primaryColor?: string;   // Hex #RRGGBB — validated by AppBrandingSchema, defaults to #4f46e5
+  accentColor?: string;    // Hex #RRGGBB — validated by AppBrandingSchema
   supportEmail?: string;
   fromName?: string;       // Email sender display name
 }
 ```
 
-Malformed hex values are replaced with the platform default so a misconfigured branding JSONB never breaks the render. The shell header, button colors, email subject lines, and `<title>` tags all reflect the resolved branding — an end-user receives an email titled "Bienvenue sur Mon Workspace" instead of "Bienvenue sur Appstrate".
+Colors are validated by `AppBrandingSchema` at resolve time, so a misconfigured branding JSONB is silently replaced with the platform default before reaching the render. The shell header, button colors, and `<title>` tags all reflect the resolved branding.
 
 ## Enabling OAuth for an application
 

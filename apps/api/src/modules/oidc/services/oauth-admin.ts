@@ -77,7 +77,7 @@ function randomSecret(): string {
     .replace(/=+$/, "");
 }
 
-async function hashSecret(plaintext: string): Promise<string> {
+export async function hashSecret(plaintext: string): Promise<string> {
   const data = new TextEncoder().encode(plaintext);
   const digest = await crypto.subtle.digest("SHA-256", data);
   return Buffer.from(new Uint8Array(digest)).toString("hex");

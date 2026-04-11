@@ -100,6 +100,38 @@ export const updateOAuthClientSchema = z.object({
   disabled: z.boolean().optional(),
 });
 
+/**
+ * Single entry point for every end-user page handler (GET/POST login,
+ * GET/POST consent). Loads the oauth client row, rejects unknown/disabled
+ * clients with 404, resolves the owning application's branding, and
+ * issues a fresh CSRF token — all in one round trip per request.
+ */
+async function loadClientContext(
+  c: Context<AppEnv>,
+  clientId: string,
+): Promise<{
+  client: { id: string; name: string | null };
+  applicationId: string | null;
+  branding: Awaited<ReturnType<typeof resolveAppBranding>>;
+  csrfToken: string;
+}> {
+  const [row] = await db
+    .select({
+      id: oauthClient.clientId,
+      name: oauthClient.name,
+      disabled: oauthClient.disabled,
+      referenceId: oauthClient.referenceId,
+    })
+    .from(oauthClient)
+    .where(eq(oauthClient.clientId, clientId))
+    .limit(1);
+  if (!row || row.disabled) throw notFound("Unknown OAuth client");
+  const applicationId = row.referenceId ?? null;
+  const branding = await resolveAppBranding(applicationId);
+  const csrfToken = issueCsrfToken(c);
+  return { client: { id: row.id, name: row.name }, applicationId, branding, csrfToken };
+}
+
 export function createOidcRouter() {
   const router = new Hono<AppEnv>();
 
@@ -250,19 +282,7 @@ export function createOidcRouter() {
     const clientId = url.searchParams.get("client_id");
     if (!clientId) throw invalidRequest("client_id is required", "client_id");
 
-    const [row] = await db
-      .select({
-        id: oauthClient.clientId,
-        disabled: oauthClient.disabled,
-        referenceId: oauthClient.referenceId,
-      })
-      .from(oauthClient)
-      .where(eq(oauthClient.clientId, clientId))
-      .limit(1);
-    if (!row || row.disabled) throw notFound("Unknown OAuth client");
-
-    const branding = row.referenceId ? await resolveAppBranding(row.referenceId) : undefined;
-    const csrfToken = issueCsrfToken(c);
+    const { branding, csrfToken } = await loadClientContext(c, clientId);
     const body = renderLoginPage({ queryString: url.search, branding, csrfToken });
     return c.html(body.value);
   });
@@ -279,30 +299,30 @@ export function createOidcRouter() {
     if (!clientId) throw invalidRequest("client_id is required", "client_id");
 
     const form = await c.req.parseBody();
-    const csrfOk = verifyCsrfToken(c, readFormString(form, "_csrf"));
-    if (!csrfOk) {
+    // CSRF is verified before any lookup so a forged POST never probes
+    // the oauth_client table. The cookie is cleared on match; a fresh
+    // token will be issued by `loadClientContext` below for whichever
+    // response (error page or redirect) we return.
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
       throw forbidden("CSRF token missing or invalid — reload the login page and try again");
     }
+
+    const ctx = await loadClientContext(c, clientId);
+    const renderError = (error: string, status: 400 | 401 | 409 | 429, email?: string) => {
+      const page = renderLoginPage({
+        queryString: url.search,
+        branding: ctx.branding,
+        csrfToken: ctx.csrfToken,
+        error,
+        email,
+      });
+      return c.html(page.value, status);
+    };
 
     const email = readFormString(form, "email")?.toLowerCase().trim();
     const password = readFormString(form, "password");
     if (!email || !password) {
-      const [row] = await db
-        .select({ referenceId: oauthClient.referenceId, disabled: oauthClient.disabled })
-        .from(oauthClient)
-        .where(eq(oauthClient.clientId, clientId))
-        .limit(1);
-      if (!row || row.disabled) throw notFound("Unknown OAuth client");
-      const branding = row.referenceId ? await resolveAppBranding(row.referenceId) : undefined;
-      const csrfToken = issueCsrfToken(c);
-      const page = renderLoginPage({
-        queryString: url.search,
-        branding,
-        csrfToken,
-        error: "Email et mot de passe requis.",
-        email: email ?? undefined,
-      });
-      return c.html(page.value, 400);
+      return renderError("Email et mot de passe requis.", 400, email ?? undefined);
     }
 
     // Per-email brute-force protection — complements the IP limiter.
@@ -310,23 +330,13 @@ export function createOidcRouter() {
     // account from many addresses.
     const attempt = await consumeLoginEmailAttempt(email);
     if (!attempt.allowed) {
-      const [row] = await db
-        .select({ referenceId: oauthClient.referenceId })
-        .from(oauthClient)
-        .where(eq(oauthClient.clientId, clientId))
-        .limit(1);
-      const branding = row?.referenceId ? await resolveAppBranding(row.referenceId) : undefined;
-      const csrfToken = issueCsrfToken(c);
       const minutes = Math.ceil(attempt.retryAfterSeconds / 60);
-      const page = renderLoginPage({
-        queryString: url.search,
-        branding,
-        csrfToken,
-        error: `Trop de tentatives. Réessayez dans ${minutes} minute${minutes > 1 ? "s" : ""}.`,
-        email,
-      });
       c.header("Retry-After", String(attempt.retryAfterSeconds));
-      return c.html(page.value, 429);
+      return renderError(
+        `Trop de tentatives. Réessayez dans ${minutes} minute${minutes > 1 ? "s" : ""}.`,
+        429,
+        email,
+      );
     }
 
     // signInEmail sets the session cookie on the response. We `asResponse:
@@ -344,21 +354,7 @@ export function createOidcRouter() {
     })) as Response;
 
     if (!authResponse.ok) {
-      const [row] = await db
-        .select({ referenceId: oauthClient.referenceId })
-        .from(oauthClient)
-        .where(eq(oauthClient.clientId, clientId))
-        .limit(1);
-      const branding = row?.referenceId ? await resolveAppBranding(row.referenceId) : undefined;
-      const csrfToken = issueCsrfToken(c);
-      const page = renderLoginPage({
-        queryString: url.search,
-        branding,
-        csrfToken,
-        error: "Email ou mot de passe incorrect.",
-        email,
-      });
-      return c.html(page.value, 401);
+      return renderError("Email ou mot de passe incorrect.", 401, email);
     }
 
     // Successful sign-in — clear the per-email attempt counter so the
@@ -369,27 +365,14 @@ export function createOidcRouter() {
     // redirecting into authorize, so an `UnverifiedEmailConflictError`
     // surfaces as a friendly FR error page on this handler rather than
     // as a generic 500 propagated through the plugin's token-mint path.
-    //
-    // The original code had a post-hoc catch at this call site, but the
+    // The original post-hoc catch at this call site was unreachable: the
     // error is actually thrown from `customAccessTokenClaims` during
-    // token mint — *after* we have already 302'd away — so that catch
-    // was unreachable. Resolving up front here lets us handle the error
-    // while we still control the response.
+    // token mint — *after* we have already 302'd away.
     //
     // We fetch the Better Auth user by email (unique index) because
     // `asResponse: true` above returns a raw Response, not the typed
     // `{ user }` object that the non-response form would give us.
-    const [clientRow] = await db
-      .select({
-        referenceId: oauthClient.referenceId,
-        disabled: oauthClient.disabled,
-      })
-      .from(oauthClient)
-      .where(eq(oauthClient.clientId, clientId))
-      .limit(1);
-    if (!clientRow || clientRow.disabled) throw notFound("Unknown OAuth client");
-    const applicationId = clientRow.referenceId;
-    if (applicationId) {
+    if (ctx.applicationId) {
       const [authUserRow] = await db
         .select({
           id: betterAuthUser.id,
@@ -409,21 +392,15 @@ export function createOidcRouter() {
               name: authUserRow.name,
               emailVerified: authUserRow.emailVerified === true,
             },
-            applicationId,
+            ctx.applicationId,
           );
         } catch (err) {
           if (err instanceof UnverifiedEmailConflictError) {
-            const branding = await resolveAppBranding(applicationId);
-            const csrfToken = issueCsrfToken(c);
-            const page = renderLoginPage({
-              queryString: url.search,
-              branding,
-              csrfToken,
-              error:
-                "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
+            return renderError(
+              "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
+              409,
               email,
-            });
-            return c.html(page.value, 409);
+            );
           }
           throw err;
         }
@@ -448,23 +425,10 @@ export function createOidcRouter() {
     const scope = url.searchParams.get("scope") ?? "openid";
     if (!clientId) throw invalidRequest("client_id is required", "client_id");
 
-    const [row] = await db
-      .select({
-        id: oauthClient.clientId,
-        name: oauthClient.name,
-        disabled: oauthClient.disabled,
-        referenceId: oauthClient.referenceId,
-      })
-      .from(oauthClient)
-      .where(eq(oauthClient.clientId, clientId))
-      .limit(1);
-    if (!row || row.disabled) throw notFound("Unknown OAuth client");
-
+    const { client, branding, csrfToken } = await loadClientContext(c, clientId);
     const scopes = scope.split(/\s+/).filter(Boolean);
-    const branding = row.referenceId ? await resolveAppBranding(row.referenceId) : undefined;
-    const csrfToken = issueCsrfToken(c);
     const body = renderConsentPage({
-      clientName: row.name ?? row.id,
+      clientName: client.name ?? client.id,
       scopes,
       action: `/api/oauth/enduser/consent${url.search}`,
       branding,

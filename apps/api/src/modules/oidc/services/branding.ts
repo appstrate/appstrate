@@ -75,15 +75,29 @@ export interface ResolvedAppBranding {
 const DEFAULT_PRIMARY = "#4f46e5";
 const DEFAULT_ACCENT = "#4338ca";
 
+export const PLATFORM_DEFAULT_BRANDING: ResolvedAppBranding = {
+  name: "Appstrate",
+  logoUrl: null,
+  primaryColor: DEFAULT_PRIMARY,
+  accentColor: DEFAULT_ACCENT,
+  supportEmail: null,
+  fromName: "Appstrate",
+};
+
 /**
  * Read `applications.settings.branding` for the given app, validate it,
- * and return a fully-resolved branding with sensible fallbacks.
+ * and return a fully-resolved branding with sensible fallbacks. Pass
+ * `null` to get the platform default branding (used when a client row
+ * is not yet bound to an application).
  *
- * Validation failures are logged (warn) but never throw — the page/email
- * still renders with defaults so a bad branding config can't take down an
+ * Validation failures are logged (warn) but never throw — the page still
+ * renders with defaults so a bad branding config can't take down an
  * end-user flow.
  */
-export async function resolveAppBranding(applicationId: string): Promise<ResolvedAppBranding> {
+export async function resolveAppBranding(
+  applicationId: string | null,
+): Promise<ResolvedAppBranding> {
+  if (!applicationId) return PLATFORM_DEFAULT_BRANDING;
   const [row] = await db
     .select({ name: applications.name, settings: applications.settings })
     .from(applications)

@@ -45,6 +45,7 @@ import {
   resolveOrCreateEndUser,
   UnverifiedEmailConflictError,
 } from "../services/enduser-mapping.ts";
+import { hashSecret } from "../services/oauth-admin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 
 /**
@@ -68,22 +69,9 @@ export const APPSTRATE_SCOPES: readonly string[] = [
   ...OIDC_ALLOWED_SCOPES,
 ];
 
-/**
- * SHA-256 hex hash matching `services/oauth-admin.ts`'s `hashSecret`.
- * Wrapping it here so the plugin's `storeClientSecret.hash` hook uses the
- * exact same format that our admin API writes — otherwise newly-created
- * clients would be unverifiable.
- */
-async function sha256HexHash(clientSecret: string): Promise<string> {
-  const data = new TextEncoder().encode(clientSecret);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return Buffer.from(new Uint8Array(digest)).toString("hex");
-}
-
 async function sha256HexVerify(clientSecret: string, storedHash: string): Promise<boolean> {
-  const computed = await sha256HexHash(clientSecret);
+  const computed = await hashSecret(clientSecret);
   if (computed.length !== storedHash.length) return false;
-  // Constant-time compare.
   let diff = 0;
   for (let i = 0; i < computed.length; i++) {
     diff |= computed.charCodeAt(i) ^ storedHash.charCodeAt(i);
@@ -134,7 +122,7 @@ export function oidcBetterAuthPlugins(): unknown[] {
       // Match our existing admin-API hash so clients created before/without
       // the plugin continue to work.
       storeClientSecret: {
-        hash: sha256HexHash,
+        hash: hashSecret,
         verify: sha256HexVerify,
       },
 
