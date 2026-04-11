@@ -14,7 +14,7 @@ import {
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
-import { organizations } from "./organizations.ts"; // used by userProviderConnections + oauthStates
+import { organizations } from "./organizations.ts";
 import { packages } from "./packages.ts";
 
 export const connectionProfiles = pgTable(
@@ -176,44 +176,5 @@ export const userProviderConnections = pgTable(
     index("idx_user_provider_connections_org_id").on(table.orgId),
     index("idx_user_provider_connections_cred_id").on(table.providerCredentialId),
     index("idx_user_provider_connections_org_provider").on(table.orgId, table.providerId),
-  ],
-);
-
-export const oauthStates = pgTable(
-  "oauth_states",
-  {
-    state: text("state").primaryKey(),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
-    endUserId: text("end_user_id").references(() => endUsers.id, {
-      onDelete: "cascade",
-    }),
-    profileId: uuid("profile_id")
-      .notNull()
-      .references(() => connectionProfiles.id, { onDelete: "cascade" }),
-    providerId: text("provider_id").notNull(),
-    applicationId: text("application_id")
-      .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
-    codeVerifier: text("code_verifier").notNull(),
-    oauthTokenSecret: text("oauth_token_secret"),
-    authMode: text("auth_mode").notNull().default("oauth2"),
-    scopesRequested: text("scopes_requested")
-      .array()
-      .default(sql`'{}'::text[]`),
-    redirectUri: text("redirect_uri").notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    expiresAt: timestamp("expires_at")
-      .notNull()
-      .default(sql`NOW() + INTERVAL '10 minutes'`),
-  },
-  (table) => [
-    index("idx_oauth_states_expires").on(table.expiresAt),
-    check(
-      "oauth_states_exactly_one_actor",
-      sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
-    ),
   ],
 );

@@ -1,2 +1,8 @@
 # Generated files — managed by scripts, not prettier
 packages/core/schema/
+
+# Drizzle SQL migrations — managed by drizzle-kit, not prettier
+**/drizzle/migrations/**
+
+# Bun config files — toml, no prettier parser
+**/bunfig.toml

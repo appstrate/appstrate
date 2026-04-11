@@ -12,11 +12,23 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
+export type FormFieldType =
+  | "text"
+  | "number"
+  | "textarea"
+  | "email"
+  | "url"
+  | "date"
+  | "datetime-local"
+  | "time"
+  | "color"
+  | "password";
+
 export interface FormFieldProps {
   id: string;
   label: string;
   required?: boolean;
-  type?: "text" | "number" | "textarea";
+  type?: FormFieldType;
   value: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
@@ -25,6 +37,12 @@ export interface FormFieldProps {
   enumValues?: string[];
   error?: string;
   disabled?: boolean;
+  min?: number;
+  max?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  step?: number | "any";
 }
 
 export function FormField({
@@ -40,6 +58,12 @@ export function FormField({
   enumValues,
   error,
   disabled,
+  min,
+  max,
+  minLength,
+  maxLength,
+  pattern,
+  step,
 }: FormFieldProps) {
   const hintId = description ? `hint-${id}` : undefined;
   const errorId = error ? `error-${id}` : undefined;
@@ -77,10 +101,30 @@ export function FormField({
           onBlur={onBlur}
           placeholder={placeholder}
           disabled={disabled}
+          required={required}
+          minLength={minLength}
+          maxLength={maxLength}
           rows={4}
           aria-describedby={describedBy}
           aria-invalid={error ? true : undefined}
           className={cn(error && "border-destructive")}
+        />
+      );
+    }
+
+    if (type === "color") {
+      return (
+        <Input
+          id={id}
+          type="color"
+          value={value || "#000000"}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
+          disabled={disabled}
+          required={required}
+          aria-describedby={describedBy}
+          aria-invalid={error ? true : undefined}
+          className={cn("h-10 w-20 cursor-pointer p-1", error && "border-destructive")}
         />
       );
     }
@@ -94,6 +138,13 @@ export function FormField({
         onBlur={onBlur}
         placeholder={placeholder}
         disabled={disabled}
+        required={required}
+        min={min}
+        max={max}
+        minLength={minLength}
+        maxLength={maxLength}
+        pattern={pattern}
+        step={step}
         aria-describedby={describedBy}
         aria-invalid={error ? true : undefined}
         className={cn(error && "border-destructive")}

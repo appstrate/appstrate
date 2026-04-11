@@ -247,7 +247,7 @@ describe("API Keys API", () => {
       expect(body.scopes.length).toBeGreaterThan(20);
       expect(body.scopes).toContain("agents:read");
       expect(body.scopes).toContain("agents:write");
-      expect(body.scopes).toContain("webhooks:write");
+      expect(body.scopes).toContain("runs:read");
       // Session-only scopes should NOT be present
       expect(body.scopes).not.toContain("org:delete");
       expect(body.scopes).not.toContain("billing:manage");

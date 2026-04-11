@@ -60,16 +60,22 @@ export interface SchemaWrapper {
 
 // ─── Field Descriptor ────────────────────────────────────────────────────────
 
-/** Supported form field types derived from JSON Schema property definitions. */
+/**
+ * Structural form field types derived from JSON Schema property definitions.
+ * These describe the **widget kind**, not the data format. Format-specific
+ * rendering (email, date, color…) is handled by the UI layer via `FieldDescriptor.format`.
+ */
 export type FieldType =
   | "text"
   | "textarea"
   | "number"
+  | "integer"
   | "boolean"
   | "enum"
   | "json"
   | "file"
-  | "file-multiple";
+  | "file-multiple"
+  | "multiselect";
 
 /** Validation constraints extracted from JSON Schema property definitions. */
 export interface FieldValidation {
@@ -77,7 +83,10 @@ export interface FieldValidation {
   maxLength?: number;
   minimum?: number;
   maximum?: number;
+  exclusiveMinimum?: number;
+  exclusiveMaximum?: number;
   pattern?: string;
+  multipleOf?: number;
 }
 
 /** Descriptor for a single form field, derived from a JSON Schema property. */
@@ -98,10 +107,20 @@ export interface FieldDescriptor {
   defaultValue?: unknown;
   /** Allowed values for enum fields. */
   enumValues?: string[];
+  /** Allowed values for multiselect fields (array of enum items). */
+  multiselectOptions?: string[];
   /** File upload constraints for file/file-multiple fields. */
   fileConstraints?: FileConstraint & { maxFiles?: number };
   /** Validation constraints extracted from the schema. */
   validation?: FieldValidation;
+  /** Step value for number/integer inputs (1 for integer, multipleOf if set). */
+  step?: number;
+  /** Inclusive minimum for HTML `min` attribute. Accounts for exclusiveMinimum (integer: +1, number: as-is). */
+  effectiveMin?: number;
+  /** Inclusive maximum for HTML `max` attribute. Accounts for exclusiveMaximum (integer: -1, number: as-is). */
+  effectiveMax?: number;
+  /** Raw JSON Schema format string, passed through for UI customization. */
+  format?: string;
 }
 
 // ─── Field Error ─────────────────────────────────────────────────────────────
@@ -110,10 +129,47 @@ export interface FieldDescriptor {
 export interface FieldError {
   /** Property key that failed validation. */
   key: string;
-  /** Machine-readable error code: "required" | "type" | "enum" | "minimum" | "maximum" | "minLength" | "maxLength" | "pattern". */
-  message: string;
+  /** Machine-readable error code. */
+  message:
+    | "required"
+    | "type"
+    | "enum"
+    | "format"
+    | "minimum"
+    | "maximum"
+    | "exclusiveMinimum"
+    | "exclusiveMaximum"
+    | "multipleOf"
+    | "minLength"
+    | "maxLength"
+    | "pattern";
   /** Additional context for the error (e.g. expected type, min/max values). */
   params?: Record<string, unknown>;
+}
+
+// ─── HTML Input Type Resolution ─────────────────────────────────────────────
+
+/** Map JSON Schema format → HTML input type for string fields. */
+export const FORMAT_TO_HTML_INPUT_TYPE: Readonly<Record<string, string>> = {
+  email: "email",
+  "idn-email": "email",
+  uri: "url",
+  url: "url",
+  date: "date",
+  "date-time": "datetime-local",
+  time: "time",
+  color: "color",
+  password: "password",
+};
+
+/** Resolve the HTML input type from a FieldDescriptor. */
+export function toHtmlInputType(field: FieldDescriptor): string {
+  if (field.type === "number" || field.type === "integer") return "number";
+  if (field.type === "textarea") return "textarea";
+  if (field.type === "text" && field.format) {
+    return FORMAT_TO_HTML_INPUT_TYPE[field.format] ?? "text";
+  }
+  return "text";
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
@@ -172,11 +228,22 @@ function resolveFieldType(prop: JSONSchema7): FieldType {
   if (isMultipleFileField(prop)) return "file-multiple";
   if (isFileField(prop)) return "file";
   if (prop.enum && prop.enum.length > 0) return "enum";
+
   const t = getType(prop);
+
+  // Array with enum items → multiselect
+  if (t === "array") {
+    const items = getItems(prop);
+    if (items?.enum && items.enum.length > 0) return "multiselect";
+    return "json";
+  }
+
   if (t === "object") return "json";
-  if (t === "array") return "json";
   if (t === "boolean") return "boolean";
-  if (t === "number" || t === "integer") return "number";
+  if (t === "integer") return "integer";
+  if (t === "number") return "number";
+
+  // String: format-specific rendering is delegated to the UI via descriptor.format
   if (t === "string" && prop.maxLength && prop.maxLength > 500) return "textarea";
   return "text";
 }
@@ -200,8 +267,20 @@ function extractValidation(prop: JSONSchema7): FieldValidation | undefined {
     v.maximum = prop.maximum;
     hasAny = true;
   }
+  if (prop.exclusiveMinimum != null && typeof prop.exclusiveMinimum === "number") {
+    v.exclusiveMinimum = prop.exclusiveMinimum;
+    hasAny = true;
+  }
+  if (prop.exclusiveMaximum != null && typeof prop.exclusiveMaximum === "number") {
+    v.exclusiveMaximum = prop.exclusiveMaximum;
+    hasAny = true;
+  }
   if (prop.pattern != null) {
     v.pattern = prop.pattern;
+    hasAny = true;
+  }
+  if (prop.multipleOf != null) {
+    v.multipleOf = prop.multipleOf;
     hasAny = true;
   }
   return hasAny ? v : undefined;
@@ -235,6 +314,13 @@ export function schemaToFields(wrapper: SchemaWrapper): FieldDescriptor[] {
       descriptor.enumValues = prop.enum.map(String);
     }
 
+    if (fieldType === "multiselect") {
+      const items = getItems(prop);
+      if (items?.enum) {
+        descriptor.multiselectOptions = items.enum.map(String);
+      }
+    }
+
     if (fieldType === "file" || fieldType === "file-multiple") {
       descriptor.fileConstraints = {
         ...fc,
@@ -245,6 +331,31 @@ export function schemaToFields(wrapper: SchemaWrapper): FieldDescriptor[] {
     const validation = extractValidation(prop);
     if (validation) {
       descriptor.validation = validation;
+    }
+
+    // Step and effective min/max for number/integer inputs
+    if (fieldType === "integer" || fieldType === "number") {
+      const isInt = fieldType === "integer";
+      descriptor.step = isInt ? (prop.multipleOf ?? 1) : prop.multipleOf;
+
+      const exMin =
+        prop.exclusiveMinimum != null && typeof prop.exclusiveMinimum === "number"
+          ? prop.exclusiveMinimum
+          : undefined;
+      const exMax =
+        prop.exclusiveMaximum != null && typeof prop.exclusiveMaximum === "number"
+          ? prop.exclusiveMaximum
+          : undefined;
+
+      descriptor.effectiveMin =
+        prop.minimum ?? (exMin != null ? (isInt ? exMin + 1 : exMin) : undefined);
+      descriptor.effectiveMax =
+        prop.maximum ?? (exMax != null ? (isInt ? exMax - 1 : exMax) : undefined);
+    }
+
+    // Pass through format for UI customization
+    if (prop.format) {
+      descriptor.format = prop.format;
     }
 
     return descriptor;
@@ -265,20 +376,35 @@ export function initFormValues(
     if (isFileField(prop)) continue;
 
     const t = getType(prop);
-    const isJsonType = t === "object" || t === "array";
+    const items = t === "array" ? getItems(prop) : undefined;
+    const isMultiselect = t === "array" && items?.enum && items.enum.length > 0;
+    const isJsonType = (t === "object" || t === "array") && !isMultiselect;
 
     if (existing != null && key in existing && existing[key] != null) {
-      values[key] =
-        isJsonType && typeof existing[key] === "object"
-          ? JSON.stringify(existing[key], null, 2)
-          : existing[key];
+      if (isMultiselect) {
+        // Multiselect: keep as array
+        values[key] = Array.isArray(existing[key]) ? existing[key] : [];
+      } else if (isJsonType && typeof existing[key] === "object") {
+        values[key] = JSON.stringify(existing[key], null, 2);
+      } else {
+        values[key] = existing[key];
+      }
     } else if (prop.default !== undefined) {
-      values[key] =
-        isJsonType && typeof prop.default === "object"
-          ? JSON.stringify(prop.default, null, 2)
-          : prop.default;
+      if (isMultiselect) {
+        values[key] = Array.isArray(prop.default) ? prop.default : [];
+      } else if (isJsonType && typeof prop.default === "object") {
+        values[key] = JSON.stringify(prop.default, null, 2);
+      } else {
+        values[key] = prop.default;
+      }
     } else {
-      values[key] = isJsonType ? (t === "array" ? "[]" : "{}") : "";
+      if (isMultiselect) {
+        values[key] = [];
+      } else if (isJsonType) {
+        values[key] = t === "array" ? "[]" : "{}";
+      } else {
+        values[key] = "";
+      }
     }
   }
   return values;
@@ -313,9 +439,15 @@ export function buildPayload(
     const raw = values[key];
     const t = getType(prop);
 
-    // Empty string → null
+    // Empty string → null (but empty array is valid for multiselect)
     if (raw === "" || raw === undefined) {
       payload[key] = null;
+      continue;
+    }
+
+    // Multiselect: keep as array (already an array from the form)
+    if (t === "array" && Array.isArray(raw)) {
+      payload[key] = raw;
       continue;
     }
 
@@ -329,9 +461,17 @@ export function buildPayload(
       continue;
     }
 
+    // Integer coercion
+    if (t === "integer" && typeof raw === "string") {
+      const n = Number(raw);
+      payload[key] = Number.isNaN(n) ? null : Math.round(n);
+      continue;
+    }
+
     // Number coercion
-    if ((t === "number" || t === "integer") && typeof raw === "string") {
-      payload[key] = Number(raw);
+    if (t === "number" && typeof raw === "string") {
+      const n = Number(raw);
+      payload[key] = Number.isNaN(n) ? null : n;
       continue;
     }
 
@@ -379,7 +519,13 @@ export function validateFormValues(
     if (expectedType === "number" || expectedType === "integer") {
       const num = typeof raw === "string" ? Number(raw) : raw;
       if (typeof num !== "number" || Number.isNaN(num)) {
-        errors.push({ key, message: "type", params: { expected: "number" } });
+        errors.push({ key, message: "type", params: { expected: expectedType } });
+        continue;
+      }
+
+      // Integer check
+      if (expectedType === "integer" && !Number.isInteger(num)) {
+        errors.push({ key, message: "type", params: { expected: "integer" } });
         continue;
       }
 
@@ -390,28 +536,109 @@ export function validateFormValues(
       if (prop.maximum != null && num > prop.maximum) {
         errors.push({ key, message: "maximum", params: { maximum: prop.maximum, actual: num } });
       }
+      if (
+        prop.exclusiveMinimum != null &&
+        typeof prop.exclusiveMinimum === "number" &&
+        num <= prop.exclusiveMinimum
+      ) {
+        errors.push({
+          key,
+          message: "exclusiveMinimum",
+          params: { exclusiveMinimum: prop.exclusiveMinimum, actual: num },
+        });
+      }
+      if (
+        prop.exclusiveMaximum != null &&
+        typeof prop.exclusiveMaximum === "number" &&
+        num >= prop.exclusiveMaximum
+      ) {
+        errors.push({
+          key,
+          message: "exclusiveMaximum",
+          params: { exclusiveMaximum: prop.exclusiveMaximum, actual: num },
+        });
+      }
+      // multipleOf check (use ratio comparison to avoid floating-point modulo errors)
+      if (prop.multipleOf != null) {
+        const ratio = num / prop.multipleOf;
+        if (Math.abs(ratio - Math.round(ratio)) > 1e-10) {
+          errors.push({
+            key,
+            message: "multipleOf",
+            params: { multipleOf: prop.multipleOf, actual: num },
+          });
+        }
+      }
     } else if (expectedType === "boolean") {
       if (typeof raw !== "boolean" && raw !== "true" && raw !== "false") {
         errors.push({ key, message: "type", params: { expected: "boolean" } });
         continue;
       }
-    } else if (expectedType === "object" || expectedType === "array") {
-      // Validate JSON string is parseable
-      if (typeof raw === "string") {
+    } else if (expectedType === "array") {
+      // Multiselect: value is already an array
+      if (Array.isArray(raw)) {
+        const items = getItems(prop);
+        if (items?.enum) {
+          const allowed = items.enum.map(String);
+          for (const item of raw) {
+            if (!allowed.includes(String(item))) {
+              errors.push({ key, message: "enum", params: { allowed: items.enum } });
+              break;
+            }
+          }
+        }
+      } else if (typeof raw === "string") {
         try {
           const parsed = JSON.parse(raw);
-          if (expectedType === "object" && (typeof parsed !== "object" || Array.isArray(parsed))) {
-            errors.push({ key, message: "type", params: { expected: "object" } });
-          }
-          if (expectedType === "array" && !Array.isArray(parsed)) {
+          if (!Array.isArray(parsed)) {
             errors.push({ key, message: "type", params: { expected: "array" } });
           }
         } catch {
-          errors.push({ key, message: "type", params: { expected: expectedType } });
+          errors.push({ key, message: "type", params: { expected: "array" } });
+        }
+      }
+    } else if (expectedType === "object") {
+      if (typeof raw === "string") {
+        try {
+          const parsed = JSON.parse(raw);
+          if (typeof parsed !== "object" || Array.isArray(parsed)) {
+            errors.push({ key, message: "type", params: { expected: "object" } });
+          }
+        } catch {
+          errors.push({ key, message: "type", params: { expected: "object" } });
         }
       }
     } else if (expectedType === "string" || !expectedType) {
       const str = String(raw);
+
+      // Format-specific validation
+      if (prop.format === "email" || prop.format === "idn-email") {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str)) {
+          errors.push({ key, message: "format", params: { format: "email" } });
+        }
+      }
+      if (prop.format === "uri" || prop.format === "url") {
+        try {
+          new URL(str);
+        } catch {
+          errors.push({ key, message: "format", params: { format: "uri" } });
+        }
+      }
+      if (prop.format === "date") {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(str) || Number.isNaN(Date.parse(str))) {
+          errors.push({ key, message: "format", params: { format: "date" } });
+        }
+      }
+      if (prop.format === "date-time") {
+        if (Number.isNaN(Date.parse(str))) {
+          errors.push({ key, message: "format", params: { format: "date-time" } });
+        }
+      }
+      if (prop.format === "time") {
+        if (!/^\d{2}:\d{2}(:\d{2})?$/.test(str)) {
+          errors.push({ key, message: "format", params: { format: "time" } });
+        }
+      }
 
       if (prop.minLength != null && str.length < prop.minLength) {
         errors.push({
@@ -438,8 +665,8 @@ export function validateFormValues(
       }
     }
 
-    // Enum check (applies to any type)
-    if (prop.enum && prop.enum.length > 0) {
+    // Enum check (applies to any type except array which is handled above)
+    if (expectedType !== "array" && prop.enum && prop.enum.length > 0) {
       const stringValues = prop.enum.map(String);
       if (!stringValues.includes(String(raw))) {
         errors.push({ key, message: "enum", params: { allowed: prop.enum } });

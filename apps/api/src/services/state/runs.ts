@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, ne, desc, isNotNull, inArray, count, max, type SQL } from "drizzle-orm";
+import { eq, and, ne, desc, isNotNull, inArray, count, max, type SQL, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, runLogs } from "@appstrate/db/schema";
+import { runs, runLogs, profiles, endUsers, apiKeys, packageSchedules } from "@appstrate/db/schema";
+import type { RunProviderSnapshot } from "@appstrate/shared-types";
 import { logger } from "../../lib/logger.ts";
 import { type Actor, actorInsert, actorFilter } from "../../lib/actor.ts";
 import { asRecordOrNull } from "../../lib/safe-json.ts";
@@ -43,7 +44,8 @@ interface CreateRunParams {
   modelLabel?: string;
   modelSource?: string;
   providerProfileIds?: Record<string, string>;
-  providerStatuses?: unknown[];
+  providerStatuses?: RunProviderSnapshot[];
+  apiKeyId?: string;
 }
 
 export async function createRun(params: CreateRunParams): Promise<void> {
@@ -68,6 +70,7 @@ export async function createRun(params: CreateRunParams): Promise<void> {
     applicationId,
     providerProfileIds: params.providerProfileIds,
     providerStatuses: params.providerStatuses,
+    apiKeyId: params.apiKeyId,
     runNumber,
   });
 }
@@ -117,7 +120,6 @@ export async function updateRun(
     result?: Record<string, unknown>;
     state?: Record<string, unknown>;
     error?: string;
-    tokensUsed?: number;
     completedAt?: string;
     duration?: number;
     tokenUsage?: Record<string, unknown>;
@@ -130,7 +132,6 @@ export async function updateRun(
 
   if (updates.status !== undefined) set.status = updates.status;
   if (updates.error !== undefined) set.error = updates.error;
-  if (updates.tokensUsed !== undefined) set.tokensUsed = updates.tokensUsed;
   if (updates.completedAt !== undefined) set.completedAt = new Date(updates.completedAt);
   if (updates.duration !== undefined) set.duration = updates.duration;
   if (updates.result !== undefined) set.result = updates.result;
@@ -399,15 +400,31 @@ export async function listRunsWithFilter(
   const [countRow] = await db.select({ count: count() }).from(runs).where(filter);
 
   const rows = await db
-    .select()
+    .select({
+      run: runs,
+      userName: profiles.displayName,
+      endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
+      apiKeyName: apiKeys.name,
+      scheduleName: packageSchedules.name,
+    })
     .from(runs)
+    .leftJoin(profiles, eq(runs.userId, profiles.id))
+    .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
+    .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
+    .leftJoin(packageSchedules, eq(runs.scheduleId, packageSchedules.id))
     .where(filter)
     .orderBy(desc(runs.startedAt))
     .limit(limit)
     .offset(offset);
 
   return {
-    runs: rows as unknown as Record<string, unknown>[],
+    runs: rows.map((r) => ({
+      ...r.run,
+      userName: r.userName ?? null,
+      endUserName: r.endUserName ?? null,
+      apiKeyName: r.apiKeyName ?? null,
+      scheduleName: r.scheduleName ?? null,
+    })) as unknown as Record<string, unknown>[],
     total: countRow?.count ?? 0,
   };
 }
@@ -459,11 +476,29 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
   ];
 
   const [row] = await db
-    .select()
+    .select({
+      run: runs,
+      userName: profiles.displayName,
+      endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
+      apiKeyName: apiKeys.name,
+      scheduleName: packageSchedules.name,
+    })
     .from(runs)
+    .leftJoin(profiles, eq(runs.userId, profiles.id))
+    .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
+    .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
+    .leftJoin(packageSchedules, eq(runs.scheduleId, packageSchedules.id))
     .where(and(...conditions))
     .limit(1);
-  return row ?? null;
+
+  if (!row) return null;
+  return {
+    ...row.run,
+    userName: row.userName ?? null,
+    endUserName: row.endUserName ?? null,
+    apiKeyName: row.apiKeyName ?? null,
+    scheduleName: row.scheduleName ?? null,
+  };
 }
 
 export async function listRunLogs(runId: string, orgId: string) {

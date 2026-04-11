@@ -71,7 +71,7 @@ export const parameters = {
     name: "X-App-Id",
     in: "header" as const,
     description:
-      "Application ID. Required for app-scoped routes (agents, runs, schedules, webhooks). Not needed for API key auth (app resolved from key).",
+      "Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key).",
     schema: { type: "string" },
   },
   PackageScope: {

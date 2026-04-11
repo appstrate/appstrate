@@ -25,8 +25,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'error', NEW.error,
         'started_at', to_char(NEW.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'completed_at', to_char(NEW.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-        'duration', NEW.duration,
-        'tokens_used', NEW.tokens_used
+        'duration', NEW.duration
       )::text);
       RETURN NEW;
     END;
@@ -62,22 +61,28 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
     $$ LANGUAGE plpgsql
   `);
 
-  // Create triggers (drop first to avoid duplicates)
+  // Create triggers idempotently. Use DO blocks with explicit existence
+  // checks instead of DROP TRIGGER IF EXISTS to avoid NOTICE logs on first
+  // boot (when the triggers don't exist yet).
   await db.execute(drizzleSql`
-    DROP TRIGGER IF EXISTS runs_notify_trigger ON runs
-  `);
-  await db.execute(drizzleSql`
-    CREATE TRIGGER runs_notify_trigger
-      AFTER INSERT OR UPDATE ON runs
-      FOR EACH ROW EXECUTE FUNCTION notify_run_change()
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'runs_notify_trigger') THEN
+        DROP TRIGGER runs_notify_trigger ON runs;
+      END IF;
+      CREATE TRIGGER runs_notify_trigger
+        AFTER INSERT OR UPDATE ON runs
+        FOR EACH ROW EXECUTE FUNCTION notify_run_change();
+    END $$;
   `);
 
   await db.execute(drizzleSql`
-    DROP TRIGGER IF EXISTS run_logs_notify_trigger ON run_logs
-  `);
-  await db.execute(drizzleSql`
-    CREATE TRIGGER run_logs_notify_trigger
-      AFTER INSERT ON run_logs
-      FOR EACH ROW EXECUTE FUNCTION notify_run_log_insert()
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'run_logs_notify_trigger') THEN
+        DROP TRIGGER run_logs_notify_trigger ON run_logs;
+      END IF;
+      CREATE TRIGGER run_logs_notify_trigger
+        AFTER INSERT ON run_logs
+        FOR EACH ROW EXECUTE FUNCTION notify_run_log_insert();
+    END $$;
   `);
 }

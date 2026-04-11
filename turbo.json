@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": ["BETTER_AUTH_SECRET", "CONNECTION_ENCRYPTION_KEY"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -12,8 +13,8 @@
       "cache": false
     },
     "typecheck": {
-      "dependsOn": ["^build"],
-      "inputs": ["src/**", "tsconfig.json", "tsconfig.*.json"]
+      "dependsOn": ["^typecheck"],
+      "inputs": ["src/**", "tsconfig.json", "tsconfig.*.json", "package.json"]
     },
     "check": {
       "dependsOn": ["typecheck"]
@@ -24,6 +25,37 @@
     },
     "lint": {
       "inputs": ["src/**", "eslint.config.*"]
+    },
+    "//#lint": {
+      "inputs": [
+        "apps/*/src/**",
+        "apps/*/test/**",
+        "packages/*/src/**",
+        "packages/*/test/**",
+        "runtime-pi/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+        "scripts/**/*.ts",
+        "test/**/*.ts",
+        "eslint.config.mjs",
+        "package.json"
+      ]
+    },
+    "//#format:check": {
+      "inputs": [
+        "apps/*/src/**",
+        "packages/*/src/**",
+        ".prettierrc",
+        ".prettierignore",
+        "package.json"
+      ]
+    },
+    "//#verify:openapi": {
+      "cache": false
+    },
+    "//#detect:breaking": {
+      "cache": false
+    },
+    "//#build:system-packages:check": {
+      "cache": false
     }
   }
 }

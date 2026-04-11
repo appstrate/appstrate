@@ -20,6 +20,8 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
+import { listScheduleRuns } from "../services/state/index.ts";
+
 export const createScheduleSchema = z.object({
   name: z.string().optional(),
   connectionProfileId: z.uuid(),
@@ -164,6 +166,31 @@ export function createSchedulesRouter() {
     }
     await deleteSchedule(id, orgId, applicationId);
     return c.json({ ok: true });
+  });
+
+  // GET /api/schedules/:id/runs — list runs for a schedule
+  router.get("/schedules/:id/runs", async (c) => {
+    const scheduleId = c.req.param("id");
+    const orgId = c.get("orgId");
+    const limit = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .catch(20)
+      .parse(c.req.query("limit") ?? 20);
+    const offset = z.coerce
+      .number()
+      .int()
+      .min(0)
+      .catch(0)
+      .parse(c.req.query("offset") ?? 0);
+    const result = await listScheduleRuns(scheduleId, orgId, {
+      limit,
+      offset,
+      applicationId: c.get("applicationId"),
+    });
+    return c.json(result);
   });
 
   return router;

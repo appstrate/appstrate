@@ -89,7 +89,7 @@ test.describe("Agent visibility in UI", () => {
     const webhookUrl = `https://ui-test-${Date.now()}.example.com/hook`;
     await apiClient.post("/webhooks", {
       url: webhookUrl,
-      events: ["run.completed"],
+      events: ["run.success"],
     });
 
     const webhooks = new WebhooksPage(page);

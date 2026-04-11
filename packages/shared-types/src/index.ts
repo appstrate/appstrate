@@ -10,18 +10,39 @@ export type { PackageType };
 
 export type { Run } from "@appstrate/db/schema";
 
+import type { Run } from "@appstrate/db/schema";
+
+/** Run with enriched display names from LEFT JOINs (user, end-user, API key, schedule). */
+export type EnrichedRun = Run & {
+  userName: string | null;
+  endUserName: string | null;
+  apiKeyName: string | null;
+  scheduleName: string | null;
+};
+
 // --- App Config Types ---
 
+/**
+ * Platform feature flags.
+ *
+ * Only *core* flags are statically typed here — flags derived from
+ * environment variables owned by the core platform (opt-in integrations
+ * like Google/GitHub OAuth, SMTP).
+ *
+ * Module-owned flags (e.g. `billing` from @appstrate/cloud, `webhooks`
+ * from the webhooks module, future `oidc`) are contributed at boot via
+ * `AppstrateModule.features` and flow through the index signature —
+ * adding a new module never requires editing shared-types.
+ */
+export interface AppConfigFeatures {
+  googleAuth: boolean;
+  githubAuth: boolean;
+  smtp: boolean;
+  [key: string]: boolean;
+}
+
 export interface AppConfig {
-  platform: "oss" | "cloud";
-  features: {
-    billing: boolean;
-    models: boolean;
-    providerKeys: boolean;
-    googleAuth: boolean;
-    githubAuth: boolean;
-    smtp: boolean;
-  };
+  features: AppConfigFeatures;
   legalUrls?: {
     terms?: string;
     privacy?: string;
@@ -46,8 +67,10 @@ export type RunStatus = (typeof runStatusEnum.enumValues)[number];
 
 // --- Schedule Types ---
 
-export type { PackageSchedule as Schedule } from "@appstrate/db/schema";
-import type { PackageSchedule } from "@appstrate/db/schema";
+// `package_schedules` is a legacy DB name — the public type drops the prefix.
+// TODO: rename the table + Drizzle variable to `schedules` in a follow-up PR.
+import type { PackageSchedule as Schedule } from "@appstrate/db/schema";
+export type { Schedule };
 
 export interface ScheduleReadiness {
   status: "ready" | "degraded" | "not_ready";
@@ -56,7 +79,7 @@ export interface ScheduleReadiness {
   missingProviders: string[];
 }
 
-export type EnrichedSchedule = PackageSchedule & {
+export type EnrichedSchedule = Schedule & {
   profileName: string | null;
   profileType: "user" | "app" | null;
   profileOwnerName: string | null;
@@ -462,35 +485,4 @@ export interface EndUserListResponse {
   data: EndUserInfo[];
   hasMore: boolean;
   limit: number;
-}
-
-// --- Webhook Types ---
-
-export interface WebhookInfo {
-  id: string;
-  object: "webhook";
-  applicationId: string;
-  url: string;
-  events: string[];
-  packageId: string | null;
-  payloadMode: "full" | "summary";
-  enabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface WebhookCreateResponse extends WebhookInfo {
-  secret: string;
-}
-
-export interface WebhookDelivery {
-  id: string;
-  eventId: string;
-  eventType: string;
-  status: "pending" | "success" | "failed";
-  statusCode: number | null;
-  latency: number | null;
-  attempt: number;
-  error: string | null;
-  createdAt: string;
 }

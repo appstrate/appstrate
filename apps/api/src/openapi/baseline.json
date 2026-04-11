@@ -132,10 +132,6 @@
     {
       "name": "Provider Keys",
       "description": "Organization provider keys and credentials"
-    },
-    {
-      "name": "Webhooks",
-      "description": "Webhook configuration and delivery"
     }
   ],
   "paths": {
@@ -533,21 +529,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -619,21 +604,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -684,21 +658,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -768,21 +731,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -833,21 +785,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -900,21 +841,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "memoryId",
@@ -975,21 +905,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -1037,21 +956,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -1121,21 +1029,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -1220,21 +1117,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -1319,21 +1205,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -1385,21 +1260,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -1471,21 +1335,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -1555,21 +1408,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -1649,21 +1491,10 @@
             "$ref": "#/components/parameters/IdempotencyKey"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -1693,6 +1524,11 @@
                     "type": "string",
                     "description": "Proxy ID override for this run, or \"none\" to disable proxying. Takes priority over agent and org defaults."
                   }
+                }
+              },
+              "example": {
+                "input": {
+                  "message": "Summarize my latest emails"
                 }
               }
             },
@@ -1784,6 +1620,9 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -1802,21 +1641,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "limit",
@@ -1887,21 +1715,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -2010,10 +1827,10 @@
                   "state": {
                     "lastProcessedId": "msg_99f2a"
                   },
-                  "tokensUsed": 12450,
                   "tokenUsage": {
-                    "input": 8200,
-                    "output": 4250
+                    "inputTokens": 8200,
+                    "outputTokens": 4250,
+                    "totalTokens": 12450
                   },
                   "startedAt": "2026-01-15T10:30:00Z",
                   "completedAt": "2026-01-15T10:31:12Z",
@@ -2349,21 +2166,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -2406,21 +2212,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -2948,23 +2743,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Provider scope (e.g. @appstrate)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Provider name (e.g. gmail)"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -3038,23 +2820,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Provider scope (e.g. @appstrate)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Provider name (e.g. gmail)"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -3130,23 +2899,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Provider scope (e.g. @appstrate)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Provider name (e.g. gmail)"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -3293,23 +3049,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Provider scope (e.g. @appstrate)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Provider name (e.g. gmail)"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "profileId",
@@ -3499,21 +3242,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -3562,21 +3294,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -3629,21 +3350,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -3691,21 +3401,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -7855,21 +7554,10 @@
         ],
         "parameters": [
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -7940,21 +7628,10 @@
         ],
         "parameters": [
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -8756,21 +8433,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -8998,23 +8664,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -9070,23 +8723,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -9137,23 +8777,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -9228,23 +8855,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -9315,23 +8929,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -9419,23 +9020,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -9481,23 +9069,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -9540,23 +9115,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -9643,23 +9205,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -9877,23 +9426,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -9949,23 +9485,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -10016,23 +9539,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -10107,23 +9617,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -10194,23 +9691,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -10298,23 +9782,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -10360,23 +9831,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -10419,23 +9877,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -10522,23 +9967,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -10747,23 +10179,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -10811,23 +10230,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -10910,23 +10316,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -10964,23 +10357,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -11033,23 +10413,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -11100,23 +10467,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -11194,23 +10548,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -11280,23 +10621,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -11383,23 +10711,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -11463,24 +10778,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @other-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -11735,23 +11036,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -11807,23 +11095,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -11874,23 +11149,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -11965,23 +11227,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -12052,23 +11301,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -12156,23 +11392,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           },
           {
             "name": "version",
@@ -12218,23 +11441,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -12277,23 +11487,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -12373,23 +11570,10 @@
             "$ref": "#/components/parameters/XAppId"
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^@[a-z0-9][a-z0-9-]*$"
-            },
-            "description": "Package scope (e.g. @my-org)"
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Package name"
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -13257,670 +12441,6 @@
         }
       }
     },
-    "/api/webhooks": {
-      "post": {
-        "operationId": "createWebhook",
-        "tags": ["Webhooks"],
-        "summary": "Create a webhook",
-        "description": "Create a webhook endpoint. The secret is returned once in the response. Max 20 webhooks per org.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["url", "events"],
-                "properties": {
-                  "url": {
-                    "type": "string",
-                    "format": "uri",
-                    "description": "HTTPS endpoint URL"
-                  },
-                  "events": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "enum": [
-                        "run.started",
-                        "run.completed",
-                        "run.failed",
-                        "run.timeout",
-                        "run.cancelled"
-                      ]
-                    },
-                    "description": "Event types to subscribe to"
-                  },
-                  "packageId": {
-                    "type": ["string", "null"],
-                    "description": "Filter by agent ID (null = all agents)"
-                  },
-                  "payloadMode": {
-                    "type": "string",
-                    "enum": ["full", "summary"],
-                    "default": "full",
-                    "description": "Payload mode: full includes result/input, summary omits them"
-                  },
-                  "enabled": {
-                    "type": "boolean",
-                    "default": true
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Webhook created. The `secret` field is shown only once.",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              },
-              "Idempotent-Replayed": {
-                "$ref": "#/components/headers/IdempotentReplayed"
-              },
-              "RateLimit": {
-                "$ref": "#/components/headers/RateLimit"
-              },
-              "RateLimit-Policy": {
-                "$ref": "#/components/headers/RateLimitPolicy"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/WebhookObject"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "secret": {
-                          "type": "string",
-                          "description": "Webhook secret (whsec_ prefix). Store securely — shown only once."
-                        }
-                      }
-                    }
-                  ]
-                },
-                "example": {
-                  "id": "wh_cm1abc123",
-                  "object": "webhook",
-                  "applicationId": "app_cm4jkl013",
-                  "url": "https://example.com/webhooks/appstrate",
-                  "events": ["run.completed", "run.failed"],
-                  "packageId": null,
-                  "payloadMode": "full",
-                  "enabled": true,
-                  "createdAt": "2026-01-15T10:30:00Z",
-                  "updatedAt": "2026-01-15T10:30:00Z",
-                  "secret": "whsec_k3x9m2pq7r4t1w6y0a5d8g"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/IdempotencyInProgress"
-          },
-          "422": {
-            "$ref": "#/components/responses/IdempotencyConflict"
-          }
-        }
-      },
-      "get": {
-        "operationId": "listWebhooks",
-        "tags": ["Webhooks"],
-        "summary": "List webhooks",
-        "description": "List all webhooks for the current application (resolved from X-App-Id header or API key).",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Webhook list",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/WebhookObject"
-                      }
-                    }
-                  }
-                },
-                "example": {
-                  "object": "list",
-                  "data": [
-                    {
-                      "id": "wh_cm1abc123",
-                      "object": "webhook",
-                      "applicationId": "app_cm4jkl013",
-                      "url": "https://example.com/webhooks/appstrate",
-                      "events": ["run.completed", "run.failed"],
-                      "packageId": null,
-                      "payloadMode": "full",
-                      "enabled": true,
-                      "createdAt": "2026-01-15T10:30:00Z",
-                      "updatedAt": "2026-01-15T10:30:00Z"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
-        }
-      }
-    },
-    "/api/webhooks/{id}": {
-      "get": {
-        "operationId": "getWebhook",
-        "tags": ["Webhooks"],
-        "summary": "Get a webhook",
-        "description": "Get a single webhook by ID.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Webhook detail",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookObject"
-                },
-                "example": {
-                  "id": "wh_cm1abc123",
-                  "object": "webhook",
-                  "applicationId": "app_cm4jkl013",
-                  "url": "https://example.com/webhooks/appstrate",
-                  "events": ["run.completed", "run.failed"],
-                  "packageId": null,
-                  "payloadMode": "full",
-                  "enabled": true,
-                  "createdAt": "2026-01-15T10:30:00Z",
-                  "updatedAt": "2026-01-15T10:30:00Z"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "put": {
-        "operationId": "updateWebhook",
-        "tags": ["Webhooks"],
-        "summary": "Update a webhook",
-        "description": "Update webhook URL, events, filters, or enabled status. Cannot change the secret.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "url": {
-                    "type": "string",
-                    "format": "uri"
-                  },
-                  "events": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "enum": [
-                        "run.started",
-                        "run.completed",
-                        "run.failed",
-                        "run.timeout",
-                        "run.cancelled"
-                      ]
-                    }
-                  },
-                  "packageId": {
-                    "type": ["string", "null"]
-                  },
-                  "payloadMode": {
-                    "type": "string",
-                    "enum": ["full", "summary"]
-                  },
-                  "enabled": {
-                    "type": "boolean"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Webhook updated",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookObject"
-                },
-                "example": {
-                  "id": "wh_cm1abc123",
-                  "object": "webhook",
-                  "applicationId": "app_cm4jkl013",
-                  "url": "https://example.com/webhooks/appstrate",
-                  "events": ["run.completed", "run.failed"],
-                  "packageId": null,
-                  "payloadMode": "full",
-                  "enabled": true,
-                  "createdAt": "2026-01-15T10:30:00Z",
-                  "updatedAt": "2026-01-20T14:00:00Z"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteWebhook",
-        "tags": ["Webhooks"],
-        "summary": "Delete a webhook",
-        "description": "Delete a webhook and all its delivery history.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Webhook deleted",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/api/webhooks/{id}/test": {
-      "post": {
-        "operationId": "testWebhook",
-        "tags": ["Webhooks"],
-        "summary": "Send a test ping",
-        "description": "Send a synthetic test.ping event to verify webhook connectivity.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Test event generated",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "eventId": {
-                      "type": "string"
-                    },
-                    "payload": {
-                      "type": "object"
-                    }
-                  }
-                },
-                "example": {
-                  "eventId": "evt_test_cm2def456",
-                  "payload": {
-                    "type": "test.ping",
-                    "webhookId": "wh_cm1abc123"
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/api/webhooks/{id}/rotate": {
-      "post": {
-        "operationId": "rotateWebhookSecret",
-        "tags": ["Webhooks"],
-        "summary": "Rotate webhook secret",
-        "description": "Generate a new secret. The previous secret remains valid for 24 hours (grace period). During rotation, signatures are emitted with both secrets.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "New secret generated",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "secret": {
-                      "type": "string",
-                      "description": "New webhook secret (whsec_ prefix)"
-                    }
-                  }
-                },
-                "example": {
-                  "secret": "whsec_n4w8s3cr3tR0t4t3dK3y"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/api/webhooks/{id}/deliveries": {
-      "get": {
-        "operationId": "listWebhookDeliveries",
-        "tags": ["Webhooks"],
-        "summary": "Delivery history",
-        "description": "List recent delivery attempts for a webhook (status, latency, response code).",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XAppId"
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "default": 20
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Delivery history",
-            "headers": {
-              "Request-Id": {
-                "$ref": "#/components/headers/RequestId"
-              },
-              "Appstrate-Version": {
-                "$ref": "#/components/headers/AppstrateVersion"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "eventId": {
-                            "type": "string"
-                          },
-                          "eventType": {
-                            "type": "string"
-                          },
-                          "status": {
-                            "type": "string",
-                            "enum": ["pending", "success", "failed"]
-                          },
-                          "statusCode": {
-                            "type": ["integer", "null"]
-                          },
-                          "latency": {
-                            "type": ["integer", "null"],
-                            "description": "Delivery latency in ms"
-                          },
-                          "attempt": {
-                            "type": "integer"
-                          },
-                          "error": {
-                            "type": ["string", "null"]
-                          },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "example": {
-                  "object": "list",
-                  "data": [
-                    {
-                      "id": "dlv_cm3ghi789",
-                      "eventId": "evt_cm3ghi790",
-                      "eventType": "run.completed",
-                      "status": "success",
-                      "statusCode": 200,
-                      "latency": 142,
-                      "attempt": 1,
-                      "error": null,
-                      "createdAt": "2026-01-15T11:00:00Z"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
     "/api/applications": {
       "post": {
         "operationId": "createApplication",
@@ -14424,20 +12944,10 @@
             }
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -14482,20 +12992,10 @@
             }
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -14569,20 +13069,10 @@
             }
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -14684,20 +13174,10 @@
             }
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "requestBody": {
@@ -14775,20 +13255,10 @@
             }
           },
           {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageScope"
           },
           {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/PackageName"
           }
         ],
         "responses": {
@@ -14852,6 +13322,15 @@
                     "type": "object",
                     "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
                   }
+                }
+              },
+              "example": {
+                "name": "Alice Martin",
+                "email": "alice@example.com",
+                "externalId": "usr_12345",
+                "metadata": {
+                  "plan": "pro",
+                  "region": "eu-west"
                 }
               }
             }
@@ -15354,7 +13833,26 @@
       "XAppId": {
         "name": "X-App-Id",
         "in": "header",
-        "description": "Application ID. Required for app-scoped routes (agents, runs, schedules, webhooks). Not needed for API key auth (app resolved from key).",
+        "description": "Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key).",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "PackageScope": {
+        "name": "scope",
+        "in": "path",
+        "required": true,
+        "description": "Package scope (e.g. @myorg)",
+        "schema": {
+          "type": "string",
+          "pattern": "^@[a-z0-9][a-z0-9-]*$"
+        }
+      },
+      "PackageName": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "description": "Package name",
         "schema": {
           "type": "string"
         }
@@ -15539,62 +14037,6 @@
           "packageSource": {
             "type": "string",
             "enum": ["system", "local"]
-          }
-        }
-      },
-      "WebhookObject": {
-        "type": "object",
-        "description": "Webhook configuration object",
-        "required": [
-          "id",
-          "object",
-          "applicationId",
-          "url",
-          "events",
-          "payloadMode",
-          "enabled",
-          "createdAt"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "Webhook ID (wh_ prefix)"
-          },
-          "object": {
-            "type": "string",
-            "enum": ["webhook"]
-          },
-          "applicationId": {
-            "type": "string",
-            "description": "Application ID (app_ prefix). All webhooks are application-scoped."
-          },
-          "url": {
-            "type": "string",
-            "format": "uri"
-          },
-          "events": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "packageId": {
-            "type": ["string", "null"]
-          },
-          "payloadMode": {
-            "type": "string",
-            "enum": ["full", "summary"]
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
@@ -16154,9 +14596,6 @@
           "error": {
             "type": "string"
           },
-          "tokensUsed": {
-            "type": "integer"
-          },
           "tokenUsage": {
             "type": "object"
           },
@@ -16206,6 +14645,10 @@
             "type": ["string", "null"],
             "description": "End-user ID (eu_ prefix) if executed on behalf of an end-user"
           },
+          "apiKeyId": {
+            "type": ["string", "null"],
+            "description": "API key ID that triggered the run (null for dashboard/schedule runs)"
+          },
           "applicationId": {
             "type": ["string", "null"],
             "description": "Application ID (app_ prefix) that owns this run"
@@ -16214,6 +14657,22 @@
             "type": ["object", "null"],
             "description": "Additional metadata (e.g. creditsUsed in cloud mode)",
             "additionalProperties": true
+          },
+          "userName": {
+            "type": ["string", "null"],
+            "description": "Display name of the user who triggered the run (from profiles table)"
+          },
+          "endUserName": {
+            "type": ["string", "null"],
+            "description": "Display name of the end-user (name or externalId fallback)"
+          },
+          "apiKeyName": {
+            "type": ["string", "null"],
+            "description": "Name of the API key that triggered the run"
+          },
+          "scheduleName": {
+            "type": ["string", "null"],
+            "description": "Name of the schedule that triggered the run"
           }
         }
       },
@@ -17422,6 +15881,24 @@
               "status": 409,
               "detail": "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
               "code": "idempotency_in_progress",
+              "requestId": "req_abc123"
+            }
+          }
+        }
+      },
+      "InternalServerError": {
+        "description": "Unexpected server error",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "https://docs.appstrate.dev/errors/internal-error",
+              "title": "Internal Server Error",
+              "status": 500,
+              "detail": "An unexpected error occurred. Please try again or contact support.",
+              "code": "internal_error",
               "requestId": "req_abc123"
             }
           }

@@ -17,9 +17,23 @@ import { sql } from "drizzle-orm";
 import { runStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
-import { organizations } from "./organizations.ts";
+import { apiKeys, organizations } from "./organizations.ts";
 import { packages } from "./packages.ts";
 import { connectionProfiles } from "./connections.ts";
+
+/**
+ * Shape of a single entry in `runs.providerStatuses`. Mirrored by
+ * `RunProviderSnapshot` in `@appstrate/shared-types`; duplicated here
+ * to avoid a circular dependency (shared-types re-exports `Run`).
+ */
+interface RunProviderSnapshot {
+  id: string;
+  status: string;
+  source: string | null;
+  profileName: string | null;
+  profileOwnerName: string | null;
+  scopesSufficient?: boolean;
+}
 
 export const runs = pgTable(
   "runs",
@@ -45,8 +59,13 @@ export const runs = pgTable(
     result: jsonb("result"),
     state: jsonb("state"),
     error: text("error"),
-    tokensUsed: integer("tokens_used"),
-    tokenUsage: jsonb("token_usage"),
+    tokenUsage: jsonb("token_usage").$type<{
+      inputTokens?: number;
+      outputTokens?: number;
+      cacheReadInputTokens?: number;
+      cacheCreationInputTokens?: number;
+      totalTokens?: number;
+    }>(),
     startedAt: timestamp("started_at").defaultNow().notNull(),
     completedAt: timestamp("completed_at"),
     duration: integer("duration"),
@@ -66,7 +85,10 @@ export const runs = pgTable(
     cost: doublePrecision("cost"),
     runNumber: integer("run_number"),
     providerProfileIds: jsonb("provider_profile_ids").$type<Record<string, string>>(),
-    providerStatuses: jsonb("provider_statuses"),
+    providerStatuses: jsonb("provider_statuses").$type<RunProviderSnapshot[]>(),
+    apiKeyId: text("api_key_id").references(() => apiKeys.id, {
+      onDelete: "set null",
+    }),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   },
   (table) => [

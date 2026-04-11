@@ -252,9 +252,10 @@ export function manifestToSchemaFields(
 
 function convertDefaultValue(value: string, type: string): unknown {
   if (!value) return undefined;
-  if (type === "number") {
+  if (type === "number" || type === "integer") {
     const n = Number(value);
-    return isNaN(n) ? value : n;
+    if (isNaN(n)) return value;
+    return type === "integer" ? Math.round(n) : n;
   }
   if (type === "boolean") return value === "true";
   return value;
@@ -279,6 +280,21 @@ export function schemaToFields(
     const constraints = wrapper?.fileConstraints?.[key];
     const hint = wrapper?.uiHints?.[key];
     const type = isInputFile ? "string" : typeof prop.type === "string" ? prop.type : "string";
+
+    // Extract array enum items
+    let arrayEnumItems = "";
+    if (
+      type === "array" &&
+      prop.items &&
+      typeof prop.items === "object" &&
+      !Array.isArray(prop.items)
+    ) {
+      const items = prop.items as JSONSchema7;
+      if (Array.isArray(items.enum)) {
+        arrayEnumItems = items.enum.join(", ");
+      }
+    }
+
     return {
       _id: crypto.randomUUID(),
       key,
@@ -306,6 +322,24 @@ export function schemaToFields(
             enumValues: Array.isArray(prop.enum) ? prop.enum.join(", ") : "",
           }
         : {}),
+      // String format
+      ...(type === "string" && prop.format ? { format: prop.format } : {}),
+      // String constraints
+      ...(type === "string" && prop.minLength != null ? { minLength: String(prop.minLength) } : {}),
+      ...(type === "string" && prop.maxLength != null ? { maxLength: String(prop.maxLength) } : {}),
+      ...(type === "string" && prop.pattern ? { pattern: prop.pattern } : {}),
+      // Number/integer constraints
+      ...((type === "number" || type === "integer") && prop.minimum != null
+        ? { minimum: String(prop.minimum) }
+        : {}),
+      ...((type === "number" || type === "integer") && prop.maximum != null
+        ? { maximum: String(prop.maximum) }
+        : {}),
+      ...((type === "number" || type === "integer") && prop.multipleOf != null
+        ? { step: String(prop.multipleOf) }
+        : {}),
+      // Array enum items
+      ...(arrayEnumItems ? { arrayEnumItems } : {}),
     };
   });
 }
@@ -363,6 +397,47 @@ export function fieldsToSchema(
           .map((v) => v.trim())
           .filter(Boolean);
         if (enumVals && enumVals.length > 0) prop.enum = enumVals;
+      }
+      // String format
+      if (f.type === "string" && f.format && f.format !== "__none") {
+        prop.format = f.format;
+      }
+      // String constraints
+      if (f.type === "string") {
+        if (f.minLength) {
+          const n = Number(f.minLength);
+          if (!isNaN(n)) prop.minLength = n;
+        }
+        if (f.maxLength) {
+          const n = Number(f.maxLength);
+          if (!isNaN(n)) prop.maxLength = n;
+        }
+        if (f.pattern) prop.pattern = f.pattern;
+      }
+      // Number/integer constraints
+      if (f.type === "number" || f.type === "integer") {
+        if (f.minimum) {
+          const n = Number(f.minimum);
+          if (!isNaN(n)) prop.minimum = n;
+        }
+        if (f.maximum) {
+          const n = Number(f.maximum);
+          if (!isNaN(n)) prop.maximum = n;
+        }
+        if (f.step) {
+          const n = Number(f.step);
+          if (!isNaN(n)) prop.multipleOf = n;
+        }
+      }
+      // Array with enum items → multiselect schema
+      if (f.type === "array" && f.arrayEnumItems) {
+        const items = f.arrayEnumItems
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+        if (items.length > 0) {
+          prop.items = { type: "string", enum: items } as JSONSchema7;
+        }
       }
       properties[key] = prop;
       // Build uiHints for placeholder

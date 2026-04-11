@@ -46,6 +46,20 @@ export interface SchemaField {
   maxSize?: string;
   multiple?: boolean;
   maxFiles?: string;
+  /** Minimum value for number/integer fields. */
+  minimum?: string;
+  /** Maximum value for number/integer fields. */
+  maximum?: string;
+  /** Step/multipleOf for number/integer fields. */
+  step?: string;
+  /** Minimum length for string fields. */
+  minLength?: string;
+  /** Maximum length for string fields. */
+  maxLength?: string;
+  /** Regex pattern for string fields. */
+  pattern?: string;
+  /** Comma-separated enum values for array items (multiselect). */
+  arrayEnumItems?: string;
 }
 
 type SchemaMode = "input" | "output" | "config" | "credentials";
@@ -58,7 +72,18 @@ interface SchemaSectionProps {
   readOnly?: boolean;
 }
 
-const TYPE_OPTIONS = ["string", "number", "boolean", "array", "object"];
+const TYPE_OPTIONS = ["string", "number", "integer", "boolean", "array", "object"];
+
+const STRING_FORMAT_OPTIONS = [
+  { value: "", label: "—" },
+  { value: "email", label: "Email" },
+  { value: "password", label: "Password" },
+  { value: "date", label: "Date" },
+  { value: "date-time", label: "Date-Time" },
+  { value: "time", label: "Time" },
+  { value: "color", label: "Color" },
+  { value: "uri", label: "URL" },
+];
 
 function emptyField(mode: SchemaMode): SchemaField {
   return {
@@ -100,6 +125,9 @@ function SortableFieldCard({
 
   const isFile = mode === "input" && !!field.isFile;
   const showDetails = hasDetailsRow(mode);
+  const isNumeric = field.type === "number" || field.type === "integer";
+  const isString = field.type === "string" && !isFile;
+  const isArray = field.type === "array";
 
   return (
     <div
@@ -268,6 +296,94 @@ function SortableFieldCard({
                   value={field.enumValues ?? ""}
                   onChange={(e) => onUpdate(index, { enumValues: e.target.value })}
                   className="h-7 min-w-[100px] flex-1 text-xs"
+                  disabled={readOnly}
+                />
+              )}
+              {/* String format dropdown */}
+              {isString && (
+                <Select
+                  value={field.format ?? ""}
+                  onValueChange={(v) => onUpdate(index, { format: v || undefined })}
+                  disabled={readOnly}
+                >
+                  <SelectTrigger className="h-7 w-[110px] text-xs">
+                    <SelectValue placeholder="Format" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STRING_FORMAT_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value || "__none"} value={opt.value || "__none"}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {/* String constraints */}
+              {isString && (
+                <>
+                  <Input
+                    type="text"
+                    placeholder="minLength"
+                    value={field.minLength ?? ""}
+                    onChange={(e) => onUpdate(index, { minLength: e.target.value })}
+                    className="h-7 w-[90px] text-xs"
+                    disabled={readOnly}
+                  />
+                  <Input
+                    type="text"
+                    placeholder="maxLength"
+                    value={field.maxLength ?? ""}
+                    onChange={(e) => onUpdate(index, { maxLength: e.target.value })}
+                    className="h-7 w-[90px] text-xs"
+                    disabled={readOnly}
+                  />
+                  <Input
+                    type="text"
+                    placeholder="pattern"
+                    value={field.pattern ?? ""}
+                    onChange={(e) => onUpdate(index, { pattern: e.target.value })}
+                    className="h-7 min-w-[100px] flex-1 font-mono text-xs"
+                    disabled={readOnly}
+                  />
+                </>
+              )}
+              {/* Number/integer constraints */}
+              {isNumeric && (
+                <>
+                  <Input
+                    type="text"
+                    placeholder="min"
+                    value={field.minimum ?? ""}
+                    onChange={(e) => onUpdate(index, { minimum: e.target.value })}
+                    className="h-7 w-[70px] text-xs"
+                    disabled={readOnly}
+                  />
+                  <Input
+                    type="text"
+                    placeholder="max"
+                    value={field.maximum ?? ""}
+                    onChange={(e) => onUpdate(index, { maximum: e.target.value })}
+                    className="h-7 w-[70px] text-xs"
+                    disabled={readOnly}
+                  />
+                  <Input
+                    type="text"
+                    placeholder="step"
+                    value={field.step ?? ""}
+                    onChange={(e) => onUpdate(index, { step: e.target.value })}
+                    className="h-7 w-[70px] text-xs"
+                    disabled={readOnly}
+                  />
+                </>
+              )}
+              {/* Array enum items (for multiselect) */}
+              {isArray && (
+                <Input
+                  type="text"
+                  placeholder="Enum items (a, b, c)"
+                  value={field.arrayEnumItems ?? ""}
+                  onChange={(e) => onUpdate(index, { arrayEnumItems: e.target.value })}
+                  className="h-7 min-w-[150px] flex-1 text-xs"
                   disabled={readOnly}
                 />
               )}

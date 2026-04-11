@@ -21,10 +21,42 @@
  *   bun scripts/detect-breaking-changes.ts                  # Compare against baseline
  *   bun scripts/detect-breaking-changes.ts --update-baseline # Save current spec as baseline
  */
-import { openApiSpec } from "../apps/api/src/openapi/index.ts";
-import { resolve } from "path";
+import { resolve } from "node:path";
+import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
+import { collectModuleOpenApi, stripModuleContributions } from "./lib/module-openapi.ts";
 
 const BASELINE_PATH = resolve(import.meta.dir, "../apps/api/src/openapi/baseline.json");
+
+// ═══════════════════════════════════════════════════
+// Auto-discover built-in modules and collect their OpenAPI contributions
+// ═══════════════════════════════════════════════════
+// Uses the shared helper in scripts/lib/module-openapi.ts so discovery logic
+// stays in one place (also consumed by verify-openapi.ts). We cannot boot the
+// module loader here since it requires a full init context — the helper
+// imports each module's default export statically.
+//
+// NOTE: module-owned contributions (paths, component schemas, tags) are
+// stripped from BOTH the baseline and the current spec before comparison.
+// This keeps the breaking-change detector agnostic of modules — disabling a
+// module should not register as a breaking change, and older baselines that
+// still contain module artefacts should not produce a false diff either.
+
+const {
+  paths: modulePaths,
+  componentSchemas: moduleComponentSchemas,
+  tags: moduleTags,
+  ownedPathKeys,
+  ownedSchemaNames,
+  ownedTagNames,
+} = await collectModuleOpenApi();
+
+const openApiSpec = buildOpenApiSpec(modulePaths, moduleComponentSchemas, moduleTags);
+
+const ownedContributions = {
+  paths: ownedPathKeys,
+  schemaNames: ownedSchemaNames,
+  tagNames: ownedTagNames,
+};
 
 // ═══════════════════════════════════════════════════
 // Types
@@ -342,13 +374,18 @@ function compareSpecs(baseline: Spec, current: Spec): Change[] {
 // ═══════════════════════════════════════════════════
 
 const updateBaseline = process.argv.includes("--update-baseline");
-const currentSpec = JSON.parse(JSON.stringify(openApiSpec));
+
+// Strip module-owned contributions (paths, schemas, tags) from the current spec —
+// the baseline tracks core API surface only, so disabling or removing a module is
+// never a breaking change.
+const fullCurrentSpec = JSON.parse(JSON.stringify(openApiSpec));
+const currentSpec = stripModuleContributions(fullCurrentSpec, ownedContributions);
 
 if (updateBaseline) {
   await Bun.write(BASELINE_PATH, JSON.stringify(currentSpec, null, 2) + "\n");
   console.log(`\n  Baseline updated: ${BASELINE_PATH}`);
   console.log(
-    `  Endpoints: ${Object.entries(currentSpec.paths || {}).reduce((n: number, [, m]) => n + Object.keys(m as object).length, 0)}`,
+    `  Endpoints: ${Object.entries(currentSpec.paths || {}).reduce((n: number, [, m]) => n + Object.keys(m as object).length, 0)} (core only; module paths excluded)`,
   );
   console.log();
   process.exit(0);
@@ -362,7 +399,12 @@ if (!(await baselineFile.exists())) {
   process.exit(1);
 }
 
-const baseline = JSON.parse(await baselineFile.text());
+// Also strip from the baseline in case an older baseline still contains
+// module-owned contributions — the comparison must be symmetric.
+const baseline = stripModuleContributions(
+  JSON.parse(await baselineFile.text()),
+  ownedContributions,
+);
 const changes = compareSpecs(baseline, currentSpec);
 
 const breaking = changes.filter((c) => c.level === "breaking");

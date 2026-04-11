@@ -35,6 +35,9 @@ const envSchema = z
       .default("[]")
       .transform((s) => JSON.parse(s) as unknown[]),
 
+    // Modules (comma-separated specifiers, empty = OSS mode)
+    APPSTRATE_MODULES: z.string().default(""),
+
     // App
     APP_URL: z.string().default("http://localhost:3000"),
     TRUSTED_ORIGINS: z
@@ -74,6 +77,10 @@ const envSchema = z
     GOOGLE_CLIENT_SECRET: z.string().optional(),
     GITHUB_CLIENT_ID: z.string().optional(),
     GITHUB_CLIENT_SECRET: z.string().optional(),
+
+    // Legal URLs (optional — displayed in footer when set)
+    LEGAL_TERMS_URL: z.string().optional(),
+    LEGAL_PRIVACY_URL: z.string().optional(),
 
     // SMTP (optional — enables email verification when all are set)
     SMTP_HOST: z.string().optional(),

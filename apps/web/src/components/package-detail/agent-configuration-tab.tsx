@@ -13,7 +13,6 @@ import {
 import { InputFields } from "../input-fields";
 import { PROVIDER_ICONS } from "../icons";
 import { findProviderByApiAndBaseUrl } from "@/lib/model-presets";
-import { useAppConfig } from "../../hooks/use-app-config";
 import { useModels, useAgentModel, useSetAgentModel } from "../../hooks/use-models";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { useAppProfiles, useSetAgentAppProfile } from "../../hooks/use-connection-profiles";
@@ -76,11 +75,10 @@ function ConfigSection({
 
 function ModelSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings"]);
-  const { features } = useAppConfig();
   const { data: orgModels } = useModels();
   const { data: agentModel } = useAgentModel(packageId);
   const setAgentModel = useSetAgentModel(packageId);
-  if (!features.models || !orgModels || orgModels.length === 0) return null;
+  if (!orgModels || orgModels.length === 0) return null;
 
   const agentModelId = agentModel?.modelId;
   const orgDefaultModel = orgModels.find((m) => m.isDefault && m.enabled);

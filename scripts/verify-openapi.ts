@@ -10,15 +10,38 @@
  * 4. Zod ↔ OpenAPI schema comparison — compares Zod-derived JSON Schemas (pre-converted
  *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas
  *
+ * Module-owned paths and schemas are loaded dynamically from built-in modules.
+ * The set of modules validated matches `APPSTRATE_MODULES` (default: all built-in).
+ *
  * Usage: bun scripts/verify-openapi.ts
  */
 import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
-import { openApiSpec } from "../apps/api/src/openapi/index.ts";
+import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
 import {
-  zodSchemaRegistry,
+  buildZodSchemaRegistry,
   type ZodSchemaEntry,
 } from "../apps/api/src/openapi/zod-schema-registry.ts";
+import { collectModuleOpenApi } from "./lib/module-openapi.ts";
+
+// ---------------------------------------------------------------------------
+// Auto-discover built-in modules and collect their OpenAPI contributions
+// ---------------------------------------------------------------------------
+//
+// Discovery scans `apps/api/src/modules/*/index.ts` — no hardcoded list.
+// External modules (e.g. @appstrate/cloud) are not validated here; they're
+// loaded at runtime via APPSTRATE_MODULES and can't be imported without full boot.
+
+const {
+  paths: modulePaths,
+  componentSchemas: moduleComponentSchemas,
+  tags: moduleTags,
+  schemas: moduleSchemas,
+} = await collectModuleOpenApi();
+
+// Build the full spec and registry with module contributions
+const openApiSpec = buildOpenApiSpec(modulePaths, moduleComponentSchemas, moduleTags);
+const zodSchemaRegistry = buildZodSchemaRegistry(moduleSchemas);
 
 let exitCode = 0;
 
@@ -292,17 +315,21 @@ const expectedEndpoints = [
   "GET /api/end-users/{id}",
   "PATCH /api/end-users/{id}",
   "DELETE /api/end-users/{id}",
-
-  // Webhooks
-  "POST /api/webhooks",
-  "GET /api/webhooks",
-  "GET /api/webhooks/{id}",
-  "PUT /api/webhooks/{id}",
-  "DELETE /api/webhooks/{id}",
-  "POST /api/webhooks/{id}/test",
-  "POST /api/webhooks/{id}/rotate",
-  "GET /api/webhooks/{id}/deliveries",
 ];
+
+// Module-contributed endpoints are sourced directly from each module's
+// `openApiPaths()` output — no hardcoded list. This keeps verify-openapi
+// in sync with whatever the module declares, so adding or removing a
+// module endpoint requires no update here.
+for (const [path, methods] of Object.entries(modulePaths)) {
+  if (!methods || typeof methods !== "object") continue;
+  for (const method of Object.keys(methods as Record<string, unknown>)) {
+    // Skip OpenAPI path-level fields that aren't HTTP methods (parameters, summary, etc.)
+    const lower = method.toLowerCase();
+    if (!["get", "post", "put", "patch", "delete", "head", "options"].includes(lower)) continue;
+    expectedEndpoints.push(`${lower.toUpperCase()} ${path}`);
+  }
+}
 
 const specEndpoints = new Set<string>();
 const paths = openApiSpec.paths as Record<string, Record<string, unknown>>;
@@ -378,7 +405,23 @@ try {
     },
   });
 
-  const source = JSON.stringify(openApiSpec, null, 2);
+  // Strip remote $refs (AFPS schema URLs) before linting — Redocly's lintFromString
+  // has no option equivalent to validateOpenAPI's `resolve: { external: false }`, and
+  // fetching the 4 AFPS schemas over HTTPS adds ~20s with no disk cache. The AFPS
+  // schemas are validated separately by the afps-spec repo, so replacing them with a
+  // stub object is safe and drops this step from ~20s to ~150ms.
+  const strippedSpec = JSON.parse(JSON.stringify(openApiSpec), (_key, value) => {
+    if (
+      value &&
+      typeof value === "object" &&
+      typeof (value as { $ref?: unknown }).$ref === "string" &&
+      /^https?:\/\//.test((value as { $ref: string }).$ref)
+    ) {
+      return { type: "object", description: `external: ${(value as { $ref: string }).$ref}` };
+    }
+    return value;
+  });
+  const source = JSON.stringify(strippedSpec, null, 2);
   const problems = await lintFromString({ source, config });
 
   const errors = problems.filter((p) => p.severity === "error");
