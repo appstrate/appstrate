@@ -51,6 +51,7 @@ import {
 } from "./services/enduser-mapping.ts";
 import { renderLoginPage } from "./pages/login.ts";
 import { renderConsentPage } from "./pages/consent.ts";
+import { renderErrorPage } from "./pages/error.ts";
 
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 
@@ -129,6 +130,29 @@ async function loadClientContext(c: Context<AppEnv>, clientId: string): Promise<
   const branding = await resolveBrandingForClient(client);
   const csrfToken = issueCsrfToken(c);
   return { client, branding, csrfToken };
+}
+
+/**
+ * Wrapper around `loadClientContext` for public browser-facing routes.
+ * Returns `null` (+ renders an error page) instead of throwing `notFound`
+ * so the user sees styled HTML — not raw JSON.
+ */
+async function loadClientContextOrRenderError(
+  c: Context<AppEnv>,
+  clientId: string,
+): Promise<ClientContext | Response> {
+  try {
+    return await loadClientContext(c, clientId);
+  } catch {
+    return c.html(
+      renderErrorPage({
+        title: "Application introuvable",
+        message:
+          "L'application associée à ce lien n'existe plus ou a été désactivée. Contactez l'administrateur de l'application.",
+      }).value,
+      404,
+    );
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -294,43 +318,85 @@ export function createOidcRouter() {
   router.get("/api/oauth/login", rateLimitByIp(60), async (c) => {
     const url = new URL(c.req.url);
     const clientId = url.searchParams.get("client_id");
-    if (!clientId) throw invalidRequest("client_id is required", "client_id");
+    if (!clientId) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien de connexion invalide",
+          message:
+            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+        }).value,
+        400,
+      );
+    }
     // Better Auth signs the redirect with `exp` (Unix seconds). Reject
     // expired login URLs so stale links cannot create upstream sessions.
     const exp = url.searchParams.get("exp");
     if (exp && Number(exp) < Date.now() / 1000) {
-      const { branding } = await loadClientContext(c, clientId);
+      const result = await loadClientContextOrRenderError(c, clientId);
+      if (result instanceof Response) return result;
       const body = renderLoginPage({
         queryString: url.search,
-        branding,
+        branding: result.branding,
         csrfToken: "",
         error:
           "Ce lien de connexion a expiré. Veuillez relancer la connexion depuis l'application.",
       });
       return c.html(body.value, 400);
     }
-    const { branding, csrfToken } = await loadClientContext(c, clientId);
-    const body = renderLoginPage({ queryString: url.search, branding, csrfToken });
+    const getResult = await loadClientContextOrRenderError(c, clientId);
+    if (getResult instanceof Response) return getResult;
+    const body = renderLoginPage({
+      queryString: url.search,
+      branding: getResult.branding,
+      csrfToken: getResult.csrfToken,
+    });
     return c.html(body.value);
   });
 
   router.post("/api/oauth/login", rateLimitByIp(60), async (c) => {
     const url = new URL(c.req.url);
     const clientId = url.searchParams.get("client_id");
-    if (!clientId) throw invalidRequest("client_id is required", "client_id");
+    if (!clientId) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien de connexion invalide",
+          message:
+            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+        }).value,
+        400,
+      );
+    }
     // Reject form submissions for expired login URLs — prevents creating a
-    // Better Auth session from a stale link.
+    // Better Auth session from a stale link. Render the login page with an
+    // inline error (same as the GET handler) instead of returning JSON —
+    // the browser submitted a form, not an API call.
     const exp = url.searchParams.get("exp");
     if (exp && Number(exp) < Date.now() / 1000) {
-      throw invalidRequest("Login link has expired");
+      const result = await loadClientContextOrRenderError(c, clientId);
+      if (result instanceof Response) return result;
+      const body = renderLoginPage({
+        queryString: url.search,
+        branding: result.branding,
+        csrfToken: "",
+        error:
+          "Ce lien de connexion a expiré. Veuillez relancer la connexion depuis l'application.",
+      });
+      return c.html(body.value, 400);
     }
 
     const form = await c.req.parseBody();
+    const ctxResult = await loadClientContextOrRenderError(c, clientId);
+    if (ctxResult instanceof Response) return ctxResult;
+    const ctx = ctxResult;
     if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
-      throw forbidden("CSRF token missing or invalid — reload the login page and try again");
+      const page = renderLoginPage({
+        queryString: url.search,
+        branding: ctx.branding,
+        csrfToken: ctx.csrfToken,
+        error: "Votre session a expiré. Veuillez réessayer.",
+      });
+      return c.html(page.value, 403);
     }
-
-    const ctx = await loadClientContext(c, clientId);
     const renderError = (
       error: string,
       status: 400 | 401 | 403 | 409 | 429 | 500,
@@ -510,16 +576,26 @@ export function createOidcRouter() {
     const url = new URL(c.req.url);
     const clientId = url.searchParams.get("client_id");
     const scope = url.searchParams.get("scope") ?? "openid";
-    if (!clientId) throw invalidRequest("client_id is required", "client_id");
+    if (!clientId) {
+      return c.html(
+        renderErrorPage({
+          title: "Page d'autorisation invalide",
+          message:
+            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+        }).value,
+        400,
+      );
+    }
 
-    const { client, branding, csrfToken } = await loadClientContext(c, clientId);
+    const consentResult = await loadClientContextOrRenderError(c, clientId);
+    if (consentResult instanceof Response) return consentResult;
     const scopes = scope.split(/\s+/).filter(Boolean);
     const body = renderConsentPage({
-      clientName: client.name ?? client.id,
+      clientName: consentResult.client.name ?? consentResult.client.id,
       scopes,
       action: `/api/oauth/consent${url.search}`,
-      branding,
-      csrfToken,
+      branding: consentResult.branding,
+      csrfToken: consentResult.csrfToken,
     });
     return c.html(body.value);
   });
@@ -529,6 +605,25 @@ export function createOidcRouter() {
 
     const form = await c.req.parseBody();
     if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
+      // Re-render the consent page instead of returning JSON — the user
+      // submitted a form (browser context), not an API call.
+      const clientId = url.searchParams.get("client_id");
+      if (clientId) {
+        const csrfResult = await loadClientContextOrRenderError(c, clientId);
+        if (csrfResult instanceof Response) return csrfResult;
+        const { client, branding, csrfToken } = csrfResult;
+        const scope = url.searchParams.get("scope") ?? "openid";
+        const scopes = scope.split(/\s+/).filter(Boolean);
+        const body = renderConsentPage({
+          clientName: client.name ?? client.id,
+          scopes,
+          action: `/api/oauth/consent${url.search}`,
+          branding,
+          csrfToken,
+          error: "Votre session a expiré. Veuillez réessayer.",
+        });
+        return c.html(body.value, 403);
+      }
       throw forbidden("CSRF token missing or invalid — reload the consent page and try again");
     }
 
@@ -566,7 +661,9 @@ export function createOidcRouter() {
       if (err instanceof UnverifiedEmailConflictError) {
         const clientIdParam = consentParams.get("client_id");
         if (clientIdParam) {
-          const ctx = await loadClientContext(c, clientIdParam);
+          const ctxOrRes = await loadClientContextOrRenderError(c, clientIdParam);
+          if (ctxOrRes instanceof Response) return ctxOrRes;
+          const ctx = ctxOrRes;
           const page = renderLoginPage({
             queryString: `?${oauthQuery}`,
             branding: ctx.branding,

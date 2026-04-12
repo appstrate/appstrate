@@ -49,13 +49,17 @@ export interface ConsentPageProps {
   csrfToken: string;
   /** Resolved branding for the owning application. */
   branding: ResolvedAppBranding;
+  /** Optional error message displayed above the form. */
+  error?: string;
 }
 
 export function renderConsentPage(props: ConsentPageProps): RawHtml {
   const scopeItems = props.scopes.map((s) => html`<li>${describeScope(s)}</li>`);
   const title = `Autorisation — ${props.branding.name}`;
+  const errorBlock = props.error ? html`<div class="error" role="alert">${props.error}</div>` : "";
   const bodyHtml = html`
     <h1>Autorisation</h1>
+    ${errorBlock}
     <p>
       <span class="client">${props.clientName}</span> souhaite accéder à votre compte
       ${props.branding.name}.
