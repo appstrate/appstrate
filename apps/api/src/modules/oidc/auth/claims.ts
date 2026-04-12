@@ -41,6 +41,12 @@ export function scopesToPermissions(
   const ceiling =
     actorType === "dashboard_user" && orgRole ? resolvePermissions(orgRole) : undefined;
 
+  // Widen to Set<string> for runtime .has() checks — the sets contain
+  // Permission values, so a successful .has(s) guarantees s is a valid
+  // Permission and the cast on .add() is safe.
+  const allowedScopes = OIDC_ALLOWED_SCOPES as ReadonlySet<string>;
+  const ceilingScopes = ceiling as ReadonlySet<string> | undefined;
+
   for (const s of scope.split(/\s+/)) {
     if (s === "" || OIDC_IDENTITY_SCOPE_SET.has(s)) continue;
     if (actorType === "end_user") {
@@ -48,7 +54,7 @@ export function scopesToPermissions(
       // outside it (admin / destructive / org management) is dropped
       // silently — they should never have been requested in the first
       // place (the client creation API rejects them upfront).
-      if (OIDC_ALLOWED_SCOPES.has(s as Permission)) {
+      if (allowedScopes.has(s)) {
         granted.add(s as Permission);
       } else {
         logger.warn("oidc: end_user scope dropped (not in OIDC_ALLOWED_SCOPES)", {
@@ -60,7 +66,7 @@ export function scopesToPermissions(
     }
     // Dashboard flow: scope must be a valid Permission AND the role must
     // allow it (ceiling filter).
-    if (ceiling && ceiling.has(s as Permission)) {
+    if (ceilingScopes && ceilingScopes.has(s)) {
       granted.add(s as Permission);
       continue;
     }

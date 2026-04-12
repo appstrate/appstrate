@@ -155,11 +155,13 @@ async function buildClaimsForClient(
   if (level === "application") {
     return buildApplicationLevelClaims(user, metadata!);
   }
-  logger.warn("oidc: oauth_client metadata missing level — token will carry no actor claims", {
+  logger.warn("oidc: oauth_client metadata missing level — rejecting token", {
     module: "oidc",
     userId: user.id,
   });
-  return {};
+  throw new APIError("BAD_REQUEST", {
+    message: "OAuth client metadata missing level — cannot issue token",
+  });
 }
 
 async function buildOrgLevelClaims(

@@ -115,11 +115,11 @@ async function loadClientContext(c: Context<AppEnv>, clientId: string): Promise<
     .where(eq(oauthClient.clientId, clientId))
     .limit(1);
   if (!row || row.disabled) throw notFound("Unknown OAuth client");
-  const level = row.level === "org" ? "org" : "application";
+  const level: typeof row.level = row.level === "org" ? "org" : "application";
   const client = {
     id: row.id,
     name: row.name,
-    level: level as "org" | "application",
+    level,
     referencedOrgId: row.referencedOrgId,
     referencedApplicationId: row.referencedApplicationId,
   };
@@ -210,7 +210,7 @@ export function createOidcRouter() {
       const client = await getClient(c.req.param("clientId")!);
       if (!client) throw notFound("OAuth client not found");
       const owning = await getClientOwningOrg(client.clientId);
-      if (owning !== orgId) throw notFound("OAuth client not found");
+      if (!owning || owning !== orgId) throw notFound("OAuth client not found");
       return c.json(client);
     },
   );
@@ -225,7 +225,7 @@ export function createOidcRouter() {
       const body = await c.req.json();
       const data = parseBody(updateOAuthClientSchema, body);
       const owning = await getClientOwningOrg(clientId);
-      if (owning !== orgId) throw notFound("OAuth client not found");
+      if (!owning || owning !== orgId) throw notFound("OAuth client not found");
 
       // Require admin/owner for isFirstParty — skipping consent is a trust escalation.
       if (data.isFirstParty !== undefined) {
@@ -256,7 +256,7 @@ export function createOidcRouter() {
       const orgId = c.get("orgId");
       const clientId = c.req.param("clientId")!;
       const owning = await getClientOwningOrg(clientId);
-      if (owning !== orgId) throw notFound("OAuth client not found");
+      if (!owning || owning !== orgId) throw notFound("OAuth client not found");
       const deleted = await deleteClient(clientId);
       if (!deleted) throw notFound("OAuth client not found");
       return c.body(null, 204);
@@ -271,7 +271,7 @@ export function createOidcRouter() {
       const orgId = c.get("orgId");
       const clientId = c.req.param("clientId")!;
       const owning = await getClientOwningOrg(clientId);
-      if (owning !== orgId) throw notFound("OAuth client not found");
+      if (!owning || owning !== orgId) throw notFound("OAuth client not found");
       const rotated = await rotateClientSecret(clientId);
       if (!rotated) throw notFound("OAuth client not found");
       return c.json(rotated);
@@ -300,7 +300,11 @@ export function createOidcRouter() {
     }
 
     const ctx = await loadClientContext(c, clientId);
-    const renderError = (error: string, status: 400 | 401 | 403 | 409 | 429, email?: string) => {
+    const renderError = (
+      error: string,
+      status: 400 | 401 | 403 | 409 | 429 | 500,
+      email?: string,
+    ) => {
       const page = renderLoginPage({
         queryString: url.search,
         branding: ctx.branding,
@@ -338,6 +342,17 @@ export function createOidcRouter() {
       })) as Response;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      // Distinguish infrastructure failures from bad credentials. Connection
+      // errors, DB timeouts, and unhandled 5xx should not masquerade as
+      // "wrong password" — the user would retry endlessly.
+      const isInfraError =
+        err instanceof Error &&
+        (/connect|ECONNREFUSED|timeout|database|pool/i.test(err.message) ||
+          ("status" in err && typeof err.status === "number" && err.status >= 500));
+      if (isInfraError) {
+        logger.error("oidc: signInEmail infra error", { error: msg, email });
+        return renderError("Erreur serveur temporaire, veuillez réessayer.", 500, email);
+      }
       logger.warn("oidc: signInEmail threw", { error: msg, email });
       return renderError("Email ou mot de passe incorrect.", 401, email);
     }
