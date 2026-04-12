@@ -91,9 +91,12 @@ async function registerClient(
     method: "POST",
     headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
     body: JSON.stringify({
+      level: "application",
       name: "E2E Satellite",
       redirectUris: ["https://satellite.example.com/callback"],
       scopes: ["openid", "profile", "email", "offline_access", "connections:read", "runs:read"],
+      referencedApplicationId: ctx.defaultAppId,
+      isFirstParty: false,
     }),
   });
   expect(res.status).toBe(201);
@@ -206,7 +209,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     const consentLocation = authorizeRes.headers.get("location");
     expect(consentLocation).toBeTruthy();
     const consentUrl = new URL(consentLocation!, "http://localhost");
-    expect(consentUrl.pathname).toBe("/api/oauth/enduser/consent");
+    expect(consentUrl.pathname).toBe("/api/oauth/consent");
     // Better Auth has signed the query — both params must be present.
     expect(consentUrl.searchParams.get("sig")).toBeTruthy();
     expect(consentUrl.searchParams.get("exp")).toBeTruthy();
@@ -228,7 +231,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     expect(csrfMatch).not.toBeNull();
     const csrfToken = csrfMatch![1]!;
 
-    // ── Step 3 ── POST /api/oauth/enduser/consent — our custom handler
+    // ── Step 3 ── POST /api/oauth/consent — our custom handler
     // verifies CSRF, then forwards `oauth_query` (the signed query from the
     // URL) to Better Auth's `/oauth2/consent`. This is the step that was
     // silently broken before the `oauth_query` fix — previously we passed
@@ -294,20 +297,22 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // covered by `test/integration/middleware/enduser-token-auth.test.ts`
     // which spins up a local JWKS server). Here we assert the payload
     // shape — proving `customAccessTokenClaims` actually ran and injected
-    // `endUserId` + `applicationId` + `orgId` via `resolveOrCreateEndUser`.
+    // `end_user_id` + `application_id` + `org_id` via `resolveOrCreateEndUser`.
     const payload = decodeJwt(tokens.access_token) as {
       sub?: string;
       scope?: string;
-      endUserId?: string;
-      applicationId?: string;
-      orgId?: string;
+      actor_type?: string;
+      end_user_id?: string;
+      application_id?: string;
+      org_id?: string;
     };
     expect(payload.sub).toBeTruthy();
     expect(payload.scope).toContain("openid");
     expect(payload.scope).toContain("offline_access");
-    expect(payload.endUserId).toMatch(/^eu_/);
-    expect(payload.applicationId).toBeTruthy();
-    expect(payload.orgId).toBeTruthy();
+    expect(payload.actor_type).toBe("end_user");
+    expect(payload.end_user_id).toMatch(/^eu_/);
+    expect(payload.application_id).toBeTruthy();
+    expect(payload.org_id).toBeTruthy();
   });
 
   it("a real minted Bearer JWT authenticates against a core route via the OIDC strategy", async () => {
@@ -594,15 +599,17 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     expect(refreshed.access_token).toBeTruthy();
     expect(refreshed.access_token).not.toBe(initialAccess);
 
-    // Prove customAccessTokenClaims re-ran on refresh — endUserId + applicationId
+    // Prove customAccessTokenClaims re-ran on refresh — end_user_id + application_id
     // are injected only by that closure, so their presence on the new token
     // is the canary.
     const payload = decodeJwt(refreshed.access_token) as {
-      endUserId?: string;
-      applicationId?: string;
+      actor_type?: string;
+      end_user_id?: string;
+      application_id?: string;
     };
-    expect(payload.endUserId).toMatch(/^eu_/);
-    expect(payload.applicationId).toBeTruthy();
+    expect(payload.actor_type).toBe("end_user");
+    expect(payload.end_user_id).toMatch(/^eu_/);
+    expect(payload.application_id).toBeTruthy();
   });
 
   it("refresh_token grant also requires resource parameter", async () => {

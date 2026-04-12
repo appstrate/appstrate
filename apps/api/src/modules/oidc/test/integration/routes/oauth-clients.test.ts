@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for `/api/oauth/clients*` admin routes.
+ * Integration tests for `/api/oauth/clients*` admin routes — polymorphic.
  *
- * Covers CRUD + rotate + cross-app isolation + 404 handling. Uses the real
- * OIDC module loaded via `getTestApp({ modules })` so the router + OpenAPI +
- * appScopedPaths wiring is all exercised end-to-end.
+ * Covers CRUD + rotate + cross-org isolation + 404 handling for both
+ * `dashboard` and `end_user` client types.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -23,7 +22,27 @@ import { oauthClient, oauthAccessToken, oauthRefreshToken, oauthConsent } from "
 
 const app = getTestApp({ modules: [oidcModule] });
 
-describe("OAuth clients admin routes", () => {
+function applicationLevelBody(ctx: TestContext, overrides: Record<string, unknown> = {}) {
+  return {
+    level: "application" as const,
+    name: "Acme Portal",
+    redirectUris: ["https://acme.example.com/oauth/callback"],
+    referencedApplicationId: ctx.defaultAppId,
+    ...overrides,
+  };
+}
+
+function orgLevelBody(ctx: TestContext, overrides: Record<string, unknown> = {}) {
+  return {
+    level: "org" as const,
+    name: "Acme Admin",
+    redirectUris: ["https://acme.example.com/oauth/callback"],
+    referencedOrgId: ctx.orgId,
+    ...overrides,
+  };
+}
+
+describe("OAuth clients admin routes (polymorphic)", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -31,57 +50,84 @@ describe("OAuth clients admin routes", () => {
     ctx = await createTestContext({ orgSlug: "oauthroutes" });
   });
 
-  it("POST /api/oauth/clients creates a client and returns the plaintext secret once", async () => {
+  it("POST creates an end_user client and returns the plaintext secret once", async () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "Acme Portal",
-        redirectUris: ["https://acme.example.com/oauth/callback"],
-      }),
+      body: JSON.stringify(applicationLevelBody(ctx)),
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
       clientId: string;
       clientSecret: string;
-      applicationId: string;
+      level: string;
+      referencedApplicationId: string | null;
+      referencedOrgId: string | null;
       redirectUris: string[];
     };
     expect(body.clientId).toStartWith("oauth_");
     expect(body.clientSecret.length).toBeGreaterThan(20);
-    expect(body.applicationId).toBe(ctx.defaultAppId);
+    expect(body.level).toBe("application");
+    expect(body.referencedApplicationId).toBe(ctx.defaultAppId);
+    expect(body.referencedOrgId).toBeNull();
     expect(body.redirectUris).toEqual(["https://acme.example.com/oauth/callback"]);
 
-    // DB row carries a hashed secret (not the plaintext).
     const [row] = await db
       .select()
       .from(oauthClient)
       .where(eq(oauthClient.clientId, body.clientId));
     expect(row).toBeDefined();
     expect(row!.clientSecret).not.toBe(body.clientSecret);
-    expect(row!.clientSecret?.length).toBe(64); // hex SHA-256
+    expect(row!.clientSecret?.length).toBe(64);
+  });
+
+  it("POST creates a dashboard client pinned to the current org", async () => {
+    const res = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(orgLevelBody(ctx)),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      level: string;
+      referencedOrgId: string | null;
+      referencedApplicationId: string | null;
+    };
+    expect(body.level).toBe("org");
+    expect(body.referencedOrgId).toBe(ctx.orgId);
+    expect(body.referencedApplicationId).toBeNull();
+  });
+
+  it("POST rejects dashboard client for a different org (403)", async () => {
+    const res = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(orgLevelBody(ctx, { referencedOrgId: crypto.randomUUID() })),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("POST rejects end_user client for an app the org does not own (403)", async () => {
+    const other = await createTestContext({ orgSlug: "otherorg" });
+    const res = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(
+        applicationLevelBody(ctx, { referencedApplicationId: other.defaultAppId }),
+      ),
+    });
+    expect(res.status).toBe(403);
   });
 
   it("POST rejects invalid redirect URIs", async () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "Bad",
-        redirectUris: ["not-a-url"],
-      }),
+      body: JSON.stringify(applicationLevelBody(ctx, { redirectUris: ["not-a-url"] })),
     });
     expect(res.status).toBe(400);
   });
 
-  // A2 — redirect_uri scheme + SSRF allowlist.
-  // `z.url()` alone accepts `javascript:`, `data:`, IPs like 169.254.169.254
-  // (cloud metadata) and 10.0.0.1 (RFC1918). The custom refinement wraps
-  // `@appstrate/core/ssrf:isBlockedUrl` to reject them.
-  // NOTE: test preload sets APP_URL=http://localhost:3000 so `isDevEnvironment()`
-  // returns true — loopback http:// URIs are intentionally accepted here (see
-  // the "accepts http://localhost in dev" case below). Production (non-dev
-  // APP_URL) rejects them because the scheme check requires https.
   const blockedRedirectUris: Array<[string, string]> = [
     ["javascript scheme", "javascript:alert(1)"],
     ["data scheme", "data:text/html,<script>alert(1)</script>"],
@@ -96,10 +142,7 @@ describe("OAuth clients admin routes", () => {
       const res = await app.request("/api/oauth/clients", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "Evil",
-          redirectUris: [uri],
-        }),
+        body: JSON.stringify(applicationLevelBody(ctx, { redirectUris: [uri] })),
       });
       expect(res.status).toBe(400);
     });
@@ -109,44 +152,33 @@ describe("OAuth clients admin routes", () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "Legit",
-        redirectUris: ["https://satellite.example.com/oauth/callback"],
-      }),
+      body: JSON.stringify(
+        applicationLevelBody(ctx, {
+          redirectUris: ["https://satellite.example.com/oauth/callback"],
+        }),
+      ),
     });
     expect(res.status).toBe(201);
   });
 
   it("POST accepts http://localhost redirect URI in dev mode", async () => {
-    // `isDevEnvironment()` is true because test preload sets
-    // APP_URL=http://localhost:3000. Satellites running against a local
-    // platform instance can register their Vite dev server callback.
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "Dev",
-        redirectUris: ["http://localhost:5173/auth/callback"],
-      }),
+      body: JSON.stringify(
+        applicationLevelBody(ctx, { redirectUris: ["http://localhost:5173/auth/callback"] }),
+      ),
     });
     expect(res.status).toBe(201);
   });
 
   it("POST rejects scopes outside the APPSTRATE_SCOPES whitelist", async () => {
-    // Scope whitelist is enforced at both the Zod layer and the service
-    // boundary (defense-in-depth). Arbitrary strings like `superadmin:*`
-    // must never reach the `oauth_client.scopes` column — they would
-    // otherwise propagate through `scopesToPermissions()` and grant
-    // unauthorized RBAC permissions to any end-user JWT minted against
-    // this client.
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "Malicious",
-        redirectUris: ["https://acme.example.com/oauth/callback"],
-        scopes: ["openid", "profile", "email", "superadmin:*"],
-      }),
+      body: JSON.stringify(
+        applicationLevelBody(ctx, { scopes: ["openid", "profile", "email", "superadmin:*"] }),
+      ),
     });
     expect(res.status).toBe(400);
   });
@@ -155,11 +187,11 @@ describe("OAuth clients admin routes", () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "Legit",
-        redirectUris: ["https://acme.example.com/oauth/callback"],
-        scopes: ["openid", "profile", "email", "offline_access", "runs:read"],
-      }),
+      body: JSON.stringify(
+        applicationLevelBody(ctx, {
+          scopes: ["openid", "profile", "email", "offline_access", "runs:read"],
+        }),
+      ),
     });
     expect(res.status).toBe(201);
   });
@@ -168,42 +200,38 @@ describe("OAuth clients admin routes", () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        redirectUris: ["https://acme.example.com/oauth/callback"],
-      }),
+      body: JSON.stringify(applicationLevelBody(ctx, { name: undefined })),
     });
     expect(res.status).toBe(400);
   });
 
-  it("GET /api/oauth/clients lists clients scoped to the current app", async () => {
+  it("GET /api/oauth/clients lists every client visible to the org", async () => {
     await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "One", redirectUris: ["https://a.example.com/cb"] }),
+      body: JSON.stringify(applicationLevelBody(ctx, { name: "EndUser One" })),
     });
     await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Two", redirectUris: ["https://b.example.com/cb"] }),
+      body: JSON.stringify(orgLevelBody(ctx, { name: "Dashboard One" })),
     });
 
     const res = await app.request("/api/oauth/clients", { headers: authHeaders(ctx) });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      object: string;
-      data: { clientId: string; name: string | null }[];
+      data: { name: string | null; level: string }[];
     };
-    expect(body.object).toBe("list");
     expect(body.data.length).toBe(2);
     const names = body.data.map((c) => c.name).sort();
-    expect(names).toEqual(["One", "Two"]);
+    expect(names).toEqual(["Dashboard One", "EndUser One"]);
   });
 
   it("GET /api/oauth/clients/:id returns a single client without the secret", async () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "One", redirectUris: ["https://a.example.com/cb"] }),
+      body: JSON.stringify(applicationLevelBody(ctx)),
     });
     const created = (await createRes.json()) as { clientId: string };
 
@@ -221,11 +249,11 @@ describe("OAuth clients admin routes", () => {
     expect(res.status).toBe(404);
   });
 
-  it("PATCH updates redirectUris and disabled flag", async () => {
+  it("PATCH updates redirectUris, disabled, and isFirstParty", async () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "One", redirectUris: ["https://a.example.com/cb"] }),
+      body: JSON.stringify(applicationLevelBody(ctx)),
     });
     const { clientId } = (await createRes.json()) as { clientId: string };
 
@@ -235,25 +263,28 @@ describe("OAuth clients admin routes", () => {
       body: JSON.stringify({
         redirectUris: ["https://new.example.com/cb", "https://other.example.com/cb"],
         disabled: true,
+        isFirstParty: true,
       }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       redirectUris: string[];
       disabled: boolean;
+      isFirstParty: boolean;
     };
     expect(body.redirectUris).toEqual([
       "https://new.example.com/cb",
       "https://other.example.com/cb",
     ]);
     expect(body.disabled).toBe(true);
+    expect(body.isFirstParty).toBe(true);
   });
 
   it("POST /rotate returns a new plaintext secret and updates the hash", async () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "One", redirectUris: ["https://a.example.com/cb"] }),
+      body: JSON.stringify(applicationLevelBody(ctx)),
     });
     const first = (await createRes.json()) as { clientId: string; clientSecret: string };
 
@@ -283,7 +314,7 @@ describe("OAuth clients admin routes", () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "One", redirectUris: ["https://a.example.com/cb"] }),
+      body: JSON.stringify(applicationLevelBody(ctx)),
     });
     const { clientId } = (await createRes.json()) as { clientId: string };
 
@@ -302,20 +333,19 @@ describe("OAuth clients admin routes", () => {
     expect(get404.status).toBe(404);
   });
 
-  it("DELETE cascades child tokens + consent rows (regression: used clients were unreleasable)", async () => {
-    // Before the cascade migration, FKs from oauth_access_token /
-    // oauth_refresh_token / oauth_consent → oauth_client were ON DELETE NO
-    // ACTION, so any client that had ever minted a token raised a
-    // constraint violation on DELETE → 500 from the admin API.
+  it("DELETE cascades child tokens + consent rows", async () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Used client", redirectUris: ["https://c.example.com/cb"] }),
+      body: JSON.stringify(
+        applicationLevelBody(ctx, {
+          name: "Used client",
+          redirectUris: ["https://c.example.com/cb"],
+        }),
+      ),
     });
     const { clientId } = (await createRes.json()) as { clientId: string };
 
-    // Seed the three child row types directly — we're testing the schema,
-    // not the full plugin path (which is covered by oauth-flows.test.ts).
     const now = new Date();
     await db.insert(oauthRefreshToken).values({
       id: "rt_test_1",
@@ -349,7 +379,6 @@ describe("OAuth clients admin routes", () => {
     });
     expect(del.status).toBe(204);
 
-    // Parent gone + all children cascaded.
     expect(
       (await db.select().from(oauthClient).where(eq(oauthClient.clientId, clientId))).length,
     ).toBe(0);
@@ -366,33 +395,24 @@ describe("OAuth clients admin routes", () => {
     ).toBe(0);
   });
 
-  it("isolates clients per application", async () => {
+  it("isolates clients per org", async () => {
     const otherCtx = await createTestContext({ orgSlug: "otherapp" });
-    // Both contexts independently create clients.
     await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "App A client", redirectUris: ["https://a.example.com/cb"] }),
+      body: JSON.stringify(applicationLevelBody(ctx, { name: "Org A client" })),
     });
     await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(otherCtx), "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "App B client", redirectUris: ["https://b.example.com/cb"] }),
+      body: JSON.stringify(applicationLevelBody(otherCtx, { name: "Org B client" })),
     });
 
     const listA = await app.request("/api/oauth/clients", { headers: authHeaders(ctx) });
     const listB = await app.request("/api/oauth/clients", { headers: authHeaders(otherCtx) });
     const bodyA = (await listA.json()) as { data: { name: string | null }[] };
     const bodyB = (await listB.json()) as { data: { name: string | null }[] };
-    expect(bodyA.data.map((c) => c.name)).toEqual(["App A client"]);
-    expect(bodyB.data.map((c) => c.name)).toEqual(["App B client"]);
-  });
-
-  it("requires X-App-Id (appScopedPaths enforcement)", async () => {
-    const res = await app.request("/api/oauth/clients", {
-      headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
-    });
-    // Missing X-App-Id → core app-context middleware rejects before the route.
-    expect([400, 403]).toContain(res.status);
+    expect(bodyA.data.map((c) => c.name)).toEqual(["Org A client"]);
+    expect(bodyB.data.map((c) => c.name)).toEqual(["Org B client"]);
   });
 });

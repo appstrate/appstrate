@@ -88,7 +88,9 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         c.set("orgRole", resolution.orgRole);
         c.set("permissions", new Set(resolution.permissions));
         c.set("authMethod", resolution.authMethod);
-        c.set("applicationId", resolution.applicationId);
+        if (resolution.applicationId !== undefined) {
+          c.set("applicationId", resolution.applicationId);
+        }
         if (resolution.endUser) {
           c.set("endUser", resolution.endUser);
         }

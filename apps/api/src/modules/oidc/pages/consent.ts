@@ -3,7 +3,7 @@
 /**
  * End-user consent page.
  *
- * Served at GET /api/oauth/enduser/consent after a successful login. The
+ * Served at GET /api/oauth/consent after a successful login. The
  * Better Auth oauth-provider plugin hands the flow off here with a pending
  * authorization-code state; the user sees the client's name + requested
  * scopes and clicks "Autoriser" or "Refuser". The form POST completes the
@@ -43,7 +43,7 @@ function describeScope(scope: string): string {
 export interface ConsentPageProps {
   clientName: string;
   scopes: string[];
-  /** Form action — typically `/api/oauth/enduser/consent${queryString}`. */
+  /** Form action — typically `/api/oauth/consent${queryString}`. */
   action: string;
   /** CSRF token injected into the form + paired cookie. */
   csrfToken: string;

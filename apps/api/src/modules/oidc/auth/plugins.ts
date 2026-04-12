@@ -5,40 +5,37 @@
  *
  * Wires the `@better-auth/oauth-provider` plugin onto the platform Better
  * Auth singleton so Appstrate acts as an OAuth 2.1 / OIDC authorization
- * server for end-user satellites. The JWT plugin is bundled automatically
- * by oauth-provider (disableJwtPlugin defaults to false) — the JWKS is
- * served at `/api/auth/jwks`, OIDC discovery at
- * `/api/auth/.well-known/openid-configuration`, and the token, authorize,
- * userinfo, revoke, introspect endpoints at `/api/auth/oauth2/*`.
+ * server. The flow is **polymorphic** — the same plugin handles two distinct
+ * client scoping levels, discriminated by `oauth_clients.level`:
  *
- * The plugin reads/writes the `oauth_client`, `oauth_access_token`,
- * `oauth_refresh_token`, and `oauth_consent` tables owned by this module.
- * The Drizzle schema in `../schema.ts` was designed to match the plugin's
- * expected shape 1:1 so no schema reconciliation is required at runtime.
+ *   1. **Org-level** (`level: "org"`): dashboard users (org operators) scoped
+ *      to a single organization pinned at client creation. Tokens carry
+ *      `actor_type: "dashboard_user"` + `org_id` + `org_role`.
+ *   2. **Application-level** (`level: "application"`): application end-users
+ *      scoped to a single application. Tokens carry `actor_type: "end_user"`
+ *      + `application_id` + `end_user_id`.
  *
- * The owning Appstrate `applicationId` is stashed in the plugin-native
- * `oauth_client.metadata` JSON column at client registration time by
- * `services/oauth-admin.ts`. The plugin parses it on every token/id_token
- * mint and forwards it as the `metadata` closure argument of
- * `customAccessTokenClaims` and `customIdTokenClaims`. We deliberately do
- * NOT use the `referenceId` closure argument: in this plugin version it
- * reflects `postLogin.consentReferenceId` (a consent-time account-selection
- * feature we don't use), not `oauth_client.reference_id`. The column is
- * still populated in lockstep with `metadata.applicationId` for the
- * plugin's own client-ACL path (`clientReference` + admin CRUD gates).
+ * `customAccessTokenClaims` reads the parsed `metadata` JSON column for the
+ * active OAuth client and dispatches to `buildOrgLevelClaims` or
+ * `buildApplicationLevelClaims` accordingly. All claim names are RFC 9068 / OIDC Core
+ * snake_case.
  *
- * The OIDC auth strategy picks the claims up from the Bearer JWT and
- * sets the `endUser` context for every subsequent core route, so the
- * strict end-user run visibility filter kicks in automatically.
+ * The JWT plugin is bundled automatically by oauth-provider
+ * (disableJwtPlugin defaults to false). The JWKS is served at
+ * `/api/auth/jwks`, OIDC discovery at `/api/auth/.well-known/openid-configuration`,
+ * and the token / authorize / userinfo / revoke / introspect endpoints at
+ * `/api/auth/oauth2/*`.
  *
- * Client secret storage matches the existing `oauth-admin` service hash
- * (SHA-256 hex) so clients registered via our admin API are accepted
- * by the plugin's token endpoint without a migration.
+ * Client secret storage matches the `oauth-admin` service hash (SHA-256 hex).
  */
 
+import { eq, and } from "drizzle-orm";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { jwt } from "better-auth/plugins";
+import { APIError } from "better-auth/api";
 import { getEnv } from "@appstrate/env";
+import { db } from "@appstrate/db/client";
+import { organizationMembers } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import {
   resolveOrCreateEndUser,
@@ -48,6 +45,15 @@ import {
 import { hashSecret } from "../services/oauth-admin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 import { APPSTRATE_SCOPES } from "./scopes.ts";
+
+export type ActorType = "dashboard_user" | "end_user";
+export type OrgRoleClaim = "owner" | "admin" | "member" | "viewer";
+
+export interface ClientMetadata {
+  level?: "org" | "application";
+  referencedOrgId?: string;
+  referencedApplicationId?: string;
+}
 
 async function sha256HexVerify(clientSecret: string, storedHash: string): Promise<boolean> {
   const computed = await hashSecret(clientSecret);
@@ -63,155 +69,159 @@ export function oidcBetterAuthPlugins(): unknown[] {
   const env = getEnv();
   const validAudiences = [env.APP_URL, `${env.APP_URL}/api/auth`];
   return [
-    // Guards must run BEFORE oauth-provider so that `hooks.before` can
-    // reject malformed token/authorize requests and enforce rate limits
-    // before any opaque token is minted or client_secret is probed.
-    //
-    // Note: `@better-auth/oauth-provider` exposes its own `rateLimit`
-    // config option. We deliberately do NOT set it — the guards plugin
-    // supersedes it for three reasons:
-    //   1. The guards plugin uses the shared `rate-limiter-flexible`
-    //      Redis backend that the rest of the API already relies on,
-    //      so limits are distributed across instances (the plugin's
-    //      built-in limiter is per-process).
-    //   2. We need a per-email brute-force limit on the login page
-    //      (`rl:oidc:login-email:`) that the plugin's config doesn't
-    //      support — keyed on email, not endpoint.
-    //   3. We need a per-`client_id` brute-force limit on `/oauth2/token`
-    //      on top of the per-IP limit, which the plugin's flat config
-    //      also doesn't support.
-    // Wiring `opts.rateLimit` in addition to the guards would stack two
-    // independent limiters and produce confusing behavior. See
-    // `guards.ts` for the full rationale + limit table.
     oidcGuardsPlugin({ validAudiences }),
-    // JWT plugin MUST be present before oauth-provider so that token
-    // signing uses ES256 keys rotated through the module-owned `jwks`
-    // table. `oauth-provider` throws `jwt_config` at token mint time if
-    // this plugin is missing from the chain.
     jwt({
-      jwks: {
-        keyPairConfig: { alg: "ES256" },
-      },
+      jwks: { keyPairConfig: { alg: "ES256" } },
     }),
     oauthProvider({
-      // End-user facing pages served by this module (see `routes.ts`).
-      loginPage: "/api/oauth/enduser/login",
-      consentPage: "/api/oauth/enduser/consent",
-
-      // Full canonical scope vocabulary. The strategy's `scopesToPermissions`
-      // mapper translates these into core RBAC strings at request time.
+      loginPage: "/api/oauth/login",
+      consentPage: "/api/oauth/consent",
       scopes: [...APPSTRATE_SCOPES],
-
-      // `validAudiences` is what the plugin accepts on the RFC 8707
-      // `resource` parameter at the token endpoint. It drives the
-      // JWT-vs-opaque decision: `createUserTokens` only issues a JWT
-      // access token when `audience && !disableJwtPlugin`. Without a
-      // valid `resource`, the plugin mints opaque tokens that our OIDC
-      // auth strategy cannot match (it fast-rejects on `Bearer ey…`).
-      //
-      // We accept both `APP_URL` and `APP_URL/api/auth` so satellites
-      // can pass either the issuer or the Better Auth base URL as the
-      // resource indicator. The module README's satellite integration
-      // example documents `resource=<APP_URL>` as the canonical form.
       validAudiences,
-
-      // Match our existing admin-API hash so clients created before/without
-      // the plugin continue to work.
       storeClientSecret: {
         hash: hashSecret,
         verify: sha256HexVerify,
       },
 
-      // `storeTokens` defaults to "hashed" in the plugin. Opaque access
-      // tokens + refresh tokens are stored as SHA-256 hashes so a DB dump
-      // cannot be replayed against the token endpoint. We rely on the
-      // default — declaring it explicitly would be redundant noise.
-
-      // OAuth 2.1 default: PKCE required for every authorization code flow.
-      // Opt-out only possible per-client via `requirePKCE: false` on the row.
-      // (We enforce `requirePKCE: true` at admin-API client creation time.)
+      /**
+       * Polymorphic claim builder. Branches on `metadata.level` (set at
+       * client registration via `services/oauth-admin.ts`) and returns a
+       * snake_case claim payload compatible with RFC 9068 + OIDC Core.
+       */
+      customAccessTokenClaims: async ({ user, scopes, metadata }) =>
+        buildClaimsForClient(user ?? null, metadata as ClientMetadata | undefined, scopes),
 
       /**
-       * Inject `endUserId` + `applicationId` + `orgId` custom claims into
-       * every access token so the OIDC auth strategy can resolve the
-       * end-user from the JWT alone, without a DB lookup by email. Called
-       * once per token mint, including on refresh.
-       *
-       * `metadata` is `parseClientMetadata(oauth_client.metadata)` — the
-       * plugin parses the JSON column for us. `services/oauth-admin.ts`
-       * writes `{ applicationId }` there at registration time.
-       *
-       * Errors here fail the token issuance — we deliberately propagate
-       * `UnverifiedEmailConflictError` so the end-user sees a "verify your
-       * email" message instead of a silently-succeeded login that later
-       * fails on every scoped request.
+       * Surface the same polymorphic claims on /userinfo so satellites can
+       * read identity without decoding the JWT themselves. The Better Auth
+       * oauth-provider plugin only passes us `{ user, scopes, jwt }` —
+       * `jwt` is the decoded custom claims object from the access token,
+       * so we can forward its identity claims verbatim.
        */
-      customAccessTokenClaims: async ({ user, metadata }) => buildEndUserClaims(user, metadata),
-
-      // NOTE: `customIdTokenClaims` is deliberately NOT wired. The plugin
-      // mints access_token + id_token in parallel via Promise.all in
-      // `createUserTokens`. Wiring both closures triggers two concurrent
-      // `resolveOrCreateEndUser` calls on the first mint for a new user
-      // and races on the `end_users` unique index. Satellites that need
-      // `applicationId` read it from the access token (custom claims) or
-      // from `/userinfo` (mirrored via `customUserInfoClaims` below).
-
-      // Surface the same custom claims on the /userinfo endpoint so
-      // satellites can read `endUserId` without decoding the JWT themselves.
-      customUserInfoClaims: async ({ user, jwt }) => {
-        const endUserId = jwt?.endUserId;
-        const applicationId = jwt?.applicationId;
-        return {
-          ...(typeof endUserId === "string" ? { endUserId } : {}),
-          ...(typeof applicationId === "string" ? { applicationId } : {}),
-          ...(user?.name ? { name: user.name } : {}),
-        };
+      customUserInfoClaims: async ({ jwt, user }) => {
+        const claims = (jwt ?? {}) as Record<string, unknown>;
+        const actorType = claims.actor_type;
+        if (actorType === "dashboard_user") {
+          return {
+            actor_type: "dashboard_user",
+            email: stringOr(claims.email, user?.email),
+            email_verified: boolOr(claims.email_verified, false),
+            name: stringOr(claims.name, user?.name),
+            org_id: stringOrNull(claims.org_id),
+            org_role: stringOrNull(claims.org_role),
+          };
+        }
+        if (actorType === "end_user") {
+          return {
+            actor_type: "end_user",
+            email: stringOr(claims.email, user?.email),
+            name: stringOr(claims.name, user?.name),
+            org_id: stringOrNull(claims.org_id),
+            application_id: stringOrNull(claims.application_id),
+            end_user_id: stringOrNull(claims.end_user_id),
+          };
+        }
+        return {};
       },
     }),
   ];
 }
 
+function stringOr(...candidates: unknown[]): string | undefined {
+  for (const c of candidates) if (typeof c === "string" && c.length > 0) return c;
+  return undefined;
+}
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+function boolOr(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
 /**
- * Shared resolver for the `customAccessTokenClaims` closure (and any other
- * closure that mints end-user claims in the future). Reads the owning
- * Appstrate `applicationId` from the plugin-provided `metadata` (which is
- * already parsed JSON from `oauth_client.metadata`),
- * resolves/creates the end-user, and returns the custom claim set. Returns
- * an empty object when context is missing so the plugin still mints a valid
- * token — just without end-user context.
- *
- * Propagates `UnverifiedEmailConflictError` so the caller (the plugin) can
- * surface it to the end-user instead of silently succeeding and then failing
- * on every scoped request.
- *
- * `user` is declared optional by the plugin's TypeScript surface to cover
- * the `client_credentials` path. We do not advertise that grant at client
- * registration (`services/oauth-admin.ts` only sets `["authorization_code",
- * "refresh_token"]`), so the branch is not reachable today — but we keep
- * the defensive null-check to satisfy the plugin's type contract.
+ * Dispatch on `metadata.level`. Defensive fallback returns `{}` so the
+ * plugin still mints a token — at worst the strategy rejects it at verify
+ * time because `actor_type` is missing.
  */
-async function buildEndUserClaims(
-  user:
-    | { id: string; email: string; name?: string | null; emailVerified?: boolean }
-    | null
-    | undefined,
-  metadata: Record<string, unknown> | undefined,
-): Promise<Record<string, string>> {
+async function buildClaimsForClient(
+  user: { id: string; email: string; name?: string | null; emailVerified?: boolean } | null,
+  metadata: ClientMetadata | undefined,
+  _scopes: string[] | undefined,
+): Promise<Record<string, unknown>> {
   if (!user) return {};
-  const applicationId =
-    metadata && typeof metadata.applicationId === "string" ? metadata.applicationId : undefined;
+  const level = metadata?.level;
+  if (level === "org") {
+    return buildOrgLevelClaims(user, metadata!);
+  }
+  if (level === "application") {
+    return buildApplicationLevelClaims(user, metadata!);
+  }
+  logger.warn("oidc: oauth_client metadata missing level — token will carry no actor claims", {
+    module: "oidc",
+    userId: user.id,
+  });
+  return {};
+}
+
+async function buildOrgLevelClaims(
+  user: { id: string; email: string; name?: string | null; emailVerified?: boolean },
+  metadata: ClientMetadata,
+): Promise<Record<string, unknown>> {
+  const orgId = metadata.referencedOrgId;
+  if (!orgId) {
+    logger.warn("oidc: org-level client missing referencedOrgId — rejecting token", {
+      module: "oidc",
+      userId: user.id,
+    });
+    throw new Error("oidc: org-level oauth client missing referencedOrgId in metadata");
+  }
+  const [m] = await db
+    .select({ role: organizationMembers.role })
+    .from(organizationMembers)
+    .where(and(eq(organizationMembers.userId, user.id), eq(organizationMembers.orgId, orgId)))
+    .limit(1);
+  if (!m) {
+    logger.warn("oidc: user is not a member of the pinned org — rejecting token", {
+      module: "oidc",
+      userId: user.id,
+      orgId,
+    });
+    // Structured OAuth2 error so satellites (portal) can render a clean
+    // membership-error page instead of a generic 500. Uses RFC 6749
+    // `access_denied` since RFC does not define a more specific code.
+    throw new APIError("FORBIDDEN", {
+      error: "access_denied",
+      error_description:
+        "The signed-in user is not a member of the organization pinned to this OAuth client.",
+    });
+  }
+  return {
+    actor_type: "dashboard_user",
+    email: user.email,
+    email_verified: user.emailVerified === true,
+    name: user.name ?? user.email,
+    org_id: orgId,
+    org_role: m.role,
+  };
+}
+
+async function buildApplicationLevelClaims(
+  user: { id: string; email: string; name?: string | null; emailVerified?: boolean },
+  metadata: ClientMetadata,
+): Promise<Record<string, unknown>> {
+  const applicationId = metadata.referencedApplicationId;
   if (!applicationId) {
     logger.warn(
-      "oidc: oauth_client missing applicationId metadata — token will not carry end-user claims",
-      { module: "oidc", userId: user.id },
+      "oidc: application-level client missing referencedApplicationId — rejecting token",
+      {
+        module: "oidc",
+        userId: user.id,
+      },
     );
-    return {};
+    throw new Error(
+      "oidc: application-level oauth client missing referencedApplicationId in metadata",
+    );
   }
-  // Load the owning application row once per token mint so the downstream
-  // `resolveOrCreateEndUser` + `createEndUser` path never needs to re-SELECT.
-  // This closure runs outside the Hono middleware chain, so the resolved
-  // `app` context normally provided by `requireAppContext()` is not
-  // available — we load it manually here instead.
   const app = await loadAppById(applicationId);
   if (!app) {
     logger.warn("oidc: application referenced by oauth_client has been deleted", {
@@ -219,7 +229,7 @@ async function buildEndUserClaims(
       userId: user.id,
       applicationId,
     });
-    return {};
+    throw new Error("oidc: referenced application not found");
   }
   try {
     const resolved = await resolveOrCreateEndUser(
@@ -232,9 +242,12 @@ async function buildEndUserClaims(
       app,
     );
     return {
-      endUserId: resolved.endUserId,
-      applicationId: resolved.applicationId,
-      orgId: resolved.orgId,
+      actor_type: "end_user",
+      email: resolved.email ?? user.email,
+      name: resolved.name ?? user.name ?? user.email,
+      org_id: resolved.orgId,
+      application_id: resolved.applicationId,
+      end_user_id: resolved.endUserId,
     };
   } catch (err) {
     if (err instanceof UnverifiedEmailConflictError) {

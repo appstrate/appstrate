@@ -3,33 +3,72 @@
 /**
  * OAuth scope → Appstrate permission filter.
  *
- * The oauth-provider plugin issues JWTs carrying a space-separated `scope`
- * claim. Every scope value is either an OIDC identity scope (openid /
- * profile / email / offline_access — no permission) or a core `Permission`
- * string drawn from `OIDC_ALLOWED_SCOPES` (used verbatim — no translation).
+ * Polymorphic on the token `actor_type`. Dashboard tokens additionally filter
+ * scopes through the current `org_role` so a `member` cannot escalate to
+ * `admin`-level permissions even if the granted scope set was broader at
+ * client-registration time. End-user tokens filter through a fixed safe
+ * allowlist (destructive admin scopes are never reachable via the embedding
+ * app flow).
  *
- * Unknown scopes (not in either set) are dropped with a warn log so
- * operators can spot silent authorization drift when a satellite upgrades
- * its scope catalog faster than the platform.
+ * Convention: `{resource}:{action}` for every non-identity scope. The scope
+ * string `agents:run` grants the `agents:run` permission verbatim — no
+ * translation layer.
  */
 
+import {
+  OIDC_ALLOWED_SCOPES,
+  resolvePermissions,
+  type Permission,
+} from "../../../lib/permissions.ts";
 import { logger } from "../../../lib/logger.ts";
-import { OIDC_ALLOWED_SCOPES, type Permission } from "../../../lib/permissions.ts";
+import type { OrgRole } from "../../../types/index.ts";
 import { OIDC_IDENTITY_SCOPE_SET } from "./scopes.ts";
 
-export function scopesToPermissions(scope?: string): Set<Permission> {
-  const permissions = new Set<Permission>();
-  if (!scope) return permissions;
+type ActorType = "dashboard_user" | "end_user";
+
+export function scopesToPermissions(
+  scope: string | undefined,
+  actorType: ActorType,
+  orgRole?: OrgRole,
+): Set<Permission> {
+  const granted = new Set<Permission>();
+  if (!scope) return granted;
+
+  // Dashboard users: the role's permission set is the ceiling. A scope is
+  // granted iff the role allows it. This prevents token privilege
+  // escalation after a role downgrade and matches the way API keys derive
+  // their effective permissions (see `resolveApiKeyPermissions`).
+  const ceiling =
+    actorType === "dashboard_user" && orgRole ? resolvePermissions(orgRole) : undefined;
+
   for (const s of scope.split(/\s+/)) {
     if (s === "" || OIDC_IDENTITY_SCOPE_SET.has(s)) continue;
-    if (OIDC_ALLOWED_SCOPES.has(s as Permission)) {
-      permissions.add(s as Permission);
+    if (actorType === "end_user") {
+      // End-users are constrained to the safe OIDC allowlist. Anything
+      // outside it (admin / destructive / org management) is dropped
+      // silently — they should never have been requested in the first
+      // place (the client creation API rejects them upfront).
+      if (OIDC_ALLOWED_SCOPES.has(s as Permission)) {
+        granted.add(s as Permission);
+      } else {
+        logger.warn("oidc: end_user scope dropped (not in OIDC_ALLOWED_SCOPES)", {
+          module: "oidc",
+          scope: s,
+        });
+      }
       continue;
     }
-    logger.warn(
-      "oidc: unknown OAuth scope dropped — token carries a scope not in OIDC_ALLOWED_SCOPES",
-      { module: "oidc", scope: s },
-    );
+    // Dashboard flow: scope must be a valid Permission AND the role must
+    // allow it (ceiling filter).
+    if (ceiling && ceiling.has(s as Permission)) {
+      granted.add(s as Permission);
+      continue;
+    }
+    logger.warn("oidc: dashboard scope dropped — role ceiling does not allow it", {
+      module: "oidc",
+      scope: s,
+      orgRole,
+    });
   }
-  return permissions;
+  return granted;
 }

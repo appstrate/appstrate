@@ -63,8 +63,8 @@ Frontend reads `useAppConfig().features.oidc` to conditionally show the OAuth ta
 
 ```ts
 publicPaths: [
-  "/api/oauth/enduser/login",
-  "/api/oauth/enduser/consent",
+  "/api/oauth/login",
+  "/api/oauth/consent",
   "/.well-known/openid-configuration",
   "/.well-known/oauth-authorization-server",
 ];
@@ -90,10 +90,10 @@ Client admin routes (`/api/oauth/clients*`) require `X-App-Id`.
 | PATCH  | `/api/oauth/clients/:clientId`            | `oauth-clients:write`  | Update `redirectUris` / `disabled`.                                                                                                             |
 | DELETE | `/api/oauth/clients/:clientId`            | `oauth-clients:delete` | Delete a client.                                                                                                                                |
 | POST   | `/api/oauth/clients/:clientId/rotate`     | `oauth-clients:write`  | Issue a fresh plaintext secret.                                                                                                                 |
-| GET    | `/api/oauth/enduser/login`                | public                 | Server-rendered login form. Validates `client_id`, loads app branding, issues a one-shot CSRF token paired with an httpOnly `oidc_csrf` cookie. |
-| POST   | `/api/oauth/enduser/login`                | public                 | Verifies CSRF, calls `auth.api.signInEmail`, redirects to `/api/auth/oauth2/authorize` on success (preserving the signed query string).         |
-| GET    | `/api/oauth/enduser/consent`              | public                 | Server-rendered consent form with app branding + scope descriptions + CSRF token.                                                               |
-| POST   | `/api/oauth/enduser/consent`              | public                 | Verifies CSRF, calls `auth.api.oauth2Consent` (accept/deny), forwards the plugin's redirect response.                                           |
+| GET    | `/api/oauth/login`                        | public                 | Server-rendered login form. Validates `client_id`, loads app branding, issues a one-shot CSRF token paired with an httpOnly `oidc_csrf` cookie. |
+| POST   | `/api/oauth/login`                        | public                 | Verifies CSRF, calls `auth.api.signInEmail`, redirects to `/api/auth/oauth2/authorize` on success (preserving the signed query string).         |
+| GET    | `/api/oauth/consent`                      | public                 | Server-rendered consent form with app branding + scope descriptions + CSRF token.                                                               |
+| POST   | `/api/oauth/consent`                      | public                 | Verifies CSRF, calls `auth.api.oauth2Consent` (accept/deny), forwards the plugin's redirect response.                                           |
 | GET    | `/.well-known/openid-configuration`       | public                 | RFC-compliant OIDC discovery document at the HTTP origin root. Proxies `auth.api.getOpenIdConfig`.                                              |
 | GET    | `/.well-known/oauth-authorization-server` | public                 | RFC 8414 authorization server metadata at the HTTP origin root. Proxies `auth.api.getOAuthServerConfig`.                                        |
 
@@ -120,7 +120,7 @@ Refuses when:
 
 Plugin configuration highlights:
 
-- `loginPage: "/api/oauth/enduser/login"` + `consentPage: "/api/oauth/enduser/consent"` — Better Auth redirects unauthenticated authorize attempts here with a signed query string, and the module's POST handlers orchestrate the rest.
+- `loginPage: "/api/oauth/login"` + `consentPage: "/api/oauth/consent"` — Better Auth redirects unauthenticated authorize attempts here with a signed query string, and the module's POST handlers orchestrate the rest.
 - `scopes` — OIDC identity scopes (`openid`, `profile`, `email`, `offline_access`) concatenated with every entry of `OIDC_ALLOWED_SCOPES` from `apps/api/src/lib/permissions.ts`. The OIDC module uses core `Permission` strings directly as OAuth scope values — there is no translation layer. The scope `agents:run` grants the `agents:run` permission verbatim, and only permissions listed in `OIDC_ALLOWED_SCOPES` can be requested through an OAuth client (admin-only permissions are unreachable through end-user JWTs by design).
 - `storeClientSecret` — custom `hash` + `verify` functions matching the module's `oauth-admin` service (SHA-256 hex) so secrets created by the admin API verify correctly at token exchange.
 - `customAccessTokenClaims` — on every access token mint (including refresh), calls `resolveOrCreateEndUser()` with the Better Auth user + the client's `referenceId` (= Appstrate `applicationId`), then injects `{ endUserId, applicationId, orgId }` as custom claims. The OIDC auth strategy then picks these up from the Bearer JWT and sets `endUser` context for every subsequent core request. `UnverifiedEmailConflictError` propagates as a token-issuance failure so unverified-email attempts fail loudly instead of silently taking over an existing row.

@@ -35,7 +35,7 @@ export function issueCsrfToken(c: Context<AppEnv>): string {
     httpOnly: true,
     sameSite: "Lax",
     secure: getEnv().APP_URL.startsWith("https://"),
-    path: "/api/oauth/enduser",
+    path: "/api/oauth",
     maxAge: COOKIE_MAX_AGE,
   });
   return token;
@@ -52,7 +52,7 @@ export function verifyCsrfToken(c: Context<AppEnv>, bodyToken: string | undefine
   if (!cookieToken || !bodyToken) return false;
   if (!constantTimeEqual(cookieToken, bodyToken)) return false;
   // One-shot: rotate by deleting so replays fail.
-  deleteCookie(c, COOKIE_NAME, { path: "/api/oauth/enduser" });
+  deleteCookie(c, COOKIE_NAME, { path: "/api/oauth" });
   return true;
 }
 

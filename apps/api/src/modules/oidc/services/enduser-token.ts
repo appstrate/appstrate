@@ -34,18 +34,35 @@ import { getEnv } from "@appstrate/env";
 import { logger } from "../../../lib/logger.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
 
-export interface EndUserClaims {
+/**
+ * Polymorphic access-token claim shape. Every OIDC-minted token carries
+ * `actor_type` as the discriminant. Dashboard-user tokens additionally
+ * carry `org_id` + `org_role`; end-user tokens additionally carry
+ * `application_id` + `end_user_id`. `sub` is always present (Better Auth
+ * `user.id`).
+ */
+export interface AccessTokenClaims {
   /** Better Auth `user.id` (the JWT `sub` claim). */
   authUserId: string;
-  /** Application-scoped `end_users.id` (custom claim). */
-  endUserId?: string;
-  /** Application ID carried through from the OAuth client `referenceId`. */
-  applicationId?: string;
+  /** Discriminant — see polymorphic fields below. */
+  actorType?: "dashboard_user" | "end_user";
   email?: string;
+  emailVerified?: boolean;
   name?: string;
   /** Space-separated scope string as issued by the oauth-provider plugin. */
   scope?: string;
+  /** Org scope for dashboard users and (derived) for end-users. */
+  orgId?: string;
+  /** Dashboard flow: `owner` / `admin` / `member` / `viewer`. */
+  orgRole?: "owner" | "admin" | "member" | "viewer";
+  /** End-user flow: owning application id. */
+  applicationId?: string;
+  /** End-user flow: `eu_…` id of the impersonated end-user. */
+  endUserId?: string;
 }
+
+/** @deprecated Kept as an alias for backward-compat with older callers. */
+export type EndUserClaims = AccessTokenClaims;
 
 export type JwksResolver = (
   protectedHeader?: jose.JWSHeaderParameters,
@@ -131,7 +148,7 @@ function isUnknownKidError(err: unknown): boolean {
 export async function verifyEndUserAccessToken(
   token: string,
   deps?: { jwks?: JwksResolver },
-): Promise<EndUserClaims | null> {
+): Promise<AccessTokenClaims | null> {
   const env = getEnv();
   // Better Auth's oauth-provider plugin mints tokens with `iss` set to
   // `${baseURL}${basePath}` — in this codebase that is `${APP_URL}/api/auth`
@@ -183,13 +200,29 @@ export async function verifyEndUserAccessToken(
 
   if (!payload.sub) return null;
   const extra = payload as Record<string, unknown>;
+  const actorType =
+    extra.actor_type === "dashboard_user" || extra.actor_type === "end_user"
+      ? (extra.actor_type as "dashboard_user" | "end_user")
+      : undefined;
+  const orgRole =
+    typeof extra.org_role === "string" &&
+    (extra.org_role === "owner" ||
+      extra.org_role === "admin" ||
+      extra.org_role === "member" ||
+      extra.org_role === "viewer")
+      ? (extra.org_role as "owner" | "admin" | "member" | "viewer")
+      : undefined;
   return {
     authUserId: payload.sub,
-    endUserId: typeof extra.endUserId === "string" ? extra.endUserId : undefined,
-    applicationId: typeof extra.applicationId === "string" ? extra.applicationId : undefined,
+    actorType,
     email: typeof extra.email === "string" ? extra.email : undefined,
+    emailVerified: typeof extra.email_verified === "boolean" ? extra.email_verified : undefined,
     name: typeof extra.name === "string" ? extra.name : undefined,
     scope: typeof extra.scope === "string" ? extra.scope : undefined,
+    orgId: typeof extra.org_id === "string" ? extra.org_id : undefined,
+    orgRole,
+    applicationId: typeof extra.application_id === "string" ? extra.application_id : undefined,
+    endUserId: typeof extra.end_user_id === "string" ? extra.end_user_id : undefined,
   };
 }
 

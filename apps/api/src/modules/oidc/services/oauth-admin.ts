@@ -1,58 +1,58 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OAuth client admin service.
+ * OAuth client admin service — polymorphic org + application clients.
  *
- * Direct CRUD against the module-owned `oauth_client` table, scoped by
- * Appstrate `applicationId`. Secrets are generated as base64url-encoded
- * random bytes, hashed with SHA-256 at rest, and only returned in
- * plaintext from `createClient` / `rotateClientSecret` — subsequent reads
- * never expose them.
+ * Direct CRUD against `oauth_clients`. Each client is scoped at one of two
+ * levels:
  *
- * Why we bypass `auth.api.adminCreateOAuthClient`: the plugin derives
- * `reference_id` from `clientReference({ session })` at creation time.
- * Appstrate's active `applicationId` is threaded via the `X-App-Id`
- * header + Hono context middleware, not through the Better Auth session
- * — so `clientReference` has no access to it. Rather than rewire the
- * whole session object to carry app context, we keep direct Drizzle
- * writes here.
+ *   - `org`: pinned to an organization via `referenced_org_id` (dashboard
+ *     users are the actors)
+ *   - `application`: pinned to an application via `referenced_application_id`
+ *     (end-users are the actors)
  *
- * Single source of truth for "which app owns this client" is
- * `oauth_client.metadata.applicationId`. It is the only value the
- * `@better-auth/oauth-provider` plugin exposes to its
- * `customAccessTokenClaims` closure (which receives `parseClientMetadata(
- * oauth_client.metadata)` and nothing else from the client row). Every
- * admin filter query below therefore reads the JSON path via
- * `byApplicationId()`, never the `referenceId` column.
+ * A DB-level CHECK constraint guarantees exactly one of the two FKs is set
+ * based on `level`, so "mixed" clients are unrepresentable.
  *
- * We still write `reference_id` in lockstep because the plugin's own
- * Drizzle schema declares the column `notNull` and emits it in internal
- * SELECTs (the `clientReference` ACL path at `oauth-provider/index.mjs`
- * line 1370 reads it if `opts.clientReference` is set — we don't set it,
- * so the value is functionally inert, but the column must exist and must
- * be non-null on every row). Treat it as a legacy mirror kept alive to
- * satisfy the plugin's schema contract, not as a lookup key.
+ * Why we bypass `auth.api.adminCreateOAuthClient`: the plugin derives its
+ * `reference_id` via `clientReference({ session })` which doesn't have
+ * access to Appstrate's multi-tenant context. We write directly to the
+ * Drizzle schema and stash the polymorphic fields into the plugin-readable
+ * `metadata` JSON column so the `customAccessTokenClaims` closure can
+ * branch on them at token-mint time.
+ *
+ * `metadata` shape (single source of truth readable by the plugin):
+ *   {
+ *     level: "org" | "application",
+ *     referencedOrgId?: string,
+ *     referencedApplicationId?: string,
+ *   }
+ *
+ * The same values are also persisted in dedicated SQL columns for query
+ * performance + FK integrity. Writes keep both in lockstep.
+ *
+ * Secrets are generated as base64url-encoded random bytes, hashed with
+ * SHA-256 at rest, and only returned in plaintext from `createClient` /
+ * `rotateClientSecret` — subsequent reads never expose them.
  */
 
-import { eq, and, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
+import { applications } from "@appstrate/db/schema";
 import { oauthClient } from "../schema.ts";
 import { prefixedId } from "../../../lib/ids.ts";
-import type { AppContextRow } from "../../../middleware/app-context.ts";
 import { APPSTRATE_SCOPES } from "../auth/scopes.ts";
 import { isValidRedirectUri } from "./redirect-uri.ts";
 
-/**
- * Thrown by the service layer when a caller passes scopes or redirect URIs
- * that fail the canonical whitelist. Route handlers already validate via
- * Zod (`createOAuthClientSchema` / `updateOAuthClientSchema`), but these
- * re-checks at the service boundary are the defense-in-depth net for any
- * future internal caller that bypasses the route layer.
- */
+export type OAuthClientLevel = "org" | "application";
+
 export class OAuthAdminValidationError extends Error {
-  readonly field: "scopes" | "redirectUris";
-  constructor(field: "scopes" | "redirectUris", message: string) {
+  readonly field: "scopes" | "redirectUris" | "referencedOrgId" | "referencedApplicationId";
+  constructor(
+    field: "scopes" | "redirectUris" | "referencedOrgId" | "referencedApplicationId",
+    message: string,
+  ) {
     super(message);
     this.name = "OAuthAdminValidationError";
     this.field = field;
@@ -86,60 +86,44 @@ function assertValidRedirectUris(uris: readonly string[]): void {
   }
 }
 
-/**
- * Single source of truth for the OAuth client shape returned by this
- * module. Backends, OpenAPI component schemas, and frontend hooks all
- * derive their types + JSON Schema from this definition.
- *
- * Dates are serialized to ISO 8601 strings at the service boundary so the
- * wire shape matches the frontend and OpenAPI contract — the DB column is
- * a `timestamp`, but consumers only ever see strings.
- */
-export const oauthClientSchema = z.object({
+export const oauthClientBaseSchema = z.object({
   id: z.string(),
   clientId: z.string(),
   name: z.string().nullable(),
-  applicationId: z.string(),
+  level: z.enum(["org", "application"]),
+  referencedOrgId: z.string().nullable(),
+  referencedApplicationId: z.string().nullable(),
   redirectUris: z.array(z.url()),
   scopes: z.array(z.string()),
   disabled: z.boolean(),
+  isFirstParty: z.boolean(),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
 });
 
-/** Returned only on create + rotate — the plaintext secret is never re-readable. */
-export const oauthClientWithSecretSchema = oauthClientSchema.extend({
+export const oauthClientWithSecretSchema = oauthClientBaseSchema.extend({
   clientSecret: z.string(),
 });
 
-export type OAuthClientRecord = z.infer<typeof oauthClientSchema>;
+export type OAuthClientRecord = z.infer<typeof oauthClientBaseSchema>;
 export type OAuthClientWithSecret = z.infer<typeof oauthClientWithSecretSchema>;
 
 function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
+  const level: OAuthClientLevel = row.level === "org" ? "org" : "application";
   return {
     id: row.id,
     clientId: row.clientId,
     name: row.name,
+    level,
+    referencedOrgId: row.referencedOrgId ?? null,
+    referencedApplicationId: row.referencedApplicationId ?? null,
     redirectUris: row.redirectUris ?? [],
     scopes: row.scopes ?? [],
     disabled: row.disabled ?? false,
-    applicationId: row.referenceId,
+    isFirstParty: row.skipConsent ?? false,
     createdAt: row.createdAt ? row.createdAt.toISOString() : null,
     updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
   };
-}
-
-/**
- * JSON path filter shared by every admin CRUD query. The single source of
- * truth for "which app owns this client" is `oauth_client.metadata.applicationId`
- * (the value the Better Auth plugin forwards to `customAccessTokenClaims`).
- * `oauth_client.reference_id` is kept populated in lockstep for compatibility
- * with the oauth-provider plugin's own schema — see the comment on the
- * `referenceId` column in `../schema.ts` — but queries should never filter
- * on it directly.
- */
-function byApplicationId(applicationId: string) {
-  return sql`(${oauthClient.metadata}::jsonb->>'applicationId') = ${applicationId}`;
 }
 
 function randomSecret(): string {
@@ -158,49 +142,84 @@ export async function hashSecret(plaintext: string): Promise<string> {
   return Buffer.from(new Uint8Array(digest)).toString("hex");
 }
 
-export async function listClientsForApp(applicationId: string): Promise<OAuthClientRecord[]> {
-  const rows = await db.select().from(oauthClient).where(byApplicationId(applicationId));
+// ─── Scope-filter helpers ─────────────────────────────────────────────────────
+//
+// Org-level clients are visible to any admin of the org. Application-level
+// clients are visible to any admin of the org that owns the application.
+
+export async function listClientsForOrg(orgId: string): Promise<OAuthClientRecord[]> {
+  const rows = await db.select().from(oauthClient).where(eq(oauthClient.referencedOrgId, orgId));
   return rows.map(mapRow);
 }
 
-export async function getClient(
-  applicationId: string,
-  clientId: string,
-): Promise<OAuthClientRecord | null> {
+export async function listClientsForApp(applicationId: string): Promise<OAuthClientRecord[]> {
+  const rows = await db
+    .select()
+    .from(oauthClient)
+    .where(eq(oauthClient.referencedApplicationId, applicationId));
+  return rows.map(mapRow);
+}
+
+/** Combined list for the admin UI — returns every client the caller's org can see. */
+export async function listClientsForOrgAndApps(
+  orgId: string,
+  applicationIds: string[],
+): Promise<OAuthClientRecord[]> {
+  const orgLevel = await listClientsForOrg(orgId);
+  const appLevel: OAuthClientRecord[] = [];
+  for (const appId of applicationIds) {
+    appLevel.push(...(await listClientsForApp(appId)));
+  }
+  return [...orgLevel, ...appLevel];
+}
+
+export async function getClient(clientId: string): Promise<OAuthClientRecord | null> {
   const [row] = await db
     .select()
     .from(oauthClient)
-    .where(and(byApplicationId(applicationId), eq(oauthClient.clientId, clientId)))
+    .where(eq(oauthClient.clientId, clientId))
     .limit(1);
   return row ? mapRow(row) : null;
 }
 
-export interface CreateClientInput {
+// ─── Create ───────────────────────────────────────────────────────────────────
+
+export interface CreateOrgClientInput {
+  level: "org";
   name: string;
   redirectUris: string[];
   scopes?: string[];
+  referencedOrgId: string;
+  isFirstParty?: boolean;
 }
 
-export async function createClient(
-  app: AppContextRow,
-  input: CreateClientInput,
-): Promise<OAuthClientWithSecret> {
-  // Defense-in-depth — the route-layer Zod schemas already validate both
-  // fields, but any future internal caller (programmatic provisioning, a
-  // migration script, another module) that invokes `createClient` directly
-  // must not be able to slip in arbitrary scopes or unsafe redirect URIs.
-  // Failing at the service boundary is the only way to guarantee the
-  // `oauth_client` table never contains a value the plugin would otherwise
-  // reject — or worse, silently honor.
+export interface CreateApplicationClientInput {
+  level: "application";
+  name: string;
+  redirectUris: string[];
+  scopes?: string[];
+  referencedApplicationId: string;
+  isFirstParty?: boolean;
+}
+
+export type CreateClientInput = CreateOrgClientInput | CreateApplicationClientInput;
+
+export async function createClient(input: CreateClientInput): Promise<OAuthClientWithSecret> {
   assertValidRedirectUris(input.redirectUris);
   assertValidScopes(input.scopes);
 
-  const applicationId = app.id;
   const id = prefixedId("oac");
   const clientId = `oauth_${randomSecret().slice(0, 24)}`;
   const plaintextSecret = randomSecret();
   const hashedSecret = await hashSecret(plaintextSecret);
   const now = new Date();
+
+  const metadata: Record<string, unknown> = { level: input.level };
+  if (input.level === "org") {
+    metadata.referencedOrgId = input.referencedOrgId;
+  } else {
+    metadata.referencedApplicationId = input.referencedApplicationId;
+  }
 
   const inserted = await db
     .insert(oauthClient)
@@ -211,8 +230,11 @@ export async function createClient(
       name: input.name,
       redirectUris: input.redirectUris,
       scopes: input.scopes ?? ["openid", "profile", "email"],
-      referenceId: applicationId,
-      metadata: JSON.stringify({ applicationId }),
+      level: input.level,
+      referencedOrgId: input.level === "org" ? input.referencedOrgId : null,
+      referencedApplicationId: input.level === "application" ? input.referencedApplicationId : null,
+      metadata: JSON.stringify(metadata),
+      skipConsent: input.isFirstParty ?? false,
       disabled: false,
       type: "web",
       tokenEndpointAuthMethod: "client_secret_basic",
@@ -224,60 +246,91 @@ export async function createClient(
     })
     .returning();
   if (inserted.length === 0) {
-    throw new Error("OIDC: failed to insert oauth_client row");
+    throw new Error("OIDC: failed to insert oauth_clients row");
   }
   return { ...mapRow(inserted[0]!), clientSecret: plaintextSecret };
 }
 
-export async function deleteClient(
-  applicationId: string,
-  clientId: string,
-): Promise<OAuthClientRecord | null> {
-  const [row] = await db
-    .delete(oauthClient)
-    .where(and(byApplicationId(applicationId), eq(oauthClient.clientId, clientId)))
-    .returning();
+// ─── Update / delete / rotate ─────────────────────────────────────────────────
+
+export async function deleteClient(clientId: string): Promise<OAuthClientRecord | null> {
+  const [row] = await db.delete(oauthClient).where(eq(oauthClient.clientId, clientId)).returning();
   return row ? mapRow(row) : null;
 }
 
-export async function rotateClientSecret(
-  applicationId: string,
-  clientId: string,
-): Promise<OAuthClientWithSecret | null> {
+export async function rotateClientSecret(clientId: string): Promise<OAuthClientWithSecret | null> {
   const plaintextSecret = randomSecret();
   const hashedSecret = await hashSecret(plaintextSecret);
   const [row] = await db
     .update(oauthClient)
     .set({ clientSecret: hashedSecret, updatedAt: new Date() })
-    .where(and(byApplicationId(applicationId), eq(oauthClient.clientId, clientId)))
+    .where(eq(oauthClient.clientId, clientId))
     .returning();
   return row ? { ...mapRow(row), clientSecret: plaintextSecret } : null;
 }
 
 export async function setClientDisabled(
-  applicationId: string,
   clientId: string,
   disabled: boolean,
 ): Promise<OAuthClientRecord | null> {
   const [row] = await db
     .update(oauthClient)
     .set({ disabled, updatedAt: new Date() })
-    .where(and(byApplicationId(applicationId), eq(oauthClient.clientId, clientId)))
+    .where(eq(oauthClient.clientId, clientId))
     .returning();
   return row ? mapRow(row) : null;
 }
 
 export async function updateClientRedirectUris(
-  applicationId: string,
   clientId: string,
   redirectUris: string[],
 ): Promise<OAuthClientRecord | null> {
-  // Defense-in-depth — see `createClient` for the rationale.
   assertValidRedirectUris(redirectUris);
   const [row] = await db
     .update(oauthClient)
     .set({ redirectUris, updatedAt: new Date() })
-    .where(and(byApplicationId(applicationId), eq(oauthClient.clientId, clientId)))
+    .where(eq(oauthClient.clientId, clientId))
     .returning();
   return row ? mapRow(row) : null;
+}
+
+export async function setClientFirstParty(
+  clientId: string,
+  isFirstParty: boolean,
+): Promise<OAuthClientRecord | null> {
+  const [row] = await db
+    .update(oauthClient)
+    .set({ skipConsent: isFirstParty, updatedAt: new Date() })
+    .where(eq(oauthClient.clientId, clientId))
+    .returning();
+  return row ? mapRow(row) : null;
+}
+
+/**
+ * Resolve the effective "owning entity" for a client — the org id for
+ * org-level clients, or the org id derived from the application FK for
+ * application-level clients. Used by route-level permission checks that
+ * need to ensure the caller is an admin of the org that owns the client.
+ */
+export async function getClientOwningOrg(clientId: string): Promise<string | null> {
+  const [row] = await db
+    .select({
+      level: oauthClient.level,
+      referencedOrgId: oauthClient.referencedOrgId,
+      referencedApplicationId: oauthClient.referencedApplicationId,
+    })
+    .from(oauthClient)
+    .where(eq(oauthClient.clientId, clientId))
+    .limit(1);
+  if (!row) return null;
+  if (row.level === "org") return row.referencedOrgId;
+  if (row.level === "application" && row.referencedApplicationId) {
+    const [app] = await db
+      .select({ orgId: applications.orgId })
+      .from(applications)
+      .where(eq(applications.id, row.referencedApplicationId))
+      .limit(1);
+    return app?.orgId ?? null;
+  }
+  return null;
 }

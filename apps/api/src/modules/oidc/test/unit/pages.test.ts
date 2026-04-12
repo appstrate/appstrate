@@ -48,14 +48,14 @@ describe("renderConsentPage", () => {
       ...DEFAULT_PROPS,
       clientName: `<img src=x>`,
       scopes: ["openid", "runs:read", `<evil>`],
-      action: "/api/oauth/enduser/consent?state=x",
+      action: "/api/oauth/consent?state=x",
     }).value;
     expect(out).not.toContain(`<img src=x>`);
     expect(out).toContain("&lt;img src=x&gt;");
     // Unknown scopes fall back to the raw (escaped) value.
     expect(out).toContain("&lt;evil&gt;");
     // The two form actions echo the escaped URL back.
-    expect(out).toContain('action="/api/oauth/enduser/consent?state=x"');
+    expect(out).toContain('action="/api/oauth/consent?state=x"');
   });
 
   it("renders French labels for known permission-style scopes", () => {
@@ -108,7 +108,7 @@ describe("page branding + CSRF", () => {
       ...DEFAULT_PROPS,
       clientName: "Acme",
       scopes: ["openid"],
-      action: "/api/oauth/enduser/consent",
+      action: "/api/oauth/consent",
       csrfToken: "tok_consent",
     }).value;
     const csrfMatches = out.match(/name="_csrf" value="tok_consent"/g);

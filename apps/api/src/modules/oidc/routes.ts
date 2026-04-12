@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OIDC module — OAuth client admin routes.
+ * OIDC module — OAuth client admin routes + server-rendered login/consent pages.
  *
- * All routes are application-scoped (`X-App-Id` required, enforced by the
- * app-context middleware via `appScopedPaths: ["/api/oauth"]` in the module
- * manifest). Callers need `oauth-clients:*` permissions — a new resource
- * contributed to core in the same phase (CLAUDE.md rule: "if a module
- * introduces a new RBAC resource, extend `apps/api/src/lib/permissions.ts`
- * in the same PR").
+ * Polymorphic across two client types:
+ *   - `dashboard`: org-scoped OAuth client for dashboard users (org operators)
+ *   - `end_user`: application-scoped OAuth client for app end-users
  *
- * Phase 1 scope: CRUD + rotate. No token issuance from here — tokens are
- * issued by Better Auth's oauth-provider plugin under `/api/auth/oauth2/*`
- * (wired in Stage 5). These routes own the client registry only.
+ * The admin CRUD uses `z.discriminatedUnion("clientType", …)` for creation
+ * so the request body is statically typed on the discriminant. The
+ * server-rendered `/api/oauth/{login,consent}` pages are polymorphic: they
+ * load the client, resolve branding via `resolveBrandingForClient`, and
+ * render the form identically — only the post-login handling diverges
+ * (dashboard tokens skip `resolveOrCreateEndUser`; end-user tokens run it).
  */
 
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import type { AppEnv } from "../../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
@@ -26,20 +26,23 @@ import { parseBody, notFound, invalidRequest, forbidden } from "../../lib/errors
 import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
 import { db } from "@appstrate/db/client";
-import { user } from "@appstrate/db/schema";
+import { user, applications, organizationMembers } from "@appstrate/db/schema";
 import { oauthClient } from "./schema.ts";
 import {
-  listClientsForApp,
-  getClient,
   createClient,
   deleteClient,
+  getClient,
+  getClientOwningOrg,
+  listClientsForOrg,
+  listClientsForApp,
   rotateClientSecret,
   setClientDisabled,
+  setClientFirstParty,
   updateClientRedirectUris,
   OAuthAdminValidationError,
 } from "./services/oauth-admin.ts";
 import { isValidRedirectUri } from "./services/redirect-uri.ts";
-import { resolveAppBranding } from "./services/branding.ts";
+import { resolveBrandingForClient } from "./services/branding.ts";
 import { issueCsrfToken, verifyCsrfToken } from "./services/csrf.ts";
 import { getOidcAuthApi } from "./auth/api.ts";
 import { APPSTRATE_SCOPES } from "./auth/scopes.ts";
@@ -52,91 +55,126 @@ import {
 import { renderLoginPage } from "./pages/login.ts";
 import { renderConsentPage } from "./pages/consent.ts";
 
+// ─── Zod schemas ──────────────────────────────────────────────────────────────
+
 const redirectUriSchema = z
   .url("redirectUris must be valid URLs")
   .refine(isValidRedirectUri, "redirectUri scheme or host is not allowed");
 
-// Scope whitelist — only values the module actually advertises via
-// `APPSTRATE_SCOPES` (identity scopes + `OIDC_ALLOWED_SCOPES` from core
-// permissions) can be registered on a client. Because the admin CRUD
-// bypasses `auth.api.adminCreateOAuthClient` (see `services/oauth-admin.ts`
-// header comment), the plugin's own scope validation never runs — any
-// arbitrary string passed through here would end up in the access token
-// claims and be translated to RBAC permissions by `scopesToPermissions()`.
-// Enforcing the enum at the edge is the only place scope integrity is
-// guaranteed for admin-created clients.
 const APPSTRATE_SCOPE_SET = new Set(APPSTRATE_SCOPES);
 const allowedScopeSchema = z
   .string()
   .min(1)
   .refine((s) => APPSTRATE_SCOPE_SET.has(s), {
-    message: `scope must be one of the supported values (see GET /api/oauth/scopes)`,
+    message: "scope must be one of the supported values (see GET /api/oauth/scopes)",
   });
 
-export const createOAuthClientSchema = z.object({
-  name: z.string().min(1, "name is required").max(200),
+const createOrgClientSchema = z.object({
+  level: z.literal("org"),
+  name: z.string().min(1).max(200),
   redirectUris: z.array(redirectUriSchema).min(1),
   scopes: z.array(allowedScopeSchema).optional(),
+  referencedOrgId: z.string().min(1),
+  isFirstParty: z.boolean().optional(),
 });
+
+const createApplicationClientSchema = z.object({
+  level: z.literal("application"),
+  name: z.string().min(1).max(200),
+  redirectUris: z.array(redirectUriSchema).min(1),
+  scopes: z.array(allowedScopeSchema).optional(),
+  referencedApplicationId: z.string().min(1),
+  isFirstParty: z.boolean().optional(),
+});
+
+export const createOAuthClientSchema = z.discriminatedUnion("level", [
+  createOrgClientSchema,
+  createApplicationClientSchema,
+]);
 
 export const updateOAuthClientSchema = z.object({
   redirectUris: z.array(redirectUriSchema).min(1).optional(),
   disabled: z.boolean().optional(),
+  isFirstParty: z.boolean().optional(),
 });
 
-/**
- * Single entry point for every end-user page handler (GET/POST login,
- * GET/POST consent). Loads the oauth client row, rejects unknown/disabled
- * clients with 404, resolves the owning application's branding, and
- * issues a fresh CSRF token — all in one round trip per request.
- */
-async function loadClientContext(
-  c: Context<AppEnv>,
-  clientId: string,
-): Promise<{
-  client: { id: string; name: string | null };
-  applicationId: string;
-  branding: Awaited<ReturnType<typeof resolveAppBranding>>;
+// ─── Shared page context loader ───────────────────────────────────────────────
+
+interface ClientContext {
+  client: {
+    id: string;
+    name: string | null;
+    level: "org" | "application";
+    referencedOrgId: string | null;
+    referencedApplicationId: string | null;
+  };
+  branding: Awaited<ReturnType<typeof resolveBrandingForClient>>;
   csrfToken: string;
-}> {
+}
+
+async function loadClientContext(c: Context<AppEnv>, clientId: string): Promise<ClientContext> {
   const [row] = await db
     .select({
       id: oauthClient.clientId,
       name: oauthClient.name,
       disabled: oauthClient.disabled,
-      referenceId: oauthClient.referenceId,
+      level: oauthClient.level,
+      referencedOrgId: oauthClient.referencedOrgId,
+      referencedApplicationId: oauthClient.referencedApplicationId,
     })
     .from(oauthClient)
     .where(eq(oauthClient.clientId, clientId))
     .limit(1);
   if (!row || row.disabled) throw notFound("Unknown OAuth client");
-  const branding = await resolveAppBranding(row.referenceId);
-  const csrfToken = issueCsrfToken(c);
-  return {
-    client: { id: row.id, name: row.name },
-    applicationId: row.referenceId,
-    branding,
-    csrfToken,
+  const level = row.level === "org" ? "org" : "application";
+  const client = {
+    id: row.id,
+    name: row.name,
+    level: level as "org" | "application",
+    referencedOrgId: row.referencedOrgId,
+    referencedApplicationId: row.referencedApplicationId,
   };
+  const branding = await resolveBrandingForClient(client);
+  const csrfToken = issueCsrfToken(c);
+  return { client, branding, csrfToken };
 }
+
+// ─── Router ───────────────────────────────────────────────────────────────────
 
 export function createOidcRouter() {
   const router = new Hono<AppEnv>();
 
-  // POST /api/oauth/clients — register a new OAuth client for the current app.
-  // Returns the plaintext clientSecret exactly once (hashed at rest).
+  // ── Admin: CRUD ─────────────────────────────────────────────────────────────
+
   router.post(
     "/api/oauth/clients",
     rateLimit(10),
     idempotency(),
     requirePermission("oauth-clients", "write"),
     async (c) => {
-      const app = c.get("app");
-      if (!app) throw notFound("Application context not loaded");
+      const orgId = c.get("orgId");
       const body = await c.req.json();
       const data = parseBody(createOAuthClientSchema, body);
+
+      // Authorization: the caller must own the referenced entity.
+      if (data.level === "org") {
+        if (data.referencedOrgId !== orgId) {
+          throw forbidden("referencedOrgId must match the current organization");
+        }
+      } else {
+        // application-level: the application must belong to the caller's org.
+        const [app] = await db
+          .select({ orgId: applications.orgId })
+          .from(applications)
+          .where(eq(applications.id, data.referencedApplicationId))
+          .limit(1);
+        if (!app || app.orgId !== orgId) {
+          throw forbidden("referencedApplicationId must belong to the current organization");
+        }
+      }
+
       try {
-        const created = await createClient(app, data);
+        const created = await createClient(data);
         return c.json(created, 201);
       } catch (err) {
         if (err instanceof OAuthAdminValidationError) {
@@ -147,63 +185,64 @@ export function createOidcRouter() {
     },
   );
 
-  // GET /api/oauth/clients — list registered clients for the current app.
+  // Combined list: org-level clients for the org + application-level clients
+  // for every app the org owns. The admin UI renders both in one table.
   router.get(
     "/api/oauth/clients",
     rateLimit(300),
     requirePermission("oauth-clients", "read"),
     async (c) => {
-      const applicationId = c.get("applicationId");
-      const data = await listClientsForApp(applicationId);
-      return c.json({ object: "list", data });
+      const orgId = c.get("orgId");
+      const orgLevel = await listClientsForOrg(orgId);
+      // Apps owned by the org
+      const appRows = await db
+        .select({ id: applications.id })
+        .from(applications)
+        .where(eq(applications.orgId, orgId));
+      const appLevel = (await Promise.all(appRows.map((a) => listClientsForApp(a.id)))).flat();
+      return c.json({ object: "list", data: [...orgLevel, ...appLevel] });
     },
   );
 
-  // GET /api/oauth/scopes — canonical scope vocabulary for the admin UI.
-  // Read-only, org-member, no app context needed. The create-client modal
-  // reads this list to render its checkbox group so the frontend never
-  // hardcodes scope strings — adding a new scope to the server list is
-  // enough to surface it in the UI.
   router.get(
     "/api/oauth/scopes",
     rateLimit(300),
     requirePermission("oauth-clients", "read"),
-    async (c) => {
-      return c.json({ data: [...APPSTRATE_SCOPES] });
-    },
+    async (c) => c.json({ data: [...APPSTRATE_SCOPES] }),
   );
 
-  // GET /api/oauth/clients/:clientId — retrieve a single client.
   router.get(
     "/api/oauth/clients/:clientId",
     rateLimit(300),
     requirePermission("oauth-clients", "read"),
     async (c) => {
-      const applicationId = c.get("applicationId");
-      const client = await getClient(applicationId, c.req.param("clientId")!);
+      const orgId = c.get("orgId");
+      const client = await getClient(c.req.param("clientId")!);
       if (!client) throw notFound("OAuth client not found");
+      const owning = await getClientOwningOrg(client.clientId);
+      if (owning !== orgId) throw notFound("OAuth client not found");
       return c.json(client);
     },
   );
 
-  // PATCH /api/oauth/clients/:clientId — update redirectUris or disabled flag.
   router.patch(
     "/api/oauth/clients/:clientId",
     rateLimit(10),
     requirePermission("oauth-clients", "write"),
     async (c) => {
-      const applicationId = c.get("applicationId");
+      const orgId = c.get("orgId");
       const clientId = c.req.param("clientId")!;
       const body = await c.req.json();
       const data = parseBody(updateOAuthClientSchema, body);
+      const owning = await getClientOwningOrg(clientId);
+      if (owning !== orgId) throw notFound("OAuth client not found");
 
-      let current = await getClient(applicationId, clientId);
+      let current = await getClient(clientId);
       if (!current) throw notFound("OAuth client not found");
 
       try {
         if (data.redirectUris !== undefined) {
-          current =
-            (await updateClientRedirectUris(applicationId, clientId, data.redirectUris)) ?? current;
+          current = (await updateClientRedirectUris(clientId, data.redirectUris)) ?? current;
         }
       } catch (err) {
         if (err instanceof OAuthAdminValidationError) {
@@ -212,71 +251,62 @@ export function createOidcRouter() {
         throw err;
       }
       if (data.disabled !== undefined) {
-        current = (await setClientDisabled(applicationId, clientId, data.disabled)) ?? current;
+        current = (await setClientDisabled(clientId, data.disabled)) ?? current;
+      }
+      if (data.isFirstParty !== undefined) {
+        current = (await setClientFirstParty(clientId, data.isFirstParty)) ?? current;
       }
       return c.json(current);
     },
   );
 
-  // DELETE /api/oauth/clients/:clientId — remove a client.
   router.delete(
     "/api/oauth/clients/:clientId",
     rateLimit(10),
     requirePermission("oauth-clients", "delete"),
     async (c) => {
-      const applicationId = c.get("applicationId");
-      const deleted = await deleteClient(applicationId, c.req.param("clientId")!);
+      const orgId = c.get("orgId");
+      const clientId = c.req.param("clientId")!;
+      const owning = await getClientOwningOrg(clientId);
+      if (owning !== orgId) throw notFound("OAuth client not found");
+      const deleted = await deleteClient(clientId);
       if (!deleted) throw notFound("OAuth client not found");
       return c.body(null, 204);
     },
   );
 
-  // POST /api/oauth/clients/:clientId/rotate — issue a fresh clientSecret.
   router.post(
     "/api/oauth/clients/:clientId/rotate",
     rateLimit(5),
     requirePermission("oauth-clients", "write"),
     async (c) => {
-      const applicationId = c.get("applicationId");
-      const rotated = await rotateClientSecret(applicationId, c.req.param("clientId")!);
+      const orgId = c.get("orgId");
+      const clientId = c.req.param("clientId")!;
+      const owning = await getClientOwningOrg(clientId);
+      if (owning !== orgId) throw notFound("OAuth client not found");
+      const rotated = await rotateClientSecret(clientId);
       if (!rotated) throw notFound("OAuth client not found");
       return c.json(rotated);
     },
   );
 
-  // ─── Public end-user pages (anonymous, listed in publicPaths) ──────────────
+  // ── Public polymorphic login/consent pages ─────────────────────────────────
 
-  // GET /api/oauth/enduser/login — server-rendered login form.
-  // Validates the `client_id` query param against the registry so unknown
-  // clients can't render the form at all (prevents phishing the HTML).
-  // Loads the owning application's branding + issues a one-shot CSRF token
-  // paired to an httpOnly cookie for the POST handler.
-  router.get("/api/oauth/enduser/login", rateLimitByIp(60), async (c) => {
+  router.get("/api/oauth/login", rateLimitByIp(60), async (c) => {
     const url = new URL(c.req.url);
     const clientId = url.searchParams.get("client_id");
     if (!clientId) throw invalidRequest("client_id is required", "client_id");
-
     const { branding, csrfToken } = await loadClientContext(c, clientId);
     const body = renderLoginPage({ queryString: url.search, branding, csrfToken });
     return c.html(body.value);
   });
 
-  // POST /api/oauth/enduser/login — complete the email/password sign-in
-  // against Better Auth, then redirect back into the oauth-provider flow
-  // via `/api/auth/oauth2/authorize` preserving the original signed query.
-  //
-  // CSRF token paired with the `oidc_csrf` cookie (set on the GET) MUST
-  // match exactly — mismatch → 403, no sign-in attempt made.
-  router.post("/api/oauth/enduser/login", rateLimitByIp(60), async (c) => {
+  router.post("/api/oauth/login", rateLimitByIp(60), async (c) => {
     const url = new URL(c.req.url);
     const clientId = url.searchParams.get("client_id");
     if (!clientId) throw invalidRequest("client_id is required", "client_id");
 
     const form = await c.req.parseBody();
-    // CSRF is verified before any lookup so a forged POST never probes
-    // the oauth_client table. The cookie is cleared on match; a fresh
-    // token will be issued by `loadClientContext` below for whichever
-    // response (error page or redirect) we return.
     if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
       throw forbidden("CSRF token missing or invalid — reload the login page and try again");
     }
@@ -299,9 +329,6 @@ export function createOidcRouter() {
       return renderError("Email et mot de passe requis.", 400, email ?? undefined);
     }
 
-    // Per-email brute-force protection — complements the IP limiter.
-    // IP-only throttling lets distributed attackers hammer a single
-    // account from many addresses.
     const attempt = await consumeLoginEmailAttempt(email);
     if (!attempt.allowed) {
       const minutes = Math.ceil(attempt.retryAfterSeconds / 60);
@@ -313,87 +340,126 @@ export function createOidcRouter() {
       );
     }
 
-    // signInEmail sets the session cookie on the response. We `asResponse:
-    // true` so we can forward the Set-Cookie header, then issue our own
-    // 302 back into the authorize endpoint with the original signed query.
-    // `request: c.req.raw` is required so Better Auth's endpoint wrapper
-    // populates `ctx.request` — missing it causes plugins that check
-    // `ctx.request` to throw 401 "request not found".
     const authApi = getOidcAuthApi();
-    const authResponse = (await authApi.signInEmail({
-      body: { email, password },
-      request: c.req.raw,
-      headers: c.req.raw.headers,
-      asResponse: true,
-    })) as Response;
-
-    if (!authResponse.ok) {
+    let authResponse: Response;
+    try {
+      authResponse = (await authApi.signInEmail({
+        body: { email, password },
+        headers: c.req.raw.headers,
+        asResponse: true,
+      })) as Response;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn("oidc: signInEmail threw", { error: msg, email });
       return renderError("Email ou mot de passe incorrect.", 401, email);
     }
 
-    // Successful sign-in — clear the per-email attempt counter so the
-    // next visitor to this account is not throttled by past failures.
+    if (!authResponse.ok) {
+      const bodyText = await authResponse.text().catch(() => "");
+      logger.warn("oidc: signInEmail !ok", {
+        status: authResponse.status,
+        body: bodyText.slice(0, 400),
+        email,
+      });
+      return renderError("Email ou mot de passe incorrect.", 401, email);
+    }
+
     await resetLoginEmailAttempts(email);
 
-    // Proactively resolve the end-user for this application NOW, while we
-    // still own the HTTP response. `resolveOrCreateEndUser` is the same
-    // call `customAccessTokenClaims` will make later at token-mint time,
-    // but doing it here lets us surface `UnverifiedEmailConflictError` as
-    // a friendly 409 error page on the login form — if we deferred until
-    // token mint, the browser would already have followed the 302 to
-    // `/oauth2/authorize` and the error would surface as an opaque 500
-    // three redirects away. The idempotent resolution also means the
-    // token-mint-time call is a no-op fast-path for users who already
-    // exist.
-    const [authUserRow] = await db
-      .select({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        emailVerified: user.emailVerified,
-      })
-      .from(user)
-      .where(eq(user.email, email))
-      .limit(1);
-    if (authUserRow) {
-      const app = await loadAppById(ctx.applicationId);
-      if (app) {
-        try {
-          await resolveOrCreateEndUser(
-            {
-              id: authUserRow.id,
-              email: authUserRow.email,
-              name: authUserRow.name ?? null,
-              emailVerified: authUserRow.emailVerified === true,
-            },
-            app,
+    // For org-level clients: proactively verify the signed-in user is a
+    // member of the pinned organization. Otherwise the failure surfaces as
+    // an opaque 500 from inside `customAccessTokenClaims` after three
+    // redirects — unhelpful and confusing.
+    if (ctx.client.level === "org" && ctx.client.referencedOrgId) {
+      const [authUserRow] = await db
+        .select({ id: user.id })
+        .from(user)
+        .where(eq(user.email, email))
+        .limit(1);
+      if (authUserRow) {
+        const [m] = await db
+          .select({ role: organizationMembers.role })
+          .from(organizationMembers)
+          .where(
+            and(
+              eq(organizationMembers.userId, authUserRow.id),
+              eq(organizationMembers.orgId, ctx.client.referencedOrgId),
+            ),
+          )
+          .limit(1);
+        if (!m) {
+          return renderError(
+            "Ce compte n'est pas membre de l'organisation associée à cette application. Contactez votre administrateur.",
+            403,
+            email,
           );
-        } catch (err) {
-          if (err instanceof UnverifiedEmailConflictError) {
-            return renderError(
-              "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
-              409,
-              email,
-            );
-          }
-          throw err;
         }
       }
     }
 
-    // Forward every Set-Cookie from Better Auth + redirect into authorize.
-    const redirect = new Response(null, { status: 302 });
-    for (const [name, value] of authResponse.headers) {
-      if (name.toLowerCase() === "set-cookie") {
-        redirect.headers.append("set-cookie", value);
+    // For application-level clients: proactively resolve-or-create the
+    // end-user row so `UnverifiedEmailConflictError` surfaces as a 409 here
+    // rather than as an opaque 500 three redirects deep at token-mint time.
+    // Org-level clients skip this — they don't create end_users rows.
+    if (ctx.client.level === "application" && ctx.client.referencedApplicationId) {
+      const [authUserRow] = await db
+        .select({
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          emailVerified: user.emailVerified,
+        })
+        .from(user)
+        .where(eq(user.email, email))
+        .limit(1);
+      if (authUserRow) {
+        const app = await loadAppById(ctx.client.referencedApplicationId);
+        if (app) {
+          try {
+            await resolveOrCreateEndUser(
+              {
+                id: authUserRow.id,
+                email: authUserRow.email,
+                name: authUserRow.name ?? null,
+                emailVerified: authUserRow.emailVerified === true,
+              },
+              app,
+            );
+          } catch (err) {
+            if (err instanceof UnverifiedEmailConflictError) {
+              return renderError(
+                "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
+                409,
+                email,
+              );
+            }
+            throw err;
+          }
+        }
       }
     }
-    redirect.headers.set("location", `/api/auth/oauth2/authorize${url.search}`);
-    return redirect;
+
+    // Headers.getSetCookie() returns each Set-Cookie as a distinct entry —
+    // plain iteration collapses duplicate headers into a comma-joined string
+    // which breaks cookie forwarding. We must use the Hono context header
+    // accumulator (not a fresh Response) so the forwarded cookies survive
+    // alongside the CSRF cookie deletion that verifyCsrfToken already queued.
+    const setCookies =
+      typeof (authResponse.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie ===
+      "function"
+        ? (authResponse.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
+        : [];
+    for (const value of setCookies) {
+      c.header("set-cookie", value, { append: true });
+    }
+    logger.info("oidc: login success, forwarding cookies", {
+      cookieCount: setCookies.length,
+      email,
+    });
+    return c.redirect(`/api/auth/oauth2/authorize${url.search}`, 302);
   });
 
-  // GET /api/oauth/enduser/consent — server-rendered consent form.
-  router.get("/api/oauth/enduser/consent", rateLimitByIp(60), async (c) => {
+  router.get("/api/oauth/consent", rateLimitByIp(60), async (c) => {
     const url = new URL(c.req.url);
     const clientId = url.searchParams.get("client_id");
     const scope = url.searchParams.get("scope") ?? "openid";
@@ -404,32 +470,18 @@ export function createOidcRouter() {
     const body = renderConsentPage({
       clientName: client.name ?? client.id,
       scopes,
-      action: `/api/oauth/enduser/consent${url.search}`,
+      action: `/api/oauth/consent${url.search}`,
       branding,
       csrfToken,
     });
     return c.html(body.value);
   });
 
-  // POST /api/oauth/enduser/consent — verify CSRF then forward to Better
-  // Auth's `/oauth2/consent` endpoint with the signed `oauth_query` from
-  // the authorize redirect. The plugin's before-hook reads `oauth_query`
-  // from the body, verifies the HMAC signature against `ctx.context.secret`,
-  // and rehydrates the pending authorization state into `oAuthState` so the
-  // consent endpoint can mint the authorization code.
-  //
-  // The signed query lands here via `url.search`: our GET /consent handler
-  // echoes `url.search` into the form action, so the browser POSTs back to
-  // the same path with the signed query still attached. We strip the leading
-  // `?` and forward the remainder as `oauth_query`. Anything we injected
-  // ourselves (e.g. internal params) would break the signature — we don't
-  // add any, so the round-trip is verbatim.
-  router.post("/api/oauth/enduser/consent", rateLimitByIp(60), async (c) => {
+  router.post("/api/oauth/consent", rateLimitByIp(60), async (c) => {
     const url = new URL(c.req.url);
 
     const form = await c.req.parseBody();
-    const csrfOk = verifyCsrfToken(c, readFormString(form, "_csrf"));
-    if (!csrfOk) {
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
       throw forbidden("CSRF token missing or invalid — reload the consent page and try again");
     }
 
@@ -441,12 +493,6 @@ export function createOidcRouter() {
       );
     }
 
-    // Audit log — record the decision before forwarding to Better Auth.
-    // The signed query carries the full OAuth2 context (client_id, scope,
-    // redirect_uri) which was HMAC-verified by the consent endpoint's own
-    // before-hook on the way in, so we can trust its contents here. The
-    // `audit: true` marker is the filter downstream log shippers use to
-    // forward consent events to SIEM / compliance storage.
     const consentParams = new URLSearchParams(oauthQuery);
     logger.info("oidc: consent decision", {
       module: "oidc",
@@ -464,31 +510,16 @@ export function createOidcRouter() {
     let consentResponse: Response;
     try {
       consentResponse = (await authApi.oauth2Consent({
-        body: {
-          accept,
-          oauth_query: oauthQuery,
-        },
-        // Better Auth's endpoint wrapper (`to-auth-endpoints.mjs`) checks
-        // `context.request instanceof Request` and the oauth-provider plugin
-        // throws "request not found" (401) inside `authorizeEndpoint` if it
-        // is missing — pass the raw Hono request through so `ctx.request` is
-        // populated end-to-end.
+        body: { accept, oauth_query: oauthQuery },
         request: c.req.raw,
         headers: c.req.raw.headers,
         asResponse: true,
       })) as Response;
     } catch (err) {
-      // `customAccessTokenClaims` (in `auth/plugins.ts`) runs during token
-      // mint and propagates `UnverifiedEmailConflictError` so the end-user
-      // sees a proper "verify your email" message instead of a silently
-      // succeeded login that later fails on every scoped request. Catch it
-      // here — the only place we still control the HTTP response before
-      // the browser follows Better Auth's redirect — and render the same
-      // FR error page the login form uses.
       if (err instanceof UnverifiedEmailConflictError) {
-        const clientId = consentParams.get("client_id");
-        if (clientId) {
-          const ctx = await loadClientContext(c, clientId);
+        const clientIdParam = consentParams.get("client_id");
+        if (clientIdParam) {
+          const ctx = await loadClientContext(c, clientIdParam);
           const page = renderLoginPage({
             queryString: `?${oauthQuery}`,
             branding: ctx.branding,
@@ -502,39 +533,31 @@ export function createOidcRouter() {
       throw err;
     }
 
-    // Browser form submits (our server-rendered consent page) must see a
-    // real HTTP redirect — otherwise the browser renders the JSON
-    // `{redirect:true,url:"..."}` body as the new document. Programmatic
-    // callers (tests, JSON API clients) keep the verbatim JSON shape.
     const acceptsHtml = prefersHtml(c.req.header("accept"));
     return maybeJsonRedirectToLocation(consentResponse, acceptsHtml);
   });
 
-  // ─── RFC-compliant OIDC discovery at the HTTP origin root ──────────────────
-  //
-  // The module router is mounted at the HTTP origin (`/`, not `/api`), so
-  // routes declared here with their full paths are served verbatim. Two
-  // discovery specs apply:
-  //
-  //  1. OpenID Connect Discovery 1.0 — clients append
-  //     `/.well-known/openid-configuration` to the issuer URL. Appstrate's
-  //     issuer is `${APP_URL}/api/auth`, so the canonical OIDC 1.0 location
-  //     is `${APP_URL}/api/auth/.well-known/openid-configuration`, already
-  //     served natively by Better Auth.
-  //
-  //  2. RFC 8414 — for an issuer with a path component, clients insert
-  //     `/.well-known/<suffix>` between the host and the path. The same spec
-  //     also permits serving the OIDC 1.0 variant at the HTTP origin root
-  //     for backward compat.
-  //
-  // In practice, most satellite libraries simply GET
-  // `${ORIGIN}/.well-known/openid-configuration` at the HTTP origin root and
-  // do not apply the issuer-path insertion rule. Serving the payload at the
-  // root is what maximises interop with real-world OIDC clients.
-  //
-  // The previous implementation exposed `/api/.well-known/*` — that path is
-  // neither OIDC 1.0 nor RFC 8414, and no spec-compliant client would look
-  // there. Dropped in favor of these root paths.
+  // ── RP-Initiated Logout helper ───────────────────────────────────────────────
+  // Better Auth's /oauth2/end-session deletes the session from the DB
+  // but does NOT clear the `better-auth.session_token` cookie. This
+  // leaves a stale cookie that breaks the next authorize request
+  // ("session no longer exists"). This custom GET route clears the
+  // cookie and redirects to the post_logout_redirect_uri.
+  // Satellites call this instead of /oauth2/end-session directly.
+
+  router.get("/api/oauth/logout", rateLimitByIp(30), async (c: Context<AppEnv>) => {
+    const postLogoutUri = c.req.query("post_logout_redirect_uri") || "/";
+
+    // Clear the BA session cookie so the next authorize starts fresh.
+    c.header("set-cookie", "better-auth.session_token=; Path=/; HttpOnly; Max-Age=0", {
+      append: true,
+    });
+
+    return c.redirect(postLogoutUri, 302);
+  });
+
+  // ── OIDC discovery ──────────────────────────────────────────────────────────
+
   router.get("/.well-known/openid-configuration", async (c: Context<AppEnv>) => {
     const payload = await getOidcAuthApi().getOpenIdConfig({ headers: c.req.raw.headers });
     c.header("cache-control", "public, max-age=3600");
@@ -549,12 +572,6 @@ export function createOidcRouter() {
   return router;
 }
 
-/**
- * Detect whether an `Accept` header prefers HTML over JSON. Used by the
- * consent handler to decide whether to materialize Better Auth's JSON
- * redirect response into a real 302 (for browser form submits) or pass it
- * through verbatim (for programmatic JSON callers).
- */
 export function prefersHtml(acceptHeader: string | undefined | null): boolean {
   if (!acceptHeader) return false;
   const lower = acceptHeader.toLowerCase();
@@ -562,15 +579,6 @@ export function prefersHtml(acceptHeader: string | undefined | null): boolean {
   return lower.includes("text/html") || lower.includes("*/*");
 }
 
-/**
- * Convert a Better Auth `oauth2Consent` JSON redirect response into a real
- * HTTP 302 when the caller prefers HTML, preserving any `Set-Cookie` headers
- * the plugin attached. Already-302 responses and non-JSON bodies are passed
- * through unchanged. Programmatic JSON callers (`acceptsHtml` false) always
- * see the verbatim plugin response.
- *
- * `@better-auth/oauth-provider@^1.6` returns `{ redirect: true, url: "..." }`.
- */
 export async function maybeJsonRedirectToLocation(
   response: Response,
   acceptsHtml: boolean,
@@ -600,10 +608,6 @@ export async function maybeJsonRedirectToLocation(
   return redirect;
 }
 
-/**
- * Extract a string field from a Hono-parsed form body, ignoring arrays /
- * file uploads. Keeps the POST handlers above concise.
- */
 function readFormString(
   form: Record<string, string | File | (string | File)[]>,
   key: string,

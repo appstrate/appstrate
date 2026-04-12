@@ -153,8 +153,9 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
   it("resolves a valid JWT to endUser context and reaches the route", async () => {
     const token = await mintToken({
       sub: authUserId,
-      endUserId,
-      applicationId,
+      actor_type: "end_user",
+      end_user_id: endUserId,
+      application_id: applicationId,
       email: "stage3@example.com",
       name: "Stage Three",
       scope: "openid runs:read",
@@ -172,8 +173,9 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
   it("falls through when the end-user claim is unknown", async () => {
     const token = await mintToken({
       sub: authUserId,
-      endUserId: "eu_does_not_exist",
-      applicationId,
+      actor_type: "end_user",
+      end_user_id: "eu_does_not_exist",
+      application_id: applicationId,
     });
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
@@ -222,8 +224,9 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
 
     const token = await mintToken({
       sub: authUserId,
-      endUserId,
-      applicationId, // JWT legitimately scoped to App A
+      actor_type: "end_user",
+      end_user_id: endUserId,
+      application_id: applicationId, // JWT legitimately scoped to App A
     });
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
@@ -240,8 +243,9 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     // the route handler.
     const token = await mintToken({
       sub: authUserId,
-      endUserId,
-      applicationId,
+      actor_type: "end_user",
+      end_user_id: endUserId,
+      application_id: applicationId,
     });
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
@@ -270,8 +274,9 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     // Token claims the end-user lives in otherApp — strategy should refuse.
     const token = await mintToken({
       sub: authUserId,
-      endUserId,
-      applicationId: otherAppId,
+      actor_type: "end_user",
+      end_user_id: endUserId,
+      application_id: otherAppId,
     });
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
