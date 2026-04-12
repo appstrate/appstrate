@@ -312,7 +312,7 @@ export function createOidcRouter() {
     }
 
     const ctx = await loadClientContext(c, clientId);
-    const renderError = (error: string, status: 400 | 401 | 409 | 429, email?: string) => {
+    const renderError = (error: string, status: 400 | 401 | 403 | 409 | 429, email?: string) => {
       const page = renderLoginPage({
         queryString: url.search,
         branding: ctx.branding,
