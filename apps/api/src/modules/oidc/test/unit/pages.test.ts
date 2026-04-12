@@ -3,6 +3,9 @@
 import { describe, it, expect } from "bun:test";
 import { renderLoginPage } from "../../pages/login.ts";
 import { renderConsentPage } from "../../pages/consent.ts";
+import { renderMagicLinkPage } from "../../pages/magic-link.ts";
+import { renderForgotPasswordPage } from "../../pages/forgot-password.ts";
+import { renderResetPasswordPage, renderInvalidTokenPage } from "../../pages/reset-password.ts";
 import { PLATFORM_DEFAULT_BRANDING } from "../../services/branding.ts";
 
 const DEFAULT_PROPS = {
@@ -115,6 +118,36 @@ describe("page branding + CSRF", () => {
     expect(csrfMatches).toHaveLength(2);
   });
 
+  it("login page renders magic-link button when smtpEnabled is true", () => {
+    const out = renderLoginPage({
+      ...DEFAULT_PROPS,
+      queryString: "?client_id=c1",
+      smtpEnabled: true,
+    }).value;
+    expect(out).toContain("Recevoir un lien de connexion");
+    expect(out).toContain("/api/oauth/magic-link?client_id=c1");
+  });
+
+  it("login page omits magic-link button when smtpEnabled is false", () => {
+    const out = renderLoginPage({
+      ...DEFAULT_PROPS,
+      queryString: "?client_id=c1",
+      smtpEnabled: false,
+    }).value;
+    expect(out).not.toContain("Recevoir un lien de connexion");
+    expect(out).not.toContain("/api/oauth/magic-link");
+  });
+
+  it("login page points forgot-password link at the internal OIDC route", () => {
+    const out = renderLoginPage({
+      ...DEFAULT_PROPS,
+      queryString: "?client_id=c1&state=x",
+      smtpEnabled: true,
+    }).value;
+    expect(out).toContain("/api/oauth/forgot-password?client_id=c1&amp;state=x");
+    expect(out).not.toContain('href="/forgot-password"');
+  });
+
   it("consent page uses branded name in the body sentence", () => {
     const out = renderConsentPage({
       clientName: "Acme",
@@ -126,5 +159,134 @@ describe("page branding + CSRF", () => {
     // Indentation is irrelevant — we only care that the branded name is
     // rendered in the consent body sentence ("votre compte {brand}.").
     expect(out.replace(/\s+/g, " ")).toContain("votre compte Mon Workspace.");
+  });
+});
+
+describe("renderMagicLinkPage", () => {
+  it("renders a form with email field and CSRF hidden input by default", () => {
+    const out = renderMagicLinkPage({
+      ...DEFAULT_PROPS,
+      queryString: "?client_id=c1",
+    }).value;
+    expect(out).toContain('method="POST"');
+    expect(out).toContain('action="/api/oauth/magic-link?client_id=c1"');
+    expect(out).toContain('name="email"');
+    expect(out).toContain('name="_csrf" value="tok_test"');
+    expect(out).toContain("Envoyer le lien");
+  });
+
+  it("renders the sent confirmation when sent=true", () => {
+    const out = renderMagicLinkPage({
+      ...DEFAULT_PROPS,
+      queryString: "?client_id=c1",
+      email: "user@example.com",
+      sent: true,
+    }).value;
+    expect(out).toContain("Vérifiez votre email");
+    expect(out).toContain("user@example.com");
+    expect(out).not.toContain('<input type="email"');
+  });
+
+  it("escapes malicious email values in the sent confirmation", () => {
+    const out = renderMagicLinkPage({
+      ...DEFAULT_PROPS,
+      queryString: "",
+      email: `<script>x()</script>`,
+      sent: true,
+    }).value;
+    expect(out).not.toContain("<script>x()</script>");
+    expect(out).toContain("&lt;script&gt;x()&lt;/script&gt;");
+  });
+
+  it("preserves the OAuth queryString in the back-to-login link", () => {
+    const out = renderMagicLinkPage({
+      ...DEFAULT_PROPS,
+      queryString: "?client_id=c1&state=x",
+    }).value;
+    expect(out).toContain("/api/oauth/login?client_id=c1&amp;state=x");
+  });
+});
+
+describe("renderForgotPasswordPage", () => {
+  it("renders the form with email field by default", () => {
+    const out = renderForgotPasswordPage({
+      ...DEFAULT_PROPS,
+      queryString: "?client_id=c1",
+    }).value;
+    expect(out).toContain('action="/api/oauth/forgot-password?client_id=c1"');
+    expect(out).toContain('name="email"');
+    expect(out).toContain('name="_csrf" value="tok_test"');
+    expect(out).toContain("Envoyer le lien");
+  });
+
+  it("renders the sent confirmation when sent=true", () => {
+    const out = renderForgotPasswordPage({
+      ...DEFAULT_PROPS,
+      queryString: "",
+      email: "user@example.com",
+      sent: true,
+    }).value;
+    expect(out).toContain("Vérifiez votre email");
+    expect(out).toContain("user@example.com");
+    expect(out).toContain("/api/oauth/login");
+  });
+
+  it("renders error messages escaped", () => {
+    const out = renderForgotPasswordPage({
+      ...DEFAULT_PROPS,
+      queryString: "",
+      error: `<img src=x onerror=alert(1)>`,
+    }).value;
+    expect(out).not.toContain(`<img src=x onerror=alert(1)>`);
+    expect(out).toContain("&lt;img");
+  });
+});
+
+describe("renderResetPasswordPage", () => {
+  it("renders the form with both password fields and embeds the token", () => {
+    const out = renderResetPasswordPage({
+      ...DEFAULT_PROPS,
+      queryString: "?client_id=c1",
+      token: "tok_reset_abc",
+    }).value;
+    expect(out).toContain('action="/api/oauth/reset-password?client_id=c1"');
+    expect(out).toContain('name="password"');
+    expect(out).toContain('name="password_confirm"');
+    expect(out).toContain('name="token" value="tok_reset_abc"');
+    expect(out).toContain('name="_csrf" value="tok_test"');
+  });
+
+  it("escapes tokens that contain HTML-unsafe characters", () => {
+    const out = renderResetPasswordPage({
+      ...DEFAULT_PROPS,
+      queryString: "",
+      token: `<"/>`,
+    }).value;
+    expect(out).not.toContain(`value="<"/>"`);
+    expect(out).toContain("&lt;&quot;/&gt;");
+  });
+
+  it("renders success screen when success=true", () => {
+    const out = renderResetPasswordPage({
+      ...DEFAULT_PROPS,
+      queryString: "?client_id=c1",
+      token: "tok",
+      success: true,
+    }).value;
+    expect(out).toContain("Mot de passe mis à jour");
+    expect(out).toContain("/api/oauth/login?client_id=c1");
+    expect(out).not.toContain('name="password"');
+  });
+});
+
+describe("renderInvalidTokenPage", () => {
+  it("links to forgot-password to request a new link", () => {
+    const out = renderInvalidTokenPage({
+      branding: PLATFORM_DEFAULT_BRANDING,
+      queryString: "?client_id=c1",
+    }).value;
+    expect(out).toContain("Lien invalide");
+    expect(out).toContain("/api/oauth/forgot-password?client_id=c1");
+    expect(out).toContain("/api/oauth/login?client_id=c1");
   });
 });

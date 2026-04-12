@@ -35,6 +35,33 @@ interface OAuth2ConsentArgs {
   asResponse?: boolean;
 }
 
+interface SignInMagicLinkArgs {
+  body: {
+    email: string;
+    callbackURL?: string;
+    newUserCallbackURL?: string;
+    errorCallbackURL?: string;
+    name?: string;
+  };
+  headers: Headers;
+  request?: Request;
+  asResponse?: boolean;
+}
+
+interface RequestPasswordResetArgs {
+  body: { email: string; redirectTo?: string };
+  headers: Headers;
+  request?: Request;
+  asResponse?: boolean;
+}
+
+interface ResetPasswordArgs {
+  body: { newPassword: string; token: string };
+  headers: Headers;
+  request?: Request;
+  asResponse?: boolean;
+}
+
 interface DiscoveryArgs {
   headers: Headers;
 }
@@ -46,6 +73,9 @@ interface JwksArgs {
 export interface OidcAuthApi {
   signInEmail(args: SignInEmailArgs): Promise<Response | unknown>;
   signUpEmail(args: SignUpEmailArgs): Promise<Response | unknown>;
+  signInMagicLink(args: SignInMagicLinkArgs): Promise<Response | unknown>;
+  requestPasswordReset(args: RequestPasswordResetArgs): Promise<Response | unknown>;
+  resetPassword(args: ResetPasswordArgs): Promise<Response | unknown>;
   oauth2Consent(args: OAuth2ConsentArgs): Promise<Response | unknown>;
   getOpenIdConfig(args: DiscoveryArgs): Promise<unknown>;
   getOAuthServerConfig(args: DiscoveryArgs): Promise<unknown>;

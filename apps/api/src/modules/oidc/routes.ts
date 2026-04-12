@@ -52,6 +52,9 @@ import {
 import { getEnv } from "@appstrate/env";
 import { renderLoginPage } from "./pages/login.ts";
 import { renderRegisterPage } from "./pages/register.ts";
+import { renderMagicLinkPage } from "./pages/magic-link.ts";
+import { renderForgotPasswordPage } from "./pages/forgot-password.ts";
+import { renderResetPasswordPage, renderInvalidTokenPage } from "./pages/reset-password.ts";
 import { renderConsentPage } from "./pages/consent.ts";
 import { renderErrorPage } from "./pages/error.ts";
 
@@ -790,6 +793,434 @@ export function createOidcRouter() {
     return c.redirect(`/api/auth/oauth2/authorize${url.search}`, 302);
   });
 
+  // ── Public magic-link sign-in page ────────────────────────────────────────
+  //
+  // Mirrors the register flow: GET renders a one-field form, POST hands off
+  // to Better Auth's `signInMagicLink` with a `callbackURL` pointing back at
+  // the OAuth authorize endpoint so the verification link resumes the flow.
+  //
+  // Gate: SMTP must be configured. Without SMTP the magic-link plugin is not
+  // loaded, so the endpoints are absent server-side — we return 404 from the
+  // OIDC wrapper to keep the failure obvious rather than letting BA emit an
+  // opaque 500 from an undefined endpoint.
+
+  router.get("/api/oauth/magic-link", rateLimitByIp(60), async (c) => {
+    if (!isSmtpEnabled()) {
+      return c.html(
+        renderErrorPage({
+          title: "Connexion par lien magique indisponible",
+          message: "Cette méthode de connexion n'est pas activée sur cette instance.",
+        }).value,
+        404,
+      );
+    }
+    const url = new URL(c.req.url);
+    const clientId = url.searchParams.get("client_id");
+    if (!clientId) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien de connexion invalide",
+          message:
+            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+        }).value,
+        400,
+      );
+    }
+    const result = await loadClientContextOrRenderError(c, clientId);
+    if (result instanceof Response) return result;
+    const body = renderMagicLinkPage({
+      queryString: url.search,
+      branding: result.branding,
+      csrfToken: result.csrfToken,
+    });
+    return c.html(body.value);
+  });
+
+  router.post("/api/oauth/magic-link", rateLimitByIp(20), async (c) => {
+    if (!isSmtpEnabled()) {
+      return c.html(
+        renderErrorPage({
+          title: "Connexion par lien magique indisponible",
+          message: "Cette méthode de connexion n'est pas activée sur cette instance.",
+        }).value,
+        404,
+      );
+    }
+    const url = new URL(c.req.url);
+    const clientId = url.searchParams.get("client_id");
+    if (!clientId) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien de connexion invalide",
+          message:
+            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+        }).value,
+        400,
+      );
+    }
+    const ctxResult = await loadClientContextOrRenderError(c, clientId);
+    if (ctxResult instanceof Response) return ctxResult;
+    const ctx = ctxResult;
+
+    const form = await c.req.parseBody();
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
+      const page = renderMagicLinkPage({
+        queryString: url.search,
+        branding: ctx.branding,
+        csrfToken: ctx.csrfToken,
+        error: "Votre session a expiré. Veuillez réessayer.",
+      });
+      return c.html(page.value, 403);
+    }
+
+    const email = readFormString(form, "email")?.toLowerCase().trim();
+    if (!email) {
+      const page = renderMagicLinkPage({
+        queryString: url.search,
+        branding: ctx.branding,
+        csrfToken: ctx.csrfToken,
+        error: "Email requis.",
+      });
+      return c.html(page.value, 400);
+    }
+
+    // The verification link, once clicked, creates a BA session and
+    // redirects to `callbackURL` — pointing at the authorize endpoint
+    // resumes the OAuth flow exactly like after a successful password
+    // login. Preserving `queryString` keeps client_id / redirect_uri /
+    // state / PKCE intact end-to-end.
+    //
+    // Absolute URLs are required: Better Auth's origin-check middleware
+    // validates relative callbackURLs with a strict regex that forbids
+    // spaces in the query string, and URLSearchParams decodes `+` in
+    // `scope=openid+profile+email` (or `%2B` in the PKCE `sig`) as a
+    // space — failing the regex. Absolute URLs go through the origin
+    // comparison branch instead and bypass the regex entirely.
+    const callbackURL = `${url.origin}/api/auth/oauth2/authorize${url.search}`;
+    const errorCallbackURL = `${url.origin}/api/oauth/login${url.search}`;
+
+    const authApi = getOidcAuthApi();
+    try {
+      await authApi.signInMagicLink({
+        body: { email, callbackURL, errorCallbackURL },
+        headers: c.req.raw.headers,
+        asResponse: true,
+      });
+    } catch (err) {
+      // Better Auth already swallows per-user failures internally (the
+      // plugin's sendMagicLink handler is fire-and-forget). A throw here
+      // is an infra error — log and render generic guidance. We still
+      // show the "sent" screen to preserve anti-enumeration.
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn("oidc: signInMagicLink threw", { error: msg, email });
+    }
+
+    logger.info("oidc: magic link requested", { email });
+    const page = renderMagicLinkPage({
+      queryString: url.search,
+      branding: ctx.branding,
+      csrfToken: ctx.csrfToken,
+      email,
+      sent: true,
+    });
+    return c.html(page.value);
+  });
+
+  // ── Public forgot-password page ───────────────────────────────────────────
+  //
+  // Better Auth's `requestPasswordReset` endpoint has anti-enumeration built
+  // in — it returns `{ status: true, message: ... }` regardless of whether
+  // the email exists. We piggy-back on that and always render the "sent"
+  // confirmation screen after a successful POST.
+  //
+  // `redirectTo` points at our own reset page; Better Auth will URL-encode
+  // it into the verification link and BA's GET /reset-password/:token
+  // handler validates the token, then 302s to
+  // `/api/oauth/reset-password?{queryString}&token={token}`.
+
+  router.get("/api/oauth/forgot-password", rateLimitByIp(60), async (c) => {
+    if (!isSmtpEnabled()) {
+      return c.html(
+        renderErrorPage({
+          title: "Réinitialisation du mot de passe indisponible",
+          message:
+            "La réinitialisation par email n'est pas activée sur cette instance. Contactez l'administrateur.",
+        }).value,
+        404,
+      );
+    }
+    const url = new URL(c.req.url);
+    const clientId = url.searchParams.get("client_id");
+    if (!clientId) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien invalide",
+          message: "L'identifiant de l'application est manquant.",
+        }).value,
+        400,
+      );
+    }
+    const result = await loadClientContextOrRenderError(c, clientId);
+    if (result instanceof Response) return result;
+    const body = renderForgotPasswordPage({
+      queryString: url.search,
+      branding: result.branding,
+      csrfToken: result.csrfToken,
+    });
+    return c.html(body.value);
+  });
+
+  router.post("/api/oauth/forgot-password", rateLimitByIp(20), async (c) => {
+    if (!isSmtpEnabled()) {
+      return c.html(
+        renderErrorPage({
+          title: "Réinitialisation du mot de passe indisponible",
+          message:
+            "La réinitialisation par email n'est pas activée sur cette instance. Contactez l'administrateur.",
+        }).value,
+        404,
+      );
+    }
+    const url = new URL(c.req.url);
+    const clientId = url.searchParams.get("client_id");
+    if (!clientId) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien invalide",
+          message: "L'identifiant de l'application est manquant.",
+        }).value,
+        400,
+      );
+    }
+    const ctxResult = await loadClientContextOrRenderError(c, clientId);
+    if (ctxResult instanceof Response) return ctxResult;
+    const ctx = ctxResult;
+
+    const form = await c.req.parseBody();
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
+      const page = renderForgotPasswordPage({
+        queryString: url.search,
+        branding: ctx.branding,
+        csrfToken: ctx.csrfToken,
+        error: "Votre session a expiré. Veuillez réessayer.",
+      });
+      return c.html(page.value, 403);
+    }
+
+    const email = readFormString(form, "email")?.toLowerCase().trim();
+    if (!email) {
+      const page = renderForgotPasswordPage({
+        queryString: url.search,
+        branding: ctx.branding,
+        csrfToken: ctx.csrfToken,
+        error: "Email requis.",
+      });
+      return c.html(page.value, 400);
+    }
+
+    // Absolute URL so Better Auth's origin-check accepts it — see the
+    // magic-link route above for the full rationale (BA's relative-path
+    // regex rejects spaces in the query string).
+    const redirectTo = `${url.origin}/api/oauth/reset-password${url.search}`;
+
+    const authApi = getOidcAuthApi();
+    try {
+      await authApi.requestPasswordReset({
+        body: { email, redirectTo },
+        headers: c.req.raw.headers,
+        asResponse: true,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn("oidc: requestPasswordReset threw", { error: msg, email });
+      // Still render "sent" to preserve anti-enumeration.
+    }
+
+    logger.info("oidc: password reset requested", { email });
+    const page = renderForgotPasswordPage({
+      queryString: url.search,
+      branding: ctx.branding,
+      csrfToken: ctx.csrfToken,
+      email,
+      sent: true,
+    });
+    return c.html(page.value);
+  });
+
+  // ── Public reset-password page (second leg of the reset flow) ──────────────
+  //
+  // Entry point from the email verification redirect:
+  //   `/api/oauth/reset-password?{queryString}&token={token}`
+  //
+  // If the token is missing or the Better Auth callback rejected it
+  // (`?error=INVALID_TOKEN`), render the dedicated invalid-token screen with
+  // a link to request a fresh email.
+  //
+  // On POST, call Better Auth's `resetPassword` with the hidden token field.
+  // Success does NOT create a session — the page renders a confirmation that
+  // bounces back to /api/oauth/login${queryString} so the user signs in with
+  // the new password and resumes the OAuth flow.
+
+  router.get("/api/oauth/reset-password", rateLimitByIp(60), async (c) => {
+    if (!isSmtpEnabled()) {
+      return c.html(
+        renderErrorPage({
+          title: "Réinitialisation du mot de passe indisponible",
+          message: "La réinitialisation par email n'est pas activée sur cette instance.",
+        }).value,
+        404,
+      );
+    }
+    const url = new URL(c.req.url);
+    const clientId = url.searchParams.get("client_id");
+    if (!clientId) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien invalide",
+          message: "L'identifiant de l'application est manquant.",
+        }).value,
+        400,
+      );
+    }
+    const result = await loadClientContextOrRenderError(c, clientId);
+    if (result instanceof Response) return result;
+
+    // Strip our own locally-owned params from the forwarded queryString so
+    // that links back to login/forgot-password don't carry stale tokens.
+    const forwardQuery = stripResetParams(url.searchParams);
+
+    const token = url.searchParams.get("token");
+    const error = url.searchParams.get("error");
+    if (!token || error) {
+      return c.html(
+        renderInvalidTokenPage({ queryString: forwardQuery, branding: result.branding }).value,
+        400,
+      );
+    }
+    const body = renderResetPasswordPage({
+      queryString: forwardQuery,
+      token,
+      branding: result.branding,
+      csrfToken: result.csrfToken,
+    });
+    return c.html(body.value);
+  });
+
+  router.post("/api/oauth/reset-password", rateLimitByIp(20), async (c) => {
+    if (!isSmtpEnabled()) {
+      return c.html(
+        renderErrorPage({
+          title: "Réinitialisation du mot de passe indisponible",
+          message: "La réinitialisation par email n'est pas activée sur cette instance.",
+        }).value,
+        404,
+      );
+    }
+    const url = new URL(c.req.url);
+    const clientId = url.searchParams.get("client_id");
+    if (!clientId) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien invalide",
+          message: "L'identifiant de l'application est manquant.",
+        }).value,
+        400,
+      );
+    }
+    const ctxResult = await loadClientContextOrRenderError(c, clientId);
+    if (ctxResult instanceof Response) return ctxResult;
+    const ctx = ctxResult;
+
+    const forwardQuery = stripResetParams(url.searchParams);
+
+    const form = await c.req.parseBody();
+    const token = readFormString(form, "token")?.trim() ?? "";
+
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
+      if (!token) {
+        return c.html(
+          renderInvalidTokenPage({ queryString: forwardQuery, branding: ctx.branding }).value,
+          403,
+        );
+      }
+      const page = renderResetPasswordPage({
+        queryString: forwardQuery,
+        token,
+        branding: ctx.branding,
+        csrfToken: ctx.csrfToken,
+        error: "Votre session a expiré. Veuillez réessayer.",
+      });
+      return c.html(page.value, 403);
+    }
+
+    if (!token) {
+      return c.html(
+        renderInvalidTokenPage({ queryString: forwardQuery, branding: ctx.branding }).value,
+        400,
+      );
+    }
+
+    const password = readFormString(form, "password") ?? "";
+    const passwordConfirm = readFormString(form, "password_confirm") ?? "";
+
+    const renderFormError = (error: string, status: 400 | 500) => {
+      const page = renderResetPasswordPage({
+        queryString: forwardQuery,
+        token,
+        branding: ctx.branding,
+        csrfToken: ctx.csrfToken,
+        error,
+      });
+      return c.html(page.value, status);
+    };
+
+    if (password.length < 8) {
+      return renderFormError("Le mot de passe doit contenir au moins 8 caractères.", 400);
+    }
+    if (password !== passwordConfirm) {
+      return renderFormError("Les deux mots de passe ne correspondent pas.", 400);
+    }
+
+    const authApi = getOidcAuthApi();
+    let resetResponse: Response;
+    try {
+      resetResponse = (await authApi.resetPassword({
+        body: { newPassword: password, token },
+        headers: c.req.raw.headers,
+        asResponse: true,
+      })) as Response;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn("oidc: resetPassword threw", { error: msg });
+      return c.html(
+        renderInvalidTokenPage({ queryString: forwardQuery, branding: ctx.branding }).value,
+        400,
+      );
+    }
+
+    if (!resetResponse.ok) {
+      const bodyText = await resetResponse.text().catch(() => "");
+      logger.warn("oidc: resetPassword !ok", {
+        status: resetResponse.status,
+        body: bodyText.slice(0, 200),
+      });
+      return c.html(
+        renderInvalidTokenPage({ queryString: forwardQuery, branding: ctx.branding }).value,
+        400,
+      );
+    }
+
+    logger.info("oidc: password reset success");
+    const page = renderResetPasswordPage({
+      queryString: forwardQuery,
+      token,
+      branding: ctx.branding,
+      csrfToken: ctx.csrfToken,
+      success: true,
+    });
+    return c.html(page.value);
+  });
+
   router.get("/api/oauth/consent", rateLimitByIp(60), async (c) => {
     const url = new URL(c.req.url);
     const clientId = url.searchParams.get("client_id");
@@ -1028,6 +1459,19 @@ export async function maybeJsonRedirectToLocation(
     }
   }
   return redirect;
+}
+
+/**
+ * Strip reset-password-specific params (`token`, `error`) from the query
+ * string so links back to the login / forgot-password pages don't leak a
+ * stale token or error flag.
+ */
+function stripResetParams(params: URLSearchParams): string {
+  const clone = new URLSearchParams(params);
+  clone.delete("token");
+  clone.delete("error");
+  const s = clone.toString();
+  return s ? `?${s}` : "";
 }
 
 function readFormString(

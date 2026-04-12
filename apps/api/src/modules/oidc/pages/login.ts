@@ -28,7 +28,7 @@ export interface LoginPageProps {
   branding: ResolvedAppBranding;
   /** Available social auth providers. */
   socialProviders?: { google?: boolean; github?: boolean };
-  /** Whether SMTP is configured (enables forgot password link). */
+  /** Whether SMTP is configured (enables forgot password + magic link). */
   smtpEnabled?: boolean;
 }
 
@@ -44,9 +44,12 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
 
   const google = props.socialProviders?.google ?? false;
   const github = props.socialProviders?.github ?? false;
-  const hasSocial = google || github;
+  const magicLink = props.smtpEnabled ?? false;
+  const hasAltMethods = google || github || magicLink;
 
   const registerUrl = `/api/oauth/register${props.queryString}`;
+  const magicLinkUrl = `/api/oauth/magic-link${props.queryString}`;
+  const forgotPasswordUrl = `/api/oauth/forgot-password${props.queryString}`;
 
   const bodyHtml = html`
     <h1>Connexion</h1>
@@ -65,7 +68,7 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
       <input type="password" name="password" placeholder="Mot de passe" required />
       <button type="submit">Se connecter</button>
     </form>
-    ${hasSocial
+    ${hasAltMethods
       ? html`
           <div class="divider"><span>ou</span></div>
           <div class="social-buttons">
@@ -108,13 +111,23 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
                   Continuer avec GitHub
                 </a>`
               : null}
+            ${magicLink
+              ? html`<a href="${magicLinkUrl}" class="social-btn magic-link">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                    <path
+                      d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"
+                    />
+                  </svg>
+                  Recevoir un lien de connexion
+                </a>`
+              : null}
           </div>
         `
       : null}
     <div class="footer-links">
       <a href="${registerUrl}">Créer un compte</a>
       ${props.smtpEnabled
-        ? html`<span class="sep">·</span><a href="/forgot-password">Mot de passe oublié ?</a>`
+        ? html`<span class="sep">·</span><a href="${forgotPasswordUrl}">Mot de passe oublié ?</a>`
         : null}
     </div>
   `;
