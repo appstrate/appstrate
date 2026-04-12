@@ -33,6 +33,21 @@ import {
 import { parseBody, forbidden } from "../../lib/errors.ts";
 import { requirePermission } from "../../middleware/require-permission.ts";
 
+/**
+ * Assert that an application belongs to the given org.
+ * Throws `forbidden` if the app doesn't exist or belongs to another org.
+ */
+async function assertAppBelongsToOrg(applicationId: string, orgId: string): Promise<void> {
+  const [app] = await db
+    .select({ orgId: applications.orgId })
+    .from(applications)
+    .where(eq(applications.id, applicationId))
+    .limit(1);
+  if (!app || app.orgId !== orgId) {
+    throw forbidden("applicationId must belong to the current organization");
+  }
+}
+
 const createOrgWebhookSchema = z.object({
   level: z.literal("org"),
   url: z.url("url must be a valid URL"),
@@ -80,15 +95,7 @@ export function createWebhooksRouter() {
       const data = parseBody(createWebhookSchema, body);
 
       if (data.level === "application") {
-        // The application must belong to the caller's org.
-        const [app] = await db
-          .select({ orgId: applications.orgId })
-          .from(applications)
-          .where(eq(applications.id, data.referencedApplicationId))
-          .limit(1);
-        if (!app || app.orgId !== orgId) {
-          throw forbidden("referencedApplicationId must belong to the current organization");
-        }
+        await assertAppBelongsToOrg(data.referencedApplicationId, orgId);
       }
 
       const result = await createWebhook(
@@ -122,15 +129,7 @@ export function createWebhooksRouter() {
     const orgId = c.get("orgId");
     const applicationId = c.req.query("applicationId") || undefined;
     if (applicationId) {
-      // Verify the app belongs to the caller's org before we leak pinned webhooks.
-      const [app] = await db
-        .select({ orgId: applications.orgId })
-        .from(applications)
-        .where(eq(applications.id, applicationId))
-        .limit(1);
-      if (!app || app.orgId !== orgId) {
-        throw forbidden("applicationId must belong to the current organization");
-      }
+      await assertAppBelongsToOrg(applicationId, orgId);
     }
     const result = await listWebhooks(orgId, applicationId);
     return c.json({ object: "list", data: result });

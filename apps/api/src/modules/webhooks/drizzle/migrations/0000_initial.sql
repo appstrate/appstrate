@@ -15,6 +15,7 @@ CREATE TABLE "webhooks" (
   "previous_secret_expires_at" timestamp,
   "created_at" timestamp DEFAULT now() NOT NULL,
   "updated_at" timestamp DEFAULT now() NOT NULL,
+  CONSTRAINT "webhooks_level_values" CHECK (level IN ('org', 'application')),
   CONSTRAINT "webhooks_level_check" CHECK (
     (level = 'org' AND application_id IS NULL)
     OR

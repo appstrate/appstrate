@@ -19,8 +19,8 @@ type WebhookInsert = Partial<InferInsertModel<typeof webhooks>> & {
 export async function seedWebhook(
   overrides: WebhookInsert,
 ): Promise<InferSelectModel<typeof webhooks>> {
-  const level: "org" | "application" =
-    overrides.level === "org" ? "org" : overrides.applicationId ? "application" : "application";
+  const level =
+    (overrides.level as "org" | "application") ?? (overrides.applicationId ? "application" : "org");
   const [wh] = await db
     .insert(webhooks)
     .values({

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll, setDefaultTimeout } from "bun:test";
+import { eq } from "drizzle-orm";
 import { truncateAll, db } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
 import { seedPackage } from "../../../../../../test/helpers/seed.ts";
@@ -11,6 +12,9 @@ import {
   deleteWebhook,
   rotateSecret,
   listDeliveries,
+  dispatchWebhookEvents,
+  initWebhookWorker,
+  shutdownWebhookWorker,
 } from "../../../service.ts";
 import { webhookDeliveries } from "../../../schema.ts";
 
@@ -106,6 +110,21 @@ describe("webhooks service", () => {
       // 3 app-level + 0 org-level = 3
       expect(all).toHaveLength(3);
     });
+
+    it("enforces limit for org-level webhooks independently", async () => {
+      // Create 20 org-level webhooks (the max)
+      for (let i = 0; i < 20; i++) {
+        await createWebhook(orgLevel({ url: `https://example.com/org-hook-${i}` }));
+      }
+      // 21st should fail
+      await expect(
+        createWebhook(orgLevel({ url: "https://example.com/org-hook-overflow" })),
+      ).rejects.toThrow(/maximum 20 webhooks/i);
+
+      // But an app-level webhook should still be allowed (separate scope)
+      const appWh = await createWebhook(appLevel());
+      expect(appWh.id).toStartWith("wh_");
+    });
   });
 
   // ── listWebhooks ─────────────────────────────────────────
@@ -137,7 +156,7 @@ describe("webhooks service", () => {
       expect(list[0]!.applicationId).toBeNull();
     });
 
-    it("does not include webhooks from other orgs", async () => {
+    it("does not include webhooks from other orgs (app-level)", async () => {
       const otherUser = await createTestUser({ email: "other@test.com" });
       const { org: otherOrg, defaultAppId: otherAppId } = await createTestOrg(otherUser.id, {
         slug: "otherorg",
@@ -155,6 +174,23 @@ describe("webhooks service", () => {
       const list = await listWebhooks(orgId, defaultAppId);
       expect(list).toHaveLength(1);
       expect(list[0]!.url).toBe("https://example.com/mine");
+    });
+
+    it("does not include org-level webhooks from other orgs", async () => {
+      const otherUser = await createTestUser({ email: "other@test.com" });
+      const { org: otherOrg } = await createTestOrg(otherUser.id, { slug: "otherorg" });
+
+      await createWebhook(orgLevel({ url: "https://example.com/my-org" }));
+      await createWebhook({
+        level: "org",
+        orgId: otherOrg.id,
+        url: "https://example.com/their-org",
+        events: ["run.success"],
+      });
+
+      const list = await listWebhooks(orgId);
+      expect(list).toHaveLength(1);
+      expect(list[0]!.url).toBe("https://example.com/my-org");
     });
 
     it("does not expose the secret in list results", async () => {
@@ -249,6 +285,61 @@ describe("webhooks service", () => {
 
       const deliveries = await listDeliveries(orgId, created.id);
       expect(deliveries).toHaveLength(0);
+    });
+  });
+
+  // ── dispatchWebhookEvents ────────────────────────────────
+
+  describe("dispatchWebhookEvents", () => {
+    setDefaultTimeout(30_000);
+
+    beforeAll(async () => {
+      await initWebhookWorker();
+    });
+
+    afterAll(async () => {
+      await shutdownWebhookWorker();
+    });
+
+    async function waitForDelivery(
+      webhookId: string,
+      timeoutMs = 20_000,
+    ): Promise<{ eventType: string; status: string } | null> {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const rows = await db
+          .select({ eventType: webhookDeliveries.eventType, status: webhookDeliveries.status })
+          .from(webhookDeliveries)
+          .where(eq(webhookDeliveries.webhookId, webhookId))
+          .limit(1);
+        if (rows.length > 0) return rows[0]!;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return null;
+    }
+
+    it("fires org-level webhook for a run in any app of the org", async () => {
+      const orgWh = await createWebhook(
+        orgLevel({
+          url: "https://no-such-domain-xyz123.test/org-hook",
+          events: ["run.success"],
+        }),
+      );
+
+      await dispatchWebhookEvents(
+        orgId,
+        "run.success",
+        {
+          id: "run_dispatch_org",
+          packageId: "@scope/agent",
+          status: "success",
+        },
+        defaultAppId,
+      );
+
+      const row = await waitForDelivery(orgWh.id);
+      expect(row).not.toBeNull();
+      expect(row?.eventType).toBe("run.success");
     });
   });
 });
