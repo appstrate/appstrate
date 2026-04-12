@@ -47,7 +47,7 @@ describe("OpenAPI response validation — webhooks", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           level: "application",
-          referencedApplicationId: ctx.defaultAppId,
+          applicationId: ctx.defaultAppId,
           url: "https://example.com/hook",
           events: ["run.success"],
         }),

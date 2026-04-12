@@ -22,7 +22,7 @@ describe("Webhooks API", () => {
   function webhookPayload(overrides?: Record<string, unknown>) {
     return {
       level: "application" as const,
-      referencedApplicationId: ctx.defaultAppId,
+      applicationId: ctx.defaultAppId,
       url: "https://example.com/webhook",
       events: ["run.success"],
       ...overrides,

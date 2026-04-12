@@ -19,18 +19,24 @@ type WebhookInsert = Partial<InferInsertModel<typeof webhooks>> & {
 export async function seedWebhook(
   overrides: WebhookInsert,
 ): Promise<InferSelectModel<typeof webhooks>> {
-  const level =
-    (overrides.level as "org" | "application") ?? (overrides.applicationId ? "application" : "org");
-  const [wh] = await db
-    .insert(webhooks)
-    .values({
-      id: `wh_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
-      level,
-      url: "https://example.com/webhook",
-      events: ["run.success"],
-      secret: crypto.randomUUID(),
-      ...overrides,
-    } as InferInsertModel<typeof webhooks>)
-    .returning();
+  const level: "org" | "application" =
+    overrides.level === "org" || overrides.level === "application"
+      ? overrides.level
+      : overrides.applicationId
+        ? "application"
+        : "org";
+  const values: InferInsertModel<typeof webhooks> = {
+    id: `wh_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+    level,
+    orgId: overrides.orgId,
+    applicationId: overrides.applicationId ?? null,
+    url: overrides.url ?? "https://example.com/webhook",
+    events: overrides.events ?? ["run.success"],
+    secret: overrides.secret ?? crypto.randomUUID(),
+    packageId: overrides.packageId ?? null,
+    payloadMode: overrides.payloadMode ?? "full",
+    enabled: overrides.enabled ?? true,
+  };
+  const [wh] = await db.insert(webhooks).values(values).returning();
   return wh!;
 }

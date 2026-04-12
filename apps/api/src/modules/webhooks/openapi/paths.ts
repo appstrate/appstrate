@@ -43,10 +43,10 @@ export const webhooksPaths = {
                 },
                 {
                   type: "object",
-                  required: ["level", "referencedApplicationId", "url", "events"],
+                  required: ["level", "applicationId", "url", "events"],
                   properties: {
                     level: { type: "string", enum: ["application"] },
-                    referencedApplicationId: { type: "string" },
+                    applicationId: { type: "string", description: "Application ID (app_ prefix)" },
                     url: { type: "string", format: "uri" },
                     events: {
                       type: "array",
@@ -69,14 +69,29 @@ export const webhooksPaths = {
               ],
               discriminator: { propertyName: "level" },
             },
-            example: {
-              level: "application",
-              referencedApplicationId: "app_cm4jkl013",
-              url: "https://api.example.com/webhooks/appstrate",
-              events: ["run.success", "run.failed"],
-              packageId: null,
-              payloadMode: "summary",
-              enabled: true,
+            examples: {
+              orgLevel: {
+                summary: "Org-level webhook (fires for all apps)",
+                value: {
+                  level: "org",
+                  url: "https://api.example.com/webhooks/appstrate",
+                  events: ["run.success", "run.failed"],
+                  payloadMode: "summary",
+                  enabled: true,
+                },
+              },
+              applicationLevel: {
+                summary: "Application-level webhook (pinned to one app)",
+                value: {
+                  level: "application",
+                  applicationId: "app_cm4jkl013",
+                  url: "https://api.example.com/webhooks/appstrate",
+                  events: ["run.success", "run.failed"],
+                  packageId: null,
+                  payloadMode: "summary",
+                  enabled: true,
+                },
+              },
             },
           },
         },
@@ -236,7 +251,7 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "Update a webhook",
       description:
-        "Update webhook URL, events, filters, or enabled status. Cannot change the secret.",
+        "Update webhook URL, events, filters, or enabled status. Cannot change the secret or the scoping level.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

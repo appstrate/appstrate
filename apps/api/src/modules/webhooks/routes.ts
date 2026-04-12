@@ -5,7 +5,7 @@
  *
  * Polymorphic across scoping level (mirrors the OIDC oauth_clients model):
  *   - `level: "org"`: fires for any application in the org
- *   - `level: "application"`: pinned to a single app via `referencedApplicationId`
+ *   - `level: "application"`: pinned to a single app via `applicationId`
  *
  * Routes are org-scoped — the body discriminates on `level` at create time.
  * `GET /api/webhooks?applicationId=` filters the list by pinned app.
@@ -30,7 +30,7 @@ import {
   buildEventEnvelope,
   webhookEventSchema,
 } from "./service.ts";
-import { parseBody, forbidden } from "../../lib/errors.ts";
+import { parseBody, forbidden, invalidRequest } from "../../lib/errors.ts";
 import { requirePermission } from "../../middleware/require-permission.ts";
 
 /**
@@ -59,7 +59,7 @@ const createOrgWebhookSchema = z.object({
 
 const createApplicationWebhookSchema = z.object({
   level: z.literal("application"),
-  referencedApplicationId: z.string().min(1),
+  applicationId: z.string().min(1),
   url: z.url("url must be a valid URL"),
   events: z.array(webhookEventSchema).min(1, "events is required"),
   packageId: z.string().nullable().optional(),
@@ -95,7 +95,7 @@ export function createWebhooksRouter() {
       const data = parseBody(createWebhookSchema, body);
 
       if (data.level === "application") {
-        await assertAppBelongsToOrg(data.referencedApplicationId, orgId);
+        await assertAppBelongsToOrg(data.applicationId, orgId);
       }
 
       const result = await createWebhook(
@@ -112,7 +112,7 @@ export function createWebhooksRouter() {
           : {
               level: "application",
               orgId,
-              applicationId: data.referencedApplicationId,
+              applicationId: data.applicationId,
               url: data.url,
               events: data.events,
               packageId: data.packageId,
@@ -129,6 +129,9 @@ export function createWebhooksRouter() {
     const orgId = c.get("orgId");
     const applicationId = c.req.query("applicationId") || undefined;
     if (applicationId) {
+      if (!applicationId.startsWith("app_")) {
+        throw invalidRequest("applicationId must start with 'app_' prefix", "applicationId");
+      }
       await assertAppBelongsToOrg(applicationId, orgId);
     }
     const result = await listWebhooks(orgId, applicationId);
