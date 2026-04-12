@@ -65,7 +65,8 @@ CREATE TABLE "oauth_refresh_tokens" (
   "created_at" timestamp DEFAULT now(),
   "revoked" timestamp,
   "auth_time" timestamp,
-  "scopes" text[] NOT NULL
+  "scopes" text[] NOT NULL,
+  CONSTRAINT "oauth_refresh_tokens_token_unique" UNIQUE ("token")
 );
 --> statement-breakpoint
 CREATE TABLE "oauth_access_tokens" (
@@ -123,7 +124,7 @@ ALTER TABLE "oauth_refresh_tokens"
 --> statement-breakpoint
 ALTER TABLE "oauth_refresh_tokens"
   ADD CONSTRAINT "oauth_refresh_tokens_user_id_user_id_fk"
-  FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;
+  FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
 ALTER TABLE "oauth_access_tokens"
   ADD CONSTRAINT "oauth_access_tokens_client_id_oauth_clients_client_id_fk"
@@ -135,7 +136,7 @@ ALTER TABLE "oauth_access_tokens"
 --> statement-breakpoint
 ALTER TABLE "oauth_access_tokens"
   ADD CONSTRAINT "oauth_access_tokens_user_id_user_id_fk"
-  FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;
+  FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
 ALTER TABLE "oauth_access_tokens"
   ADD CONSTRAINT "oauth_access_tokens_refresh_id_oauth_refresh_tokens_id_fk"
@@ -147,7 +148,7 @@ ALTER TABLE "oauth_consents"
 --> statement-breakpoint
 ALTER TABLE "oauth_consents"
   ADD CONSTRAINT "oauth_consents_user_id_user_id_fk"
-  FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;
+  FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
 ALTER TABLE "oidc_end_user_profiles"
   ADD CONSTRAINT "oidc_end_user_profiles_end_user_id_end_users_id_fk"

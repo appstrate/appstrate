@@ -44,6 +44,8 @@ import { getOidcAuthApi } from "../auth/api.ts";
 export interface AccessTokenClaims {
   /** Better Auth `user.id` (the JWT `sub` claim). */
   authUserId: string;
+  /** OAuth2 `azp` (authorized party) — the `client_id` of the issuing client. */
+  clientId?: string;
   /** Discriminant — see polymorphic fields below. */
   actorType?: "dashboard_user" | "end_user";
   email?: string;
@@ -214,6 +216,7 @@ export async function verifyEndUserAccessToken(
       : undefined;
   return {
     authUserId: payload.sub,
+    clientId: typeof extra.azp === "string" ? extra.azp : undefined,
     actorType,
     email: typeof extra.email === "string" ? extra.email : undefined,
     emailVerified: typeof extra.email_verified === "boolean" ? extra.email_verified : undefined,

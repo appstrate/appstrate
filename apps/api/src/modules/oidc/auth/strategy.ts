@@ -30,6 +30,7 @@ import type { OrgRole } from "../../../types/index.ts";
 import { logger } from "../../../lib/logger.ts";
 import { verifyEndUserAccessToken, type AccessTokenClaims } from "../services/enduser-token.ts";
 import { lookupEndUser } from "../services/enduser-mapping.ts";
+import { getClient } from "../services/oauth-admin.ts";
 import { scopesToPermissions } from "./claims.ts";
 
 export const oidcAuthStrategy: AuthStrategy = {
@@ -43,6 +44,38 @@ export const oidcAuthStrategy: AuthStrategy = {
     const token = authHeader.slice(7);
     const claims = await verifyEndUserAccessToken(token);
     if (!claims) return null;
+
+    // Defense-in-depth: reject tokens from disabled clients. The `azp`
+    // claim carries the OAuth client_id — load the client and verify it
+    // is still active. This adds one DB lookup per request; a short-TTL
+    // cache could optimize this later if it becomes a hot path.
+    if (claims.clientId) {
+      const client = await getClient(claims.clientId);
+      if (!client) {
+        logger.info("OIDC strategy: token references unknown client — rejecting", {
+          module: "oidc",
+          clientId: claims.clientId,
+        });
+        return null;
+      }
+      if (client.disabled) {
+        logger.info("OIDC strategy: token's client is disabled — rejecting", {
+          module: "oidc",
+          clientId: claims.clientId,
+        });
+        return null;
+      }
+      // Cross-validate actor_type vs client level to prevent confused deputy.
+      const expectedLevel = claims.actorType === "dashboard_user" ? "org" : "application";
+      if (claims.actorType && client.level !== expectedLevel) {
+        logger.warn("OIDC strategy: actor_type / client level mismatch — rejecting", {
+          module: "oidc",
+          actorType: claims.actorType,
+          clientLevel: client.level,
+        });
+        return null;
+      }
+    }
 
     if (claims.actorType === "dashboard_user") {
       return resolveDashboardUser(claims);

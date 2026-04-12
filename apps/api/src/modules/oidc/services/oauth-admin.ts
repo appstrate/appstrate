@@ -36,7 +36,7 @@
  * `rotateClientSecret` — subsequent reads never expose them.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, or, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
@@ -109,7 +109,10 @@ export type OAuthClientRecord = z.infer<typeof oauthClientBaseSchema>;
 export type OAuthClientWithSecret = z.infer<typeof oauthClientWithSecretSchema>;
 
 function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
-  const level: OAuthClientLevel = row.level === "org" ? "org" : "application";
+  if (row.level !== "org" && row.level !== "application") {
+    throw new Error(`OIDC: unexpected oauth_client.level value: ${String(row.level)}`);
+  }
+  const level: OAuthClientLevel = row.level;
   return {
     id: row.id,
     clientId: row.clientId,
@@ -142,6 +145,25 @@ export async function hashSecret(plaintext: string): Promise<string> {
   return Buffer.from(new Uint8Array(digest)).toString("hex");
 }
 
+/**
+ * Rebuild the `metadata` JSON column from the authoritative SQL columns.
+ * Plugins (customAccessTokenClaims) read `metadata` at token-mint time;
+ * keeping it in sync after every mutation prevents stale claim data.
+ */
+async function syncMetadata(row: typeof oauthClient.$inferSelect): Promise<void> {
+  const metadata: Record<string, unknown> = { level: row.level };
+  if (row.level === "org") metadata.referencedOrgId = row.referencedOrgId;
+  else metadata.referencedApplicationId = row.referencedApplicationId;
+  const current = row.metadata ? JSON.parse(row.metadata) : {};
+  const expected = JSON.stringify(metadata);
+  if (row.metadata !== expected && JSON.stringify(current) !== expected) {
+    await db
+      .update(oauthClient)
+      .set({ metadata: expected })
+      .where(eq(oauthClient.clientId, row.clientId));
+  }
+}
+
 // ─── Scope-filter helpers ─────────────────────────────────────────────────────
 //
 // Org-level clients are visible to any admin of the org. Application-level
@@ -160,17 +182,20 @@ export async function listClientsForApp(applicationId: string): Promise<OAuthCli
   return rows.map(mapRow);
 }
 
-/** Combined list for the admin UI — returns every client the caller's org can see. */
+/** Combined list for the admin UI — returns every client the caller's org can see in a single query. */
 export async function listClientsForOrgAndApps(
   orgId: string,
   applicationIds: string[],
 ): Promise<OAuthClientRecord[]> {
-  const orgLevel = await listClientsForOrg(orgId);
-  const appLevel: OAuthClientRecord[] = [];
-  for (const appId of applicationIds) {
-    appLevel.push(...(await listClientsForApp(appId)));
+  const conditions = [eq(oauthClient.referencedOrgId, orgId)];
+  if (applicationIds.length > 0) {
+    conditions.push(inArray(oauthClient.referencedApplicationId, applicationIds));
   }
-  return [...orgLevel, ...appLevel];
+  const rows = await db
+    .select()
+    .from(oauthClient)
+    .where(or(...conditions));
+  return rows.map(mapRow);
 }
 
 export async function getClient(clientId: string): Promise<OAuthClientRecord | null> {
@@ -269,41 +294,35 @@ export async function rotateClientSecret(clientId: string): Promise<OAuthClientW
   return row ? { ...mapRow(row), clientSecret: plaintextSecret } : null;
 }
 
-export async function setClientDisabled(
-  clientId: string,
-  disabled: boolean,
-): Promise<OAuthClientRecord | null> {
-  const [row] = await db
-    .update(oauthClient)
-    .set({ disabled, updatedAt: new Date() })
-    .where(eq(oauthClient.clientId, clientId))
-    .returning();
-  return row ? mapRow(row) : null;
+export interface UpdateClientInput {
+  redirectUris?: string[];
+  disabled?: boolean;
+  isFirstParty?: boolean;
 }
 
-export async function updateClientRedirectUris(
+export async function updateClient(
   clientId: string,
-  redirectUris: string[],
+  input: UpdateClientInput,
 ): Promise<OAuthClientRecord | null> {
-  assertValidRedirectUris(redirectUris);
-  const [row] = await db
-    .update(oauthClient)
-    .set({ redirectUris, updatedAt: new Date() })
-    .where(eq(oauthClient.clientId, clientId))
-    .returning();
-  return row ? mapRow(row) : null;
-}
+  if (input.redirectUris !== undefined) {
+    assertValidRedirectUris(input.redirectUris);
+  }
+  // Build a single SET clause — atomic, no partial-update risk.
+  const set: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.redirectUris !== undefined) set.redirectUris = input.redirectUris;
+  if (input.disabled !== undefined) set.disabled = input.disabled;
+  if (input.isFirstParty !== undefined) set.skipConsent = input.isFirstParty;
 
-export async function setClientFirstParty(
-  clientId: string,
-  isFirstParty: boolean,
-): Promise<OAuthClientRecord | null> {
   const [row] = await db
     .update(oauthClient)
-    .set({ skipConsent: isFirstParty, updatedAt: new Date() })
+    .set(set)
     .where(eq(oauthClient.clientId, clientId))
     .returning();
-  return row ? mapRow(row) : null;
+  if (!row) return null;
+  // Keep metadata JSON in sync with SQL columns — plugins read metadata
+  // at token-mint time via customAccessTokenClaims.
+  await syncMetadata(row);
+  return mapRow(row);
 }
 
 /**

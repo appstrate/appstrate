@@ -87,7 +87,7 @@ export const oauthClient = pgTable(
     requirePKCE: boolean("require_pkce"),
     metadata: text("metadata"),
     // ─── Appstrate polymorphic fields ────────────────────────────────────────
-    level: text("level").notNull(),
+    level: text("level", { enum: ["org", "application"] }).notNull(),
     referencedOrgId: uuid("referenced_org_id").references(() => organizations.id, {
       onDelete: "cascade",
     }),
@@ -103,14 +103,14 @@ export const oauthClient = pgTable(
 
 export const oauthRefreshToken = pgTable("oauth_refresh_tokens", {
   id: text("id").primaryKey(),
-  token: text("token").notNull(),
+  token: text("token").notNull().unique(),
   clientId: text("client_id")
     .notNull()
     .references(() => oauthClient.clientId, { onDelete: "cascade" }),
   sessionId: text("session_id").references(() => session.id, { onDelete: "set null" }),
   userId: text("user_id")
     .notNull()
-    .references(() => user.id),
+    .references(() => user.id, { onDelete: "cascade" }),
   referenceId: text("reference_id"),
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -126,7 +126,7 @@ export const oauthAccessToken = pgTable("oauth_access_tokens", {
     .notNull()
     .references(() => oauthClient.clientId, { onDelete: "cascade" }),
   sessionId: text("session_id").references(() => session.id, { onDelete: "set null" }),
-  userId: text("user_id").references(() => user.id),
+  userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
   referenceId: text("reference_id"),
   refreshId: text("refresh_id").references(() => oauthRefreshToken.id, { onDelete: "cascade" }),
   expiresAt: timestamp("expires_at"),
@@ -139,7 +139,7 @@ export const oauthConsent = pgTable("oauth_consents", {
   clientId: text("client_id")
     .notNull()
     .references(() => oauthClient.clientId, { onDelete: "cascade" }),
-  userId: text("user_id").references(() => user.id),
+  userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
   referenceId: text("reference_id"),
   scopes: text("scopes").array().notNull(),
   createdAt: timestamp("created_at").defaultNow(),

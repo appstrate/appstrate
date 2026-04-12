@@ -88,8 +88,8 @@ export function oidcBetterAuthPlugins(): unknown[] {
        * client registration via `services/oauth-admin.ts`) and returns a
        * snake_case claim payload compatible with RFC 9068 + OIDC Core.
        */
-      customAccessTokenClaims: async ({ user, scopes, metadata }) =>
-        buildClaimsForClient(user ?? null, metadata as ClientMetadata | undefined, scopes),
+      customAccessTokenClaims: async ({ user, metadata }) =>
+        buildClaimsForClient(user ?? null, metadata as ClientMetadata | undefined),
 
       /**
        * Surface the same polymorphic claims on /userinfo so satellites can
@@ -146,7 +146,6 @@ function boolOr(value: unknown, fallback: boolean): boolean {
 async function buildClaimsForClient(
   user: { id: string; email: string; name?: string | null; emailVerified?: boolean } | null,
   metadata: ClientMetadata | undefined,
-  _scopes: string[] | undefined,
 ): Promise<Record<string, unknown>> {
   if (!user) return {};
   const level = metadata?.level;
@@ -173,7 +172,9 @@ async function buildOrgLevelClaims(
       module: "oidc",
       userId: user.id,
     });
-    throw new Error("oidc: org-level oauth client missing referencedOrgId in metadata");
+    throw new APIError("BAD_REQUEST", {
+      message: "Invalid OAuth client configuration",
+    });
   }
   const [m] = await db
     .select({ role: organizationMembers.role })

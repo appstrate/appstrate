@@ -33,12 +33,9 @@ import {
   deleteClient,
   getClient,
   getClientOwningOrg,
-  listClientsForOrg,
-  listClientsForApp,
+  listClientsForOrgAndApps,
   rotateClientSecret,
-  setClientDisabled,
-  setClientFirstParty,
-  updateClientRedirectUris,
+  updateClient,
   OAuthAdminValidationError,
 } from "./services/oauth-admin.ts";
 import { isValidRedirectUri } from "./services/redirect-uri.ts";
@@ -61,19 +58,11 @@ const redirectUriSchema = z
   .url("redirectUris must be valid URLs")
   .refine(isValidRedirectUri, "redirectUri scheme or host is not allowed");
 
-const APPSTRATE_SCOPE_SET = new Set(APPSTRATE_SCOPES);
-const allowedScopeSchema = z
-  .string()
-  .min(1)
-  .refine((s) => APPSTRATE_SCOPE_SET.has(s), {
-    message: "scope must be one of the supported values (see GET /api/oauth/scopes)",
-  });
-
 const createOrgClientSchema = z.object({
   level: z.literal("org"),
   name: z.string().min(1).max(200),
   redirectUris: z.array(redirectUriSchema).min(1),
-  scopes: z.array(allowedScopeSchema).optional(),
+  scopes: z.array(z.string().min(1)).optional(),
   referencedOrgId: z.string().min(1),
   isFirstParty: z.boolean().optional(),
 });
@@ -82,7 +71,7 @@ const createApplicationClientSchema = z.object({
   level: z.literal("application"),
   name: z.string().min(1).max(200),
   redirectUris: z.array(redirectUriSchema).min(1),
-  scopes: z.array(allowedScopeSchema).optional(),
+  scopes: z.array(z.string().min(1)).optional(),
   referencedApplicationId: z.string().min(1),
   isFirstParty: z.boolean().optional(),
 });
@@ -193,14 +182,15 @@ export function createOidcRouter() {
     requirePermission("oauth-clients", "read"),
     async (c) => {
       const orgId = c.get("orgId");
-      const orgLevel = await listClientsForOrg(orgId);
-      // Apps owned by the org
       const appRows = await db
         .select({ id: applications.id })
         .from(applications)
         .where(eq(applications.orgId, orgId));
-      const appLevel = (await Promise.all(appRows.map((a) => listClientsForApp(a.id)))).flat();
-      return c.json({ object: "list", data: [...orgLevel, ...appLevel] });
+      const clients = await listClientsForOrgAndApps(
+        orgId,
+        appRows.map((a) => a.id),
+      );
+      return c.json({ object: "list", data: clients });
     },
   );
 
@@ -237,26 +227,24 @@ export function createOidcRouter() {
       const owning = await getClientOwningOrg(clientId);
       if (owning !== orgId) throw notFound("OAuth client not found");
 
-      let current = await getClient(clientId);
-      if (!current) throw notFound("OAuth client not found");
+      // Require admin/owner for isFirstParty — skipping consent is a trust escalation.
+      if (data.isFirstParty !== undefined) {
+        const orgRole = c.get("orgRole");
+        if (orgRole !== "owner" && orgRole !== "admin") {
+          throw forbidden("Only org admins can set isFirstParty");
+        }
+      }
 
       try {
-        if (data.redirectUris !== undefined) {
-          current = (await updateClientRedirectUris(clientId, data.redirectUris)) ?? current;
-        }
+        const updated = await updateClient(clientId, data);
+        if (!updated) throw notFound("OAuth client not found");
+        return c.json(updated);
       } catch (err) {
         if (err instanceof OAuthAdminValidationError) {
           throw invalidRequest(err.message, err.field);
         }
         throw err;
       }
-      if (data.disabled !== undefined) {
-        current = (await setClientDisabled(clientId, data.disabled)) ?? current;
-      }
-      if (data.isFirstParty !== undefined) {
-        current = (await setClientFirstParty(clientId, data.isFirstParty)) ?? current;
-      }
-      return c.json(current);
     },
   );
 
@@ -546,14 +534,27 @@ export function createOidcRouter() {
   // Satellites call this instead of /oauth2/end-session directly.
 
   router.get("/api/oauth/logout", rateLimitByIp(30), async (c: Context<AppEnv>) => {
-    const postLogoutUri = c.req.query("post_logout_redirect_uri") || "/";
+    const postLogoutUri = c.req.query("post_logout_redirect_uri");
+    const clientId = c.req.query("client_id");
 
     // Clear the BA session cookie so the next authorize starts fresh.
     c.header("set-cookie", "better-auth.session_token=; Path=/; HttpOnly; Max-Age=0", {
       append: true,
     });
 
-    return c.redirect(postLogoutUri, 302);
+    // Validate redirect URI against the client's registered URIs to prevent
+    // open redirect attacks (OWASP). Fall back to "/" if no URI or no client.
+    if (postLogoutUri && clientId) {
+      const client = await getClient(clientId);
+      if (client) {
+        const registeredUris = client.redirectUris ?? [];
+        if (registeredUris.includes(postLogoutUri)) {
+          return c.redirect(postLogoutUri, 302);
+        }
+      }
+    }
+
+    return c.redirect("/", 302);
   });
 
   // ── OIDC discovery ──────────────────────────────────────────────────────────
