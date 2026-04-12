@@ -9,7 +9,6 @@ export const webhooksPaths = {
         "Create a webhook endpoint. The secret is returned once in the response. Max 20 webhooks per org.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
         { $ref: "#/components/parameters/IdempotencyKey" },
       ],
       requestBody: {
@@ -17,38 +16,62 @@ export const webhooksPaths = {
         content: {
           "application/json": {
             schema: {
-              type: "object",
-              required: ["url", "events"],
-              properties: {
-                url: { type: "string", format: "uri", description: "HTTPS endpoint URL" },
-                events: {
-                  type: "array",
-                  items: {
-                    type: "string",
-                    enum: [
-                      "run.started",
-                      "run.success",
-                      "run.failed",
-                      "run.timeout",
-                      "run.cancelled",
-                    ],
+              oneOf: [
+                {
+                  type: "object",
+                  required: ["level", "url", "events"],
+                  properties: {
+                    level: { type: "string", enum: ["org"] },
+                    url: { type: "string", format: "uri" },
+                    events: {
+                      type: "array",
+                      items: {
+                        type: "string",
+                        enum: [
+                          "run.started",
+                          "run.success",
+                          "run.failed",
+                          "run.timeout",
+                          "run.cancelled",
+                        ],
+                      },
+                    },
+                    packageId: { type: ["string", "null"] },
+                    payloadMode: { type: "string", enum: ["full", "summary"], default: "full" },
+                    enabled: { type: "boolean", default: true },
                   },
-                  description: "Event types to subscribe to",
                 },
-                packageId: {
-                  type: ["string", "null"],
-                  description: "Filter by agent ID (null = all agents)",
+                {
+                  type: "object",
+                  required: ["level", "referencedApplicationId", "url", "events"],
+                  properties: {
+                    level: { type: "string", enum: ["application"] },
+                    referencedApplicationId: { type: "string" },
+                    url: { type: "string", format: "uri" },
+                    events: {
+                      type: "array",
+                      items: {
+                        type: "string",
+                        enum: [
+                          "run.started",
+                          "run.success",
+                          "run.failed",
+                          "run.timeout",
+                          "run.cancelled",
+                        ],
+                      },
+                    },
+                    packageId: { type: ["string", "null"] },
+                    payloadMode: { type: "string", enum: ["full", "summary"], default: "full" },
+                    enabled: { type: "boolean", default: true },
+                  },
                 },
-                payloadMode: {
-                  type: "string",
-                  enum: ["full", "summary"],
-                  default: "full",
-                  description: "Payload mode: full includes result/input, summary omits them",
-                },
-                enabled: { type: "boolean", default: true },
-              },
+              ],
+              discriminator: { propertyName: "level" },
             },
             example: {
+              level: "application",
+              referencedApplicationId: "app_cm4jkl013",
               url: "https://api.example.com/webhooks/appstrate",
               events: ["run.success", "run.failed"],
               packageId: null,
@@ -88,6 +111,7 @@ export const webhooksPaths = {
               example: {
                 id: "wh_cm1abc123",
                 object: "webhook",
+                level: "application",
                 applicationId: "app_cm4jkl013",
                 url: "https://example.com/webhooks/appstrate",
                 events: ["run.success", "run.failed"],
@@ -113,10 +137,16 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "List webhooks",
       description:
-        "List all webhooks for the current application (resolved from X-App-Id header or API key).",
+        "List webhooks visible to the current organization. When `applicationId` is passed, returns both org-level webhooks and application-level webhooks pinned to that app.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        {
+          name: "applicationId",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description: "Optional filter — include webhooks pinned to this application.",
+        },
       ],
       responses: {
         "200": {
@@ -140,6 +170,7 @@ export const webhooksPaths = {
                   {
                     id: "wh_cm1abc123",
                     object: "webhook",
+                    level: "application",
                     applicationId: "app_cm4jkl013",
                     url: "https://example.com/webhooks/appstrate",
                     events: ["run.success", "run.failed"],
@@ -167,7 +198,6 @@ export const webhooksPaths = {
       description: "Get a single webhook by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -183,6 +213,7 @@ export const webhooksPaths = {
               example: {
                 id: "wh_cm1abc123",
                 object: "webhook",
+                level: "application",
                 applicationId: "app_cm4jkl013",
                 url: "https://example.com/webhooks/appstrate",
                 events: ["run.success", "run.failed"],
@@ -208,7 +239,6 @@ export const webhooksPaths = {
         "Update webhook URL, events, filters, or enabled status. Cannot change the secret.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -252,6 +282,7 @@ export const webhooksPaths = {
               example: {
                 id: "wh_cm1abc123",
                 object: "webhook",
+                level: "application",
                 applicationId: "app_cm4jkl013",
                 url: "https://example.com/webhooks/appstrate",
                 events: ["run.success", "run.failed"],
@@ -276,7 +307,6 @@ export const webhooksPaths = {
       description: "Delete a webhook and all its delivery history.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -300,7 +330,6 @@ export const webhooksPaths = {
       description: "Send a synthetic test.ping event to verify webhook connectivity.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -341,7 +370,6 @@ export const webhooksPaths = {
         "Generate a new secret. The previous secret remains valid for 24 hours (grace period). During rotation, signatures are emitted with both secrets.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -377,7 +405,6 @@ export const webhooksPaths = {
       description: "List recent delivery attempts for a webhook (status, latency, response code).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
           name: "limit",
