@@ -80,7 +80,10 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
     // fast with a DNS error, but a `webhook_deliveries` row with status="failed"
     // is recorded regardless. That row is what we assert on to prove the
     // cross-module path fired.
-    const webhook = await createWebhook(orgId, applicationId, {
+    const webhook = await createWebhook({
+      level: "application",
+      orgId,
+      applicationId,
       url: "https://no-such-domain-xyz123.test/hook",
       events: ["run.success"],
     });
@@ -103,7 +106,10 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
   });
 
   it("does not deliver when the registered event does not match", async () => {
-    const webhook = await createWebhook(orgId, applicationId, {
+    const webhook = await createWebhook({
+      level: "application",
+      orgId,
+      applicationId,
       url: "https://no-such-domain-xyz123.test/hook",
       events: ["run.failed"],
     });

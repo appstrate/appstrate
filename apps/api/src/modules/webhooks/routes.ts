@@ -3,12 +3,19 @@
 /**
  * Webhooks API — CRUD + test ping + secret rotation + delivery history.
  *
- * All webhooks are application-scoped. The application context comes from
- * the X-App-Id header (resolved by app-context middleware).
+ * Polymorphic across scoping level (mirrors the OIDC oauth_clients model):
+ *   - `level: "org"`: fires for any application in the org
+ *   - `level: "application"`: pinned to a single app via `applicationId`
+ *
+ * Routes are org-scoped — the body discriminates on `level` at create time.
+ * `GET /api/webhooks?applicationId=` filters the list by pinned app.
  */
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { applications } from "@appstrate/db/schema";
 import type { AppEnv } from "../../types/index.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
@@ -23,15 +30,47 @@ import {
   buildEventEnvelope,
   webhookEventSchema,
 } from "./service.ts";
-import { parseBody } from "../../lib/errors.ts";
+import { parseBody, forbidden, invalidRequest } from "../../lib/errors.ts";
 import { requirePermission } from "../../middleware/require-permission.ts";
-export const createWebhookSchema = z.object({
+
+/**
+ * Assert that an application belongs to the given org.
+ * Throws `forbidden` if the app doesn't exist or belongs to another org.
+ */
+async function assertAppBelongsToOrg(applicationId: string, orgId: string): Promise<void> {
+  const [app] = await db
+    .select({ orgId: applications.orgId })
+    .from(applications)
+    .where(eq(applications.id, applicationId))
+    .limit(1);
+  if (!app || app.orgId !== orgId) {
+    throw forbidden("applicationId must belong to the current organization");
+  }
+}
+
+const createOrgWebhookSchema = z.object({
+  level: z.literal("org"),
   url: z.url("url must be a valid URL"),
   events: z.array(webhookEventSchema).min(1, "events is required"),
   packageId: z.string().nullable().optional(),
   payloadMode: z.enum(["full", "summary"]).optional(),
   enabled: z.boolean().optional(),
 });
+
+const createApplicationWebhookSchema = z.object({
+  level: z.literal("application"),
+  applicationId: z.string().startsWith("app_", "applicationId must start with 'app_' prefix"),
+  url: z.url("url must be a valid URL"),
+  events: z.array(webhookEventSchema).min(1, "events is required"),
+  packageId: z.string().nullable().optional(),
+  payloadMode: z.enum(["full", "summary"]).optional(),
+  enabled: z.boolean().optional(),
+});
+
+export const createWebhookSchema = z.discriminatedUnion("level", [
+  createOrgWebhookSchema,
+  createApplicationWebhookSchema,
+]);
 
 export const updateWebhookSchema = z.object({
   url: z.url().optional(),
@@ -52,26 +91,51 @@ export function createWebhooksRouter() {
     requirePermission("webhooks", "write"),
     async (c) => {
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId");
       const body = await c.req.json();
       const data = parseBody(createWebhookSchema, body);
 
-      const result = await createWebhook(orgId, applicationId, {
-        url: data.url,
-        events: data.events,
-        packageId: data.packageId,
-        payloadMode: data.payloadMode,
-        enabled: data.enabled,
-      });
+      if (data.level === "application") {
+        await assertAppBelongsToOrg(data.applicationId, orgId);
+      }
+
+      const result = await createWebhook(
+        data.level === "org"
+          ? {
+              level: "org",
+              orgId,
+              url: data.url,
+              events: data.events,
+              packageId: data.packageId,
+              payloadMode: data.payloadMode,
+              enabled: data.enabled,
+            }
+          : {
+              level: "application",
+              orgId,
+              applicationId: data.applicationId,
+              url: data.url,
+              events: data.events,
+              packageId: data.packageId,
+              payloadMode: data.payloadMode,
+              enabled: data.enabled,
+            },
+      );
       return c.json(result, 201);
     },
   );
 
-  // GET /api/webhooks — list webhooks for the current application
+  // GET /api/webhooks[?applicationId=...&all=true] — list webhooks visible to the caller
   router.get("/api/webhooks", rateLimit(300), requirePermission("webhooks", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
-    const result = await listWebhooks(orgId, applicationId);
+    const all = c.req.query("all") === "true";
+    const applicationId = c.req.query("applicationId") || undefined;
+    if (applicationId) {
+      if (!applicationId.startsWith("app_")) {
+        throw invalidRequest("applicationId must start with 'app_' prefix", "applicationId");
+      }
+      await assertAppBelongsToOrg(applicationId, orgId);
+    }
+    const result = await listWebhooks(orgId, { applicationId, all });
     return c.json({ object: "list", data: result });
   });
 
@@ -82,24 +146,22 @@ export function createWebhooksRouter() {
     requirePermission("webhooks", "read"),
     async (c) => {
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId");
-      const result = await getWebhook(orgId, applicationId, c.req.param("id")!);
+      const result = await getWebhook(orgId, c.req.param("id")!);
       return c.json(result);
     },
   );
 
-  // PUT /api/webhooks/:id — update webhook (url, events, filters — not secret)
+  // PUT /api/webhooks/:id — update webhook (url, events, filters — not secret/level)
   router.put(
     "/api/webhooks/:id",
     rateLimit(10),
     requirePermission("webhooks", "write"),
     async (c) => {
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId");
       const body = await c.req.json();
       const data = parseBody(updateWebhookSchema, body);
 
-      const result = await updateWebhook(orgId, applicationId, c.req.param("id")!, data);
+      const result = await updateWebhook(orgId, c.req.param("id")!, data);
       return c.json(result);
     },
   );
@@ -111,8 +173,7 @@ export function createWebhooksRouter() {
     requirePermission("webhooks", "delete"),
     async (c) => {
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId");
-      await deleteWebhook(orgId, applicationId, c.req.param("id")!);
+      await deleteWebhook(orgId, c.req.param("id")!);
       return c.body(null, 204);
     },
   );
@@ -124,9 +185,8 @@ export function createWebhooksRouter() {
     requirePermission("webhooks", "write"),
     async (c) => {
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId");
       const webhookId = c.req.param("id")!;
-      const wh = await getWebhook(orgId, applicationId, webhookId);
+      const wh = await getWebhook(orgId, webhookId);
 
       const { eventId, payload } = buildEventEnvelope({
         eventType: "test.ping",
@@ -146,8 +206,7 @@ export function createWebhooksRouter() {
     requirePermission("webhooks", "write"),
     async (c) => {
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId");
-      const result = await rotateSecret(orgId, applicationId, c.req.param("id")!);
+      const result = await rotateSecret(orgId, c.req.param("id")!);
       return c.json(result);
     },
   );
@@ -159,9 +218,8 @@ export function createWebhooksRouter() {
     requirePermission("webhooks", "read"),
     async (c) => {
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId");
       const limit = c.req.query("limit") ? Number(c.req.query("limit")) : 20;
-      const result = await listDeliveries(orgId, applicationId, c.req.param("id")!, limit);
+      const result = await listDeliveries(orgId, c.req.param("id")!, limit);
       return c.json({ object: "list", data: result });
     },
   );
