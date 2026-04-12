@@ -29,15 +29,18 @@ test.describe("Cross-app resource isolation", () => {
   // Agent is installed in both apps so we can create resources in both contexts
 
   // ─── Webhooks ──────────────────────────────
+  // Webhooks are org-scoped routes (not app-scoped). The `level` field in the
+  // request body determines event delivery scope (org vs application), and list
+  // filtering uses the `?applicationId=` query param. Individual webhook
+  // get/update/delete are accessible to any admin in the org.
 
-  test.describe("Webhook isolation", () => {
-    test("AppB cannot list AppA webhooks", async ({
+  test.describe("Webhook list filtering by application", () => {
+    test("App-level webhook does not appear in another app's filtered list", async ({
       request,
       apiClient: clientA,
       orgContext,
       orgOnlyClient,
     }) => {
-      // Create a second app
       const appB = await createApplication(orgOnlyClient, `AppB-wh-list-${Date.now()}`);
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
@@ -45,69 +48,74 @@ test.describe("Cross-app resource isolation", () => {
         appId: appB.id,
       });
 
-      // Create webhook in AppA (default app)
-      const wh = await createWebhook(clientA, { url: "https://appA.example.com/hook" });
+      // Create app-level webhook scoped to AppA (default app)
+      const wh = await createWebhook(clientA, {
+        level: "application",
+        applicationId: orgContext.org.defaultAppId,
+        url: "https://appA.example.com/hook",
+      });
 
-      // List from AppB — should not contain AppA's webhook
-      const res = await clientB.get("/webhooks");
+      // List filtered by AppB — should NOT contain AppA's app-level webhook
+      const res = await clientB.get(`/webhooks?applicationId=${appB.id}`);
       expect(res.status()).toBe(200);
       const body = await res.json();
       const ids = (body.data ?? []).map((w: { id: string }) => w.id);
       expect(ids).not.toContain(wh.id);
     });
 
-    test("AppB cannot access AppA webhook by ID", async ({
-      request,
+    test("App-level webhook does not appear in unfiltered list", async ({
       apiClient: clientA,
       orgContext,
-      orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-wh-det-${Date.now()}`);
-      const clientB = createApiClient(request, {
-        cookie: orgContext.auth.cookie,
-        orgId: orgContext.org.orgId,
-        appId: appB.id,
+      // Create app-level webhook
+      const wh = await createWebhook(clientA, {
+        level: "application",
+        applicationId: orgContext.org.defaultAppId,
       });
 
-      const wh = await createWebhook(clientA);
-      const res = await clientB.get(`/webhooks/${wh.id}`);
-      expect(res.status()).toBe(404);
+      // List without applicationId filter — returns only org-level webhooks
+      const res = await clientA.get("/webhooks");
+      expect(res.status()).toBe(200);
+      const body = await res.json();
+      const ids = (body.data ?? []).map((w: { id: string }) => w.id);
+      expect(ids).not.toContain(wh.id);
     });
 
-    test("AppB cannot update AppA webhook", async ({
-      request,
+    test("App-level webhook appears when listing with correct applicationId", async ({
       apiClient: clientA,
       orgContext,
-      orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-wh-upd-${Date.now()}`);
-      const clientB = createApiClient(request, {
-        cookie: orgContext.auth.cookie,
-        orgId: orgContext.org.orgId,
-        appId: appB.id,
+      const wh = await createWebhook(clientA, {
+        level: "application",
+        applicationId: orgContext.org.defaultAppId,
       });
 
-      const wh = await createWebhook(clientA);
-      const res = await clientB.put(`/webhooks/${wh.id}`, { url: "https://hacked.com" });
-      expect(res.status()).toBe(404);
+      const res = await clientA.get(`/webhooks?applicationId=${orgContext.org.defaultAppId}`);
+      expect(res.status()).toBe(200);
+      const body = await res.json();
+      const ids = (body.data ?? []).map((w: { id: string }) => w.id);
+      expect(ids).toContain(wh.id);
     });
 
-    test("AppB cannot delete AppA webhook", async ({
+    test("Org-level webhook appears in all application-filtered lists", async ({
       request,
       apiClient: clientA,
       orgContext,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-wh-del-${Date.now()}`);
-      const clientB = createApiClient(request, {
-        cookie: orgContext.auth.cookie,
-        orgId: orgContext.org.orgId,
-        appId: appB.id,
+      const appB = await createApplication(orgOnlyClient, `AppB-wh-org-${Date.now()}`);
+
+      const wh = await createWebhook(clientA, {
+        level: "org",
+        url: "https://org.example.com/hook",
       });
 
-      const wh = await createWebhook(clientA);
-      const res = await clientB.delete(`/webhooks/${wh.id}`);
-      expect(res.status()).toBe(404);
+      // Org-level webhooks appear when filtering by any applicationId
+      const res = await clientA.get(`/webhooks?applicationId=${appB.id}`);
+      expect(res.status()).toBe(200);
+      const body = await res.json();
+      const ids = (body.data ?? []).map((w: { id: string }) => w.id);
+      expect(ids).toContain(wh.id);
     });
   });
 
