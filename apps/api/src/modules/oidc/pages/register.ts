@@ -21,6 +21,14 @@ export interface RegisterPageProps {
   csrfToken: string;
   branding: ResolvedAppBranding;
   socialProviders?: { google?: boolean; github?: boolean };
+  /**
+   * Kept for type-parity with `LoginPageProps.allowSignup` so route
+   * handlers can pass a single `allowSignupForClient(...)` result to every
+   * page renderer. In practice this component is never rendered with
+   * `allowSignup=false` — the register GET handler returns an error page
+   * in that case instead of calling this function.
+   */
+  allowSignup?: boolean;
 }
 
 export function renderRegisterPage(props: RegisterPageProps): RawHtml {

@@ -92,10 +92,78 @@ describe("OAuth clients admin routes (polymorphic)", () => {
       level: string;
       referencedOrgId: string | null;
       referencedApplicationId: string | null;
+      allowSignup: boolean;
+      signupRole: string;
     };
     expect(body.level).toBe("org");
     expect(body.referencedOrgId).toBe(ctx.orgId);
     expect(body.referencedApplicationId).toBeNull();
+    // Defaults when signup policy is not specified.
+    expect(body.allowSignup).toBe(false);
+    expect(body.signupRole).toBe("member");
+  });
+
+  it("POST accepts org-level signup policy fields on create", async () => {
+    const res = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(orgLevelBody(ctx, { allowSignup: true, signupRole: "admin" })),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { allowSignup: boolean; signupRole: string };
+    expect(body.allowSignup).toBe(true);
+    expect(body.signupRole).toBe("admin");
+  });
+
+  it("POST rejects signupRole=owner at the Zod boundary (400)", async () => {
+    const res = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(orgLevelBody(ctx, { allowSignup: true, signupRole: "owner" })),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST rejects signup policy fields on application-level clients (400)", async () => {
+    const res = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(applicationLevelBody(ctx, { allowSignup: true })),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH updates allowSignup + signupRole on an org-level client", async () => {
+    const createRes = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(orgLevelBody(ctx)),
+    });
+    const created = (await createRes.json()) as { clientId: string };
+    const patchRes = await app.request(`/api/oauth/clients/${created.clientId}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ allowSignup: true, signupRole: "viewer" }),
+    });
+    expect(patchRes.status).toBe(200);
+    const updated = (await patchRes.json()) as { allowSignup: boolean; signupRole: string };
+    expect(updated.allowSignup).toBe(true);
+    expect(updated.signupRole).toBe("viewer");
+  });
+
+  it("PATCH rejects signup policy fields on application-level clients (400)", async () => {
+    const createRes = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(applicationLevelBody(ctx)),
+    });
+    const created = (await createRes.json()) as { clientId: string };
+    const patchRes = await app.request(`/api/oauth/clients/${created.clientId}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ allowSignup: true }),
+    });
+    expect(patchRes.status).toBe(400);
   });
 
   it("POST rejects dashboard client for a different org (403)", async () => {

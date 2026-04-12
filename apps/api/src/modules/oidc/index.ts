@@ -34,6 +34,7 @@ import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
 import { oidcAuthStrategy } from "./auth/strategy.ts";
 import { oidcBetterAuthPlugins } from "./auth/plugins.ts";
+import { oidcBeforeSignupGuard, oidcAfterSignupHandler } from "./auth/signup-guard.ts";
 import { createOidcRouter, createOAuthClientSchema, updateOAuthClientSchema } from "./routes.ts";
 import { oidcPaths } from "./openapi/paths.ts";
 import { oidcSchemas } from "./openapi/schemas.ts";
@@ -148,6 +149,27 @@ const oidcModule: AppstrateModule = {
   },
 
   features: { oidc: true },
+
+  hooks: {
+    // Blocks the creation of orphan Better Auth users when a visitor tries
+    // to sign up through an org-level OAuth client with `allow_signup=false`.
+    // The guard reads the signed `oidc_pending_client` cookie set by the
+    // OIDC entry pages (`GET /api/oauth/{login,register,magic-link}`) to
+    // identify which client is in play — the cookie survives the social
+    // round-trip that BA's native `/api/auth/sign-in/social` bounces through.
+    // Pass-through on every signup that is not gated by an org-level client.
+    beforeSignup: async (email, ctx) => {
+      await oidcBeforeSignupGuard({ user: { email }, headers: ctx?.headers ?? null });
+    },
+    // Symmetric post-signup: on a BA user freshly created through an
+    // org-level client with `allowSignup=true`, auto-join them to the org
+    // before the social flow continues to `/api/auth/oauth2/authorize`. See
+    // `oidcAfterSignupHandler` docstring for why `buildOrgLevelClaims` alone
+    // isn't enough for the social code path.
+    afterSignup: async (user, ctx) => {
+      await oidcAfterSignupHandler({ user, headers: ctx?.headers ?? null });
+    },
+  },
 };
 
 export default oidcModule;

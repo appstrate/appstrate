@@ -76,12 +76,16 @@ import { isValidRedirectUri } from "./redirect-uri.ts";
 
 export type OAuthClientLevel = "instance" | "org" | "application";
 
+export type OAuthAdminValidationField =
+  | "scopes"
+  | "redirectUris"
+  | "referencedOrgId"
+  | "referencedApplicationId"
+  | "signupPolicy";
+
 export class OAuthAdminValidationError extends Error {
-  readonly field: "scopes" | "redirectUris" | "referencedOrgId" | "referencedApplicationId";
-  constructor(
-    field: "scopes" | "redirectUris" | "referencedOrgId" | "referencedApplicationId",
-    message: string,
-  ) {
+  readonly field: OAuthAdminValidationField;
+  constructor(field: OAuthAdminValidationField, message: string) {
     super(message);
     this.name = "OAuthAdminValidationError";
     this.field = field;
@@ -115,6 +119,15 @@ function assertValidRedirectUris(uris: readonly string[]): void {
   }
 }
 
+/**
+ * Role allowlist for org-level auto-provisioning. `owner` is intentionally
+ * excluded at the service, DB, and UI layers: self-promotion to owner via a
+ * misconfigured client is an unacceptable operational risk. Admins who
+ * genuinely need a new owner must promote after the fact.
+ */
+export const SIGNUP_ROLE_ALLOWED = ["admin", "member", "viewer"] as const;
+export type SignupRole = (typeof SIGNUP_ROLE_ALLOWED)[number];
+
 export const oauthClientBaseSchema = z.object({
   id: z.string(),
   clientId: z.string(),
@@ -127,6 +140,10 @@ export const oauthClientBaseSchema = z.object({
   scopes: z.array(z.string()),
   disabled: z.boolean(),
   isFirstParty: z.boolean(),
+  /** Org-level: whether non-members are auto-joined on first sign-in. Defaults to `false`. */
+  allowSignup: z.boolean(),
+  /** Org-level: role assigned on auto-join. `owner` forbidden. Defaults to `"member"`. */
+  signupRole: z.enum(SIGNUP_ROLE_ALLOWED),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
 });
@@ -152,6 +169,14 @@ function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
   if (!isKnownLevel(row.level)) {
     throw new Error(`OIDC: unexpected oauth_client.level value: ${String(row.level)}`);
   }
+  // Drizzle returns `signup_role` as `string` (no enum narrowing on reads).
+  // Narrow it back to the allowlist and fall back to `"member"` on any
+  // unexpected value — the DB CHECK constraint prevents bad values from
+  // ever being written, so this branch is defense in depth against
+  // out-of-band SQL mutations.
+  const signupRole: SignupRole = (SIGNUP_ROLE_ALLOWED as readonly string[]).includes(row.signupRole)
+    ? (row.signupRole as SignupRole)
+    : "member";
   return {
     id: row.id,
     clientId: row.clientId,
@@ -164,6 +189,8 @@ function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
     scopes: row.scopes ?? [],
     disabled: row.disabled ?? false,
     isFirstParty: row.skipConsent ?? false,
+    allowSignup: row.allowSignup ?? false,
+    signupRole,
     createdAt: row.createdAt ? row.createdAt.toISOString() : null,
     updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
   };
@@ -312,6 +339,10 @@ export interface CreateOrgClientInput {
   scopes?: string[];
   referencedOrgId: string;
   isFirstParty?: boolean;
+  /** Defaults to `false`. Only honored for org-level clients. */
+  allowSignup?: boolean;
+  /** Defaults to `"member"`. Only honored for org-level clients. `owner` forbidden. */
+  signupRole?: SignupRole;
 }
 
 export interface CreateApplicationClientInput {
@@ -348,13 +379,38 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
   const hashedSecret = await hashSecret(plaintextSecret);
   const now = new Date();
 
-  const metadata: Record<string, unknown> = { level: input.level };
+  // `clientId` is stashed alongside the polymorphic fields so the
+  // `customAccessTokenClaims` closure can recover the client identity from
+  // its `metadata` argument (Better Auth's oauth-provider plugin does not
+  // pass `client.clientId` to the closure directly). Immutable — the unique
+  // `client_id` column never changes for the client's lifetime, so no
+  // drift with the SQL column.
+  const metadata: Record<string, unknown> = { level: input.level, clientId };
   if (input.level === "org") {
     metadata.referencedOrgId = input.referencedOrgId;
   } else if (input.level === "application") {
     metadata.referencedApplicationId = input.referencedApplicationId;
   }
   // instance: no FK fields in metadata
+
+  // Org-level signup policy. Mutable (unlike the rest of `metadata`) so it
+  // lives only in dedicated SQL columns — the plugin reads it at token mint
+  // via `loadOrgClientPolicy` (backed by `getClientCached`) rather than the
+  // frozen metadata JSON. Rejected on application/instance clients to
+  // prevent silent-ignore footguns.
+  if (input.level === "org") {
+    // no-op — defaults apply if unset
+  } else if (
+    (input as { allowSignup?: unknown }).allowSignup !== undefined ||
+    (input as { signupRole?: unknown }).signupRole !== undefined
+  ) {
+    throw new OAuthAdminValidationError(
+      "signupPolicy",
+      "OIDC: allowSignup / signupRole are only valid for org-level clients",
+    );
+  }
+  const allowSignup = input.level === "org" ? (input.allowSignup ?? false) : false;
+  const signupRole: SignupRole = input.level === "org" ? (input.signupRole ?? "member") : "member";
 
   const inserted = await db
     .insert(oauthClient)
@@ -371,6 +427,8 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
       referencedApplicationId: input.level === "application" ? input.referencedApplicationId : null,
       metadata: JSON.stringify(metadata),
       skipConsent: input.isFirstParty ?? false,
+      allowSignup,
+      signupRole,
       disabled: false,
       type: "web",
       tokenEndpointAuthMethod: "client_secret_basic",
@@ -413,6 +471,10 @@ export interface UpdateClientInput {
   scopes?: string[];
   disabled?: boolean;
   isFirstParty?: boolean;
+  /** Org-level only — rejected on app/instance clients with a clear error. */
+  allowSignup?: boolean;
+  /** Org-level only — rejected on app/instance clients. `owner` forbidden. */
+  signupRole?: SignupRole;
 }
 
 export async function updateClient(
@@ -425,6 +487,20 @@ export async function updateClient(
   if (input.scopes !== undefined) {
     assertValidScopes(input.scopes);
   }
+
+  // Reject signup policy updates on non-org clients early — the caller
+  // probably meant to PATCH a different client. Silently ignoring would
+  // hide configuration mistakes.
+  if (input.allowSignup !== undefined || input.signupRole !== undefined) {
+    const existing = await getClient(clientId);
+    if (existing && existing.level !== "org") {
+      throw new OAuthAdminValidationError(
+        "signupPolicy",
+        "OIDC: allowSignup / signupRole are only valid for org-level clients",
+      );
+    }
+  }
+
   // Build a single SET clause — atomic, no partial-update risk.
   const set: Record<string, unknown> = { updatedAt: new Date() };
   if (input.redirectUris !== undefined) set.redirectUris = input.redirectUris;
@@ -433,6 +509,8 @@ export async function updateClient(
   if (input.scopes !== undefined) set.scopes = input.scopes;
   if (input.disabled !== undefined) set.disabled = input.disabled;
   if (input.isFirstParty !== undefined) set.skipConsent = input.isFirstParty;
+  if (input.allowSignup !== undefined) set.allowSignup = input.allowSignup;
+  if (input.signupRole !== undefined) set.signupRole = input.signupRole;
 
   const [row] = await db
     .update(oauthClient)

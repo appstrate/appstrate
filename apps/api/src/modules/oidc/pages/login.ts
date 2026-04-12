@@ -31,6 +31,17 @@ export interface LoginPageProps {
   socialProviders?: { google?: boolean; github?: boolean };
   /** Whether SMTP is configured (enables forgot password + magic link). */
   smtpEnabled?: boolean;
+  /**
+   * Whether signup is open for this client's underlying org. When `false`
+   * (org-level client with `allow_signup=false`), only the "Créer un
+   * compte" CTA is hidden. Social sign-in and magic-link stay visible so
+   * existing members who linked a Google/GitHub account (or never set a
+   * password) can still sign in. Orphan user creation is prevented at the
+   * BA `beforeSignup` hook layer and by `magicLink({ disableSignUp: true })`,
+   * so showing these buttons is safe. Defaults to `true` (backward
+   * compatible for app/instance clients and pre-feature callers).
+   */
+  allowSignup?: boolean;
 }
 
 export function renderLoginPage(props: LoginPageProps): RawHtml {
@@ -41,6 +52,13 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
   // — it POSTs to Better Auth's native `/api/auth/sign-in/social` the way
   // the official `authClient.signIn.social()` SDK does, so BA's signed
   // `better-auth.state` cookie flows natively without any server bridge.
+  //
+  // Social + magic-link stay visible regardless of `allowSignup` — an
+  // existing member may have linked a Google/GitHub account or rely on
+  // magic-link to sign in without a password. Orphan creation on closed
+  // clients is blocked by the `beforeSignup` BA hook and
+  // `magicLink({ disableSignUp: true })`.
+  const allowSignup = props.allowSignup ?? true;
   const google = props.socialProviders?.google ?? false;
   const github = props.socialProviders?.github ?? false;
   const magicLink = props.smtpEnabled ?? false;
@@ -118,10 +136,12 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
         `
       : null}
     <div class="footer-links">
-      <a href="${registerUrl}">Créer un compte</a>
-      ${props.smtpEnabled
+      ${allowSignup ? html`<a href="${registerUrl}">Créer un compte</a>` : null}
+      ${allowSignup && props.smtpEnabled
         ? html`<span class="sep">·</span><a href="${forgotPasswordUrl}">Mot de passe oublié ?</a>`
-        : null}
+        : props.smtpEnabled
+          ? html`<a href="${forgotPasswordUrl}">Mot de passe oublié ?</a>`
+          : null}
     </div>
     ${google || github ? renderSocialSignInScript() : null}
   `;

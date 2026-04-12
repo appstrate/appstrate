@@ -29,6 +29,8 @@ function baseRow(overrides: Partial<Row>): Row {
     scopes: ["openid"],
     disabled: false,
     skipConsent: false,
+    allowSignup: false,
+    signupRole: "member",
     createdAt: new Date("2026-01-01T00:00:00Z"),
     updatedAt: new Date("2026-01-01T00:00:00Z"),
     metadata: null,
@@ -97,5 +99,25 @@ describe("mapRowSafe", () => {
       });
       expect(mapRowSafe(row)?.level).toBe(level);
     }
+  });
+
+  it("exposes allowSignup + signupRole on the mapped record", () => {
+    const row = baseRow({ level: "org", allowSignup: true, signupRole: "viewer" });
+    const mapped = mapRowSafe(row);
+    expect(mapped?.allowSignup).toBe(true);
+    expect(mapped?.signupRole).toBe("viewer");
+  });
+
+  it("defensively narrows an unexpected signupRole string back to member", () => {
+    // The DB CHECK constraint prevents out-of-band writes of bad roles,
+    // but the mapper still guards against corrupted rows so a single bad
+    // value cannot leak an unknown role into the token claims.
+    const row = baseRow({
+      level: "org",
+      allowSignup: true,
+      signupRole: "owner" as unknown as "admin",
+    });
+    const mapped = mapRowSafe(row);
+    expect(mapped?.signupRole).toBe("member");
   });
 });

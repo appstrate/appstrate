@@ -12,9 +12,10 @@ import { useCurrentApplicationId } from "@/hooks/use-current-application";
 import type {
   OAuthClientRecord as OAuthClient,
   OAuthClientWithSecret,
+  SignupRole,
 } from "../../../../../api/src/modules/oidc/services/oauth-admin.ts";
 
-export type { OAuthClient, OAuthClientWithSecret };
+export type { OAuthClient, OAuthClientWithSecret, SignupRole };
 
 export function useOAuthClients(level?: "org" | "application") {
   const orgId = useCurrentOrgId();
@@ -58,6 +59,9 @@ export function useCreateOAuthClient(level?: "org" | "application") {
       postLogoutRedirectUris?: string[];
       scopes?: string[];
       isFirstParty?: boolean;
+      /** Org-level only — auto-join policy. `owner` forbidden. */
+      allowSignup?: boolean;
+      signupRole?: SignupRole;
     }) =>
       api<OAuthClientWithSecret>("/oauth/clients", {
         method: "POST",
@@ -87,6 +91,9 @@ export function useUpdateOAuthClient() {
         scopes?: string[];
         disabled?: boolean;
         isFirstParty?: boolean;
+        /** Org-level only — auto-join policy. `owner` forbidden. */
+        allowSignup?: boolean;
+        signupRole?: SignupRole;
       };
     }) =>
       api<OAuthClient>(`/oauth/clients/${clientId}`, {

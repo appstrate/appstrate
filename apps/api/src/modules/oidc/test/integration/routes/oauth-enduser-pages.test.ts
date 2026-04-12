@@ -406,4 +406,156 @@ describe("Public end-user pages — /api/oauth/*", () => {
       }
     });
   });
+
+  describe("Org-level signup policy", () => {
+    async function registerOrgClient(
+      c: TestContext,
+      overrides: { allowSignup?: boolean; signupRole?: "admin" | "member" | "viewer" } = {},
+    ): Promise<{ clientId: string }> {
+      const body = {
+        level: "org" as const,
+        name: "Org Portal",
+        redirectUris: ["https://orgportal.example.com/cb"],
+        referencedOrgId: c.orgId,
+        ...overrides,
+      };
+      const res = await app.request("/api/oauth/clients", {
+        method: "POST",
+        headers: { ...authHeaders(c), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return (await res.json()) as { clientId: string };
+    }
+
+    it("GET /register renders an error page when allowSignup=false on an org-level client", async () => {
+      const { clientId } = await registerOrgClient(ctx, { allowSignup: false });
+      const res = await app.request(
+        `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=x`,
+      );
+      expect(res.status).toBe(403);
+      const html = await res.text();
+      expect(html).toContain("Inscription fermée");
+      // No form, no CSRF field
+      expect(html).not.toContain('name="password"');
+    });
+
+    it("GET /register issues the pending-client cookie when allowSignup=true", async () => {
+      const { clientId } = await registerOrgClient(ctx, { allowSignup: true });
+      const res = await app.request(
+        `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=x`,
+      );
+      expect(res.status).toBe(200);
+      const setCookie = res.headers.get("set-cookie") ?? "";
+      expect(setCookie).toContain("oidc_pending_client=");
+    });
+
+    it("GET /login hides the register CTA when allowSignup=false, keeps social + magic-link", async () => {
+      const { clientId } = await registerOrgClient(ctx, { allowSignup: false });
+      const res = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=x`,
+      );
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      // Password form stays
+      expect(html).toContain('name="password"');
+      // "Créer un compte" link is hidden (the only signup CTA gated by policy)
+      expect(html).not.toContain("Créer un compte");
+      // Social + magic-link stay available for existing members — orphan
+      // creation is blocked at the BA beforeSignup hook + magicLink's
+      // `disableSignUp: true`, so showing them is safe.
+    });
+
+    it("POST /login rejects an existing auth user who is not a member and allowSignup=false", async () => {
+      // Create a second auth user (not a member of `ctx.orgId`).
+      const outsider = await createTestUser({ email: "outsider@example.com" });
+      const { clientId } = await registerOrgClient(ctx, { allowSignup: false });
+
+      // Prime CSRF via GET so we have a valid token paired with a cookie.
+      const getRes = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=x`,
+      );
+      const csrfCookie = (getRes.headers.get("set-cookie") ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith("oidc_csrf="));
+      expect(csrfCookie).toBeDefined();
+      const csrfToken = csrfCookie!.slice("oidc_csrf=".length).split(";")[0];
+
+      const form = new URLSearchParams({
+        _csrf: csrfToken!,
+        email: outsider.email,
+        // `createTestUser` uses a default password; import to keep in sync
+        password: "TestPassword123!",
+      });
+
+      const postRes = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=x`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            cookie: csrfCookie!,
+          },
+          body: form.toString(),
+        },
+      );
+      expect(postRes.status).toBe(403);
+      const html = await postRes.text();
+      // HTML-escaped apostrophe — the renderer runs the error string
+      // through the same `escapeHtml` the rest of the layout uses.
+      expect(html).toContain("n&#39;est pas membre");
+    });
+
+    it("POST /login auto-joins an existing auth user as signupRole when allowSignup=true", async () => {
+      const outsider = await createTestUser({ email: "newbie@example.com" });
+      const { clientId } = await registerOrgClient(ctx, {
+        allowSignup: true,
+        signupRole: "admin",
+      });
+
+      const getRes = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=x`,
+      );
+      const csrfCookie = (getRes.headers.get("set-cookie") ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith("oidc_csrf="));
+      const csrfToken = csrfCookie!.slice("oidc_csrf=".length).split(";")[0];
+
+      const form = new URLSearchParams({
+        _csrf: csrfToken!,
+        email: outsider.email,
+        password: "TestPassword123!",
+      });
+
+      const postRes = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=x`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            cookie: csrfCookie!,
+          },
+          body: form.toString(),
+        },
+      );
+      // Successful login → 302 redirect to /api/auth/oauth2/authorize.
+      expect(postRes.status).toBe(302);
+      expect(postRes.headers.get("location")).toContain("/api/auth/oauth2/authorize");
+
+      // Membership row was created with the configured role.
+      const { organizationMembers } = await import("@appstrate/db/schema");
+      const { and, eq: eqOp } = await import("drizzle-orm");
+      const [row] = await db
+        .select({ role: organizationMembers.role })
+        .from(organizationMembers)
+        .where(
+          and(
+            eqOp(organizationMembers.userId, outsider.id),
+            eqOp(organizationMembers.orgId, ctx.orgId),
+          ),
+        );
+      expect(row?.role).toBe("admin");
+    });
+  });
 });

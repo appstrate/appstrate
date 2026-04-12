@@ -14,11 +14,50 @@ import { getEnv } from "@appstrate/env";
 const env = getEnv();
 
 // ─── Before-signup hook (injected at boot via module system) ───
+//
+// The platform exposes a single injection slot consumed by the module
+// loader (`apps/api/src/lib/boot.ts`) which fans out to every registered
+// module's `beforeSignup` hook. The signature passes both the legacy
+// `email` string AND an optional `ctx` carrying the request headers — so
+// modules that need to read request state (e.g. the OIDC pending-client
+// cookie in `auth/signup-guard.ts`) can do so without adding a parallel
+// hook channel. Modules that only care about the email (e.g. cloud's
+// free-tier handler) keep their existing `(email) => {...}` shape —
+// extra arguments are dropped by JavaScript, so this is backward
+// compatible.
 
-let _beforeSignupHook: ((email: string) => void | Promise<void>) | null = null;
+export interface BeforeSignupContext {
+  /** Request headers when the signup happens inside an HTTP request, `null` otherwise. */
+  headers: Headers | null;
+}
 
-export function setBeforeSignupHook(hook: (email: string) => void | Promise<void>): void {
+/**
+ * Post-creation context passed to `afterSignup` hooks. Unlike `before`, we
+ * now have the committed BA user id — modules can attach it to their own
+ * tables (e.g. OIDC auto-joining the user to an org) inside the same
+ * transaction as the user creation.
+ */
+export interface AfterSignupContext {
+  headers: Headers | null;
+}
+
+let _beforeSignupHook: ((email: string, ctx: BeforeSignupContext) => void | Promise<void>) | null =
+  null;
+
+let _afterSignupHook:
+  | ((user: { id: string; email: string }, ctx: AfterSignupContext) => void | Promise<void>)
+  | null = null;
+
+export function setBeforeSignupHook(
+  hook: (email: string, ctx: BeforeSignupContext) => void | Promise<void>,
+): void {
   _beforeSignupHook = hook;
+}
+
+export function setAfterSignupHook(
+  hook: (user: { id: string; email: string }, ctx: AfterSignupContext) => void | Promise<void>,
+): void {
+  _afterSignupHook = hook;
 }
 
 // ─── SMTP transport (lazy, only if configured) ─────────────
@@ -220,6 +259,7 @@ function buildAuth(
     ...(smtpEnabled && {
       emailVerification: {
         sendOnSignUp: true,
+        sendOnSignIn: true,
         autoSignInAfterVerification: true,
         sendVerificationEmail: async ({ user, url }) => {
           try {
@@ -287,17 +327,50 @@ function buildAuth(
     databaseHooks: {
       user: {
         create: {
-          before: async (user) => {
+          before: async (user, context) => {
+            const ctx = context as
+              | {
+                  headers?: Headers;
+                  request?: { headers?: Headers };
+                  path?: string;
+                }
+              | null
+              | undefined;
             if (_beforeSignupHook) {
-              await _beforeSignupHook(user.email);
+              // BA stores request headers in two possible locations depending
+              // on the code path: `context.headers` for email/password signup,
+              // `context.request.headers` for social OAuth callbacks. Match
+              // BA's own fallback chain (see internal-adapter.mjs) — missing
+              // this second path was the bug that let social signups bypass
+              // the OIDC `beforeSignup` guard. `context` is `null` when BA
+              // creates users outside an HTTP request (seeds, admin scripts).
+              const headers = ctx?.headers ?? ctx?.request?.headers ?? null;
+              await _beforeSignupHook(user.email, { headers });
+            }
+            // Auto-verify email on social signup. BA sets `emailVerified`
+            // from the provider's `email_verified` claim, which some
+            // providers omit or return as `false` — trapping the new user
+            // on the verification screen even though the social provider
+            // already asserted ownership. Force-verify when the signup is
+            // coming from BA's OAuth callback endpoint (`/callback/:id`).
+            if (ctx?.path === "/callback/:id") {
+              return { data: { emailVerified: true } };
             }
           },
-          after: async (user) => {
+          after: async (user, context) => {
             await db.insert(profiles).values({
               id: user.id,
               displayName: user.name || user.email,
               language: "fr",
             });
+            if (_afterSignupHook) {
+              const ctx = context as
+                | { headers?: Headers; request?: { headers?: Headers } }
+                | null
+                | undefined;
+              const headers = ctx?.headers ?? ctx?.request?.headers ?? null;
+              await _afterSignupHook({ id: user.id, email: user.email }, { headers });
+            }
           },
         },
       },

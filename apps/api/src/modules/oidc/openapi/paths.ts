@@ -31,6 +31,17 @@ const orgLevelClientRequest = {
     scopes: { type: "array", items: { type: "string" } },
     referencedOrgId: { type: "string" },
     isFirstParty: { type: "boolean" },
+    allowSignup: {
+      type: "boolean",
+      description:
+        "When `true`, users signing in for the first time through this client are auto-joined to `referencedOrgId` with `signupRole`. When `false` (default), non-members are rejected. Only meaningful for org-level clients.",
+    },
+    signupRole: {
+      type: "string",
+      enum: ["admin", "member", "viewer"],
+      description:
+        "Role assigned on auto-join. `owner` is deliberately excluded to prevent self-promotion via a misconfigured client. Defaults to `member`.",
+    },
   },
 };
 
@@ -82,6 +93,16 @@ const updateClientRequest = {
     },
     disabled: { type: "boolean" },
     isFirstParty: { type: "boolean" },
+    allowSignup: {
+      type: "boolean",
+      description:
+        "Org-level only. When `true`, users signing in for the first time through this client are auto-joined to the referenced org with `signupRole`. Rejected with 400 on application/instance clients.",
+    },
+    signupRole: {
+      type: "string",
+      enum: ["admin", "member", "viewer"],
+      description: "Org-level only. Role assigned on auto-join. `owner` forbidden.",
+    },
   },
 };
 

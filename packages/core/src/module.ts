@@ -224,12 +224,54 @@ export interface AppstrateModule {
 //   Events (broadcast-to-all): onX
 // ---------------------------------------------------------------------------
 
+/**
+ * Context passed alongside the `beforeSignup` hook's `email` argument. The
+ * second argument is optional for backward compatibility: existing modules
+ * that declare `async (email) => {...}` continue to work unchanged
+ * (JavaScript silently drops extra arguments).
+ *
+ * Modules that need to read request-scoped state (e.g. a signed cookie
+ * pinning an OAuth client for the in-flight signup) should read from
+ * `ctx.headers`. The headers are `null` when BA creates the user outside
+ * an HTTP context (seeds, admin scripts).
+ */
+export interface BeforeSignupContext {
+  headers: Headers | null;
+}
+
+/**
+ * Context passed to the `afterSignup` hook. Includes the committed BA user
+ * id so modules can attach the user to their own tables (e.g. OIDC
+ * auto-joining the user to an org based on the in-flight OAuth client).
+ */
+export interface AfterSignupContext {
+  headers: Headers | null;
+}
+
 /** Known hooks and their signatures. */
 export interface ModuleHooks {
   /** Pre-run gate — return a rejection to block the run, or null/undefined to allow. */
   beforeRun: (params: BeforeRunParams) => Promise<RunRejection | null>;
-  /** Pre-signup gate — throw to reject signup (e.g. domain allowlist). */
-  beforeSignup: (email: string) => Promise<void>;
+  /**
+   * Pre-signup gate — throw to reject signup (e.g. domain allowlist,
+   * free-tier quota, per-client org-signup policy).
+   *
+   * Unlike other hooks in this map, `beforeSignup` is dispatched to EVERY
+   * loaded module rather than first-match-wins (the platform calls all
+   * handlers in turn; any thrown error aborts the signup). This lets
+   * unrelated modules — e.g. cloud billing + OIDC auto-provisioning —
+   * coexist cleanly.
+   */
+  beforeSignup: (email: string, ctx?: BeforeSignupContext) => Promise<void>;
+  /**
+   * Post-signup side effect — runs after the BA user row is committed with
+   * the freshly minted `user.id`. Symmetric with `beforeSignup`: dispatched
+   * to EVERY loaded module. Used by OIDC to auto-join the new user to the
+   * org pinned by the in-flight OAuth client so the subsequent /authorize
+   * redirect lands on the client's callback instead of the dashboard
+   * onboarding flow.
+   */
+  afterSignup: (user: { id: string; email: string }, ctx?: AfterSignupContext) => Promise<void>;
   /**
    * Post-run hook — called on terminal status before the final run record is
    * persisted. Symmetric with `beforeRun`. Modules return a metadata patch

@@ -30,19 +30,21 @@
  */
 
 import { timingSafeEqual } from "node:crypto";
-import { eq, and } from "drizzle-orm";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { jwt } from "better-auth/plugins";
 import { APIError } from "better-auth/api";
 import { getEnv } from "@appstrate/env";
-import { db } from "@appstrate/db/client";
-import { organizationMembers } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import {
   resolveOrCreateEndUser,
   UnverifiedEmailConflictError,
   loadAppById,
 } from "../services/enduser-mapping.ts";
+import {
+  OrgSignupClosedError,
+  loadOrgClientPolicy,
+  resolveOrCreateOrgMembership,
+} from "../services/orgmember-mapping.ts";
 import { hashSecret } from "../services/oauth-admin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 import { APPSTRATE_SCOPES } from "./scopes.ts";
@@ -54,6 +56,14 @@ export interface ClientMetadata {
   level?: "org" | "application" | "instance";
   referencedOrgId?: string;
   referencedApplicationId?: string;
+  /**
+   * The OAuth client id — stashed by `createClient` so the
+   * `customAccessTokenClaims` closure can recover the client identity and
+   * look up mutable policy (e.g. `allowSignup` / `signupRole`) via
+   * `loadOrgClientPolicy`. The Better Auth oauth-provider plugin does not
+   * pass `client.clientId` to the closure directly.
+   */
+  clientId?: string;
 }
 
 /**
@@ -215,34 +225,77 @@ async function buildOrgLevelClaims(
       message: "Invalid OAuth client configuration",
     });
   }
-  const [m] = await db
-    .select({ role: organizationMembers.role })
-    .from(organizationMembers)
-    .where(and(eq(organizationMembers.userId, user.id), eq(organizationMembers.orgId, orgId)))
-    .limit(1);
-  if (!m) {
-    logger.warn("oidc: user is not a member of the pinned org — rejecting token", {
+
+  // Load the mutable signup policy via the short-TTL client cache. Falls
+  // back to the "closed" default if the lookup fails for any reason —
+  // better to reject a legitimate mint than silently auto-join to a wrong
+  // role because the cache is cold.
+  let policy: { allowSignup: boolean; signupRole: "admin" | "member" | "viewer" } = {
+    allowSignup: false,
+    signupRole: "member",
+  };
+  if (metadata.clientId) {
+    const loaded = await loadOrgClientPolicy(metadata.clientId);
+    if (loaded && loaded.orgId === orgId) {
+      policy = { allowSignup: loaded.allowSignup, signupRole: loaded.signupRole };
+    } else if (!loaded) {
+      logger.warn("oidc: could not load policy for org-level client — defaulting to closed", {
+        module: "oidc",
+        clientId: metadata.clientId,
+      });
+    }
+  } else {
+    logger.warn("oidc: org-level client metadata missing clientId — defaulting to closed", {
       module: "oidc",
       userId: user.id,
       orgId,
     });
-    // Structured OAuth2 error so satellites (portal) can render a clean
-    // membership-error page instead of a generic 500. Uses RFC 6749
-    // `access_denied` since RFC does not define a more specific code.
-    throw new APIError("FORBIDDEN", {
-      error: "access_denied",
-      error_description:
-        "The signed-in user is not a member of the organization pinned to this OAuth client.",
-    });
   }
-  return {
-    actor_type: "dashboard_user",
-    email: user.email,
-    email_verified: user.emailVerified === true,
-    name: user.name ?? user.email,
-    org_id: orgId,
-    org_role: m.role,
-  };
+
+  // Resolve or create the membership. For existing members this is a
+  // single SELECT (the proactive call in routes.ts already created the row
+  // for new members during password login / register; this re-check is a
+  // no-op for them). For social / magic-link flows where the proactive call
+  // never ran, the auto-join happens here.
+  //
+  // NOTE: the BA `databaseHooks.user.create.before` guard
+  // (`auth/signup-guard.ts`) already blocks brand-new BA users for closed
+  // org-level clients BEFORE they reach this point. This path remains as
+  // defense in depth for existing-but-unaffiliated BA users (e.g. a user
+  // who created an account elsewhere and is now trying to access a closed
+  // client).
+  try {
+    const resolved = await resolveOrCreateOrgMembership(
+      { id: user.id, email: user.email },
+      orgId,
+      policy,
+    );
+    return {
+      actor_type: "dashboard_user",
+      email: user.email,
+      email_verified: user.emailVerified === true,
+      name: user.name ?? user.email,
+      org_id: orgId,
+      org_role: resolved.role,
+    };
+  } catch (err) {
+    if (err instanceof OrgSignupClosedError) {
+      logger.warn("oidc: user is not a member of the pinned org — rejecting token", {
+        module: "oidc",
+        userId: user.id,
+        orgId,
+      });
+      // Structured OAuth2 error so satellites (portal) can render a clean
+      // membership-error page instead of a generic 500. Uses RFC 6749
+      // `access_denied` since RFC does not define a more specific code.
+      throw new APIError("FORBIDDEN", {
+        error: "access_denied",
+        error_description:
+          "Registration is disabled for this application. Contact your administrator to be added to the organization.",
+      });
+    }
+    throw err;
+  }
 }
 
 async function buildApplicationLevelClaims(

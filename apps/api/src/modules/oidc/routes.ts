@@ -17,7 +17,7 @@
 
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { AppEnv } from "../../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
@@ -26,7 +26,7 @@ import { parseBody, notFound, invalidRequest, forbidden } from "../../lib/errors
 import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
 import { db } from "@appstrate/db/client";
-import { user, applications, organizationMembers } from "@appstrate/db/schema";
+import { user, applications } from "@appstrate/db/schema";
 import {
   createClient,
   deleteClient,
@@ -37,7 +37,16 @@ import {
   rotateClientSecret,
   updateClient,
   OAuthAdminValidationError,
+  SIGNUP_ROLE_ALLOWED,
 } from "./services/oauth-admin.ts";
+import {
+  OrgSignupClosedError,
+  resolveOrCreateOrgMembership,
+} from "./services/orgmember-mapping.ts";
+import {
+  issuePendingClientCookie,
+  clearPendingClientCookie,
+} from "./services/pending-client-cookie.ts";
 import { isValidRedirectUri } from "./services/redirect-uri.ts";
 import { resolveBrandingForClient } from "./services/branding.ts";
 import { issueCsrfToken, verifyCsrfToken } from "./services/csrf.ts";
@@ -53,6 +62,7 @@ import { getEnv } from "@appstrate/env";
 import { renderLoginPage } from "./pages/login.ts";
 import { renderRegisterPage } from "./pages/register.ts";
 import { renderMagicLinkPage } from "./pages/magic-link.ts";
+import { renderVerifyEmailSentPage } from "./pages/verify-email-sent.ts";
 import { renderForgotPasswordPage } from "./pages/forgot-password.ts";
 import { renderResetPasswordPage, renderInvalidTokenPage } from "./pages/reset-password.ts";
 import { renderConsentPage } from "./pages/consent.ts";
@@ -93,6 +103,8 @@ const createOrgClientSchema = z.object({
   scopes: z.array(z.string().min(1)).optional(),
   referencedOrgId: z.string().min(1),
   isFirstParty: z.boolean().optional(),
+  allowSignup: z.boolean().optional(),
+  signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
 });
 
 const createApplicationClientSchema = z.object({
@@ -103,6 +115,11 @@ const createApplicationClientSchema = z.object({
   scopes: z.array(z.string().min(1)).optional(),
   referencedApplicationId: z.string().min(1),
   isFirstParty: z.boolean().optional(),
+  // Passed through to the service so we can reject them with a clear 400.
+  // Zod by default strips unknown keys; accepting them here lets us fail
+  // loudly rather than silently dropping the caller's intent.
+  allowSignup: z.boolean().optional(),
+  signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
 });
 
 export const createOAuthClientSchema = z.discriminatedUnion("level", [
@@ -116,6 +133,8 @@ export const updateOAuthClientSchema = z.object({
   scopes: z.array(z.string().min(1)).optional(),
   disabled: z.boolean().optional(),
   isFirstParty: z.boolean().optional(),
+  allowSignup: z.boolean().optional(),
+  signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
 });
 
 // ─── Shared page context loader ───────────────────────────────────────────────
@@ -128,6 +147,9 @@ interface ClientContext {
     referencedOrgId: string | null;
     referencedApplicationId: string | null;
     isFirstParty: boolean;
+    /** Org-level auto-provisioning policy; `false` / `"member"` on app/instance. */
+    allowSignup: boolean;
+    signupRole: "admin" | "member" | "viewer";
   };
   branding: Awaited<ReturnType<typeof resolveBrandingForClient>>;
   csrfToken: string;
@@ -147,6 +169,8 @@ async function loadClientContext(c: Context<AppEnv>, clientId: string): Promise<
     isFirstParty: record.isFirstParty,
     referencedOrgId: record.referencedOrgId,
     referencedApplicationId: record.referencedApplicationId,
+    allowSignup: record.allowSignup,
+    signupRole: record.signupRole,
   };
   const branding = await resolveBrandingForClient(client);
   const csrfToken = issueCsrfToken(c);
@@ -190,6 +214,63 @@ function getSocialProviders(): { google: boolean; github: boolean } {
 function isSmtpEnabled(): boolean {
   const env = getEnv();
   return !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM);
+}
+
+/**
+ * Effective "is signup open" flag for a client's entry pages. Org-level
+ * clients honor their configured `allowSignup`; app/instance clients are
+ * open by default (end-user provisioning is handled elsewhere, and the
+ * instance client is first-party). Passed to `renderLoginPage` /
+ * `renderRegisterPage` / `renderMagicLinkPage` so they can hide the
+ * signup-only CTAs when the org is closed.
+ */
+function allowSignupForClient(client: {
+  level: "org" | "application" | "instance";
+  allowSignup: boolean;
+}): boolean {
+  if (client.level === "org") return client.allowSignup;
+  return true;
+}
+
+/**
+ * Map an `?error=<code>` from the Better Auth social callback redirect (or
+ * from our own error-callback URL) to a user-facing French banner on the
+ * login page. Codes we don't recognize fall back to a generic message so the
+ * user isn't left with a silent white screen.
+ */
+function mapLoginErrorCode(code: string): string {
+  switch (code) {
+    case "signup_disabled":
+      return "L'inscription n'est pas ouverte sur cette application. Contactez un administrateur pour être ajouté à l'organisation.";
+    case "email_not_found":
+      return "Le fournisseur n'a pas retourné d'adresse email. Veuillez réessayer avec un autre compte.";
+    case "account_already_linked_to_different_user":
+      return "Ce compte est déjà lié à un autre utilisateur.";
+    case "unable_to_link_account":
+      return "Impossible de lier ce compte. Veuillez réessayer.";
+    case "email_doesn't_match":
+      return "L'email ne correspond pas au compte existant.";
+    case "unable_to_create_user":
+    case "unable_to_create_session":
+      return "Impossible de créer le compte. Veuillez réessayer.";
+    default:
+      return "La connexion a échoué. Veuillez réessayer.";
+  }
+}
+
+/**
+ * Remove `error=<code>` from a query string so social-sign-in buttons and
+ * the register-CTA link don't carry the stale error parameter forward. We
+ * keep everything else (client_id, redirect_uri, scope, state, …) intact
+ * **byte-for-byte** — do NOT round-trip through `URLSearchParams`, which
+ * would re-encode `%20` as `+` and break clients that compare the echoed
+ * query string to the one they originally sent.
+ */
+function stripErrorFromQueryString(search: string): string {
+  if (!search) return search;
+  const body = search.startsWith("?") ? search.slice(1) : search;
+  const kept = body.split("&").filter((pair) => pair !== "" && !pair.startsWith("error="));
+  return kept.length ? `?${kept.join("&")}` : "";
 }
 
 /** Skipping consent is a trust escalation — only admin/owner may set isFirstParty. */
@@ -392,6 +473,7 @@ export function createOidcRouter() {
         csrfToken: "",
         socialProviders: getSocialProviders(),
         smtpEnabled: isSmtpEnabled(),
+        allowSignup: allowSignupForClient(result.client),
         error:
           "Ce lien de connexion a expiré. Veuillez relancer la connexion depuis l'application.",
       });
@@ -399,12 +481,24 @@ export function createOidcRouter() {
     }
     const getResult = await loadClientContextOrRenderError(c, clientId);
     if (getResult instanceof Response) return getResult;
+    // Pin the pending client_id in a signed cookie so the BA `beforeSignup`
+    // hook can enforce the signup policy on social / magic-link flows that
+    // bypass our own POST handlers. See `services/pending-client-cookie.ts`.
+    issuePendingClientCookie(c, getResult.client.id);
+    // Better Auth appends `?error=<code>` to `errorCallbackURL` when the
+    // social callback fails — including when our `beforeSignup` guard throws
+    // `signup_disabled` for a closed org-level client. Surface a friendly
+    // banner instead of silently rendering a blank login page.
+    const errorCode = url.searchParams.get("error");
+    const errorMessage = errorCode ? mapLoginErrorCode(errorCode) : undefined;
     const body = renderLoginPage({
-      queryString: url.search,
+      queryString: stripErrorFromQueryString(url.search),
       branding: getResult.branding,
       csrfToken: getResult.csrfToken,
       socialProviders: getSocialProviders(),
       smtpEnabled: isSmtpEnabled(),
+      allowSignup: allowSignupForClient(getResult.client),
+      error: errorMessage,
     });
     return c.html(body.value);
   });
@@ -445,6 +539,7 @@ export function createOidcRouter() {
     const ctxResult = await loadClientContextOrRenderError(c, clientId);
     if (ctxResult instanceof Response) return ctxResult;
     const ctx = ctxResult;
+    const allowSignup = allowSignupForClient(ctx.client);
     if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
       const page = renderLoginPage({
         queryString: url.search,
@@ -452,6 +547,7 @@ export function createOidcRouter() {
         csrfToken: ctx.csrfToken,
         socialProviders: getSocialProviders(),
         smtpEnabled: isSmtpEnabled(),
+        allowSignup,
         error: "Votre session a expiré. Veuillez réessayer.",
       });
       return c.html(page.value, 403);
@@ -469,6 +565,7 @@ export function createOidcRouter() {
         csrfToken: ctx.csrfToken,
         socialProviders,
         smtpEnabled,
+        allowSignup,
         error,
         email,
       });
@@ -493,10 +590,20 @@ export function createOidcRouter() {
     }
 
     const authApi = getOidcAuthApi();
+    // Same reasoning as the register handler: pin the verification email
+    // callbackURL so a failed login on an unverified account produces a
+    // resend-link that resumes the OAuth flow on click.
+    const verificationCallbackURL = `/api/auth/oauth2/authorize${url.search}`;
     let authResponse: Response;
     try {
       authResponse = (await authApi.signInEmail({
-        body: { email, password },
+        // `callbackURL` is accepted by BA's sign-in endpoint (it becomes the
+        // email-verification resend target) but is missing from the exported
+        // input type — cast narrowly to keep the rest of the body strict.
+        body: { email, password, callbackURL: verificationCallbackURL } as {
+          email: string;
+          password: string;
+        },
         headers: c.req.raw.headers,
         asResponse: true,
       })) as Response;
@@ -524,38 +631,57 @@ export function createOidcRouter() {
         body: bodyText.slice(0, 400),
         email,
       });
+      // BA returns 403 with `{ code: "EMAIL_NOT_VERIFIED" }` for unverified
+      // accounts. `sendOnSignIn` has already fired a fresh verification
+      // email with the pinned `callbackURL` above, so render the same
+      // branded interstitial as post-signup — clicking the link resumes
+      // the OAuth flow.
+      if (authResponse.status === 403 && bodyText.includes("EMAIL_NOT_VERIFIED")) {
+        clearPendingClientCookie(c);
+        const sentPage = renderVerifyEmailSentPage({
+          queryString: url.search,
+          branding: ctx.branding,
+          email,
+        });
+        return c.html(sentPage.value);
+      }
       return renderError("Email ou mot de passe incorrect.", 401, email);
     }
 
     await resetLoginEmailAttempts(email);
 
-    // For org-level clients: proactively verify the signed-in user is a
-    // member of the pinned organization. Otherwise the failure surfaces as
-    // an opaque 500 from inside `customAccessTokenClaims` after three
-    // redirects — unhelpful and confusing.
+    // For org-level clients: proactively resolve-or-create the membership
+    // so the failure surfaces as a clear 403 here instead of an opaque
+    // `access_denied` three redirects deep at token-mint time. Respects
+    // the client's `allowSignup` policy — closed orgs reject non-members
+    // with a styled error page, open orgs auto-provision with
+    // `signupRole`. The mirror call in `buildOrgLevelClaims` is a no-op
+    // for existing members (SELECT-only step 1).
     if (ctx.client.level === "org" && ctx.client.referencedOrgId) {
       const [authUserRow] = await db
-        .select({ id: user.id })
+        .select({ id: user.id, email: user.email })
         .from(user)
         .where(eq(user.email, email))
         .limit(1);
       if (authUserRow) {
-        const [m] = await db
-          .select({ role: organizationMembers.role })
-          .from(organizationMembers)
-          .where(
-            and(
-              eq(organizationMembers.userId, authUserRow.id),
-              eq(organizationMembers.orgId, ctx.client.referencedOrgId),
-            ),
-          )
-          .limit(1);
-        if (!m) {
-          return renderError(
-            "Ce compte n'est pas membre de l'organisation associée à cette application. Contactez votre administrateur.",
-            403,
-            email,
+        try {
+          await resolveOrCreateOrgMembership(
+            { id: authUserRow.id, email: authUserRow.email },
+            ctx.client.referencedOrgId,
+            {
+              allowSignup: ctx.client.allowSignup,
+              signupRole: ctx.client.signupRole,
+            },
           );
+        } catch (err) {
+          if (err instanceof OrgSignupClosedError) {
+            return renderError(
+              "Ce compte n'est pas membre de l'organisation et l'inscription n'est pas ouverte sur cette application. Contactez votre administrateur.",
+              403,
+              email,
+            );
+          }
+          throw err;
         }
       }
     }
@@ -655,6 +781,9 @@ export function createOidcRouter() {
       firstParty: ctx.client.isFirstParty,
       email,
     });
+    // Clear the pending-client cookie — the signup policy guard has done
+    // its job (or was never needed for this login of an existing member).
+    clearPendingClientCookie(c);
     return c.redirect(`/api/auth/oauth2/authorize${url.search}`, 302);
   });
 
@@ -675,11 +804,27 @@ export function createOidcRouter() {
     }
     const result = await loadClientContextOrRenderError(c, clientId);
     if (result instanceof Response) return result;
+    // Org-level + closed signup → no register form at all.
+    if (result.client.level === "org" && !result.client.allowSignup) {
+      return c.html(
+        renderErrorPage({
+          title: "Inscription fermée",
+          message:
+            "L'inscription n'est pas ouverte sur cette application. Contactez votre administrateur pour obtenir un accès.",
+          branding: result.branding,
+        }).value,
+        403,
+      );
+    }
+    // Same pending-client cookie as GET /api/oauth/login — covers the social
+    // sign-in buttons surfaced on the register page.
+    issuePendingClientCookie(c, result.client.id);
     const body = renderRegisterPage({
       queryString: url.search,
       branding: result.branding,
       csrfToken: result.csrfToken,
       socialProviders: getSocialProviders(),
+      allowSignup: true,
     });
     return c.html(body.value);
   });
@@ -701,6 +846,22 @@ export function createOidcRouter() {
     if (ctxResult instanceof Response) return ctxResult;
     const ctx = ctxResult;
 
+    // Defense in depth: the GET handler hides the form when signup is
+    // closed, but a hand-crafted POST must still be rejected here. Returning
+    // the styled error page (instead of `renderRegError` with a banner)
+    // matches the GET behavior — there is no form to retry.
+    if (ctx.client.level === "org" && !ctx.client.allowSignup) {
+      return c.html(
+        renderErrorPage({
+          title: "Inscription fermée",
+          message:
+            "L'inscription n'est pas ouverte sur cette application. Contactez votre administrateur pour obtenir un accès.",
+          branding: ctx.branding,
+        }).value,
+        403,
+      );
+    }
+
     const form = await c.req.parseBody();
     if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
       const page = renderRegisterPage({
@@ -708,6 +869,7 @@ export function createOidcRouter() {
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,
         socialProviders: getSocialProviders(),
+        allowSignup: allowSignupForClient(ctx.client),
         error: "Votre session a expiré. Veuillez réessayer.",
       });
       return c.html(page.value, 403);
@@ -715,7 +877,7 @@ export function createOidcRouter() {
 
     const renderRegError = (
       error: string,
-      status: 400 | 409 | 429 | 500,
+      status: 400 | 403 | 409 | 429 | 500,
       email?: string,
       name?: string,
     ) => {
@@ -724,6 +886,7 @@ export function createOidcRouter() {
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,
         socialProviders: getSocialProviders(),
+        allowSignup: allowSignupForClient(ctx.client),
         error,
         email,
         name,
@@ -747,10 +910,23 @@ export function createOidcRouter() {
     }
 
     const authApi = getOidcAuthApi();
+    // Pin the BA verification email's `callbackURL` to the authorize endpoint
+    // with the original OAuth query string. After the user clicks the link,
+    // BA sets the session cookie (via `autoSignInAfterVerification`) and
+    // redirects there — resuming the OAuth flow transparently. Without this,
+    // the link would land on `/` and the third-party client would never see
+    // the completed sign-in.
+    const verificationCallbackURL = `/api/auth/oauth2/authorize${url.search}`;
     let authResponse: Response;
     try {
       authResponse = (await authApi.signUpEmail({
-        body: { email, password, name },
+        // Same reason as signInEmail: `callbackURL` is accepted at runtime
+        // by BA's sign-up endpoint but absent from the input type.
+        body: { email, password, name, callbackURL: verificationCallbackURL } as {
+          email: string;
+          password: string;
+          name: string;
+        },
         headers: c.req.raw.headers,
         asResponse: true,
       })) as Response;
@@ -809,7 +985,62 @@ export function createOidcRouter() {
       }
     }
 
+    // Org-level clients: provision the `organization_members` row now so
+    // the subsequent `authorize` redirect chain mints a token with the
+    // configured `org_role`. The policy has already passed the GET guard
+    // and the POST guard; `allowSignup` is guaranteed `true` here.
+    if (ctx.client.level === "org" && ctx.client.referencedOrgId) {
+      const [authUserRow] = await db
+        .select({ id: user.id, email: user.email })
+        .from(user)
+        .where(eq(user.email, email))
+        .limit(1);
+      if (authUserRow) {
+        try {
+          await resolveOrCreateOrgMembership(
+            { id: authUserRow.id, email: authUserRow.email },
+            ctx.client.referencedOrgId,
+            {
+              allowSignup: ctx.client.allowSignup,
+              signupRole: ctx.client.signupRole,
+            },
+          );
+        } catch (err) {
+          if (err instanceof OrgSignupClosedError) {
+            // Should not happen — the GET + POST guards checked already.
+            logger.warn("oidc: signup closed after signUpEmail succeeded", {
+              userId: authUserRow.id,
+              orgId: ctx.client.referencedOrgId,
+            });
+            return renderRegError(
+              "L'inscription n'est pas ouverte sur cette application. Contactez votre administrateur.",
+              403,
+              email,
+              name,
+            );
+          }
+          throw err;
+        }
+      }
+    }
+
     logger.info("oidc: registration success", { email });
+    clearPendingClientCookie(c);
+    // With SMTP enabled, BA's `requireEmailVerification: true` means
+    // `signUpEmail` does NOT create a session — there are no cookies to
+    // forward and the subsequent `/authorize` redirect would land on the
+    // login page with no context. Render a branded "check your email"
+    // interstitial that matches the client's logo/colors. The verification
+    // link itself (in the email) will resume the OAuth flow via the
+    // `callbackURL` we pinned to `signUpEmail` above.
+    if (isSmtpEnabled() && setCookies.length === 0) {
+      const sentPage = renderVerifyEmailSentPage({
+        queryString: url.search,
+        branding: ctx.branding,
+        email,
+      });
+      return c.html(sentPage.value);
+    }
     return c.redirect(`/api/auth/oauth2/authorize${url.search}`, 302);
   });
 
@@ -848,6 +1079,13 @@ export function createOidcRouter() {
     }
     const result = await loadClientContextOrRenderError(c, clientId);
     if (result instanceof Response) return result;
+    // Magic-link deliberately stays open for EXISTING members even when
+    // `allowSignup=false` — the BA plugin runs with `disableSignUp: true`
+    // so it never creates a user, and the token-mint path rejects
+    // non-members cleanly via `resolveOrCreateOrgMembership`. The pending
+    // cookie is still issued so the BA `beforeSignup` guard fires as
+    // defense in depth if BA ever changes its signup behavior.
+    issuePendingClientCookie(c, result.client.id);
     const body = renderMagicLinkPage({
       queryString: url.search,
       branding: result.branding,
@@ -1366,6 +1604,7 @@ export function createOidcRouter() {
             csrfToken: ctx.csrfToken,
             socialProviders: getSocialProviders(),
             smtpEnabled: isSmtpEnabled(),
+            allowSignup: allowSignupForClient(ctx.client),
             error:
               "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
           });

@@ -94,6 +94,21 @@ export const oauthClient = pgTable(
     referencedApplicationId: text("referenced_application_id").references(() => applications.id, {
       onDelete: "cascade",
     }),
+    // Org-level auto-provisioning policy: when true, a user signing in through
+    // this client who is NOT yet a member of `referenced_org_id` is
+    // auto-added to the org with `signup_role`. When false, non-members are
+    // rejected upstream (GET guards hide the register/social surfaces and the
+    // BA beforeSignup hook blocks orphan user creation). Ignored on
+    // application/instance clients — end-user provisioning goes through
+    // `resolveOrCreateEndUser` instead. Mutable (unlike `level` /
+    // `referenced_*_id`): read via `getClientCached` so updates propagate
+    // within one cache TTL (30s).
+    allowSignup: boolean("allow_signup").default(false).notNull(),
+    // Role assigned on auto-join. `owner` is deliberately excluded at the DB,
+    // Zod, and UI layers to prevent self-promotion via a misconfigured client.
+    signupRole: text("signup_role", { enum: ["admin", "member", "viewer"] })
+      .default("member")
+      .notNull(),
   },
   (t) => [
     index("idx_oauth_clients_org").on(t.referencedOrgId),

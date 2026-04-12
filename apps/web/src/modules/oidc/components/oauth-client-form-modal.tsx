@@ -27,7 +27,11 @@ import {
   useUpdateOAuthClient,
   useOAuthScopes,
   type OAuthClient,
+  type SignupRole,
 } from "../hooks/use-oauth-clients";
+
+/** Role allowlist for org-level auto-provisioning. `owner` deliberately excluded. */
+const SIGNUP_ROLE_OPTIONS: SignupRole[] = ["member", "admin", "viewer"];
 
 /** Scopes that are always granted — cannot be unchecked in the UI. */
 const REQUIRED_SCOPES = new Set(["openid", "profile", "email"]);
@@ -63,6 +67,8 @@ function OAuthClientFormBody({
   const isEditing = !!client;
 
   const effectiveLevel = client?.level === "instance" ? undefined : client?.level;
+  const formLevel = effectiveLevel ?? level;
+  const isOrgLevel = formLevel === "org";
   const createMutation = useCreateOAuthClient(effectiveLevel ?? level);
   const updateMutation = useUpdateOAuthClient();
   const { data: availableScopes } = useOAuthScopes();
@@ -78,6 +84,12 @@ function OAuthClientFormBody({
     () => new Set(client?.scopes?.length ? client.scopes : REQUIRED_SCOPES),
   );
   const [isFirstParty, setIsFirstParty] = useState(client?.isFirstParty ?? false);
+  // Org-level auto-provisioning policy. Controls whether non-members of the
+  // referenced organization are auto-joined on first sign-in, and with what
+  // role. Ignored for application/instance clients (defaults kept but the UI
+  // section stays hidden).
+  const [allowSignup, setAllowSignup] = useState(client?.allowSignup ?? false);
+  const [signupRole, setSignupRole] = useState<SignupRole>(client?.signupRole ?? "member");
   const [createdSecret, setCreatedSecret] = useState<{
     clientId: string;
     clientSecret: string;
@@ -164,6 +176,10 @@ function OAuthClientFormBody({
             postLogoutRedirectUris: cleanedPostLogout,
             scopes: Array.from(selectedScopes),
             ...(isAdmin ? { isFirstParty } : {}),
+            // Signup policy is meaningful only on org-level clients; the
+            // backend rejects these fields with a 400 on app/instance
+            // clients, so we strictly gate on `isOrgLevel` here.
+            ...(isOrgLevel ? { allowSignup, signupRole } : {}),
           },
         },
         {
@@ -184,6 +200,7 @@ function OAuthClientFormBody({
           ...(cleanedPostLogout.length > 0 && { postLogoutRedirectUris: cleanedPostLogout }),
           scopes: Array.from(selectedScopes),
           ...(isFirstParty && { isFirstParty: true }),
+          ...(isOrgLevel ? { allowSignup, signupRole } : {}),
         },
         {
           onSuccess: (result) => {
@@ -327,6 +344,46 @@ function OAuthClientFormBody({
                 </span>
               </span>
             </label>
+          </div>
+        )}
+
+        {isOrgLevel && (
+          <div className="space-y-3 rounded-md border p-3">
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={allowSignup}
+                onChange={() => setAllowSignup((v) => !v)}
+                className="accent-primary mt-0.5 h-4 w-4"
+              />
+              <span className="flex flex-col">
+                <span>{t("settings:oauthClients.allowSignupLabel")}</span>
+                <span className="text-muted-foreground text-xs">
+                  {t("settings:oauthClients.allowSignupHint")}
+                </span>
+              </span>
+            </label>
+            <div className="space-y-1">
+              <Label htmlFor="oauth-client-signup-role">
+                {t("settings:oauthClients.signupRoleLabel")}
+              </Label>
+              <select
+                id="oauth-client-signup-role"
+                value={signupRole}
+                onChange={(e) => setSignupRole(e.target.value as SignupRole)}
+                disabled={!allowSignup}
+                className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {SIGNUP_ROLE_OPTIONS.map((role) => (
+                  <option key={role} value={role}>
+                    {t(`settings:oauthClients.signupRoleOption.${role}`)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-muted-foreground text-xs">
+                {t("settings:oauthClients.signupRoleHint")}
+              </p>
+            </div>
           </div>
         )}
 
