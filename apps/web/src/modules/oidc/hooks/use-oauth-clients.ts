@@ -57,6 +57,7 @@ export function useCreateOAuthClient(level?: "org" | "application") {
       redirectUris: string[];
       postLogoutRedirectUris?: string[];
       scopes?: string[];
+      isFirstParty?: boolean;
     }) =>
       api<OAuthClientWithSecret>("/oauth/clients", {
         method: "POST",
@@ -80,7 +81,12 @@ export function useUpdateOAuthClient() {
       data,
     }: {
       clientId: string;
-      data: { redirectUris?: string[]; postLogoutRedirectUris?: string[]; disabled?: boolean };
+      data: {
+        redirectUris?: string[];
+        postLogoutRedirectUris?: string[];
+        disabled?: boolean;
+        isFirstParty?: boolean;
+      };
     }) =>
       api<OAuthClient>(`/oauth/clients/${clientId}`, {
         method: "PATCH",

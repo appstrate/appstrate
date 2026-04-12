@@ -131,6 +131,18 @@ async function loadClientContext(c: Context<AppEnv>, clientId: string): Promise<
   return { client, branding, csrfToken };
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Skipping consent is a trust escalation — only admin/owner may set isFirstParty. */
+function requireAdminForFirstParty(c: Context<AppEnv>, isFirstParty: boolean | undefined) {
+  if (isFirstParty) {
+    const orgRole = c.get("orgRole");
+    if (orgRole !== "owner" && orgRole !== "admin") {
+      throw forbidden("Only org admins can set isFirstParty");
+    }
+  }
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 export function createOidcRouter() {
@@ -147,6 +159,8 @@ export function createOidcRouter() {
       const orgId = c.get("orgId");
       const body = await c.req.json();
       const data = parseBody(createOAuthClientSchema, body);
+
+      requireAdminForFirstParty(c, data.isFirstParty);
 
       // Authorization: the caller must own the referenced entity.
       if (data.level === "org") {
@@ -230,13 +244,7 @@ export function createOidcRouter() {
       const owning = await getClientOwningOrg(clientId);
       if (!owning || owning !== orgId) throw notFound("OAuth client not found");
 
-      // Require admin/owner for isFirstParty — skipping consent is a trust escalation.
-      if (data.isFirstParty !== undefined) {
-        const orgRole = c.get("orgRole");
-        if (orgRole !== "owner" && orgRole !== "admin") {
-          throw forbidden("Only org admins can set isFirstParty");
-        }
-      }
+      requireAdminForFirstParty(c, data.isFirstParty);
 
       try {
         const updated = await updateClient(clientId, data);

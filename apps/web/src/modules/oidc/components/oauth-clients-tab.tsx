@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OAuth clients admin tab for the application settings page.
- * Lists registered clients for the current app and lets admins register,
- * rotate secrets for, disable, and delete them.
+ * OAuth clients admin tab for org/app settings pages.
+ * Lists registered clients and lets admins register, edit, rotate secrets
+ * for, disable, and delete them.
  *
  * Feature-gated by `features.oidc` at the parent tab level — this component
  * should never render when the OIDC module is absent.
@@ -12,13 +12,14 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Plus, Trash2, RotateCcw, Power, KeyRound } from "lucide-react";
+import { Plus, Pencil, Trash2, RotateCcw, Power, KeyRound, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
 import { Spinner } from "@/components/spinner";
 import { Modal } from "@/components/modal";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
+import { usePermissions } from "@/hooks/use-permissions";
 import {
   useOAuthClients,
   useUpdateOAuthClient,
@@ -26,7 +27,7 @@ import {
   useRotateOAuthClientSecret,
   type OAuthClient,
 } from "../hooks/use-oauth-clients";
-import { OAuthClientCreateModal } from "./oauth-client-create-modal";
+import { OAuthClientFormModal } from "./oauth-client-form-modal";
 
 interface OAuthClientsTabProps {
   level?: "org" | "application";
@@ -35,7 +36,18 @@ interface OAuthClientsTabProps {
 export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   const { t } = useTranslation(["settings", "common"]);
   const { data, isLoading, error } = useOAuthClients(level);
-  const [createOpen, setCreateOpen] = useState(false);
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editClient, setEditClient] = useState<OAuthClient | null>(null);
+
+  const openCreate = () => {
+    setEditClient(null);
+    setModalOpen(true);
+  };
+  const openEdit = (client: OAuthClient) => {
+    setEditClient(client);
+    setModalOpen(true);
+  };
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
@@ -45,36 +57,38 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-muted-foreground max-w-xl text-sm">{t("settings:oauthClients.intro")}</p>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
+        <Button size="sm" onClick={openCreate}>
           <Plus className="h-4 w-4" /> {t("settings:oauthClients.createBtn")}
         </Button>
       </div>
 
       {data.length === 0 ? (
         <EmptyState message={t("settings:oauthClients.empty")} icon={KeyRound}>
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Button size="sm" onClick={openCreate}>
             <Plus className="h-4 w-4" /> {t("settings:oauthClients.createBtn")}
           </Button>
         </EmptyState>
       ) : (
         <ul className="space-y-3">
           {data.map((client) => (
-            <OAuthClientRow key={client.clientId} client={client} />
+            <OAuthClientRow key={client.clientId} client={client} onEdit={() => openEdit(client)} />
           ))}
         </ul>
       )}
 
-      <OAuthClientCreateModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
+      <OAuthClientFormModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        client={editClient}
         level={level}
       />
     </div>
   );
 }
 
-function OAuthClientRow({ client }: { client: OAuthClient }) {
+function OAuthClientRow({ client, onEdit }: { client: OAuthClient; onEdit: () => void }) {
   const { t } = useTranslation(["settings", "common"]);
+  const { isAdmin } = usePermissions();
   const updateMutation = useUpdateOAuthClient();
   const deleteMutation = useDeleteOAuthClient();
   const rotateMutation = useRotateOAuthClientSecret();
@@ -122,6 +136,12 @@ function OAuthClientRow({ client }: { client: OAuthClient }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h3 className="truncate font-semibold">{client.name ?? client.clientId}</h3>
+            {client.isFirstParty && (
+              <Badge variant="outline">
+                <ShieldCheck className="mr-1 h-3 w-3" />
+                {t("settings:oauthClients.firstPartyBadge")}
+              </Badge>
+            )}
             {client.disabled && (
               <Badge variant="secondary">{t("settings:oauthClients.disabledBadge")}</Badge>
             )}
@@ -131,6 +151,33 @@ function OAuthClientRow({ client }: { client: OAuthClient }) {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <Button size="sm" variant="outline" onClick={onEdit} title={t("common:btn.edit")}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+          {isAdmin && (
+            <Button
+              size="sm"
+              variant={client.isFirstParty ? "default" : "outline"}
+              onClick={() =>
+                updateMutation.mutate(
+                  { clientId: client.clientId, data: { isFirstParty: !client.isFirstParty } },
+                  {
+                    onSuccess: () => {
+                      toast.success(
+                        client.isFirstParty
+                          ? t("settings:oauthClients.firstPartyDisabled")
+                          : t("settings:oauthClients.firstPartyEnabled"),
+                      );
+                    },
+                  },
+                )
+              }
+              disabled={updateMutation.isPending}
+              title={t("settings:oauthClients.toggleFirstParty")}
+            >
+              <ShieldCheck className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
