@@ -24,15 +24,16 @@ const REQUIRED_SCOPES = new Set(["openid", "profile", "email"]);
 interface Props {
   open: boolean;
   onClose: () => void;
+  level?: "org" | "application";
 }
 
 interface FormData {
   name: string;
 }
 
-export function OAuthClientCreateModal({ open, onClose }: Props) {
+export function OAuthClientCreateModal({ open, onClose, level }: Props) {
   const { t } = useTranslation(["settings", "common"]);
-  const createMutation = useCreateOAuthClient();
+  const createMutation = useCreateOAuthClient(level);
   const { data: availableScopes } = useOAuthScopes();
   const [redirectUris, setRedirectUris] = useState<string[]>([""]);
   const [selectedScopes, setSelectedScopes] = useState<Set<string>>(() => new Set(REQUIRED_SCOPES));

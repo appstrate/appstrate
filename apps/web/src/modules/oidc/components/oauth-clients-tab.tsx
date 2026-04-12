@@ -28,9 +28,13 @@ import {
 } from "../hooks/use-oauth-clients";
 import { OAuthClientCreateModal } from "./oauth-client-create-modal";
 
-export function OAuthClientsTab() {
+interface OAuthClientsTabProps {
+  level?: "org" | "application";
+}
+
+export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   const { t } = useTranslation(["settings", "common"]);
-  const { data, isLoading, error } = useOAuthClients();
+  const { data, isLoading, error } = useOAuthClients(level);
   const [createOpen, setCreateOpen] = useState(false);
 
   if (isLoading) return <LoadingState />;
@@ -60,7 +64,11 @@ export function OAuthClientsTab() {
         </ul>
       )}
 
-      <OAuthClientCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
+      <OAuthClientCreateModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        level={level}
+      />
     </div>
   );
 }

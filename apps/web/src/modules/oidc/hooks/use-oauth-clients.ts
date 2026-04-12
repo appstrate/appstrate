@@ -16,14 +16,17 @@ import type {
 
 export type { OAuthClient, OAuthClientWithSecret };
 
-export function useOAuthClients() {
+export function useOAuthClients(level?: "org" | "application") {
   const orgId = useCurrentOrgId();
   const appId = useCurrentApplicationId();
+  const isOrg = level === "org";
   return useQuery({
-    queryKey: ["oauth-clients", orgId, appId],
+    queryKey: ["oauth-clients", orgId, isOrg ? "org" : appId],
     queryFn: () =>
-      api<{ object: "list"; data: OAuthClient[] }>("/oauth/clients").then((d) => d.data),
-    enabled: !!orgId && !!appId,
+      api<{ object: "list"; data: OAuthClient[] }>("/oauth/clients").then((d) =>
+        level ? d.data.filter((c) => c.level === level) : d.data,
+      ),
+    enabled: isOrg ? !!orgId : !!orgId && !!appId,
   });
 }
 
@@ -43,13 +46,20 @@ export function useOAuthScopes() {
   });
 }
 
-export function useCreateOAuthClient() {
+export function useCreateOAuthClient(level?: "org" | "application") {
   const qc = useQueryClient();
+  const appId = useCurrentApplicationId();
+  const orgId = useCurrentOrgId();
+  const isOrg = level === "org";
   return useMutation({
     mutationFn: async (data: { name: string; redirectUris: string[]; scopes?: string[] }) =>
       api<OAuthClientWithSecret>("/oauth/clients", {
         method: "POST",
-        body: JSON.stringify(data),
+        body: JSON.stringify(
+          isOrg
+            ? { level: "org", referencedOrgId: orgId, ...data }
+            : { level: "application", referencedApplicationId: appId, ...data },
+        ),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["oauth-clients"] });

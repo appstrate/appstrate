@@ -20,7 +20,7 @@
  *    in context. Core's strict run-visibility filter then applies.
  *  - `createRouter()` (mounted at the HTTP origin root by the platform)
  *    owns the `/api/oauth/*` admin endpoints, the server-rendered
- *    `/api/oauth/enduser/{login,consent}` pages, and the RFC-compliant
+ *    `/api/oauth/{login,consent}` pages, and the RFC-compliant
  *    `/.well-known/openid-configuration` + `/.well-known/oauth-authorization-server`
  *    discovery endpoints.
  *  - `init()` runs module-owned Drizzle migrations for the Better Auth
@@ -42,7 +42,7 @@ const oidcModule: AppstrateModule = {
 
   async init(ctx: ModuleInitContext) {
     await ctx.applyMigrations("oidc", resolve(import.meta.dir, "drizzle/migrations"), {
-      requireCoreTables: ["end_users", "user", "session"],
+      requireCoreTables: ["end_users", "user", "session", "organizations", "applications"],
     });
   },
 
@@ -55,11 +55,13 @@ const oidcModule: AppstrateModule = {
     return createOidcRouter();
   },
 
-  appScopedPaths: ["/api/oauth"],
-
+  // OIDC admin routes are org-scoped (dashboard clients) — end_user clients
+  // are created with a `referencedApplicationId` passed explicitly in the
+  // request body. No `X-App-Id` header is required.
   publicPaths: [
-    "/api/oauth/enduser/login",
-    "/api/oauth/enduser/consent",
+    "/api/oauth/login",
+    "/api/oauth/consent",
+    "/api/oauth/logout",
     "/.well-known/openid-configuration",
     "/.well-known/oauth-authorization-server",
   ],
