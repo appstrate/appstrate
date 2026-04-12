@@ -105,7 +105,7 @@ function toWebhookResponse(row: WebhookRow): WebhookInfo {
   return {
     id: row.id,
     object: "webhook",
-    level: row.level as "org" | "application",
+    level: row.level,
     applicationId: row.applicationId,
     url: row.url,
     events: row.events,
@@ -242,19 +242,24 @@ export async function createWebhook(params: CreateWebhookInput): Promise<Webhook
 /**
  * List webhooks visible to the caller.
  *
- * - When `applicationId` is passed: returns both org-level webhooks AND
- *   application-level webhooks pinned to that app. (This mirrors the
- *   dispatch semantics — any webhook that *would* fire for a run in the
- *   app is visible in the app's webhook list.)
- * - When `applicationId` is omitted: returns org-level webhooks only.
+ * - `all: true`: returns every webhook in the org (org-level + all app-level).
+ * - `applicationId` set: returns org-level webhooks AND app-level webhooks
+ *   pinned to that app (mirrors dispatch semantics).
+ * - Neither: returns org-level webhooks only.
  */
-export async function listWebhooks(orgId: string, applicationId?: string): Promise<WebhookInfo[]> {
-  const filter = applicationId
-    ? and(
-        eq(webhooks.orgId, orgId),
-        or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId)),
-      )
-    : and(eq(webhooks.orgId, orgId), isNull(webhooks.applicationId));
+export async function listWebhooks(
+  orgId: string,
+  opts: { applicationId?: string; all?: boolean } = {},
+): Promise<WebhookInfo[]> {
+  const { applicationId, all } = opts;
+  const filter = all
+    ? eq(webhooks.orgId, orgId)
+    : applicationId
+      ? and(
+          eq(webhooks.orgId, orgId),
+          or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId)),
+        )
+      : and(eq(webhooks.orgId, orgId), isNull(webhooks.applicationId));
 
   const rows = await db.select().from(webhooks).where(filter).orderBy(desc(webhooks.createdAt));
   return rows.map(toWebhookResponse);

@@ -59,7 +59,7 @@ const createOrgWebhookSchema = z.object({
 
 const createApplicationWebhookSchema = z.object({
   level: z.literal("application"),
-  applicationId: z.string().min(1),
+  applicationId: z.string().startsWith("app_", "applicationId must start with 'app_' prefix"),
   url: z.url("url must be a valid URL"),
   events: z.array(webhookEventSchema).min(1, "events is required"),
   packageId: z.string().nullable().optional(),
@@ -124,9 +124,10 @@ export function createWebhooksRouter() {
     },
   );
 
-  // GET /api/webhooks[?applicationId=...] — list webhooks visible to the caller
+  // GET /api/webhooks[?applicationId=...&all=true] — list webhooks visible to the caller
   router.get("/api/webhooks", rateLimit(300), requirePermission("webhooks", "read"), async (c) => {
     const orgId = c.get("orgId");
+    const all = c.req.query("all") === "true";
     const applicationId = c.req.query("applicationId") || undefined;
     if (applicationId) {
       if (!applicationId.startsWith("app_")) {
@@ -134,7 +135,7 @@ export function createWebhooksRouter() {
       }
       await assertAppBelongsToOrg(applicationId, orgId);
     }
-    const result = await listWebhooks(orgId, applicationId);
+    const result = await listWebhooks(orgId, { applicationId, all });
     return c.json({ object: "list", data: result });
   });
 

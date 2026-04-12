@@ -25,7 +25,7 @@ export const webhooks = pgTable(
   "webhooks",
   {
     id: text("id").primaryKey(), // wh_ prefix
-    level: text("level").notNull(), // "org" | "application"
+    level: text("level").notNull().$type<"org" | "application">(),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),

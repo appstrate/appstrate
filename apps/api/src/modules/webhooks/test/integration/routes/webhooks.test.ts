@@ -54,6 +54,22 @@ describe("Webhooks API", () => {
       expect(body.events).toContain("run.success");
     });
 
+    it("rejects application webhook with invalid applicationId prefix", async () => {
+      const res = await app.request("/api/webhooks", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          level: "application",
+          applicationId: "invalid-no-prefix",
+          url: "https://example.com/hook",
+          events: ["run.success"],
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.detail).toContain("app_");
+    });
+
     it("returns secret only at creation", async () => {
       const body = await createWebhook();
       expect(body.secret).toBeDefined();
@@ -104,6 +120,24 @@ describe("Webhooks API", () => {
       expect(body.data.length).toBe(1);
       expect(body.data[0].level).toBe("org");
       expect(body.data[0].applicationId).toBeNull();
+    });
+
+    it("lists all webhooks in the org when all=true", async () => {
+      await app.request("/api/webhooks", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          level: "org",
+          url: "https://example.com/org-webhook",
+          events: ["run.success"],
+        }),
+      });
+      await createWebhook();
+
+      const res = await app.request("/api/webhooks?all=true", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.data.length).toBe(2);
     });
   });
 

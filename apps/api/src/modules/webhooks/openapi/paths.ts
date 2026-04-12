@@ -1,4 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
+
+/** Shared webhook creation properties (DRY across oneOf variants). */
+const sharedCreateProps = {
+  url: { type: "string", format: "uri" },
+  events: {
+    type: "array",
+    items: {
+      type: "string",
+      enum: ["run.started", "run.success", "run.failed", "run.timeout", "run.cancelled"],
+    },
+  },
+  packageId: { type: ["string", "null"] },
+  payloadMode: { type: "string", enum: ["full", "summary"], default: "full" },
+  enabled: { type: "boolean", default: true },
+} as const;
+
 export const webhooksPaths = {
   "/api/webhooks": {
     post: {
@@ -22,23 +38,7 @@ export const webhooksPaths = {
                   required: ["level", "url", "events"],
                   properties: {
                     level: { type: "string", enum: ["org"] },
-                    url: { type: "string", format: "uri" },
-                    events: {
-                      type: "array",
-                      items: {
-                        type: "string",
-                        enum: [
-                          "run.started",
-                          "run.success",
-                          "run.failed",
-                          "run.timeout",
-                          "run.cancelled",
-                        ],
-                      },
-                    },
-                    packageId: { type: ["string", "null"] },
-                    payloadMode: { type: "string", enum: ["full", "summary"], default: "full" },
-                    enabled: { type: "boolean", default: true },
+                    ...sharedCreateProps,
                   },
                 },
                 {
@@ -47,23 +47,7 @@ export const webhooksPaths = {
                   properties: {
                     level: { type: "string", enum: ["application"] },
                     applicationId: { type: "string", description: "Application ID (app_ prefix)" },
-                    url: { type: "string", format: "uri" },
-                    events: {
-                      type: "array",
-                      items: {
-                        type: "string",
-                        enum: [
-                          "run.started",
-                          "run.success",
-                          "run.failed",
-                          "run.timeout",
-                          "run.cancelled",
-                        ],
-                      },
-                    },
-                    packageId: { type: ["string", "null"] },
-                    payloadMode: { type: "string", enum: ["full", "summary"], default: "full" },
-                    enabled: { type: "boolean", default: true },
+                    ...sharedCreateProps,
                   },
                 },
               ],
@@ -152,7 +136,7 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "List webhooks",
       description:
-        "List webhooks visible to the current organization. When `applicationId` is passed, returns both org-level webhooks and application-level webhooks pinned to that app.",
+        "List webhooks visible to the current organization. When `applicationId` is passed, returns org-level + application-level webhooks pinned to that app. When `all=true`, returns every webhook in the org regardless of level.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -160,7 +144,15 @@ export const webhooksPaths = {
           in: "query",
           required: false,
           schema: { type: "string" },
-          description: "Optional filter — include webhooks pinned to this application.",
+          description: "Filter — include webhooks pinned to this application (plus org-level).",
+        },
+        {
+          name: "all",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["true"] },
+          description:
+            "When `true`, return all webhooks in the org (org-level + every application-level). Overrides `applicationId`.",
         },
       ],
       responses: {
