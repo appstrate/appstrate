@@ -52,7 +52,12 @@ export function useCreateOAuthClient(level?: "org" | "application") {
   const orgId = useCurrentOrgId();
   const isOrg = level === "org";
   return useMutation({
-    mutationFn: async (data: { name: string; redirectUris: string[]; scopes?: string[] }) =>
+    mutationFn: async (data: {
+      name: string;
+      redirectUris: string[];
+      postLogoutRedirectUris?: string[];
+      scopes?: string[];
+    }) =>
       api<OAuthClientWithSecret>("/oauth/clients", {
         method: "POST",
         body: JSON.stringify(
@@ -75,7 +80,7 @@ export function useUpdateOAuthClient() {
       data,
     }: {
       clientId: string;
-      data: { redirectUris?: string[]; disabled?: boolean };
+      data: { redirectUris?: string[]; postLogoutRedirectUris?: string[]; disabled?: boolean };
     }) =>
       api<OAuthClient>(`/oauth/clients/${clientId}`, {
         method: "PATCH",

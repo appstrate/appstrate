@@ -306,6 +306,8 @@
   "oauthClients.httpsRequired": "HTTPS obligatoire (hors localhost).",
   "oauthClients.invalidUri": "URI invalide.",
   "oauthClients.addRedirectUri": "Ajouter une URI",
+  "oauthClients.postLogoutRedirectUris": "URIs de redirection post-déconnexion",
+  "oauthClients.postLogoutRedirectUrisHint": "Où l'utilisateur sera renvoyé après la déconnexion. HTTPS obligatoire (sauf localhost). Optionnel.",
   "oauthClients.disabledBadge": "Désactivé",
   "oauthClients.enable": "Activer",
   "oauthClients.disable": "Désactiver",

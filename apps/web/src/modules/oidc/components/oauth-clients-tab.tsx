@@ -178,6 +178,21 @@ function OAuthClientRow({ client }: { client: OAuthClient }) {
         </ul>
       </div>
 
+      {client.postLogoutRedirectUris.length > 0 && (
+        <div>
+          <p className="text-muted-foreground mb-1 text-xs font-medium uppercase">
+            {t("settings:oauthClients.postLogoutRedirectUris")}
+          </p>
+          <ul className="space-y-1">
+            {client.postLogoutRedirectUris.map((uri) => (
+              <li key={uri} className="bg-muted rounded px-2 py-1 font-mono text-xs break-all">
+                {uri}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <Modal
         open={rotateConfirmOpen}
         onClose={() => setRotateConfirmOpen(false)}

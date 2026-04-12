@@ -36,6 +36,7 @@ export function OAuthClientCreateModal({ open, onClose, level }: Props) {
   const createMutation = useCreateOAuthClient(level);
   const { data: availableScopes } = useOAuthScopes();
   const [redirectUris, setRedirectUris] = useState<string[]>([""]);
+  const [postLogoutRedirectUris, setPostLogoutRedirectUris] = useState<string[]>([""]);
   const [selectedScopes, setSelectedScopes] = useState<Set<string>>(() => new Set(REQUIRED_SCOPES));
   const [createdSecret, setCreatedSecret] = useState<{
     clientId: string;
@@ -53,6 +54,7 @@ export function OAuthClientCreateModal({ open, onClose, level }: Props) {
   function handleClose() {
     reset({ name: "" });
     setRedirectUris([""]);
+    setPostLogoutRedirectUris([""]);
     setSelectedScopes(new Set(REQUIRED_SCOPES));
     setCreatedSecret(null);
     createMutation.reset();
@@ -69,29 +71,40 @@ export function OAuthClientCreateModal({ open, onClose, level }: Props) {
     });
   }
 
+  function validateUris(uris: string[]): string[] | null {
+    for (const uri of uris) {
+      try {
+        const url = new URL(uri);
+        if (url.protocol !== "https:" && url.hostname !== "localhost") {
+          setError("root", { message: t("settings:oauthClients.httpsRequired") });
+          return null;
+        }
+      } catch {
+        setError("root", { message: t("settings:oauthClients.invalidUri") });
+        return null;
+      }
+    }
+    return uris;
+  }
+
   function onSubmit(data: FormData) {
     const cleaned = redirectUris.map((u) => u.trim()).filter((u) => u.length > 0);
     if (cleaned.length === 0) {
       setError("root", { message: t("settings:oauthClients.redirectUrisRequired") });
       return;
     }
-    for (const uri of cleaned) {
-      try {
-        const url = new URL(uri);
-        if (url.protocol !== "https:" && url.hostname !== "localhost") {
-          setError("root", { message: t("settings:oauthClients.httpsRequired") });
-          return;
-        }
-      } catch {
-        setError("root", { message: t("settings:oauthClients.invalidUri") });
-        return;
-      }
-    }
+    if (!validateUris(cleaned)) return;
+
+    const cleanedPostLogout = postLogoutRedirectUris
+      .map((u) => u.trim())
+      .filter((u) => u.length > 0);
+    if (cleanedPostLogout.length > 0 && !validateUris(cleanedPostLogout)) return;
 
     createMutation.mutate(
       {
         name: data.name.trim(),
         redirectUris: cleaned,
+        ...(cleanedPostLogout.length > 0 && { postLogoutRedirectUris: cleanedPostLogout }),
         scopes: Array.from(selectedScopes),
       },
       {
@@ -182,6 +195,51 @@ export function OAuthClientCreateModal({ open, onClose, level }: Props) {
               variant="outline"
               size="sm"
               onClick={() => setRedirectUris([...redirectUris, ""])}
+            >
+              <Plus className="h-4 w-4" /> {t("settings:oauthClients.addRedirectUri")}
+            </Button>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>{t("settings:oauthClients.postLogoutRedirectUris")}</Label>
+          <p className="text-muted-foreground text-xs">
+            {t("settings:oauthClients.postLogoutRedirectUrisHint")}
+          </p>
+          <div className="flex flex-col gap-2">
+            {postLogoutRedirectUris.map((uri, index) => (
+              <div key={index} className="flex gap-2">
+                <Input
+                  type="url"
+                  value={uri}
+                  onChange={(e) => {
+                    const next = [...postLogoutRedirectUris];
+                    next[index] = e.target.value;
+                    setPostLogoutRedirectUris(next);
+                  }}
+                  placeholder="https://example.com/"
+                />
+                {postLogoutRedirectUris.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() =>
+                      setPostLogoutRedirectUris(
+                        postLogoutRedirectUris.filter((_, i) => i !== index),
+                      )
+                    }
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPostLogoutRedirectUris([...postLogoutRedirectUris, ""])}
             >
               <Plus className="h-4 w-4" /> {t("settings:oauthClients.addRedirectUri")}
             </Button>
