@@ -311,4 +311,99 @@ describe("Public end-user pages — /api/oauth/*", () => {
     const out = await res.text();
     expect(out).toContain("Email ou mot de passe incorrect");
   });
+
+  // ── Stale login URL protections ────────────────────────────────────────
+  // When a user clicks a stale/bookmarked OAuth login link, the login
+  // endpoint must not create a persistent BA session that would let any
+  // downstream OIDC client silently auto-grant on the next visit.
+
+  describe("expired login URL protection (exp param)", () => {
+    it("GET /login with an expired exp param returns 400 with error message", async () => {
+      const { clientId } = await registerClient(ctx);
+      const pastExp = Math.floor(Date.now() / 1000) - 60; // 1 minute ago
+      const qs = `?client_id=${encodeURIComponent(clientId)}&state=stale&exp=${pastExp}&sig=fakesig`;
+      const res = await app.request(`/api/oauth/login${qs}`);
+      expect(res.status).toBe(400);
+      const html = await res.text();
+      expect(html).toContain("expiré");
+    });
+
+    it("GET /login without exp param still renders normally (BA handles its own signing)", async () => {
+      const { clientId } = await registerClient(ctx);
+      const qs = `?client_id=${encodeURIComponent(clientId)}&state=fresh`;
+      const res = await app.request(`/api/oauth/login${qs}`);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain('method="POST"');
+    });
+
+    it("GET /login with a future exp param renders normally", async () => {
+      const { clientId } = await registerClient(ctx);
+      const futureExp = Math.floor(Date.now() / 1000) + 600; // 10 minutes from now
+      const qs = `?client_id=${encodeURIComponent(clientId)}&state=fresh&exp=${futureExp}&sig=test`;
+      const res = await app.request(`/api/oauth/login${qs}`);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain('method="POST"');
+    });
+
+    it("POST /login with an expired exp param rejects before authenticating", async () => {
+      const { clientId } = await registerClient(ctx);
+      const pastExp = Math.floor(Date.now() / 1000) - 60;
+      const qs = `?client_id=${encodeURIComponent(clientId)}&state=stale&exp=${pastExp}&sig=fake`;
+      const res = await app.request(`/api/oauth/login${qs}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "email=a@b.com&password=hunter2",
+      });
+      expect(res.status).toBe(400);
+      // No Set-Cookie with a session token — the user was never authenticated.
+      const cookies = res.headers.get("set-cookie") ?? "";
+      expect(cookies).not.toContain("better-auth.session_token");
+    });
+  });
+
+  describe("OAuth login session TTL", () => {
+    it("POST /login success forwards BA cookies with Max-Age capped to 300s", async () => {
+      const { clientId } = await registerClient(ctx);
+      const email = `ttl-${Date.now()}@example.com`;
+      const password = "TestPassword123!";
+      await createTestUser({ email, password });
+
+      // GET login page to obtain CSRF token + cookie.
+      const getRes = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}`,
+      );
+      const csrfCookie = (getRes.headers.get("set-cookie") ?? "").split(";")[0]!;
+      const formHtml = await getRes.text();
+      const csrf = formHtml.match(/name="_csrf" value="([^"]+)"/)![1]!;
+
+      const res = await app.request(`/api/oauth/login?client_id=${encodeURIComponent(clientId)}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          cookie: csrfCookie,
+        },
+        body:
+          `_csrf=${encodeURIComponent(csrf)}` +
+          `&email=${encodeURIComponent(email)}` +
+          `&password=${encodeURIComponent(password)}`,
+        redirect: "manual",
+      });
+      // Successful login redirects to the authorize endpoint.
+      expect(res.status).toBe(302);
+
+      // Every Set-Cookie from BA must carry Max-Age=300 (5 min cap).
+      const allCookies =
+        typeof (res.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie ===
+        "function"
+          ? (res.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
+          : (res.headers.get("set-cookie") ?? "").split(",").map((c) => c.trim());
+      const sessionCookies = allCookies.filter((c) => c.includes("better-auth.session_token"));
+      expect(sessionCookies.length).toBeGreaterThan(0);
+      for (const cookie of sessionCookies) {
+        expect(cookie).toContain("Max-Age=300");
+      }
+    });
+  });
 });

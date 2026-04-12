@@ -287,6 +287,20 @@ export function createOidcRouter() {
     const url = new URL(c.req.url);
     const clientId = url.searchParams.get("client_id");
     if (!clientId) throw invalidRequest("client_id is required", "client_id");
+    // Better Auth signs the redirect with `exp` (Unix seconds). Reject
+    // expired login URLs so stale links cannot create upstream sessions.
+    const exp = url.searchParams.get("exp");
+    if (exp && Number(exp) < Date.now() / 1000) {
+      const { branding } = await loadClientContext(c, clientId);
+      const body = renderLoginPage({
+        queryString: url.search,
+        branding,
+        csrfToken: "",
+        error:
+          "Ce lien de connexion a expiré. Veuillez relancer la connexion depuis l'application.",
+      });
+      return c.html(body.value, 400);
+    }
     const { branding, csrfToken } = await loadClientContext(c, clientId);
     const body = renderLoginPage({ queryString: url.search, branding, csrfToken });
     return c.html(body.value);
@@ -296,6 +310,12 @@ export function createOidcRouter() {
     const url = new URL(c.req.url);
     const clientId = url.searchParams.get("client_id");
     if (!clientId) throw invalidRequest("client_id is required", "client_id");
+    // Reject form submissions for expired login URLs — prevents creating a
+    // Better Auth session from a stale link.
+    const exp = url.searchParams.get("exp");
+    if (exp && Number(exp) < Date.now() / 1000) {
+      throw invalidRequest("Login link has expired");
+    }
 
     const form = await c.req.parseBody();
     if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
@@ -450,16 +470,29 @@ export function createOidcRouter() {
     // which breaks cookie forwarding. We must use the Hono context header
     // accumulator (not a fresh Response) so the forwarded cookies survive
     // alongside the CSRF cookie deletion that verifyCsrfToken already queued.
+    //
+    // SECURITY: Cap the session cookie Max-Age to 5 minutes. The BA session
+    // created here is only needed for the OAuth redirect chain (login →
+    // authorize → consent → callback). Without this cap, the session
+    // persists indefinitely — if the downstream client rejects the callback
+    // (e.g. expired state), the surviving BA session enables silent
+    // re-authentication on the next visit, bypassing the client's CSRF
+    // (state) protection entirely.
+    const OAUTH_SESSION_MAX_AGE = 300; // 5 minutes — enough for the redirect chain
     const setCookies =
       typeof (authResponse.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie ===
       "function"
         ? (authResponse.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
         : [];
-    for (const value of setCookies) {
-      c.header("set-cookie", value, { append: true });
+    for (const raw of setCookies) {
+      const patched = raw.includes("Max-Age=")
+        ? raw.replace(/Max-Age=\d+/gi, `Max-Age=${OAUTH_SESSION_MAX_AGE}`)
+        : `${raw}; Max-Age=${OAUTH_SESSION_MAX_AGE}`;
+      c.header("set-cookie", patched, { append: true });
     }
-    logger.info("oidc: login success, forwarding cookies", {
+    logger.info("oidc: login success, forwarding cookies (capped to OAuth flow TTL)", {
       cookieCount: setCookies.length,
+      maxAge: OAUTH_SESSION_MAX_AGE,
       email,
     });
     return c.redirect(`/api/auth/oauth2/authorize${url.search}`, 302);
