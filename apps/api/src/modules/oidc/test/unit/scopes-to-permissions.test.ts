@@ -3,7 +3,8 @@
 import { describe, it, expect, spyOn } from "bun:test";
 import { scopesToPermissions } from "../../auth/claims.ts";
 import { logger } from "../../../../lib/logger.ts";
-import { OIDC_ALLOWED_SCOPES, resolvePermissions } from "../../../../lib/permissions.ts";
+import { resolvePermissions } from "../../../../lib/permissions.ts";
+import { OIDC_ALLOWED_SCOPES } from "../../auth/scopes.ts";
 
 describe("scopesToPermissions — end_user flow", () => {
   it("returns an empty set for undefined / empty scope", () => {

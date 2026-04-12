@@ -15,14 +15,10 @@
  * translation layer.
  */
 
-import {
-  OIDC_ALLOWED_SCOPES,
-  resolvePermissions,
-  type Permission,
-} from "../../../lib/permissions.ts";
+import { resolvePermissions, type Permission } from "../../../lib/permissions.ts";
 import { logger } from "../../../lib/logger.ts";
 import type { OrgRole } from "../../../types/index.ts";
-import { OIDC_IDENTITY_SCOPE_SET } from "./scopes.ts";
+import { OIDC_ALLOWED_SCOPES, OIDC_IDENTITY_SCOPE_SET } from "./scopes.ts";
 
 type ActorType = "dashboard_user" | "end_user" | "user";
 
