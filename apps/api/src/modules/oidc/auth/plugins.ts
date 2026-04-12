@@ -46,11 +46,11 @@ import { hashSecret } from "../services/oauth-admin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 import { APPSTRATE_SCOPES } from "./scopes.ts";
 
-export type ActorType = "dashboard_user" | "end_user";
+export type ActorType = "dashboard_user" | "end_user" | "user";
 export type OrgRoleClaim = "owner" | "admin" | "member" | "viewer";
 
 export interface ClientMetadata {
-  level?: "org" | "application";
+  level?: "org" | "application" | "instance";
   referencedOrgId?: string;
   referencedApplicationId?: string;
 }
@@ -121,6 +121,14 @@ export function oidcBetterAuthPlugins(): unknown[] {
             end_user_id: stringOrNull(claims.end_user_id),
           };
         }
+        if (actorType === "user") {
+          return {
+            actor_type: "user",
+            email: stringOr(claims.email, user?.email),
+            email_verified: boolOr(claims.email_verified, false),
+            name: stringOr(claims.name, user?.name),
+          };
+        }
         return {};
       },
     }),
@@ -149,6 +157,9 @@ async function buildClaimsForClient(
 ): Promise<Record<string, unknown>> {
   if (!user) return {};
   const level = metadata?.level;
+  if (level === "instance") {
+    return buildInstanceLevelClaims(user);
+  }
   if (level === "org") {
     return buildOrgLevelClaims(user, metadata!);
   }
@@ -162,6 +173,23 @@ async function buildClaimsForClient(
   throw new APIError("BAD_REQUEST", {
     message: "OAuth client metadata missing level — cannot issue token",
   });
+}
+
+async function buildInstanceLevelClaims(user: {
+  id: string;
+  email: string;
+  name?: string | null;
+  emailVerified?: boolean;
+}): Promise<Record<string, unknown>> {
+  // Instance tokens carry NO org or application context. The user is a
+  // Better Auth user who may belong to multiple organizations — org is
+  // resolved per-request via X-Org-Id after authentication.
+  return {
+    actor_type: "user",
+    email: user.email,
+    email_verified: user.emailVerified === true,
+    name: user.name ?? user.email,
+  };
 }
 
 async function buildOrgLevelClaims(

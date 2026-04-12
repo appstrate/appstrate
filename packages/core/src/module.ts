@@ -202,6 +202,16 @@ export interface AppstrateModule {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   emailOverrides?: Record<string, any>;
 
+  /**
+   * Structured data to merge into `AppConfig` at boot.
+   *
+   * Unlike `features` (boolean flags only), this method can contribute
+   * arbitrary structured fields (e.g. `{ oidc: { clientId, issuer } }`).
+   * Called once at boot after `init()` — the result is deep-merged into
+   * `AppConfig` alongside module features.
+   */
+  appConfigContribution?(): Promise<Record<string, unknown>> | Record<string, unknown>;
+
   /** Called during graceful shutdown (reverse init order). */
   shutdown?(): Promise<void>;
 }
@@ -284,9 +294,9 @@ export interface AuthStrategyRequest {
  */
 export interface AuthResolution {
   user: { id: string; email: string; name: string };
-  orgId: string;
+  orgId?: string;
   orgSlug?: string;
-  orgRole: "owner" | "admin" | "member" | "viewer";
+  orgRole?: "owner" | "admin" | "member" | "viewer";
   /**
    * Strategy-chosen identifier for this auth method (e.g. "oidc", "mtls",
    * "webhook-hmac"). Written to `c.set("authMethod", ...)`. NOT constrained

@@ -348,13 +348,18 @@ export function getModuleContributions(): ModuleContributions {
  * Merge module feature flags into the base AppConfig.
  * Each module's `features` is a `Record<string, boolean>` merged via `Object.assign`.
  */
-export function applyModuleFeatures(base: AppConfig): AppConfig {
+export async function applyModuleFeatures(base: AppConfig): Promise<AppConfig> {
   const moduleFeatures: Record<string, boolean> = {};
+  let config = { ...base };
   for (const mod of _modules.values()) {
     if (mod.features) Object.assign(moduleFeatures, mod.features);
+    if (mod.appConfigContribution) {
+      const contribution = await mod.appConfigContribution();
+      config = { ...config, ...contribution };
+    }
   }
   return {
-    ...base,
+    ...config,
     features: { ...base.features, ...moduleFeatures },
   };
 }

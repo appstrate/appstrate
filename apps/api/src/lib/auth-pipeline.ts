@@ -83,10 +83,12 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         const resolution = await strategy.authenticate(strategyReq);
         if (!resolution) continue;
         c.set("user", resolution.user);
-        c.set("orgId", resolution.orgId);
+        if (resolution.orgId !== undefined) c.set("orgId", resolution.orgId);
         if (resolution.orgSlug !== undefined) c.set("orgSlug", resolution.orgSlug);
-        c.set("orgRole", resolution.orgRole);
-        c.set("permissions", new Set(resolution.permissions));
+        if (resolution.orgRole !== undefined) c.set("orgRole", resolution.orgRole);
+        if (resolution.permissions.length > 0) {
+          c.set("permissions", new Set(resolution.permissions));
+        }
         c.set("authMethod", resolution.authMethod);
         if (resolution.applicationId !== undefined) {
           c.set("applicationId", resolution.applicationId);
@@ -195,8 +197,10 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     if (skipAuth(path, publicPaths())) return next();
     if (!c.get("user")) return next();
     // Non-session auth (API key, module strategies) already resolved orgId
-    // and permissions inline. Only session auth reads X-Org-Id here.
-    if (c.get("authMethod") !== "session") return next();
+    // and permissions inline. Session auth and instance-level OIDC tokens
+    // defer org resolution to the X-Org-Id middleware.
+    const method = c.get("authMethod");
+    if (method !== "session" && method !== "oauth2-instance") return next();
     if (skipOrgContext(path)) return next();
     return requireOrgContext()(c, next);
   });
@@ -204,7 +208,10 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   // Permission resolution for session auth (after org context sets orgRole).
   app.use("*", async (c, next) => {
     // Non-session auth methods set permissions inline — skip derivation.
-    if (c.get("authMethod") !== "session") return next();
+    // Instance-level OIDC tokens also defer permission resolution until after
+    // org-context sets orgRole (same as session auth).
+    const authMethod = c.get("authMethod");
+    if (authMethod !== "session" && authMethod !== "oauth2-instance") return next();
     const orgRole = c.get("orgRole");
     if (orgRole) {
       c.set("permissions", resolvePermissions(orgRole));

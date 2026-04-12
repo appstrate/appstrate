@@ -51,6 +51,8 @@ CREATE TABLE "oauth_clients" (
     (level = 'org' AND referenced_org_id IS NOT NULL AND referenced_application_id IS NULL)
     OR
     (level = 'application' AND referenced_application_id IS NOT NULL AND referenced_org_id IS NULL)
+    OR
+    (level = 'instance' AND referenced_org_id IS NULL AND referenced_application_id IS NULL)
   )
 );
 --> statement-breakpoint

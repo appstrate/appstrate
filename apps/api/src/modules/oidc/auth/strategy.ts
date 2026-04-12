@@ -7,6 +7,11 @@
  * the module-owned JWKS endpoint. The token's `actor_type` claim selects one
  * of two resolution paths:
  *
+ * - **`user`**: instance-level token. Load the Better Auth user row and
+ *   return a partial `AuthResolution` (no org, no role). The auth pipeline
+ *   defers org resolution to the `X-Org-Id` middleware (same as session
+ *   auth). `authMethod: "oauth2-instance"`.
+ *
  * - **`dashboard_user`**: load the Better Auth user row, re-verify that the
  *   user is still a member of the token's `org_id`, and emit the current
  *   `org_role` from the DB (not the stale claim — prevents role escalation
@@ -66,8 +71,13 @@ export const oidcAuthStrategy: AuthStrategy = {
         return null;
       }
       // Cross-validate actor_type vs client level to prevent confused deputy.
-      const expectedLevel = claims.actorType === "dashboard_user" ? "org" : "application";
-      if (claims.actorType && client.level !== expectedLevel) {
+      const actorToLevel: Record<string, string> = {
+        user: "instance",
+        dashboard_user: "org",
+        end_user: "application",
+      };
+      const expectedLevel = claims.actorType ? actorToLevel[claims.actorType] : undefined;
+      if (expectedLevel && client.level !== expectedLevel) {
         logger.warn("OIDC strategy: actor_type / client level mismatch — rejecting", {
           module: "oidc",
           actorType: claims.actorType,
@@ -77,6 +87,9 @@ export const oidcAuthStrategy: AuthStrategy = {
       }
     }
 
+    if (claims.actorType === "user") {
+      return resolveInstanceUser(claims);
+    }
     if (claims.actorType === "dashboard_user") {
       return resolveDashboardUser(claims);
     }
@@ -88,6 +101,35 @@ export const oidcAuthStrategy: AuthStrategy = {
     return null;
   },
 };
+
+async function resolveInstanceUser(claims: AccessTokenClaims): Promise<AuthResolution | null> {
+  const [authUserRow] = await db
+    .select({ id: authUsers.id, email: authUsers.email, name: authUsers.name })
+    .from(authUsers)
+    .where(eq(authUsers.id, claims.authUserId))
+    .limit(1);
+  if (!authUserRow) {
+    logger.debug("OIDC strategy: instance user row not found", {
+      module: "oidc",
+      userId: claims.authUserId,
+    });
+    return null;
+  }
+  // Instance tokens carry no org context. Return a partial resolution —
+  // orgId and orgRole are left undefined. The auth pipeline defers org
+  // resolution to the X-Org-Id middleware (same path as session auth).
+  // Permissions are also deferred — the pipeline derives them from orgRole
+  // after org-context resolves, via resolvePermissions(orgRole).
+  return {
+    user: {
+      id: authUserRow.id,
+      email: authUserRow.email,
+      name: authUserRow.name ?? "",
+    },
+    authMethod: "oauth2-instance",
+    permissions: [],
+  };
+}
 
 async function resolveDashboardUser(claims: AccessTokenClaims): Promise<AuthResolution | null> {
   if (!claims.orgId) {

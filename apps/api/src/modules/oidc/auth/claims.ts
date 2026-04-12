@@ -24,7 +24,7 @@ import { logger } from "../../../lib/logger.ts";
 import type { OrgRole } from "../../../types/index.ts";
 import { OIDC_IDENTITY_SCOPE_SET } from "./scopes.ts";
 
-type ActorType = "dashboard_user" | "end_user";
+type ActorType = "dashboard_user" | "end_user" | "user";
 
 export function scopesToPermissions(
   scope: string | undefined,
@@ -33,6 +33,11 @@ export function scopesToPermissions(
 ): Set<Permission> {
   const granted = new Set<Permission>();
   if (!scope) return granted;
+
+  // Instance-level tokens ("user") defer permission resolution to the
+  // auth pipeline — permissions are derived from orgRole after the
+  // X-Org-Id middleware resolves org context. Return empty set here.
+  if (actorType === "user") return granted;
 
   // Dashboard users: the role's permission set is the ceiling. A scope is
   // granted iff the role allows it. This prevents token privilege

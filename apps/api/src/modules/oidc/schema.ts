@@ -87,7 +87,7 @@ export const oauthClient = pgTable(
     requirePKCE: boolean("require_pkce"),
     metadata: text("metadata"),
     // ─── Appstrate polymorphic fields ────────────────────────────────────────
-    level: text("level", { enum: ["org", "application"] }).notNull(),
+    level: text("level", { enum: ["org", "application", "instance"] }).notNull(),
     referencedOrgId: uuid("referenced_org_id").references(() => organizations.id, {
       onDelete: "cascade",
     }),

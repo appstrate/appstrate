@@ -3,16 +3,18 @@
 /**
  * OAuth client admin service — polymorphic org + application clients.
  *
- * Direct CRUD against `oauth_clients`. Each client is scoped at one of two
+ * Direct CRUD against `oauth_clients`. Each client is scoped at one of three
  * levels:
  *
+ *   - `instance`: platform-wide, no org/app FK (the platform dashboard SPA)
  *   - `org`: pinned to an organization via `referenced_org_id` (dashboard
  *     users are the actors)
  *   - `application`: pinned to an application via `referenced_application_id`
  *     (end-users are the actors)
  *
  * A DB-level CHECK constraint guarantees exactly one of the two FKs is set
- * based on `level`, so "mixed" clients are unrepresentable.
+ * based on `level` (or neither for instance), so "mixed" clients are
+ * unrepresentable.
  *
  * Why we bypass `auth.api.adminCreateOAuthClient`: the plugin derives its
  * `reference_id` via `clientReference({ session })` which doesn't have
@@ -23,7 +25,7 @@
  *
  * `metadata` shape (single source of truth readable by the plugin):
  *   {
- *     level: "org" | "application",
+ *     level: "instance" | "org" | "application",
  *     referencedOrgId?: string,
  *     referencedApplicationId?: string,
  *   }
@@ -45,7 +47,7 @@ import { prefixedId } from "../../../lib/ids.ts";
 import { APPSTRATE_SCOPES } from "../auth/scopes.ts";
 import { isValidRedirectUri } from "./redirect-uri.ts";
 
-export type OAuthClientLevel = "org" | "application";
+export type OAuthClientLevel = "instance" | "org" | "application";
 
 export class OAuthAdminValidationError extends Error {
   readonly field: "scopes" | "redirectUris" | "referencedOrgId" | "referencedApplicationId";
@@ -90,7 +92,7 @@ export const oauthClientBaseSchema = z.object({
   id: z.string(),
   clientId: z.string(),
   name: z.string().nullable(),
-  level: z.enum(["org", "application"]),
+  level: z.enum(["instance", "org", "application"]),
   referencedOrgId: z.string().nullable(),
   referencedApplicationId: z.string().nullable(),
   redirectUris: z.array(z.url()),
@@ -110,7 +112,7 @@ export type OAuthClientRecord = z.infer<typeof oauthClientBaseSchema>;
 export type OAuthClientWithSecret = z.infer<typeof oauthClientWithSecretSchema>;
 
 function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
-  if (row.level !== "org" && row.level !== "application") {
+  if (row.level !== "instance" && row.level !== "org" && row.level !== "application") {
     throw new Error(`OIDC: unexpected oauth_client.level value: ${String(row.level)}`);
   }
   const level: OAuthClientLevel = row.level;
@@ -155,7 +157,9 @@ export async function hashSecret(plaintext: string): Promise<string> {
 async function syncMetadata(row: typeof oauthClient.$inferSelect): Promise<void> {
   const metadata: Record<string, unknown> = { level: row.level };
   if (row.level === "org") metadata.referencedOrgId = row.referencedOrgId;
-  else metadata.referencedApplicationId = row.referencedApplicationId;
+  else if (row.level === "application")
+    metadata.referencedApplicationId = row.referencedApplicationId;
+  // instance: no FK fields in metadata
   const current = row.metadata ? JSON.parse(row.metadata) : {};
   const expected = JSON.stringify(metadata);
   if (row.metadata !== expected && JSON.stringify(current) !== expected) {
@@ -231,7 +235,19 @@ export interface CreateApplicationClientInput {
   isFirstParty?: boolean;
 }
 
-export type CreateClientInput = CreateOrgClientInput | CreateApplicationClientInput;
+export interface CreateInstanceClientInput {
+  level: "instance";
+  name: string;
+  redirectUris: string[];
+  postLogoutRedirectUris?: string[];
+  scopes?: string[];
+  isFirstParty?: boolean;
+}
+
+export type CreateClientInput =
+  | CreateInstanceClientInput
+  | CreateOrgClientInput
+  | CreateApplicationClientInput;
 
 export async function createClient(input: CreateClientInput): Promise<OAuthClientWithSecret> {
   assertValidRedirectUris(input.redirectUris);
@@ -246,9 +262,10 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
   const metadata: Record<string, unknown> = { level: input.level };
   if (input.level === "org") {
     metadata.referencedOrgId = input.referencedOrgId;
-  } else {
+  } else if (input.level === "application") {
     metadata.referencedApplicationId = input.referencedApplicationId;
   }
+  // instance: no FK fields in metadata
 
   const inserted = await db
     .insert(oauthClient)
@@ -350,6 +367,8 @@ export async function getClientOwningOrg(clientId: string): Promise<string | nul
     .where(eq(oauthClient.clientId, clientId))
     .limit(1);
   if (!row) return null;
+  // Instance clients are system-level — they have no owning org.
+  if (row.level === "instance") return null;
   if (row.level === "org") return row.referencedOrgId;
   if (row.level === "application" && row.referencedApplicationId) {
     const [app] = await db
@@ -360,4 +379,36 @@ export async function getClientOwningOrg(clientId: string): Promise<string | nul
     return app?.orgId ?? null;
   }
   return null;
+}
+
+// ─── Instance client helpers ──────────────────────────────────────────────────
+
+/** Lookup the (unique) instance-level client's clientId. */
+export async function getInstanceClientId(): Promise<string | null> {
+  const [row] = await db
+    .select({ clientId: oauthClient.clientId })
+    .from(oauthClient)
+    .where(eq(oauthClient.level, "instance"))
+    .limit(1);
+  return row?.clientId ?? null;
+}
+
+/**
+ * Auto-provision the instance-level OIDC client for the platform SPA.
+ * Idempotent — returns the existing clientId if one already exists.
+ * Called from `oidcModule.init()` at boot.
+ */
+export async function ensureInstanceClient(appUrl: string): Promise<string> {
+  const existing = await getInstanceClientId();
+  if (existing) return existing;
+
+  const created = await createClient({
+    level: "instance",
+    name: "Appstrate Platform",
+    redirectUris: [`${appUrl}/auth/callback`],
+    postLogoutRedirectUris: [appUrl],
+    scopes: ["openid", "profile", "email", "offline_access"],
+    isFirstParty: true,
+  });
+  return created.clientId;
 }

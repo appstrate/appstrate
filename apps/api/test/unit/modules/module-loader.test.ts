@@ -180,7 +180,7 @@ describe("module-loader", () => {
       const b = mockModule("b", { features: { webhooks: true } });
       await loadModulesFromInstances([a, b], mockCtx());
 
-      const result = applyModuleFeatures(baseConfig);
+      const result = await applyModuleFeatures(baseConfig);
       expect(result.features.billing).toBe(true);
       expect(result.features.webhooks).toBe(true);
       expect(baseConfig.features.billing).toBe(false); // unchanged
@@ -338,7 +338,7 @@ describe("module-loader", () => {
 
       // applyModuleFeatures leaves base features untouched — only module
       // contributions are merged in.
-      const merged = applyModuleFeatures(baseConfig);
+      const merged = await applyModuleFeatures(baseConfig);
       expect(merged.features).toEqual(baseConfig.features);
 
       // No module-provided hooks. Core does not use the module hook system

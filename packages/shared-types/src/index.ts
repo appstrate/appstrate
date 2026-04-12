@@ -48,6 +48,8 @@ export interface AppConfig {
     privacy?: string;
   };
   trustedOrigins: string[];
+  /** OIDC instance-level client config — set by the OIDC module at boot. */
+  oidc?: { clientId: string; issuer: string };
 }
 
 // --- Package Types ---

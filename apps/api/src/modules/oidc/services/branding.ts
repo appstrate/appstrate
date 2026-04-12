@@ -143,6 +143,9 @@ export async function resolveBrandingForClient(client: {
   referencedOrgId: string | null;
   referencedApplicationId: string | null;
 }): Promise<ResolvedAppBranding> {
+  if (client.level === "instance") {
+    return { ...PLATFORM_DEFAULT_BRANDING };
+  }
   if (client.level === "application" && client.referencedApplicationId) {
     return resolveAppBranding(client.referencedApplicationId);
   }

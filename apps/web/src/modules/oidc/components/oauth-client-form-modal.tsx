@@ -62,7 +62,8 @@ function OAuthClientFormBody({
   const { isAdmin } = usePermissions();
   const isEditing = !!client;
 
-  const createMutation = useCreateOAuthClient(client?.level ?? level);
+  const effectiveLevel = client?.level === "instance" ? undefined : client?.level;
+  const createMutation = useCreateOAuthClient(effectiveLevel ?? level);
   const updateMutation = useUpdateOAuthClient();
   const { data: availableScopes } = useOAuthScopes();
   const isPending = createMutation.isPending || updateMutation.isPending;

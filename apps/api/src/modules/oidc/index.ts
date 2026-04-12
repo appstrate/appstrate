@@ -30,12 +30,15 @@
 import { resolve } from "node:path";
 import { z } from "zod";
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
+import { getEnv } from "@appstrate/env";
+import { logger } from "../../lib/logger.ts";
 import { oidcAuthStrategy } from "./auth/strategy.ts";
 import { oidcBetterAuthPlugins } from "./auth/plugins.ts";
 import { createOidcRouter, createOAuthClientSchema, updateOAuthClientSchema } from "./routes.ts";
 import { oidcPaths } from "./openapi/paths.ts";
 import { oidcSchemas } from "./openapi/schemas.ts";
 import { jwks, oauthClient, oauthAccessToken, oauthRefreshToken, oauthConsent } from "./schema.ts";
+import { ensureInstanceClient, getInstanceClientId } from "./services/oauth-admin.ts";
 
 const oidcModule: AppstrateModule = {
   manifest: { id: "oidc", name: "OIDC Identity Provider", version: "1.0.0" },
@@ -44,6 +47,11 @@ const oidcModule: AppstrateModule = {
     await ctx.applyMigrations("oidc", resolve(import.meta.dir, "drizzle/migrations"), {
       requireCoreTables: ["end_users", "user", "session", "organizations", "applications"],
     });
+    // Auto-provision the instance-level first-party OIDC client for the
+    // platform dashboard SPA. Idempotent — skips if one already exists.
+    const env = getEnv();
+    const clientId = await ensureInstanceClient(env.APP_URL);
+    logger.info("OIDC instance client ready", { module: "oidc", clientId });
   },
 
   // Router mounted at HTTP origin root. Declares full paths — `/api/oauth/*`
@@ -114,6 +122,13 @@ const oidcModule: AppstrateModule = {
         description: "Update OAuth client",
       },
     ];
+  },
+
+  async appConfigContribution() {
+    const clientId = await getInstanceClientId();
+    if (!clientId) return {};
+    const env = getEnv();
+    return { oidc: { clientId, issuer: `${env.APP_URL}/api/auth` } };
   },
 
   features: { oidc: true },

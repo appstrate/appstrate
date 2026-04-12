@@ -47,7 +47,7 @@ export interface AccessTokenClaims {
   /** OAuth2 `azp` (authorized party) — the `client_id` of the issuing client. */
   clientId?: string;
   /** Discriminant — see polymorphic fields below. */
-  actorType?: "dashboard_user" | "end_user";
+  actorType?: "dashboard_user" | "end_user" | "user";
   email?: string;
   emailVerified?: boolean;
   name?: string;
@@ -203,8 +203,10 @@ export async function verifyEndUserAccessToken(
   if (!payload.sub) return null;
   const extra = payload as Record<string, unknown>;
   const actorType =
-    extra.actor_type === "dashboard_user" || extra.actor_type === "end_user"
-      ? (extra.actor_type as "dashboard_user" | "end_user")
+    extra.actor_type === "dashboard_user" ||
+    extra.actor_type === "end_user" ||
+    extra.actor_type === "user"
+      ? (extra.actor_type as "dashboard_user" | "end_user" | "user")
       : undefined;
   const orgRole =
     typeof extra.org_role === "string" &&

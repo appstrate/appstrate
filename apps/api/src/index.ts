@@ -48,7 +48,7 @@ import {
 import { ApiError } from "./lib/errors.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
-import { getAppConfig } from "./lib/app-config.ts";
+import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
 import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
 import type { AppEnv } from "./types/index.ts";
 
@@ -158,6 +158,9 @@ app.use("*", async (c, next) => {
 
 // Boot: load system resources, init services, clean up orphans
 await boot();
+
+// Initialize app config (async — modules may contribute structured data like OIDC client ID)
+await initAppConfig();
 
 // Pre-compute config script (config is static after boot — cloud module is loaded or not)
 const appConfigScript = `<script>window.__APP_CONFIG__=${JSON.stringify(getAppConfig())};</script>`;
