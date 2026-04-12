@@ -415,4 +415,68 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(bodyA.data.map((c) => c.name)).toEqual(["Org A client"]);
     expect(bodyB.data.map((c) => c.name)).toEqual(["Org B client"]);
   });
+
+  // ── Logout route ──────────────────────────────────────────────────────────
+
+  it("GET /api/oauth/logout redirects to / when no client_id or redirect_uri", async () => {
+    const res = await app.request("/api/oauth/logout", { redirect: "manual" });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/");
+    expect(res.headers.get("set-cookie")).toContain("better-auth.session_token=;");
+  });
+
+  it("GET /api/oauth/logout validates redirect URI against registered URIs", async () => {
+    const createRes = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(applicationLevelBody(ctx)),
+    });
+    const { clientId } = (await createRes.json()) as { clientId: string };
+
+    // Registered URI should redirect
+    const goodRes = await app.request(
+      `/api/oauth/logout?client_id=${clientId}&post_logout_redirect_uri=${encodeURIComponent("https://acme.example.com/oauth/callback")}`,
+      { redirect: "manual" },
+    );
+    expect(goodRes.status).toBe(302);
+    expect(goodRes.headers.get("location")).toBe("https://acme.example.com/oauth/callback");
+
+    // Unregistered URI should fall back to /
+    const badRes = await app.request(
+      `/api/oauth/logout?client_id=${clientId}&post_logout_redirect_uri=${encodeURIComponent("https://evil.example.com/phish")}`,
+      { redirect: "manual" },
+    );
+    expect(badRes.status).toBe(302);
+    expect(badRes.headers.get("location")).toBe("/");
+  });
+
+  // ── PATCH atomicity + isFirstParty auth ───────────────────────────────────
+
+  it("PATCH updates a single field without affecting others", async () => {
+    const createRes = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(applicationLevelBody(ctx)),
+    });
+    const { clientId, redirectUris } = (await createRes.json()) as {
+      clientId: string;
+      redirectUris: string[];
+    };
+
+    // Only update disabled, leaving redirectUris and isFirstParty untouched
+    const patchRes = await app.request(`/api/oauth/clients/${clientId}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ disabled: true }),
+    });
+    expect(patchRes.status).toBe(200);
+    const body = (await patchRes.json()) as {
+      disabled: boolean;
+      isFirstParty: boolean;
+      redirectUris: string[];
+    };
+    expect(body.disabled).toBe(true);
+    expect(body.isFirstParty).toBe(false);
+    expect(body.redirectUris).toEqual(redirectUris);
+  });
 });

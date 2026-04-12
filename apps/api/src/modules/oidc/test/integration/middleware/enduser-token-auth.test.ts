@@ -291,4 +291,126 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     // anyone extending the test to cross-check app metadata.
     void applications;
   });
+
+  it("rejects a token when the end-user is suspended", async () => {
+    // Mark end-user as suspended in the OIDC profile.
+    await db
+      .update(oidcEndUserProfiles)
+      .set({ status: "suspended" })
+      .where(eq(oidcEndUserProfiles.endUserId, endUserId));
+
+    const token = await mintToken({
+      sub: authUserId,
+      actor_type: "end_user",
+      end_user_id: endUserId,
+      application_id: applicationId,
+      email: "stage3@example.com",
+    });
+    const res = await app.request(`/api/end-users/${endUserId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-App-Id": applicationId,
+      },
+    });
+    // Strategy returns null for non-active end-user → falls through → 401.
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects a token from a disabled OAuth client (via azp claim)", async () => {
+    // Create a real OAuth client, then disable it. Tokens carrying its
+    // client_id in the azp claim must be rejected by the strategy.
+    const { createClient, updateClient } = await import("../../../services/oauth-admin.ts");
+
+    const client = await createClient({
+      level: "application",
+      name: "Disabled Test Client",
+      redirectUris: ["https://example.com/cb"],
+      referencedApplicationId: applicationId,
+    });
+
+    // Mint a token with the azp claim matching the client.
+    const token = await mintToken({
+      sub: authUserId,
+      azp: client.clientId,
+      actor_type: "end_user",
+      end_user_id: endUserId,
+      application_id: applicationId,
+    });
+
+    // Token should work while client is active.
+    const goodRes = await app.request(`/api/end-users/${endUserId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-App-Id": applicationId,
+      },
+    });
+    expect(goodRes.status).toBe(200);
+
+    // Disable the client.
+    await updateClient(client.clientId, { disabled: true });
+
+    // Same token should now be rejected.
+    const badRes = await app.request(`/api/end-users/${endUserId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-App-Id": applicationId,
+      },
+    });
+    expect(badRes.status).toBe(401);
+  });
+
+  it("resolves a dashboard_user token to a dashboard session (no endUser)", async () => {
+    // Dashboard tokens carry actor_type: "dashboard_user" with org_id +
+    // org_role. The strategy resolves them to a normal admin session, NOT
+    // an end-user session.
+    const { organizationMembers } = await import("@appstrate/db/schema");
+
+    // The authUserId created in beforeEach is not an org member — we need
+    // to add them to the org for the dashboard strategy to resolve.
+    await db.insert(organizationMembers).values({
+      userId: authUserId,
+      orgId,
+      role: "admin",
+    });
+
+    const token = await mintToken({
+      sub: authUserId,
+      actor_type: "dashboard_user",
+      org_id: orgId,
+      org_role: "admin",
+      email: "stage3@example.com",
+      name: "Stage Three",
+      scope: "openid",
+    });
+
+    // Hit an org-scoped route (not app-scoped). Profile route works for any
+    // authenticated user.
+    const res = await app.request("/api/profile", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects a dashboard_user token when user is no longer an org member", async () => {
+    // Token was minted when user was a member, but membership was revoked.
+    // The strategy re-verifies membership from the DB and rejects.
+    const token = await mintToken({
+      sub: authUserId,
+      actor_type: "dashboard_user",
+      org_id: orgId,
+      org_role: "admin",
+      email: "stage3@example.com",
+    });
+
+    // authUserId is NOT a member of orgId (no membership row inserted).
+    const res = await app.request("/api/profile", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    // Strategy returns null (membership check fails) → 401.
+    expect(res.status).toBe(401);
+  });
 });
