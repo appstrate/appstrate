@@ -242,6 +242,8 @@ function mapLoginErrorCode(code: string): string {
   switch (code) {
     case "signup_disabled":
       return "L'inscription n'est pas ouverte sur cette application. Contactez un administrateur pour être ajouté à l'organisation.";
+    case "new_user_signup_disabled":
+      return "Aucun compte n'existe pour cette adresse email. Créez un compte ou utilisez un autre fournisseur de connexion.";
     case "email_not_found":
       return "Le fournisseur n'a pas retourné d'adresse email. Veuillez réessayer avec un autre compte.";
     case "account_already_linked_to_different_user":
@@ -1079,12 +1081,10 @@ export function createOidcRouter() {
     }
     const result = await loadClientContextOrRenderError(c, clientId);
     if (result instanceof Response) return result;
-    // Magic-link deliberately stays open for EXISTING members even when
-    // `allowSignup=false` — the BA plugin runs with `disableSignUp: true`
-    // so it never creates a user, and the token-mint path rejects
-    // non-members cleanly via `resolveOrCreateOrgMembership`. The pending
-    // cookie is still issued so the BA `beforeSignup` guard fires as
-    // defense in depth if BA ever changes its signup behavior.
+    // The pending cookie pins the client_id so the BA `beforeSignup` guard
+    // (`oidcBeforeSignupGuard`) applies the org-level signup policy at
+    // verify time: creation is allowed for instance/app clients and for
+    // org-level clients with `allowSignup: true`, and blocked otherwise.
     issuePendingClientCookie(c, result.client.id);
     const body = renderMagicLinkPage({
       queryString: url.search,

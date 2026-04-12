@@ -113,7 +113,13 @@ function buildBasePlugins(
     ...(smtpEnabled
       ? [
           magicLink({
-            disableSignUp: true,
+            // Signup via magic-link is allowed. The `databaseHooks.user.create.before`
+            // chain still enforces per-context policy: the OIDC module's
+            // `oidcBeforeSignupGuard` blocks creation for org-level clients with
+            // `allowSignup: false` (via the signed `oidc_pending_client` cookie),
+            // and cloud's free-tier hook applies its own gate. Outside an OIDC
+            // flow, magic-link signup is as open as email/password signup.
+            disableSignUp: false,
             expiresIn: 7 * 24 * 60 * 60, // 7 days — matches invitation expiry
             allowedAttempts: 5, // Browsers may hit verify multiple times (prefetch, preconnect)
             sendMagicLink: async ({ email, url }) => {

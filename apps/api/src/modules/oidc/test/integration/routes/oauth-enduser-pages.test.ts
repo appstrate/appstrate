@@ -461,8 +461,8 @@ describe("Public end-user pages — /api/oauth/*", () => {
       // "Créer un compte" link is hidden (the only signup CTA gated by policy)
       expect(html).not.toContain("Créer un compte");
       // Social + magic-link stay available for existing members — orphan
-      // creation is blocked at the BA beforeSignup hook + magicLink's
-      // `disableSignUp: true`, so showing them is safe.
+      // creation is blocked at the BA beforeSignup hook
+      // (`oidcBeforeSignupGuard`), so showing them is safe.
     });
 
     it("POST /login rejects an existing auth user who is not a member and allowSignup=false", async () => {
