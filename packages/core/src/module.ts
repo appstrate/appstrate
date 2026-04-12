@@ -286,21 +286,14 @@ export interface AuthResolution {
   user: { id: string; email: string; name: string };
   orgId: string;
   orgSlug?: string;
-  orgRole: "owner" | "admin" | "member" | "viewer";
+  orgRole: "owner" | "admin" | "member";
   /**
    * Strategy-chosen identifier for this auth method (e.g. "oidc", "mtls",
    * "webhook-hmac"). Written to `c.set("authMethod", ...)`. NOT constrained
    * to the core values `"session" | "api_key"`.
    */
   authMethod: string;
-  /**
-   * Optional application binding. End-user strategies (API-key impersonation,
-   * OIDC end_user flow) pin this so core's strict end-user filter has the
-   * owning app in context. Dashboard strategies (OIDC dashboard flow) leave
-   * it undefined — app context is then supplied per-request via the
-   * `X-App-Id` header handled by `requireAppContext()`.
-   */
-  applicationId?: string;
+  applicationId: string;
   /** Permission strings already resolved by the strategy. */
   permissions: readonly string[];
   /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
