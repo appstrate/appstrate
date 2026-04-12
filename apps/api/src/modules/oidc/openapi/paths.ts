@@ -12,18 +12,53 @@ const clientListResponse = {
   },
 };
 
-const createClientRequest = {
+const orgLevelClientRequest = {
   type: "object",
-  required: ["name", "redirectUris"],
+  required: ["level", "name", "redirectUris", "referencedOrgId"],
   properties: {
+    level: { type: "string", enum: ["org"] },
     name: { type: "string", minLength: 1, maxLength: 200 },
     redirectUris: {
       type: "array",
       minItems: 1,
       items: { type: "string", format: "uri" },
     },
+    postLogoutRedirectUris: {
+      type: "array",
+      items: { type: "string", format: "uri" },
+      description: "URIs allowed for post-logout redirects (OIDC RP-Initiated Logout).",
+    },
     scopes: { type: "array", items: { type: "string" } },
+    referencedOrgId: { type: "string" },
+    isFirstParty: { type: "boolean" },
   },
+};
+
+const applicationLevelClientRequest = {
+  type: "object",
+  required: ["level", "name", "redirectUris", "referencedApplicationId"],
+  properties: {
+    level: { type: "string", enum: ["application"] },
+    name: { type: "string", minLength: 1, maxLength: 200 },
+    redirectUris: {
+      type: "array",
+      minItems: 1,
+      items: { type: "string", format: "uri" },
+    },
+    postLogoutRedirectUris: {
+      type: "array",
+      items: { type: "string", format: "uri" },
+      description: "URIs allowed for post-logout redirects (OIDC RP-Initiated Logout).",
+    },
+    scopes: { type: "array", items: { type: "string" } },
+    referencedApplicationId: { type: "string" },
+    isFirstParty: { type: "boolean" },
+  },
+};
+
+const createClientRequest = {
+  oneOf: [orgLevelClientRequest, applicationLevelClientRequest],
+  discriminator: { propertyName: "level" },
 };
 
 const updateClientRequest = {
@@ -34,7 +69,13 @@ const updateClientRequest = {
       minItems: 1,
       items: { type: "string", format: "uri" },
     },
+    postLogoutRedirectUris: {
+      type: "array",
+      items: { type: "string", format: "uri" },
+      description: "URIs allowed for post-logout redirects (OIDC RP-Initiated Logout).",
+    },
     disabled: { type: "boolean" },
+    isFirstParty: { type: "boolean" },
   },
 };
 
@@ -52,10 +93,9 @@ export const oidcPaths = {
       tags: ["OAuth Clients"],
       summary: "Register an OAuth client",
       description:
-        "Register a new OAuth 2.1 client for the current application. The plaintext `clientSecret` is returned exactly once in the response body.",
+        "Register a new OAuth 2.1 client. Polymorphic across `org` (org-scoped, dashboard users) and `application` (app-scoped, end-users) levels. The plaintext `clientSecret` is returned exactly once.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
         { $ref: "#/components/parameters/IdempotencyKey" },
       ],
       requestBody: {
@@ -81,20 +121,14 @@ export const oidcPaths = {
       operationId: "listOAuthClients",
       tags: ["OAuth Clients"],
       summary: "List OAuth clients",
-      description: "List all OAuth clients registered against the current application.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-      ],
+      description:
+        "List every OAuth client visible to the current organization — both org-level clients pinned to the org and application-level clients pinned to any application the org owns.",
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
           description: "List of OAuth clients.",
           headers: commonHeaders,
-          content: {
-            "application/json": {
-              schema: clientListResponse,
-            },
-          },
+          content: { "application/json": { schema: clientListResponse } },
         },
       },
     },
@@ -106,13 +140,7 @@ export const oidcPaths = {
       summary: "Get OAuth client",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "clientId",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-        },
+        { name: "clientId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
@@ -132,16 +160,10 @@ export const oidcPaths = {
       tags: ["OAuth Clients"],
       summary: "Update OAuth client",
       description:
-        "Update the redirect URIs or `disabled` flag. The client secret is NOT rotatable here — use the `/rotate` endpoint.",
+        "Update the redirect URIs, `disabled` flag, or `isFirstParty` flag. Client type and pinned references are immutable.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "clientId",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-        },
+        { name: "clientId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -166,13 +188,7 @@ export const oidcPaths = {
       summary: "Delete OAuth client",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "clientId",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-        },
+        { name: "clientId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "204": { description: "Client deleted." },
@@ -185,12 +201,7 @@ export const oidcPaths = {
       operationId: "listOAuthScopes",
       tags: ["OAuth Clients"],
       summary: "List supported OAuth scopes",
-      description:
-        "Return the canonical OAuth scope vocabulary the authorization server supports. Used by the admin UI to render the create-client scope checkbox group so the frontend never hardcodes scope strings.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-      ],
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
           description: "List of supported OAuth scopes.",
@@ -215,16 +226,9 @@ export const oidcPaths = {
       operationId: "rotateOAuthClientSecret",
       tags: ["OAuth Clients"],
       summary: "Rotate client secret",
-      description: "Issue a fresh plaintext `clientSecret`. The previous secret is invalidated.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "clientId",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-        },
+        { name: "clientId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {

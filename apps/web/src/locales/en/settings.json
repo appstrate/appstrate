@@ -306,6 +306,8 @@
   "oauthClients.httpsRequired": "HTTPS required (except localhost).",
   "oauthClients.invalidUri": "Invalid URI.",
   "oauthClients.addRedirectUri": "Add URI",
+  "oauthClients.postLogoutRedirectUris": "Post-logout redirect URIs",
+  "oauthClients.postLogoutRedirectUrisHint": "Where the user is sent after logout. HTTPS required (except localhost). Optional.",
   "oauthClients.disabledBadge": "Disabled",
   "oauthClients.enable": "Enable",
   "oauthClients.disable": "Disable",

@@ -3,13 +3,13 @@
 /**
  * End-user login page.
  *
- * Served at GET /api/oauth/enduser/login as an anonymous public page. The
+ * Served at GET /api/oauth/login as an anonymous public page. The
  * Better Auth oauth-provider plugin redirects unauthenticated users here
  * during the OAuth authorize flow, passing through query parameters
  * (client_id, redirect_uri, state, code_challenge, code_challenge_method,
  * scope). The form POSTs back to the same path with email/password + a
  * CSRF token — the POST handler completes sign-in against Better Auth,
- * then redirects to /api/oauth/enduser/consent with the same query string.
+ * then redirects to /api/oauth/consent with the same query string.
  */
 
 import { html, type RawHtml } from "./html.ts";
@@ -30,7 +30,7 @@ export interface LoginPageProps {
 }
 
 export function renderLoginPage(props: LoginPageProps): RawHtml {
-  const action = `/api/oauth/enduser/login${props.queryString}`;
+  const action = `/api/oauth/login${props.queryString}`;
   const title = `Connexion à ${props.branding.name}`;
   const bodyHtml = html`
     <h1>Connexion</h1>

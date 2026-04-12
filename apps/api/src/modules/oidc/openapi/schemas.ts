@@ -10,9 +10,9 @@
  */
 
 import { z } from "zod";
-import { oauthClientSchema, oauthClientWithSecretSchema } from "../services/oauth-admin.ts";
+import { oauthClientBaseSchema, oauthClientWithSecretSchema } from "../services/oauth-admin.ts";
 
 export const oidcSchemas = {
-  OAuthClientObject: z.toJSONSchema(oauthClientSchema) as Record<string, unknown>,
+  OAuthClientObject: z.toJSONSchema(oauthClientBaseSchema) as Record<string, unknown>,
   OAuthClientWithSecret: z.toJSONSchema(oauthClientWithSecretSchema) as Record<string, unknown>,
 };

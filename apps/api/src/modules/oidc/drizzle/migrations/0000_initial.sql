@@ -1,8 +1,8 @@
 -- OIDC module: initial schema
--- Owns: jwks, oauth_client, oauth_access_token, oauth_refresh_token, oauth_consent,
+-- Owns: jwks, oauth_clients, oauth_access_tokens, oauth_refresh_tokens, oauth_consents,
 --       oidc_end_user_profiles
 --
--- Requires core tables: "user", "session", "end_users".
+-- Requires core tables: "user", "session", "end_users", "organizations", "applications".
 
 CREATE TABLE "jwks" (
   "id" text PRIMARY KEY NOT NULL,
@@ -12,12 +12,12 @@ CREATE TABLE "jwks" (
   "expires_at" timestamp
 );
 --> statement-breakpoint
-CREATE TABLE "oauth_client" (
+CREATE TABLE "oauth_clients" (
   "id" text PRIMARY KEY NOT NULL,
   "client_id" text NOT NULL,
   "client_secret" text,
   "disabled" boolean DEFAULT false,
-  "skip_consent" boolean,
+  "is_first_party" boolean DEFAULT false,
   "enable_end_session" boolean,
   "subject_type" text,
   "scopes" text[] DEFAULT '{}',
@@ -42,12 +42,19 @@ CREATE TABLE "oauth_client" (
   "public" boolean,
   "type" text,
   "require_pkce" boolean,
-  "reference_id" text NOT NULL,
   "metadata" text,
-  CONSTRAINT "oauth_client_client_id_unique" UNIQUE("client_id")
+  "level" text NOT NULL,
+  "referenced_org_id" uuid,
+  "referenced_application_id" text,
+  CONSTRAINT "oauth_clients_client_id_unique" UNIQUE ("client_id"),
+  CONSTRAINT "oauth_clients_level_check" CHECK (
+    (level = 'org' AND referenced_org_id IS NOT NULL AND referenced_application_id IS NULL)
+    OR
+    (level = 'application' AND referenced_application_id IS NOT NULL AND referenced_org_id IS NULL)
+  )
 );
 --> statement-breakpoint
-CREATE TABLE "oauth_refresh_token" (
+CREATE TABLE "oauth_refresh_tokens" (
   "id" text PRIMARY KEY NOT NULL,
   "token" text NOT NULL,
   "client_id" text NOT NULL,
@@ -58,10 +65,11 @@ CREATE TABLE "oauth_refresh_token" (
   "created_at" timestamp DEFAULT now(),
   "revoked" timestamp,
   "auth_time" timestamp,
-  "scopes" text[] NOT NULL
+  "scopes" text[] NOT NULL,
+  CONSTRAINT "oauth_refresh_tokens_token_unique" UNIQUE ("token")
 );
 --> statement-breakpoint
-CREATE TABLE "oauth_access_token" (
+CREATE TABLE "oauth_access_tokens" (
   "id" text PRIMARY KEY NOT NULL,
   "token" text,
   "client_id" text NOT NULL,
@@ -72,10 +80,10 @@ CREATE TABLE "oauth_access_token" (
   "expires_at" timestamp,
   "created_at" timestamp DEFAULT now(),
   "scopes" text[] NOT NULL,
-  CONSTRAINT "oauth_access_token_token_unique" UNIQUE("token")
+  CONSTRAINT "oauth_access_tokens_token_unique" UNIQUE ("token")
 );
 --> statement-breakpoint
-CREATE TABLE "oauth_consent" (
+CREATE TABLE "oauth_consents" (
   "id" text PRIMARY KEY NOT NULL,
   "client_id" text NOT NULL,
   "user_id" text,
@@ -94,45 +102,53 @@ CREATE TABLE "oidc_end_user_profiles" (
   "updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "oauth_client"
-  ADD CONSTRAINT "oauth_client_user_id_user_id_fk"
+ALTER TABLE "oauth_clients"
+  ADD CONSTRAINT "oauth_clients_user_id_user_id_fk"
   FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
-ALTER TABLE "oauth_refresh_token"
-  ADD CONSTRAINT "oauth_refresh_token_client_id_oauth_client_client_id_fk"
-  FOREIGN KEY ("client_id") REFERENCES "public"."oauth_client"("client_id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "oauth_clients"
+  ADD CONSTRAINT "oauth_clients_referenced_org_id_organizations_id_fk"
+  FOREIGN KEY ("referenced_org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
-ALTER TABLE "oauth_refresh_token"
-  ADD CONSTRAINT "oauth_refresh_token_session_id_session_id_fk"
+ALTER TABLE "oauth_clients"
+  ADD CONSTRAINT "oauth_clients_referenced_application_id_applications_id_fk"
+  FOREIGN KEY ("referenced_application_id") REFERENCES "public"."applications"("id") ON DELETE cascade ON UPDATE no action;
+--> statement-breakpoint
+ALTER TABLE "oauth_refresh_tokens"
+  ADD CONSTRAINT "oauth_refresh_tokens_client_id_oauth_clients_client_id_fk"
+  FOREIGN KEY ("client_id") REFERENCES "public"."oauth_clients"("client_id") ON DELETE cascade ON UPDATE no action;
+--> statement-breakpoint
+ALTER TABLE "oauth_refresh_tokens"
+  ADD CONSTRAINT "oauth_refresh_tokens_session_id_session_id_fk"
   FOREIGN KEY ("session_id") REFERENCES "public"."session"("id") ON DELETE set null ON UPDATE no action;
 --> statement-breakpoint
-ALTER TABLE "oauth_refresh_token"
-  ADD CONSTRAINT "oauth_refresh_token_user_id_user_id_fk"
-  FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "oauth_refresh_tokens"
+  ADD CONSTRAINT "oauth_refresh_tokens_user_id_user_id_fk"
+  FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
-ALTER TABLE "oauth_access_token"
-  ADD CONSTRAINT "oauth_access_token_client_id_oauth_client_client_id_fk"
-  FOREIGN KEY ("client_id") REFERENCES "public"."oauth_client"("client_id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "oauth_access_tokens"
+  ADD CONSTRAINT "oauth_access_tokens_client_id_oauth_clients_client_id_fk"
+  FOREIGN KEY ("client_id") REFERENCES "public"."oauth_clients"("client_id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
-ALTER TABLE "oauth_access_token"
-  ADD CONSTRAINT "oauth_access_token_session_id_session_id_fk"
+ALTER TABLE "oauth_access_tokens"
+  ADD CONSTRAINT "oauth_access_tokens_session_id_session_id_fk"
   FOREIGN KEY ("session_id") REFERENCES "public"."session"("id") ON DELETE set null ON UPDATE no action;
 --> statement-breakpoint
-ALTER TABLE "oauth_access_token"
-  ADD CONSTRAINT "oauth_access_token_user_id_user_id_fk"
-  FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "oauth_access_tokens"
+  ADD CONSTRAINT "oauth_access_tokens_user_id_user_id_fk"
+  FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
-ALTER TABLE "oauth_access_token"
-  ADD CONSTRAINT "oauth_access_token_refresh_id_oauth_refresh_token_id_fk"
-  FOREIGN KEY ("refresh_id") REFERENCES "public"."oauth_refresh_token"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "oauth_access_tokens"
+  ADD CONSTRAINT "oauth_access_tokens_refresh_id_oauth_refresh_tokens_id_fk"
+  FOREIGN KEY ("refresh_id") REFERENCES "public"."oauth_refresh_tokens"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
-ALTER TABLE "oauth_consent"
-  ADD CONSTRAINT "oauth_consent_client_id_oauth_client_client_id_fk"
-  FOREIGN KEY ("client_id") REFERENCES "public"."oauth_client"("client_id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "oauth_consents"
+  ADD CONSTRAINT "oauth_consents_client_id_oauth_clients_client_id_fk"
+  FOREIGN KEY ("client_id") REFERENCES "public"."oauth_clients"("client_id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
-ALTER TABLE "oauth_consent"
-  ADD CONSTRAINT "oauth_consent_user_id_user_id_fk"
-  FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "oauth_consents"
+  ADD CONSTRAINT "oauth_consents_user_id_user_id_fk"
+  FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
 ALTER TABLE "oidc_end_user_profiles"
   ADD CONSTRAINT "oidc_end_user_profiles_end_user_id_end_users_id_fk"
@@ -141,5 +157,9 @@ ALTER TABLE "oidc_end_user_profiles"
 ALTER TABLE "oidc_end_user_profiles"
   ADD CONSTRAINT "oidc_end_user_profiles_auth_user_id_user_id_fk"
   FOREIGN KEY ("auth_user_id") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;
+--> statement-breakpoint
+CREATE INDEX "idx_oauth_clients_org" ON "oauth_clients" ("referenced_org_id");
+--> statement-breakpoint
+CREATE INDEX "idx_oauth_clients_app" ON "oauth_clients" ("referenced_application_id");
 --> statement-breakpoint
 CREATE INDEX "idx_oidc_profiles_auth_user" ON "oidc_end_user_profiles" ("auth_user_id");

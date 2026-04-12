@@ -84,8 +84,9 @@ describe("verifyEndUserAccessToken", () => {
     const { verifyEndUserAccessToken } = await import("../../services/enduser-token.ts");
     const token = await mintToken({
       sub: "auth_user_1",
-      endUserId: "eu_abc",
-      applicationId: "app_xyz",
+      actor_type: "end_user",
+      end_user_id: "eu_abc",
+      application_id: "app_xyz",
       email: "user@example.com",
       name: "User One",
       scope: "openid runs:read",
@@ -93,6 +94,7 @@ describe("verifyEndUserAccessToken", () => {
     const claims = await verifyEndUserAccessToken(token, { jwks: localJwks });
     expect(claims).not.toBeNull();
     expect(claims!.authUserId).toBe("auth_user_1");
+    expect(claims!.actorType).toBe("end_user");
     expect(claims!.endUserId).toBe("eu_abc");
     expect(claims!.applicationId).toBe("app_xyz");
     expect(claims!.email).toBe("user@example.com");
@@ -142,7 +144,10 @@ describe("verifyEndUserAccessToken", () => {
     // the issuer or the Better Auth base URL as their `resource` parameter.
     const { verifyEndUserAccessToken } = await import("../../services/enduser-token.ts");
     const env = process.env.APP_URL!;
-    const token = await mintToken({ sub: "auth_user_1", endUserId: "eu_abc" }, `${env}/api/auth`);
+    const token = await mintToken(
+      { sub: "auth_user_1", actor_type: "end_user", end_user_id: "eu_abc" },
+      `${env}/api/auth`,
+    );
     const claims = await verifyEndUserAccessToken(token, { jwks: localJwks });
     expect(claims).not.toBeNull();
     expect(claims!.endUserId).toBe("eu_abc");

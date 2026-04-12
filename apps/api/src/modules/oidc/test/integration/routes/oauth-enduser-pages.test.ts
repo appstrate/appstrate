@@ -28,11 +28,14 @@ const app = getTestApp({ modules: [oidcModule] });
 
 async function registerClient(
   ctx: TestContext,
-  body: { name: string; redirectUris: string[] } = {
-    name: "Acme Portal",
-    redirectUris: ["https://acme.example.com/oauth/callback"],
-  },
+  overrides: { name?: string; redirectUris?: string[] } = {},
 ): Promise<{ clientId: string; clientSecret: string }> {
+  const body = {
+    level: "application" as const,
+    name: overrides.name ?? "Acme Portal",
+    redirectUris: overrides.redirectUris ?? ["https://acme.example.com/oauth/callback"],
+    referencedApplicationId: ctx.defaultAppId,
+  };
   const res = await app.request("/api/oauth/clients", {
     method: "POST",
     headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -41,7 +44,7 @@ async function registerClient(
   return (await res.json()) as { clientId: string; clientSecret: string };
 }
 
-describe("Public end-user pages — /api/oauth/enduser/*", () => {
+describe("Public end-user pages — /api/oauth/*", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -52,7 +55,7 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
   it("GET /login renders a form with the escaped query string and no auth required", async () => {
     const { clientId } = await registerClient(ctx);
     const qs = `?client_id=${encodeURIComponent(clientId)}&state=xyz&scope=openid%20runs%3Aread`;
-    const res = await app.request(`/api/oauth/enduser/login${qs}`);
+    const res = await app.request(`/api/oauth/login${qs}`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
@@ -61,7 +64,7 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
     expect(html).toContain('name="password"');
     // Form action echoes the query string back with `&` HTML-escaped to `&amp;`.
     const escapedQs = qs.replace(/&/g, "&amp;");
-    expect(html).toContain(`action="/api/oauth/enduser/login${escapedQs}"`);
+    expect(html).toContain(`action="/api/oauth/login${escapedQs}"`);
   });
 
   it("GET /login always HTML-escapes `&` in the forwarded query string", async () => {
@@ -72,22 +75,20 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
     // on `escapeHtml` + `renderLoginPage` cover the raw-character vectors.
     const { clientId } = await registerClient(ctx);
     const qs = `?client_id=${encodeURIComponent(clientId)}&state=x&scope=openid`;
-    const res = await app.request(`/api/oauth/enduser/login${qs}`);
+    const res = await app.request(`/api/oauth/login${qs}`);
     expect(res.status).toBe(200);
     const htmlOut = await res.text();
-    expect(htmlOut).not.toContain(`action="/api/oauth/enduser/login${qs}"`);
+    expect(htmlOut).not.toContain(`action="/api/oauth/login${qs}"`);
     expect(htmlOut).toContain(`state=x&amp;scope=openid`);
   });
 
   it("GET /login 404s on unknown client_id", async () => {
-    const res = await app.request(
-      "/api/oauth/enduser/login?client_id=oauth_totally_unknown&state=x",
-    );
+    const res = await app.request("/api/oauth/login?client_id=oauth_totally_unknown&state=x");
     expect(res.status).toBe(404);
   });
 
   it("GET /login 400s when client_id is missing", async () => {
-    const res = await app.request("/api/oauth/enduser/login?state=x");
+    const res = await app.request("/api/oauth/login?state=x");
     expect(res.status).toBe(400);
   });
 
@@ -98,9 +99,7 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ disabled: true }),
     });
-    const res = await app.request(
-      `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
-    );
+    const res = await app.request(`/api/oauth/login?client_id=${encodeURIComponent(clientId)}`);
     expect(res.status).toBe(404);
   });
 
@@ -112,7 +111,7 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
     const qs = `?client_id=${encodeURIComponent(clientId)}&scope=${encodeURIComponent(
       "openid runs:read agents:run",
     )}&state=s1`;
-    const res = await app.request(`/api/oauth/enduser/consent${qs}`);
+    const res = await app.request(`/api/oauth/consent${qs}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Team Portal");
@@ -120,7 +119,7 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
     expect(html).toContain("Lancer des agents pour vous");
     // Two forms (deny + allow) both posting back to the same action.
     const escapedQs = qs.replace(/&/g, "&amp;");
-    expect(html).toContain(`action="/api/oauth/enduser/consent${escapedQs}"`);
+    expect(html).toContain(`action="/api/oauth/consent${escapedQs}"`);
   });
 
   it("GET /consent escapes XSS in the client name", async () => {
@@ -129,7 +128,7 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
       redirectUris: ["https://x.example.com/cb"],
     });
     const res = await app.request(
-      `/api/oauth/enduser/consent?client_id=${encodeURIComponent(clientId)}&scope=openid`,
+      `/api/oauth/consent?client_id=${encodeURIComponent(clientId)}&scope=openid`,
     );
     const html = await res.text();
     expect(html).not.toContain("<img src=x onerror=alert(1)>");
@@ -137,41 +136,33 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
   });
 
   it("GET /consent 404s on unknown client_id", async () => {
-    const res = await app.request("/api/oauth/enduser/consent?client_id=oauth_nope&scope=openid");
+    const res = await app.request("/api/oauth/consent?client_id=oauth_nope&scope=openid");
     expect(res.status).toBe(404);
   });
 
   it("POST /login without a CSRF token is rejected 403", async () => {
     const { clientId } = await registerClient(ctx);
-    const res = await app.request(
-      `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "email=a@b.com&password=hunter2",
-      },
-    );
+    const res = await app.request(`/api/oauth/login?client_id=${encodeURIComponent(clientId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "email=a@b.com&password=hunter2",
+    });
     expect(res.status).toBe(403);
   });
 
   it("POST /consent without a CSRF token is rejected 403", async () => {
     const { clientId } = await registerClient(ctx);
-    const res = await app.request(
-      `/api/oauth/enduser/consent?client_id=${encodeURIComponent(clientId)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "accept=true",
-      },
-    );
+    const res = await app.request(`/api/oauth/consent?client_id=${encodeURIComponent(clientId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "accept=true",
+    });
     expect(res.status).toBe(403);
   });
 
   it("GET /login issues an httpOnly oidc_csrf cookie that matches the hidden form field", async () => {
     const { clientId } = await registerClient(ctx);
-    const res = await app.request(
-      `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
-    );
+    const res = await app.request(`/api/oauth/login?client_id=${encodeURIComponent(clientId)}`);
     expect(res.status).toBe(200);
     const cookieHeader = res.headers.get("set-cookie") ?? "";
     const cookieMatch = cookieHeader.match(/oidc_csrf=([^;]+)/);
@@ -198,12 +189,12 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
       password: string,
     ): Promise<Response> {
       const getRes = await app.request(
-        `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}`,
       );
       const cookie = (getRes.headers.get("set-cookie") ?? "").split(";")[0]!;
       const formHtml = await getRes.text();
       const csrf = formHtml.match(/name="_csrf" value="([^"]+)"/)![1]!;
-      return app.request(`/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`, {
+      return app.request(`/api/oauth/login?client_id=${encodeURIComponent(clientId)}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -275,27 +266,22 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
     // default sign-up leaves `emailVerified = false`.
     await createTestUser({ email: conflictEmail });
 
-    const getRes = await app.request(
-      `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
-    );
+    const getRes = await app.request(`/api/oauth/login?client_id=${encodeURIComponent(clientId)}`);
     const cookie = (getRes.headers.get("set-cookie") ?? "").split(";")[0]!;
     const formHtml = await getRes.text();
     const csrf = formHtml.match(/name="_csrf" value="([^"]+)"/)![1]!;
 
-    const res = await app.request(
-      `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          cookie,
-        },
-        body:
-          `_csrf=${encodeURIComponent(csrf)}` +
-          `&email=${encodeURIComponent(conflictEmail)}` +
-          `&password=TestPassword123!`,
+    const res = await app.request(`/api/oauth/login?client_id=${encodeURIComponent(clientId)}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        cookie,
       },
-    );
+      body:
+        `_csrf=${encodeURIComponent(csrf)}` +
+        `&email=${encodeURIComponent(conflictEmail)}` +
+        `&password=TestPassword123!`,
+    });
 
     expect(res.status).toBe(409);
     const body = await res.text();
@@ -306,28 +292,118 @@ describe("Public end-user pages — /api/oauth/enduser/*", () => {
 
   it("POST /login with a valid CSRF but wrong credentials re-renders the form with an error", async () => {
     const { clientId } = await registerClient(ctx);
-    const getRes = await app.request(
-      `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
-    );
+    const getRes = await app.request(`/api/oauth/login?client_id=${encodeURIComponent(clientId)}`);
     const cookie = (getRes.headers.get("set-cookie") ?? "").split(";")[0]!;
     const html = await getRes.text();
     const csrf = html.match(/name="_csrf" value="([^"]+)"/)![1]!;
 
-    const res = await app.request(
-      `/api/oauth/enduser/login?client_id=${encodeURIComponent(clientId)}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          cookie,
-        },
-        body: `_csrf=${encodeURIComponent(csrf)}&email=nobody@example.com&password=wrong`,
+    const res = await app.request(`/api/oauth/login?client_id=${encodeURIComponent(clientId)}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        cookie,
       },
-    );
+      body: `_csrf=${encodeURIComponent(csrf)}&email=nobody@example.com&password=wrong`,
+    });
     // Credentials bad — 401 with the login form re-rendered, not the 302
     // redirect to the authorize endpoint.
     expect([401, 400]).toContain(res.status);
     const out = await res.text();
     expect(out).toContain("Email ou mot de passe incorrect");
+  });
+
+  // ── Stale login URL protections ────────────────────────────────────────
+  // When a user clicks a stale/bookmarked OAuth login link, the login
+  // endpoint must not create a persistent BA session that would let any
+  // downstream OIDC client silently auto-grant on the next visit.
+
+  describe("expired login URL protection (exp param)", () => {
+    it("GET /login with an expired exp param returns 400 with error message", async () => {
+      const { clientId } = await registerClient(ctx);
+      const pastExp = Math.floor(Date.now() / 1000) - 60; // 1 minute ago
+      const qs = `?client_id=${encodeURIComponent(clientId)}&state=stale&exp=${pastExp}&sig=fakesig`;
+      const res = await app.request(`/api/oauth/login${qs}`);
+      expect(res.status).toBe(400);
+      const html = await res.text();
+      expect(html).toContain("expiré");
+    });
+
+    it("GET /login without exp param still renders normally (BA handles its own signing)", async () => {
+      const { clientId } = await registerClient(ctx);
+      const qs = `?client_id=${encodeURIComponent(clientId)}&state=fresh`;
+      const res = await app.request(`/api/oauth/login${qs}`);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain('method="POST"');
+    });
+
+    it("GET /login with a future exp param renders normally", async () => {
+      const { clientId } = await registerClient(ctx);
+      const futureExp = Math.floor(Date.now() / 1000) + 600; // 10 minutes from now
+      const qs = `?client_id=${encodeURIComponent(clientId)}&state=fresh&exp=${futureExp}&sig=test`;
+      const res = await app.request(`/api/oauth/login${qs}`);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain('method="POST"');
+    });
+
+    it("POST /login with an expired exp param rejects before authenticating", async () => {
+      const { clientId } = await registerClient(ctx);
+      const pastExp = Math.floor(Date.now() / 1000) - 60;
+      const qs = `?client_id=${encodeURIComponent(clientId)}&state=stale&exp=${pastExp}&sig=fake`;
+      const res = await app.request(`/api/oauth/login${qs}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "email=a@b.com&password=hunter2",
+      });
+      expect(res.status).toBe(400);
+      // No Set-Cookie with a session token — the user was never authenticated.
+      const cookies = res.headers.get("set-cookie") ?? "";
+      expect(cookies).not.toContain("better-auth.session_token");
+    });
+  });
+
+  describe("OAuth login session TTL", () => {
+    it("POST /login success forwards BA cookies with Max-Age capped to 300s", async () => {
+      const { clientId } = await registerClient(ctx);
+      const email = `ttl-${Date.now()}@example.com`;
+      const password = "TestPassword123!";
+      await createTestUser({ email, password });
+
+      // GET login page to obtain CSRF token + cookie.
+      const getRes = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}`,
+      );
+      const csrfCookie = (getRes.headers.get("set-cookie") ?? "").split(";")[0]!;
+      const formHtml = await getRes.text();
+      const csrf = formHtml.match(/name="_csrf" value="([^"]+)"/)![1]!;
+
+      const res = await app.request(`/api/oauth/login?client_id=${encodeURIComponent(clientId)}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          cookie: csrfCookie,
+        },
+        body:
+          `_csrf=${encodeURIComponent(csrf)}` +
+          `&email=${encodeURIComponent(email)}` +
+          `&password=${encodeURIComponent(password)}`,
+        redirect: "manual",
+      });
+      // Successful login redirects to the authorize endpoint.
+      expect(res.status).toBe(302);
+
+      // Every Set-Cookie from BA must carry Max-Age=300 (5 min cap).
+      const allCookies =
+        typeof (res.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie ===
+        "function"
+          ? (res.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
+          : (res.headers.get("set-cookie") ?? "").split(",").map((c) => c.trim());
+      const sessionCookies = allCookies.filter((c) => c.includes("better-auth.session_token"));
+      expect(sessionCookies.length).toBeGreaterThan(0);
+      for (const cookie of sessionCookies) {
+        expect(cookie).toContain("Max-Age=300");
+      }
+    });
   });
 });

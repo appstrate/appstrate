@@ -18,7 +18,7 @@
  */
 
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
@@ -124,6 +124,37 @@ export async function resolveAppBranding(applicationId: string): Promise<Resolve
     supportEmail: parsed.supportEmail ?? null,
     fromName: parsed.fromName ?? parsed.name ?? appName,
   };
+}
+
+/**
+ * Resolve branding for a polymorphic OAuth client.
+ *
+ * - **application-level clients**: branding comes from the pinned
+ *   `applications.settings.branding`.
+ * - **org-level clients**: branding comes from the org's default application
+ *   (where `applications.isDefault = true` for the given org). This avoids
+ *   introducing a new `organizations.branding` column while still giving the
+ *   org a consistent brand identity on its dashboard login page.
+ *
+ * Falls back to platform defaults on any missing / malformed data.
+ */
+export async function resolveBrandingForClient(client: {
+  level: string;
+  referencedOrgId: string | null;
+  referencedApplicationId: string | null;
+}): Promise<ResolvedAppBranding> {
+  if (client.level === "application" && client.referencedApplicationId) {
+    return resolveAppBranding(client.referencedApplicationId);
+  }
+  if (client.level === "org" && client.referencedOrgId) {
+    const [row] = await db
+      .select({ id: applications.id })
+      .from(applications)
+      .where(and(eq(applications.orgId, client.referencedOrgId), eq(applications.isDefault, true)))
+      .limit(1);
+    if (row) return resolveAppBranding(row.id);
+  }
+  return { ...PLATFORM_DEFAULT_BRANDING };
 }
 
 /** Safe narrowing: settings is jsonb, treat as opaque until checked. */

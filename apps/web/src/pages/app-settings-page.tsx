@@ -78,7 +78,7 @@ export function AppSettingsPage() {
 
       {tab === "general" && <GeneralTab appId={appId} application={application} />}
       {tab === "profiles" && <AppProfilesTab />}
-      {tab === "oauth" && oidcEnabled && <OAuthClientsTab />}
+      {tab === "oauth" && oidcEnabled && <OAuthClientsTab level="application" />}
     </>
   );
 }

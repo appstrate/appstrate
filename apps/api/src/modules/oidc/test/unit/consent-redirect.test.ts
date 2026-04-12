@@ -2,7 +2,7 @@
 
 /**
  * Unit tests for the consent JSON→302 helper introduced to fix the bug
- * where browser form POSTs to `/api/oauth/enduser/consent` rendered Better
+ * where browser form POSTs to `/api/oauth/consent` rendered Better
  * Auth's `{redirect:true,url:"..."}` JSON body as the document instead of
  * following a real redirect.
  */
