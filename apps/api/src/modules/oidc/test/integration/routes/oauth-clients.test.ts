@@ -249,6 +249,46 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(res.status).toBe(404);
   });
 
+  it("PATCH updates scopes", async () => {
+    const createRes = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(applicationLevelBody(ctx, { scopes: ["openid", "profile", "email"] })),
+    });
+    const { clientId } = (await createRes.json()) as { clientId: string };
+
+    const res = await app.request(`/api/oauth/clients/${clientId}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scopes: ["openid", "profile", "email", "agents:read", "agents:run"],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { scopes: string[] };
+    expect(body.scopes.sort()).toEqual(
+      ["openid", "profile", "email", "agents:read", "agents:run"].sort(),
+    );
+  });
+
+  it("PATCH rejects scopes outside the APPSTRATE_SCOPES whitelist", async () => {
+    const createRes = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(applicationLevelBody(ctx)),
+    });
+    const { clientId } = (await createRes.json()) as { clientId: string };
+
+    const res = await app.request(`/api/oauth/clients/${clientId}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scopes: ["openid", "profile", "email", "superadmin:*"],
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("PATCH updates redirectUris, disabled, and isFirstParty", async () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",

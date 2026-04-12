@@ -99,13 +99,31 @@ function OAuthClientFormBody({
   }
 
   function toggleScope(scope: string) {
-    if (isEditing || REQUIRED_SCOPES.has(scope)) return;
+    if (REQUIRED_SCOPES.has(scope)) return;
     setSelectedScopes((prev) => {
       const next = new Set(prev);
       if (next.has(scope)) next.delete(scope);
       else next.add(scope);
       return next;
     });
+  }
+
+  /**
+   * Derive a sensible post-logout redirect URI default from the first
+   * redirect URI's origin. Called when the user blurs the post-logout
+   * field while it's empty — pure suggestion, they can still edit.
+   */
+  function suggestPostLogoutFromRedirects(): void {
+    const firstRedirect = redirectUris.find((u) => u.trim().length > 0);
+    if (!firstRedirect) return;
+    const alreadyFilled = postLogoutRedirectUris.some((u) => u.trim().length > 0);
+    if (alreadyFilled) return;
+    try {
+      const origin = new URL(firstRedirect.trim()).origin;
+      setPostLogoutRedirectUris([`${origin}/`]);
+    } catch {
+      // First redirect URI is not a valid URL — skip the suggestion.
+    }
   }
 
   function validateUris(uris: string[]): string[] | null {
@@ -144,6 +162,7 @@ function OAuthClientFormBody({
           data: {
             redirectUris: cleaned,
             postLogoutRedirectUris: cleanedPostLogout,
+            scopes: Array.from(selectedScopes),
             ...(isAdmin ? { isFirstParty } : {}),
           },
         },
@@ -249,15 +268,12 @@ function OAuthClientFormBody({
           onChange={setPostLogoutRedirectUris}
           placeholder="https://example.com/"
           addLabel={t("settings:oauthClients.addRedirectUri")}
+          onFirstInputFocus={isEditing ? undefined : suggestPostLogoutFromRedirects}
         />
 
         <div className="space-y-2">
           <Label>{t("settings:oauthClients.scopesLabel")}</Label>
-          <p className="text-muted-foreground text-xs">
-            {isEditing
-              ? t("settings:oauthClients.scopesReadonlyHint")
-              : t("settings:oauthClients.scopesHint")}
-          </p>
+          <p className="text-muted-foreground text-xs">{t("settings:oauthClients.scopesHint")}</p>
           <div className="flex flex-col gap-1.5">
             {(availableScopes ?? Array.from(REQUIRED_SCOPES)).map((scope) => {
               const required = REQUIRED_SCOPES.has(scope);
@@ -267,7 +283,7 @@ function OAuthClientFormBody({
                   <input
                     type="checkbox"
                     checked={checked}
-                    disabled={isEditing || required}
+                    disabled={required}
                     onChange={() => toggleScope(scope)}
                     className="accent-primary mt-0.5 h-4 w-4"
                   />
@@ -281,7 +297,7 @@ function OAuthClientFormBody({
                           defaultValue: scope,
                         })}
                       </span>
-                      {required && !isEditing && (
+                      {required && (
                         <span className="text-muted-foreground text-xs">
                           ({t("settings:oauthClients.scopeRequired")})
                         </span>
@@ -328,6 +344,7 @@ function UriListField({
   onChange,
   placeholder,
   addLabel,
+  onFirstInputFocus,
 }: {
   label: string;
   hint: string;
@@ -335,6 +352,12 @@ function UriListField({
   onChange: (uris: string[]) => void;
   placeholder: string;
   addLabel: string;
+  /**
+   * Called when the first input receives focus while empty. Used to offer
+   * a suggested default (e.g. derive post-logout URI from redirect URI
+   * origin) without forcing a value on the user.
+   */
+  onFirstInputFocus?: () => void;
 }) {
   return (
     <div className="space-y-2">
@@ -351,6 +374,11 @@ function UriListField({
                 next[index] = e.target.value;
                 onChange(next);
               }}
+              onFocus={
+                index === 0 && uri.trim().length === 0 && onFirstInputFocus
+                  ? onFirstInputFocus
+                  : undefined
+              }
               placeholder={placeholder}
             />
             {uris.length > 1 && (

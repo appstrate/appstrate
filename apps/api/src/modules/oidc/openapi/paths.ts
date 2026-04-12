@@ -74,6 +74,12 @@ const updateClientRequest = {
       items: { type: "string", format: "uri" },
       description: "URIs allowed for post-logout redirects (OIDC RP-Initiated Logout).",
     },
+    scopes: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "OAuth scopes granted to this client. Must be a subset of `/api/oauth/scopes`. Existing access tokens retain the scopes they were minted with; updating this field only affects subsequent authorizations.",
+    },
     disabled: { type: "boolean" },
     isFirstParty: { type: "boolean" },
   },
@@ -160,7 +166,7 @@ export const oidcPaths = {
       tags: ["OAuth Clients"],
       summary: "Update OAuth client",
       description:
-        "Update the redirect URIs, `disabled` flag, or `isFirstParty` flag. Client type and pinned references are immutable.",
+        "Update the redirect URIs, post-logout redirect URIs, scopes, `disabled` flag, or `isFirstParty` flag. Client type and pinned references are immutable.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "clientId", in: "path", required: true, schema: { type: "string" } },

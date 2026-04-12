@@ -113,6 +113,7 @@ export const createOAuthClientSchema = z.discriminatedUnion("level", [
 export const updateOAuthClientSchema = z.object({
   redirectUris: z.array(redirectUriSchema).min(1).optional(),
   postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
+  scopes: z.array(z.string().min(1)).optional(),
   disabled: z.boolean().optional(),
   isFirstParty: z.boolean().optional(),
 });

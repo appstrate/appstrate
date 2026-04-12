@@ -84,6 +84,7 @@ export function useUpdateOAuthClient() {
       data: {
         redirectUris?: string[];
         postLogoutRedirectUris?: string[];
+        scopes?: string[];
         disabled?: boolean;
         isFirstParty?: boolean;
       };

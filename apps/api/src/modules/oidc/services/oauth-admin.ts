@@ -410,6 +410,7 @@ export async function rotateClientSecret(clientId: string): Promise<OAuthClientW
 export interface UpdateClientInput {
   redirectUris?: string[];
   postLogoutRedirectUris?: string[];
+  scopes?: string[];
   disabled?: boolean;
   isFirstParty?: boolean;
 }
@@ -421,11 +422,15 @@ export async function updateClient(
   if (input.redirectUris !== undefined) {
     assertValidRedirectUris(input.redirectUris);
   }
+  if (input.scopes !== undefined) {
+    assertValidScopes(input.scopes);
+  }
   // Build a single SET clause — atomic, no partial-update risk.
   const set: Record<string, unknown> = { updatedAt: new Date() };
   if (input.redirectUris !== undefined) set.redirectUris = input.redirectUris;
   if (input.postLogoutRedirectUris !== undefined)
     set.postLogoutRedirectUris = input.postLogoutRedirectUris;
+  if (input.scopes !== undefined) set.scopes = input.scopes;
   if (input.disabled !== undefined) set.disabled = input.disabled;
   if (input.isFirstParty !== undefined) set.skipConsent = input.isFirstParty;
 
