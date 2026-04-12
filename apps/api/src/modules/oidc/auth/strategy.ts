@@ -35,7 +35,7 @@ import type { OrgRole } from "../../../types/index.ts";
 import { logger } from "../../../lib/logger.ts";
 import { verifyEndUserAccessToken, type AccessTokenClaims } from "../services/enduser-token.ts";
 import { lookupEndUser } from "../services/enduser-mapping.ts";
-import { getClient } from "../services/oauth-admin.ts";
+import { getClientCached } from "../services/oauth-admin.ts";
 import { scopesToPermissions } from "./claims.ts";
 
 export const oidcAuthStrategy: AuthStrategy = {
@@ -52,10 +52,12 @@ export const oidcAuthStrategy: AuthStrategy = {
 
     // Defense-in-depth: reject tokens from disabled clients. The `azp`
     // claim carries the OAuth client_id — load the client and verify it
-    // is still active. This adds one DB lookup per request; a short-TTL
-    // cache could optimize this later if it becomes a hot path.
+    // is still active. Uses a short-TTL in-process cache keyed by
+    // clientId (see `oauth-admin.ts`), so the hot path is normally a
+    // Map lookup. Mutations invalidate the cache synchronously so a
+    // `disabled: true` update takes effect on the next request.
     if (claims.clientId) {
-      const client = await getClient(claims.clientId);
+      const client = await getClientCached(claims.clientId);
       if (!client) {
         logger.info("OIDC strategy: token references unknown client — rejecting", {
           module: "oidc",

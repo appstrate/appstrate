@@ -27,11 +27,11 @@ import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
 import { db } from "@appstrate/db/client";
 import { user, applications, organizationMembers } from "@appstrate/db/schema";
-import { oauthClient } from "./schema.ts";
 import {
   createClient,
   deleteClient,
   getClient,
+  getClientCached,
   getClientOwningOrg,
   listClientsForOrgAndApps,
   rotateClientSecret,
@@ -129,28 +129,19 @@ interface ClientContext {
 }
 
 async function loadClientContext(c: Context<AppEnv>, clientId: string): Promise<ClientContext> {
-  const [row] = await db
-    .select({
-      id: oauthClient.clientId,
-      name: oauthClient.name,
-      disabled: oauthClient.disabled,
-      level: oauthClient.level,
-      isFirstParty: oauthClient.skipConsent,
-      referencedOrgId: oauthClient.referencedOrgId,
-      referencedApplicationId: oauthClient.referencedApplicationId,
-    })
-    .from(oauthClient)
-    .where(eq(oauthClient.clientId, clientId))
-    .limit(1);
-  if (!row || row.disabled) throw notFound("Unknown OAuth client");
-  const level = row.level as "org" | "application" | "instance";
+  // Use the short-TTL cache from `oauth-admin.ts` so the GET → POST
+  // login round-trip doesn't re-fetch the same client row from DB. The
+  // cache is invalidated synchronously on `updateClient` / `deleteClient`
+  // / `rotateClientSecret`, so admin mutations take effect immediately.
+  const record = await getClientCached(clientId);
+  if (!record || record.disabled) throw notFound("Unknown OAuth client");
   const client = {
-    id: row.id,
-    name: row.name,
-    level,
-    isFirstParty: row.isFirstParty === true,
-    referencedOrgId: row.referencedOrgId,
-    referencedApplicationId: row.referencedApplicationId,
+    id: record.clientId,
+    name: record.name,
+    level: record.level,
+    isFirstParty: record.isFirstParty,
+    referencedOrgId: record.referencedOrgId,
+    referencedApplicationId: record.referencedApplicationId,
   };
   const branding = await resolveBrandingForClient(client);
   const csrfToken = issueCsrfToken(c);
@@ -958,7 +949,7 @@ export function createOidcRouter() {
     // to prevent open redirect attacks (OWASP). Fall back to "/" if no URI,
     // no client, or the URI is not registered.
     if (postLogoutUri && clientId) {
-      const client = await getClient(clientId);
+      const client = await getClientCached(clientId);
       if (client) {
         const postLogoutUris = client.postLogoutRedirectUris ?? [];
         if (postLogoutUris.includes(postLogoutUri)) {

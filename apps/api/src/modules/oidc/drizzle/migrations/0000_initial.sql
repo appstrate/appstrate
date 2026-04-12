@@ -165,3 +165,34 @@ CREATE INDEX "idx_oauth_clients_org" ON "oauth_clients" ("referenced_org_id");
 CREATE INDEX "idx_oauth_clients_app" ON "oauth_clients" ("referenced_application_id");
 --> statement-breakpoint
 CREATE INDEX "idx_oidc_profiles_auth_user" ON "oidc_end_user_profiles" ("auth_user_id");
+--> statement-breakpoint
+-- Enforce oauth_clients.level immutability at the DB layer.
+--
+-- The service layer already excludes `level` from `UpdateClientInput`, and
+-- the CHECK constraint above guarantees the (level, referenced_org_id,
+-- referenced_application_id) triplet stays consistent on INSERT. But
+-- nothing prevents a raw SQL UPDATE (or a future service-layer typo)
+-- from flipping `level` post-hoc and leaving the `metadata` JSON column
+-- — which the OIDC plugin reads at token-mint time via
+-- `customAccessTokenClaims` — stale relative to the live columns.
+--
+-- This BEFORE UPDATE trigger makes the invariant unconditional: any
+-- attempt to mutate `level` raises `check_violation` and the UPDATE is
+-- rejected. Combined with `level` being absent from `UpdateClientInput`,
+-- this gives us defense in depth with an audit-friendly error message.
+CREATE OR REPLACE FUNCTION oauth_clients_level_immutable_fn()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.level IS DISTINCT FROM OLD.level THEN
+    RAISE EXCEPTION 'oauth_clients.level is immutable (attempted change: % -> %)',
+      OLD.level, NEW.level
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+--> statement-breakpoint
+CREATE TRIGGER oauth_clients_level_immutable
+  BEFORE UPDATE ON oauth_clients
+  FOR EACH ROW
+  EXECUTE FUNCTION oauth_clients_level_immutable_fn();

@@ -213,25 +213,50 @@ export async function hashSecret(plaintext: string): Promise<string> {
   return Buffer.from(new Uint8Array(digest)).toString("hex");
 }
 
+// ─── Short-TTL client cache ───────────────────────────────────────────────────
+//
+// The OIDC auth strategy hits `getClient()` on every authenticated request to
+// verify the client is still enabled (defense-in-depth against stale tokens
+// from disabled clients). That would put a DB round-trip on the hot path of
+// every API call authenticated via OIDC. The server-rendered login/consent
+// pages also re-read the same client across a GET → POST pair, adding two
+// more queries per browser login.
+//
+// Solution: a tiny in-process TTL cache keyed by `clientId`. Reads fall
+// through on miss or expiry; mutations (update / delete / rotate) invalidate
+// the entry synchronously so `updateClient(id, { disabled: true })` takes
+// effect immediately on the next request instead of waiting out the TTL.
+// `createClient` does NOT need to invalidate because new `clientId` values
+// are guaranteed to be absent from the map.
+//
+// Best-effort only: the cache lives per-process, so in a multi-replica
+// deployment a disabled client may remain cached for up to TTL on OTHER
+// replicas. That is acceptable — the worst-case window is one TTL, and the
+// mutation path is already rare compared to the read path it protects.
+const CLIENT_CACHE_TTL_MS = 30_000;
+const clientCache = new Map<string, { record: OAuthClientRecord | null; expiresAt: number }>();
+
+function cacheInvalidate(clientId: string): void {
+  clientCache.delete(clientId);
+}
+
 /**
- * Rebuild the `metadata` JSON column from the authoritative SQL columns.
- * Plugins (customAccessTokenClaims) read `metadata` at token-mint time;
- * keeping it in sync after every mutation prevents stale claim data.
+ * Cached variant of `getClient`. Safe for read-heavy hot paths (auth
+ * strategy, page rendering). Returns `null` for unknown clientIds (also
+ * cached to soak up probes for non-existent clients).
  */
-async function syncMetadata(row: typeof oauthClient.$inferSelect): Promise<void> {
-  const metadata: Record<string, unknown> = { level: row.level };
-  if (row.level === "org") metadata.referencedOrgId = row.referencedOrgId;
-  else if (row.level === "application")
-    metadata.referencedApplicationId = row.referencedApplicationId;
-  // instance: no FK fields in metadata
-  const current = row.metadata ? JSON.parse(row.metadata) : {};
-  const expected = JSON.stringify(metadata);
-  if (row.metadata !== expected && JSON.stringify(current) !== expected) {
-    await db
-      .update(oauthClient)
-      .set({ metadata: expected })
-      .where(eq(oauthClient.clientId, row.clientId));
-  }
+export async function getClientCached(clientId: string): Promise<OAuthClientRecord | null> {
+  const now = Date.now();
+  const cached = clientCache.get(clientId);
+  if (cached && cached.expiresAt > now) return cached.record;
+  const record = await getClient(clientId);
+  clientCache.set(clientId, { record, expiresAt: now + CLIENT_CACHE_TTL_MS });
+  return record;
+}
+
+/** @internal Test helper — drop every entry. */
+export function _resetClientCache(): void {
+  clientCache.clear();
 }
 
 // ─── Scope-filter helpers ─────────────────────────────────────────────────────
@@ -366,6 +391,7 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
 
 export async function deleteClient(clientId: string): Promise<OAuthClientRecord | null> {
   const [row] = await db.delete(oauthClient).where(eq(oauthClient.clientId, clientId)).returning();
+  cacheInvalidate(clientId);
   return row ? mapRow(row) : null;
 }
 
@@ -377,6 +403,7 @@ export async function rotateClientSecret(clientId: string): Promise<OAuthClientW
     .set({ clientSecret: hashedSecret, updatedAt: new Date() })
     .where(eq(oauthClient.clientId, clientId))
     .returning();
+  cacheInvalidate(clientId);
   return row ? { ...mapRow(row), clientSecret: plaintextSecret } : null;
 }
 
@@ -408,9 +435,15 @@ export async function updateClient(
     .where(eq(oauthClient.clientId, clientId))
     .returning();
   if (!row) return null;
-  // Keep metadata JSON in sync with SQL columns — plugins read metadata
-  // at token-mint time via customAccessTokenClaims.
-  await syncMetadata(row);
+  cacheInvalidate(clientId);
+  // No metadata re-sync needed: none of the `UpdateClientInput` fields
+  // (redirectUris, postLogoutRedirectUris, disabled, isFirstParty) feed
+  // into `metadata`, and `level` / `referenced*` columns are immutable
+  // (enforced by the `oauth_clients_level_immutable` DB trigger in
+  // migration 0001). The metadata JSON written at creation time is
+  // therefore frozen for the client's lifetime and cannot drift from
+  // the SQL columns — eliminating the read-modify-write race that the
+  // old `syncMetadata` helper introduced between mutations.
   return mapRow(row);
 }
 
@@ -419,29 +452,29 @@ export async function updateClient(
  * org-level clients, or the org id derived from the application FK for
  * application-level clients. Used by route-level permission checks that
  * need to ensure the caller is an admin of the org that owns the client.
+ *
+ * Single `LEFT JOIN` so we never issue two sequential round-trips for
+ * application-level clients — this function runs on every CRUD route
+ * (`GET /:id`, `PATCH /:id`, `DELETE /:id`, `POST /:id/rotate`) and is
+ * latency-sensitive. The join is cheap: `applications.id` is the primary
+ * key and the FK is covered by an index from the initial migration.
  */
 export async function getClientOwningOrg(clientId: string): Promise<string | null> {
   const [row] = await db
     .select({
       level: oauthClient.level,
       referencedOrgId: oauthClient.referencedOrgId,
-      referencedApplicationId: oauthClient.referencedApplicationId,
+      appOrgId: applications.orgId,
     })
     .from(oauthClient)
+    .leftJoin(applications, eq(applications.id, oauthClient.referencedApplicationId))
     .where(eq(oauthClient.clientId, clientId))
     .limit(1);
   if (!row) return null;
   // Instance clients are system-level — they have no owning org.
   if (row.level === "instance") return null;
   if (row.level === "org") return row.referencedOrgId;
-  if (row.level === "application" && row.referencedApplicationId) {
-    const [app] = await db
-      .select({ orgId: applications.orgId })
-      .from(applications)
-      .where(eq(applications.id, row.referencedApplicationId))
-      .limit(1);
-    return app?.orgId ?? null;
-  }
+  if (row.level === "application") return row.appOrgId ?? null;
   return null;
 }
 

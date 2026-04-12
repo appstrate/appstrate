@@ -62,6 +62,19 @@ export function scopesToPermissions(
   const ceiling: ReadonlySet<Permission> | undefined =
     actorType === "dashboard_user" && orgRole ? resolvePermissions(orgRole) : undefined;
 
+  // Safety alarm: a dashboard token without an `orgRole` gets zero scopes
+  // below (ceiling is `undefined`, every scope falls through to the
+  // "dropped" branch). The AuthResolution still looks legitimate — correct
+  // user + orgId + authMethod — so every downstream request fails with an
+  // opaque 403. Emit a dedicated warning up-front so operators can
+  // distinguish this wiring bug from a legitimate role-downgrade drop.
+  if (actorType === "dashboard_user" && !orgRole) {
+    logger.warn(
+      "oidc: dashboard_user token missing orgRole — all non-identity scopes will be dropped",
+      { module: "oidc", actorType },
+    );
+  }
+
   for (const s of scope.split(/\s+/)) {
     if (s === "" || OIDC_IDENTITY_SCOPE_SET.has(s)) continue;
     if (actorType === "end_user") {
