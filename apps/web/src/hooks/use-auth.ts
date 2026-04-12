@@ -82,16 +82,21 @@ export function useAuth() {
    * is redirected back to /auth/callback with an authorization code.
    *
    * The optional `redirectTo` is saved for after the callback completes.
+   *
+   * The single-argument shape (vs. the old `(email, password)`) is
+   * deliberate — any remaining inline email/password caller must use
+   * `loginDirect` explicitly and the compiler flags the miswire rather
+   * than silently coercing an email into `redirectTo`.
    */
-  const login = useCallback(async (redirectTo?: string) => {
+  const login = useCallback((redirectTo?: string): Promise<void> => {
     const oidcConfig = (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
     if (oidcConfig) {
-      const { startOidcLogin } = await import("../modules/oidc/lib/oidc");
-      await startOidcLogin(redirectTo);
-    } else {
-      // Fallback for non-OIDC setups (e.g. OIDC module not loaded)
-      window.location.assign("/login");
+      return import("../modules/oidc/lib/oidc").then(({ startOidcLogin }) =>
+        startOidcLogin(redirectTo),
+      );
     }
+    window.location.assign("/login");
+    return Promise.resolve();
   }, []);
 
   /**
@@ -113,6 +118,22 @@ export function useAuth() {
       password: string,
       displayName?: string,
     ): Promise<{ emailVerificationRequired: boolean }> => {
+      // When OIDC is loaded, signup must traverse the same server-rendered
+      // flow as login so that (a) both events go through the centralized
+      // branded page and (b) the resulting BA session is established under
+      // the same cookie domain as the authorize callback. The server-side
+      // `/api/oauth/register` handler forwards to `/oauth2/authorize` on
+      // success, so the callback lands on `/auth/callback` like any login.
+      const oidcConfig = (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
+      if (oidcConfig) {
+        const { startOidcSignup } = await import("../modules/oidc/lib/oidc");
+        await startOidcSignup();
+        // Page is navigating away — return a never-resolving promise so
+        // callers (`onSuccess` handlers, route navigations) cannot fire
+        // mid-unload and trigger a no-op state update on a detached tree.
+        return new Promise<never>(() => {});
+      }
+
       const result = await authClient.signUp.email({
         email,
         password,

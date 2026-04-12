@@ -129,7 +129,18 @@ const oidcModule: AppstrateModule = {
     const clientId = await getInstanceClientId();
     if (!clientId) return {};
     const env = getEnv();
-    return { oidc: { clientId, issuer: `${env.APP_URL}/api/auth` } };
+    // `callbackUrl` is published here so the SPA uses the exact redirect_uri
+    // registered by `ensureInstanceClient()` — deriving it from
+    // `window.location.origin` would break any deployment where the browser
+    // origin diverges from `APP_URL` (reverse proxy, TLS termination, custom
+    // subdomain), triggering `redirect_uri_mismatch` at `/oauth2/authorize`.
+    return {
+      oidc: {
+        clientId,
+        issuer: `${env.APP_URL}/api/auth`,
+        callbackUrl: `${env.APP_URL}/auth/callback`,
+      },
+    };
   },
 
   features: { oidc: true },

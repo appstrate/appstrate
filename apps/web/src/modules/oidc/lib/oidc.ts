@@ -12,6 +12,11 @@
 interface OidcConfig {
   clientId: string;
   issuer: string;
+  // Canonical callback URL registered server-side on the instance client.
+  // Use this verbatim — deriving it from `window.location.origin` breaks
+  // when `APP_URL` differs from the browser origin (reverse proxy, TLS
+  // termination, subdomain mismatch) and triggers `redirect_uri_mismatch`.
+  callbackUrl: string;
 }
 
 export function getOidcConfig(): OidcConfig | undefined {
@@ -44,47 +49,87 @@ const OIDC_VERIFIER_KEY = "appstrate_oidc_verifier";
 const OIDC_REDIRECT_KEY = "appstrate_oidc_redirect";
 
 /**
- * Initiate the OIDC Authorization Code + PKCE flow.
+ * Build the `URLSearchParams` shared by both the login (`/oauth2/authorize`)
+ * and signup (`/api/oauth/register`) entry points and persist the PKCE
+ * state for the eventual `/auth/callback` return.
  *
- * Stores state + code_verifier in sessionStorage, then redirects to the
- * authorization endpoint. The server-rendered login page handles
- * authentication — on success the browser is redirected back to
- * `/auth/callback` with an authorization code.
+ * Both entry points feed the same underlying PKCE + authorize flow — the
+ * server-rendered register page POSTs back to itself then redirects to
+ * `/api/auth/oauth2/authorize${url.search}`, so the query string must
+ * already carry every authorize parameter (including `resource` for the
+ * RFC 8707 enforcement in `oidcGuardsPlugin`).
+ */
+async function initPkceFlow(
+  config: OidcConfig,
+  redirectTo: string | undefined,
+): Promise<URLSearchParams> {
+  const state = generateState();
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = await calculateCodeChallenge(codeVerifier);
+
+  sessionStorage.setItem(OIDC_STATE_KEY, state);
+  sessionStorage.setItem(OIDC_VERIFIER_KEY, codeVerifier);
+  if (redirectTo) sessionStorage.setItem(OIDC_REDIRECT_KEY, redirectTo);
+
+  // `resource` is required by `oidcGuardsPlugin` (RFC 8707) on both the
+  // authorize and token endpoints. `config.issuer` is one of the server's
+  // `validAudiences` (`${APP_URL}/api/auth`). The SPA never consumes the
+  // minted tokens — the BA session cookie is the real auth — but the
+  // grant still has to succeed, so `resource` is non-negotiable.
+  return new URLSearchParams({
+    response_type: "code",
+    client_id: config.clientId,
+    redirect_uri: config.callbackUrl,
+    // `offline_access` deliberately omitted: the SPA discards the tokens
+    // immediately after exchange (see `handleOidcCallback`), so a refresh
+    // token would be dead weight persisted server-side with no consumer.
+    scope: "openid profile email",
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+    resource: config.issuer,
+  });
+}
+
+/**
+ * Initiate the OIDC Authorization Code + PKCE flow for login.
+ *
+ * Redirects to the authorization endpoint; the server-rendered login page
+ * handles authentication. On success the browser lands on `/auth/callback`
+ * with an authorization code.
  */
 export async function startOidcLogin(redirectTo?: string): Promise<void> {
   const config = getOidcConfig();
   if (!config) {
     throw new Error("OIDC not configured — window.__APP_CONFIG__.oidc is missing");
   }
-
-  const state = generateState();
-  const codeVerifier = generateCodeVerifier();
-  const codeChallenge = await calculateCodeChallenge(codeVerifier);
-
-  // Persist for the callback
-  sessionStorage.setItem(OIDC_STATE_KEY, state);
-  sessionStorage.setItem(OIDC_VERIFIER_KEY, codeVerifier);
-  if (redirectTo) sessionStorage.setItem(OIDC_REDIRECT_KEY, redirectTo);
-
-  const params = new URLSearchParams({
-    response_type: "code",
-    client_id: config.clientId,
-    redirect_uri: `${window.location.origin}/auth/callback`,
-    scope: "openid profile email offline_access",
-    state,
-    code_challenge: codeChallenge,
-    code_challenge_method: "S256",
-  });
-
+  const params = await initPkceFlow(config, redirectTo);
   window.location.assign(`/api/auth/oauth2/authorize?${params.toString()}`);
+}
+
+/**
+ * Initiate the OIDC PKCE flow for signup — same as login, but targets the
+ * server-rendered registration page at `/api/oauth/register`. On successful
+ * sign-up the server forwards to `/api/auth/oauth2/authorize${url.search}`,
+ * reusing the same `state`/`code_challenge`/`resource` that were generated
+ * here, so the callback handler cannot tell login and signup apart.
+ */
+export async function startOidcSignup(redirectTo?: string): Promise<void> {
+  const config = getOidcConfig();
+  if (!config) {
+    throw new Error("OIDC not configured — window.__APP_CONFIG__.oidc is missing");
+  }
+  const params = await initPkceFlow(config, redirectTo);
+  window.location.assign(`/api/oauth/register?${params.toString()}`);
 }
 
 /**
  * Handle the callback from the OIDC authorize endpoint.
  *
- * Validates the state, exchanges the code for tokens (to complete the
- * OIDC flow properly), and returns the redirect path. The actual auth
- * relies on the Better Auth session cookie set during login.
+ * Validates the state, exchanges the code for tokens (to properly complete
+ * the OIDC flow and prevent the code from being replayed), and returns the
+ * post-login redirect path. The tokens themselves are discarded — the real
+ * auth is the Better Auth session cookie set during login.
  */
 export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
   const config = getOidcConfig();
@@ -106,7 +151,6 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
   const codeVerifier = sessionStorage.getItem(OIDC_VERIFIER_KEY);
   const redirectTo = sessionStorage.getItem(OIDC_REDIRECT_KEY) ?? "/";
 
-  // Clean up
   sessionStorage.removeItem(OIDC_STATE_KEY);
   sessionStorage.removeItem(OIDC_VERIFIER_KEY);
   sessionStorage.removeItem(OIDC_REDIRECT_KEY);
@@ -118,15 +162,16 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
     throw new Error("Missing code verifier — session may have expired");
   }
 
-  // Exchange code for tokens to properly complete the OIDC flow.
-  // The tokens themselves aren't needed (we use the BA session cookie),
-  // but exchanging the code prevents it from being replayed.
+  // `resource` MUST match one of the server's `validAudiences` — the
+  // `oidcGuardsPlugin` rejects any `authorization_code`/`refresh_token`
+  // grant without it (RFC 8707). `config.issuer` is that audience.
   const tokenBody = new URLSearchParams({
     grant_type: "authorization_code",
     code,
-    redirect_uri: `${window.location.origin}/auth/callback`,
+    redirect_uri: config.callbackUrl,
     client_id: config.clientId,
     code_verifier: codeVerifier,
+    resource: config.issuer,
   });
 
   const res = await fetch("/api/auth/oauth2/token", {
@@ -150,7 +195,6 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
 export function startOidcLogout(): void {
   const config = getOidcConfig();
   if (!config) {
-    // Fallback: just navigate to login
     window.location.assign("/login");
     return;
   }

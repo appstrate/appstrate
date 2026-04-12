@@ -4,8 +4,8 @@
  * Integration test for the OIDC module's `appConfigContribution()` hook.
  *
  * Verifies that after the instance client is auto-provisioned, the hook
- * returns the OIDC config (clientId + issuer) that gets merged into AppConfig
- * and served to the SPA via `window.__APP_CONFIG__`.
+ * returns the OIDC config (clientId + issuer + callbackUrl) that gets merged
+ * into AppConfig and served to the SPA via `window.__APP_CONFIG__`.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
@@ -50,6 +50,7 @@ describe("appConfigContribution", () => {
       oidc: {
         clientId,
         issuer: `${env.APP_URL}/api/auth`,
+        callbackUrl: `${env.APP_URL}/auth/callback`,
       },
     });
   });
@@ -60,7 +61,7 @@ describe("appConfigContribution", () => {
     await ensureInstanceClient("http://localhost:3000");
 
     const result = (await oidcModule.appConfigContribution!()) as {
-      oidc?: { clientId: string; issuer: string };
+      oidc?: { clientId: string; issuer: string; callbackUrl: string };
     };
     const dbClientId = await getInstanceClientId();
 
