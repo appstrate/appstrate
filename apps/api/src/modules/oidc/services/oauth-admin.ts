@@ -94,6 +94,7 @@ export const oauthClientBaseSchema = z.object({
   referencedOrgId: z.string().nullable(),
   referencedApplicationId: z.string().nullable(),
   redirectUris: z.array(z.url()),
+  postLogoutRedirectUris: z.array(z.url()),
   scopes: z.array(z.string()),
   disabled: z.boolean(),
   isFirstParty: z.boolean(),
@@ -121,6 +122,7 @@ function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
     referencedOrgId: row.referencedOrgId ?? null,
     referencedApplicationId: row.referencedApplicationId ?? null,
     redirectUris: row.redirectUris ?? [],
+    postLogoutRedirectUris: row.postLogoutRedirectUris ?? [],
     scopes: row.scopes ?? [],
     disabled: row.disabled ?? false,
     isFirstParty: row.skipConsent ?? false,
@@ -213,6 +215,7 @@ export interface CreateOrgClientInput {
   level: "org";
   name: string;
   redirectUris: string[];
+  postLogoutRedirectUris?: string[];
   scopes?: string[];
   referencedOrgId: string;
   isFirstParty?: boolean;
@@ -222,6 +225,7 @@ export interface CreateApplicationClientInput {
   level: "application";
   name: string;
   redirectUris: string[];
+  postLogoutRedirectUris?: string[];
   scopes?: string[];
   referencedApplicationId: string;
   isFirstParty?: boolean;
@@ -254,6 +258,7 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
       clientSecret: hashedSecret,
       name: input.name,
       redirectUris: input.redirectUris,
+      postLogoutRedirectUris: input.postLogoutRedirectUris ?? [],
       scopes: input.scopes ?? ["openid", "profile", "email"],
       level: input.level,
       referencedOrgId: input.level === "org" ? input.referencedOrgId : null,
@@ -296,6 +301,7 @@ export async function rotateClientSecret(clientId: string): Promise<OAuthClientW
 
 export interface UpdateClientInput {
   redirectUris?: string[];
+  postLogoutRedirectUris?: string[];
   disabled?: boolean;
   isFirstParty?: boolean;
 }
@@ -310,6 +316,8 @@ export async function updateClient(
   // Build a single SET clause — atomic, no partial-update risk.
   const set: Record<string, unknown> = { updatedAt: new Date() };
   if (input.redirectUris !== undefined) set.redirectUris = input.redirectUris;
+  if (input.postLogoutRedirectUris !== undefined)
+    set.postLogoutRedirectUris = input.postLogoutRedirectUris;
   if (input.disabled !== undefined) set.disabled = input.disabled;
   if (input.isFirstParty !== undefined) set.skipConsent = input.isFirstParty;
 

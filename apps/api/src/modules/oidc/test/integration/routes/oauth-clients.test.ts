@@ -425,21 +425,25 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(res.headers.get("set-cookie")).toContain("better-auth.session_token=;");
   });
 
-  it("GET /api/oauth/logout validates redirect URI against registered URIs", async () => {
+  it("GET /api/oauth/logout validates against postLogoutRedirectUris", async () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx)),
+      body: JSON.stringify(
+        applicationLevelBody(ctx, {
+          postLogoutRedirectUris: ["https://portal.example.com/"],
+        }),
+      ),
     });
     const { clientId } = (await createRes.json()) as { clientId: string };
 
-    // Registered URI should redirect
+    // Registered post-logout URI should redirect
     const goodRes = await app.request(
-      `/api/oauth/logout?client_id=${clientId}&post_logout_redirect_uri=${encodeURIComponent("https://acme.example.com/oauth/callback")}`,
+      `/api/oauth/logout?client_id=${clientId}&post_logout_redirect_uri=${encodeURIComponent("https://portal.example.com/")}`,
       { redirect: "manual" },
     );
     expect(goodRes.status).toBe(302);
-    expect(goodRes.headers.get("location")).toBe("https://acme.example.com/oauth/callback");
+    expect(goodRes.headers.get("location")).toBe("https://portal.example.com/");
 
     // Unregistered URI should fall back to /
     const badRes = await app.request(
@@ -448,6 +452,33 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     );
     expect(badRes.status).toBe(302);
     expect(badRes.headers.get("location")).toBe("/");
+  });
+
+  it("GET /api/oauth/logout falls back to redirectUris when postLogoutRedirectUris is empty", async () => {
+    const createRes = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(applicationLevelBody(ctx)),
+    });
+    const { clientId } = (await createRes.json()) as { clientId: string };
+
+    // The redirectUri (https://acme.example.com/oauth/callback) should be accepted
+    // as a fallback even though postLogoutRedirectUris is empty.
+    const res = await app.request(
+      `/api/oauth/logout?client_id=${clientId}&post_logout_redirect_uri=${encodeURIComponent("https://acme.example.com/oauth/callback")}`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://acme.example.com/oauth/callback");
+  });
+
+  it("GET /api/oauth/logout falls back to / when post_logout_redirect_uri sent without client_id", async () => {
+    const res = await app.request(
+      `/api/oauth/logout?post_logout_redirect_uri=${encodeURIComponent("https://portal.example.com/")}`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/");
   });
 
   // ── PATCH atomicity + isFirstParty auth ───────────────────────────────────

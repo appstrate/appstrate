@@ -62,6 +62,7 @@ const createOrgClientSchema = z.object({
   level: z.literal("org"),
   name: z.string().min(1).max(200),
   redirectUris: z.array(redirectUriSchema).min(1),
+  postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
   scopes: z.array(z.string().min(1)).optional(),
   referencedOrgId: z.string().min(1),
   isFirstParty: z.boolean().optional(),
@@ -71,6 +72,7 @@ const createApplicationClientSchema = z.object({
   level: z.literal("application"),
   name: z.string().min(1).max(200),
   redirectUris: z.array(redirectUriSchema).min(1),
+  postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
   scopes: z.array(z.string().min(1)).optional(),
   referencedApplicationId: z.string().min(1),
   isFirstParty: z.boolean().optional(),
@@ -83,6 +85,7 @@ export const createOAuthClientSchema = z.discriminatedUnion("level", [
 
 export const updateOAuthClientSchema = z.object({
   redirectUris: z.array(redirectUriSchema).min(1).optional(),
+  postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
   disabled: z.boolean().optional(),
   isFirstParty: z.boolean().optional(),
 });
@@ -557,16 +560,34 @@ export function createOidcRouter() {
       append: true,
     });
 
-    // Validate redirect URI against the client's registered URIs to prevent
-    // open redirect attacks (OWASP). Fall back to "/" if no URI or no client.
+    // Validate redirect URI against the client's registered post-logout URIs
+    // to prevent open redirect attacks (OWASP). Fall back to "/" if no URI,
+    // no client, or the URI is not registered.
     if (postLogoutUri && clientId) {
       const client = await getClient(clientId);
       if (client) {
-        const registeredUris = client.redirectUris ?? [];
-        if (registeredUris.includes(postLogoutUri)) {
+        const postLogoutUris = client.postLogoutRedirectUris ?? [];
+        if (postLogoutUris.includes(postLogoutUri)) {
           return c.redirect(postLogoutUri, 302);
         }
+        // Fallback: also accept URIs registered as OAuth redirect URIs.
+        // Some deployments re-use the same URI for both authorize callbacks
+        // and post-logout redirects.
+        const redirectUris = client.redirectUris ?? [];
+        if (redirectUris.includes(postLogoutUri)) {
+          return c.redirect(postLogoutUri, 302);
+        }
+        logger.warn("oidc: post_logout_redirect_uri not registered on client", {
+          module: "oidc",
+          clientId,
+          postLogoutUri,
+        });
       }
+    } else if (postLogoutUri) {
+      logger.warn("oidc: post_logout_redirect_uri without client_id — cannot validate, ignoring", {
+        module: "oidc",
+        postLogoutUri,
+      });
     }
 
     return c.redirect("/", 302);
