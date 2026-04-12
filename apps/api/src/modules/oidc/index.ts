@@ -74,6 +74,7 @@ const oidcModule: AppstrateModule = {
     "/api/oauth/magic-link",
     "/api/oauth/forgot-password",
     "/api/oauth/reset-password",
+    "/api/oauth/assets/social-sign-in.js",
     "/.well-known/openid-configuration",
     "/.well-known/oauth-authorization-server",
   ],

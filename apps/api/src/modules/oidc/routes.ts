@@ -57,6 +57,7 @@ import { renderForgotPasswordPage } from "./pages/forgot-password.ts";
 import { renderResetPasswordPage, renderInvalidTokenPage } from "./pages/reset-password.ts";
 import { renderConsentPage } from "./pages/consent.ts";
 import { renderErrorPage } from "./pages/error.ts";
+import { SOCIAL_SIGN_IN_SCRIPT } from "./pages/social-sign-in-script.ts";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -345,6 +346,24 @@ export function createOidcRouter() {
       return c.json(rotated);
     },
   );
+
+  // ── Public static assets ──────────────────────────────────────────────────
+  //
+  // Served as external JS (not inline) so login/register pages stay
+  // compatible with a strict `script-src 'self'` CSP without needing
+  // per-request nonces. The source lives in `pages/social-sign-in-script.ts`
+  // as a module-level constant — zero build step, safe to cache for a long
+  // time because the string only changes on deploy.
+  router.get("/api/oauth/assets/social-sign-in.js", rateLimitByIp(120), () => {
+    return new Response(SOCIAL_SIGN_IN_SCRIPT, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/javascript; charset=utf-8",
+        "Cache-Control": "public, max-age=3600, must-revalidate",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  });
 
   // ── Public polymorphic login/consent pages ─────────────────────────────────
 

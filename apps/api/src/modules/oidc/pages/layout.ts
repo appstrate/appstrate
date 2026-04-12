@@ -171,11 +171,17 @@ export function renderLayout(props: LayoutProps): RawHtml {
             cursor: pointer;
             transition:
               background 0.15s,
-              border-color 0.15s;
+              border-color 0.15s,
+              opacity 0.15s;
           }
-          .social-btn:hover {
+          .social-btn:hover:not(:disabled) {
             background: #f5f5f5;
             border-color: #bbb;
+          }
+          .social-btn:disabled,
+          .social-btn[aria-busy="true"] {
+            opacity: 0.6;
+            cursor: wait;
           }
           .social-btn svg {
             flex-shrink: 0;
