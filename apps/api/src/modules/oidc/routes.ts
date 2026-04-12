@@ -55,6 +55,26 @@ import { renderRegisterPage } from "./pages/register.ts";
 import { renderConsentPage } from "./pages/consent.ts";
 import { renderErrorPage } from "./pages/error.ts";
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Decide whether a Better Auth-signed `exp` query param (Unix seconds) marks
+ * the login URL as expired.
+ *
+ * Defensive behavior:
+ *  - Missing param → not expired (no constraint to enforce).
+ *  - Non-numeric / NaN → treat as expired. `Number("garbage") < now` is
+ *    `false` (NaN comparisons always are), which would silently let a
+ *    tampered value bypass the check. Refuse explicitly instead.
+ *  - Finite number in the past → expired.
+ */
+export function isLoginLinkExpired(expParam: string | null): boolean {
+  if (!expParam) return false;
+  const exp = Number(expParam);
+  if (!Number.isFinite(exp)) return true;
+  return exp < Date.now() / 1000;
+}
+
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 
 const redirectUriSchema = z
@@ -349,8 +369,7 @@ export function createOidcRouter() {
     }
     // Better Auth signs the redirect with `exp` (Unix seconds). Reject
     // expired login URLs so stale links cannot create upstream sessions.
-    const exp = url.searchParams.get("exp");
-    if (exp && Number(exp) < Date.now() / 1000) {
+    if (isLoginLinkExpired(url.searchParams.get("exp"))) {
       const result = await loadClientContextOrRenderError(c, clientId);
       if (result instanceof Response) return result;
       const body = renderLoginPage({
@@ -393,8 +412,7 @@ export function createOidcRouter() {
     // Better Auth session from a stale link. Render the login page with an
     // inline error (same as the GET handler) instead of returning JSON —
     // the browser submitted a form, not an API call.
-    const exp = url.searchParams.get("exp");
-    if (exp && Number(exp) < Date.now() / 1000) {
+    if (isLoginLinkExpired(url.searchParams.get("exp"))) {
       const result = await loadClientContextOrRenderError(c, clientId);
       if (result instanceof Response) return result;
       const body = renderLoginPage({
@@ -532,6 +550,20 @@ export function createOidcRouter() {
     // end-user row so `UnverifiedEmailConflictError` surfaces as a 409 here
     // rather than as an opaque 500 three redirects deep at token-mint time.
     // Org-level clients skip this — they don't create end_users rows.
+    //
+    // INTENTIONAL DOUBLE CALL: `resolveOrCreateEndUser` is also invoked
+    // later during token minting in `auth/plugins.ts` (customAccessTokenClaims).
+    // This is safe by design — the function is idempotent and race-safe:
+    // step 1 is a SELECT-only `findLinkedEndUser` lookup that returns the
+    // existing row without side effects, so the second call is a no-op for
+    // the common case (the first call either found or created the link).
+    // See `services/enduser-mapping.ts` for the full contract.
+    //
+    // WARNING: if future changes add observable side effects to
+    // `resolveOrCreateEndUser` (events, webhooks, audit logs), they will
+    // fire TWICE for application-level logins. Gate any such side effect
+    // on a "newly created" flag returned from the function, or move the
+    // proactive check to a side-effect-free probe.
     if (ctx.client.level === "application" && ctx.client.referencedApplicationId) {
       const [authUserRow] = await db
         .select({

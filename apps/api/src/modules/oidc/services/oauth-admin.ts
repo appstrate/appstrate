@@ -44,8 +44,35 @@ import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
 import { oauthClient } from "../schema.ts";
 import { prefixedId } from "../../../lib/ids.ts";
+import { logger } from "../../../lib/logger.ts";
 import { APPSTRATE_SCOPES } from "../auth/scopes.ts";
 import { isValidRedirectUri } from "./redirect-uri.ts";
+
+// ─── SECURITY: Trust boundary ─────────────────────────────────────────────────
+//
+// This service layer is intentionally UNSCOPED. Functions that operate on a
+// single client by `clientId` (getClient, updateClient, deleteClient,
+// rotateClientSecret) perform NO ownership or tenancy filtering — they will
+// act on any matching row regardless of which org owns it.
+//
+// The caller (route handler) MUST resolve ownership via `getClientOwningOrg`
+// and verify it matches the authenticated org before invoking these
+// functions. See the CRUD routes in `../routes.ts` for the canonical pattern:
+//
+//     const owning = await getClientOwningOrg(clientId);
+//     if (!owning || owning !== orgId) throw notFound("OAuth client not found");
+//     await deleteClient(clientId); // safe only after the guard above
+//
+// Why this shape: the multi-level (instance / org / application) model makes
+// a single Drizzle predicate awkward — routes already know the authenticated
+// org, so a post-fetch check is both simpler and more obviously correct than
+// a compound WHERE clause. But it means a new caller that forgets the guard
+// becomes an authorization bypass. If you add a new endpoint that mutates an
+// OAuth client by id, the `getClientOwningOrg` check is REQUIRED.
+//
+// The only exception are the scoped list helpers (`listClientsForOrg`,
+// `listClientsForApp`, `listClientsForOrgAndApps`) which filter by the
+// caller's org/applications at query time and are safe to expose directly.
 
 export type OAuthClientLevel = "instance" | "org" | "application";
 
@@ -111,16 +138,25 @@ export const oauthClientWithSecretSchema = oauthClientBaseSchema.extend({
 export type OAuthClientRecord = z.infer<typeof oauthClientBaseSchema>;
 export type OAuthClientWithSecret = z.infer<typeof oauthClientWithSecretSchema>;
 
+/** @internal exported for unit tests */
+export function isKnownLevel(level: unknown): level is OAuthClientLevel {
+  return level === "instance" || level === "org" || level === "application";
+}
+
+/**
+ * Strict row mapper — throws on unexpected `level` values. Use this for
+ * single-row lookups (`getClient`, `createClient`, `updateClient`) where
+ * a corrupted row is a hard failure the caller should surface.
+ */
 function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
-  if (row.level !== "instance" && row.level !== "org" && row.level !== "application") {
+  if (!isKnownLevel(row.level)) {
     throw new Error(`OIDC: unexpected oauth_client.level value: ${String(row.level)}`);
   }
-  const level: OAuthClientLevel = row.level;
   return {
     id: row.id,
     clientId: row.clientId,
     name: row.name,
-    level,
+    level: row.level,
     referencedOrgId: row.referencedOrgId ?? null,
     referencedApplicationId: row.referencedApplicationId ?? null,
     redirectUris: row.redirectUris ?? [],
@@ -131,6 +167,34 @@ function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
     createdAt: row.createdAt ? row.createdAt.toISOString() : null,
     updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
   };
+}
+
+/**
+ * Lenient row mapper — returns `null` and logs a warning for unexpected
+ * `level` values instead of throwing. Use this in list/batch operations
+ * so one corrupted row (e.g. after a botched migration) cannot crash the
+ * entire listing and lock admins out of the UI.
+ */
+/** @internal exported for unit tests */
+export function mapRowSafe(row: typeof oauthClient.$inferSelect): OAuthClientRecord | null {
+  if (!isKnownLevel(row.level)) {
+    logger.warn("oidc: skipping oauth_client row with unexpected level", {
+      module: "oidc",
+      clientId: row.clientId,
+      level: String(row.level),
+    });
+    return null;
+  }
+  return mapRow(row);
+}
+
+function mapRowsSafe(rows: (typeof oauthClient.$inferSelect)[]): OAuthClientRecord[] {
+  const out: OAuthClientRecord[] = [];
+  for (const row of rows) {
+    const mapped = mapRowSafe(row);
+    if (mapped) out.push(mapped);
+  }
+  return out;
 }
 
 function randomSecret(): string {
@@ -177,7 +241,7 @@ async function syncMetadata(row: typeof oauthClient.$inferSelect): Promise<void>
 
 export async function listClientsForOrg(orgId: string): Promise<OAuthClientRecord[]> {
   const rows = await db.select().from(oauthClient).where(eq(oauthClient.referencedOrgId, orgId));
-  return rows.map(mapRow);
+  return mapRowsSafe(rows);
 }
 
 export async function listClientsForApp(applicationId: string): Promise<OAuthClientRecord[]> {
@@ -185,7 +249,7 @@ export async function listClientsForApp(applicationId: string): Promise<OAuthCli
     .select()
     .from(oauthClient)
     .where(eq(oauthClient.referencedApplicationId, applicationId));
-  return rows.map(mapRow);
+  return mapRowsSafe(rows);
 }
 
 /** Combined list for the admin UI — returns every client the caller's org can see in a single query. */
@@ -201,7 +265,7 @@ export async function listClientsForOrgAndApps(
     .select()
     .from(oauthClient)
     .where(or(...conditions));
-  return rows.map(mapRow);
+  return mapRowsSafe(rows);
 }
 
 export async function getClient(clientId: string): Promise<OAuthClientRecord | null> {

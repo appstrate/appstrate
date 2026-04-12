@@ -26,6 +26,26 @@ import { OIDC_IDENTITY_SCOPE_SET } from "./scopes.ts";
 
 type ActorType = "dashboard_user" | "end_user" | "user";
 
+/**
+ * Runtime-validated narrowing from `string` to `Permission`.
+ *
+ * `OIDC_ALLOWED_SCOPES` is typed as `ReadonlySet<Permission>`, so a
+ * membership check is sufficient evidence that the input is a valid
+ * `Permission`. Declaring this as a type predicate gives us a single
+ * documented widening point instead of sprinkling `as Permission` casts
+ * across the loop body — a reviewer can audit one function instead of
+ * every call site, and any future change to `OIDC_ALLOWED_SCOPES` is
+ * reflected here automatically.
+ */
+function isAllowedOidcScope(s: string): s is Permission {
+  return (OIDC_ALLOWED_SCOPES as ReadonlySet<string>).has(s);
+}
+
+/** Runtime-validated narrowing through a role-ceiling Set<Permission>. */
+function isWithinCeiling(s: string, ceiling: ReadonlySet<Permission>): s is Permission {
+  return (ceiling as ReadonlySet<string>).has(s);
+}
+
 export function scopesToPermissions(
   scope: string | undefined,
   actorType: ActorType,
@@ -43,14 +63,8 @@ export function scopesToPermissions(
   // granted iff the role allows it. This prevents token privilege
   // escalation after a role downgrade and matches the way API keys derive
   // their effective permissions (see `resolveApiKeyPermissions`).
-  const ceiling =
+  const ceiling: ReadonlySet<Permission> | undefined =
     actorType === "dashboard_user" && orgRole ? resolvePermissions(orgRole) : undefined;
-
-  // Widen to Set<string> for runtime .has() checks — the sets contain
-  // Permission values, so a successful .has(s) guarantees s is a valid
-  // Permission and the cast on .add() is safe.
-  const allowedScopes = OIDC_ALLOWED_SCOPES as ReadonlySet<string>;
-  const ceilingScopes = ceiling as ReadonlySet<string> | undefined;
 
   for (const s of scope.split(/\s+/)) {
     if (s === "" || OIDC_IDENTITY_SCOPE_SET.has(s)) continue;
@@ -59,8 +73,8 @@ export function scopesToPermissions(
       // outside it (admin / destructive / org management) is dropped
       // silently — they should never have been requested in the first
       // place (the client creation API rejects them upfront).
-      if (allowedScopes.has(s)) {
-        granted.add(s as Permission);
+      if (isAllowedOidcScope(s)) {
+        granted.add(s);
       } else {
         logger.warn("oidc: end_user scope dropped (not in OIDC_ALLOWED_SCOPES)", {
           module: "oidc",
@@ -71,8 +85,8 @@ export function scopesToPermissions(
     }
     // Dashboard flow: scope must be a valid Permission AND the role must
     // allow it (ceiling filter).
-    if (ceilingScopes && ceilingScopes.has(s)) {
-      granted.add(s as Permission);
+    if (ceiling && isWithinCeiling(s, ceiling)) {
+      granted.add(s);
       continue;
     }
     logger.warn("oidc: dashboard scope dropped — role ceiling does not allow it", {

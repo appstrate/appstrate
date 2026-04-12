@@ -101,3 +101,45 @@ describe("scopesToPermissions — dashboard flow", () => {
     }
   });
 });
+
+describe("scopesToPermissions — narrowing guards", () => {
+  it("arbitrary non-Permission strings never end up in the granted set", () => {
+    // Regression test for the type-widening concern: the previous
+    // implementation cast the allowed-scope set to `ReadonlySet<string>`
+    // and used `granted.add(s as Permission)`, which would technically
+    // accept any string that somehow passed `.has()`. With the typed
+    // predicate in place, unknown strings are dropped at runtime.
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const perms = scopesToPermissions(
+        "runs:read totally-fake evil:injection 🚀 agents:run",
+        "end_user",
+      );
+      // Only the two real OIDC-allowed core permissions survive.
+      expect([...perms].sort()).toEqual(["agents:run", "runs:read"]);
+      // Every survivor is exercise-able through Permission's type contract.
+      for (const p of perms) {
+        expect(typeof p).toBe("string");
+        expect(p.includes(":")).toBe(true);
+      }
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("dashboard ceiling narrowing rejects scopes missing from the role set", () => {
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const perms = scopesToPermissions(
+        "agents:read not:a:permission billing:manage",
+        "dashboard_user",
+        "member",
+      );
+      // `agents:read` is in MEMBER_PERMISSIONS; the other two are not.
+      expect(perms.has("agents:read")).toBe(true);
+      expect(perms.size).toBe(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+});

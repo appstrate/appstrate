@@ -29,6 +29,7 @@
  * Client secret storage matches the `oauth-admin` service hash (SHA-256 hex).
  */
 
+import { timingSafeEqual } from "node:crypto";
 import { eq, and } from "drizzle-orm";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { jwt } from "better-auth/plugins";
@@ -55,14 +56,22 @@ export interface ClientMetadata {
   referencedApplicationId?: string;
 }
 
+/**
+ * Constant-time comparison of the SHA-256 hex digest of `clientSecret`
+ * against the stored hash. Uses `crypto.timingSafeEqual` on raw buffers
+ * so the comparison cost does not depend on the position of the first
+ * byte mismatch (prevents timing side channels on secret verification).
+ *
+ * `timingSafeEqual` requires equal-length buffers — we early-return on
+ * length mismatch, which is safe because the stored hash length is a
+ * public constant (64 hex chars) and does not leak secret material.
+ */
 async function sha256HexVerify(clientSecret: string, storedHash: string): Promise<boolean> {
   const computed = await hashSecret(clientSecret);
   if (computed.length !== storedHash.length) return false;
-  let diff = 0;
-  for (let i = 0; i < computed.length; i++) {
-    diff |= computed.charCodeAt(i) ^ storedHash.charCodeAt(i);
-  }
-  return diff === 0;
+  const a = Buffer.from(computed, "utf8");
+  const b = Buffer.from(storedHash, "utf8");
+  return timingSafeEqual(a, b);
 }
 
 export function oidcBetterAuthPlugins(): unknown[] {
@@ -262,6 +271,13 @@ async function buildApplicationLevelClaims(
     });
     throw new Error("oidc: referenced application not found");
   }
+  // NOTE: this call may be the SECOND invocation for a given login —
+  // `routes.ts` POST /api/oauth/login pre-resolves the end-user to surface
+  // `UnverifiedEmailConflictError` as a 409 before the redirect chain. That
+  // first call is idempotent (step-1 SELECT lookup via `findLinkedEndUser`
+  // on repeat calls), so this second invocation is a no-op for the happy
+  // path. Do NOT add observable side effects here without making them
+  // "first-call only" — see the matching warning in routes.ts.
   try {
     const resolved = await resolveOrCreateEndUser(
       {
