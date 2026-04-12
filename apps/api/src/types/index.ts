@@ -79,5 +79,7 @@ export type AppEnv = {
     app?: import("../middleware/app-context.ts").AppContextRow;
     requestId: string;
     apiVersion: string;
+    /** Set by auth strategies that defer org resolution to X-Org-Id middleware. */
+    deferOrgResolution?: boolean;
   };
 };

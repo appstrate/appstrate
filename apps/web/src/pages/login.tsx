@@ -9,18 +9,19 @@ import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { AuthLayout } from "../components/auth-layout";
 import { LoginForm } from "../components/login-form";
-import { startOidcLogin } from "../lib/oidc";
 import { Spinner } from "../components/spinner";
 
 export function LoginPage() {
   const location = useLocation();
-  const oidcConfig = window.__APP_CONFIG__?.oidc;
+  const oidcConfig = (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
 
   useEffect(() => {
     if (oidcConfig) {
       // Redirect to OIDC authorize — the server-rendered login page handles auth
       const redirectTo = location.state?.from ?? "/";
-      startOidcLogin(redirectTo);
+      import("../modules/oidc/lib/oidc").then(({ startOidcLogin }) => {
+        startOidcLogin(redirectTo);
+      });
     }
   }, [oidcConfig, location.state?.from]);
 

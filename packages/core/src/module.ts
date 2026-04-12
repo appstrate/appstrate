@@ -317,6 +317,14 @@ export interface AuthResolution {
   endUser?: EndUserContext;
   /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */
   extra?: Record<string, unknown>;
+  /**
+   * When true, the auth pipeline defers org resolution to the `X-Org-Id`
+   * middleware (same path as session auth) and derives permissions from
+   * `orgRole` after org-context resolves. Strategies that authenticate a
+   * platform user without binding to a specific org at token-verification
+   * time should set this to `true`.
+   */
+  deferOrgResolution?: boolean;
 }
 
 /**

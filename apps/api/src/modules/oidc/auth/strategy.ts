@@ -128,6 +128,7 @@ async function resolveInstanceUser(claims: AccessTokenClaims): Promise<AuthResol
     },
     authMethod: "oauth2-instance",
     permissions: [],
+    deferOrgResolution: true,
   };
 }
 

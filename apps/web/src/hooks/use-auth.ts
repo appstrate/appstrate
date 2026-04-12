@@ -3,7 +3,6 @@
 import { useCallback } from "react";
 import { useStore } from "zustand";
 import { authClient } from "../lib/auth-client";
-import { startOidcLogin, startOidcLogout } from "../lib/oidc";
 import { api } from "../api";
 import { authStore } from "../stores/auth-store";
 import i18n from "../i18n";
@@ -85,12 +84,12 @@ export function useAuth() {
    * The optional `redirectTo` is saved for after the callback completes.
    */
   const login = useCallback(async (redirectTo?: string) => {
-    const oidcConfig = window.__APP_CONFIG__?.oidc;
+    const oidcConfig = (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
     if (oidcConfig) {
+      const { startOidcLogin } = await import("../modules/oidc/lib/oidc");
       await startOidcLogin(redirectTo);
     } else {
       // Fallback for non-OIDC setups (e.g. OIDC module not loaded)
-      // This shouldn't happen in normal operation, but handle gracefully
       window.location.assign("/login");
     }
   }, []);
@@ -132,10 +131,15 @@ export function useAuth() {
   );
 
   const logout = useCallback(async () => {
-    const oidcConfig = window.__APP_CONFIG__?.oidc;
+    const oidcConfig = (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc;
     if (oidcConfig) {
-      // OIDC logout: clear BA session + server-side OIDC session
-      clearAuth();
+      // Navigate to the server-side logout endpoint FIRST — it clears the
+      // BA session cookie and redirects back to /login. Do NOT call
+      // clearAuth() before this: setting user=null triggers a React
+      // re-render that navigates to /login (via the catch-all route),
+      // which starts a new OIDC login flow before the browser can follow
+      // the logout redirect — effectively re-logging the user in.
+      const { startOidcLogout } = await import("../modules/oidc/lib/oidc");
       startOidcLogout();
     } else {
       await authClient.signOut();

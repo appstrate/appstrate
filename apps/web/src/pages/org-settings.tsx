@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
@@ -18,7 +18,11 @@ import {
 } from "@/components/ui/select";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useAppConfig } from "../hooks/use-app-config";
-import { OAuthClientsTab } from "../modules/oidc/components/oauth-clients-tab";
+const OAuthClientsTab = lazy(() =>
+  import("../modules/oidc/components/oauth-clients-tab").then((m) => ({
+    default: m.OAuthClientsTab,
+  })),
+);
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useOrg } from "../hooks/use-org";
@@ -655,7 +659,11 @@ export function OrgSettingsPage() {
         />
       )}
 
-      {tab === "oauth" && oidcEnabled && <OAuthClientsTab level="org" />}
+      {tab === "oauth" && oidcEnabled && (
+        <Suspense fallback={<LoadingState />}>
+          <OAuthClientsTab level="org" />
+        </Suspense>
+      )}
 
       {tab === "billing" && features.billing && <BillingTab />}
 

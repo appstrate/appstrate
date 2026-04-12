@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
@@ -24,7 +24,11 @@ import { LoadingState, ErrorState, EmptyState } from "../components/page-states"
 import { Spinner } from "../components/spinner";
 import { AppProfilesTab } from "../components/app-profiles-tab";
 import { useAppConfig } from "../hooks/use-app-config";
-import { OAuthClientsTab } from "../modules/oidc/components/oauth-clients-tab";
+const OAuthClientsTab = lazy(() =>
+  import("../modules/oidc/components/oauth-clients-tab").then((m) => ({
+    default: m.OAuthClientsTab,
+  })),
+);
 
 interface SettingsFormData {
   name: string;
@@ -78,7 +82,11 @@ export function AppSettingsPage() {
 
       {tab === "general" && <GeneralTab appId={appId} application={application} />}
       {tab === "profiles" && <AppProfilesTab />}
-      {tab === "oauth" && oidcEnabled && <OAuthClientsTab level="application" />}
+      {tab === "oauth" && oidcEnabled && (
+        <Suspense fallback={<LoadingState />}>
+          <OAuthClientsTab level="application" />
+        </Suspense>
+      )}
     </>
   );
 }

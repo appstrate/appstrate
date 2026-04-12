@@ -96,6 +96,9 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         if (resolution.endUser) {
           c.set("endUser", resolution.endUser);
         }
+        if (resolution.deferOrgResolution) {
+          c.set("deferOrgResolution", true);
+        }
         return next();
       }
     }
@@ -197,10 +200,10 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     if (skipAuth(path, publicPaths())) return next();
     if (!c.get("user")) return next();
     // Non-session auth (API key, module strategies) already resolved orgId
-    // and permissions inline. Session auth and instance-level OIDC tokens
-    // defer org resolution to the X-Org-Id middleware.
+    // and permissions inline. Session auth and strategies that set
+    // `deferOrgResolution` defer org resolution to the X-Org-Id middleware.
     const method = c.get("authMethod");
-    if (method !== "session" && method !== "oauth2-instance") return next();
+    if (method !== "session" && !c.get("deferOrgResolution")) return next();
     if (skipOrgContext(path)) return next();
     return requireOrgContext()(c, next);
   });
@@ -208,10 +211,10 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   // Permission resolution for session auth (after org context sets orgRole).
   app.use("*", async (c, next) => {
     // Non-session auth methods set permissions inline — skip derivation.
-    // Instance-level OIDC tokens also defer permission resolution until after
-    // org-context sets orgRole (same as session auth).
+    // Strategies with `deferOrgResolution` also defer permission resolution
+    // until after org-context sets orgRole (same as session auth).
     const authMethod = c.get("authMethod");
-    if (authMethod !== "session" && authMethod !== "oauth2-instance") return next();
+    if (authMethod !== "session" && !c.get("deferOrgResolution")) return next();
     const orgRole = c.get("orgRole");
     if (orgRole) {
       c.set("permissions", resolvePermissions(orgRole));

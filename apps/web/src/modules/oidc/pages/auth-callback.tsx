@@ -10,8 +10,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { handleOidcCallback } from "../lib/oidc";
-import { refreshAuth } from "../hooks/use-auth";
-import { Spinner } from "../components/spinner";
+import { refreshAuth } from "../../../hooks/use-auth";
+import { Spinner } from "../../../components/spinner";
 
 export function AuthCallbackPage() {
   const navigate = useNavigate();

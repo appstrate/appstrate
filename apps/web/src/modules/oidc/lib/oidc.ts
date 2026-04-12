@@ -9,6 +9,17 @@
  * the user's identity at callback time.
  */
 
+interface OidcConfig {
+  clientId: string;
+  issuer: string;
+}
+
+export function getOidcConfig(): OidcConfig | undefined {
+  return (window.__APP_CONFIG__ as unknown as Record<string, unknown>)?.oidc as
+    | OidcConfig
+    | undefined;
+}
+
 function base64url(bytes: Uint8Array): string {
   let str = "";
   for (const b of bytes) str += String.fromCharCode(b);
@@ -41,7 +52,7 @@ const OIDC_REDIRECT_KEY = "appstrate_oidc_redirect";
  * `/auth/callback` with an authorization code.
  */
 export async function startOidcLogin(redirectTo?: string): Promise<void> {
-  const config = window.__APP_CONFIG__?.oidc;
+  const config = getOidcConfig();
   if (!config) {
     throw new Error("OIDC not configured — window.__APP_CONFIG__.oidc is missing");
   }
@@ -76,7 +87,7 @@ export async function startOidcLogin(redirectTo?: string): Promise<void> {
  * relies on the Better Auth session cookie set during login.
  */
 export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
-  const config = window.__APP_CONFIG__?.oidc;
+  const config = getOidcConfig();
   if (!config) throw new Error("OIDC not configured");
 
   const params = new URLSearchParams(window.location.search);
@@ -137,7 +148,7 @@ export async function handleOidcCallback(): Promise<{ redirectTo: string }> {
  * Clears the BA session cookie + the OIDC session on the IdP side.
  */
 export function startOidcLogout(): void {
-  const config = window.__APP_CONFIG__?.oidc;
+  const config = getOidcConfig();
   if (!config) {
     // Fallback: just navigate to login
     window.location.assign("/login");

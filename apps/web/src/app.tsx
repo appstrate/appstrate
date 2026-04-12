@@ -33,7 +33,6 @@ import { PreferencesPage } from "./pages/preferences";
 import { LibraryPage } from "./pages/library-page";
 import { LoginPage } from "./pages/login";
 import { RegisterPage } from "./pages/register";
-import { AuthCallbackPage } from "./pages/auth-callback";
 import { VerifyEmailPage } from "./pages/verify-email";
 import { ForgotPasswordPage } from "./pages/forgot-password";
 import { ResetPasswordPage } from "./pages/reset-password";
@@ -65,6 +64,9 @@ const WebhookDetailPage = lazy(() =>
   import("./modules/webhooks/pages/webhook-detail-page").then((m) => ({
     default: m.WebhookDetailPage,
   })),
+);
+const AuthCallbackPage = lazy(() =>
+  import("./modules/oidc/pages/auth-callback").then((m) => ({ default: m.AuthCallbackPage })),
 );
 
 function MainLayout() {
@@ -187,7 +189,22 @@ export function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
-          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          {features.oidc && (
+            <Route
+              path="/auth/callback"
+              element={
+                <Suspense
+                  fallback={
+                    <div className="flex min-h-screen items-center justify-center">
+                      <Spinner />
+                    </div>
+                  }
+                >
+                  <AuthCallbackPage />
+                </Suspense>
+              }
+            />
+          )}
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
