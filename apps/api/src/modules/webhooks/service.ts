@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import { eq, and, or, desc, isNull, type InferSelectModel } from "drizzle-orm";
+import { eq, and, desc, type InferSelectModel } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "./schema.ts";
 import { logger } from "../../lib/logger.ts";
@@ -105,7 +105,6 @@ function toWebhookResponse(row: WebhookRow): WebhookInfo {
   return {
     id: row.id,
     object: "webhook",
-    level: row.level as "org" | "application",
     applicationId: row.applicationId,
     url: row.url,
     events: row.events,
@@ -173,49 +172,28 @@ async function buildSignedHeaders(
 // CRUD
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Polymorphic CRUD — level: "org" | "application"
-// ---------------------------------------------------------------------------
-//
-// Org-level webhooks subscribe to events from any application in the org.
-// Application-level webhooks are pinned to a single app at creation.
-// `applicationId` is nullable — the CHECK constraint in the initial
-// migration enforces exactly one shape per row.
-
-export type CreateWebhookInput =
-  | {
-      level: "org";
-      orgId: string;
-      url: string;
-      events: string[];
-      packageId?: string | null;
-      payloadMode?: string;
-      enabled?: boolean;
-    }
-  | {
-      level: "application";
-      orgId: string;
-      applicationId: string;
-      url: string;
-      events: string[];
-      packageId?: string | null;
-      payloadMode?: string;
-      enabled?: boolean;
-    };
-
-export async function createWebhook(params: CreateWebhookInput): Promise<WebhookCreateResponse> {
-  // Per-scope limit (per app for app-level, per org for org-level).
-  const scopeFilter =
-    params.level === "application"
-      ? and(eq(webhooks.orgId, params.orgId), eq(webhooks.applicationId, params.applicationId))
-      : and(eq(webhooks.orgId, params.orgId), isNull(webhooks.applicationId));
-  const existing = await db.select({ id: webhooks.id }).from(webhooks).where(scopeFilter);
+export async function createWebhook(
+  orgId: string,
+  applicationId: string,
+  params: {
+    url: string;
+    events: string[];
+    packageId?: string | null;
+    payloadMode?: string;
+    enabled?: boolean;
+  },
+): Promise<WebhookCreateResponse> {
+  // Check limit (per application, not per org)
+  const existing = await db
+    .select({ id: webhooks.id })
+    .from(webhooks)
+    .where(and(eq(webhooks.orgId, orgId), eq(webhooks.applicationId, applicationId)));
   if (existing.length >= MAX_WEBHOOKS_PER_APP) {
     throw new ApiError({
       status: 400,
       code: "webhook_limit_reached",
       title: "Webhook Limit Reached",
-      detail: `Maximum ${MAX_WEBHOOKS_PER_APP} webhooks per ${params.level === "org" ? "organization" : "application"}`,
+      detail: `Maximum ${MAX_WEBHOOKS_PER_APP} webhooks per application`,
     });
   }
 
@@ -228,9 +206,8 @@ export async function createWebhook(params: CreateWebhookInput): Promise<Webhook
     .insert(webhooks)
     .values({
       id,
-      level: params.level,
-      orgId: params.orgId,
-      applicationId: params.level === "application" ? params.applicationId : null,
+      orgId,
+      applicationId,
       url: params.url,
       events: params.events,
       packageId: params.packageId ?? null,
@@ -243,32 +220,31 @@ export async function createWebhook(params: CreateWebhookInput): Promise<Webhook
   return { ...toWebhookResponse(created!), secret };
 }
 
-/**
- * List webhooks visible to the caller.
- *
- * - When `applicationId` is passed: returns both org-level webhooks AND
- *   application-level webhooks pinned to that app. (This mirrors the
- *   dispatch semantics — any webhook that *would* fire for a run in the
- *   app is visible in the app's webhook list.)
- * - When `applicationId` is omitted: returns org-level webhooks only.
- */
-export async function listWebhooks(orgId: string, applicationId?: string): Promise<WebhookInfo[]> {
-  const filter = applicationId
-    ? and(
-        eq(webhooks.orgId, orgId),
-        or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId)),
-      )
-    : and(eq(webhooks.orgId, orgId), isNull(webhooks.applicationId));
+export async function listWebhooks(orgId: string, applicationId: string): Promise<WebhookInfo[]> {
+  const rows = await db
+    .select()
+    .from(webhooks)
+    .where(and(eq(webhooks.orgId, orgId), eq(webhooks.applicationId, applicationId)))
+    .orderBy(desc(webhooks.createdAt));
 
-  const rows = await db.select().from(webhooks).where(filter).orderBy(desc(webhooks.createdAt));
   return rows.map(toWebhookResponse);
 }
 
-export async function getWebhook(orgId: string, webhookId: string): Promise<WebhookInfo> {
+export async function getWebhook(
+  orgId: string,
+  applicationId: string,
+  webhookId: string,
+): Promise<WebhookInfo> {
   const [row] = await db
     .select()
     .from(webhooks)
-    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)))
+    .where(
+      and(
+        eq(webhooks.id, webhookId),
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+      ),
+    )
     .limit(1);
 
   if (!row) throw notFound(`Webhook '${webhookId}' not found`);
@@ -277,6 +253,7 @@ export async function getWebhook(orgId: string, webhookId: string): Promise<Webh
 
 export async function updateWebhook(
   orgId: string,
+  applicationId: string,
   webhookId: string,
   params: {
     url?: string;
@@ -286,7 +263,7 @@ export async function updateWebhook(
     enabled?: boolean;
   },
 ): Promise<WebhookInfo> {
-  await getWebhook(orgId, webhookId);
+  await getWebhook(orgId, applicationId, webhookId);
 
   if (params.url) validateWebhookUrl(params.url);
 
@@ -295,25 +272,53 @@ export async function updateWebhook(
   const [updated] = await db
     .update(webhooks)
     .set(updates)
-    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)))
+    .where(
+      and(
+        eq(webhooks.id, webhookId),
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+      ),
+    )
     .returning();
 
   return toWebhookResponse(updated!);
 }
 
-export async function deleteWebhook(orgId: string, webhookId: string): Promise<void> {
-  await getWebhook(orgId, webhookId);
-  await db.delete(webhooks).where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)));
+export async function deleteWebhook(
+  orgId: string,
+  applicationId: string,
+  webhookId: string,
+): Promise<void> {
+  await getWebhook(orgId, applicationId, webhookId);
+  await db
+    .delete(webhooks)
+    .where(
+      and(
+        eq(webhooks.id, webhookId),
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+      ),
+    );
 }
 
 /** Grace period for the previous secret after rotation (24 hours). */
 const SECRET_ROTATION_GRACE_MS = 24 * 60 * 60 * 1000;
 
-export async function rotateSecret(orgId: string, webhookId: string): Promise<{ secret: string }> {
+export async function rotateSecret(
+  orgId: string,
+  applicationId: string,
+  webhookId: string,
+): Promise<{ secret: string }> {
   const [row] = await db
     .select({ id: webhooks.id, secret: webhooks.secret })
     .from(webhooks)
-    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)))
+    .where(
+      and(
+        eq(webhooks.id, webhookId),
+        eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
+      ),
+    )
     .limit(1);
 
   if (!row) throw notFound(`Webhook '${webhookId}' not found`);
@@ -334,10 +339,11 @@ export async function rotateSecret(orgId: string, webhookId: string): Promise<{ 
 
 export async function listDeliveries(
   orgId: string,
+  applicationId: string,
   webhookId: string,
   limit = 20,
 ): Promise<WebhookDeliveryInfo[]> {
-  await getWebhook(orgId, webhookId);
+  await getWebhook(orgId, applicationId, webhookId);
 
   const rows = await db
     .select()
@@ -411,8 +417,7 @@ async function getDeliveryQueue(): Promise<JobQueue<DeliveryJobData>> {
  * Dispatch webhook events for a run status change.
  * Called from the run pipeline after status transitions.
  *
- * Fires both **org-level** webhooks (pinned to the org, `application_id IS NULL`)
- * and **application-level** webhooks pinned to the run's application.
+ * All webhooks are application-scoped — fires only for runs in the same application.
  */
 export async function dispatchWebhookEvents(
   orgId: string,
@@ -431,8 +436,8 @@ export async function dispatchWebhookEvents(
     .where(
       and(
         eq(webhooks.orgId, orgId),
+        eq(webhooks.applicationId, applicationId),
         eq(webhooks.enabled, true),
-        or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId)),
       ),
     );
 

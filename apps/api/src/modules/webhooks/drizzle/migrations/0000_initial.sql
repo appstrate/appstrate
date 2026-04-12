@@ -2,9 +2,8 @@
 
 CREATE TABLE "webhooks" (
   "id" text PRIMARY KEY NOT NULL,
-  "level" text NOT NULL,
   "org_id" uuid NOT NULL REFERENCES "organizations" ("id") ON DELETE CASCADE,
-  "application_id" text REFERENCES "applications" ("id") ON DELETE CASCADE,
+  "application_id" text NOT NULL REFERENCES "applications" ("id") ON DELETE CASCADE,
   "url" text NOT NULL,
   "events" text[] NOT NULL,
   "package_id" text REFERENCES "packages" ("id") ON DELETE SET NULL,
@@ -14,12 +13,7 @@ CREATE TABLE "webhooks" (
   "previous_secret" text,
   "previous_secret_expires_at" timestamp,
   "created_at" timestamp DEFAULT now() NOT NULL,
-  "updated_at" timestamp DEFAULT now() NOT NULL,
-  CONSTRAINT "webhooks_level_check" CHECK (
-    (level = 'org' AND application_id IS NULL)
-    OR
-    (level = 'application' AND application_id IS NOT NULL)
-  )
+  "updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "webhook_deliveries" (

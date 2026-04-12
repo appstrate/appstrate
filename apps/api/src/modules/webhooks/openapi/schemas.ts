@@ -6,7 +6,6 @@ export const webhooksSchemas = {
     required: [
       "id",
       "object",
-      "level",
       "applicationId",
       "url",
       "events",
@@ -17,15 +16,9 @@ export const webhooksSchemas = {
     properties: {
       id: { type: "string", description: "Webhook ID (wh_ prefix)" },
       object: { type: "string", enum: ["webhook"] },
-      level: {
-        type: "string",
-        enum: ["org", "application"],
-        description:
-          "Scoping level. `org` webhooks fire for any application in the org; `application` webhooks are pinned via `applicationId`.",
-      },
       applicationId: {
-        type: ["string", "null"],
-        description: "Application ID (app_ prefix) when `level = 'application'`, otherwise null.",
+        type: "string",
+        description: "Application ID (app_ prefix). All webhooks are application-scoped.",
       },
       url: { type: "string", format: "uri" },
       events: { type: "array", items: { type: "string" } },

@@ -46,8 +46,6 @@ describe("OpenAPI response validation — webhooks", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          level: "application",
-          referencedApplicationId: ctx.defaultAppId,
           url: "https://example.com/hook",
           events: ["run.success"],
         }),
@@ -72,7 +70,7 @@ describe("OpenAPI response validation — webhooks", () => {
 
       await seedWebhook({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
 
-      const res = await app.request(`/api/webhooks?applicationId=${ctx.defaultAppId}`, {
+      const res = await app.request("/api/webhooks", {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);

@@ -21,8 +21,6 @@ describe("Webhooks API", () => {
 
   function webhookPayload(overrides?: Record<string, unknown>) {
     return {
-      level: "application" as const,
-      referencedApplicationId: ctx.defaultAppId,
       url: "https://example.com/webhook",
       events: ["run.success"],
       ...overrides,
@@ -70,11 +68,11 @@ describe("Webhooks API", () => {
   });
 
   describe("GET /api/webhooks", () => {
-    it("lists application-level webhooks when applicationId is passed", async () => {
+    it("lists webhooks", async () => {
       await createWebhook();
       await createWebhook({ url: "https://example.com/webhook2" });
 
-      const res = await app.request(`/api/webhooks?applicationId=${ctx.defaultAppId}`, {
+      const res = await app.request("/api/webhooks", {
         headers: authHeaders(ctx),
       });
 
@@ -83,27 +81,6 @@ describe("Webhooks API", () => {
       expect(body.object).toBe("list");
       expect(body.data).toBeArray();
       expect(body.data.length).toBeGreaterThanOrEqual(2);
-    });
-
-    it("lists org-level webhooks when applicationId is omitted", async () => {
-      // Create one org-level webhook + one app-level webhook, then list without applicationId.
-      await app.request("/api/webhooks", {
-        method: "POST",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          level: "org",
-          url: "https://example.com/org-webhook",
-          events: ["run.success"],
-        }),
-      });
-      await createWebhook();
-
-      const res = await app.request("/api/webhooks", { headers: authHeaders(ctx) });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.data.length).toBe(1);
-      expect(body.data[0].level).toBe("org");
-      expect(body.data[0].applicationId).toBeNull();
     });
   });
 
