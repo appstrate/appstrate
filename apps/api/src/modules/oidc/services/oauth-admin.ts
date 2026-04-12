@@ -406,7 +406,7 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
     level: "instance",
     name: "Appstrate Platform",
     redirectUris: [`${appUrl}/auth/callback`],
-    postLogoutRedirectUris: [appUrl],
+    postLogoutRedirectUris: [appUrl, `${appUrl}/login`],
     scopes: ["openid", "profile", "email", "offline_access"],
     isFirstParty: true,
   });

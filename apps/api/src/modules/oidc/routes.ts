@@ -49,7 +49,9 @@ import {
   resolveOrCreateEndUser,
   loadAppById,
 } from "./services/enduser-mapping.ts";
+import { getEnv } from "@appstrate/env";
 import { renderLoginPage } from "./pages/login.ts";
+import { renderRegisterPage } from "./pages/register.ts";
 import { renderConsentPage } from "./pages/consent.ts";
 import { renderErrorPage } from "./pages/error.ts";
 
@@ -97,9 +99,10 @@ interface ClientContext {
   client: {
     id: string;
     name: string | null;
-    level: "org" | "application";
+    level: "org" | "application" | "instance";
     referencedOrgId: string | null;
     referencedApplicationId: string | null;
+    isFirstParty: boolean;
   };
   branding: Awaited<ReturnType<typeof resolveBrandingForClient>>;
   csrfToken: string;
@@ -112,6 +115,7 @@ async function loadClientContext(c: Context<AppEnv>, clientId: string): Promise<
       name: oauthClient.name,
       disabled: oauthClient.disabled,
       level: oauthClient.level,
+      isFirstParty: oauthClient.skipConsent,
       referencedOrgId: oauthClient.referencedOrgId,
       referencedApplicationId: oauthClient.referencedApplicationId,
     })
@@ -119,11 +123,12 @@ async function loadClientContext(c: Context<AppEnv>, clientId: string): Promise<
     .where(eq(oauthClient.clientId, clientId))
     .limit(1);
   if (!row || row.disabled) throw notFound("Unknown OAuth client");
-  const level: typeof row.level = row.level === "org" ? "org" : "application";
+  const level = row.level as "org" | "application" | "instance";
   const client = {
     id: row.id,
     name: row.name,
     level,
+    isFirstParty: row.isFirstParty === true,
     referencedOrgId: row.referencedOrgId,
     referencedApplicationId: row.referencedApplicationId,
   };
@@ -156,6 +161,20 @@ async function loadClientContextOrRenderError(
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Detect available social auth providers from env vars. */
+function getSocialProviders(): { google: boolean; github: boolean } {
+  const env = getEnv();
+  return {
+    google: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
+    github: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
+  };
+}
+
+function isSmtpEnabled(): boolean {
+  const env = getEnv();
+  return !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM);
+}
 
 /** Skipping consent is a trust escalation — only admin/owner may set isFirstParty. */
 function requireAdminForFirstParty(c: Context<AppEnv>, isFirstParty: boolean | undefined) {
@@ -338,6 +357,8 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: result.branding,
         csrfToken: "",
+        socialProviders: getSocialProviders(),
+        smtpEnabled: isSmtpEnabled(),
         error:
           "Ce lien de connexion a expiré. Veuillez relancer la connexion depuis l'application.",
       });
@@ -349,6 +370,8 @@ export function createOidcRouter() {
       queryString: url.search,
       branding: getResult.branding,
       csrfToken: getResult.csrfToken,
+      socialProviders: getSocialProviders(),
+      smtpEnabled: isSmtpEnabled(),
     });
     return c.html(body.value);
   });
@@ -378,6 +401,8 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: result.branding,
         csrfToken: "",
+        socialProviders: getSocialProviders(),
+        smtpEnabled: isSmtpEnabled(),
         error:
           "Ce lien de connexion a expiré. Veuillez relancer la connexion depuis l'application.",
       });
@@ -393,10 +418,14 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,
+        socialProviders: getSocialProviders(),
+        smtpEnabled: isSmtpEnabled(),
         error: "Votre session a expiré. Veuillez réessayer.",
       });
       return c.html(page.value, 403);
     }
+    const socialProviders = getSocialProviders();
+    const smtpEnabled = isSmtpEnabled();
     const renderError = (
       error: string,
       status: 400 | 401 | 403 | 409 | 429 | 500,
@@ -406,6 +435,8 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,
+        socialProviders,
+        smtpEnabled,
         error,
         email,
       });
@@ -545,13 +576,16 @@ export function createOidcRouter() {
     // accumulator (not a fresh Response) so the forwarded cookies survive
     // alongside the CSRF cookie deletion that verifyCsrfToken already queued.
     //
-    // SECURITY: Cap the session cookie Max-Age to 5 minutes. The BA session
-    // created here is only needed for the OAuth redirect chain (login →
-    // authorize → consent → callback). Without this cap, the session
-    // persists indefinitely — if the downstream client rejects the callback
-    // (e.g. expired state), the surviving BA session enables silent
-    // re-authentication on the next visit, bypassing the client's CSRF
-    // (state) protection entirely.
+    // SECURITY: Cap the session cookie Max-Age to 5 minutes for third-party
+    // clients. The BA session is only needed for the OAuth redirect chain
+    // (login → authorize → consent → callback). Without this cap, the
+    // session persists indefinitely — if the downstream client rejects the
+    // callback (e.g. expired state), the surviving BA session enables
+    // silent re-authentication, bypassing the client's CSRF protection.
+    //
+    // Exception: first-party clients (e.g. the platform SPA) keep the
+    // default session TTL because the session IS the primary auth mechanism
+    // — the OIDC flow is only used to route through the shared login page.
     const OAUTH_SESSION_MAX_AGE = 300; // 5 minutes — enough for the redirect chain
     const setCookies =
       typeof (authResponse.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie ===
@@ -559,16 +593,177 @@ export function createOidcRouter() {
         ? (authResponse.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
         : [];
     for (const raw of setCookies) {
-      const patched = raw.includes("Max-Age=")
-        ? raw.replace(/Max-Age=\d+/gi, `Max-Age=${OAUTH_SESSION_MAX_AGE}`)
-        : `${raw}; Max-Age=${OAUTH_SESSION_MAX_AGE}`;
-      c.header("set-cookie", patched, { append: true });
+      if (ctx.client.isFirstParty) {
+        // First-party: forward cookies as-is (default 7-day session TTL)
+        c.header("set-cookie", raw, { append: true });
+      } else {
+        // Third-party: cap to 5 minutes for the OAuth redirect chain only
+        const patched = raw.includes("Max-Age=")
+          ? raw.replace(/Max-Age=\d+/gi, `Max-Age=${OAUTH_SESSION_MAX_AGE}`)
+          : `${raw}; Max-Age=${OAUTH_SESSION_MAX_AGE}`;
+        c.header("set-cookie", patched, { append: true });
+      }
     }
-    logger.info("oidc: login success, forwarding cookies (capped to OAuth flow TTL)", {
+    logger.info("oidc: login success, forwarding cookies", {
       cookieCount: setCookies.length,
-      maxAge: OAUTH_SESSION_MAX_AGE,
+      firstParty: ctx.client.isFirstParty,
       email,
     });
+    return c.redirect(`/api/auth/oauth2/authorize${url.search}`, 302);
+  });
+
+  // ── Public registration page ──────────────────────────────────────────────
+
+  router.get("/api/oauth/register", rateLimitByIp(30), async (c) => {
+    const url = new URL(c.req.url);
+    const clientId = url.searchParams.get("client_id");
+    if (!clientId) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien d'inscription invalide",
+          message:
+            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+        }).value,
+        400,
+      );
+    }
+    const result = await loadClientContextOrRenderError(c, clientId);
+    if (result instanceof Response) return result;
+    const body = renderRegisterPage({
+      queryString: url.search,
+      branding: result.branding,
+      csrfToken: result.csrfToken,
+      socialProviders: getSocialProviders(),
+    });
+    return c.html(body.value);
+  });
+
+  router.post("/api/oauth/register", rateLimitByIp(20), async (c) => {
+    const url = new URL(c.req.url);
+    const clientId = url.searchParams.get("client_id");
+    if (!clientId) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien d'inscription invalide",
+          message:
+            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+        }).value,
+        400,
+      );
+    }
+    const ctxResult = await loadClientContextOrRenderError(c, clientId);
+    if (ctxResult instanceof Response) return ctxResult;
+    const ctx = ctxResult;
+
+    const form = await c.req.parseBody();
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
+      const page = renderRegisterPage({
+        queryString: url.search,
+        branding: ctx.branding,
+        csrfToken: ctx.csrfToken,
+        socialProviders: getSocialProviders(),
+        error: "Votre session a expiré. Veuillez réessayer.",
+      });
+      return c.html(page.value, 403);
+    }
+
+    const renderRegError = (
+      error: string,
+      status: 400 | 409 | 429 | 500,
+      email?: string,
+      name?: string,
+    ) => {
+      const page = renderRegisterPage({
+        queryString: url.search,
+        branding: ctx.branding,
+        csrfToken: ctx.csrfToken,
+        socialProviders: getSocialProviders(),
+        error,
+        email,
+        name,
+      });
+      return c.html(page.value, status);
+    };
+
+    const name = readFormString(form, "name")?.trim();
+    const email = readFormString(form, "email")?.toLowerCase().trim();
+    const password = readFormString(form, "password");
+    if (!name || !email || !password) {
+      return renderRegError("Tous les champs sont requis.", 400, email ?? undefined, name);
+    }
+    if (password.length < 8) {
+      return renderRegError(
+        "Le mot de passe doit contenir au moins 8 caractères.",
+        400,
+        email,
+        name,
+      );
+    }
+
+    const authApi = getOidcAuthApi();
+    let authResponse: Response;
+    try {
+      authResponse = (await authApi.signUpEmail({
+        body: { email, password, name },
+        headers: c.req.raw.headers,
+        asResponse: true,
+      })) as Response;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("oidc: signUpEmail failed", { error: msg, email });
+      if (msg.includes("already exists") || msg.includes("duplicate")) {
+        return renderRegError(
+          "Un compte existe déjà avec cet email. Essayez de vous connecter.",
+          409,
+          email,
+          name,
+        );
+      }
+      return renderRegError("Erreur serveur temporaire, veuillez réessayer.", 500, email, name);
+    }
+
+    if (!authResponse.ok) {
+      const bodyText = await authResponse.text().catch(() => "");
+      logger.warn("oidc: signUpEmail !ok", {
+        status: authResponse.status,
+        body: bodyText.slice(0, 400),
+        email,
+      });
+      if (authResponse.status === 422 || bodyText.includes("already exists")) {
+        return renderRegError(
+          "Un compte existe déjà avec cet email. Essayez de vous connecter.",
+          409,
+          email,
+          name,
+        );
+      }
+      return renderRegError(
+        "Impossible de créer le compte. Vérifiez vos informations.",
+        400,
+        email,
+        name,
+      );
+    }
+
+    // Forward session cookies — same pattern as login POST handler
+    const setCookies =
+      typeof (authResponse.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie ===
+      "function"
+        ? (authResponse.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
+        : [];
+    for (const raw of setCookies) {
+      if (ctx.client.isFirstParty) {
+        c.header("set-cookie", raw, { append: true });
+      } else {
+        const OAUTH_SESSION_MAX_AGE = 300;
+        const patched = raw.includes("Max-Age=")
+          ? raw.replace(/Max-Age=\d+/gi, `Max-Age=${OAUTH_SESSION_MAX_AGE}`)
+          : `${raw}; Max-Age=${OAUTH_SESSION_MAX_AGE}`;
+        c.header("set-cookie", patched, { append: true });
+      }
+    }
+
+    logger.info("oidc: registration success", { email });
     return c.redirect(`/api/auth/oauth2/authorize${url.search}`, 302);
   });
 
@@ -589,6 +784,33 @@ export function createOidcRouter() {
 
     const consentResult = await loadClientContextOrRenderError(c, clientId);
     if (consentResult instanceof Response) return consentResult;
+
+    // First-party clients skip the consent screen — the user already trusts
+    // the platform SPA or an admin-designated first-party app.
+    if (consentResult.client.isFirstParty) {
+      const oauthQuery = url.search.startsWith("?") ? url.search.slice(1) : url.search;
+      const authApi = getOidcAuthApi();
+      try {
+        const consentResponse = (await authApi.oauth2Consent({
+          body: { accept: true, oauth_query: oauthQuery },
+          request: c.req.raw,
+          headers: c.req.raw.headers,
+          asResponse: true,
+        })) as Response;
+        return maybeJsonRedirectToLocation(consentResponse, true);
+      } catch (err) {
+        if (err instanceof UnverifiedEmailConflictError) {
+          const page = renderErrorPage({
+            title: "Vérification requise",
+            message:
+              "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
+          });
+          return c.html(page.value, 409);
+        }
+        throw err;
+      }
+    }
+
     const scopes = scope.split(/\s+/).filter(Boolean);
     const body = renderConsentPage({
       clientName: consentResult.client.name ?? consentResult.client.id,
@@ -668,6 +890,8 @@ export function createOidcRouter() {
             queryString: `?${oauthQuery}`,
             branding: ctx.branding,
             csrfToken: ctx.csrfToken,
+            socialProviders: getSocialProviders(),
+            smtpEnabled: isSmtpEnabled(),
             error:
               "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
           });

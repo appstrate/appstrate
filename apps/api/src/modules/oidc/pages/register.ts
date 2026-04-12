@@ -1,44 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Server-rendered login page for the OIDC authorize flow.
+ * Server-rendered registration page for the OIDC authorize flow.
  *
- * Served at GET /api/oauth/login. Supports:
- *   - Email/password authentication
- *   - Social login (Google, GitHub) — redirects through Better Auth's
- *     social sign-in then back to the authorize endpoint
- *   - Registration link → /api/oauth/register with same OAuth params
- *   - Forgot password link (when SMTP is enabled)
+ * Served at GET /api/oauth/register. After successful sign-up the user
+ * has a Better Auth session and is redirected to the authorize endpoint
+ * to continue the OAuth flow.
  */
 
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
 
-export interface LoginPageProps {
-  /** Raw query string from the authorize redirect — forwarded to the form action. */
+export interface RegisterPageProps {
   queryString: string;
-  /** Optional error message to display above the form. */
   error?: string;
-  /** Optional pre-filled email (e.g. after a failed submission). */
   email?: string;
-  /** CSRF token injected into the form + paired cookie. */
+  name?: string;
   csrfToken: string;
-  /** Resolved branding for the owning application. */
   branding: ResolvedAppBranding;
-  /** Available social auth providers. */
   socialProviders?: { google?: boolean; github?: boolean };
-  /** Whether SMTP is configured (enables forgot password link). */
-  smtpEnabled?: boolean;
 }
 
-export function renderLoginPage(props: LoginPageProps): RawHtml {
-  const action = `/api/oauth/login${props.queryString}`;
-  const title = `Connexion à ${props.branding.name}`;
+export function renderRegisterPage(props: RegisterPageProps): RawHtml {
+  const action = `/api/oauth/register${props.queryString}`;
+  const title = `Créer un compte — ${props.branding.name}`;
 
-  // Build the authorize URL that social auth should redirect back to after
-  // completing the provider flow. This is the same URL the consent page
-  // would redirect to — the user now has a BA session so authorize proceeds.
   const authorizeUrl = `/api/auth/oauth2/authorize${props.queryString}`;
   const encodedCallback = encodeURIComponent(authorizeUrl);
 
@@ -46,24 +33,31 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
   const github = props.socialProviders?.github ?? false;
   const hasSocial = google || github;
 
-  const registerUrl = `/api/oauth/register${props.queryString}`;
+  const loginUrl = `/api/oauth/login${props.queryString}`;
 
   const bodyHtml = html`
-    <h1>Connexion</h1>
-    <p>Connectez-vous pour continuer.</p>
+    <h1>Créer un compte</h1>
+    <p>Inscrivez-vous pour continuer.</p>
     ${props.error ? html`<div class="error">${props.error}</div>` : null}
     <form method="POST" action="${action}" autocomplete="on">
       <input type="hidden" name="_csrf" value="${props.csrfToken}" />
       <input
-        type="email"
-        name="email"
-        placeholder="Email"
+        type="text"
+        name="name"
+        placeholder="Nom"
         required
         autofocus
-        value="${props.email ?? ""}"
+        value="${props.name ?? ""}"
       />
-      <input type="password" name="password" placeholder="Mot de passe" required />
-      <button type="submit">Se connecter</button>
+      <input type="email" name="email" placeholder="Email" required value="${props.email ?? ""}" />
+      <input
+        type="password"
+        name="password"
+        placeholder="Mot de passe (8 caractères min.)"
+        required
+        minlength="8"
+      />
+      <button type="submit">Créer mon compte</button>
     </form>
     ${hasSocial
       ? html`
@@ -112,10 +106,7 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
         `
       : null}
     <div class="footer-links">
-      <a href="${registerUrl}">Créer un compte</a>
-      ${props.smtpEnabled
-        ? html`<span class="sep">·</span><a href="/forgot-password">Mot de passe oublié ?</a>`
-        : null}
+      <a href="${loginUrl}">Déjà un compte ? Se connecter</a>
     </div>
   `;
   return renderLayout({ branding: props.branding, title, maxWidth: 400, bodyHtml });

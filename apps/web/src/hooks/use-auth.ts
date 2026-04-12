@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useStore } from "zustand";
 import { authClient } from "../lib/auth-client";
+import { startOidcLogin, startOidcLogout } from "../lib/oidc";
 import { api } from "../api";
 import { authStore } from "../stores/auth-store";
 import i18n from "../i18n";
@@ -76,7 +77,29 @@ export function useAuth() {
 
   const state = useStore(authStore);
 
-  const login = useCallback(async (email: string, password: string) => {
+  /**
+   * Login — redirects to the OIDC authorize endpoint which shows the
+   * shared server-rendered login page. After authentication, the browser
+   * is redirected back to /auth/callback with an authorization code.
+   *
+   * The optional `redirectTo` is saved for after the callback completes.
+   */
+  const login = useCallback(async (redirectTo?: string) => {
+    const oidcConfig = window.__APP_CONFIG__?.oidc;
+    if (oidcConfig) {
+      await startOidcLogin(redirectTo);
+    } else {
+      // Fallback for non-OIDC setups (e.g. OIDC module not loaded)
+      // This shouldn't happen in normal operation, but handle gracefully
+      window.location.assign("/login");
+    }
+  }, []);
+
+  /**
+   * Direct email/password login — used by invite acceptance flow
+   * where the user must authenticate inline without redirecting.
+   */
+  const loginDirect = useCallback(async (email: string, password: string) => {
     const result = await authClient.signIn.email({ email, password });
     if (result.error) throw new Error(result.error.message);
     const profile = await fetchProfile();
@@ -97,10 +120,6 @@ export function useAuth() {
         name: displayName || email,
       });
       if (result.error) throw new Error(result.error.message);
-      // When SMTP is enabled, Better Auth requires email verification —
-      // detect via missing user or unverified email.
-      // When SMTP is off, emailVerified stays false (no verification flow)
-      // but the session is valid, so we proceed normally.
       const smtpEnabled = window.__APP_CONFIG__?.features?.smtp ?? false;
       if (!result.data?.user || (smtpEnabled && !result.data.user.emailVerified)) {
         return { emailVerificationRequired: true };
@@ -113,8 +132,15 @@ export function useAuth() {
   );
 
   const logout = useCallback(async () => {
-    await authClient.signOut();
-    clearAuth();
+    const oidcConfig = window.__APP_CONFIG__?.oidc;
+    if (oidcConfig) {
+      // OIDC logout: clear BA session + server-side OIDC session
+      clearAuth();
+      startOidcLogout();
+    } else {
+      await authClient.signOut();
+      clearAuth();
+    }
   }, []);
 
   const updatePassword = useCallback(async (currentPassword: string, newPassword: string) => {
@@ -171,6 +197,7 @@ export function useAuth() {
     profile: state.profile,
     loading: state.loading,
     login,
+    loginDirect,
     signup,
     logout,
     updatePassword,

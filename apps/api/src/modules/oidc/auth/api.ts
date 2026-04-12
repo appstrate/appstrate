@@ -21,6 +21,13 @@ interface SignInEmailArgs {
   asResponse?: boolean;
 }
 
+interface SignUpEmailArgs {
+  body: { email: string; password: string; name: string };
+  headers: Headers;
+  request?: Request;
+  asResponse?: boolean;
+}
+
 interface OAuth2ConsentArgs {
   body: { accept: boolean; scope?: string; oauth_query?: string };
   headers: Headers;
@@ -38,6 +45,7 @@ interface JwksArgs {
 
 export interface OidcAuthApi {
   signInEmail(args: SignInEmailArgs): Promise<Response | unknown>;
+  signUpEmail(args: SignUpEmailArgs): Promise<Response | unknown>;
   oauth2Consent(args: OAuth2ConsentArgs): Promise<Response | unknown>;
   getOpenIdConfig(args: DiscoveryArgs): Promise<unknown>;
   getOAuthServerConfig(args: DiscoveryArgs): Promise<unknown>;

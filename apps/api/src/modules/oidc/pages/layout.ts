@@ -134,6 +134,68 @@ export function renderLayout(props: LayoutProps): RawHtml {
           .deny:hover {
             background: #d1d5db;
           }
+          .divider {
+            display: flex;
+            align-items: center;
+            margin: 20px 0;
+            color: #888;
+            font-size: 13px;
+          }
+          .divider::before,
+          .divider::after {
+            content: "";
+            flex: 1;
+            border-bottom: 1px solid #ddd;
+          }
+          .divider span {
+            padding: 0 12px;
+          }
+          .social-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+          }
+          .social-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 10px 16px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            color: #333;
+            background: #fff;
+            cursor: pointer;
+            transition:
+              background 0.15s,
+              border-color 0.15s;
+          }
+          .social-btn:hover {
+            background: #f5f5f5;
+            border-color: #bbb;
+          }
+          .social-btn svg {
+            flex-shrink: 0;
+          }
+          .footer-links {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 13px;
+            color: #888;
+          }
+          .footer-links a {
+            color: ${primary};
+            text-decoration: none;
+          }
+          .footer-links a:hover {
+            text-decoration: underline;
+          }
+          .footer-links .sep {
+            margin: 0 8px;
+          }
         </style>
       </head>
       <body>

@@ -68,6 +68,7 @@ const oidcModule: AppstrateModule = {
   // request body. No `X-App-Id` header is required.
   publicPaths: [
     "/api/oauth/login",
+    "/api/oauth/register",
     "/api/oauth/consent",
     "/api/oauth/logout",
     "/.well-known/openid-configuration",
