@@ -4,7 +4,7 @@
  * API version registry — date-based versioning (Stripe pattern).
  *
  * Each version is an ISO date string (YYYY-MM-DD). The org can pin to a version
- * via `organizations.settings.apiVersion`. Clients can override per-request
+ * via `organizations.orgSettings.apiVersion`. Clients can override per-request
  * via the `Appstrate-Version` header.
  */
 

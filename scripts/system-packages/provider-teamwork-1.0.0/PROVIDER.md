@@ -300,7 +300,7 @@ Use `fields[{type}]` to limit returned fields: `fields[tasks]=name,status,dueDat
 
 ## Important Notes
 
-- **Subdomain in URL** — The base URL includes the customer's subdomain (e.g. `mycompany.teamwork.com`). Use the `subdomain` credential field. Because the subdomain is dynamic, this provider uses `allowAllUris` to bypass the sidecar URI allowlist.
+- **Subdomain in URL** — The base URL includes the customer's subdomain. Use the `subdomain` credential field.
 - **JSON suffix** — All endpoints require `.json` suffix. Without it, you may get HTML responses.
 - **Basic auth** — Authentication is pre-encoded as `base64(api_key:X)` by the runtime.
 - **Token permanent** — API keys don't expire unless manually revoked.

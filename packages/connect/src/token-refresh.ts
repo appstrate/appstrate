@@ -5,13 +5,8 @@ import { userProviderConnections } from "@appstrate/db/schema";
 import type { Db } from "@appstrate/db/client";
 import type { DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
-import {
-  parseTokenResponse,
-  buildTokenHeaders,
-  buildTokenBody,
-  type OAuthTokenAuthMethod,
-  type OAuthTokenContentType,
-} from "./token-utils.ts";
+import type { OAuthTokenAuthMethod, OAuthTokenContentType } from "@appstrate/core/validation";
+import { parseTokenResponse, buildTokenHeaders, buildTokenBody } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
 
 /** In-memory concurrency lock: one refresh at a time per connection. */
@@ -24,6 +19,36 @@ export interface RefreshContext {
   tokenAuthMethod?: OAuthTokenAuthMethod;
   scopeSeparator?: string;
   tokenContentType?: OAuthTokenContentType;
+}
+
+/**
+ * Error thrown by forceRefresh when the OAuth token refresh call fails.
+ *
+ * `kind` discriminates between two cases that callers MUST treat differently:
+ *
+ * - `"revoked"`: the OAuth server responded with `HTTP 400` + body
+ *   `{ "error": "invalid_grant" }` per RFC 6749 §5.2. This is the only
+ *   reliable signal that the refresh token is dead and the user must
+ *   reconnect. Callers should set `needsReconnection = true`.
+ *
+ * - `"transient"`: every other failure mode (network error, timeout, 5xx,
+ *   non-JSON body, other 4xx, other OAuth error codes). The credential
+ *   might still be valid — callers MUST NOT flag the connection, and should
+ *   just fail the current request. Flagging on transient errors produces
+ *   false positives that force users to reconnect unnecessarily, especially
+ *   when the initial 401 that triggered the refresh came from a malformed
+ *   agent request (wrong header name, wrong auth scheme, wrong endpoint).
+ */
+export class RefreshError extends Error {
+  constructor(
+    message: string,
+    public readonly kind: "revoked" | "transient",
+    public readonly status?: number,
+    public readonly body?: string,
+  ) {
+    super(message);
+    this.name = "RefreshError";
+  }
 }
 
 /**
@@ -100,19 +125,45 @@ async function doRefresh(
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
-    throw new Error(`Token refresh network error for '${providerId}': ${extractErrorMessage(err)}`);
+    throw new RefreshError(
+      `Token refresh network error for '${providerId}': ${extractErrorMessage(err)}`,
+      "transient",
+    );
   }
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Token refresh failed for '${providerId}': ${response.status} ${text}`);
+    // Per RFC 6749 §5.2, a dead refresh_token is signaled by HTTP 400 +
+    // body {"error": "invalid_grant"}. Any other failure (5xx, 401, 403,
+    // other 4xx, non-JSON body, body without an `error` field, other OAuth
+    // error codes like invalid_client/invalid_scope) is treated as transient.
+    let kind: "revoked" | "transient" = "transient";
+    if (response.status === 400) {
+      try {
+        const parsed = JSON.parse(text) as { error?: unknown };
+        if (parsed && typeof parsed === "object" && parsed.error === "invalid_grant") {
+          kind = "revoked";
+        }
+      } catch {
+        // Non-JSON body on 400 — not a revocation signal
+      }
+    }
+    throw new RefreshError(
+      `Token refresh failed for '${providerId}': ${response.status} ${text}`,
+      kind,
+      response.status,
+      text,
+    );
   }
 
   let tokenData: Record<string, unknown>;
   try {
     tokenData = (await response.json()) as Record<string, unknown>;
   } catch {
-    throw new Error(`Token refresh returned non-JSON response for '${providerId}'`);
+    throw new RefreshError(
+      `Token refresh returned non-JSON response for '${providerId}'`,
+      "transient",
+    );
   }
 
   const parsed = parseTokenResponse(

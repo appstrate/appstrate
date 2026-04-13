@@ -1,11 +1,30 @@
 /**
  * Test preload script — runs once before any test file.
  *
- * 1. Starts test containers (PostgreSQL + Redis) if not already running
+ * 1. Starts test containers (PostgreSQL + Redis + MinIO + DinD) if not already running
  * 2. Sets environment variables for the test database and Redis
- * 3. Runs Drizzle migrations against the test database
+ * 3. Runs Drizzle migrations against the test database (core + all modules)
+ * 4. Registers module-owned tables for truncation
+ *
+ * Module discovery: each built-in module under apps/api/src/modules/<name>/ contributes:
+ *   - index.ts — default-exports an AppstrateModule (used by getTestApp)
+ *   - drizzle/migrations/NNNN_name.sql — applied in file-name order (alphabetical)
+ *   - test/tables.ts — default-exports a string[] of tables for truncateAll()
+ *
+ * Both are optional. Running core tests alone still picks up installed modules
+ * because anything under the modules directory is part of the repo — there is
+ * no "module disabled" state in tests, unlike production (APPSTRATE_MODULES env var).
  */
-import { resolve } from "path";
+import { resolve, join } from "path";
+import { readdirSync, existsSync, statSync } from "fs";
+import type { AppstrateModule } from "@appstrate/core/module";
+import { applyModuleMigration } from "./apply-module-migration.ts";
+import {
+  TEST_DB_NAME,
+  TEST_DB_USER,
+  TEST_MINIO_CONTAINER,
+  TEST_POSTGRES_CONTAINER,
+} from "./constants.ts";
 
 // ─── Docker Compose (idempotent — no-op if already running) ─────
 const composeFile = resolve(import.meta.dir, "docker-compose.test.yml");
@@ -61,7 +80,7 @@ const mcAlias = Bun.spawnSync(
   [
     "docker",
     "exec",
-    "setup-minio-test-1",
+    TEST_MINIO_CONTAINER,
     "mc",
     "alias",
     "set",
@@ -74,7 +93,7 @@ const mcAlias = Bun.spawnSync(
 );
 if (mcAlias.exitCode === 0) {
   Bun.spawnSync(
-    ["docker", "exec", "setup-minio-test-1", "mc", "mb", "--ignore-existing", "local/test-bucket"],
+    ["docker", "exec", TEST_MINIO_CONTAINER, "mc", "mb", "--ignore-existing", "local/test-bucket"],
     { stdout: "pipe", stderr: "pipe" },
   );
 }
@@ -89,51 +108,29 @@ Bun.spawnSync(["docker", "-H", "tcp://localhost:2375", "pull", "alpine:3.20"], {
 // ─── Migrations ─────────────────────────────────────────────
 // Drop and recreate the test DB to ensure a clean slate (fresh migration).
 // Uses psql via the test postgres container to avoid needing a local client.
-Bun.spawnSync(
-  [
-    "docker",
-    "exec",
-    "setup-postgres-test-1",
-    "psql",
-    "-U",
-    "test",
-    "-d",
-    "postgres",
-    "-c",
-    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'appstrate_test' AND pid <> pg_backend_pid();",
-  ],
-  { stdout: "pipe", stderr: "pipe" },
+function psqlAdmin(sqlCommand: string): void {
+  Bun.spawnSync(
+    [
+      "docker",
+      "exec",
+      TEST_POSTGRES_CONTAINER,
+      "psql",
+      "-U",
+      TEST_DB_USER,
+      "-d",
+      "postgres",
+      "-c",
+      sqlCommand,
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+}
+
+psqlAdmin(
+  `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${TEST_DB_NAME}' AND pid <> pg_backend_pid();`,
 );
-Bun.spawnSync(
-  [
-    "docker",
-    "exec",
-    "setup-postgres-test-1",
-    "psql",
-    "-U",
-    "test",
-    "-d",
-    "postgres",
-    "-c",
-    "DROP DATABASE IF EXISTS appstrate_test;",
-  ],
-  { stdout: "pipe", stderr: "pipe" },
-);
-Bun.spawnSync(
-  [
-    "docker",
-    "exec",
-    "setup-postgres-test-1",
-    "psql",
-    "-U",
-    "test",
-    "-d",
-    "postgres",
-    "-c",
-    "CREATE DATABASE appstrate_test;",
-  ],
-  { stdout: "pipe", stderr: "pipe" },
-);
+psqlAdmin(`DROP DATABASE IF EXISTS ${TEST_DB_NAME};`);
+psqlAdmin(`CREATE DATABASE ${TEST_DB_NAME};`);
 
 // Run drizzle-kit migrate as a subprocess from the packages/db directory,
 // since the postgres driver is a dependency of @appstrate/db, not @appstrate/api.
@@ -153,3 +150,78 @@ if (result.exitCode !== 0) {
     `Migration failed (exit ${result.exitCode}):\nstderr: ${stderr}\nstdout: ${stdout}`,
   );
 }
+
+// ─── Module migrations + truncation registration ────────────
+// Auto-discover every built-in module under apps/api/src/modules/*/ and
+// wire up its test infrastructure. We do this from the root preload (not
+// per-module) so that `bun test` from any directory sees a consistent state.
+
+const modulesRoot = resolve(import.meta.dir, "../../apps/api/src/modules");
+const moduleDirs = existsSync(modulesRoot)
+  ? readdirSync(modulesRoot)
+      .map((name) => join(modulesRoot, name))
+      .filter((path) => statSync(path).isDirectory())
+  : [];
+
+for (const moduleDir of moduleDirs) {
+  const migrationsDir = join(moduleDir, "drizzle", "migrations");
+  if (!existsSync(migrationsDir)) continue;
+  const sqlFiles = readdirSync(migrationsDir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+  for (const sqlFile of sqlFiles) {
+    applyModuleMigration(join(migrationsDir, sqlFile));
+  }
+}
+
+// Dynamic imports are async — bun supports top-level await in preloads.
+const { registerTruncationTables } = await import("../../apps/api/test/helpers/db.ts");
+const { registerTestModule } = await import("../../apps/api/test/helpers/test-modules.ts");
+
+// Phase 1: discover modules and register them. We collect imported modules
+// into a local list, then use the shared `collectModuleContributions()`
+// helper from module-loader.ts to aggregate Better Auth plugins + Drizzle
+// schemas in one place — the production boot path uses the same helper
+// (via `getModuleContributions()`), so tests and prod cannot drift.
+const importedModules: AppstrateModule[] = [];
+
+for (const moduleDir of moduleDirs) {
+  // Register the module itself so getTestApp() can mount its router
+  const indexFile = join(moduleDir, "index.ts");
+  if (existsSync(indexFile)) {
+    const imported: { default?: AppstrateModule } = await import(indexFile);
+    if (imported.default) {
+      registerTestModule(imported.default);
+      importedModules.push(imported.default);
+    }
+  }
+
+  // Register its tables for per-test truncation
+  const tablesFile = join(moduleDir, "test", "tables.ts");
+  if (!existsSync(tablesFile)) continue;
+  const tables: { default?: readonly string[] } = await import(tablesFile);
+  if (tables.default) {
+    registerTruncationTables(tables.default);
+  } else {
+    throw new Error(
+      `${tablesFile} must default-export a readonly string[] of tables (children first, FK-safe).`,
+    );
+  }
+}
+
+// Phase 2: initialize Better Auth singleton with every module's plugins.
+// The production code path calls createAuth() from boot.ts after
+// loadModules(); tests don't go through boot(), so we initialize directly
+// here. `collectModuleContributions()` is the shared aggregator used by
+// both paths — types flow through as `BetterAuthPluginList`, no `never`
+// cast needed at this layer. Subsequent `getTestApp({ modules })` calls
+// reuse this singleton so strategy tests and E2E OAuth flow tests see a
+// coherent auth surface with no double-initialization cost.
+const { collectModuleContributions } =
+  await import("../../apps/api/src/lib/modules/module-loader.ts");
+const { createAuth } = await import("../../packages/db/src/auth.ts");
+const contributions = collectModuleContributions(importedModules);
+createAuth(
+  contributions.betterAuthPlugins as Parameters<typeof createAuth>[0],
+  contributions.drizzleSchemas,
+);

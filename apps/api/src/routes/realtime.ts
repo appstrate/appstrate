@@ -2,15 +2,17 @@
 
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { auth } from "@appstrate/db/auth";
+import { getAuth } from "@appstrate/db/auth";
 import { organizationMembers } from "@appstrate/db/schema";
+import { scopedWhere } from "../lib/db-helpers.ts";
 import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
 import type { RealtimeEvent } from "../services/realtime.ts";
 import { unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
 import { validateApplicationInOrg } from "../middleware/app-context.ts";
+import type { OrgRole } from "../types/index.ts";
 
 /** Strip large user-content fields from SSE payloads for non-verbose consumers. */
 function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
@@ -28,7 +30,7 @@ function stripPayload(evt: RealtimeEvent): Record<string, unknown> {
 interface SSEAuthResult {
   userId: string;
   orgId: string;
-  role: string;
+  role: OrgRole;
   applicationId: string;
 }
 
@@ -62,7 +64,7 @@ async function validateSSEAuth(c: {
   }
 
   // 2. Fallback: cookie session
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
   if (!session?.user) return null;
 
   const orgId = c.req.query("orgId");
@@ -73,7 +75,10 @@ async function validateSSEAuth(c: {
     .select({ role: organizationMembers.role })
     .from(organizationMembers)
     .where(
-      and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, session.user.id)),
+      scopedWhere(organizationMembers, {
+        orgId,
+        extra: [eq(organizationMembers.userId, session.user.id)],
+      }),
     )
     .limit(1);
 
@@ -86,7 +91,12 @@ async function validateSSEAuth(c: {
   const app = await validateApplicationInOrg(applicationId, orgId);
   if (!app) return null;
 
-  return { userId: session.user.id, orgId, role: rows[0].role, applicationId };
+  return {
+    userId: session.user.id,
+    orgId,
+    role: rows[0].role,
+    applicationId,
+  };
 }
 
 /** Open an SSE stream with a subscriber filter, verbose toggle, and ping keep-alive. */

@@ -51,6 +51,7 @@
   "btn.copy": "Copier",
   "btn.copyLink": "Copier le lien",
   "btn.copied": "Copié !",
+  "btn.close": "Fermer",
   "btn.done": "Terminé",
   "btn.install": "Installer",
   "btn.installing": "Installation...",
@@ -97,5 +98,6 @@
   "library.empty": "Aucun package disponible",
   "pagination.previous": "Précédent",
   "pagination.next": "Suivant",
-  "pagination.pageOf": "Page {{page}} sur {{total}}"
+  "pagination.pageOf": "Page {{page}} sur {{total}}",
+  "invalidJson": "JSON invalide"
 }

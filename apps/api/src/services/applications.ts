@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, asc, desc } from "drizzle-orm";
+import { eq, asc, desc } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "../lib/ids.ts";
+import { scopedWhere } from "../lib/db-helpers.ts";
 
 export const appSettingsSchema = z.object({
   allowedRedirectDomains: z.array(z.string()).max(20).optional(),
@@ -43,7 +44,7 @@ export async function createDefaultApplication(orgId: string, createdBy?: string
   const existing = await db
     .select()
     .from(applications)
-    .where(and(eq(applications.orgId, orgId), eq(applications.isDefault, true)))
+    .where(scopedWhere(applications, { orgId, extra: [eq(applications.isDefault, true)] }))
     .limit(1);
 
   if (existing[0]) return existing[0];
@@ -56,7 +57,7 @@ export async function getDefaultApplication(orgId: string) {
   const [app] = await db
     .select()
     .from(applications)
-    .where(and(eq(applications.orgId, orgId), eq(applications.isDefault, true)))
+    .where(scopedWhere(applications, { orgId, extra: [eq(applications.isDefault, true)] }))
     .limit(1);
 
   if (!app) throw notFound("Default application not found");
@@ -77,7 +78,7 @@ export async function getApplication(orgId: string, applicationId: string) {
   const [app] = await db
     .select()
     .from(applications)
-    .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
+    .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }))
     .limit(1);
 
   if (!app) throw notFound("Application not found");
@@ -97,7 +98,7 @@ export async function updateApplication(
       ...(params.settings !== undefined && { settings: params.settings }),
       updatedAt: new Date(),
     })
-    .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
+    .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }))
     .returning();
 
   if (!app) throw notFound("Application not found");
@@ -110,7 +111,7 @@ export async function deleteApplication(orgId: string, applicationId: string) {
   const [app] = await db
     .select({ id: applications.id, isDefault: applications.isDefault })
     .from(applications)
-    .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
+    .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }))
     .limit(1);
 
   if (!app) throw notFound("Application not found");
@@ -118,5 +119,5 @@ export async function deleteApplication(orgId: string, applicationId: string) {
 
   await db
     .delete(applications)
-    .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)));
+    .where(scopedWhere(applications, { orgId, extra: [eq(applications.id, applicationId)] }));
 }

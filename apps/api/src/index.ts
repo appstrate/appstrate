@@ -4,13 +4,9 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
-import { auth } from "@appstrate/db/auth";
 import { logger } from "./lib/logger.ts";
 import { boot } from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
-import { validateApiKey } from "./services/api-keys.ts";
-import { ensureDefaultProfile } from "./services/connection-profiles.ts";
-import { requireOrgContext } from "./middleware/org-context.ts";
 import { requireAppContext } from "./middleware/app-context.ts";
 import { requestId } from "./middleware/request-id.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
@@ -31,7 +27,6 @@ import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
 import { createEndUsersRouter } from "./routes/end-users.ts";
-import { createWebhooksRouter } from "./routes/webhooks.ts";
 import healthRouter from "./routes/health.ts";
 import { createConnectionsRouter } from "./routes/connections.ts";
 import { createLibraryRouter } from "./routes/library.ts";
@@ -40,14 +35,21 @@ import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
 import welcomeRouter from "./routes/welcome.ts";
 import { swaggerUI } from "@hono/swagger-ui";
-import { openApiSpec } from "./openapi/index.ts";
-import { getCloudModule } from "./lib/cloud-loader.ts";
-import { ApiError, unauthorized } from "./lib/errors.ts";
-import { resolvePermissions, resolveApiKeyPermissions } from "./lib/permissions.ts";
-import { isEndUserInApp } from "./services/end-users.ts";
+import { buildOpenApiSpec } from "./openapi/index.ts";
+import {
+  getModulePublicPaths,
+  getModuleAppScopedPaths,
+  getModuleAuthStrategies,
+  getModuleOpenApiPaths,
+  getModuleOpenApiComponentSchemas,
+  getModuleOpenApiTags,
+  registerModuleRoutes,
+} from "./lib/modules/module-loader.ts";
+import { ApiError } from "./lib/errors.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { getOrgSettings } from "./services/organizations.ts";
-import { getAppConfig } from "./lib/app-config.ts";
+import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
+import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
 import type { AppEnv } from "./types/index.ts";
 
 // Fail-fast: validate all env vars at startup
@@ -70,7 +72,18 @@ app.use("*", cors({ origin: trustedOrigins, credentials: true }));
 app.route("/", healthRouter);
 
 // OpenAPI docs — public (before auth middleware)
-app.get("/api/openapi.json", (c) => c.json(openApiSpec));
+// Spec is built lazily on first request (after modules are initialized at boot).
+let _openApiSpec: ReturnType<typeof buildOpenApiSpec> | null = null;
+function getOpenApiSpec() {
+  if (!_openApiSpec)
+    _openApiSpec = buildOpenApiSpec(
+      getModuleOpenApiPaths(),
+      getModuleOpenApiComponentSchemas(),
+      getModuleOpenApiTags(),
+    );
+  return _openApiSpec;
+}
+app.get("/api/openapi.json", (c) => c.json(getOpenApiSpec()));
 app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
 // Shutdown gate — reject new write requests during graceful shutdown
@@ -88,157 +101,26 @@ app.use("*", async (c, next) => {
   return next();
 });
 
-// Mount Better Auth handler — handles signup, signin, session, etc.
-app.on(["POST", "GET"], "/api/auth/*", (c) => {
-  return auth.handler(c.req.raw);
+// Shared auth pipeline — mounts Better Auth handler, installs module
+// auth strategies → Bearer API key → cookie session middleware, org
+// context, and session permission resolution. The test harness
+// (`apps/api/test/helpers/app.ts`) calls the same helper so the two
+// cannot drift. Accessors are lazy: this is wired before `await boot()`
+// finishes loading modules, so snapshotting here would miss module
+// contributions.
+applyAuthPipeline(app, {
+  publicPaths: getModulePublicPaths,
+  authStrategies: getModuleAuthStrategies,
 });
 
-// Paths that skip both auth and org-context middleware (handled by other means or public)
-function skipAuth(path: string): boolean {
-  if (!path.startsWith("/api/")) return true;
-  if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
-  if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
-  if (path === "/api/connections/callback") return true; // OAuth redirect — no session
-  if (path === "/api/docs" || path === "/api/openapi.json") return true;
-  if (getCloudModule()?.publicPaths.includes(path)) return true; // e.g. Stripe webhook
-  return false;
-}
-
-// Paths that need auth but not org-context (user-scoped or self-resolving)
-function skipOrgContext(path: string): boolean {
-  if (path === "/api/orgs" || path === "/api/orgs/") return true; // list/create orgs
-  if (path.startsWith("/api/orgs/")) return true; // /api/orgs/:id/* handle their own auth
-  if (path === "/api/profile" || path === "/api/profile/") return true;
-
-  if (path === "/api/welcome/setup") return true;
-  return false;
-}
-
-// Auth middleware: verify Bearer API key OR Better Auth session (cookie-based)
-app.use("*", async (c, next) => {
-  if (skipAuth(c.req.path)) return next();
-
-  // Try Bearer API key first
-  const authHeader = c.req.header("Authorization");
-  if (authHeader?.startsWith("Bearer ask_")) {
-    const rawKey = authHeader.slice(7); // "Bearer ".length
-    const keyInfo = await validateApiKey(rawKey);
-    if (!keyInfo) {
-      throw unauthorized("Invalid or expired API key");
-    }
-    c.set("user", { id: keyInfo.userId, email: keyInfo.email, name: keyInfo.name });
-    c.set("orgId", keyInfo.orgId);
-    c.set("orgSlug", keyInfo.orgSlug);
-    c.set("orgRole", keyInfo.creatorRole);
-    c.set("permissions", resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole));
-    c.set("authMethod", "api_key");
-    c.set("apiKeyId", keyInfo.keyId);
-    c.set("applicationId", keyInfo.applicationId);
-
-    // Appstrate-User header: resolve end-user context (API key only)
-    const targetEndUserId = c.req.header("Appstrate-User");
-    if (targetEndUserId) {
-      if (!targetEndUserId.startsWith("eu_")) {
-        throw new ApiError({
-          status: 400,
-          code: "invalid_end_user_id",
-          title: "Invalid End-User ID",
-          detail: `Appstrate-User header must be an end-user ID with 'eu_' prefix, got '${targetEndUserId}'`,
-          param: "Appstrate-User",
-        });
-      }
-      const endUser = await isEndUserInApp(keyInfo.applicationId, targetEndUserId);
-      if (!endUser) {
-        throw new ApiError({
-          status: 403,
-          code: "invalid_end_user",
-          title: "Invalid End-User",
-          detail: `End-user '${targetEndUserId}' does not exist or does not belong to this application`,
-          param: "Appstrate-User",
-        });
-      }
-      logger.info("Appstrate-User end-user context", {
-        requestId: c.get("requestId"),
-        apiKeyId: keyInfo.keyId,
-        authenticatedMember: keyInfo.userId,
-        endUserId: endUser.id,
-        applicationId: endUser.applicationId,
-        method: c.req.method,
-        path: c.req.path,
-        ip:
-          c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
-          c.req.header("x-real-ip") ||
-          "unknown",
-        userAgent: c.req.header("user-agent") || "unknown",
-      });
-      c.set("endUser", endUser);
-    }
-
-    return next();
-  }
-
-  // Fallback: cookie session
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session?.user) {
-    throw unauthorized("Invalid or missing session");
-  }
-
-  // Appstrate-User header is NOT allowed with cookie auth
-  if (c.req.header("Appstrate-User")) {
-    throw new ApiError({
-      status: 400,
-      code: "header_not_allowed",
-      title: "Header Not Allowed",
-      detail: "Appstrate-User header is not allowed with cookie authentication",
-      param: "Appstrate-User",
-    });
-  }
-
-  c.set("user", {
-    id: session.user.id,
-    email: session.user.email ?? "",
-    name: session.user.name ?? "",
-  });
-  c.set("authMethod", "session");
-
-  // Ensure the user has a default connection profile
-  ensureDefaultProfile({ type: "member", id: session.user.id }).catch((err) => {
-    logger.warn("Failed to ensure default profile", {
-      userId: session.user.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  });
-
-  return next();
-});
-
-// Org context middleware: require X-Org-Id for org-scoped /api/* routes
-app.use("*", async (c, next) => {
-  const path = c.req.path;
-  if (skipAuth(path)) return next(); // public paths also skip org context
-  if (!c.get("user")) return next(); // no auth resolved — nothing to do
-  if (c.get("authMethod") === "api_key") return next(); // API key already resolved orgId + permissions
-  if (skipOrgContext(path)) return next();
-
-  return requireOrgContext()(c, next);
-});
-
-// Permission resolution for session auth (after org context sets orgRole)
-app.use("*", async (c, next) => {
-  if (c.get("authMethod") === "api_key") return next(); // already resolved
-  const orgRole = c.get("orgRole");
-  if (orgRole) {
-    c.set("permissions", resolvePermissions(orgRole));
-  }
-  return next();
-});
-
-// App context middleware: resolve X-App-Id for app-scoped routes
-const APP_SCOPED_PREFIXES = [
+// App context middleware: resolve X-App-Id for app-scoped routes.
+// Core prefixes listed statically; module-owned prefixes (e.g. webhooks)
+// are contributed by modules via `appScopedPaths` and merged lazily after
+// boot (modules are not yet loaded at top-level eval time).
+const CORE_APP_SCOPED_PREFIXES = [
   "/api/agents",
   "/api/runs",
   "/api/schedules",
-  "/api/webhooks",
   "/api/end-users",
   "/api/api-keys",
   "/api/notifications",
@@ -247,12 +129,19 @@ const APP_SCOPED_PREFIXES = [
   "/api/connections",
   "/api/app-profiles",
 ];
+let _appScopedPrefixes: string[] | null = null;
+function getAppScopedPrefixes(): string[] {
+  if (_appScopedPrefixes === null) {
+    _appScopedPrefixes = [...CORE_APP_SCOPED_PREFIXES, ...getModuleAppScopedPaths()];
+  }
+  return _appScopedPrefixes;
+}
 
 const appContextMiddleware = requireAppContext();
 app.use("*", async (c, next) => {
-  if (skipAuth(c.req.path)) return next();
+  if (skipAuth(c.req.path, getModulePublicPaths())) return next();
   if (!c.get("user")) return next();
-  if (!APP_SCOPED_PREFIXES.some((p) => c.req.path.startsWith(p))) return next();
+  if (!getAppScopedPrefixes().some((p) => c.req.path.startsWith(p))) return next();
   return appContextMiddleware(c, next);
 });
 
@@ -262,13 +151,16 @@ const apiVersionMiddleware = apiVersion(async (orgId) => {
   return settings.apiVersion ?? null;
 });
 app.use("*", async (c, next) => {
-  if (skipAuth(c.req.path)) return next();
+  if (skipAuth(c.req.path, getModulePublicPaths())) return next();
   if (!c.get("user")) return next();
   return apiVersionMiddleware(c, next);
 });
 
 // Boot: load system resources, init services, clean up orphans
 await boot();
+
+// Initialize app config (async — modules may contribute structured data like OIDC client ID)
+await initAppConfig();
 
 // Pre-compute config script (config is static after boot — cloud module is loaded or not)
 const appConfigScript = `<script>window.__APP_CONFIG__=${JSON.stringify(getAppConfig())};</script>`;
@@ -296,7 +188,6 @@ app.route("/api", runsRouter);
 app.route("/api", schedulesRouter);
 app.route("/api/packages", createPackagesRouter());
 app.route("/api/end-users", createEndUsersRouter());
-app.route("/api/webhooks", createWebhooksRouter());
 app.route("/api/providers", createProvidersRouter());
 app.route("/api/api-keys", createApiKeysRouter());
 app.route("/api/proxies", createProxiesRouter());
@@ -320,11 +211,12 @@ app.route("/api", welcomeRouter);
 const internalRouter = createInternalRouter();
 app.route("/internal", internalRouter);
 
-// Cloud routes (billing, webhooks — no-op in OSS)
-const cloud = getCloudModule();
-if (cloud) {
-  cloud.registerCloudRoutes(app);
-}
+// Module routes — mounted at root. Modules declare full paths (typically
+// `/api/<name>/*` for business endpoints, plus `/.well-known/*` for any
+// RFC-specified well-known URI). MUST be mounted BEFORE the SPA `/*`
+// catch-all below, otherwise the static fallback shadows module paths.
+// No-op when no module exposes `createRouter()`.
+registerModuleRoutes(app);
 
 // Static files for UI (JS, CSS, images, fonts — skip index.html, served with config below)
 app.use(

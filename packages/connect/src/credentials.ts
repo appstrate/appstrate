@@ -10,8 +10,12 @@ import type { Db } from "@appstrate/db/client";
 import type { ConnectionRecord, DecryptedCredentials } from "./types.ts";
 import { encryptCredentials, decryptCredentials } from "./encryption.ts";
 import { forceRefresh, type RefreshContext } from "./token-refresh.ts";
-import type { OAuthTokenAuthMethod, OAuthTokenContentType } from "./token-utils.ts";
-import type { CredentialEncoding } from "@appstrate/core/validation";
+import type {
+  AuthMode,
+  CredentialTransform,
+  OAuthTokenAuthMethod,
+  OAuthTokenContentType,
+} from "@appstrate/core/validation";
 
 /**
  * Get a connection by profile + provider + org + provider credential.
@@ -132,7 +136,7 @@ export async function resolveCredentialsForProxy(
   if (!result) return null;
 
   const def = result.definition;
-  const authMode = def.authMode as string | undefined;
+  const authMode = def.authMode as AuthMode | undefined;
 
   return {
     credentials: buildSidecarCredentials(result.credentials, def, authMode),
@@ -160,7 +164,7 @@ export async function forceRefreshCredentials(
   if (!connection) return null;
 
   const def = await getProviderDefinition(db, providerId);
-  const authMode = def.authMode as string | undefined;
+  const authMode = def.authMode as AuthMode | undefined;
 
   let decrypted: DecryptedCredentials;
 
@@ -366,37 +370,67 @@ async function buildRefreshContext(
   };
 }
 
+/** Render `{{var}}` placeholders using the given credential fields. Unknown refs become empty. */
+function substituteTemplate(template: string, credentials: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_match, key) => credentials[key] ?? "");
+}
+
+/** Apply a whitelisted post-substitution transform. Throws on unknown encodings. */
+function applyTransformEncoding(value: string, encoding: CredentialTransform["encoding"]): string {
+  if (encoding === "base64") return Buffer.from(value, "utf8").toString("base64");
+  // Exhaustiveness guard — new AFPS encodings must be wired here explicitly.
+  throw new Error(`Unsupported credentialTransform encoding: ${encoding as string}`);
+}
+
+/**
+ * Evaluate {@link CredentialTransform} against a credential set. Returns the
+ * transformed value, or `null` if the template references a missing field (in
+ * which case the caller should fall through to the standard `fieldName` mapping).
+ */
+function evaluateCredentialTransform(
+  transform: CredentialTransform,
+  credentials: Record<string, string>,
+): string | null {
+  const refs = [...transform.template.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]!);
+  for (const ref of refs) {
+    if (!credentials[ref]) return null;
+  }
+  return applyTransformEncoding(
+    substituteTemplate(transform.template, credentials),
+    transform.encoding,
+  );
+}
+
 /**
  * Map decrypted credentials to the sidecar format.
- * For oauth2/api_key with a named field, maps to a single credential variable.
- * For api_key providers with credentialEncoding, pre-encodes the credential.
  *
- * Supported credentialEncoding values:
- * - "basic_api_key_x": base64(api_key:X) — Freshdesk/Teamwork pattern
- * - "basic_email_token": base64(email/token:api_key) — Zendesk API token pattern
+ * For `api_key` providers with a `credentialTransform`, the transform's template
+ * is rendered with `{{var}}` substitution and the result passed through the
+ * declared encoding. The transformed value replaces `credentials.fieldName`;
+ * other credential fields (subdomain, email, …) are preserved so they stay
+ * available for URL and header substitution downstream in the sidecar.
+ *
+ * For OAuth2 / api_key without a transform, the value is mapped to a single
+ * `{ [fieldName]: value }` variable.
+ *
+ * @internal Exported for direct unit testing — not part of the public API.
  */
-/** @internal Exported for testing only. */
 export function buildSidecarCredentials(
   credentials: Record<string, string>,
   def: Record<string, unknown>,
-  authMode: string | undefined,
+  authMode: AuthMode | undefined,
 ): Record<string, string> {
-  const credentialEncoding = def.credentialEncoding as CredentialEncoding | undefined;
-
-  // Apply credential encoding transformations for api_key providers.
-  // Returns ALL credential fields (not just the mapped fieldName) because
-  // extra fields like subdomain/email are needed for URL substitution via {{variable}}.
-  if (authMode === "api_key" && credentialEncoding) {
-    const apiKey = credentials.api_key;
-    if (credentialEncoding === "basic_api_key_x" && apiKey) {
-      // Freshdesk/Teamwork: Basic auth with api_key as username, "X" as password
-      const encoded = Buffer.from(`${apiKey}:X`).toString("base64");
-      return { ...credentials, api_key: encoded };
-    }
-    if (credentialEncoding === "basic_email_token" && apiKey && credentials.email) {
-      // Zendesk: Basic auth with email/token as username, api_token as password
-      const encoded = Buffer.from(`${credentials.email}/token:${apiKey}`).toString("base64");
-      return { ...credentials, api_key: encoded };
+  if (authMode === "api_key") {
+    const transform = def.credentialTransform as CredentialTransform | undefined;
+    if (transform) {
+      const encoded = evaluateCredentialTransform(transform, credentials);
+      if (encoded !== null) {
+        const fieldName =
+          ((def.credentials as Record<string, unknown>)?.fieldName as string | undefined) ??
+          "api_key";
+        return { ...credentials, [fieldName]: encoded };
+      }
+      // Fall through: template referenced a missing field (e.g. Zendesk without email).
     }
   }
 

@@ -5,17 +5,14 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage, seedConnectionProfile } from "../../helpers/seed.ts";
 import { createMockOAuthServer, type MockOAuthServer } from "../../helpers/oauth-server.ts";
-import {
-  oauthStates,
-  applicationProviderCredentials,
-  userProviderConnections,
-} from "@appstrate/db/schema";
+import { applicationProviderCredentials, userProviderConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
 import {
   initiateConnection,
   handleCallback,
 } from "../../../src/services/connection-manager/oauth.ts";
+import { oauthStateStore } from "../../../src/services/connection-manager/oauth-state-store.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 
 // ─── Mock OAuth Server ───────────────────────────────────────
@@ -173,21 +170,19 @@ describe("OAuth2 flows", () => {
       expect(scope).toContain("admin");
     });
 
-    it("stores state in the oauth_states table", async () => {
+    it("stores state in the oauth state store", async () => {
       const result = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
 
-      const rows = await db.select().from(oauthStates).where(eq(oauthStates.state, result.state));
-
-      expect(rows).toHaveLength(1);
-      const row = rows[0]!;
-      expect(row.orgId).toBe(orgId);
-      expect(row.userId).toBe(userId);
-      expect(row.profileId).toBe(profileId);
-      expect(row.providerId).toBe(PROVIDER_ID);
-      expect(row.codeVerifier).toBeString();
-      expect(row.codeVerifier.length).toBeGreaterThan(10);
-      expect(row.redirectUri).toBeString();
-      expect(row.expiresAt.getTime()).toBeGreaterThan(Date.now());
+      const row = await oauthStateStore.get(result.state);
+      expect(row).not.toBeNull();
+      expect(row!.orgId).toBe(orgId);
+      expect(row!.userId).toBe(userId);
+      expect(row!.profileId).toBe(profileId);
+      expect(row!.providerId).toBe(PROVIDER_ID);
+      expect(row!.codeVerifier).toBeString();
+      expect(row!.codeVerifier.length).toBeGreaterThan(10);
+      expect(row!.redirectUri).toBeString();
+      expect(new Date(row!.expiresAt).getTime()).toBeGreaterThan(Date.now());
     });
 
     it("stores a unique state per invocation", async () => {
@@ -276,13 +271,12 @@ describe("OAuth2 flows", () => {
       expect(decrypted.refresh_token).toBe("mock_refresh_token_xyz789");
     });
 
-    it("cleans up oauth_states after successful callback", async () => {
+    it("cleans up oauth state after successful callback", async () => {
       const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
       await handleCallback("mock-code", state);
 
-      const rows = await db.select().from(oauthStates).where(eq(oauthStates.state, state));
-
-      expect(rows).toHaveLength(0);
+      const row = await oauthStateStore.get(state);
+      expect(row).toBeNull();
     });
 
     it("throws on invalid state", async () => {
@@ -294,11 +288,8 @@ describe("OAuth2 flows", () => {
     it("throws on expired state", async () => {
       const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
 
-      // Manually expire the state row
-      await db
-        .update(oauthStates)
-        .set({ expiresAt: new Date(Date.now() - 60_000) })
-        .where(eq(oauthStates.state, state));
+      // Evict from the store to simulate TTL expiry
+      await oauthStateStore.delete(state);
 
       await expect(handleCallback("mock-code", state)).rejects.toThrow(/[Ii]nvalid|[Ee]xpired/);
     });
@@ -357,8 +348,7 @@ describe("OAuth2 flows", () => {
     it("sends the stored code_verifier in the token exchange", async () => {
       const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
 
-      // Read the code_verifier stored in DB
-      const [stateRow] = await db.select().from(oauthStates).where(eq(oauthStates.state, state));
+      const stateRow = await oauthStateStore.get(state);
       const storedVerifier = stateRow!.codeVerifier;
 
       mockServer.clearRequests();

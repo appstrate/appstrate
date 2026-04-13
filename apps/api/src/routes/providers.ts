@@ -51,6 +51,7 @@ function buildProviderDefinition(data: {
   scopeSeparator?: string;
   pkceEnabled?: boolean;
   tokenAuthMethod?: string;
+  tokenContentType?: string;
   authorizationParams?: Record<string, string>;
   tokenParams?: Record<string, string>;
   requestTokenUrl?: string;
@@ -59,6 +60,7 @@ function buildProviderDefinition(data: {
   credentialFieldName?: string;
   credentialHeaderName?: string;
   credentialHeaderPrefix?: string;
+  credentialTransform?: { template: string; encoding: "base64" };
 }): Record<string, unknown> {
   const definition: Record<string, unknown> = {
     authMode: data.authMode,
@@ -76,6 +78,7 @@ function buildProviderDefinition(data: {
       scopeSeparator: data.scopeSeparator ?? " ",
       pkceEnabled: data.pkceEnabled ?? true,
       tokenAuthMethod: data.tokenAuthMethod,
+      tokenContentType: data.tokenContentType,
       authorizationParams: data.authorizationParams ?? {},
       tokenParams: data.tokenParams ?? {},
     };
@@ -101,6 +104,9 @@ function buildProviderDefinition(data: {
   if (data.credentialHeaderPrefix !== undefined) {
     definition.credentialHeaderPrefix = data.credentialHeaderPrefix;
   }
+  if (data.credentialTransform !== undefined) {
+    definition.credentialTransform = data.credentialTransform;
+  }
 
   return definition;
 }
@@ -123,12 +129,19 @@ export const createProviderSchema = z.object({
   scopeSeparator: z.string().optional(),
   pkceEnabled: z.boolean().optional(),
   tokenAuthMethod: z.enum(["client_secret_post", "client_secret_basic"]).optional(),
+  tokenContentType: z.enum(["application/x-www-form-urlencoded", "application/json"]).optional(),
   authorizationParams: z.record(z.string(), z.string()).optional(),
   tokenParams: z.record(z.string(), z.string()).optional(),
   credentialSchema: z.record(z.string(), z.unknown()).optional(),
   credentialFieldName: z.string().optional(),
   credentialHeaderName: z.string().optional(),
   credentialHeaderPrefix: z.string().optional(),
+  credentialTransform: z
+    .object({
+      template: z.string().min(1),
+      encoding: z.enum(["base64"]),
+    })
+    .optional(),
   iconUrl: z.string().optional(),
   categories: z.array(z.string()).optional(),
   docsUrl: z.string().optional(),

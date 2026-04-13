@@ -14,13 +14,16 @@ export { db };
 export type { Db };
 
 /**
- * All table names in dependency-safe order (children first, parents last).
+ * Core table names in dependency-safe order (children first, parents last).
  * Uses DELETE (not TRUNCATE) to avoid AccessExclusiveLock deadlocks with
  * fire-and-forget queries from middleware (e.g., ensureDefaultProfile).
+ *
+ * Module-owned tables are NOT listed here — each module extends the truncation
+ * list via registerTruncationTables() from its own test preload, so core tests
+ * running alone touch only core tables.
  */
-const ALL_TABLES = [
+const CORE_TABLES = [
   // Leaf tables (no dependents)
-  "webhook_deliveries",
   "run_logs",
   "package_memories",
   "package_version_dependencies",
@@ -29,15 +32,13 @@ const ALL_TABLES = [
   "user_agent_provider_profiles",
   "app_profile_provider_bindings",
   "user_provider_connections",
-  "oauth_states",
   "application_provider_credentials",
   "package_schedules",
   "org_models",
-  "org_provider_keys",
+  "org_system_provider_keys",
   "org_proxies",
   "org_invitations",
   // Mid-level tables
-  "webhooks",
   "runs",
   "package_versions",
   "api_keys",
@@ -55,13 +56,28 @@ const ALL_TABLES = [
   '"user"', // quoted — PostgreSQL reserved word
 ] as const;
 
+const extraTables: string[] = [];
+
+/**
+ * Register additional (module-owned) tables to include in truncateAll().
+ * Module test preloads call this with their tables ordered children-first.
+ * Called at preload time before any test runs.
+ */
+export function registerTruncationTables(tables: readonly string[]): void {
+  extraTables.push(...tables);
+}
+
 /**
  * Delete all rows from all tables in the test database.
  * Uses DELETE FROM in FK-safe order (children → parents) to avoid deadlocks.
+ * Module-registered tables are truncated first (they reference core tables).
  * Call this in beforeEach() for full test isolation.
  */
 export async function truncateAll(): Promise<void> {
-  for (const table of ALL_TABLES) {
+  for (const table of extraTables) {
+    await db.execute(sql.raw(`DELETE FROM ${table}`));
+  }
+  for (const table of CORE_TABLES) {
     await db.execute(sql.raw(`DELETE FROM ${table}`));
   }
 }

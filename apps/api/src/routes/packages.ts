@@ -1160,6 +1160,18 @@ export function createPackagesRouter() {
       }
     }
 
+    // Auto-install the forked package in the current application (non-fatal)
+    const applicationId = c.get("applicationId");
+    if (applicationId) {
+      await installPackage(applicationId, orgId, result.packageId).catch((e: unknown) =>
+        logger.debug("auto-install skipped", {
+          packageId: result.packageId,
+          applicationId,
+          err: String(e),
+        }),
+      );
+    }
+
     return c.json(result, 201);
   });
 

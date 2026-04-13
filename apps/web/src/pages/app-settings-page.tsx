@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
@@ -23,20 +23,31 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { Spinner } from "../components/spinner";
 import { AppProfilesTab } from "../components/app-profiles-tab";
+import { useAppConfig } from "../hooks/use-app-config";
+const OAuthClientsTab = lazy(() =>
+  import("../modules/oidc/components/oauth-clients-tab").then((m) => ({
+    default: m.OAuthClientsTab,
+  })),
+);
 
 interface SettingsFormData {
   name: string;
 }
 
-const TABS = ["general", "profiles"] as const;
-type Tab = (typeof TABS)[number];
+const BASE_TABS = ["general", "profiles"] as const;
+type Tab = "general" | "profiles" | "oauth";
 
 export function AppSettingsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
   const appId = useCurrentApplicationId();
   const { data: application, isLoading, error } = useApplication(appId ?? "");
-  const [tab, setTab] = useTabWithHash<Tab>(TABS, "general");
+  const { features } = useAppConfig();
+  const oidcEnabled = features.oidc === true;
+  const tabs: readonly Tab[] = oidcEnabled
+    ? [...BASE_TABS, "oauth"]
+    : (BASE_TABS as readonly Tab[]);
+  const [tab, setTab] = useTabWithHash<Tab>(tabs, "general");
 
   if (!isAdmin) return null;
   if (!appId) return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
@@ -64,12 +75,18 @@ export function AppSettingsPage() {
           <TabsList>
             <TabsTrigger value="general">{t("appSettings.tabGeneral")}</TabsTrigger>
             <TabsTrigger value="profiles">{t("appSettings.tabProfiles")}</TabsTrigger>
+            {oidcEnabled && <TabsTrigger value="oauth">{t("appSettings.tabOauth")}</TabsTrigger>}
           </TabsList>
         </Tabs>
       </PageHeader>
 
       {tab === "general" && <GeneralTab appId={appId} application={application} />}
       {tab === "profiles" && <AppProfilesTab />}
+      {tab === "oauth" && oidcEnabled && (
+        <Suspense fallback={<LoadingState />}>
+          <OAuthClientsTab level="application" />
+        </Suspense>
+      )}
     </>
   );
 }

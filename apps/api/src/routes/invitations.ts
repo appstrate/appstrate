@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { db } from "@appstrate/db/client";
 import { user } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { auth } from "@appstrate/db/auth";
+import { getAuth } from "@appstrate/db/auth";
 import { logger } from "../lib/logger.ts";
 import { ApiError, invalidRequest, internalError, gone } from "../lib/errors.ts";
 import {
@@ -12,6 +12,7 @@ import {
   markInvitationAccepted,
   getInviterName,
   getOrgName,
+  type AssignableRole,
 } from "../services/invitations.ts";
 import { addMember } from "../services/organizations.ts";
 
@@ -91,7 +92,7 @@ router.post("/:token/accept", async (c) => {
 
     try {
       // Sign up — creates user + account + profile (via databaseHook)
-      const signupRes = await auth.api.signUpEmail({
+      const signupRes = await getAuth().api.signUpEmail({
         body: {
           email: invitation.email,
           password: body.password,
@@ -109,13 +110,13 @@ router.post("/:token/accept", async (c) => {
       const newUserId = signupRes.user.id;
 
       // Sign in to get session cookie
-      const signinRes = await auth.api.signInEmail({
+      const signinRes = await getAuth().api.signInEmail({
         body: { email: invitation.email, password: body.password },
         asResponse: true,
       });
 
       // Add member to org
-      await addMember(invitation.orgId, newUserId, invitation.role as "member" | "admin");
+      await addMember(invitation.orgId, newUserId, invitation.role as AssignableRole);
 
       await markInvitationAccepted(invitation.id, newUserId);
 
@@ -145,7 +146,9 @@ router.post("/:token/accept", async (c) => {
     }
   } else {
     // --- EXISTING USER ---
-    const session = await auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null);
+    const session = await getAuth()
+      .api.getSession({ headers: c.req.raw.headers })
+      .catch(() => null);
 
     // Prevent a logged-in user from accepting an invitation meant for a different email
     if (session?.user && session.user.email.toLowerCase() !== invitation.email.toLowerCase()) {
@@ -157,7 +160,7 @@ router.post("/:token/accept", async (c) => {
       });
     }
 
-    await addMember(invitation.orgId, existingUser.id, invitation.role as "member" | "admin");
+    await addMember(invitation.orgId, existingUser.id, invitation.role as AssignableRole);
 
     await markInvitationAccepted(invitation.id, existingUser.id);
 

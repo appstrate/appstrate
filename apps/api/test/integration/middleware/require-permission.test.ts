@@ -20,14 +20,12 @@ import {
 } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
+import type { AssignableRole } from "../../../src/services/invitations.ts";
 
 const app = getTestApp();
 
 /** Build a context for a user with a specific role in the owner's org. */
-async function contextForRole(
-  ownerCtx: TestContext,
-  role: "admin" | "member" | "viewer",
-): Promise<TestContext> {
+async function contextForRole(ownerCtx: TestContext, role: AssignableRole): Promise<TestContext> {
   const user = await createTestUser();
   await addOrgMember(ownerCtx.orgId, user.id, role);
   return { ...ownerCtx, user, cookie: user.cookie };
@@ -132,24 +130,6 @@ describe("RBAC — Permission enforcement", () => {
     it("viewer gets 403 on list api keys", async () => {
       const res = await app.request("/api/api-keys", {
         headers: authHeaders(viewer),
-      });
-      expect(res.status).toBe(403);
-    });
-  });
-
-  // ─── Webhooks (admin-only) ─────────────────────────────────
-
-  describe("webhooks:read (admin-only)", () => {
-    it("admin can list webhooks", async () => {
-      const res = await app.request("/api/webhooks", {
-        headers: authHeaders(admin),
-      });
-      expect(res.status).toBe(200);
-    });
-
-    it("member gets 403 on list webhooks", async () => {
-      const res = await app.request("/api/webhooks", {
-        headers: authHeaders(member),
       });
       expect(res.status).toBe(403);
     });

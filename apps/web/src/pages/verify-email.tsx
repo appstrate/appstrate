@@ -13,8 +13,11 @@ export function VerifyEmailPage() {
   const { user, resendVerificationEmail, logout } = useAuth();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  // Prefer user email from store (authenticated but unverified), fallback to location state (post-signup redirect)
-  const email = user?.email ?? (location.state as { email?: string })?.email ?? "";
+  // Prefer user email from store (authenticated but unverified), fallback to
+  // location state (post-signup redirect from SPA flow) or the `?email=`
+  // query param (server-rendered OIDC register flow in SMTP mode).
+  const email =
+    user?.email ?? (location.state as { email?: string })?.email ?? searchParams.get("email") ?? "";
   const error = searchParams.get("error");
   const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
 

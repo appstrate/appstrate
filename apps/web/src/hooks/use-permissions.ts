@@ -12,8 +12,8 @@ const ROLE_I18N_KEY: Record<OrgRole, string> = {
 };
 
 /** Get the i18n key for a role label. */
-export function roleI18nKey(role: string): string {
-  return ROLE_I18N_KEY[role as OrgRole] ?? role;
+export function roleI18nKey(role: OrgRole): string {
+  return ROLE_I18N_KEY[role];
 }
 
 /** Assignable roles for invitations (excludes owner). */

@@ -1,38 +1,48 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getEnv } from "@appstrate/env";
-import { getCloudModule } from "./cloud-loader.ts";
+import { applyModuleFeatures } from "./modules/module-loader.ts";
 import type { AppConfig } from "@appstrate/shared-types";
 
 const env = getEnv();
 
 // Platform config — computed once at boot, injected into SPA HTML.
-// In OSS (no cloud module): models & provider keys visible, billing hidden.
-// In Cloud (@appstrate/cloud loaded): models & provider keys hidden (platform-managed), billing visible.
+// Base config uses OSS defaults. Modules contribute feature flags at boot.
 export function buildAppConfig(): AppConfig {
-  const cloud = getCloudModule();
-  const isCloud = cloud !== null;
+  const legalTerms = env.LEGAL_TERMS_URL;
+  const legalPrivacy = env.LEGAL_PRIVACY_URL;
   return {
-    platform: isCloud ? "cloud" : "oss",
     features: {
-      billing: isCloud,
-      models: true,
-      providerKeys: true,
+      // Core platform flags only — derived from env vars owned by core.
+      // Module-owned flags (billing from @appstrate/cloud, webhooks, future
+      // oidc, …) are merged in by `applyModuleFeatures()` after load.
       googleAuth: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
       githubAuth: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
       smtp: !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM),
     },
-    legalUrls: cloud?.legalUrls,
+    ...(legalTerms && legalPrivacy
+      ? {
+          legalUrls: {
+            terms: legalTerms,
+            privacy: legalPrivacy,
+          },
+        }
+      : {}),
     trustedOrigins: env.TRUSTED_ORIGINS,
   };
 }
 
 let _appConfig: AppConfig | null = null;
 
-/** Returns the app config. Must be called after boot (cloud module loaded). */
+/** Initialize the app config. Must be called once during boot (after modules loaded). */
+export async function initAppConfig(): Promise<void> {
+  _appConfig = await applyModuleFeatures(buildAppConfig());
+}
+
+/** Returns the app config. Must be called after `initAppConfig()`. */
 export function getAppConfig(): AppConfig {
   if (!_appConfig) {
-    _appConfig = buildAppConfig();
+    throw new Error("getAppConfig() called before initAppConfig() — check boot order");
   }
   return _appConfig;
 }

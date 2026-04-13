@@ -68,8 +68,6 @@ describe("getActor", () => {
       c.set("endUser", {
         id: "eu_xyz",
         applicationId: "app_1",
-        name: null,
-        email: null,
       });
       const actor = getActor(c);
       actorType = actor.type;

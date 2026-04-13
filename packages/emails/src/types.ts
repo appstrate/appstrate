@@ -2,6 +2,12 @@
 
 export type SupportedLocale = "fr" | "en";
 
+/**
+ * Organization role. Mirrors the `org_role` enum in @appstrate/db —
+ * kept local so this package stays dependency-free.
+ */
+export type OrgRole = "owner" | "admin" | "member" | "viewer";
+
 export type EmailType = "verification" | "invitation" | "magic-link" | "reset-password";
 
 export interface EmailPropsMap {
@@ -15,7 +21,7 @@ export interface EmailPropsMap {
     inviteUrl: string;
     orgName: string;
     inviterName: string;
-    role: string;
+    role: OrgRole;
     locale: SupportedLocale;
   };
   "magic-link": {

@@ -96,9 +96,9 @@ describe("schemaToFields", () => {
     expect(fields[0]!.type).toBe("number");
   });
 
-  test("integer treated as number", () => {
+  test("integer field type", () => {
     const fields = schemaToFields(wrap(obj({ count: { type: "integer" } })));
-    expect(fields[0]!.type).toBe("number");
+    expect(fields[0]!.type).toBe("integer");
   });
 
   test("boolean field", () => {
@@ -406,9 +406,9 @@ describe("buildPayload", () => {
     expect("doc" in result).toBe(false);
   });
 
-  test("invalid number string → NaN", () => {
+  test("invalid number string → null", () => {
     const result = buildPayload(obj({ n: { type: "number" } }), { n: "abc" });
-    expect(result.n).toBeNaN();
+    expect(result.n).toBeNull();
   });
 
   test("number value passthrough (no double coercion)", () => {
@@ -788,7 +788,7 @@ describe("complex schemas", () => {
     const types = fields.map((f) => f.type);
     expect(types).toEqual([
       "text",
-      "number",
+      "integer",
       "boolean",
       "enum",
       "textarea",

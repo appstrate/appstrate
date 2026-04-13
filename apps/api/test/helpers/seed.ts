@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Entity factories for seeding test data.
+ * Core entity factories for seeding test data.
  *
  * All factories insert real records into the test database.
  * They return the created record for assertions.
+ *
+ * Module-owned entities have their own seed helpers next to each module
+ * (e.g. apps/api/src/modules/webhooks/test/helpers/seed.ts) so core tests
+ * running alone have zero dependency on module schemas.
  */
 import { db } from "./db.ts";
 import {
@@ -13,11 +17,10 @@ import {
   runLogs,
   applications,
   endUsers,
-  webhooks,
-  packageSchedules,
+  schedules,
   apiKeys,
   orgProxies,
-  orgProviderKeys,
+  orgSystemProviderKeys,
   orgModels,
   connectionProfiles,
   userProviderConnections,
@@ -166,32 +169,9 @@ export async function seedEndUser(
   return eu!;
 }
 
-// ─── Webhooks ─────────────────────────────────────────────
-
-type WebhookInsert = Partial<InferInsertModel<typeof webhooks>> & {
-  orgId: string;
-  applicationId: string;
-};
-
-export async function seedWebhook(
-  overrides: WebhookInsert,
-): Promise<InferSelectModel<typeof webhooks>> {
-  const [wh] = await db
-    .insert(webhooks)
-    .values({
-      id: `wh_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
-      url: "https://example.com/webhook",
-      events: ["run.completed"],
-      secret: crypto.randomUUID(),
-      ...overrides,
-    } as InferInsertModel<typeof webhooks>)
-    .returning();
-  return wh!;
-}
-
 // ─── Schedules ────────────────────────────────────────────
 
-type ScheduleInsert = Partial<InferInsertModel<typeof packageSchedules>> & {
+type ScheduleInsert = Partial<InferInsertModel<typeof schedules>> & {
   packageId: string;
   connectionProfileId: string;
   orgId: string;
@@ -200,9 +180,9 @@ type ScheduleInsert = Partial<InferInsertModel<typeof packageSchedules>> & {
 
 export async function seedSchedule(
   overrides: ScheduleInsert,
-): Promise<InferSelectModel<typeof packageSchedules>> {
+): Promise<InferSelectModel<typeof schedules>> {
   const [schedule] = await db
-    .insert(packageSchedules)
+    .insert(schedules)
     .values({
       id: `sched_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
       cronExpression: "0 * * * *",
@@ -259,15 +239,15 @@ export async function seedOrgProxy(
 
 // ─── Org Provider Keys ───────────────────────────────────
 
-type OrgProviderKeyInsert = Partial<InferInsertModel<typeof orgProviderKeys>> & {
+type OrgProviderKeyInsert = Partial<InferInsertModel<typeof orgSystemProviderKeys>> & {
   orgId: string;
 };
 
 export async function seedOrgProviderKey(
   overrides: OrgProviderKeyInsert,
-): Promise<InferSelectModel<typeof orgProviderKeys>> {
+): Promise<InferSelectModel<typeof orgSystemProviderKeys>> {
   const [key] = await db
-    .insert(orgProviderKeys)
+    .insert(orgSystemProviderKeys)
     .values({
       label: "Test Provider Key",
       api: "anthropic",

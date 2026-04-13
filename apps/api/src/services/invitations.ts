@@ -1,17 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { db } from "@appstrate/db/client";
-import { orgInvitations, organizations, user, profiles } from "@appstrate/db/schema";
+import { orgInvitations, organizations, user, profiles, orgRoleEnum } from "@appstrate/db/schema";
 import { eq, and, lt, desc } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { getAppConfig } from "../lib/app-config.ts";
 import { sendEmail } from "./email.ts";
-import { auth } from "@appstrate/db/auth";
+import { getAuth } from "@appstrate/db/auth";
 import { logger } from "../lib/logger.ts";
+import { scopedWhere } from "../lib/db-helpers.ts";
 
 /** Roles assignable via invitation (excludes owner — transferred, not invited). */
 export const ASSIGNABLE_ROLES = ["viewer", "member", "admin"] as const;
 export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
+
+// Compile-time exhaustiveness check: if `orgRoleEnum` gains a new value, this
+// line fails to type-check until it is added to `ASSIGNABLE_ROLES` above (or
+// explicitly excluded like `owner`).
+type _MissingAssignableRoles = Exclude<
+  Exclude<(typeof orgRoleEnum.enumValues)[number], "owner">,
+  AssignableRole
+>;
+const _assertAssignableRolesExhaustive: _MissingAssignableRoles extends never ? true : never = true;
+void _assertAssignableRolesExhaustive;
 
 function generateToken(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
@@ -37,11 +48,10 @@ export async function createInvitation({
     .update(orgInvitations)
     .set({ status: "cancelled" })
     .where(
-      and(
-        eq(orgInvitations.orgId, orgId),
-        eq(orgInvitations.email, normalizedEmail),
-        eq(orgInvitations.status, "pending"),
-      ),
+      scopedWhere(orgInvitations, {
+        orgId,
+        extra: [eq(orgInvitations.email, normalizedEmail), eq(orgInvitations.status, "pending")],
+      }),
     );
 
   const token = generateToken();
@@ -95,7 +105,7 @@ export async function getOrgInvitations(orgId: string) {
   return db
     .select()
     .from(orgInvitations)
-    .where(and(eq(orgInvitations.orgId, orgId), eq(orgInvitations.status, "pending")))
+    .where(scopedWhere(orgInvitations, { orgId, extra: [eq(orgInvitations.status, "pending")] }))
     .orderBy(desc(orgInvitations.createdAt));
 }
 
@@ -110,7 +120,7 @@ export async function cancelInvitation(invitationId: string, orgId: string) {
   const [cancelled] = await db
     .update(orgInvitations)
     .set({ status: "cancelled" })
-    .where(and(eq(orgInvitations.id, invitationId), eq(orgInvitations.orgId, orgId)))
+    .where(scopedWhere(orgInvitations, { orgId, extra: [eq(orgInvitations.id, invitationId)] }))
     .returning({ id: orgInvitations.id });
   return cancelled ?? null;
 }
@@ -124,11 +134,10 @@ export async function updateInvitationRole(
     .update(orgInvitations)
     .set({ role })
     .where(
-      and(
-        eq(orgInvitations.id, invitationId),
-        eq(orgInvitations.orgId, orgId),
-        eq(orgInvitations.status, "pending"),
-      ),
+      scopedWhere(orgInvitations, {
+        orgId,
+        extra: [eq(orgInvitations.id, invitationId), eq(orgInvitations.status, "pending")],
+      }),
     )
     .returning();
 
@@ -165,7 +174,7 @@ export async function sendMagicLinkInvitation(invitation: {
   email: string;
 }) {
   try {
-    await auth.api.signInMagicLink({
+    await getAuth().api.signInMagicLink({
       body: {
         email: invitation.email,
         callbackURL: `/invite/${invitation.token}/accept`,

@@ -1,0 +1,591 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Webhooks service — CRUD, signing (Standard Webhooks), and queue-based delivery.
+ */
+
+import { z } from "zod";
+import { eq, or, desc, isNull, type InferSelectModel } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { webhooks, webhookDeliveries } from "./schema.ts";
+import { logger } from "../../lib/logger.ts";
+import { notFound, invalidRequest, ApiError } from "../../lib/errors.ts";
+import type {
+  WebhookInfo,
+  WebhookCreateResponse,
+  WebhookDelivery as WebhookDeliveryInfo,
+} from "./types.ts";
+
+/**
+ * Row types inferred directly from the module's Drizzle schema. Used as
+ * input types to DTO mappers (`toWebhookResponse`, `toWebhookDeliveryResponse`)
+ * so that any schema change — renamed column, dropped field, type mismatch —
+ * breaks the mapper at typecheck time.
+ */
+type WebhookRow = InferSelectModel<typeof webhooks>;
+type WebhookDeliveryRow = InferSelectModel<typeof webhookDeliveries>;
+import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { toISORequired } from "../../lib/date-helpers.ts";
+import { buildUpdateSet, scopedWhere } from "../../lib/db-helpers.ts";
+import { createQueue, PermanentJobError } from "../../infra/queue/index.ts";
+import type { JobQueue, QueueJob } from "../../infra/queue/index.ts";
+import { isDevEnvironment, LOCALHOST_HOSTS } from "../../services/redirect-validation.ts";
+import { prefixedId } from "../../lib/ids.ts";
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+export const webhookEventSchema = z.enum([
+  "run.started",
+  "run.success",
+  "run.failed",
+  "run.timeout",
+  "run.cancelled",
+]);
+
+type WebhookEventType = z.infer<typeof webhookEventSchema>;
+
+/** Delays per attempt (attempt 1 = immediate, attempt 2 = 30s, etc.) */
+const RETRY_DELAYS_MS = [30_000, 300_000, 1_800_000, 3_600_000, 7_200_000, 10_800_000, 14_400_000];
+const MAX_ATTEMPTS = 8;
+const DELIVERY_TIMEOUT_MS = 15_000;
+const MAX_WEBHOOKS_PER_SCOPE = 20;
+const MAX_PAYLOAD_SIZE = 256 * 1024; // 256KB
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface DeliveryJobData {
+  webhookId: string;
+  eventId: string;
+  eventType: string;
+  payload: string; // JSON string
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function generateSecret(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  const base64 = Buffer.from(bytes).toString("base64url");
+  return `whsec_${base64}`;
+}
+
+/**
+ * Convert a webhooks row to the public API DTO. Strips sensitive fields
+ * (`orgId`, `secret`), narrows `payloadMode`, and serializes dates. The
+ * input type is anchored to the Drizzle schema — drop or rename a column
+ * and this function fails to typecheck.
+ */
+/**
+ * Convert a webhook_deliveries row to the public API DTO. Narrows `status`
+ * (`text` in the schema, restricted set at runtime) and serializes
+ * `createdAt`. Anchored to the Drizzle schema via `WebhookDeliveryRow`.
+ */
+function toWebhookDeliveryResponse(row: WebhookDeliveryRow): WebhookDeliveryInfo {
+  return {
+    id: row.id,
+    eventId: row.eventId,
+    eventType: row.eventType,
+    status: row.status as "pending" | "success" | "failed",
+    statusCode: row.statusCode,
+    latency: row.latency,
+    attempt: row.attempt,
+    error: row.error,
+    createdAt: toISORequired(row.createdAt),
+  };
+}
+
+function toWebhookResponse(row: WebhookRow): WebhookInfo {
+  return {
+    id: row.id,
+    object: "webhook",
+    level: row.level,
+    applicationId: row.applicationId,
+    url: row.url,
+    events: row.events,
+    packageId: row.packageId,
+    payloadMode: row.payloadMode as "summary" | "full",
+    enabled: row.enabled,
+    createdAt: toISORequired(row.createdAt),
+    updatedAt: toISORequired(row.updatedAt),
+  };
+}
+
+/**
+ * Validate webhook URL — must be HTTPS (http://localhost in dev), not SSRF.
+ */
+function validateWebhookUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw invalidRequest("Malformed URL", "url");
+  }
+
+  if (parsed.protocol !== "https:") {
+    if (
+      !(parsed.protocol === "http:" && LOCALHOST_HOSTS.has(parsed.hostname) && isDevEnvironment())
+    ) {
+      throw invalidRequest("Only https:// URLs are allowed", "url");
+    }
+  }
+
+  if (isBlockedUrl(url)) {
+    throw invalidRequest("URL resolves to a private or reserved network address", "url");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Standard Webhooks signing
+// ---------------------------------------------------------------------------
+
+async function sign(secret: string, content: string): Promise<string> {
+  const key = Buffer.from(secret.replace("whsec_", ""), "base64url");
+  const hasher = new Bun.CryptoHasher("sha256", key);
+  hasher.update(content);
+  return `v1,${Buffer.from(hasher.digest()).toString("base64")}`;
+}
+
+async function buildSignedHeaders(
+  eventId: string,
+  timestamp: number,
+  body: string,
+  secret: string,
+): Promise<Record<string, string>> {
+  const content = `${eventId}.${timestamp}.${body}`;
+  const signature = await sign(secret, content);
+
+  return {
+    "webhook-id": eventId,
+    "webhook-timestamp": String(timestamp),
+    "webhook-signature": signature,
+    "content-type": "application/json",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Polymorphic CRUD — level: "org" | "application"
+// ---------------------------------------------------------------------------
+//
+// Org-level webhooks subscribe to events from any application in the org.
+// Application-level webhooks are pinned to a single app at creation.
+// `applicationId` is nullable — the CHECK constraint in the initial
+// migration enforces exactly one shape per row.
+
+export type CreateWebhookInput =
+  | {
+      level: "org";
+      orgId: string;
+      url: string;
+      events: string[];
+      packageId?: string | null;
+      payloadMode?: string;
+      enabled?: boolean;
+    }
+  | {
+      level: "application";
+      orgId: string;
+      applicationId: string;
+      url: string;
+      events: string[];
+      packageId?: string | null;
+      payloadMode?: string;
+      enabled?: boolean;
+    };
+
+export async function createWebhook(params: CreateWebhookInput): Promise<WebhookCreateResponse> {
+  // Per-scope limit (per app for app-level, per org for org-level).
+  const scopeFilter =
+    params.level === "application"
+      ? scopedWhere(webhooks, { orgId: params.orgId, applicationId: params.applicationId })
+      : scopedWhere(webhooks, { orgId: params.orgId, extra: [isNull(webhooks.applicationId)] });
+  const existing = await db.select({ id: webhooks.id }).from(webhooks).where(scopeFilter);
+  if (existing.length >= MAX_WEBHOOKS_PER_SCOPE) {
+    throw new ApiError({
+      status: 400,
+      code: "webhook_limit_reached",
+      title: "Webhook Limit Reached",
+      detail: `Maximum ${MAX_WEBHOOKS_PER_SCOPE} webhooks per ${params.level === "org" ? "organization" : "application"}`,
+    });
+  }
+
+  validateWebhookUrl(params.url);
+
+  const id = prefixedId("wh");
+  const secret = generateSecret();
+
+  const [created] = await db
+    .insert(webhooks)
+    .values({
+      id,
+      level: params.level,
+      orgId: params.orgId,
+      applicationId: params.level === "application" ? params.applicationId : null,
+      url: params.url,
+      events: params.events,
+      packageId: params.packageId ?? null,
+      payloadMode: params.payloadMode ?? "full",
+      enabled: params.enabled ?? true,
+      secret,
+    })
+    .returning();
+
+  return { ...toWebhookResponse(created!), secret };
+}
+
+/**
+ * List webhooks visible to the caller.
+ *
+ * - `all: true`: returns every webhook in the org (org-level + all app-level).
+ * - `applicationId` set: returns org-level webhooks AND app-level webhooks
+ *   pinned to that app (mirrors dispatch semantics).
+ * - Neither: returns org-level webhooks only.
+ */
+export async function listWebhooks(
+  orgId: string,
+  opts: { applicationId?: string; all?: boolean } = {},
+): Promise<WebhookInfo[]> {
+  const { applicationId, all } = opts;
+  const filter = all
+    ? scopedWhere(webhooks, { orgId })
+    : applicationId
+      ? scopedWhere(webhooks, {
+          orgId,
+          extra: [or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId))],
+        })
+      : scopedWhere(webhooks, { orgId, extra: [isNull(webhooks.applicationId)] });
+
+  const rows = await db.select().from(webhooks).where(filter).orderBy(desc(webhooks.createdAt));
+  return rows.map(toWebhookResponse);
+}
+
+export async function getWebhook(orgId: string, webhookId: string): Promise<WebhookInfo> {
+  const [row] = await db
+    .select()
+    .from(webhooks)
+    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }))
+    .limit(1);
+
+  if (!row) throw notFound(`Webhook '${webhookId}' not found`);
+  return toWebhookResponse(row);
+}
+
+export async function updateWebhook(
+  orgId: string,
+  webhookId: string,
+  params: {
+    url?: string;
+    events?: string[];
+    packageId?: string | null;
+    payloadMode?: string;
+    enabled?: boolean;
+  },
+): Promise<WebhookInfo> {
+  await getWebhook(orgId, webhookId);
+
+  if (params.url) validateWebhookUrl(params.url);
+
+  const updates = buildUpdateSet(params);
+
+  const [updated] = await db
+    .update(webhooks)
+    .set(updates)
+    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }))
+    .returning();
+
+  return toWebhookResponse(updated!);
+}
+
+export async function deleteWebhook(orgId: string, webhookId: string): Promise<void> {
+  await getWebhook(orgId, webhookId);
+  await db
+    .delete(webhooks)
+    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }));
+}
+
+export async function rotateSecret(orgId: string, webhookId: string): Promise<{ secret: string }> {
+  await getWebhook(orgId, webhookId);
+
+  const newSecret = generateSecret();
+  await db
+    .update(webhooks)
+    .set({ secret: newSecret, updatedAt: new Date() })
+    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }));
+
+  return { secret: newSecret };
+}
+
+export async function listDeliveries(
+  orgId: string,
+  webhookId: string,
+  limit = 20,
+): Promise<WebhookDeliveryInfo[]> {
+  await getWebhook(orgId, webhookId);
+
+  const rows = await db
+    .select()
+    .from(webhookDeliveries)
+    .where(eq(webhookDeliveries.webhookId, webhookId))
+    .orderBy(desc(webhookDeliveries.createdAt))
+    .limit(Math.min(limit, 100));
+
+  return rows.map(toWebhookDeliveryResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Event envelope builder
+// ---------------------------------------------------------------------------
+
+export function buildEventEnvelope(params: {
+  eventType: string;
+  run: Record<string, unknown>;
+  payloadMode: "full" | "summary";
+}): { eventId: string; payload: Record<string, unknown> } {
+  const eventId = prefixedId("evt");
+  const now = Math.floor(Date.now() / 1000);
+
+  const execObj: Record<string, unknown> = { ...params.run, object: "run" };
+
+  // Summary mode: strip result and input
+  if (params.payloadMode === "summary") {
+    delete execObj.result;
+    delete execObj.input;
+  }
+
+  // Truncate: if data exceeds 256KB, strip result
+  const dataJson = JSON.stringify(execObj);
+  if (dataJson.length > MAX_PAYLOAD_SIZE && execObj.result) {
+    delete execObj.result;
+    execObj.resultTruncated = true;
+  }
+
+  return {
+    eventId,
+    payload: {
+      id: eventId,
+      object: "event",
+      type: params.eventType,
+      apiVersion: "2026-03-21",
+      created: now,
+      data: { object: execObj },
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Delivery queue
+// ---------------------------------------------------------------------------
+
+let deliveryQueue: JobQueue<DeliveryJobData> | null = null;
+
+async function getDeliveryQueue(): Promise<JobQueue<DeliveryJobData>> {
+  if (!deliveryQueue) {
+    deliveryQueue = await createQueue<DeliveryJobData>("webhook-delivery", {
+      attempts: MAX_ATTEMPTS,
+      backoff: { type: "custom" },
+      removeOnComplete: 1000,
+      removeOnFail: 5000,
+    });
+  }
+  return deliveryQueue;
+}
+
+/**
+ * Dispatch webhook events for a run status change.
+ * Called from the run pipeline after status transitions.
+ *
+ * Fires both **org-level** webhooks (pinned to the org, `application_id IS NULL`)
+ * and **application-level** webhooks pinned to the run's application.
+ */
+export async function dispatchWebhookEvents(
+  orgId: string,
+  eventType: WebhookEventType,
+  run: Record<string, unknown>,
+  applicationId: string,
+): Promise<void> {
+  const rows = await db
+    .select({
+      id: webhooks.id,
+      events: webhooks.events,
+      packageId: webhooks.packageId,
+      payloadMode: webhooks.payloadMode,
+    })
+    .from(webhooks)
+    .where(
+      scopedWhere(webhooks, {
+        orgId,
+        extra: [
+          eq(webhooks.enabled, true),
+          or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId)),
+        ],
+      }),
+    );
+
+  const queue = await getDeliveryQueue();
+
+  for (const wh of rows) {
+    if (!wh.events?.includes(eventType)) continue;
+    if (wh.packageId && wh.packageId !== run.packageId) continue;
+
+    const { eventId, payload } = buildEventEnvelope({
+      eventType,
+      run,
+      payloadMode: wh.payloadMode as "full" | "summary",
+    });
+
+    await queue.add("deliver", {
+      webhookId: wh.id,
+      eventId,
+      eventType,
+      payload: JSON.stringify(payload),
+    });
+  }
+}
+
+/**
+ * Process a single webhook delivery attempt.
+ * Throws on failure — queue handles retry scheduling via backoffStrategy.
+ * Throws PermanentJobError for permanent failures (4xx except 408/429).
+ */
+async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
+  const { webhookId, eventId, eventType, payload } = job.data;
+  const attempt = job.attemptsMade + 1; // attemptsMade is 0-based before this attempt
+
+  const [wh] = await db
+    .select({ url: webhooks.url, secret: webhooks.secret })
+    .from(webhooks)
+    .where(eq(webhooks.id, webhookId))
+    .limit(1);
+
+  if (!wh) {
+    logger.warn("Webhook deleted before delivery", { webhookId, eventId });
+    return; // Don't retry — webhook is gone
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const headers = await buildSignedHeaders(eventId, timestamp, payload, wh.secret);
+  headers["webhook-attempt"] = String(attempt);
+
+  const start = Date.now();
+  let statusCode: number | undefined;
+  let errorMessage: string | undefined;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
+
+    const res = await fetch(wh.url, {
+      method: "POST",
+      headers,
+      body: payload,
+      signal: controller.signal,
+      redirect: "manual", // Do NOT follow redirects (SSRF protection)
+    });
+
+    clearTimeout(timeout);
+    statusCode = res.status;
+
+    // Drain body to free resources
+    await res.text().catch(() => {});
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      errorMessage = "Delivery timeout (15s)";
+    } else {
+      errorMessage = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const latency = Date.now() - start;
+  const isSuccess = statusCode !== undefined && statusCode >= 200 && statusCode < 300;
+  const isPermanentFailure =
+    statusCode !== undefined &&
+    statusCode >= 400 &&
+    statusCode < 500 &&
+    statusCode !== 408 &&
+    statusCode !== 429;
+
+  // Record delivery attempt
+  await db.insert(webhookDeliveries).values({
+    webhookId,
+    eventId,
+    eventType,
+    status: isSuccess ? "success" : "failed",
+    statusCode: statusCode ?? null,
+    latency,
+    attempt,
+    error: errorMessage ?? null,
+  });
+
+  if (isSuccess) {
+    logger.info("Webhook delivered", { webhookId, eventId, statusCode, latency });
+    return;
+  }
+
+  const failContext = { webhookId, eventId, attempt, statusCode, error: errorMessage, latency };
+
+  // Permanent failure (4xx except 408/429) — do not retry
+  if (isPermanentFailure) {
+    logger.warn("Webhook delivery permanently failed", failContext);
+    throw new PermanentJobError(`Permanent failure: HTTP ${statusCode}`);
+  }
+
+  // Transient failure — throw to trigger retry with backoff
+  logger.warn("Webhook delivery failed, will retry", failContext);
+  throw new Error(errorMessage ?? `HTTP ${statusCode}`);
+}
+
+/**
+ * Initialize the webhook delivery worker. Called at boot.
+ */
+export async function initWebhookWorker(): Promise<void> {
+  const queue = await getDeliveryQueue();
+
+  queue.process(processDelivery, {
+    concurrency: 10,
+    limiter: { max: 100, duration: 1000 },
+    backoffStrategy: (attemptsMade: number) => {
+      return RETRY_DELAYS_MS[attemptsMade - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]!;
+    },
+  });
+
+  logger.info("Webhook delivery worker started");
+}
+
+/**
+ * Shutdown the webhook delivery worker. Called during graceful shutdown.
+ */
+export async function shutdownWebhookWorker(): Promise<void> {
+  await deliveryQueue?.shutdown();
+  deliveryQueue = null;
+}
+
+/**
+ * Fire-and-forget webhook dispatch for run status changes.
+ * Shared by the run route (POST /run) and the scheduler (triggerScheduledRun).
+ */
+export function dispatchRunWebhook(
+  orgId: string,
+  applicationId: string,
+  status: string,
+  runId: string,
+  packageId: string,
+  extra?: Record<string, unknown>,
+): void {
+  const eventType = `run.${status}` as WebhookEventType;
+  dispatchWebhookEvents(
+    orgId,
+    eventType,
+    { id: runId, packageId, status, ...extra },
+    applicationId,
+  ).catch((err) => {
+    logger.warn("Webhook dispatch failed", {
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}

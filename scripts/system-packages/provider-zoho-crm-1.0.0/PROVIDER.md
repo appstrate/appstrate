@@ -1,15 +1,17 @@
 # Zoho CRM API
 
-Base URL: `https://www.zohoapis.com/crm/v8`
+Base URL: `https://www.zohoapis.com/crm/v7`
 
-CRM platform for sales and marketing. Uses a module-based REST API where all record operations follow the same pattern at `/crm/v8/{MODULE}`. The actual API base domain should come from the OAuth token response's `api_domain` field and may vary by datacenter region (`.com`, `.eu`, `.in`, `.com.au`, `.jp`, `.com.cn`, `.sa`, `.ca`). Uses `Zoho-oauthtoken` as the authorization header prefix instead of `Bearer`.
+CRM platform for sales and marketing. Uses a module-based REST API where all record operations follow the same pattern at `/crm/v7/{MODULE}`. The API domain may vary by datacenter region (`.com`, `.eu`, `.in`, `.com.au`, `.jp`). Uses `Zoho-oauthtoken` as the authorization header prefix instead of `Bearer`.
 
 ## Endpoints
 
 ### List Records
-`GET /crm/v8/{MODULE}`
+
+`GET /crm/v7/{MODULE}`
 
 **Query parameters:**
+
 - `fields` — Comma-separated field names (e.g. `Last_Name,Email,Phone`)
 - `page` — Page number (starts at 1)
 - `per_page` — Records per page (max 200)
@@ -17,6 +19,7 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 - `sort_order` — `asc` or `desc`
 
 **Response:**
+
 ```json
 {
   "data": [
@@ -40,12 +43,15 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 ```
 
 ### Get Record
-`GET /crm/v8/{MODULE}/{RECORD_ID}`
+
+`GET /crm/v7/{MODULE}/{RECORD_ID}`
 
 ### Create Records
-`POST /crm/v8/{MODULE}`
+
+`POST /crm/v7/{MODULE}`
 
 **Request body (JSON):**
+
 ```json
 {
   "data": [
@@ -61,6 +67,7 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 ```
 
 **Response:**
+
 ```json
 {
   "data": [
@@ -75,9 +82,11 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 ```
 
 ### Update Records
-`PUT /crm/v8/{MODULE}`
+
+`PUT /crm/v7/{MODULE}`
 
 **Request body (JSON):**
+
 ```json
 {
   "data": [
@@ -91,12 +100,15 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 ```
 
 ### Delete Records
-`DELETE /crm/v8/{MODULE}?ids={ID1},{ID2}`
+
+`DELETE /crm/v7/{MODULE}?ids={ID1},{ID2}`
 
 ### Search Records
-`GET /crm/v8/{MODULE}/search`
+
+`GET /crm/v7/{MODULE}/search`
 
 **Query parameters:**
+
 - `criteria` — Filter criteria (e.g. `(Last_Name:equals:Smith)`)
 - `email` — Search by email
 - `phone` — Search by phone
@@ -106,9 +118,11 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 **Criteria operators:** `equals`, `starts_with`, `contains`, `not_equal`, `greater_than`, `less_than`, `greater_equal`, `less_equal`, `between`, `in`
 
 ### COQL Query
-`POST /crm/v8/coql`
+
+`POST /crm/v7/coql`
 
 **Request body (JSON):**
+
 ```json
 {
   "select_query": "select Last_Name, Email, Phone from Contacts where Lead_Source = 'Web' limit 10"
@@ -116,6 +130,7 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 ```
 
 **Response:**
+
 ```json
 {
   "data": [
@@ -130,18 +145,23 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 ```
 
 ### List Users
-`GET /crm/v8/users`
+
+`GET /crm/v7/users`
 
 **Query parameters:**
+
 - `type` — `AllUsers`, `ActiveUsers`, `DeactiveUsers`, `AdminUsers`
 
 ### Get Notes
-`GET /crm/v8/{MODULE}/{RECORD_ID}/Notes`
+
+`GET /crm/v7/{MODULE}/{RECORD_ID}/Notes`
 
 ### Add Note
-`POST /crm/v8/{MODULE}/{RECORD_ID}/Notes`
+
+`POST /crm/v7/{MODULE}/{RECORD_ID}/Notes`
 
 **Request body (JSON):**
+
 ```json
 {
   "data": [
@@ -154,22 +174,27 @@ CRM platform for sales and marketing. Uses a module-based REST API where all rec
 ```
 
 ### Get Related Records
-`GET /crm/v8/{MODULE}/{RECORD_ID}/{RELATED_MODULE}`
 
-Example: `GET /crm/v8/Accounts/5073207.../Contacts` — get contacts linked to an account.
+`GET /crm/v7/{MODULE}/{RECORD_ID}/{RELATED_MODULE}`
+
+Example: `GET /crm/v7/Accounts/5073207.../Contacts` — get contacts linked to an account.
 
 ## Common Patterns
 
 ### Modules
+
 Standard modules: `Leads`, `Contacts`, `Accounts`, `Deals`, `Tasks`, `Events`, `Calls`, `Products`, `Quotes`, `Sales_Orders`, `Invoices`, `Campaigns`, `Notes`
 
 ### Pagination
+
 Page-based: `page` (starts at 1) + `per_page` (max 200). Check `info.more_records` to know if there are more pages.
 
 ### Batch Operations
+
 POST and PUT accept an array of up to 100 records in the `data` field.
 
 ### Error Format
+
 ```json
 {
   "data": [
@@ -184,11 +209,13 @@ POST and PUT accept an array of up to 100 records in the `data` field.
 ```
 
 ### Rate Limits
+
 100 requests per minute (Standard plan). Header `X-RATELIMIT-REMAINING` shows remaining requests. Returns 429 when exceeded.
 
 ## Important Notes
+
 - **Authorization prefix** — Uses `Zoho-oauthtoken` instead of `Bearer` in the Authorization header.
-- **Multi-datacenter** — Use the `api_domain` returned by OAuth for API calls. Common domains include `.com` (US), `.eu` (EU), `.in` (India), `.com.au` (Australia), `.jp` (Japan), `.com.cn` (China), `.sa` (Saudi Arabia), and `.ca` (Canada).
+- **Multi-datacenter** — API domain varies by region: `.com` (US), `.eu` (EU), `.in` (India), `.com.au` (Australia), `.jp` (Japan).
 - **Token refresh** — Access tokens expire after 1 hour. Automatic refresh via the runtime.
 - **Scope separator** — Zoho uses commas to separate scopes (e.g. `ZohoCRM.modules.READ,ZohoCRM.users.READ`).
 - **Field names** — Use underscore-separated PascalCase (e.g. `Last_Name`, `Lead_Source`, `Created_Time`).

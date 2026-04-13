@@ -14,33 +14,19 @@
       "authorizationUrl": "https://app.asana.com/-/oauth_authorize",
       "tokenUrl": "https://app.asana.com/-/oauth_token",
       "refreshUrl": "https://app.asana.com/-/oauth_token",
-      "defaultScopes": ["workspaces:read", "users:read", "projects:read", "tasks:read"],
+      "defaultScopes": ["default"],
       "scopeSeparator": " ",
       "pkceEnabled": false,
       "tokenAuthMethod": "client_secret_post"
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://app.asana.com/api/*"
-    ],
+    "authorizedUris": ["https://app.asana.com/api/*"],
     "availableScopes": [
-      { "value": "workspaces:read", "label": "Read workspaces" },
-      { "value": "users:read", "label": "Read users" },
-      { "value": "teams:read", "label": "Read teams" },
-      { "value": "projects:read", "label": "Read projects" },
-      { "value": "projects:write", "label": "Create and update projects" },
-      { "value": "tasks:read", "label": "Read tasks" },
-      { "value": "tasks:write", "label": "Create and update tasks" },
-      { "value": "tasks:delete", "label": "Delete tasks" },
-      { "value": "stories:read", "label": "Read comments and activity" },
-      { "value": "stories:write", "label": "Create comments and activity" },
-      { "value": "tags:read", "label": "Read tags" },
-      { "value": "tags:write", "label": "Create and update tags" },
+      { "value": "default", "label": "Full access to all resources" },
       { "value": "openid", "label": "OpenID Connect identity" },
       { "value": "email", "label": "Read user email" },
-      { "value": "profile", "label": "Read user profile" },
-      { "value": "default", "label": "Full access to all resources" }
+      { "value": "profile", "label": "Read user profile" }
     ]
   },
   "setupGuide": {

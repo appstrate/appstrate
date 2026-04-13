@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { orgRoleEnum } from "@appstrate/db/schema";
+
+const ORG_ROLES = [...orgRoleEnum.enumValues];
+
 /**
  * All OpenAPI schema definitions (components/schemas).
  */
@@ -63,35 +67,6 @@ export const schemas = {
       packageSource: { type: "string", enum: ["system", "local"] },
     },
   },
-  WebhookObject: {
-    type: "object",
-    description: "Webhook configuration object",
-    required: [
-      "id",
-      "object",
-      "applicationId",
-      "url",
-      "events",
-      "payloadMode",
-      "enabled",
-      "createdAt",
-    ],
-    properties: {
-      id: { type: "string", description: "Webhook ID (wh_ prefix)" },
-      object: { type: "string", enum: ["webhook"] },
-      applicationId: {
-        type: "string",
-        description: "Application ID (app_ prefix). All webhooks are application-scoped.",
-      },
-      url: { type: "string", format: "uri" },
-      events: { type: "array", items: { type: "string" } },
-      packageId: { type: ["string", "null"] },
-      payloadMode: { type: "string", enum: ["full", "summary"] },
-      enabled: { type: "boolean" },
-      createdAt: { type: "string", format: "date-time" },
-      updatedAt: { type: "string", format: "date-time" },
-    },
-  },
   OrgSettings: {
     type: "object",
     description: "Organization settings (extensible)",
@@ -118,7 +93,7 @@ export const schemas = {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
-      role: { type: "string", enum: ["owner", "admin", "member"] },
+      role: { type: "string", enum: ORG_ROLES },
       createdAt: { type: "string", format: "date-time", description: "Creation timestamp" },
     },
   },
@@ -129,7 +104,7 @@ export const schemas = {
       userId: { type: "string" },
       displayName: { type: "string" },
       email: { type: "string" },
-      role: { type: "string", enum: ["owner", "admin", "member"] },
+      role: { type: "string", enum: ORG_ROLES },
       joinedAt: { type: "string", format: "date-time" },
     },
   },
@@ -139,7 +114,7 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       email: { type: "string" },
-      role: { type: "string", enum: ["owner", "admin", "member"] },
+      role: { type: "string", enum: ORG_ROLES },
       token: { type: "string" },
       expiresAt: { type: "string", format: "date-time" },
       createdAt: { type: "string", format: "date-time" },
@@ -374,7 +349,10 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       packageId: { type: "string" },
-      userId: { type: "string" },
+      dashboardUserId: {
+        type: ["string", "null"],
+        description: "Dashboard user ID that triggered the run (null for end-user/schedule runs)",
+      },
       orgId: { type: "string" },
       status: {
         type: "string",
@@ -384,7 +362,6 @@ export const schemas = {
       result: { type: "object" },
       state: { type: "object" },
       error: { type: "string" },
-      tokensUsed: { type: "integer" },
       tokenUsage: { type: "object" },
       startedAt: { type: "string", format: "date-time" },
       completedAt: { type: "string", format: "date-time" },
@@ -410,6 +387,10 @@ export const schemas = {
         type: ["string", "null"],
         description: "End-user ID (eu_ prefix) if executed on behalf of an end-user",
       },
+      apiKeyId: {
+        type: ["string", "null"],
+        description: "API key ID that triggered the run (null for dashboard/schedule runs)",
+      },
       applicationId: {
         type: ["string", "null"],
         description: "Application ID (app_ prefix) that owns this run",
@@ -418,6 +399,23 @@ export const schemas = {
         type: ["object", "null"],
         description: "Additional metadata (e.g. creditsUsed in cloud mode)",
         additionalProperties: true,
+      },
+      dashboardUserName: {
+        type: ["string", "null"],
+        description:
+          "Display name of the dashboard user who triggered the run (from profiles table)",
+      },
+      endUserName: {
+        type: ["string", "null"],
+        description: "Display name of the end-user (name or externalId fallback)",
+      },
+      apiKeyName: {
+        type: ["string", "null"],
+        description: "Name of the API key that triggered the run",
+      },
+      scheduleName: {
+        type: ["string", "null"],
+        description: "Name of the schedule that triggered the run",
       },
     },
   },
@@ -538,12 +536,38 @@ export const schemas = {
       scopeSeparator: { type: "string" },
       pkceEnabled: { type: "boolean" },
       tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
+      tokenContentType: {
+        type: "string",
+        enum: ["application/x-www-form-urlencoded", "application/json"],
+        description:
+          "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
+      },
       authorizationParams: { type: "object" },
       tokenParams: { type: "object" },
       credentialSchema: { type: "object" },
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
+      credentialTransform: {
+        type: "object",
+        required: ["template", "encoding"],
+        properties: {
+          template: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
+          },
+          encoding: {
+            type: "string",
+            enum: ["base64"],
+            description:
+              "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
+          },
+        },
+        description:
+          "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
+      },
       availableScopes: {
         type: "array",
         items: {
@@ -586,12 +610,38 @@ export const schemas = {
       scopeSeparator: { type: "string" },
       pkceEnabled: { type: "boolean" },
       tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
+      tokenContentType: {
+        type: "string",
+        enum: ["application/x-www-form-urlencoded", "application/json"],
+        description:
+          "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
+      },
       authorizationParams: { type: "object" },
       tokenParams: { type: "object" },
       credentialSchema: { type: "object", description: "JSON Schema for custom credential fields" },
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
+      credentialTransform: {
+        type: "object",
+        required: ["template", "encoding"],
+        properties: {
+          template: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
+          },
+          encoding: {
+            type: "string",
+            enum: ["base64"],
+            description:
+              "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
+          },
+        },
+        description:
+          "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
+      },
       availableScopes: {
         type: "array",
         items: {
@@ -632,12 +682,38 @@ export const schemas = {
       scopeSeparator: { type: "string" },
       pkceEnabled: { type: "boolean" },
       tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
+      tokenContentType: {
+        type: "string",
+        enum: ["application/x-www-form-urlencoded", "application/json"],
+        description:
+          "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
+      },
       authorizationParams: { type: "object" },
       tokenParams: { type: "object" },
       credentialSchema: { type: "object", description: "JSON Schema for custom credential fields" },
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
+      credentialTransform: {
+        type: "object",
+        required: ["template", "encoding"],
+        properties: {
+          template: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
+          },
+          encoding: {
+            type: "string",
+            enum: ["base64"],
+            description:
+              "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
+          },
+        },
+        description:
+          "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
+      },
       availableScopes: {
         type: "array",
         items: {

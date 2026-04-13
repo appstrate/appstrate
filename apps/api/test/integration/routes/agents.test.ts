@@ -228,14 +228,14 @@ describe("Agents API", () => {
         packageId: "@myorg/counted-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@myorg/counted-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "running",
       });
 

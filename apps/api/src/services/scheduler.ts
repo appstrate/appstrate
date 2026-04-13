@@ -2,17 +2,15 @@
 
 import { createQueue } from "../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
-import { eq, and, asc, inArray } from "drizzle-orm";
+import { eq, asc, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  packageSchedules,
-  connectionProfiles as connectionProfilesTable,
-} from "@appstrate/db/schema";
+import { schedules, connectionProfiles as connectionProfilesTable } from "@appstrate/db/schema";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
+import { user as userTable } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/index.ts";
-import { dispatchRunWebhook } from "./webhooks.ts";
+import { emitEvent } from "../lib/modules/module-loader.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "./run-pipeline.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
 import { getPackage, packageExists } from "./agent-service.ts";
@@ -27,6 +25,7 @@ import { resolveProviderStatuses } from "./connection-manager/index.ts";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
+import { scopedWhere } from "../lib/db-helpers.ts";
 import { validateInput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { computeNextRun } from "../lib/cron.ts";
@@ -50,7 +49,7 @@ interface ScheduleJobData {
 // ---------------------------------------------------------------------------
 
 /** Convert a Drizzle schedule row to the Schedule type. */
-function toSchedule(row: typeof packageSchedules.$inferSelect): Schedule {
+function toSchedule(row: typeof schedules.$inferSelect): Schedule {
   return {
     ...row,
     input: asRecordOrNull(row.input),
@@ -117,13 +116,13 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     : null;
 
   await db
-    .update(packageSchedules)
+    .update(schedules)
     .set({
       lastRunAt: new Date(),
       nextRunAt: nextRun ?? null,
       updatedAt: new Date(),
     })
-    .where(eq(packageSchedules.id, scheduleId));
+    .where(eq(schedules.id, scheduleId));
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +141,7 @@ export async function initScheduleWorker(): Promise<void> {
   );
 
   // Sync all enabled schedules from DB to queue
-  const rows = await db.select().from(packageSchedules).where(eq(packageSchedules.enabled, true));
+  const rows = await db.select().from(schedules).where(eq(schedules.enabled, true));
 
   let synced = 0;
   for (const row of rows) {
@@ -182,7 +181,7 @@ async function triggerScheduledRun(
   applicationId: string,
   input: Record<string, unknown> | undefined,
 ) {
-  /** Create a failed run record + dispatch webhook so the user is notified. */
+  /** Create a failed run record + emit onRunStatusChange so modules (webhooks, …) can notify. */
   async function failSchedule(error: string, actor: Actor | null = null): Promise<void> {
     const runId = `run_${crypto.randomUUID()}`;
     try {
@@ -196,7 +195,14 @@ async function triggerScheduledRun(
         scheduleId,
         connectionProfileId,
       );
-      dispatchRunWebhook(orgId, applicationId, "failed", runId, packageId, { error });
+      void emitEvent("onRunStatusChange", {
+        orgId,
+        runId,
+        packageId,
+        applicationId,
+        status: "failed",
+        extra: { error },
+      });
     } catch (err) {
       logger.error("Failed to create failed schedule run record", {
         scheduleId,
@@ -349,11 +355,9 @@ export async function listSchedules(
 ): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
-    .from(packageSchedules)
-    .where(
-      and(eq(packageSchedules.orgId, orgId), eq(packageSchedules.applicationId, applicationId)),
-    )
-    .orderBy(asc(packageSchedules.createdAt));
+    .from(schedules)
+    .where(scopedWhere(schedules, { orgId, applicationId }))
+    .orderBy(asc(schedules.createdAt));
   return enrichSchedules(rows.map(toSchedule), orgId);
 }
 
@@ -364,15 +368,15 @@ export async function listPackageSchedules(
 ): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
-    .from(packageSchedules)
+    .from(schedules)
     .where(
-      and(
-        eq(packageSchedules.packageId, packageId),
-        eq(packageSchedules.orgId, orgId),
-        eq(packageSchedules.applicationId, applicationId),
-      ),
+      scopedWhere(schedules, {
+        orgId,
+        applicationId,
+        extra: [eq(schedules.packageId, packageId)],
+      }),
     )
-    .orderBy(asc(packageSchedules.createdAt));
+    .orderBy(asc(schedules.createdAt));
   return enrichSchedules(rows.map(toSchedule), orgId);
 }
 
@@ -381,19 +385,53 @@ export async function getSchedule(
   orgId?: string,
   applicationId?: string,
 ): Promise<EnrichedSchedule | null> {
-  const conditions = [eq(packageSchedules.id, id)];
-  if (orgId) conditions.push(eq(packageSchedules.orgId, orgId));
-  if (applicationId) conditions.push(eq(packageSchedules.applicationId, applicationId));
-
   const rows = await db
     .select()
-    .from(packageSchedules)
-    .where(and(...conditions))
+    .from(schedules)
+    .where(scopedWhere(schedules, { orgId, applicationId, extra: [eq(schedules.id, id)] }))
     .limit(1);
   if (!rows[0]) return null;
   const schedule = toSchedule(rows[0]);
-  const [enriched] = await enrichSchedules([schedule], schedule.orgId);
-  return enriched ?? null;
+  return enrichOneSchedule(schedule, schedule.orgId);
+}
+
+/**
+ * Enrich a single schedule with profile info and readiness status.
+ * Direct single-row lookups (no batching overhead) — mirrors the shape
+ * produced by enrichSchedules() for one row.
+ */
+async function enrichOneSchedule(schedule: Schedule, orgId: string): Promise<EnrichedSchedule> {
+  // Load profile + agent in parallel (2 independent queries)
+  const [profileRows, agent] = await Promise.all([
+    db
+      .select()
+      .from(connectionProfilesTable)
+      .where(eq(connectionProfilesTable.id, schedule.connectionProfileId))
+      .limit(1),
+    getPackage(schedule.packageId, orgId),
+  ]);
+
+  const profile = profileRows[0] ?? null;
+
+  let profileName: string | null = null;
+  let profileType: "user" | "app" | null = null;
+  let profileOwnerName: string | null = null;
+  if (profile) {
+    profileName = profile.name;
+    profileType = profile.applicationId ? "app" : "user";
+    if (profile.userId) {
+      const ownerRows = await db
+        .select({ name: userTable.name })
+        .from(userTable)
+        .where(eq(userTable.id, profile.userId))
+        .limit(1);
+      profileOwnerName = ownerRows[0]?.name ?? null;
+    }
+  }
+
+  const readiness = await computeScheduleReadiness(schedule, profile, agent ?? null, orgId);
+
+  return { ...schedule, profileName, profileType, profileOwnerName, readiness };
 }
 
 /** Compute readiness status for a single schedule based on its profile and agent. */
@@ -525,7 +563,7 @@ export async function createSchedule(
   const nextRun = computeNextRun(data.cronExpression, tz);
 
   const [row] = await db
-    .insert(packageSchedules)
+    .insert(schedules)
     .values({
       id,
       packageId,
@@ -587,15 +625,9 @@ export async function updateSchedule(
   if (data.input !== undefined) payload.input = data.input;
 
   const [row] = await db
-    .update(packageSchedules)
+    .update(schedules)
     .set(payload)
-    .where(
-      and(
-        eq(packageSchedules.id, id),
-        eq(packageSchedules.orgId, orgId),
-        eq(packageSchedules.applicationId, applicationId),
-      ),
-    )
+    .where(scopedWhere(schedules, { orgId, applicationId, extra: [eq(schedules.id, id)] }))
     .returning();
 
   if (!row) {
@@ -620,14 +652,8 @@ export async function deleteSchedule(
   await removeScheduleJob(id);
 
   const deleted = await db
-    .delete(packageSchedules)
-    .where(
-      and(
-        eq(packageSchedules.id, id),
-        eq(packageSchedules.orgId, orgId),
-        eq(packageSchedules.applicationId, applicationId),
-      ),
-    )
-    .returning({ id: packageSchedules.id });
+    .delete(schedules)
+    .where(scopedWhere(schedules, { orgId, applicationId, extra: [eq(schedules.id, id)] }))
+    .returning({ id: schedules.id });
   return deleted.length > 0;
 }

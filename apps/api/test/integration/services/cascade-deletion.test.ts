@@ -8,7 +8,6 @@ import {
   seedConnectionProfile,
   seedAgent,
   seedApplication,
-  seedWebhook,
   seedEndUser,
   seedSchedule,
   seedApiKey,
@@ -21,11 +20,10 @@ import {
   applicationPackages,
   userAgentProviderProfiles,
   applications,
-  webhooks,
   endUsers,
-  packageSchedules,
   apiKeys,
   runs,
+  schedules,
 } from "@appstrate/db/schema";
 import { bindAppProfileProvider } from "../../../src/services/state/app-profile-bindings.ts";
 import {
@@ -216,7 +214,7 @@ describe("Cascade Deletion", () => {
   });
 
   describe("when application is deleted", () => {
-    it("cascades to webhooks, end-users, schedules, api-keys, runs, and installed packages", async () => {
+    it("cascades to end-users, schedules, api-keys, runs, and installed packages", async () => {
       // Create a custom (non-default) application
       const customApp = await seedApplication({ orgId, name: "Cascade Target", createdBy: userId });
 
@@ -227,7 +225,6 @@ describe("Cascade Deletion", () => {
 
       // Populate the app with resources
       await installPackage(customApp.id, orgId, agent.id);
-      const wh = await seedWebhook({ orgId, applicationId: customApp.id });
       const eu = await seedEndUser({ orgId, applicationId: customApp.id, name: "Test EU" });
       const key = await seedApiKey({ orgId, applicationId: customApp.id, createdBy: userId });
       const run = await seedRun({ orgId, applicationId: customApp.id, packageId: agent.id });
@@ -240,11 +237,10 @@ describe("Cascade Deletion", () => {
 
       // Verify all resources exist
       await assertDbHas(applicationPackages, eq(applicationPackages.applicationId, customApp.id));
-      await assertDbHas(webhooks, eq(webhooks.id, wh.id));
       await assertDbHas(endUsers, eq(endUsers.id, eu.id));
       await assertDbHas(apiKeys, eq(apiKeys.id, key.id));
       await assertDbHas(runs, eq(runs.id, run.id));
-      await assertDbHas(packageSchedules, eq(packageSchedules.id, sched.id));
+      await assertDbHas(schedules, eq(schedules.id, sched.id));
 
       // Delete the application
       await deleteApplication(orgId, customApp.id);
@@ -255,25 +251,27 @@ describe("Cascade Deletion", () => {
         applicationPackages,
         eq(applicationPackages.applicationId, customApp.id),
       );
-      await assertDbMissing(webhooks, eq(webhooks.id, wh.id));
       await assertDbMissing(endUsers, eq(endUsers.id, eu.id));
       await assertDbMissing(apiKeys, eq(apiKeys.id, key.id));
       await assertDbMissing(runs, eq(runs.id, run.id));
-      await assertDbMissing(packageSchedules, eq(packageSchedules.id, sched.id));
+      await assertDbMissing(schedules, eq(schedules.id, sched.id));
     });
 
     it("does not affect the default application or its resources", async () => {
-      // Create webhook in the default app
-      const defaultWh = await seedWebhook({ orgId, applicationId: appId });
+      const defaultKey = await seedApiKey({
+        orgId,
+        applicationId: appId,
+        createdBy: userId,
+      });
 
       // Create and delete a custom app
       const customApp = await seedApplication({ orgId, name: "Expendable", createdBy: userId });
-      await seedWebhook({ orgId, applicationId: customApp.id });
+      await seedApiKey({ orgId, applicationId: customApp.id, createdBy: userId });
       await deleteApplication(orgId, customApp.id);
 
-      // Default app and its webhook should still exist
+      // Default app and its api key should still exist
       await assertDbHas(applications, eq(applications.id, appId));
-      await assertDbHas(webhooks, eq(webhooks.id, defaultWh.id));
+      await assertDbHas(apiKeys, eq(apiKeys.id, defaultKey.id));
     });
 
     it("rejects deletion of the default application", async () => {

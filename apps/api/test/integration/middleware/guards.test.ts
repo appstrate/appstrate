@@ -72,7 +72,7 @@ describe("requireMutableAgent (via agent skills route)", () => {
       packageId: "@testorg/busy-agent",
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
-      userId: ctx.user.id,
+      dashboardUserId: ctx.user.id,
       status: "running",
     });
 

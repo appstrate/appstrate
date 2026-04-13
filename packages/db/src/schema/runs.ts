@@ -17,9 +17,23 @@ import { sql } from "drizzle-orm";
 import { runStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
-import { organizations } from "./organizations.ts";
+import { apiKeys, organizations } from "./organizations.ts";
 import { packages } from "./packages.ts";
 import { connectionProfiles } from "./connections.ts";
+
+/**
+ * Shape of a single entry in `runs.providerStatuses`. Mirrored by
+ * `RunProviderSnapshot` in `@appstrate/shared-types`; duplicated here
+ * to avoid a circular dependency (shared-types re-exports `Run`).
+ */
+interface RunProviderSnapshot {
+  id: string;
+  status: string;
+  source: string | null;
+  profileName: string | null;
+  profileOwnerName: string | null;
+  scopesSufficient?: boolean;
+}
 
 export const runs = pgTable(
   "runs",
@@ -28,7 +42,7 @@ export const runs = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    userId: text("user_id").references(() => user.id, {
+    dashboardUserId: text("dashboard_user_id").references(() => user.id, {
       onDelete: "set null",
     }),
     endUserId: text("end_user_id").references(() => endUsers.id, {
@@ -45,15 +59,20 @@ export const runs = pgTable(
     result: jsonb("result"),
     state: jsonb("state"),
     error: text("error"),
-    tokensUsed: integer("tokens_used"),
-    tokenUsage: jsonb("token_usage"),
+    tokenUsage: jsonb("token_usage").$type<{
+      inputTokens?: number;
+      outputTokens?: number;
+      cacheReadInputTokens?: number;
+      cacheCreationInputTokens?: number;
+      totalTokens?: number;
+    }>(),
     startedAt: timestamp("started_at").defaultNow().notNull(),
     completedAt: timestamp("completed_at"),
     duration: integer("duration"),
     connectionProfileId: uuid("connection_profile_id").references(() => connectionProfiles.id, {
       onDelete: "set null",
     }),
-    scheduleId: text("schedule_id").references(() => packageSchedules.id, {
+    scheduleId: text("schedule_id").references(() => schedules.id, {
       onDelete: "set null",
     }),
     versionLabel: text("version_label"),
@@ -66,19 +85,30 @@ export const runs = pgTable(
     cost: doublePrecision("cost"),
     runNumber: integer("run_number"),
     providerProfileIds: jsonb("provider_profile_ids").$type<Record<string, string>>(),
-    providerStatuses: jsonb("provider_statuses"),
+    providerStatuses: jsonb("provider_statuses").$type<RunProviderSnapshot[]>(),
+    apiKeyId: text("api_key_id").references(() => apiKeys.id, {
+      onDelete: "set null",
+    }),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   },
   (table) => [
     index("idx_runs_package_id").on(table.packageId),
     index("idx_runs_status").on(table.status),
-    index("idx_runs_user_id").on(table.userId),
+    index("idx_runs_dashboard_user_id").on(table.dashboardUserId),
     index("idx_runs_end_user_id").on(table.endUserId),
     index("idx_runs_application_id").on(table.applicationId),
     index("idx_runs_app_status_started").on(table.applicationId, table.status, table.startedAt),
     index("idx_runs_org_id").on(table.orgId),
-    index("idx_runs_notification").on(table.userId, table.orgId, table.notifiedAt, table.readAt),
-    check("runs_at_most_one_actor", sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`),
+    index("idx_runs_notification").on(
+      table.dashboardUserId,
+      table.orgId,
+      table.notifiedAt,
+      table.readAt,
+    ),
+    check(
+      "runs_at_most_one_actor",
+      sql`NOT (dashboard_user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
+    ),
   ],
 );
 
@@ -132,7 +162,7 @@ export const packageMemories = pgTable(
   ],
 );
 
-export const packageSchedules = pgTable(
+export const schedules = pgTable(
   "package_schedules",
   {
     id: text("id").primaryKey(),

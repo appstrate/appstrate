@@ -8,6 +8,7 @@
  */
 import { db } from "./db.ts";
 import { organizations, organizationMembers, applications } from "@appstrate/db/schema";
+import type { OrgRole } from "@appstrate/shared-types";
 import { getTestApp } from "./app.ts";
 
 let counter = 0;
@@ -154,7 +155,7 @@ export async function createTestOrg(
 export async function addOrgMember(
   orgId: string,
   userId: string,
-  role: "owner" | "admin" | "member" | "viewer" = "member",
+  role: OrgRole = "member",
 ): Promise<void> {
   await db.insert(organizationMembers).values({ orgId, userId, role });
 }

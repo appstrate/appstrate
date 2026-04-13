@@ -3,14 +3,14 @@
 import { closeDb } from "@appstrate/db/client";
 import { logger } from "./logger.ts";
 import { shutdownInfra } from "../infra/index.ts";
+import { shutdownModules } from "./modules/module-loader.ts";
 import { hasRedis } from "../infra/mode.ts";
-import { shutdownScheduleWorker } from "../services/scheduler.ts";
-import { shutdownWebhookWorker } from "../services/webhooks.ts";
 import {
   getInFlightCount,
   waitForInFlight,
   stopCancelSubscriber,
 } from "../services/run-tracker.ts";
+import { shutdownScheduleWorker } from "../services/scheduler.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
@@ -23,8 +23,7 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     called = true;
     setShuttingDown();
 
-    logger.info("Shutdown initiated, stopping scheduler, webhook worker, and sidecar pool...");
-    await Promise.all([shutdownScheduleWorker(), shutdownWebhookWorker()]);
+    logger.info("Shutdown initiated, stopping sidecar pool...");
     await getOrchestrator().shutdown();
 
     // Unsubscribe from cancel channel before draining to avoid processing
@@ -44,6 +43,12 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
         });
       }
     }
+
+    logger.info("Shutting down schedule worker...");
+    await shutdownScheduleWorker();
+
+    logger.info("Shutting down modules...");
+    await shutdownModules();
 
     logger.info("Closing database and infrastructure connections...");
     await shutdownInfra();

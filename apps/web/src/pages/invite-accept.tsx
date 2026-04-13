@@ -12,11 +12,12 @@ import { AuthLayout } from "../components/auth-layout";
 import { RegisterForm } from "../components/register-form";
 import { LoginForm } from "../components/login-form";
 import { roleI18nKey } from "../hooks/use-permissions";
+import type { OrgRole } from "@appstrate/shared-types";
 
 interface InviteInfo {
   email: string;
   orgName: string;
-  role: string;
+  role: OrgRole;
   inviterName: string;
   expiresAt: string;
   isNewUser: boolean;

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared run pipeline — the common tail of "build context ��� quota check → create run → execute".
+ * Shared run pipeline — the common tail of "build context → pre-run hooks → create run → execute".
  * Used by both the POST /run route and the scheduler's triggerScheduledRun.
  */
 
 import { logger } from "../lib/logger.ts";
 import { buildRunContext, ModelNotConfiguredError } from "./env-builder.ts";
-import { getCloudModule } from "../lib/cloud-loader.ts";
+import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 import { createRun, getRunningRunCountForOrg } from "./state/index.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import { executeAgentInBackground } from "../routes/runs.ts";
@@ -44,12 +44,14 @@ export interface RunPipelineParams {
   applicationId: string;
   /** Uploaded files to inject into the container. */
   uploadedFiles?: UploadedFile[];
+  /** API key ID that triggered the run (if auth via API key). */
+  apiKeyId?: string;
 }
 
-export type RunPipelineError =
-  | { code: "model_not_configured"; message: string }
-  | { code: "quota_exceeded"; message: string }
-  | { code: "unexpected"; message: string };
+/**
+ * Known codes: "model_not_configured", "unexpected", plus module-provided codes (via RunRejection).
+ */
+export type RunPipelineError = { code: string; message: string; status?: number };
 
 export type RunPipelineResult =
   | { ok: true; runId: string; modelSource: string | null }
@@ -115,7 +117,7 @@ export async function resolveRunPreflight(params: {
 // ---------------------------------------------------------------------------
 
 /**
- * Build run context, check quota, create run record, and fire-and-forget execution.
+ * Build run context, run module pre-checks, create run record, and fire-and-forget execution.
  *
  * Returns a result type instead of throwing — callers decide how to surface errors
  * (e.g. throw ApiError for HTTP routes, or failSchedule for scheduled runs).
@@ -137,6 +139,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     connectionProfileId,
     applicationId,
     uploadedFiles,
+    apiKeyId,
   } = params;
 
   // --- Step 1: Build run context ---
@@ -200,19 +203,14 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     }));
   }
 
-  // --- Step 3: Quota check (Cloud only) ---
-  const cloud = getCloudModule();
-  if (cloud) {
-    try {
-      const runningCount = await getRunningRunCountForOrg(orgId);
-      await cloud.cloudHooks.checkQuota(orgId, runningCount);
-    } catch (err) {
-      if (err instanceof cloud.QuotaExceededError) {
-        return { ok: false, error: { code: "quota_exceeded", message: err.message } };
-      }
+  // --- Step 3: Pre-run module hook (quota, rate limits, feature gates, etc.) ---
+  if (hasHook("beforeRun")) {
+    const runningCount = await getRunningRunCountForOrg(orgId);
+    const rejection = await callHook("beforeRun", { orgId, packageId: agent.id, runningCount });
+    if (rejection) {
       return {
         ok: false,
-        error: { code: "unexpected", message: err instanceof Error ? err.message : String(err) },
+        error: { code: rejection.code, message: rejection.message, status: rejection.status },
       };
     }
   }
@@ -239,6 +237,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     modelSource: modelSource ?? undefined,
     providerProfileIds: profileIdMap,
     providerStatuses: providerStatusSnapshots,
+    apiKeyId,
   });
 
   // --- Step 6: Fire-and-forget execution ---

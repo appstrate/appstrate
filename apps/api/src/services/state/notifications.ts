@@ -1,21 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, or, isNotNull, isNull, count, type SQL } from "drizzle-orm";
+import { eq, or, isNotNull, isNull, count, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
+import { scopedWhere } from "../../lib/db-helpers.ts";
 import { listRunsWithFilter } from "./runs.ts";
 
 // --- Notifications ---
 
 /**
  * Build the actor ownership filter.
- * For members: filter by userId.
+ * For members: filter by dashboardUserId.
  * For end-users: filter by endUserId.
  * The actorId may be a member userId or an endUserId depending on caller context.
  * We use OR to match either column, since the caller passes the correct actor ID.
  */
 function actorOwnershipFilter(actorId: string): SQL {
-  return or(eq(runs.userId, actorId), eq(runs.endUserId, actorId))!;
+  return or(eq(runs.dashboardUserId, actorId), eq(runs.endUserId, actorId))!;
 }
 
 export async function markNotificationRead(
@@ -28,28 +29,26 @@ export async function markNotificationRead(
     .update(runs)
     .set({ readAt: new Date() })
     .where(
-      and(
-        eq(runs.id, runId),
-        eq(runs.orgId, orgId),
-        eq(runs.applicationId, applicationId),
-        isNotNull(runs.notifiedAt),
-        actorOrOrgFilter(actorId),
-      ),
+      scopedWhere(runs, {
+        orgId,
+        applicationId,
+        extra: [eq(runs.id, runId), isNotNull(runs.notifiedAt), actorOrOrgFilter(actorId)],
+      }),
     )
     .returning({ id: runs.id });
   return updated.length > 0;
 }
 
 /**
- * Filter: actor-owned OR schedule-triggered org-level runs (no actor).
- * App-level runs come from schedules bound to app profiles — they have
- * no userId/endUserId but do have a scheduleId. All org members can see them.
+ * Filter: actor-owned OR org-visible runs (no dashboard user).
+ * This covers:
+ * - Runs triggered by the actor themselves (dashboardUserId or endUserId match)
+ * - Schedule-triggered runs (no dashboardUserId, no endUserId, has scheduleId)
+ * - End-user runs (no dashboardUserId, has endUserId) — visible to all org
+ *   members since they are API-triggered on behalf of end-users
  */
 function actorOrOrgFilter(actorId: string): SQL {
-  return or(
-    actorOwnershipFilter(actorId),
-    and(isNull(runs.userId), isNull(runs.endUserId), isNotNull(runs.scheduleId)),
-  )!;
+  return or(actorOwnershipFilter(actorId), isNull(runs.dashboardUserId))!;
 }
 
 export async function markAllNotificationsRead(
@@ -61,13 +60,11 @@ export async function markAllNotificationsRead(
     .update(runs)
     .set({ readAt: new Date() })
     .where(
-      and(
-        actorOrOrgFilter(actorId),
-        eq(runs.orgId, orgId),
-        eq(runs.applicationId, applicationId),
-        isNotNull(runs.notifiedAt),
-        isNull(runs.readAt),
-      ),
+      scopedWhere(runs, {
+        orgId,
+        applicationId,
+        extra: [actorOrOrgFilter(actorId), isNotNull(runs.notifiedAt), isNull(runs.readAt)],
+      }),
     )
     .returning({ id: runs.id });
   return updated.length;
@@ -82,13 +79,11 @@ export async function getUnreadNotificationCount(
     .select({ count: count() })
     .from(runs)
     .where(
-      and(
-        actorOrOrgFilter(actorId),
-        eq(runs.orgId, orgId),
-        eq(runs.applicationId, applicationId),
-        isNotNull(runs.notifiedAt),
-        isNull(runs.readAt),
-      ),
+      scopedWhere(runs, {
+        orgId,
+        applicationId,
+        extra: [actorOrOrgFilter(actorId), isNotNull(runs.notifiedAt), isNull(runs.readAt)],
+      }),
     );
   return row?.count ?? 0;
 }
@@ -105,14 +100,16 @@ export async function getUnreadCountsByAgent(
     })
     .from(runs)
     .where(
-      and(
-        actorOrOrgFilter(actorId),
-        eq(runs.orgId, orgId),
-        eq(runs.applicationId, applicationId),
-        isNotNull(runs.notifiedAt),
-        isNull(runs.readAt),
-        isNotNull(runs.packageId),
-      ),
+      scopedWhere(runs, {
+        orgId,
+        applicationId,
+        extra: [
+          actorOrOrgFilter(actorId),
+          isNotNull(runs.notifiedAt),
+          isNull(runs.readAt),
+          isNotNull(runs.packageId),
+        ],
+      }),
     )
     .groupBy(runs.packageId);
 
@@ -128,11 +125,7 @@ export async function listOrgRuns(
   options: { limit?: number; offset?: number; applicationId: string },
 ) {
   const { limit = 20, offset = 0, applicationId } = options;
-  return listRunsWithFilter(
-    and(eq(runs.orgId, orgId), eq(runs.applicationId, applicationId))!,
-    limit,
-    offset,
-  );
+  return listRunsWithFilter(scopedWhere(runs, { orgId, applicationId })!, limit, offset);
 }
 
 export async function listUserRuns(
@@ -142,7 +135,11 @@ export async function listUserRuns(
 ) {
   const { limit = 20, offset = 0, applicationId } = options;
   return listRunsWithFilter(
-    and(actorOrOrgFilter(actorId), eq(runs.orgId, orgId), eq(runs.applicationId, applicationId))!,
+    scopedWhere(runs, {
+      orgId,
+      applicationId,
+      extra: [actorOrOrgFilter(actorId)],
+    })!,
     limit,
     offset,
   );

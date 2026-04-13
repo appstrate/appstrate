@@ -1,11 +1,73 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { and, eq, type AnyColumn, type SQL } from "drizzle-orm";
+
 /**
  * Shared helpers for system+DB merge patterns and partial update building.
  *
  * Used by org-models, org-proxies, org-provider-keys, and any service
  * that merges system-registry entries with database rows.
  */
+
+// --- Scoped WHERE builder ---
+
+/**
+ * Drizzle table shape required by `scopedWhere`: must expose an `orgId`
+ * column, and optionally an `applicationId` column for app-scoped tables.
+ */
+export interface OrgScopedTable {
+  orgId: AnyColumn;
+  applicationId?: AnyColumn;
+}
+
+export interface ScopedWhereOptions {
+  orgId: string | undefined;
+  applicationId?: string | undefined;
+  /** Additional conditions to AND with the scope (undefined entries are skipped). */
+  extra?: (SQL | undefined)[];
+}
+
+/**
+ * Build a Drizzle `where` expression that scopes a query to an organization
+ * (and optionally an application), plus any extra conditions.
+ *
+ * Undefined values are silently skipped — callers with optional app-scoping
+ * can pass `applicationId` conditionally. Returns `undefined` if no
+ * conditions remain (rare, but compatible with `.where(cond)` signatures).
+ *
+ * Examples:
+ * ```ts
+ * scopedWhere(runs, { orgId })
+ * // → eq(runs.orgId, orgId)
+ *
+ * scopedWhere(runs, { orgId, applicationId })
+ * // → and(eq(runs.orgId, orgId), eq(runs.applicationId, applicationId))
+ *
+ * scopedWhere(runs, { orgId, applicationId, extra: [eq(runs.id, id)] })
+ * // → and(eq(runs.orgId, orgId), eq(runs.applicationId, applicationId), eq(runs.id, id))
+ * ```
+ */
+export function scopedWhere(table: OrgScopedTable, opts: ScopedWhereOptions): SQL | undefined {
+  const conditions: SQL[] = [];
+
+  if (opts.orgId !== undefined) {
+    conditions.push(eq(table.orgId, opts.orgId));
+  }
+
+  if (opts.applicationId !== undefined && table.applicationId !== undefined) {
+    conditions.push(eq(table.applicationId, opts.applicationId));
+  }
+
+  if (opts.extra) {
+    for (const cond of opts.extra) {
+      if (cond !== undefined) conditions.push(cond);
+    }
+  }
+
+  if (conditions.length === 0) return undefined;
+  if (conditions.length === 1) return conditions[0];
+  return and(...conditions);
+}
 
 // --- System + DB merge ---
 

@@ -10,12 +10,12 @@ import {
   user,
   runs,
   runLogs,
-  packageSchedules,
   packages,
   orgInvitations,
 } from "@appstrate/db/schema";
-import { eq, and, inArray, count } from "drizzle-orm";
+import { eq, inArray, count } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
+import { scopedWhere } from "../lib/db-helpers.ts";
 
 interface OrgResult {
   id: string;
@@ -48,7 +48,7 @@ export async function createOrganization(
       name,
       slug,
       createdBy: userId,
-      settings: { apiVersion: CURRENT_API_VERSION },
+      orgSettings: { apiVersion: CURRENT_API_VERSION },
     })
     .returning();
 
@@ -112,12 +112,12 @@ export type OrgSettings = z.infer<typeof orgSettingsSchema>;
 
 export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
   const [row] = await db
-    .select({ settings: organizations.settings })
+    .select({ orgSettings: organizations.orgSettings })
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
 
-  return (row?.settings as OrgSettings) ?? {};
+  return (row?.orgSettings as OrgSettings) ?? {};
 }
 
 export async function updateOrgSettings(
@@ -129,11 +129,11 @@ export async function updateOrgSettings(
 
   const [row] = await db
     .update(organizations)
-    .set({ settings: merged, updatedAt: new Date() })
+    .set({ orgSettings: merged, updatedAt: new Date() })
     .where(eq(organizations.id, orgId))
-    .returning({ settings: organizations.settings });
+    .returning({ orgSettings: organizations.orgSettings });
 
-  return (row?.settings as OrgSettings) ?? {};
+  return (row?.orgSettings as OrgSettings) ?? {};
 }
 
 export async function getOrgMembers(orgId: string) {
@@ -169,7 +169,12 @@ export async function getOrgMember(orgId: string, userId: string) {
   const [row] = await db
     .select()
     .from(organizationMembers)
-    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
+    .where(
+      scopedWhere(organizationMembers, {
+        orgId,
+        extra: [eq(organizationMembers.userId, userId)],
+      }),
+    )
     .limit(1);
 
   return row ?? null;
@@ -205,7 +210,12 @@ export async function addMember(
 export async function removeMember(orgId: string, userId: string): Promise<void> {
   const deleted = await db
     .delete(organizationMembers)
-    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
+    .where(
+      scopedWhere(organizationMembers, {
+        orgId,
+        extra: [eq(organizationMembers.userId, userId)],
+      }),
+    )
     .returning({ orgId: organizationMembers.orgId });
 
   if (deleted.length === 0) {
@@ -221,7 +231,12 @@ export async function updateMemberRole(
   const updated = await db
     .update(organizationMembers)
     .set({ role })
-    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
+    .where(
+      scopedWhere(organizationMembers, {
+        orgId,
+        extra: [eq(organizationMembers.userId, userId)],
+      }),
+    )
     .returning({ orgId: organizationMembers.orgId });
 
   if (updated.length === 0) {
@@ -244,7 +259,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
   const runningResult = await db
     .select({ runningCount: count() })
     .from(runs)
-    .where(and(eq(runs.orgId, orgId), inArray(runs.status, ["pending", "running"])));
+    .where(scopedWhere(runs, { orgId, extra: [inArray(runs.status, ["pending", "running"])] }));
 
   if ((runningResult[0]?.runningCount ?? 0) > 0) {
     throw new Error("Cannot delete organization: runs are in progress");
@@ -255,8 +270,9 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // run_logs → runs (cascade exists, but org_id FK needs manual delete)
     await tx.delete(runLogs).where(eq(runLogs.orgId, orgId));
     await tx.delete(runs).where(eq(runs.orgId, orgId));
-    // appProfileProviderBindings cascade through connectionProfiles → applicationId
-    await tx.delete(packageSchedules).where(eq(packageSchedules.orgId, orgId));
+    // Org-scoped tables (package_schedules, org_models, org_system_provider_keys,
+    // and module-owned tables like webhooks) cascade via their orgId FK —
+    // no explicit delete needed.
     // applicationPackages cascade through applications → orgId
     await tx.delete(packages).where(eq(packages.orgId, orgId));
     // userProviderConnections are now profile-scoped (user-owned), not org-scoped — no cleanup needed

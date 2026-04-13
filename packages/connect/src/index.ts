@@ -7,6 +7,8 @@ export type {
   ProviderDefinition,
   ConnectionRecord,
   ScopeValidationResult,
+  OAuthStateRecord,
+  OAuthStateStore,
 } from "./types.ts";
 // Encryption
 export { encrypt, decrypt, encryptCredentials, decryptCredentials } from "./encryption.ts";
@@ -34,6 +36,9 @@ export type { InitiateOAuthResult, OAuthCallbackResult } from "./oauth.ts";
 // OAuth1
 export { initiateOAuth1, handleOAuth1Callback } from "./oauth1.ts";
 export type { OAuth1CallbackResult } from "./oauth1.ts";
+
+// Token refresh
+export { RefreshError } from "./token-refresh.ts";
 
 // Credentials
 export {

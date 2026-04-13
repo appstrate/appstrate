@@ -14,14 +14,14 @@
       "authorizationUrl": "https://login.wrike.com/oauth2/authorize/v4",
       "tokenUrl": "https://login.wrike.com/oauth2/token",
       "refreshUrl": "https://login.wrike.com/oauth2/token",
-      "defaultScopes": ["wsReadOnly"],
+      "defaultScopes": ["Default"],
       "scopeSeparator": ",",
       "pkceEnabled": false,
       "tokenAuthMethod": "client_secret_post"
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://www.wrike.com/api/*"],
+    "authorizedUris": ["https://www.wrike.com/api/*", "https://*.wrike.com/api/*"],
     "availableScopes": [
       { "value": "Default", "label": "Standard access to tasks, folders, projects" },
       { "value": "wsReadOnly", "label": "Read-only access to workspace" },

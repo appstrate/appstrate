@@ -2,14 +2,16 @@
 
 Base URL: `https://{org}.api.crm.dynamics.com/api/data/v9.2`
 
-Enterprise CRM and ERP platform. The base URL is organization-specific. Uses OData v4 protocol with standard query options (`$select`, `$filter`, `$expand`, `$orderby`, `$top`). Entity IDs are GUIDs. OAuth is also organization-specific in practice: the delegated scope should match the environment URL (for example `https://{org}.api.crm.dynamics.com/user_impersonation`).
+Enterprise CRM and ERP platform. The base URL is organization-specific. Uses OData v4 protocol with standard query options (`$select`, `$filter`, `$expand`, `$orderby`, `$top`). Entity IDs are GUIDs.
 
 ## Endpoints
 
 ### WhoAmI
+
 `GET /api/data/v9.2/WhoAmI`
 
 **Response:**
+
 ```json
 {
   "BusinessUnitId": "00000000-0000-0000-0000-000000000001",
@@ -19,9 +21,11 @@ Enterprise CRM and ERP platform. The base URL is organization-specific. Uses ODa
 ```
 
 ### List Contacts
+
 `GET /api/data/v9.2/contacts`
 
 **Query parameters:**
+
 - `$select` — Fields to return (e.g. `firstname,lastname,emailaddress1,telephone1`)
 - `$filter` — OData filter (e.g. `statecode eq 0 and contains(lastname,'Smith')`)
 - `$orderby` — Sort (e.g. `createdon desc`)
@@ -30,6 +34,7 @@ Enterprise CRM and ERP platform. The base URL is organization-specific. Uses ODa
 - `$count` — Include total count (`true`)
 
 **Response:**
+
 ```json
 {
   "@odata.context": "https://myorg.api.crm.dynamics.com/api/data/v9.2/$metadata#contacts",
@@ -49,16 +54,20 @@ Enterprise CRM and ERP platform. The base URL is organization-specific. Uses ODa
 ```
 
 ### Get Contact
+
 `GET /api/data/v9.2/contacts({CONTACT_ID})`
 
 **Query parameters:**
+
 - `$select` — Fields to return
 - `$expand` — Related entities
 
 ### Create Contact
+
 `POST /api/data/v9.2/contacts`
 
 **Request body (JSON):**
+
 ```json
 {
   "firstname": "Jane",
@@ -72,9 +81,11 @@ Enterprise CRM and ERP platform. The base URL is organization-specific. Uses ODa
 Returns 204 with `OData-EntityId` header containing the new record URL.
 
 ### Update Contact
+
 `PATCH /api/data/v9.2/contacts({CONTACT_ID})`
 
 **Request body (JSON):**
+
 ```json
 {
   "telephone1": "+0987654321",
@@ -83,19 +94,24 @@ Returns 204 with `OData-EntityId` header containing the new record URL.
 ```
 
 ### Delete Contact
+
 `DELETE /api/data/v9.2/contacts({CONTACT_ID})`
 
 ### List Accounts
+
 `GET /api/data/v9.2/accounts`
 
 **Query parameters:**
+
 - `$select` — e.g. `name,revenue,industrycode,telephone1`
 - `$filter`, `$orderby`, `$top`, `$expand`
 
 ### Create Account
+
 `POST /api/data/v9.2/accounts`
 
 **Request body (JSON):**
+
 ```json
 {
   "name": "Acme Corporation",
@@ -106,16 +122,20 @@ Returns 204 with `OData-EntityId` header containing the new record URL.
 ```
 
 ### List Leads
+
 `GET /api/data/v9.2/leads`
 
 **Query parameters:**
+
 - `$select` — e.g. `subject,firstname,lastname,emailaddress1,companyname`
 - `$filter` — e.g. `statecode eq 0` (open leads)
 
 ### Create Lead
+
 `POST /api/data/v9.2/leads`
 
 **Request body (JSON):**
+
 ```json
 {
   "subject": "Potential enterprise client",
@@ -128,16 +148,20 @@ Returns 204 with `OData-EntityId` header containing the new record URL.
 ```
 
 ### List Opportunities
+
 `GET /api/data/v9.2/opportunities`
 
 **Query parameters:**
+
 - `$select` — e.g. `name,estimatedvalue,estimatedclosedate,stepname`
 - `$filter` — e.g. `statecode eq 0` (open opportunities)
 
 ### Create Opportunity
+
 `POST /api/data/v9.2/opportunities`
 
 **Request body (JSON):**
+
 ```json
 {
   "name": "Enterprise License Deal",
@@ -148,15 +172,19 @@ Returns 204 with `OData-EntityId` header containing the new record URL.
 ```
 
 ### List Tasks
+
 `GET /api/data/v9.2/tasks`
 
 **Query parameters:**
+
 - `$select` — e.g. `subject,description,scheduledstart,scheduledend,statecode`
 
 ### Create Task
+
 `POST /api/data/v9.2/tasks`
 
 **Request body (JSON):**
+
 ```json
 {
   "subject": "Follow up with client",
@@ -168,15 +196,18 @@ Returns 204 with `OData-EntityId` header containing the new record URL.
 ```
 
 ### List Cases (Incidents)
+
 `GET /api/data/v9.2/incidents`
 
 **Query parameters:**
+
 - `$select` — e.g. `title,ticketnumber,prioritycode,statecode`
 - `$filter` — e.g. `statecode eq 0` (active cases)
 
 ## Common Patterns
 
 ### OData Query Options
+
 - `$select=field1,field2` — Choose fields
 - `$filter=statecode eq 0 and contains(name,'Acme')` — Filter records
 - `$orderby=createdon desc` — Sort
@@ -185,17 +216,22 @@ Returns 204 with `OData-EntityId` header containing the new record URL.
 - `$count=true` — Include `@odata.count` in response
 
 ### OData Filter Operators
+
 `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `not`, `contains()`, `startswith()`, `endswith()`
 
 ### Pagination
+
 When more records exist, response includes `@odata.nextLink` with the full URL for the next page. Follow it directly. Max `$top` is 5000.
 
 ### Lookup Fields
+
 Related entity references use `_fieldname_value` for reading and `fieldname@odata.bind` for writing:
+
 - Read: `"_parentcustomerid_value": "guid-here"`
 - Write: `"parentcustomerid_account@odata.bind": "/accounts(guid-here)"`
 
 ### Error Format
+
 ```json
 {
   "error": {
@@ -206,12 +242,12 @@ Related entity references use `_fieldname_value` for reading and `fieldname@odat
 ```
 
 ### Rate Limits
+
 6000 requests per 5 minutes per user. Service protection limits return 429 with `Retry-After`. Monitor `x-ms-ratelimit-burst-remaining-xrm-requests` header.
 
 ## Important Notes
+
 - **Instance URL** — The base URL is organization-specific (e.g. `myorg.api.crm.dynamics.com`). Regions use different suffixes (`crm2`, `crm4`, etc.).
-- **OAuth scope** — In Microsoft documentation, delegated access should use an environment-specific scope such as `https://{org}.api.crm.dynamics.com/user_impersonation`. Confidential-client flows may instead use `https://{org}.api.crm.dynamics.com/.default`.
-- **Appstrate limitation** — Because Appstrate provider manifests use static default scopes, this provider may require custom handling or manual verification for organizations whose OAuth flow requires an org-specific scope value.
 - **Token refresh** — Access tokens expire after 1 hour. Automatic refresh via the runtime.
 - **GUIDs** — All entity IDs are GUIDs in parentheses: `contacts(a1b2c3d4-...)`.
 - **OData protocol** — All queries use OData v4 conventions. Include `Accept: application/json` and `OData-MaxVersion: 4.0` headers.

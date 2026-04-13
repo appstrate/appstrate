@@ -6,6 +6,26 @@
  * Defines the mapping from org roles to permissions (`resource:action`).
  * Used by the `requirePermission()` middleware for both session and API key auth.
  *
+ * ## Module-owned resources live here on purpose
+ *
+ * `ResourceActions` is a **static TypeScript interface** so call sites like
+ * `requirePermission("webhooks", "write")` stay fully typed at compile time.
+ * That means modules cannot contribute permissions at runtime — a new module
+ * that introduces its own resource (e.g. `webhooks`, `billing`) MUST edit
+ * this file in the same PR that adds the module:
+ *
+ *   1. Add the resource to the `ResourceActions` interface below.
+ *   2. Add the resource's permissions to the relevant role sets
+ *      (`OWNER_PERMISSIONS`, `ADMIN_PERMISSIONS`, `MEMBER_PERMISSIONS`).
+ *   3. Add them to `API_KEY_ALLOWED_SCOPES` if they should be grantable
+ *      through API keys.
+ *
+ * This is a deliberate coupling — RBAC is a core concern and type safety
+ * at the call site outweighs the "zero-footprint module" invariant. If a
+ * module is disabled via `APPSTRATE_MODULES`, its permission entries become
+ * unreachable (nothing mounts the routes that check them) but stay in the
+ * type union — harmless.
+ *
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md
  */
 
@@ -36,6 +56,7 @@ interface ResourceActions {
   applications: "read" | "write" | "delete";
   "end-users": "read" | "write" | "delete";
   webhooks: "read" | "write" | "delete";
+  "oauth-clients": "read" | "write" | "delete";
   billing: "read" | "manage";
 }
 
@@ -129,6 +150,10 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "webhooks:read",
   "webhooks:write",
   "webhooks:delete",
+  // OAuth clients (OIDC module)
+  "oauth-clients:read",
+  "oauth-clients:write",
+  "oauth-clients:delete",
   // Billing
   "billing:read",
   "billing:manage",
@@ -253,6 +278,10 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "proxies:read",
   "proxies:write",
   "proxies:delete",
+  // Connections (end-user OAuth via API key + Appstrate-User header)
+  "connections:read",
+  "connections:connect",
+  "connections:disconnect",
   // Applications & End-Users
   "applications:read",
   "applications:write",
@@ -264,6 +293,10 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "webhooks:read",
   "webhooks:write",
   "webhooks:delete",
+  // OAuth clients (OIDC module)
+  "oauth-clients:read",
+  "oauth-clients:write",
+  "oauth-clients:delete",
 ]);
 
 // ---------------------------------------------------------------------------

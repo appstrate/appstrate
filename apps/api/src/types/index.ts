@@ -54,16 +54,32 @@ export interface LoadedPackage {
 export type AppEnv = {
   Variables: {
     user: { id: string; email: string; name: string };
-    endUser?: { id: string; applicationId: string; name: string | null; email: string | null };
+    endUser?: import("@appstrate/core/module").EndUserContext;
     agent: LoadedPackage;
     orgId: string;
     orgSlug: string;
     orgRole: import("@appstrate/shared-types").OrgRole;
     permissions?: Set<string>;
-    authMethod: "session" | "api_key";
+    /**
+     * Auth method that resolved the request. Core values: `"session"`,
+     * `"api_key"`. Auth-strategy modules set their own identifier (e.g.
+     * `"oidc"`, `"mtls"`).
+     */
+    authMethod: string;
     apiKeyId: string | null;
     applicationId: string; // from API key auth or resolved by app-context middleware (X-App-Id)
+    /**
+     * Resolved application row (id/orgId/isDefault) set by
+     * `requireAppContext()` alongside `applicationId`. Services called from
+     * app-scoped routes should accept this shape directly instead of taking
+     * an `applicationId` string and re-SELECTing the row. Optional because
+     * auth strategies set `applicationId` before the middleware runs, but
+     * the `app` row is only loaded once the middleware executes.
+     */
+    app?: import("../middleware/app-context.ts").AppContextRow;
     requestId: string;
     apiVersion: string;
+    /** Set by auth strategies that defer org resolution to X-Org-Id middleware. */
+    deferOrgResolution?: boolean;
   };
 };

@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq, lt } from "drizzle-orm";
-import { db, isEmbeddedDb, getPGliteClient } from "@appstrate/db/client";
-import { oauthStates, packages, packageVersions } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
+import { db, isEmbeddedDb, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
+import { packages, packageVersions } from "@appstrate/db/schema";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
-import { loadCloud } from "./cloud-loader.ts";
+import { loadModules, getModules, getModuleContributions } from "./modules/module-loader.ts";
+import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
+import { registerEmailOverrides } from "@appstrate/emails";
+import {
+  setBeforeSignupHook,
+  setAfterSignupHook,
+  createAuth,
+  type BetterAuthPluginList,
+} from "@appstrate/db/auth";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
@@ -24,27 +32,64 @@ import {
 } from "../services/package-items/index.ts";
 import { markOrphanRunsFailed } from "../services/state/index.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
-import { initWebhookWorker } from "../services/webhooks.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 
 export async function boot(): Promise<void> {
-  // Attempt to load cloud module (no-op in OSS — sets _cloud to null)
-  await loadCloud();
-
-  // Log infrastructure mode
+  // Apply core migrations at boot (before modules, so DB is ready).
+  // Both PGlite and PostgreSQL auto-migrate — no manual `db:migrate` step needed.
   const env = (await import("@appstrate/env")).getEnv();
   if (isEmbeddedDb) {
     logger.info("Database: PGlite (embedded)", { path: env.PGLITE_DATA_DIR });
-    // Apply migrations programmatically for PGlite (no external drizzle-kit CLI)
     await applyEmbeddedMigrations();
   } else {
     logger.info("Database: PostgreSQL", {
       url: env.DATABASE_URL?.replace(/\/\/.*@/, "//***@") ?? "",
     });
+    await applyCoreMigrations();
   }
+
+  // Load modules (cloud, webhooks, etc.)
+  // Modules may run their own migrations in init() — core DB is ready.
+  await loadModules(getModuleRegistry(), buildModuleInitContext());
+
+  // Initialize Better Auth AFTER modules have registered their plugin +
+  // schema contributions. `createAuth()` narrows the `unknown[]` from the
+  // core contract to Better Auth's plugin list type, and merges module
+  // Drizzle schemas into the adapter's model map so plugins like
+  // @better-auth/oauth-provider can resolve their own tables.
+  const contributions = getModuleContributions();
+  createAuth(contributions.betterAuthPlugins as BetterAuthPluginList, contributions.drizzleSchemas);
+
+  // Wire module contributions that were declared on the module contract
+  for (const mod of getModules().values()) {
+    if (mod.emailOverrides) {
+      registerEmailOverrides(mod.emailOverrides);
+    }
+  }
+  // Broadcast `beforeSignup` to EVERY loaded module (not first-match-wins
+  // like other hooks). The cloud module's free-tier gate AND the OIDC
+  // module's per-client signup policy both need to run on every signup;
+  // first throw aborts the user creation. Iteration is inline (rather
+  // than going through `callHook`) because the semantics differ from the
+  // generic first-match-wins path in `module-loader.ts`.
+  setBeforeSignupHook(async (email, ctx) => {
+    for (const mod of getModules().values()) {
+      const hook = mod.hooks?.beforeSignup;
+      if (hook) await hook(email, ctx);
+    }
+  });
+  // Broadcast `afterSignup` to every loaded module too — OIDC uses it to
+  // auto-join the newly created user to the org pinned by the in-flight
+  // OAuth client so the onward /authorize redirect completes cleanly.
+  setAfterSignupHook(async (user, ctx) => {
+    for (const mod of getModules().values()) {
+      const hook = mod.hooks?.afterSignup;
+      if (hook) await hook(user, ctx);
+    }
+  });
   if (env.S3_BUCKET) {
     logger.info("Storage: S3", { bucket: env.S3_BUCKET, endpoint: env.S3_ENDPOINT ?? "AWS" });
   } else {
@@ -122,24 +167,10 @@ export async function boot(): Promise<void> {
       });
     }),
     initScheduleWorker().catch((err) => {
-      logger.warn("Could not initialize scheduler", {
+      logger.warn("Could not initialize schedule worker", {
         error: err instanceof Error ? err.message : String(err),
       });
     }),
-    Promise.resolve(initWebhookWorker()).catch((err) => {
-      logger.warn("Could not initialize webhook worker", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }),
-    db
-      .delete(oauthStates)
-      .where(lt(oauthStates.expiresAt, new Date()))
-      .then((deleted) => logger.debug("Cleaned up expired OAuth states", { deleted }))
-      .catch((err) => {
-        logger.warn("Could not clean up expired OAuth states", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }),
     expireOldInvitations()
       .then((expiredCount) => {
         if (expiredCount > 0) logger.info("Expired old invitations", { count: expiredCount });
@@ -302,4 +333,54 @@ async function applyEmbeddedMigrations(): Promise<void> {
   }
 
   logger.info("PGlite migrations applied", { count: journal.entries.length - applied.size });
+}
+
+/**
+ * Apply Drizzle migrations for PostgreSQL using the standard migrator.
+ * Idempotent — already-applied migrations are skipped via the tracking table.
+ *
+ * Multi-replica safety: drizzle-orm's migrator does not take a lock, so two
+ * API replicas starting simultaneously can race on `__drizzle_migrations`.
+ * We wrap the whole migration in a PostgreSQL session-level advisory lock
+ * using a stable constant key (shared across all replicas). A second caller
+ * blocks until the first finishes, then observes its entries in the tracking
+ * table and skips them.
+ *
+ * pg_advisory_lock is session-scoped: the lock and unlock must target the
+ * same backend connection. We pin them to a reserved postgres-js connection;
+ * the migrator runs on the shared pool since holding the lock elsewhere is
+ * enough to block concurrent replicas.
+ */
+const APPSTRATE_CORE_MIGRATION_LOCK_KEY = 7246811234567890n;
+
+async function applyCoreMigrations(): Promise<void> {
+  const { resolve } = await import("node:path");
+  const { migrate } = await import("drizzle-orm/postgres-js/migrator");
+  const { sql: rawSql } = await import("drizzle-orm");
+
+  const migrationsFolder = resolve(import.meta.dir, "../../../../packages/db/drizzle");
+
+  const reserved = await reservePgConnection();
+  if (!reserved) {
+    throw new Error("reservePgConnection() returned null — expected PostgreSQL client");
+  }
+  const { sql: reservedSql, release } = reserved;
+
+  try {
+    await reservedSql`SELECT pg_advisory_lock(${String(APPSTRATE_CORE_MIGRATION_LOCK_KEY)}::bigint)`;
+    try {
+      await db.execute(rawSql`SET client_min_messages TO 'warning'`);
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- schema generic widening for migrator
+        await migrate(db as any, { migrationsFolder });
+      } finally {
+        await db.execute(rawSql`SET client_min_messages TO 'notice'`);
+      }
+    } finally {
+      await reservedSql`SELECT pg_advisory_unlock(${String(APPSTRATE_CORE_MIGRATION_LOCK_KEY)}::bigint)`;
+    }
+  } finally {
+    release();
+  }
+  logger.info("Core migrations applied");
 }
