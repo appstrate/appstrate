@@ -23,29 +23,31 @@ describe("scopesToPermissions — end_user flow", () => {
   });
 
   it("drops destructive permissions not in OIDC_ALLOWED_SCOPES", () => {
-    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    // Scope drops are logged at `debug` (not `warn`) — scope downgrade is
+    // normal RFC 6749 behavior that fires per token mint, not an anomaly.
+    const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
     try {
       const perms = scopesToPermissions(
         "openid runs:read agents:delete webhooks:write",
         "end_user",
       );
       expect([...perms]).toEqual(["runs:read"]);
-      expect(warnSpy).toHaveBeenCalledTimes(2);
+      expect(debugSpy).toHaveBeenCalledTimes(2);
     } finally {
-      warnSpy.mockRestore();
+      debugSpy.mockRestore();
     }
   });
 
-  it("drops unknown scopes with warn log carrying module + scope metadata", () => {
-    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+  it("drops unknown scopes with debug log carrying module + scope metadata", () => {
+    const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
     try {
       scopesToPermissions("mystery:scope", "end_user");
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      const call = warnSpy.mock.calls[0]!;
+      expect(debugSpy).toHaveBeenCalledTimes(1);
+      const call = debugSpy.mock.calls[0]!;
       const meta = call[1] as Record<string, unknown>;
       expect(meta).toMatchObject({ module: "oidc", scope: "mystery:scope" });
     } finally {
-      warnSpy.mockRestore();
+      debugSpy.mockRestore();
     }
   });
 
