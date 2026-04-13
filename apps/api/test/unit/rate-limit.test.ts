@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { Hono } from "hono";
+import { _resetCacheForTesting } from "@appstrate/env";
 import type { AppEnv } from "../../src/types/index.ts";
 import {
   rateLimit,
@@ -11,7 +12,31 @@ import {
 } from "../../src/middleware/rate-limit.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
+import { resetClientIpCache } from "../../src/lib/client-ip.ts";
 import { flushRedis } from "../helpers/redis.ts";
+
+// `rateLimitByIp` derives the key from `getClientIp(c)` which honors
+// `X-Forwarded-For` / `X-Real-IP` only when `TRUST_PROXY > 0`. Hono's
+// in-process `app.request()` has no real socket, so without a trust-proxy
+// hop the resolver falls back to `"unknown"` for every call and tests
+// that assert per-IP differentiation ("different IPs have separate
+// limits") can never pass. Pin TRUST_PROXY=1 for the duration of this
+// suite and restore the previous value on teardown.
+const SNAPSHOT_TRUST_PROXY = process.env.TRUST_PROXY;
+beforeAll(() => {
+  process.env.TRUST_PROXY = "1";
+  _resetCacheForTesting();
+  resetClientIpCache();
+});
+afterAll(() => {
+  if (SNAPSHOT_TRUST_PROXY === undefined) {
+    delete process.env.TRUST_PROXY;
+  } else {
+    process.env.TRUST_PROXY = SNAPSHOT_TRUST_PROXY;
+  }
+  _resetCacheForTesting();
+  resetClientIpCache();
+});
 
 function createApp() {
   const app = new Hono<AppEnv>();

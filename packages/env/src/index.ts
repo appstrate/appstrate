@@ -7,6 +7,15 @@ import { createEnvGetter } from "@appstrate/core/env";
 
 const envSchema = z
   .object({
+    // Node environment — gates production-only invariants (e.g. APP_URL https)
+    NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+    // Trust proxy hops: "false" (default, ignore XFF) | "true" (=1) | "N" (N trusted hops)
+    TRUST_PROXY: z
+      .string()
+      .default("false")
+      .refine((v) => v === "false" || v === "true" || (/^\d+$/.test(v) && Number(v) >= 0), {
+        message: "TRUST_PROXY must be 'false', 'true', or a non-negative integer",
+      }),
     // Database (optional — falls back to PGlite embedded Postgres when absent)
     DATABASE_URL: z.string().optional(),
     // PGlite data directory (used when DATABASE_URL is absent)
@@ -31,6 +40,15 @@ const envSchema = z
       .default("[]")
       .transform((s) => JSON.parse(s) as unknown[]),
     SYSTEM_PROVIDER_KEYS: z
+      .string()
+      .default("[]")
+      .transform((s) => JSON.parse(s) as unknown[]),
+
+    // OIDC instance clients — declarative provisioning of satellite OAuth
+    // clients (admin dashboards, second-party web apps). Parsed loosely
+    // here; the oidc module applies a strict Zod schema at boot. See
+    // `apps/api/src/modules/oidc/services/instance-client-sync.ts`.
+    OIDC_INSTANCE_CLIENTS: z
       .string()
       .default("[]")
       .transform((s) => JSON.parse(s) as unknown[]),
@@ -92,6 +110,10 @@ const envSchema = z
   .refine((env) => !env.S3_BUCKET || env.S3_REGION, {
     message: "S3_REGION is required when S3_BUCKET is set",
     path: ["S3_REGION"],
+  })
+  .refine((env) => env.NODE_ENV !== "production" || env.APP_URL.startsWith("https://"), {
+    message: "APP_URL must use https:// when NODE_ENV=production",
+    path: ["APP_URL"],
   });
 
 // ─── Getter ──────────────────────────────────────────────────

@@ -65,6 +65,9 @@ const WebhookDetailPage = lazy(() =>
     default: m.WebhookDetailPage,
   })),
 );
+const AuthCallbackPage = lazy(() =>
+  import("./modules/oidc/pages/auth-callback").then((m) => ({ default: m.AuthCallbackPage })),
+);
 
 function MainLayout() {
   const { resolvedTheme } = useTheme();
@@ -186,6 +189,22 @@ export function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          {features.oidc && (
+            <Route
+              path="/auth/callback"
+              element={
+                <Suspense
+                  fallback={
+                    <div className="flex min-h-screen items-center justify-center">
+                      <Spinner />
+                    </div>
+                  }
+                >
+                  <AuthCallbackPage />
+                </Suspense>
+              }
+            />
+          )}
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />

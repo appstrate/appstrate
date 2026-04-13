@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
@@ -18,6 +18,11 @@ import {
 } from "@/components/ui/select";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useAppConfig } from "../hooks/use-app-config";
+const OAuthClientsTab = lazy(() =>
+  import("../modules/oidc/components/oauth-clients-tab").then((m) => ({
+    default: m.OAuthClientsTab,
+  })),
+);
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useOrg } from "../hooks/use-org";
@@ -81,14 +86,16 @@ export function OrgSettingsPage() {
 
   const { features } = useAppConfig();
 
+  const oidcEnabled = !!features.oidc;
   const validTabs = [
     "general",
     "members",
     ...(isAdmin ? ["models" as const] : []),
     ...(isAdmin ? ["proxies" as const] : []),
+    ...(isAdmin && oidcEnabled ? ["oauth" as const] : []),
     ...(features.billing ? ["billing" as const] : []),
   ] as const;
-  type Tab = "general" | "members" | "models" | "proxies" | "billing";
+  type Tab = "general" | "members" | "models" | "proxies" | "oauth" | "billing";
   const [tab, setTab] = useTabWithHash<Tab>(validTabs as readonly Tab[], "general");
   const [editingName, setEditingName] = useState(false);
   const [newName, setNewName] = useState("");
@@ -316,6 +323,7 @@ export function OrgSettingsPage() {
             </TabsTrigger>
             {isAdmin && <TabsTrigger value="models">{t("models.tabTitle")}</TabsTrigger>}
             {isAdmin && <TabsTrigger value="proxies">{t("proxies.tabTitle")}</TabsTrigger>}
+            {isAdmin && oidcEnabled && <TabsTrigger value="oauth">OAuth</TabsTrigger>}
             {features.billing && <TabsTrigger value="billing">{t("billing.tabTitle")}</TabsTrigger>}
           </TabsList>
         </Tabs>
@@ -649,6 +657,12 @@ export function OrgSettingsPage() {
           onSetDefault={(p) => setDefaultProxyMutation.mutate(p.id)}
           onRemoveDefault={() => setDefaultProxyMutation.mutate(null)}
         />
+      )}
+
+      {tab === "oauth" && oidcEnabled && (
+        <Suspense fallback={<LoadingState />}>
+          <OAuthClientsTab level="org" />
+        </Suspense>
       )}
 
       {tab === "billing" && features.billing && <BillingTab />}

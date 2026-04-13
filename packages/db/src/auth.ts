@@ -6,274 +6,462 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import { createTransport } from "nodemailer";
 import { eq } from "drizzle-orm";
 import { renderEmail } from "@appstrate/emails";
+import type { BeforeSignupContext, AfterSignupContext } from "@appstrate/core/module";
 import { db } from "./client.ts";
 import * as schema from "./schema.ts";
 import { profiles, orgInvitations, organizations, user } from "./schema.ts";
 import { getEnv } from "@appstrate/env";
 
-const env = getEnv();
+// Env is read lazily inside `buildAuth()` rather than at module load time so
+// that `_rebuildAuthForTesting()` can flip SMTP / social flags between tests
+// without having to reload the module. All env-dependent derivations
+// (`smtpEnabled`, `smtpTransport`, `socialProviders`, `basePlugins`) live
+// inside `buildAuth()` for the same reason.
 
-// ─── Before-signup hook (injected at boot via module system) ───
+// ─── Signup hooks (injected at boot via module system) ───
+//
+// The platform exposes single injection slots consumed by the module
+// loader (`apps/api/src/lib/boot.ts`) which fans out to every registered
+// module's `beforeSignup` / `afterSignup` hook. Both signatures carry a
+// `ctx` with the request headers so modules that need to read request
+// state (e.g. the OIDC pending-client cookie in `auth/signup-guard.ts`)
+// can do so without adding a parallel hook channel.
 
-let _beforeSignupHook: ((email: string) => void | Promise<void>) | null = null;
+let _beforeSignupHook: ((email: string, ctx: BeforeSignupContext) => void | Promise<void>) | null =
+  null;
 
-export function setBeforeSignupHook(hook: (email: string) => void | Promise<void>): void {
+let _afterSignupHook:
+  | ((user: { id: string; email: string }, ctx: AfterSignupContext) => void | Promise<void>)
+  | null = null;
+
+export function setBeforeSignupHook(
+  hook: (email: string, ctx: BeforeSignupContext) => void | Promise<void>,
+): void {
   _beforeSignupHook = hook;
 }
 
-// ─── SMTP transport (lazy, only if configured) ─────────────
+export function setAfterSignupHook(
+  hook: (user: { id: string; email: string }, ctx: AfterSignupContext) => void | Promise<void>,
+): void {
+  _afterSignupHook = hook;
+}
 
-const smtpEnabled = !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM);
+/**
+ * Better Auth plugin list type. Exported so modules can strongly type their
+ * `betterAuthPlugins()` return value without going through the `unknown[]`
+ * erasure at the `@appstrate/core` contract layer.
+ */
+export type BetterAuthPluginList = NonNullable<Parameters<typeof betterAuth>[0]["plugins"]>;
 
-const smtpTransport = smtpEnabled
-  ? createTransport({
-      host: env.SMTP_HOST,
-      port: env.SMTP_PORT,
-      secure: env.SMTP_PORT === 465,
-      auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
-    })
-  : null;
+/**
+ * BA's OAuth callback endpoint path. Exposed as a constant so the create
+ * hook and its unit tests reference the same string (if BA ever renames
+ * the route, both sides fail together).
+ */
+export const BA_OAUTH_CALLBACK_PATH = "/callback/:id";
 
-// ─── Social providers (only if configured) ──────────────
+/**
+ * Decide whether a `databaseHooks.user.create.before` invocation should
+ * auto-verify the user's email. BA populates `emailVerified` from the
+ * provider's `email_verified` claim, which some providers omit or return
+ * as `false` — trapping brand-new users behind the verification screen
+ * even though the OAuth provider already asserted ownership. We override
+ * that whenever the user creation is running under BA's OAuth callback
+ * endpoint, which means a trusted social provider produced the row.
+ *
+ * Returns `{ data: { emailVerified: true } }` (the shape BA's
+ * `createWithHooks` merges into the row about to be inserted) when the
+ * context path matches, `undefined` otherwise — falling through to the
+ * default BA behavior for email/password, magic-link, and seed paths.
+ *
+ * Exported for unit testing; the `databaseHooks.user.create.before` hook
+ * inside `buildAuth()` is the only production caller.
+ */
+export function shouldAutoVerifyEmailOnCreate(
+  context: { path?: string } | null | undefined,
+): { data: { emailVerified: true } } | undefined {
+  if (context?.path === BA_OAUTH_CALLBACK_PATH) {
+    return { data: { emailVerified: true } };
+  }
+  return undefined;
+}
 
-const googleEnabled = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
-const githubEnabled = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
-const anySocialEnabled = googleEnabled || githubEnabled;
+function buildBasePlugins(
+  env: ReturnType<typeof getEnv>,
+  smtpTransport: ReturnType<typeof createTransport> | null,
+) {
+  const smtpEnabled = !!smtpTransport;
+  return [
+    ...(smtpEnabled
+      ? [
+          magicLink({
+            // Signup via magic-link is allowed. The `databaseHooks.user.create.before`
+            // chain still enforces per-context policy: the OIDC module's
+            // `oidcBeforeSignupGuard` blocks creation for org-level clients with
+            // `allowSignup: false` (via the signed `oidc_pending_client` cookie),
+            // and cloud's free-tier hook applies its own gate. Outside an OIDC
+            // flow, magic-link signup is as open as email/password signup.
+            disableSignUp: false,
+            expiresIn: 7 * 24 * 60 * 60, // 7 days — matches invitation expiry
+            allowedAttempts: 5, // Browsers may hit verify multiple times (prefetch, preconnect)
+            sendMagicLink: async ({ email, url }) => {
+              try {
+                const normalizedEmail = email.toLowerCase().trim();
 
-const socialProviders: Record<string, { clientId: string; clientSecret: string }> | undefined =
-  anySocialEnabled
-    ? {
-        ...(googleEnabled && {
-          google: {
-            clientId: env.GOOGLE_CLIENT_ID!,
-            clientSecret: env.GOOGLE_CLIENT_SECRET!,
-          },
-        }),
-        ...(githubEnabled && {
-          github: {
-            clientId: env.GITHUB_CLIENT_ID!,
-            clientSecret: env.GITHUB_CLIENT_SECRET!,
-          },
-        }),
-      }
-    : undefined;
+                // Parse callbackURL from the magic link to determine context
+                const callbackURL = new URL(url).searchParams.get("callbackURL") ?? "";
+                const isInvitation = callbackURL.startsWith("/invite/");
 
-// ─── Plugins ─────────────────────────────────────────────────
+                let subject: string;
+                let html: string;
 
-const plugins = [
-  ...(smtpEnabled
-    ? [
-        magicLink({
-          disableSignUp: true,
-          expiresIn: 7 * 24 * 60 * 60, // 7 days — matches invitation expiry
-          allowedAttempts: 5, // Browsers may hit verify multiple times (prefetch, preconnect)
-          sendMagicLink: async ({ email, url }) => {
-            try {
-              const normalizedEmail = email.toLowerCase().trim();
+                if (isInvitation) {
+                  // Extract invitation token from callbackURL: /invite/{token}/accept
+                  const invitationToken = callbackURL.split("/")[2];
+                  const [invitation] = invitationToken
+                    ? await db
+                        .select({
+                          orgId: orgInvitations.orgId,
+                          role: orgInvitations.role,
+                          invitedBy: orgInvitations.invitedBy,
+                        })
+                        .from(orgInvitations)
+                        .where(eq(orgInvitations.token, invitationToken))
+                        .limit(1)
+                    : [];
 
-              // Parse callbackURL from the magic link to determine context
-              const callbackURL = new URL(url).searchParams.get("callbackURL") ?? "";
-              const isInvitation = callbackURL.startsWith("/invite/");
+                  if (invitation) {
+                    const [orgRow, inviterRow] = await Promise.all([
+                      db
+                        .select({ name: organizations.name })
+                        .from(organizations)
+                        .where(eq(organizations.id, invitation.orgId))
+                        .limit(1)
+                        .then(([r]) => r),
+                      invitation.invitedBy
+                        ? db
+                            .select({ displayName: profiles.displayName, name: user.name })
+                            .from(user)
+                            .leftJoin(profiles, eq(profiles.id, user.id))
+                            .where(eq(user.id, invitation.invitedBy))
+                            .limit(1)
+                            .then(([r]) => r)
+                        : null,
+                    ]);
 
-              let subject: string;
-              let html: string;
-
-              if (isInvitation) {
-                // Extract invitation token from callbackURL: /invite/{token}/accept
-                const invitationToken = callbackURL.split("/")[2];
-                const [invitation] = invitationToken
-                  ? await db
-                      .select({
-                        orgId: orgInvitations.orgId,
-                        role: orgInvitations.role,
-                        invitedBy: orgInvitations.invitedBy,
-                      })
-                      .from(orgInvitations)
-                      .where(eq(orgInvitations.token, invitationToken))
-                      .limit(1)
-                  : [];
-
-                if (invitation) {
-                  const [orgRow, inviterRow] = await Promise.all([
-                    db
-                      .select({ name: organizations.name })
-                      .from(organizations)
-                      .where(eq(organizations.id, invitation.orgId))
-                      .limit(1)
-                      .then(([r]) => r),
-                    invitation.invitedBy
-                      ? db
-                          .select({ displayName: profiles.displayName, name: user.name })
-                          .from(user)
-                          .leftJoin(profiles, eq(profiles.id, user.id))
-                          .where(eq(user.id, invitation.invitedBy))
-                          .limit(1)
-                          .then(([r]) => r)
-                      : null,
-                  ]);
-
-                  ({ subject, html } = renderEmail("invitation", {
-                    email: normalizedEmail,
-                    inviteUrl: url,
-                    orgName: orgRow?.name ?? "Organisation",
-                    inviterName: inviterRow?.displayName || inviterRow?.name || "Un membre",
-                    role: invitation.role,
-                    locale: "fr",
-                  }));
+                    ({ subject, html } = renderEmail("invitation", {
+                      email: normalizedEmail,
+                      inviteUrl: url,
+                      orgName: orgRow?.name ?? "Organisation",
+                      inviterName: inviterRow?.displayName || inviterRow?.name || "Un membre",
+                      role: invitation.role,
+                      locale: "fr",
+                    }));
+                  } else {
+                    ({ subject, html } = renderEmail("magic-link", {
+                      email: normalizedEmail,
+                      url,
+                      locale: "fr",
+                    }));
+                  }
                 } else {
-                  // Invitation token not found — fall back to generic
                   ({ subject, html } = renderEmail("magic-link", {
                     email: normalizedEmail,
                     url,
                     locale: "fr",
                   }));
                 }
-              } else {
-                // Generic magic link sign-in email
-                ({ subject, html } = renderEmail("magic-link", {
-                  email: normalizedEmail,
-                  url,
-                  locale: "fr",
-                }));
-              }
 
-              await smtpTransport!.sendMail({
-                from: env.SMTP_FROM,
-                to: email,
-                subject,
-                html,
-              });
-            } catch {
-              // Fire-and-forget
-            }
+                await smtpTransport!.sendMail({
+                  from: env.SMTP_FROM,
+                  to: email,
+                  subject,
+                  html,
+                });
+              } catch {
+                // Fire-and-forget
+              }
+            },
+          }),
+        ]
+      : []),
+  ];
+}
+
+// ─── Auth — lazy factory ──────────────────────────────────
+//
+// The Better Auth instance is constructed lazily by `createAuth()` during
+// boot, AFTER modules have registered their plugin contributions via
+// `AppstrateModule.betterAuthPlugins()` (and companion Drizzle tables via
+// `AppstrateModule.drizzleSchemas()`). All consumers must call `getAuth()`
+// at request time / post-boot — never at module-evaluation time.
+//
+// Test harness: `test/setup/preload.ts` calls `createAuth([], {})` during
+// preload so module test runs boot cleanly.
+
+function buildAuth(
+  extraPlugins: BetterAuthPluginList = [],
+  extraSchemas: Record<string, unknown> = {},
+) {
+  const env = getEnv();
+  const smtpEnabled = !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM);
+  // Tests set `SMTP_HOST=__test_json__` to exercise the SMTP-enabled BA flow
+  // (requireEmailVerification, sendOnSignUp, sendOnSignIn, …) without
+  // needing an actual SMTP server. Nodemailer's `jsonTransport` accepts
+  // every message and returns the serialized payload immediately, which
+  // keeps BA's `runInBackgroundOrAwait` from hanging in tests.
+  const smtpTransport = smtpEnabled
+    ? env.SMTP_HOST === "__test_json__"
+      ? createTransport({ jsonTransport: true })
+      : createTransport({
+          host: env.SMTP_HOST,
+          port: env.SMTP_PORT,
+          secure: env.SMTP_PORT === 465,
+          auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
+        })
+    : null;
+  const googleEnabled = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+  const githubEnabled = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
+  const anySocialEnabled = googleEnabled || githubEnabled;
+  const socialProviders:
+    | Record<
+        string,
+        {
+          clientId: string;
+          clientSecret: string;
+          mapProfileToUser?: (profile: unknown) => { emailVerified?: boolean };
+        }
+      >
+    | undefined = anySocialEnabled
+    ? {
+        ...(googleEnabled && {
+          google: {
+            clientId: env.GOOGLE_CLIENT_ID!,
+            clientSecret: env.GOOGLE_CLIENT_SECRET!,
+            // Treat the email as verified for every social signup. Rationale:
+            // a successful OAuth round-trip with Google/GitHub already proves
+            // the user controls that provider account, which is the security
+            // guarantee a second verification email would provide. Without
+            // this override, BA's `link-account.mjs` falls back to checking
+            // the provider's `emailVerified` flag — GitHub's `/user/emails`
+            // returns `false` when the OAuth App lacks the `user:email`
+            // scope grant on a pre-existing authorization, triggering a
+            // spurious verification email on a user who literally just
+            // logged in via the provider. See `sendOnSignUp: true` above.
+            mapProfileToUser: () => ({ emailVerified: true }),
           },
         }),
-      ]
-    : []),
-];
-
-// ─── Auth ──────────────────────────────────────────────────
-
-export const auth = betterAuth({
-  database: drizzleAdapter(db, {
-    provider: "pg",
-    schema,
-  }),
-
-  baseURL: env.APP_URL,
-  basePath: "/api/auth",
-  secret: env.BETTER_AUTH_SECRET,
-
-  plugins,
-
-  emailAndPassword: {
-    enabled: true,
-    minPasswordLength: 8,
-    requireEmailVerification: smtpEnabled,
-    ...(smtpEnabled && {
-      sendResetPassword: async ({ user, url }) => {
-        try {
-          const { subject, html } = renderEmail("reset-password", {
-            email: user.email,
-            url,
-            locale: "fr",
-          });
-          await smtpTransport!.sendMail({
-            from: env.SMTP_FROM,
-            to: user.email,
-            subject,
-            html,
-          });
-        } catch {
-          // Fire-and-forget — don't block reset flow if email fails
-        }
-      },
-    }),
-  },
-
-  ...(smtpEnabled && {
-    emailVerification: {
-      sendOnSignUp: true,
-      autoSignInAfterVerification: true,
-      sendVerificationEmail: async ({ user, url }) => {
-        try {
-          const { subject, html } = renderEmail("verification", {
-            user,
-            url,
-            locale: "fr",
-          });
-          await smtpTransport!.sendMail({
-            from: env.SMTP_FROM,
-            to: user.email,
-            subject,
-            html,
-          });
-        } catch {
-          // Fire-and-forget — don't block signup if email fails
-        }
-      },
-    },
-  }),
-
-  socialProviders,
-
-  account: {
-    accountLinking: {
-      enabled: anySocialEnabled,
-      trustedProviders: [
-        ...(googleEnabled ? ["google" as const] : []),
-        ...(githubEnabled ? ["github" as const] : []),
-      ],
-      allowDifferentEmails: true,
-    },
-  },
-
-  session: {
-    expiresIn: 60 * 60 * 24 * 7, // 7 days
-    updateAge: 60 * 60 * 24, // Refresh every 24h
-    cookieCache: {
-      enabled: true,
-      maxAge: 5 * 60, // 5 minutes
-    },
-  },
-
-  user: {
-    additionalFields: {},
-    changeEmail: {
-      enabled: true,
-      updateEmailWithoutVerification: !smtpEnabled,
-    },
-  },
-
-  trustedOrigins: env.TRUSTED_ORIGINS,
-
-  ...(env.COOKIE_DOMAIN
-    ? {
-        advanced: {
-          crossSubDomainCookies: {
-            enabled: true,
-            domain: env.COOKIE_DOMAIN,
+        ...(githubEnabled && {
+          github: {
+            clientId: env.GITHUB_CLIENT_ID!,
+            clientSecret: env.GITHUB_CLIENT_SECRET!,
+            mapProfileToUser: () => ({ emailVerified: true }),
           },
-        },
+        }),
       }
-    : {}),
+    : undefined;
+  const basePlugins = buildBasePlugins(env, smtpTransport);
+  return betterAuth({
+    database: drizzleAdapter(db, {
+      provider: "pg",
+      schema: { ...schema, ...extraSchemas },
+    }),
 
-  databaseHooks: {
-    user: {
-      create: {
-        before: async (user) => {
-          if (_beforeSignupHook) {
-            await _beforeSignupHook(user.email);
+    baseURL: env.APP_URL,
+    basePath: "/api/auth",
+    secret: env.BETTER_AUTH_SECRET,
+
+    plugins: [...basePlugins, ...extraPlugins],
+
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: 8,
+      requireEmailVerification: smtpEnabled,
+      ...(smtpEnabled && {
+        sendResetPassword: async ({ user, url }) => {
+          try {
+            const { subject, html } = renderEmail("reset-password", {
+              email: user.email,
+              url,
+              locale: "fr",
+            });
+            await smtpTransport!.sendMail({
+              from: env.SMTP_FROM,
+              to: user.email,
+              subject,
+              html,
+            });
+          } catch {
+            // Fire-and-forget — don't block reset flow if email fails
           }
         },
-        after: async (user) => {
-          await db.insert(profiles).values({
-            id: user.id,
-            displayName: user.name || user.email,
-            language: "fr",
-          });
+      }),
+    },
+
+    ...(smtpEnabled && {
+      emailVerification: {
+        sendOnSignUp: true,
+        sendOnSignIn: true,
+        autoSignInAfterVerification: true,
+        sendVerificationEmail: async ({ user, url }) => {
+          try {
+            const { subject, html } = renderEmail("verification", {
+              user,
+              url,
+              locale: "fr",
+            });
+            await smtpTransport!.sendMail({
+              from: env.SMTP_FROM,
+              to: user.email,
+              subject,
+              html,
+            });
+          } catch {
+            // Fire-and-forget — don't block signup if email fails
+          }
+        },
+      },
+    }),
+
+    socialProviders,
+
+    account: {
+      accountLinking: {
+        enabled: anySocialEnabled,
+        trustedProviders: [
+          ...(googleEnabled ? ["google" as const] : []),
+          ...(githubEnabled ? ["github" as const] : []),
+        ],
+        allowDifferentEmails: true,
+      },
+    },
+
+    session: {
+      expiresIn: 60 * 60 * 24 * 7, // 7 days
+      updateAge: 60 * 60 * 24, // Refresh every 24h
+      cookieCache: {
+        enabled: true,
+        maxAge: 5 * 60, // 5 minutes
+      },
+    },
+
+    user: {
+      additionalFields: {},
+      changeEmail: {
+        enabled: true,
+        updateEmailWithoutVerification: !smtpEnabled,
+      },
+    },
+
+    trustedOrigins: env.TRUSTED_ORIGINS,
+
+    ...(env.COOKIE_DOMAIN
+      ? {
+          advanced: {
+            crossSubDomainCookies: {
+              enabled: true,
+              domain: env.COOKIE_DOMAIN,
+            },
+          },
+        }
+      : {}),
+
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (user, context) => {
+            const ctx = context as
+              | {
+                  headers?: Headers;
+                  request?: { headers?: Headers };
+                  path?: string;
+                }
+              | null
+              | undefined;
+            if (_beforeSignupHook) {
+              // BA stores request headers in two possible locations depending
+              // on the code path: `context.headers` for email/password signup,
+              // `context.request.headers` for social OAuth callbacks. Match
+              // BA's own fallback chain (see internal-adapter.mjs) — missing
+              // this second path was the bug that let social signups bypass
+              // the OIDC `beforeSignup` guard. `context` is `null` when BA
+              // creates users outside an HTTP request (seeds, admin scripts).
+              const headers = ctx?.headers ?? ctx?.request?.headers ?? null;
+              await _beforeSignupHook(user.email, { headers });
+            }
+            // Auto-verify email on social signup. See
+            // `shouldAutoVerifyEmailOnCreate` for the full rationale.
+            return shouldAutoVerifyEmailOnCreate(ctx);
+          },
+          after: async (user, context) => {
+            await db.insert(profiles).values({
+              id: user.id,
+              displayName: user.name || user.email,
+              language: "fr",
+            });
+            if (_afterSignupHook) {
+              const ctx = context as
+                | { headers?: Headers; request?: { headers?: Headers } }
+                | null
+                | undefined;
+              const headers = ctx?.headers ?? ctx?.request?.headers ?? null;
+              await _afterSignupHook({ id: user.id, email: user.email }, { headers });
+            }
+          },
         },
       },
     },
-  },
-});
+  });
+}
+
+// ─── Factory + lazy singleton ────────────────────────────
+
+type AuthInstance = ReturnType<typeof buildAuth>;
+
+let _auth: AuthInstance | null = null;
+let _lastExtraPlugins: BetterAuthPluginList = [];
+let _lastExtraSchemas: Record<string, unknown> = {};
+
+/**
+ * Construct the Better Auth singleton. Idempotent — subsequent calls are
+ * no-ops. Must be called once during boot, after modules have loaded, so
+ * that any plugins contributed via `AppstrateModule.betterAuthPlugins()`
+ * (and their companion Drizzle tables via
+ * `AppstrateModule.drizzleSchemas()`) are merged with `basePlugins` and the
+ * core schema before the instance is built.
+ */
+export function createAuth(
+  extraPlugins: BetterAuthPluginList = [],
+  extraSchemas: Record<string, unknown> = {},
+): void {
+  if (_auth) return;
+  _lastExtraPlugins = extraPlugins;
+  _lastExtraSchemas = extraSchemas;
+  _auth = buildAuth(extraPlugins, extraSchemas);
+}
+
+/**
+ * Test-only: rebuild the Better Auth singleton with the CURRENT env. Lets
+ * tests flip SMTP / social / cookie-domain flags at runtime and verify the
+ * resulting behavior (email-verification flow, social auto-verify hook,
+ * …). The extra plugins + drizzle schemas passed to the most recent
+ * `createAuth()` call are re-used so modules don't need to re-register.
+ *
+ * DO NOT call this from production code — it defeats the whole point of
+ * the idempotent singleton. It exists solely so the module test preload
+ * can opt certain test files into an SMTP-enabled auth instance without
+ * having to reload the entire process.
+ */
+export function _rebuildAuthForTesting(): void {
+  _auth = buildAuth(_lastExtraPlugins, _lastExtraSchemas);
+}
+
+/** Get the Better Auth instance. Throws if `createAuth()` has not yet run. */
+export function getAuth(): AuthInstance {
+  if (!_auth) {
+    throw new Error(
+      "auth not initialized — createAuth() must run during boot before any auth access",
+    );
+  }
+  return _auth;
+}

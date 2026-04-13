@@ -56,6 +56,7 @@ interface ResourceActions {
   applications: "read" | "write" | "delete";
   "end-users": "read" | "write" | "delete";
   webhooks: "read" | "write" | "delete";
+  "oauth-clients": "read" | "write" | "delete";
   billing: "read" | "manage";
 }
 
@@ -149,6 +150,10 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "webhooks:read",
   "webhooks:write",
   "webhooks:delete",
+  // OAuth clients (OIDC module)
+  "oauth-clients:read",
+  "oauth-clients:write",
+  "oauth-clients:delete",
   // Billing
   "billing:read",
   "billing:manage",
@@ -288,6 +293,10 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "webhooks:read",
   "webhooks:write",
   "webhooks:delete",
+  // OAuth clients (OIDC module)
+  "oauth-clients:read",
+  "oauth-clients:write",
+  "oauth-clients:delete",
 ]);
 
 // ---------------------------------------------------------------------------

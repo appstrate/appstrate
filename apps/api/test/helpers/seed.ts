@@ -17,10 +17,10 @@ import {
   runLogs,
   applications,
   endUsers,
-  packageSchedules,
+  schedules,
   apiKeys,
   orgProxies,
-  orgProviderKeys,
+  orgSystemProviderKeys,
   orgModels,
   connectionProfiles,
   userProviderConnections,
@@ -171,7 +171,7 @@ export async function seedEndUser(
 
 // ─── Schedules ────────────────────────────────────────────
 
-type ScheduleInsert = Partial<InferInsertModel<typeof packageSchedules>> & {
+type ScheduleInsert = Partial<InferInsertModel<typeof schedules>> & {
   packageId: string;
   connectionProfileId: string;
   orgId: string;
@@ -180,9 +180,9 @@ type ScheduleInsert = Partial<InferInsertModel<typeof packageSchedules>> & {
 
 export async function seedSchedule(
   overrides: ScheduleInsert,
-): Promise<InferSelectModel<typeof packageSchedules>> {
+): Promise<InferSelectModel<typeof schedules>> {
   const [schedule] = await db
-    .insert(packageSchedules)
+    .insert(schedules)
     .values({
       id: `sched_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
       cronExpression: "0 * * * *",
@@ -239,15 +239,15 @@ export async function seedOrgProxy(
 
 // ─── Org Provider Keys ───────────────────────────────────
 
-type OrgProviderKeyInsert = Partial<InferInsertModel<typeof orgProviderKeys>> & {
+type OrgProviderKeyInsert = Partial<InferInsertModel<typeof orgSystemProviderKeys>> & {
   orgId: string;
 };
 
 export async function seedOrgProviderKey(
   overrides: OrgProviderKeyInsert,
-): Promise<InferSelectModel<typeof orgProviderKeys>> {
+): Promise<InferSelectModel<typeof orgSystemProviderKeys>> {
   const [key] = await db
-    .insert(orgProviderKeys)
+    .insert(orgSystemProviderKeys)
     .values({
       label: "Test Provider Key",
       api: "anthropic",

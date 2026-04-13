@@ -2,10 +2,11 @@
 
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { auth } from "@appstrate/db/auth";
+import { getAuth } from "@appstrate/db/auth";
 import { organizationMembers } from "@appstrate/db/schema";
+import { scopedWhere } from "../lib/db-helpers.ts";
 import { addSubscriber, removeSubscriber } from "../services/realtime.ts";
 import type { RealtimeEvent } from "../services/realtime.ts";
 import { unauthorized } from "../lib/errors.ts";
@@ -63,7 +64,7 @@ async function validateSSEAuth(c: {
   }
 
   // 2. Fallback: cookie session
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
   if (!session?.user) return null;
 
   const orgId = c.req.query("orgId");
@@ -74,7 +75,10 @@ async function validateSSEAuth(c: {
     .select({ role: organizationMembers.role })
     .from(organizationMembers)
     .where(
-      and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, session.user.id)),
+      scopedWhere(organizationMembers, {
+        orgId,
+        extra: [eq(organizationMembers.userId, session.user.id)],
+      }),
     )
     .limit(1);
 

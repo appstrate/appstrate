@@ -21,7 +21,7 @@ export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
   slug: text("slug").unique().notNull(),
-  settings: jsonb("settings").notNull().default({}),
+  orgSettings: jsonb("org_settings").notNull().default({}),
   createdBy: text("created_by").references(() => user.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -128,8 +128,8 @@ export const orgProxies = pgTable(
   ],
 );
 
-export const orgProviderKeys = pgTable(
-  "org_provider_keys",
+export const orgSystemProviderKeys = pgTable(
+  "org_system_provider_keys",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     orgId: uuid("org_id")
@@ -143,7 +143,7 @@ export const orgProviderKeys = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (t) => [index("idx_org_provider_keys_org_id").on(t.orgId)],
+  (t) => [index("idx_org_system_provider_keys_org_id").on(t.orgId)],
 );
 
 export const orgModels = pgTable(
@@ -159,7 +159,7 @@ export const orgModels = pgTable(
     modelId: text("model_id").notNull(),
     providerKeyId: uuid("provider_key_id")
       .notNull()
-      .references(() => orgProviderKeys.id, {
+      .references(() => orgSystemProviderKeys.id, {
         onDelete: "cascade",
       }),
     input: jsonb("input"), // ["text", "image"] | null

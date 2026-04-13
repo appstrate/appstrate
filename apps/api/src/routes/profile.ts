@@ -2,12 +2,13 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { profiles, user as userTable, organizationMembers } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 import { internalError, notFound, parseBody } from "../lib/errors.ts";
+import { scopedWhere } from "../lib/db-helpers.ts";
 
 export const profileUpdateSchema = z.object({
   language: z.enum(["fr", "en"]).optional(),
@@ -78,7 +79,7 @@ profileRouter.post("/profiles/batch", async (c) => {
     .select({ id: profiles.id, displayName: profiles.displayName })
     .from(profiles)
     .innerJoin(organizationMembers, eq(profiles.id, organizationMembers.userId))
-    .where(and(eq(organizationMembers.orgId, orgId), inArray(profiles.id, ids)));
+    .where(scopedWhere(organizationMembers, { orgId, extra: [inArray(profiles.id, ids)] }));
 
   return c.json({ profiles: rows });
 });

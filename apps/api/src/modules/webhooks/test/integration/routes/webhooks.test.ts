@@ -21,6 +21,8 @@ describe("Webhooks API", () => {
 
   function webhookPayload(overrides?: Record<string, unknown>) {
     return {
+      level: "application" as const,
+      applicationId: ctx.defaultAppId,
       url: "https://example.com/webhook",
       events: ["run.success"],
       ...overrides,
@@ -52,6 +54,22 @@ describe("Webhooks API", () => {
       expect(body.events).toContain("run.success");
     });
 
+    it("rejects application webhook with invalid applicationId prefix", async () => {
+      const res = await app.request("/api/webhooks", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          level: "application",
+          applicationId: "invalid-no-prefix",
+          url: "https://example.com/hook",
+          events: ["run.success"],
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.detail).toContain("app_");
+    });
+
     it("returns secret only at creation", async () => {
       const body = await createWebhook();
       expect(body.secret).toBeDefined();
@@ -68,11 +86,11 @@ describe("Webhooks API", () => {
   });
 
   describe("GET /api/webhooks", () => {
-    it("lists webhooks", async () => {
+    it("lists application-level webhooks when applicationId is passed", async () => {
       await createWebhook();
       await createWebhook({ url: "https://example.com/webhook2" });
 
-      const res = await app.request("/api/webhooks", {
+      const res = await app.request(`/api/webhooks?applicationId=${ctx.defaultAppId}`, {
         headers: authHeaders(ctx),
       });
 
@@ -81,6 +99,45 @@ describe("Webhooks API", () => {
       expect(body.object).toBe("list");
       expect(body.data).toBeArray();
       expect(body.data.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("lists org-level webhooks when applicationId is omitted", async () => {
+      // Create one org-level webhook + one app-level webhook, then list without applicationId.
+      await app.request("/api/webhooks", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          level: "org",
+          url: "https://example.com/org-webhook",
+          events: ["run.success"],
+        }),
+      });
+      await createWebhook();
+
+      const res = await app.request("/api/webhooks", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.data.length).toBe(1);
+      expect(body.data[0].level).toBe("org");
+      expect(body.data[0].applicationId).toBeNull();
+    });
+
+    it("lists all webhooks in the org when all=true", async () => {
+      await app.request("/api/webhooks", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          level: "org",
+          url: "https://example.com/org-webhook",
+          events: ["run.success"],
+        }),
+      });
+      await createWebhook();
+
+      const res = await app.request("/api/webhooks?all=true", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.data.length).toBe(2);
     });
   });
 

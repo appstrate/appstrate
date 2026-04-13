@@ -277,12 +277,7 @@ export async function findByExternalId(
 export async function isEndUserInApp(
   applicationId: string,
   endUserId: string,
-): Promise<{
-  id: string;
-  applicationId: string;
-  name: string | null;
-  email: string | null;
-} | null> {
+): Promise<import("@appstrate/core/module").EndUserContext | null> {
   const [row] = await db
     .select({
       id: endUsers.id,
@@ -293,5 +288,11 @@ export async function isEndUserInApp(
     .from(endUsers)
     .where(and(eq(endUsers.id, endUserId), eq(endUsers.applicationId, applicationId)))
     .limit(1);
-  return row ?? null;
+  if (!row) return null;
+  return {
+    id: row.id,
+    applicationId: row.applicationId,
+    ...(row.name != null ? { name: row.name } : {}),
+    ...(row.email != null ? { email: row.email } : {}),
+  };
 }

@@ -13,18 +13,7 @@ export const OUTBOUND_TIMEOUT_MS = 30_000;
 export const MAX_SUBSTITUTE_BODY_SIZE = 5 * 1024 * 1024; // 5MB
 export const LLM_PROXY_TIMEOUT_MS = 300_000; // 5 minutes
 
-export interface LlmProxyConfig {
-  baseUrl: string;
-  apiKey: string;
-  placeholder: string;
-}
-
-export interface SidecarConfig {
-  runToken: string;
-  platformApiUrl: string;
-  proxyUrl?: string;
-  llm?: LlmProxyConfig;
-}
+export type { SidecarConfig, LlmProxyConfig } from "@appstrate/core/sidecar-types";
 
 export interface CredentialsResponse {
   credentials: Record<string, string>;

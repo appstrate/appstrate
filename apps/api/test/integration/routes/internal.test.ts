@@ -38,7 +38,7 @@ describe("Internal API", () => {
       packageId: pkgId,
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
-      userId: ctx.user.id,
+      dashboardUserId: ctx.user.id,
       status: "running",
     });
     runningRunId = exec.id;
@@ -75,7 +75,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
       const doneToken = signRunToken(doneRun.id);
@@ -103,7 +103,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
         state: { counter: 1 },
       });
@@ -111,7 +111,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
         state: { counter: 2 },
       });
@@ -133,7 +133,7 @@ describe("Internal API", () => {
           packageId: pkgId,
           orgId: ctx.orgId,
           applicationId: ctx.defaultAppId,
-          userId: ctx.user.id,
+          dashboardUserId: ctx.user.id,
           status: "success",
           state: { i },
         });
@@ -186,7 +186,7 @@ describe("Internal API", () => {
         packageId: "@otherorg/test-agent",
         orgId: other.orgId,
         applicationId: other.defaultAppId,
-        userId: other.user.id,
+        dashboardUserId: other.user.id,
         status: "success",
         state: { foreign: true },
       });
@@ -205,7 +205,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
         state: { key: "value" },
         result: { output: "done" },
@@ -244,7 +244,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "failed",
       });
       const doneToken = signRunToken(doneRun.id);
@@ -304,7 +304,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "running",
         providerProfileIds: { [providerId]: profile.id },
       });
@@ -408,7 +408,7 @@ describe("Internal API", () => {
         packageId: pkgId,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "running",
         providerProfileIds: { [providerId]: profile.id },
       });

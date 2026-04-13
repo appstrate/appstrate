@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
@@ -10,13 +10,13 @@ import { isBlockedUrl } from "@appstrate/core/ssrf";
 import type { OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import { loadProviderKeyCredentials } from "./org-provider-keys.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
-import { mergeSystemAndDb, buildUpdateSet } from "../lib/db-helpers.ts";
+import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
 
 // --- List (system + DB) ---
 
 export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   const system = getSystemModels();
-  const rows = await db.select().from(orgModels).where(eq(orgModels.orgId, orgId));
+  const rows = await db.select().from(orgModels).where(scopedWhere(orgModels, { orgId }));
   const orgHasDefault = rows.some((r) => r.isDefault);
   const now = toISORequired(new Date());
 
@@ -88,7 +88,7 @@ export async function createOrgModel(
   const existing = await db
     .select({ id: orgModels.id })
     .from(orgModels)
-    .where(eq(orgModels.orgId, orgId))
+    .where(scopedWhere(orgModels, { orgId }))
     .limit(1);
   const isFirst = existing.length === 0;
 
@@ -140,14 +140,16 @@ export async function updateOrgModel(
   await db
     .update(orgModels)
     .set(updates)
-    .where(and(eq(orgModels.id, modelDbId), eq(orgModels.orgId, orgId)));
+    .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
 }
 
 export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<void> {
   if (isSystemModel(modelDbId)) {
     throw new Error("Cannot delete built-in model");
   }
-  await db.delete(orgModels).where(and(eq(orgModels.id, modelDbId), eq(orgModels.orgId, orgId)));
+  await db
+    .delete(orgModels)
+    .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
 }
 
 export async function setDefaultModel(orgId: string, modelDbId: string | null): Promise<void> {
@@ -155,7 +157,7 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
   await db
     .update(orgModels)
     .set({ isDefault: false, updatedAt: new Date() })
-    .where(eq(orgModels.orgId, orgId));
+    .where(scopedWhere(orgModels, { orgId }));
 
   if (modelDbId === null) return;
 
@@ -164,7 +166,7 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
     await db
       .update(orgModels)
       .set({ isDefault: true, updatedAt: new Date() })
-      .where(and(eq(orgModels.id, modelDbId), eq(orgModels.orgId, orgId)));
+      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
   }
 }
 
@@ -221,7 +223,10 @@ export async function resolveModel(
     .select()
     .from(orgModels)
     .where(
-      and(eq(orgModels.orgId, orgId), eq(orgModels.isDefault, true), eq(orgModels.enabled, true)),
+      scopedWhere(orgModels, {
+        orgId,
+        extra: [eq(orgModels.isDefault, true), eq(orgModels.enabled, true)],
+      }),
     )
     .limit(1);
 
@@ -280,7 +285,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
       cost: orgModels.cost,
     })
     .from(orgModels)
-    .where(and(eq(orgModels.id, modelDbId), eq(orgModels.orgId, orgId)))
+    .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
     .limit(1);
 
   if (!row || !row.enabled) return null;

@@ -198,11 +198,18 @@ export async function createAgentWithConfig(
 
 export async function createWebhook(
   client: ApiClient,
-  overrides: { url?: string; events?: string[] } = {},
+  overrides: {
+    url?: string;
+    events?: string[];
+    level?: "org" | "application";
+    applicationId?: string;
+  } = {},
 ): Promise<{ id: string; url: string; secret: string }> {
   const res = await client.post("/webhooks", {
+    level: overrides.level ?? "org",
     url: overrides.url ?? "https://example.com/hook",
     events: overrides.events ?? ["run.success"],
+    ...(overrides.applicationId ? { applicationId: overrides.applicationId } : {}),
   });
 
   if (res.status() !== 201) {

@@ -178,6 +178,13 @@ for (const moduleDir of moduleDirs) {
 const { registerTruncationTables } = await import("../../apps/api/test/helpers/db.ts");
 const { registerTestModule } = await import("../../apps/api/test/helpers/test-modules.ts");
 
+// Phase 1: discover modules and register them. We collect imported modules
+// into a local list, then use the shared `collectModuleContributions()`
+// helper from module-loader.ts to aggregate Better Auth plugins + Drizzle
+// schemas in one place — the production boot path uses the same helper
+// (via `getModuleContributions()`), so tests and prod cannot drift.
+const importedModules: AppstrateModule[] = [];
+
 for (const moduleDir of moduleDirs) {
   // Register the module itself so getTestApp() can mount its router
   const indexFile = join(moduleDir, "index.ts");
@@ -185,6 +192,7 @@ for (const moduleDir of moduleDirs) {
     const imported: { default?: AppstrateModule } = await import(indexFile);
     if (imported.default) {
       registerTestModule(imported.default);
+      importedModules.push(imported.default);
     }
   }
 
@@ -200,3 +208,20 @@ for (const moduleDir of moduleDirs) {
     );
   }
 }
+
+// Phase 2: initialize Better Auth singleton with every module's plugins.
+// The production code path calls createAuth() from boot.ts after
+// loadModules(); tests don't go through boot(), so we initialize directly
+// here. `collectModuleContributions()` is the shared aggregator used by
+// both paths — types flow through as `BetterAuthPluginList`, no `never`
+// cast needed at this layer. Subsequent `getTestApp({ modules })` calls
+// reuse this singleton so strategy tests and E2E OAuth flow tests see a
+// coherent auth surface with no double-initialization cost.
+const { collectModuleContributions } =
+  await import("../../apps/api/src/lib/modules/module-loader.ts");
+const { createAuth } = await import("../../packages/db/src/auth.ts");
+const contributions = collectModuleContributions(importedModules);
+createAuth(
+  contributions.betterAuthPlugins as Parameters<typeof createAuth>[0],
+  contributions.drizzleSchemas,
+);

@@ -31,18 +31,7 @@ export interface IsolationBoundary {
   readonly name: string;
 }
 
-export interface SidecarConfig {
-  runToken: string;
-  platformApiUrl: string;
-  proxyUrl?: string;
-  llm?: LlmProxyConfig;
-}
-
-export interface LlmProxyConfig {
-  baseUrl: string;
-  apiKey: string;
-  placeholder: string;
-}
+export type { SidecarConfig, LlmProxyConfig } from "@appstrate/core/sidecar-types";
 
 export interface CleanupReport {
   workloads: number;

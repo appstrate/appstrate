@@ -579,7 +579,6 @@ export function createRunsRouter() {
     if (!row) {
       throw notFound("Run not found");
     }
-    // End-user scoping: end-users can only see their own runs
     const endUser = c.get("endUser");
     if (endUser && row.endUserId !== endUser.id) {
       throw notFound("Run not found");
@@ -595,7 +594,6 @@ export function createRunsRouter() {
     if (!exec) {
       throw notFound("Run not found");
     }
-    // End-user scoping: end-users can only see their own run logs
     const endUser = c.get("endUser");
     if (endUser && exec.endUserId !== endUser.id) {
       throw notFound("Run not found");

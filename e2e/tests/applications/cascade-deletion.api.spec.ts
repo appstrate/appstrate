@@ -33,7 +33,10 @@ test.describe("Application cascade deletion", () => {
       orgId: orgContext.org.orgId,
       appId: customApp.id,
     });
-    const wh = await createWebhook(customClient);
+    const wh = await createWebhook(customClient, {
+      level: "application",
+      applicationId: customApp.id,
+    });
 
     // Verify webhook exists
     let res = await customClient.get(`/webhooks/${wh.id}`);
@@ -127,8 +130,11 @@ test.describe("Application cascade deletion", () => {
     orgContext,
     orgOnlyClient,
   }) => {
-    // Create webhook in default app
-    const wh = await createWebhook(apiClient, { url: "https://default-app.example.com/hook" });
+    // Create org-level webhook (not tied to any specific app)
+    const wh = await createWebhook(apiClient, {
+      level: "org",
+      url: "https://default-app.example.com/hook",
+    });
 
     // Create + delete a custom app
     const customApp = await createApplication(orgOnlyClient, `CascSafe-${Date.now()}`);

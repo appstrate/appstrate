@@ -57,8 +57,27 @@ export interface AppstrateModule {
   appScopedPaths?: string[];
 
   /**
-   * Create and return a Hono router to be mounted on the app under `/api`.
-   * The platform calls `app.route("/api", router)` with the returned instance.
+   * Create and return a Hono router to be mounted at the HTTP origin root
+   * (`/`). The router declares its routes with their **full paths** — the
+   * platform does NOT inject an `/api` prefix.
+   *
+   * Convention: business endpoints MUST live under `/api/*` to stay
+   * consistent with core (e.g. `/api/webhooks`, `/api/oauth/clients`).
+   * The only paths that legitimately live outside `/api/*` are those
+   * whose location is dictated by an external specification — RFC 5785
+   * well-known URIs (`/.well-known/openid-configuration`,
+   * `/.well-known/oauth-authorization-server`), `robots.txt`, etc.
+   *
+   * Route paths declared here must match the entries the module lists in
+   * `publicPaths` and `appScopedPaths` (which also use full paths). Two
+   * modules cannot register the same path — collisions surface as Hono
+   * first-match-wins silent shadowing, so authors are responsible for
+   * keeping prefixes distinct.
+   *
+   * Mount order: the platform calls `app.route("/", router)` for each
+   * module **before** the SPA static fallback, so module-owned paths take
+   * precedence over the SPA catch-all. Modules that return `undefined`
+   * contribute nothing — the OSS zero-footprint invariant is preserved.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createRouter?(): Hono<any>;
@@ -100,6 +119,58 @@ export interface AppstrateModule {
   features?: Record<string, boolean>;
 
   /**
+   * Custom authentication strategies contributed by this module.
+   *
+   * Strategies are tried in module load order, BEFORE core auth (Bearer ask_
+   * API key → session cookie). The first strategy whose `authenticate()` returns
+   * a non-null `AuthResolution` claims the request; subsequent strategies and
+   * core auth are skipped.
+   *
+   * Strategies MUST return `null` fast when the request does not match their
+   * signature (e.g. a JWT strategy should return `null` for anything not
+   * starting with `Bearer ey...`). A strategy that claims every request would
+   * shadow core API key auth — this is author discipline, not a framework
+   * guarantee. See `apps/api/src/modules/README.md` for the full contract.
+   */
+  authStrategies?(): AuthStrategy[];
+
+  /**
+   * Plugins to contribute to the Better Auth instance.
+   *
+   * Returned values are passed through as `unknown[]` at this contract layer
+   * to keep Better Auth types out of `@appstrate/core` (which is published on
+   * npm). The boot integration site in `packages/db/src/auth.ts` narrows them
+   * to Better Auth's `BetterAuthPluginList` before constructing the auth
+   * instance.
+   *
+   * Called once at boot, after `init()`, during `createAuth()`. Modules that
+   * want strong typing can import `BetterAuthPluginList` from
+   * `@appstrate/db/auth` and annotate their return type.
+   */
+  betterAuthPlugins?(): unknown[];
+
+  /**
+   * Drizzle tables contributed to the Better Auth adapter.
+   *
+   * Better Auth's Drizzle adapter resolves `findOne({ model: "name" })` calls
+   * against a flat `schema` record. When a module's plugins (e.g. the JWT or
+   * OAuth provider plugin) operate on module-owned tables, those tables must
+   * be registered with the adapter — otherwise the plugin fails with
+   * `"Drizzle Adapter: The model X was not found in the schema object."`.
+   *
+   * Return a flat map whose keys are the camelCase model names Better Auth
+   * expects (e.g. `"jwks"`, `"oauthClient"`, `"oauthAccessToken"`) and whose
+   * values are the Drizzle table instances from the module's `schema.ts`.
+   * The values are typed as `unknown` here to keep `drizzle-orm` out of the
+   * published core surface — the boot integration site in
+   * `packages/db/src/auth.ts` merges them into the adapter config as-is.
+   *
+   * Called once at boot, during `createAuth()`, immediately before the
+   * Better Auth instance is constructed.
+   */
+  drizzleSchemas?(): Record<string, unknown>;
+
+  /**
    * Named hooks (first-match-wins).
    * The platform invokes hooks by name — only the first module that provides
    * a given hook is called. For broadcast-to-all semantics, use `events`.
@@ -131,6 +202,16 @@ export interface AppstrateModule {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   emailOverrides?: Record<string, any>;
 
+  /**
+   * Structured data to merge into `AppConfig` at boot.
+   *
+   * Unlike `features` (boolean flags only), this method can contribute
+   * arbitrary structured fields (e.g. `{ oidc: { clientId, issuer } }`).
+   * Called once at boot after `init()` — the result is deep-merged into
+   * `AppConfig` alongside module features.
+   */
+  appConfigContribution?(): Promise<Record<string, unknown>> | Record<string, unknown>;
+
   /** Called during graceful shutdown (reverse init order). */
   shutdown?(): Promise<void>;
 }
@@ -143,12 +224,54 @@ export interface AppstrateModule {
 //   Events (broadcast-to-all): onX
 // ---------------------------------------------------------------------------
 
+/**
+ * Context passed alongside the `beforeSignup` hook's `email` argument. The
+ * second argument is optional for backward compatibility: existing modules
+ * that declare `async (email) => {...}` continue to work unchanged
+ * (JavaScript silently drops extra arguments).
+ *
+ * Modules that need to read request-scoped state (e.g. a signed cookie
+ * pinning an OAuth client for the in-flight signup) should read from
+ * `ctx.headers`. The headers are `null` when BA creates the user outside
+ * an HTTP context (seeds, admin scripts).
+ */
+export interface BeforeSignupContext {
+  headers: Headers | null;
+}
+
+/**
+ * Context passed to the `afterSignup` hook. Includes the committed BA user
+ * id so modules can attach the user to their own tables (e.g. OIDC
+ * auto-joining the user to an org based on the in-flight OAuth client).
+ */
+export interface AfterSignupContext {
+  headers: Headers | null;
+}
+
 /** Known hooks and their signatures. */
 export interface ModuleHooks {
   /** Pre-run gate — return a rejection to block the run, or null/undefined to allow. */
   beforeRun: (params: BeforeRunParams) => Promise<RunRejection | null>;
-  /** Pre-signup gate — throw to reject signup (e.g. domain allowlist). */
-  beforeSignup: (email: string) => Promise<void>;
+  /**
+   * Pre-signup gate — throw to reject signup (e.g. domain allowlist,
+   * free-tier quota, per-client org-signup policy).
+   *
+   * Unlike other hooks in this map, `beforeSignup` is dispatched to EVERY
+   * loaded module rather than first-match-wins (the platform calls all
+   * handlers in turn; any thrown error aborts the signup). This lets
+   * unrelated modules — e.g. cloud billing + OIDC auto-provisioning —
+   * coexist cleanly.
+   */
+  beforeSignup: (email: string, ctx?: BeforeSignupContext) => Promise<void>;
+  /**
+   * Post-signup side effect — runs after the BA user row is committed with
+   * the freshly minted `user.id`. Symmetric with `beforeSignup`: dispatched
+   * to EVERY loaded module. Used by OIDC to auto-join the new user to the
+   * org pinned by the in-flight OAuth client so the subsequent /authorize
+   * redirect lands on the client's callback instead of the dashboard
+   * onboarding flow.
+   */
+  afterSignup: (user: { id: string; email: string }, ctx?: AfterSignupContext) => Promise<void>;
   /**
    * Post-run hook — called on terminal status before the final run record is
    * persisted. Symmetric with `beforeRun`. Modules return a metadata patch
@@ -182,6 +305,102 @@ export interface OpenApiSchemaEntry {
   jsonSchema: Record<string, unknown>;
   /** Human-readable description for reporting. */
   description: string;
+}
+
+// ---------------------------------------------------------------------------
+// Auth strategy contribution types
+//
+// Generic framework-agnostic interface. OIDC/JWT, mTLS, SAML, webhook-HMAC,
+// etc. all implement the same `AuthStrategy` shape. Naming intentionally
+// avoids OIDC vocabulary — this is a general auth-pipeline extension point.
+// ---------------------------------------------------------------------------
+
+/** Request context passed to an `AuthStrategy.authenticate()` call. */
+export interface AuthStrategyRequest {
+  /** Raw request headers (direct ref to `c.req.raw.headers`). */
+  headers: Headers;
+  /** HTTP method (uppercase, e.g. "POST"). */
+  method: string;
+  /** Request path (e.g. "/api/runs"). */
+  path: string;
+}
+
+/**
+ * Resolution returned by a successful `AuthStrategy.authenticate()` call.
+ * Mirrors the shape the core auth middleware sets on `c` via `c.set(...)`.
+ *
+ * `permissions` is `readonly string[]` (not the typed `Permission` union) to
+ * avoid dragging the RBAC permission catalog into `@appstrate/core`. At
+ * request time, `requirePermission(resource, action)` validates membership;
+ * invalid strings from a strategy surface as a 403 at the guard site.
+ */
+export interface AuthResolution {
+  user: { id: string; email: string; name: string };
+  orgId?: string;
+  orgSlug?: string;
+  orgRole?: "owner" | "admin" | "member" | "viewer";
+  /**
+   * Strategy-chosen identifier for this auth method (e.g. "oidc", "mtls",
+   * "webhook-hmac"). Written to `c.set("authMethod", ...)`. NOT constrained
+   * to the core values `"session" | "api_key"`.
+   */
+  authMethod: string;
+  /**
+   * Optional application binding. End-user strategies (API-key impersonation,
+   * OIDC end_user flow) pin this so core's strict end-user filter has the
+   * owning app in context. Dashboard strategies (OIDC dashboard flow) leave
+   * it undefined — app context is then supplied per-request via the
+   * `X-App-Id` header handled by `requireAppContext()`.
+   */
+  applicationId?: string;
+  /** Permission strings already resolved by the strategy. */
+  permissions: readonly string[];
+  /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
+  endUser?: EndUserContext;
+  /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */
+  extra?: Record<string, unknown>;
+  /**
+   * When true, the auth pipeline defers org resolution to the `X-Org-Id`
+   * middleware (same path as session auth) and derives permissions from
+   * `orgRole` after org-context resolves. Strategies that authenticate a
+   * platform user without binding to a specific org at token-verification
+   * time should set this to `true`.
+   */
+  deferOrgResolution?: boolean;
+}
+
+/**
+ * End-user impersonation context. Set on the Hono request context under
+ * `endUser` by auth strategies that resolve an end-user (cookie auth with
+ * `Appstrate-User` header, OIDC JWT, etc.). Consumed by core routes that
+ * filter runs to the end-user's own data.
+ */
+export interface EndUserContext {
+  id: string;
+  applicationId: string;
+  name?: string;
+  email?: string;
+}
+
+/**
+ * A custom authentication strategy. Implementations parse request headers
+ * (JWT, mTLS cert, HMAC sig, …), resolve the caller, and return an
+ * `AuthResolution`.
+ *
+ * Discipline: return `null` as early as possible when the request is clearly
+ * not for this strategy. A strategy that claims `true` on every request would
+ * shadow core API-key auth — authors are responsible for fast no-match paths.
+ */
+export interface AuthStrategy {
+  /** Stable id for logging / telemetry (e.g. "oidc-jwt", "mtls"). */
+  id: string;
+  /**
+   * Attempt to authenticate a request. Return `AuthResolution` to claim the
+   * request, `null` to pass to the next strategy / core auth. Throwing is
+   * allowed for hard auth errors (e.g. malformed JWT) and will surface as a
+   * 500 unless the strategy wraps it in an `ApiError`.
+   */
+  authenticate(req: AuthStrategyRequest): Promise<AuthResolution | null>;
 }
 
 // ---------------------------------------------------------------------------

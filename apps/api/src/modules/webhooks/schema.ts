@@ -12,24 +12,32 @@ import { organizations, applications, packages } from "@appstrate/db/schema";
 // inside their own migration — Drizzle cannot express it without leaking
 // the module schema into core.
 
+// Webhooks are polymorphic across scoping level, mirroring the OIDC
+// `oauth_clients` model:
+//
+//   - `level: "org"` — the webhook subscribes to events from any application
+//     in the org. `applicationId` is NULL.
+//   - `level: "application"` — the webhook subscribes to events from a single
+//     application pinned at creation. `applicationId` is NOT NULL.
+//
+// A DB-level CHECK constraint enforces exactly one shape per row.
 export const webhooks = pgTable(
   "webhooks",
   {
     id: text("id").primaryKey(), // wh_ prefix
+    level: text("level").notNull().$type<"org" | "application">(),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    applicationId: text("application_id")
-      .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+    applicationId: text("application_id").references(() => applications.id, {
+      onDelete: "cascade",
+    }),
     url: text("url").notNull(),
     events: text("events").array().notNull(), // ["run.success", "run.failed"]
     packageId: text("package_id").references(() => packages.id, { onDelete: "set null" }), // null = all packages
     payloadMode: text("payload_mode").notNull().default("full"), // "full" | "summary"
     enabled: boolean("enabled").notNull().default(true),
     secret: text("secret").notNull(), // whsec_ prefix, plaintext (needed for HMAC signing)
-    previousSecret: text("previous_secret"), // for rotation grace period
-    previousSecretExpiresAt: timestamp("previous_secret_expires_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

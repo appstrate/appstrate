@@ -13,8 +13,10 @@ import {
   emitEvent,
   shutdownModules,
   resetModules,
+  getModuleAuthStrategies,
+  getModuleContributions,
 } from "../../../src/lib/modules/module-loader.ts";
-import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
+import type { AppstrateModule, ModuleInitContext, AuthStrategy } from "@appstrate/core/module";
 import type { AppConfig } from "@appstrate/shared-types";
 
 function mockModule(id: string, overrides: Partial<AppstrateModule> = {}): AppstrateModule {
@@ -147,18 +149,28 @@ describe("module-loader", () => {
   });
 
   describe("registerModuleRoutes", () => {
-    it("mounts routers returned by createRouter under /api", async () => {
+    it("mounts routers returned by createRouter at the HTTP origin root", async () => {
+      // Modules declare full paths — the platform does NOT inject an /api
+      // prefix. This lets a single module expose both `/api/*` business
+      // endpoints AND RFC-specified root paths like `/.well-known/*` from
+      // one router.
       const { Hono } = await import("hono");
       const router = new Hono();
-      router.get("/ping", (c) => c.json({ ok: true }));
+      router.get("/api/ping", (c) => c.json({ ok: true, scope: "api" }));
+      router.get("/.well-known/ping", (c) => c.json({ ok: true, scope: "root" }));
       const mod = mockModule("routed", { createRouter: () => router });
       await loadModulesFromInstances([mod], mockCtx());
 
       const app = new Hono();
       registerModuleRoutes(app as never);
-      const res = await app.request("/api/ping");
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true });
+
+      const apiRes = await app.request("/api/ping");
+      expect(apiRes.status).toBe(200);
+      expect(await apiRes.json()).toEqual({ ok: true, scope: "api" });
+
+      const rootRes = await app.request("/.well-known/ping");
+      expect(rootRes.status).toBe(200);
+      expect(await rootRes.json()).toEqual({ ok: true, scope: "root" });
     });
   });
 
@@ -168,7 +180,7 @@ describe("module-loader", () => {
       const b = mockModule("b", { features: { webhooks: true } });
       await loadModulesFromInstances([a, b], mockCtx());
 
-      const result = applyModuleFeatures(baseConfig);
+      const result = await applyModuleFeatures(baseConfig);
       expect(result.features.billing).toBe(true);
       expect(result.features.webhooks).toBe(true);
       expect(baseConfig.features.billing).toBe(false); // unchanged
@@ -326,7 +338,7 @@ describe("module-loader", () => {
 
       // applyModuleFeatures leaves base features untouched — only module
       // contributions are merged in.
-      const merged = applyModuleFeatures(baseConfig);
+      const merged = await applyModuleFeatures(baseConfig);
       expect(merged.features).toEqual(baseConfig.features);
 
       // No module-provided hooks. Core does not use the module hook system
@@ -346,6 +358,113 @@ describe("module-loader", () => {
           status: "success",
         }),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe("getModuleAuthStrategies", () => {
+    it("returns empty array in OSS mode (no modules loaded)", () => {
+      // resetModules() in beforeEach ensures clean state
+      expect(getModuleAuthStrategies()).toEqual([]);
+    });
+
+    it("flattens strategies from multiple modules in load order", async () => {
+      const stratA: AuthStrategy = {
+        id: "strat-a",
+        async authenticate() {
+          return null;
+        },
+      };
+      const stratB1: AuthStrategy = {
+        id: "strat-b1",
+        async authenticate() {
+          return null;
+        },
+      };
+      const stratB2: AuthStrategy = {
+        id: "strat-b2",
+        async authenticate() {
+          return null;
+        },
+      };
+      await loadModulesFromInstances(
+        [
+          mockModule("a", { authStrategies: () => [stratA] }),
+          mockModule("b", { authStrategies: () => [stratB1, stratB2] }),
+        ],
+        mockCtx(),
+      );
+      expect(getModuleAuthStrategies().map((s) => s.id)).toEqual([
+        "strat-a",
+        "strat-b1",
+        "strat-b2",
+      ]);
+    });
+
+    it("returns empty array after resetModules()", async () => {
+      await loadModulesFromInstances(
+        [
+          mockModule("a", {
+            authStrategies: () => [
+              {
+                id: "s1",
+                async authenticate() {
+                  return null;
+                },
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      expect(getModuleAuthStrategies()).toHaveLength(1);
+      resetModules();
+      expect(getModuleAuthStrategies()).toEqual([]);
+    });
+  });
+
+  describe("getModuleContributions", () => {
+    it("returns empty shape in OSS mode (no modules loaded)", () => {
+      expect(getModuleContributions()).toEqual({
+        betterAuthPlugins: [],
+        drizzleSchemas: {},
+      });
+    });
+
+    it("flattens plugins + schemas from multiple modules in load order", async () => {
+      const plugA = { id: "plug-a" };
+      const plugB1 = { id: "plug-b1" };
+      const plugB2 = { id: "plug-b2" };
+      const tableA = { __table: "a" };
+      const tableB = { __table: "b" };
+      await loadModulesFromInstances(
+        [
+          mockModule("a", {
+            betterAuthPlugins: () => [plugA],
+            drizzleSchemas: () => ({ tableA }),
+          }),
+          mockModule("b", {
+            betterAuthPlugins: () => [plugB1, plugB2],
+            drizzleSchemas: () => ({ tableB }),
+          }),
+        ],
+        mockCtx(),
+      );
+      const contributions = getModuleContributions();
+      expect(contributions.betterAuthPlugins).toEqual([plugA, plugB1, plugB2]);
+      expect(contributions.drizzleSchemas).toEqual({ tableA, tableB });
+    });
+
+    it("returns empty shape after resetModules()", async () => {
+      await loadModulesFromInstances(
+        [mockModule("a", { betterAuthPlugins: () => [{ id: "x" }] })],
+        mockCtx(),
+      );
+      expect(getModuleContributions().betterAuthPlugins).toHaveLength(1);
+      resetModules();
+      expect(getModuleContributions()).toEqual({
+        betterAuthPlugins: [],
+        drizzleSchemas: {},
+      });
     });
   });
 });

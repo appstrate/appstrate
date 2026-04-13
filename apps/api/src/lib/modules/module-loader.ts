@@ -7,6 +7,7 @@ import type {
   ModuleInitContext,
   ModuleHooks,
   ModuleEvents,
+  AuthStrategy,
 } from "@appstrate/core/module";
 import { readdirSync, statSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -19,7 +20,6 @@ import { logger } from "../logger.ts";
 // ---------------------------------------------------------------------------
 
 const _modules: Map<string, AppstrateModule> = new Map();
-let _publicPathsCache: Set<string> | null = null;
 let _initialized = false;
 
 // Built-in module discovery: scanned once, then cached for the process lifetime.
@@ -107,30 +107,7 @@ export async function loadModules(specifiers: string[], ctx: ModuleInitContext):
     }
   }
 
-  // Phase 2: Topological sort by dependencies
-  const sorted = topoSort(resolved);
-
-  // Phase 2.5: Fail fast on duplicate route prefixes before any init runs
-  validateNoDuplicatePrefixes(sorted);
-
-  // Phase 3: Init in dependency order
-  for (const mod of sorted) {
-    try {
-      await mod.init(ctx);
-      if (_modules.has(mod.manifest.id)) {
-        logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
-      }
-      _modules.set(mod.manifest.id, mod);
-      logger.info("Module loaded", { id: mod.manifest.id, version: mod.manifest.version });
-    } catch (err) {
-      throw new Error(
-        `Module "${mod.manifest.id}" failed to initialize: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err },
-      );
-    }
-  }
-
-  _initialized = true;
+  await initSortedModules(resolved, ctx);
 }
 
 /**
@@ -145,7 +122,17 @@ export async function loadModulesFromInstances(
     logger.debug("Modules already initialized, skipping");
     return;
   }
+  await initSortedModules(modules, ctx);
+}
 
+/**
+ * Shared init pipeline: topo-sort → duplicate-prefix guard → init in
+ * dependency order → register. Fatal on first failure.
+ */
+async function initSortedModules(
+  modules: AppstrateModule[],
+  ctx: ModuleInitContext,
+): Promise<void> {
   const sorted = topoSort(modules);
   validateNoDuplicatePrefixes(sorted);
   for (const mod of sorted) {
@@ -161,8 +148,8 @@ export async function loadModulesFromInstances(
       logger.warn("Duplicate module ID, overwriting", { id: mod.manifest.id });
     }
     _modules.set(mod.manifest.id, mod);
+    logger.info("Module loaded", { id: mod.manifest.id, version: mod.manifest.version });
   }
-
   _initialized = true;
 }
 
@@ -199,19 +186,25 @@ export function getModules(): ReadonlyMap<string, AppstrateModule> {
   return _modules;
 }
 
-/** Collect all public paths from all loaded modules (cached as Set for O(1) lookup). */
+/** Collect all public paths from all loaded modules (Set for O(1) lookup). */
 export function getModulePublicPaths(): Set<string> {
-  if (_publicPathsCache !== null) return _publicPathsCache;
-  _publicPathsCache = new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
-  return _publicPathsCache;
+  return new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
 }
 
-/** Collect routers from all modules and mount them on the app under `/api`. */
+/**
+ * Collect routers from all modules and mount them at the HTTP origin root
+ * (`/`). Modules declare their routes with their full paths (`/api/...`
+ * for business endpoints, `/.well-known/...` for RFC-specified well-known
+ * URIs) — the platform does NOT inject an `/api` prefix.
+ *
+ * Mount order: MUST be called BEFORE the SPA static fallback / `/*`
+ * catch-all, otherwise the catch-all shadows every module-owned path.
+ */
 export function registerModuleRoutes(app: Hono<AppEnv>): void {
   for (const mod of _modules.values()) {
     const router = mod.createRouter?.();
     if (router) {
-      app.route("/api", router);
+      app.route("/", router);
     }
   }
 }
@@ -259,16 +252,114 @@ export function getModuleOpenApiTags(): Array<{ name: string; description?: stri
 }
 
 /**
+ * Collect auth strategies contributed by all loaded modules.
+ *
+ * Strategies run in module load order, BEFORE core auth (Bearer ask_ API key
+ * → session cookie). First-match-wins: the first strategy returning a
+ * non-null resolution claims the request.
+ *
+ * OSS invariant: returns `[]` when no module provides `authStrategies()`.
+ */
+export function getModuleAuthStrategies(): AuthStrategy[] {
+  const strategies: AuthStrategy[] = [];
+  for (const mod of _modules.values()) {
+    const contrib = mod.authStrategies?.();
+    if (contrib) strategies.push(...contrib);
+  }
+  return strategies;
+}
+
+/**
+ * Shape of the aggregated auth contributions that need to reach Better Auth
+ * at `createAuth()` time: plugins (merged with `basePlugins`) and Drizzle
+ * table definitions (merged into the adapter's model map so plugins like
+ * `@better-auth/oauth-provider` can resolve their own tables).
+ *
+ * Both fields are erased to `unknown` at this layer — the boot integration
+ * site in `packages/db/src/auth.ts` narrows to `BetterAuthPluginList` before
+ * calling `createAuth(plugins, schemas)`. Keeps Better Auth types out of
+ * core.
+ */
+export interface ModuleContributions {
+  betterAuthPlugins: unknown[];
+  drizzleSchemas: Record<string, unknown>;
+}
+
+/**
+ * Aggregate Better Auth plugins and Drizzle schema tables from a list of
+ * modules. The input is explicit so the production registry path and the
+ * test preload path can share one implementation:
+ *
+ * - Production: `boot.ts` calls `collectModuleContributions(Array.from(getModules().values()))`
+ *   after `loadModules()` has populated the singleton registry.
+ * - Tests: `test/setup/preload.ts` imports modules off disk into a local
+ *   array and calls this helper directly — it cannot use
+ *   `getModules()` because the preload builds the Better Auth singleton
+ *   before `getTestApp()` / `loadModulesFromInstances()` has run.
+ *
+ * OSS invariant: returns `{ betterAuthPlugins: [], drizzleSchemas: {} }`
+ * when no module contributes.
+ */
+export function collectModuleContributions(
+  modules: readonly AppstrateModule[],
+): ModuleContributions {
+  const betterAuthPlugins: unknown[] = [];
+  const drizzleSchemas: Record<string, unknown> = {};
+  // Provenance map: model name → module id that contributed it. Enables a
+  // clear error message at boot when two modules declare the same Drizzle
+  // model. Without this guard, `Object.assign` silently overwrites the
+  // first contribution and a Better Auth plugin's `findOne({ model })`
+  // call resolves to the wrong table — a nasty class of silent override
+  // that only surfaces at runtime on the hot path.
+  const modelProvenance: Record<string, string> = {};
+  for (const mod of modules) {
+    const plugins = mod.betterAuthPlugins?.();
+    if (plugins) betterAuthPlugins.push(...plugins);
+    const schemas = mod.drizzleSchemas?.();
+    if (schemas) {
+      for (const modelName of Object.keys(schemas)) {
+        const existing = modelProvenance[modelName];
+        if (existing && existing !== mod.manifest.id) {
+          throw new Error(
+            `Duplicate Drizzle model "${modelName}" contributed by both "${existing}" and ` +
+              `"${mod.manifest.id}". Two modules cannot expose the same Better Auth model name ` +
+              `— the second contribution would silently overwrite the first and break plugin ` +
+              `table resolution. Rename one of the models in the offending module's schema.ts.`,
+          );
+        }
+        modelProvenance[modelName] = mod.manifest.id;
+      }
+      Object.assign(drizzleSchemas, schemas);
+    }
+  }
+  return { betterAuthPlugins, drizzleSchemas };
+}
+
+/**
+ * Production collector — aggregates contributions from every module that
+ * has been loaded into the singleton registry. Thin wrapper around
+ * `collectModuleContributions()` that reads from `_modules`.
+ */
+export function getModuleContributions(): ModuleContributions {
+  return collectModuleContributions(Array.from(_modules.values()));
+}
+
+/**
  * Merge module feature flags into the base AppConfig.
  * Each module's `features` is a `Record<string, boolean>` merged via `Object.assign`.
  */
-export function applyModuleFeatures(base: AppConfig): AppConfig {
+export async function applyModuleFeatures(base: AppConfig): Promise<AppConfig> {
   const moduleFeatures: Record<string, boolean> = {};
+  let config = { ...base };
   for (const mod of _modules.values()) {
     if (mod.features) Object.assign(moduleFeatures, mod.features);
+    if (mod.appConfigContribution) {
+      const contribution = await mod.appConfigContribution();
+      config = { ...config, ...contribution };
+    }
   }
   return {
-    ...base,
+    ...config,
     features: { ...base.features, ...moduleFeatures },
   };
 }
@@ -370,15 +461,16 @@ export async function shutdownModules(): Promise<void> {
       });
     }
   }
-  _modules.clear();
-  _publicPathsCache = null;
-  _initialized = false;
+  clearAllState();
 }
 
-/** Reset all state. Exported for tests only. */
+/** Reset all state. Exported for tests only (skips `mod.shutdown`). */
 export function resetModules(): void {
+  clearAllState();
+}
+
+function clearAllState(): void {
   _modules.clear();
-  _publicPathsCache = null;
   _builtinCache = null;
   _initialized = false;
 }

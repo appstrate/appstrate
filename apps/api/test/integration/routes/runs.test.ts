@@ -132,7 +132,7 @@ describe("Runs API", () => {
         packageId: "@runorg/my-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
 
@@ -154,7 +154,7 @@ describe("Runs API", () => {
         packageId: "@otherorg/secret-agent",
         orgId: otherCtx.orgId,
         applicationId: otherCtx.defaultAppId,
-        userId: otherCtx.user.id,
+        dashboardUserId: otherCtx.user.id,
         status: "success",
       });
 
@@ -181,7 +181,7 @@ describe("Runs API", () => {
         packageId: "@runorg/detail-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
 
@@ -210,7 +210,7 @@ describe("Runs API", () => {
         packageId: "@otherorg/other-agent",
         orgId: otherCtx.orgId,
         applicationId: otherCtx.defaultAppId,
-        userId: otherCtx.user.id,
+        dashboardUserId: otherCtx.user.id,
         status: "success",
       });
 
@@ -236,7 +236,7 @@ describe("Runs API", () => {
         packageId: "@runorg/log-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
       await seedRunLog({
@@ -268,7 +268,7 @@ describe("Runs API", () => {
         packageId: "@runorg/nolog-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "pending",
       });
 
@@ -289,7 +289,7 @@ describe("Runs API", () => {
         packageId: "@otherorg/log-agent",
         orgId: otherCtx.orgId,
         applicationId: otherCtx.defaultAppId,
-        userId: otherCtx.user.id,
+        dashboardUserId: otherCtx.user.id,
         status: "success",
       });
 
@@ -315,7 +315,7 @@ describe("Runs API", () => {
         packageId: "@runorg/cancel-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "running",
       });
 
@@ -335,7 +335,7 @@ describe("Runs API", () => {
         packageId: "@runorg/cancel-pending",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "pending",
       });
 
@@ -355,7 +355,7 @@ describe("Runs API", () => {
         packageId: "@runorg/done-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
 
@@ -383,7 +383,7 @@ describe("Runs API", () => {
         packageId: "@otherorg/cancel-agent",
         orgId: otherCtx.orgId,
         applicationId: otherCtx.defaultAppId,
-        userId: otherCtx.user.id,
+        dashboardUserId: otherCtx.user.id,
         status: "running",
       });
 
@@ -413,14 +413,14 @@ describe("Runs API", () => {
         packageId: "@runorg/del-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@runorg/del-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "failed",
       });
 
@@ -441,7 +441,7 @@ describe("Runs API", () => {
         packageId: "@runorg/running-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "running",
       });
 
@@ -473,7 +473,7 @@ describe("Runs API", () => {
         packageId: "@runorg/iso-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
 
@@ -482,7 +482,7 @@ describe("Runs API", () => {
         packageId: "@runorg/iso-agent",
         orgId: ctx.orgId,
         applicationId: appB.id,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
 
@@ -513,13 +513,13 @@ describe("Runs API", () => {
   // ─── Enriched run responses ─────────────────────────────────
 
   describe("Enriched run responses", () => {
-    it("GET /api/runs/:id returns userName from profile", async () => {
+    it("GET /api/runs/:id returns dashboardUserName from profile", async () => {
       await seedAgent({ id: "@runorg/enriched-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const run = await seedRun({
         packageId: "@runorg/enriched-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
 
@@ -529,8 +529,8 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.userName).toBeString();
-      expect(body.userName).toBeTruthy();
+      expect(body.dashboardUserName).toBeString();
+      expect(body.dashboardUserName).toBeTruthy();
       expect(body.endUserName).toBeNull();
       expect(body.apiKeyName).toBeNull();
       // scheduleName is populated from a LEFT JOIN on package_schedules — null
@@ -560,7 +560,7 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.endUserName).toBe("Alice External");
-      expect(body.userName).toBeNull();
+      expect(body.dashboardUserName).toBeNull();
     });
 
     it("GET /api/runs/:id returns endUserName from externalId fallback", async () => {
@@ -598,7 +598,7 @@ describe("Runs API", () => {
         packageId: "@runorg/ak-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         apiKeyId: apiKey.id,
         status: "success",
       });
@@ -639,7 +639,7 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.scheduleName).toBe("Daily Sync");
-      expect(body.userName).toBeNull();
+      expect(body.dashboardUserName).toBeNull();
     });
 
     it("GET /api/agents/:scope/:name/runs returns enriched fields in list", async () => {
@@ -649,7 +649,7 @@ describe("Runs API", () => {
         packageId: "@runorg/list-enriched",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
 
@@ -660,8 +660,8 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.runs).toHaveLength(1);
-      expect(body.runs[0].userName).toBeString();
-      expect(body.runs[0].userName).toBeTruthy();
+      expect(body.runs[0].dashboardUserName).toBeString();
+      expect(body.runs[0].dashboardUserName).toBeTruthy();
       expect(body.runs[0].endUserName).toBeNull();
       expect(body.runs[0].apiKeyName).toBeNull();
       expect(body.runs[0].scheduleName).toBeNull();

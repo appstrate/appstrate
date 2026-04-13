@@ -7,10 +7,15 @@ import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
-import { loadModules, getModules, callHook } from "./modules/module-loader.ts";
+import { loadModules, getModules, getModuleContributions } from "./modules/module-loader.ts";
 import { getModuleRegistry, buildModuleInitContext } from "./modules/registry.ts";
 import { registerEmailOverrides } from "@appstrate/emails";
-import { setBeforeSignupHook } from "@appstrate/db/auth";
+import {
+  setBeforeSignupHook,
+  setAfterSignupHook,
+  createAuth,
+  type BetterAuthPluginList,
+} from "@appstrate/db/auth";
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
@@ -50,14 +55,40 @@ export async function boot(): Promise<void> {
   // Modules may run their own migrations in init() — core DB is ready.
   await loadModules(getModuleRegistry(), buildModuleInitContext());
 
+  // Initialize Better Auth AFTER modules have registered their plugin +
+  // schema contributions. `createAuth()` narrows the `unknown[]` from the
+  // core contract to Better Auth's plugin list type, and merges module
+  // Drizzle schemas into the adapter's model map so plugins like
+  // @better-auth/oauth-provider can resolve their own tables.
+  const contributions = getModuleContributions();
+  createAuth(contributions.betterAuthPlugins as BetterAuthPluginList, contributions.drizzleSchemas);
+
   // Wire module contributions that were declared on the module contract
   for (const mod of getModules().values()) {
     if (mod.emailOverrides) {
       registerEmailOverrides(mod.emailOverrides);
     }
   }
-  setBeforeSignupHook(async (email: string) => {
-    await callHook("beforeSignup", email);
+  // Broadcast `beforeSignup` to EVERY loaded module (not first-match-wins
+  // like other hooks). The cloud module's free-tier gate AND the OIDC
+  // module's per-client signup policy both need to run on every signup;
+  // first throw aborts the user creation. Iteration is inline (rather
+  // than going through `callHook`) because the semantics differ from the
+  // generic first-match-wins path in `module-loader.ts`.
+  setBeforeSignupHook(async (email, ctx) => {
+    for (const mod of getModules().values()) {
+      const hook = mod.hooks?.beforeSignup;
+      if (hook) await hook(email, ctx);
+    }
+  });
+  // Broadcast `afterSignup` to every loaded module too — OIDC uses it to
+  // auto-join the newly created user to the org pinned by the in-flight
+  // OAuth client so the onward /authorize redirect completes cleanly.
+  setAfterSignupHook(async (user, ctx) => {
+    for (const mod of getModules().values()) {
+      const hook = mod.hooks?.afterSignup;
+      if (hook) await hook(user, ctx);
+    }
   });
   if (env.S3_BUCKET) {
     logger.info("Storage: S3", { bucket: env.S3_BUCKET, endpoint: env.S3_ENDPOINT ?? "AWS" });

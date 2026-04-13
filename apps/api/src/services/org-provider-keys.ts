@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgProviderKeys } from "@appstrate/db/schema";
+import { orgSystemProviderKeys } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
 import { getSystemProviderKeys } from "./model-registry.ts";
 import type { OrgProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 import { testModelConfig } from "./org-models.ts";
-import { mergeSystemAndDb, buildUpdateSet } from "../lib/db-helpers.ts";
+import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
 
 // --- List (system + DB) ---
 
 export async function listOrgProviderKeys(orgId: string): Promise<OrgProviderKeyInfo[]> {
   const system = getSystemProviderKeys();
-  const rows = await db.select().from(orgProviderKeys).where(eq(orgProviderKeys.orgId, orgId));
+  const rows = await db
+    .select()
+    .from(orgSystemProviderKeys)
+    .where(scopedWhere(orgSystemProviderKeys, { orgId }));
   const now = toISORequired(new Date());
 
   return mergeSystemAndDb({
@@ -54,7 +57,7 @@ export async function createOrgProviderKey(
   userId: string,
 ): Promise<string> {
   const [row] = await db
-    .insert(orgProviderKeys)
+    .insert(orgSystemProviderKeys)
     .values({
       orgId,
       label,
@@ -63,7 +66,7 @@ export async function createOrgProviderKey(
       apiKeyEncrypted: encrypt(apiKey),
       createdBy: userId,
     })
-    .returning({ id: orgProviderKeys.id });
+    .returning({ id: orgSystemProviderKeys.id });
   return row!.id;
 }
 
@@ -76,15 +79,19 @@ export async function updateOrgProviderKey(
   const updates = buildUpdateSet(rest);
   if (apiKey !== undefined) updates.apiKeyEncrypted = encrypt(apiKey);
   await db
-    .update(orgProviderKeys)
+    .update(orgSystemProviderKeys)
     .set(updates)
-    .where(and(eq(orgProviderKeys.id, id), eq(orgProviderKeys.orgId, orgId)));
+    .where(
+      scopedWhere(orgSystemProviderKeys, { orgId, extra: [eq(orgSystemProviderKeys.id, id)] }),
+    );
 }
 
 export async function deleteOrgProviderKey(orgId: string, id: string): Promise<void> {
   await db
-    .delete(orgProviderKeys)
-    .where(and(eq(orgProviderKeys.id, id), eq(orgProviderKeys.orgId, orgId)));
+    .delete(orgSystemProviderKeys)
+    .where(
+      scopedWhere(orgSystemProviderKeys, { orgId, extra: [eq(orgSystemProviderKeys.id, id)] }),
+    );
 }
 
 // --- Credential loading ---
@@ -101,12 +108,12 @@ export async function loadProviderKeyCredentials(
 
   const [row] = await db
     .select({
-      api: orgProviderKeys.api,
-      baseUrl: orgProviderKeys.baseUrl,
-      apiKeyEncrypted: orgProviderKeys.apiKeyEncrypted,
+      api: orgSystemProviderKeys.api,
+      baseUrl: orgSystemProviderKeys.baseUrl,
+      apiKeyEncrypted: orgSystemProviderKeys.apiKeyEncrypted,
     })
-    .from(orgProviderKeys)
-    .where(and(eq(orgProviderKeys.id, id), eq(orgProviderKeys.orgId, orgId)))
+    .from(orgSystemProviderKeys)
+    .where(scopedWhere(orgSystemProviderKeys, { orgId, extra: [eq(orgSystemProviderKeys.id, id)] }))
     .limit(1);
   if (!row) return null;
   try {

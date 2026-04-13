@@ -29,11 +29,11 @@ export function RunTrigger({ run }: { run: EnrichedRun }) {
       </span>
     );
   }
-  if (run.userName) {
+  if (run.dashboardUserName) {
     return (
       <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs">
         <User size={12} className="shrink-0" />
-        <span className="truncate">{run.userName}</span>
+        <span className="truncate">{run.dashboardUserName}</span>
       </span>
     );
   }

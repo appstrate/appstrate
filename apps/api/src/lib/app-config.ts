@@ -34,10 +34,15 @@ export function buildAppConfig(): AppConfig {
 
 let _appConfig: AppConfig | null = null;
 
-/** Returns the app config. Must be called after boot (modules loaded). */
+/** Initialize the app config. Must be called once during boot (after modules loaded). */
+export async function initAppConfig(): Promise<void> {
+  _appConfig = await applyModuleFeatures(buildAppConfig());
+}
+
+/** Returns the app config. Must be called after `initAppConfig()`. */
 export function getAppConfig(): AppConfig {
   if (!_appConfig) {
-    _appConfig = applyModuleFeatures(buildAppConfig());
+    throw new Error("getAppConfig() called before initAppConfig() — check boot order");
   }
   return _appConfig;
 }

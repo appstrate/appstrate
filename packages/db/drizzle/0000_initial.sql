@@ -102,7 +102,7 @@ CREATE TABLE "org_models" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "org_provider_keys" (
+CREATE TABLE "org_system_provider_keys" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"org_id" uuid NOT NULL,
 	"label" text NOT NULL,
@@ -139,7 +139,7 @@ CREATE TABLE "organizations" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"name" text NOT NULL,
 	"slug" text NOT NULL,
-	"settings" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"org_settings" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"created_by" text,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
@@ -280,7 +280,7 @@ CREATE TABLE "run_logs" (
 CREATE TABLE "runs" (
 	"id" text PRIMARY KEY NOT NULL,
 	"package_id" text NOT NULL,
-	"user_id" text,
+	"dashboard_user_id" text,
 	"end_user_id" text,
 	"application_id" text NOT NULL,
 	"org_id" uuid NOT NULL,
@@ -308,7 +308,7 @@ CREATE TABLE "runs" (
 	"provider_statuses" jsonb,
 	"api_key_id" text,
 	"metadata" jsonb,
-	CONSTRAINT "runs_at_most_one_actor" CHECK (NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL))
+	CONSTRAINT "runs_at_most_one_actor" CHECK (NOT (dashboard_user_id IS NOT NULL AND end_user_id IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE TABLE "app_profile_provider_bindings" (
@@ -382,10 +382,10 @@ ALTER TABLE "org_invitations" ADD CONSTRAINT "org_invitations_org_id_organizatio
 ALTER TABLE "org_invitations" ADD CONSTRAINT "org_invitations_invited_by_user_id_fk" FOREIGN KEY ("invited_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_invitations" ADD CONSTRAINT "org_invitations_accepted_by_user_id_fk" FOREIGN KEY ("accepted_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_models" ADD CONSTRAINT "org_models_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "org_models" ADD CONSTRAINT "org_models_provider_key_id_org_provider_keys_id_fk" FOREIGN KEY ("provider_key_id") REFERENCES "public"."org_provider_keys"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "org_models" ADD CONSTRAINT "org_models_provider_key_id_org_system_provider_keys_id_fk" FOREIGN KEY ("provider_key_id") REFERENCES "public"."org_system_provider_keys"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_models" ADD CONSTRAINT "org_models_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "org_provider_keys" ADD CONSTRAINT "org_provider_keys_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "org_provider_keys" ADD CONSTRAINT "org_provider_keys_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "org_system_provider_keys" ADD CONSTRAINT "org_system_provider_keys_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "org_system_provider_keys" ADD CONSTRAINT "org_system_provider_keys_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_proxies" ADD CONSTRAINT "org_proxies_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_proxies" ADD CONSTRAINT "org_proxies_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_members" ADD CONSTRAINT "org_members_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -418,7 +418,7 @@ ALTER TABLE "package_schedules" ADD CONSTRAINT "package_schedules_application_id
 ALTER TABLE "run_logs" ADD CONSTRAINT "run_logs_run_id_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."runs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "run_logs" ADD CONSTRAINT "run_logs_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "runs" ADD CONSTRAINT "runs_package_id_packages_id_fk" FOREIGN KEY ("package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "runs" ADD CONSTRAINT "runs_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "runs" ADD CONSTRAINT "runs_dashboard_user_id_user_id_fk" FOREIGN KEY ("dashboard_user_id") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "runs" ADD CONSTRAINT "runs_end_user_id_end_users_id_fk" FOREIGN KEY ("end_user_id") REFERENCES "public"."end_users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "runs" ADD CONSTRAINT "runs_application_id_applications_id_fk" FOREIGN KEY ("application_id") REFERENCES "public"."applications"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "runs" ADD CONSTRAINT "runs_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -449,7 +449,7 @@ CREATE INDEX "idx_org_invitations_org_id" ON "org_invitations" USING btree ("org
 CREATE INDEX "idx_org_invitations_email" ON "org_invitations" USING btree ("email");--> statement-breakpoint
 CREATE INDEX "idx_org_models_org_id" ON "org_models" USING btree ("org_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_org_models_one_default" ON "org_models" USING btree ("org_id") WHERE "org_models"."is_default" = true;--> statement-breakpoint
-CREATE INDEX "idx_org_provider_keys_org_id" ON "org_provider_keys" USING btree ("org_id");--> statement-breakpoint
+CREATE INDEX "idx_org_system_provider_keys_org_id" ON "org_system_provider_keys" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_org_proxies_org_id" ON "org_proxies" USING btree ("org_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_org_proxies_one_default" ON "org_proxies" USING btree ("org_id") WHERE "org_proxies"."is_default" = true;--> statement-breakpoint
 CREATE INDEX "idx_org_members_user_id" ON "org_members" USING btree ("user_id");--> statement-breakpoint
@@ -481,12 +481,12 @@ CREATE INDEX "idx_run_logs_lookup" ON "run_logs" USING btree ("run_id","id");-->
 CREATE INDEX "idx_run_logs_org_id" ON "run_logs" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_runs_package_id" ON "runs" USING btree ("package_id");--> statement-breakpoint
 CREATE INDEX "idx_runs_status" ON "runs" USING btree ("status");--> statement-breakpoint
-CREATE INDEX "idx_runs_user_id" ON "runs" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "idx_runs_dashboard_user_id" ON "runs" USING btree ("dashboard_user_id");--> statement-breakpoint
 CREATE INDEX "idx_runs_end_user_id" ON "runs" USING btree ("end_user_id");--> statement-breakpoint
 CREATE INDEX "idx_runs_application_id" ON "runs" USING btree ("application_id");--> statement-breakpoint
 CREATE INDEX "idx_runs_app_status_started" ON "runs" USING btree ("application_id","status","started_at");--> statement-breakpoint
 CREATE INDEX "idx_runs_org_id" ON "runs" USING btree ("org_id");--> statement-breakpoint
-CREATE INDEX "idx_runs_notification" ON "runs" USING btree ("user_id","org_id","notified_at","read_at");--> statement-breakpoint
+CREATE INDEX "idx_runs_notification" ON "runs" USING btree ("dashboard_user_id","org_id","notified_at","read_at");--> statement-breakpoint
 CREATE INDEX "idx_app_profile_bindings_source" ON "app_profile_provider_bindings" USING btree ("source_profile_id");--> statement-breakpoint
 CREATE INDEX "idx_app_profile_bindings_user" ON "app_profile_provider_bindings" USING btree ("bound_by_user_id");--> statement-breakpoint
 CREATE INDEX "idx_app_provider_creds_provider" ON "application_provider_credentials" USING btree ("provider_id");--> statement-breakpoint

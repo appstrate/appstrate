@@ -14,7 +14,12 @@ export function getActor(c: Context): Actor {
   return { type: "member", id: c.get("user").id };
 }
 
-/** Produces the {userId, endUserId} columns for an INSERT. */
+/**
+ * Produces the {userId, endUserId} columns for an INSERT.
+ *
+ * Note: callers using a column named differently (e.g. `runs.dashboardUserId`)
+ * should map this object's `userId` key to the appropriate column themselves.
+ */
 export function actorInsert(actor: Actor): {
   userId: string | null;
   endUserId: string | null;
@@ -32,7 +37,13 @@ export function actorFromIds(userId: string | null, endUserId: string | null): A
   return null;
 }
 
-/** Produces the WHERE clause to filter by actor. */
+/**
+ * Produces the WHERE clause to filter by actor.
+ *
+ * The `userId` key here is generic — pass whichever column represents the
+ * dashboard/member user (for `runs` that's `runs.dashboardUserId`, for
+ * `connection_profiles` it's `connectionProfiles.userId`).
+ */
 export function actorFilter(actor: Actor, cols: { userId: Column; endUserId: Column }) {
   return actor.type === "end_user" ? eq(cols.endUserId, actor.id) : eq(cols.userId, actor.id);
 }

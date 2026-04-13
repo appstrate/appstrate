@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import { eq, and, desc, type InferSelectModel } from "drizzle-orm";
+import { eq, or, desc, isNull, type InferSelectModel } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "./schema.ts";
 import { logger } from "../../lib/logger.ts";
@@ -26,7 +26,7 @@ type WebhookRow = InferSelectModel<typeof webhooks>;
 type WebhookDeliveryRow = InferSelectModel<typeof webhookDeliveries>;
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { toISORequired } from "../../lib/date-helpers.ts";
-import { buildUpdateSet } from "../../lib/db-helpers.ts";
+import { buildUpdateSet, scopedWhere } from "../../lib/db-helpers.ts";
 import { createQueue, PermanentJobError } from "../../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../../infra/queue/index.ts";
 import { isDevEnvironment, LOCALHOST_HOSTS } from "../../services/redirect-validation.ts";
@@ -50,7 +50,7 @@ type WebhookEventType = z.infer<typeof webhookEventSchema>;
 const RETRY_DELAYS_MS = [30_000, 300_000, 1_800_000, 3_600_000, 7_200_000, 10_800_000, 14_400_000];
 const MAX_ATTEMPTS = 8;
 const DELIVERY_TIMEOUT_MS = 15_000;
-const MAX_WEBHOOKS_PER_APP = 20;
+const MAX_WEBHOOKS_PER_SCOPE = 20;
 const MAX_PAYLOAD_SIZE = 256 * 1024; // 256KB
 
 // ---------------------------------------------------------------------------
@@ -77,10 +77,9 @@ function generateSecret(): string {
 
 /**
  * Convert a webhooks row to the public API DTO. Strips sensitive fields
- * (`orgId`, `secret`, `previousSecret`, `previousSecretExpiresAt`),
- * narrows `payloadMode`, and serializes dates. The input type is anchored
- * to the Drizzle schema — drop or rename a column and this function fails
- * to typecheck.
+ * (`orgId`, `secret`), narrows `payloadMode`, and serializes dates. The
+ * input type is anchored to the Drizzle schema — drop or rename a column
+ * and this function fails to typecheck.
  */
 /**
  * Convert a webhook_deliveries row to the public API DTO. Narrows `status`
@@ -105,6 +104,7 @@ function toWebhookResponse(row: WebhookRow): WebhookInfo {
   return {
     id: row.id,
     object: "webhook",
+    level: row.level,
     applicationId: row.applicationId,
     url: row.url,
     events: row.events,
@@ -169,31 +169,48 @@ async function buildSignedHeaders(
 }
 
 // ---------------------------------------------------------------------------
-// CRUD
+// Polymorphic CRUD — level: "org" | "application"
 // ---------------------------------------------------------------------------
+//
+// Org-level webhooks subscribe to events from any application in the org.
+// Application-level webhooks are pinned to a single app at creation.
+// `applicationId` is nullable — the CHECK constraint in the initial
+// migration enforces exactly one shape per row.
 
-export async function createWebhook(
-  orgId: string,
-  applicationId: string,
-  params: {
-    url: string;
-    events: string[];
-    packageId?: string | null;
-    payloadMode?: string;
-    enabled?: boolean;
-  },
-): Promise<WebhookCreateResponse> {
-  // Check limit (per application, not per org)
-  const existing = await db
-    .select({ id: webhooks.id })
-    .from(webhooks)
-    .where(and(eq(webhooks.orgId, orgId), eq(webhooks.applicationId, applicationId)));
-  if (existing.length >= MAX_WEBHOOKS_PER_APP) {
+export type CreateWebhookInput =
+  | {
+      level: "org";
+      orgId: string;
+      url: string;
+      events: string[];
+      packageId?: string | null;
+      payloadMode?: string;
+      enabled?: boolean;
+    }
+  | {
+      level: "application";
+      orgId: string;
+      applicationId: string;
+      url: string;
+      events: string[];
+      packageId?: string | null;
+      payloadMode?: string;
+      enabled?: boolean;
+    };
+
+export async function createWebhook(params: CreateWebhookInput): Promise<WebhookCreateResponse> {
+  // Per-scope limit (per app for app-level, per org for org-level).
+  const scopeFilter =
+    params.level === "application"
+      ? scopedWhere(webhooks, { orgId: params.orgId, applicationId: params.applicationId })
+      : scopedWhere(webhooks, { orgId: params.orgId, extra: [isNull(webhooks.applicationId)] });
+  const existing = await db.select({ id: webhooks.id }).from(webhooks).where(scopeFilter);
+  if (existing.length >= MAX_WEBHOOKS_PER_SCOPE) {
     throw new ApiError({
       status: 400,
       code: "webhook_limit_reached",
       title: "Webhook Limit Reached",
-      detail: `Maximum ${MAX_WEBHOOKS_PER_APP} webhooks per application`,
+      detail: `Maximum ${MAX_WEBHOOKS_PER_SCOPE} webhooks per ${params.level === "org" ? "organization" : "application"}`,
     });
   }
 
@@ -206,8 +223,9 @@ export async function createWebhook(
     .insert(webhooks)
     .values({
       id,
-      orgId,
-      applicationId,
+      level: params.level,
+      orgId: params.orgId,
+      applicationId: params.level === "application" ? params.applicationId : null,
       url: params.url,
       events: params.events,
       packageId: params.packageId ?? null,
@@ -220,31 +238,37 @@ export async function createWebhook(
   return { ...toWebhookResponse(created!), secret };
 }
 
-export async function listWebhooks(orgId: string, applicationId: string): Promise<WebhookInfo[]> {
-  const rows = await db
-    .select()
-    .from(webhooks)
-    .where(and(eq(webhooks.orgId, orgId), eq(webhooks.applicationId, applicationId)))
-    .orderBy(desc(webhooks.createdAt));
+/**
+ * List webhooks visible to the caller.
+ *
+ * - `all: true`: returns every webhook in the org (org-level + all app-level).
+ * - `applicationId` set: returns org-level webhooks AND app-level webhooks
+ *   pinned to that app (mirrors dispatch semantics).
+ * - Neither: returns org-level webhooks only.
+ */
+export async function listWebhooks(
+  orgId: string,
+  opts: { applicationId?: string; all?: boolean } = {},
+): Promise<WebhookInfo[]> {
+  const { applicationId, all } = opts;
+  const filter = all
+    ? scopedWhere(webhooks, { orgId })
+    : applicationId
+      ? scopedWhere(webhooks, {
+          orgId,
+          extra: [or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId))],
+        })
+      : scopedWhere(webhooks, { orgId, extra: [isNull(webhooks.applicationId)] });
 
+  const rows = await db.select().from(webhooks).where(filter).orderBy(desc(webhooks.createdAt));
   return rows.map(toWebhookResponse);
 }
 
-export async function getWebhook(
-  orgId: string,
-  applicationId: string,
-  webhookId: string,
-): Promise<WebhookInfo> {
+export async function getWebhook(orgId: string, webhookId: string): Promise<WebhookInfo> {
   const [row] = await db
     .select()
     .from(webhooks)
-    .where(
-      and(
-        eq(webhooks.id, webhookId),
-        eq(webhooks.orgId, orgId),
-        eq(webhooks.applicationId, applicationId),
-      ),
-    )
+    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }))
     .limit(1);
 
   if (!row) throw notFound(`Webhook '${webhookId}' not found`);
@@ -253,7 +277,6 @@ export async function getWebhook(
 
 export async function updateWebhook(
   orgId: string,
-  applicationId: string,
   webhookId: string,
   params: {
     url?: string;
@@ -263,7 +286,7 @@ export async function updateWebhook(
     enabled?: boolean;
   },
 ): Promise<WebhookInfo> {
-  await getWebhook(orgId, applicationId, webhookId);
+  await getWebhook(orgId, webhookId);
 
   if (params.url) validateWebhookUrl(params.url);
 
@@ -272,78 +295,37 @@ export async function updateWebhook(
   const [updated] = await db
     .update(webhooks)
     .set(updates)
-    .where(
-      and(
-        eq(webhooks.id, webhookId),
-        eq(webhooks.orgId, orgId),
-        eq(webhooks.applicationId, applicationId),
-      ),
-    )
+    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }))
     .returning();
 
   return toWebhookResponse(updated!);
 }
 
-export async function deleteWebhook(
-  orgId: string,
-  applicationId: string,
-  webhookId: string,
-): Promise<void> {
-  await getWebhook(orgId, applicationId, webhookId);
+export async function deleteWebhook(orgId: string, webhookId: string): Promise<void> {
+  await getWebhook(orgId, webhookId);
   await db
     .delete(webhooks)
-    .where(
-      and(
-        eq(webhooks.id, webhookId),
-        eq(webhooks.orgId, orgId),
-        eq(webhooks.applicationId, applicationId),
-      ),
-    );
+    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }));
 }
 
-/** Grace period for the previous secret after rotation (24 hours). */
-const SECRET_ROTATION_GRACE_MS = 24 * 60 * 60 * 1000;
-
-export async function rotateSecret(
-  orgId: string,
-  applicationId: string,
-  webhookId: string,
-): Promise<{ secret: string }> {
-  const [row] = await db
-    .select({ id: webhooks.id, secret: webhooks.secret })
-    .from(webhooks)
-    .where(
-      and(
-        eq(webhooks.id, webhookId),
-        eq(webhooks.orgId, orgId),
-        eq(webhooks.applicationId, applicationId),
-      ),
-    )
-    .limit(1);
-
-  if (!row) throw notFound(`Webhook '${webhookId}' not found`);
+export async function rotateSecret(orgId: string, webhookId: string): Promise<{ secret: string }> {
+  await getWebhook(orgId, webhookId);
 
   const newSecret = generateSecret();
   await db
     .update(webhooks)
-    .set({
-      secret: newSecret,
-      previousSecret: row.secret,
-      previousSecretExpiresAt: new Date(Date.now() + SECRET_ROTATION_GRACE_MS),
-      updatedAt: new Date(),
-    })
-    .where(eq(webhooks.id, webhookId));
+    .set({ secret: newSecret, updatedAt: new Date() })
+    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }));
 
   return { secret: newSecret };
 }
 
 export async function listDeliveries(
   orgId: string,
-  applicationId: string,
   webhookId: string,
   limit = 20,
 ): Promise<WebhookDeliveryInfo[]> {
-  await getWebhook(orgId, applicationId, webhookId);
+  await getWebhook(orgId, webhookId);
 
   const rows = await db
     .select()
@@ -417,7 +399,8 @@ async function getDeliveryQueue(): Promise<JobQueue<DeliveryJobData>> {
  * Dispatch webhook events for a run status change.
  * Called from the run pipeline after status transitions.
  *
- * All webhooks are application-scoped — fires only for runs in the same application.
+ * Fires both **org-level** webhooks (pinned to the org, `application_id IS NULL`)
+ * and **application-level** webhooks pinned to the run's application.
  */
 export async function dispatchWebhookEvents(
   orgId: string,
@@ -434,11 +417,13 @@ export async function dispatchWebhookEvents(
     })
     .from(webhooks)
     .where(
-      and(
-        eq(webhooks.orgId, orgId),
-        eq(webhooks.applicationId, applicationId),
-        eq(webhooks.enabled, true),
-      ),
+      scopedWhere(webhooks, {
+        orgId,
+        extra: [
+          eq(webhooks.enabled, true),
+          or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId)),
+        ],
+      }),
     );
 
   const queue = await getDeliveryQueue();
@@ -472,12 +457,7 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
   const attempt = job.attemptsMade + 1; // attemptsMade is 0-based before this attempt
 
   const [wh] = await db
-    .select({
-      url: webhooks.url,
-      secret: webhooks.secret,
-      previousSecret: webhooks.previousSecret,
-      previousSecretExpiresAt: webhooks.previousSecretExpiresAt,
-    })
+    .select({ url: webhooks.url, secret: webhooks.secret })
     .from(webhooks)
     .where(eq(webhooks.id, webhookId))
     .limit(1);
@@ -488,14 +468,7 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
   }
 
   const timestamp = Math.floor(Date.now() / 1000);
-
-  // Sign with current secret; during grace period, include previous secret signature too
   const headers = await buildSignedHeaders(eventId, timestamp, payload, wh.secret);
-  if (wh.previousSecret && wh.previousSecretExpiresAt && wh.previousSecretExpiresAt > new Date()) {
-    const content = `${eventId}.${timestamp}.${payload}`;
-    const prevSig = await sign(wh.previousSecret, content);
-    headers["webhook-signature"] = `${headers["webhook-signature"]} ${prevSig}`;
-  }
   headers["webhook-attempt"] = String(attempt);
 
   const start = Date.now();

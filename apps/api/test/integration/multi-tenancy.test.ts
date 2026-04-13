@@ -103,7 +103,7 @@ describe("Multi-tenancy isolation", () => {
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
         applicationId: orgA.defaultAppId,
-        userId: orgA.user.id,
+        dashboardUserId: orgA.user.id,
         status: "success",
       });
 
@@ -120,7 +120,7 @@ describe("Multi-tenancy isolation", () => {
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
         applicationId: orgA.defaultAppId,
-        userId: orgA.user.id,
+        dashboardUserId: orgA.user.id,
         status: "success",
       });
 
@@ -137,7 +137,7 @@ describe("Multi-tenancy isolation", () => {
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
         applicationId: orgA.defaultAppId,
-        userId: orgA.user.id,
+        dashboardUserId: orgA.user.id,
         status: "running",
       });
 
@@ -155,7 +155,7 @@ describe("Multi-tenancy isolation", () => {
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
         applicationId: orgA.defaultAppId,
-        userId: orgA.user.id,
+        dashboardUserId: orgA.user.id,
         status: "success",
       });
 

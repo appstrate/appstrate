@@ -35,7 +35,7 @@ const CORE_TABLES = [
   "application_provider_credentials",
   "package_schedules",
   "org_models",
-  "org_provider_keys",
+  "org_system_provider_keys",
   "org_proxies",
   "org_invitations",
   // Mid-level tables
