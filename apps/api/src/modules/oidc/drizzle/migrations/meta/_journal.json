@@ -29,6 +29,13 @@
       "when": 1776400000000,
       "tag": "0003_application_social_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1776600000000,
+      "tag": "0004_encryption_key_version",
+      "breakpoints": true
     }
   ]
 }

@@ -28,6 +28,8 @@ import { applicationSocialProviders } from "../schema.ts";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { createTestSpy } from "./test-spy.ts";
+import { CURRENT_ENCRYPTION_KEY_VERSION } from "./encryption-key-version.ts";
+import { logger } from "../../../lib/logger.ts";
 
 export type SocialProviderId = "google" | "github";
 
@@ -49,7 +51,7 @@ export interface ResolvedSocialProvider {
   source: "per-app";
 }
 
-const cache = createTtlCache<ResolvedSocialProvider>();
+const cache = createTtlCache<ResolvedSocialProvider>("oidc:social-cache-invalidate");
 
 function cacheKey(applicationId: string, provider: SocialProviderId): string {
   return `${applicationId}:${provider}`;
@@ -74,38 +76,36 @@ async function resolvePerApp(
   provider: SocialProviderId,
 ): Promise<ResolvedSocialProvider | null> {
   const key = cacheKey(applicationId, provider);
-  const cached = cache.get(key);
-  if (cached !== undefined) {
-    socialResolveSpy.emit({ applicationId, provider, hit: cached !== null });
-    return cached;
-  }
-
-  const [row] = await db
-    .select()
-    .from(applicationSocialProviders)
-    .where(
-      and(
-        eq(applicationSocialProviders.applicationId, applicationId),
-        eq(applicationSocialProviders.provider, provider),
-      ),
-    )
-    .limit(1);
-
-  if (!row) {
-    cache.set(key, null);
-    socialResolveSpy.emit({ applicationId, provider, hit: false });
-    return null;
-  }
-
-  const decrypted = decryptCredentials<{ clientSecret: string }>(row.clientSecretEncrypted);
-  const value: ResolvedSocialProvider = {
-    clientId: row.clientId,
-    clientSecret: decrypted.clientSecret,
-    scopes: row.scopes,
-    source: "per-app",
-  };
-  cache.set(key, value);
-  socialResolveSpy.emit({ applicationId, provider, hit: true });
+  const value = await cache.getOrLoad(key, async () => {
+    const [row] = await db
+      .select()
+      .from(applicationSocialProviders)
+      .where(
+        and(
+          eq(applicationSocialProviders.applicationId, applicationId),
+          eq(applicationSocialProviders.provider, provider),
+        ),
+      )
+      .limit(1);
+    if (!row) return null;
+    if (row.encryptionKeyVersion !== CURRENT_ENCRYPTION_KEY_VERSION) {
+      logger.warn("oidc social: stale encryption key version, treating as unconfigured", {
+        applicationId,
+        provider,
+        rowVersion: row.encryptionKeyVersion,
+        currentVersion: CURRENT_ENCRYPTION_KEY_VERSION,
+      });
+      return null;
+    }
+    const decrypted = decryptCredentials<{ clientSecret: string }>(row.clientSecretEncrypted);
+    return {
+      clientId: row.clientId,
+      clientSecret: decrypted.clientSecret,
+      scopes: row.scopes,
+      source: "per-app",
+    };
+  });
+  socialResolveSpy.emit({ applicationId, provider, hit: value !== null });
   return value;
 }
 
@@ -127,13 +127,18 @@ export async function resolveSocialProviderForClient(
  * Invalidate cached entries for an application. If `provider` is provided,
  * only that provider's entry is cleared; otherwise both are cleared.
  */
-export function invalidateSocialCache(applicationId: string, provider?: SocialProviderId): void {
+export async function invalidateSocialCache(
+  applicationId: string,
+  provider?: SocialProviderId,
+): Promise<void> {
   if (provider) {
-    cache.delete(cacheKey(applicationId, provider));
+    await cache.delete(cacheKey(applicationId, provider));
     return;
   }
-  cache.delete(cacheKey(applicationId, "google"));
-  cache.delete(cacheKey(applicationId, "github"));
+  await Promise.all([
+    cache.delete(cacheKey(applicationId, "google")),
+    cache.delete(cacheKey(applicationId, "github")),
+  ]);
 }
 
 /** Test-only: clear the entire cache. */

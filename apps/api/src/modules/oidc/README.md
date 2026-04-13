@@ -327,6 +327,19 @@ Before exposing the module to external satellites:
 - **`resource` parameter is now enforced**: `/oauth2/token` rejects `authorization_code` / `refresh_token` grants without a whitelisted `resource=` parameter. This is a **compat-break** vs. earlier builds which silently issued opaque tokens — satellites that previously "worked" (received opaque tokens) now fail fast with a diagnosable 400. See the satellite integration example below for the correct shape.
 - **`TRUST_PROXY` must match the deployment topology**: the OIDC rate limiters key on client IP, read via `lib/client-ip.ts` → `getClientIpFromRequest()`. That helper returns `X-Forwarded-For` when `TRUST_PROXY` is `"true"` or a positive integer, otherwise it falls back to the socket peer. If `TRUST_PROXY` is enabled but any hop between the public internet and the app does not strip untrusted XFF, an attacker can spoof the header and bypass per-IP limits. The per-`client_id` limiter on `/oauth2/token` is the defense-in-depth for this scenario — but do not rely on it alone: set `TRUST_PROXY` correctly for your topology (default `"false"` is the safe choice when in doubt).
 
+### Per-app secret encryption — rotation SOP
+
+`application_smtp_configs.pass_encrypted` and `application_social_providers.client_secret_encrypted` are AES-256-GCM encrypted via `CONNECTION_ENCRYPTION_KEY`. Each row also carries an `encryption_key_version` tag stamped at write time (see `services/encryption-key-version.ts`). On read, the resolver compares the row's tag with `CURRENT_ENCRYPTION_KEY_VERSION`; a mismatch is treated as "not configured" (no silent decryption error, no silent fallback to env credentials).
+
+To rotate `CONNECTION_ENCRYPTION_KEY`:
+
+1. Bump `CURRENT_ENCRYPTION_KEY_VERSION` in `services/encryption-key-version.ts` (e.g. `v1` → `v2`).
+2. Roll out the new `CONNECTION_ENCRYPTION_KEY` and the new constant together (blue/green).
+3. After deploy, per-app email + social auth are disabled for every tenant until an operator re-`PUT`s each `/api/applications/:id/smtp-config` and `/api/applications/:id/social-providers/:provider` row.
+4. Rows carrying the old tag stay unreachable until explicitly rewritten — this is intentional: a stale ciphertext must never silently fall through to instance-level env credentials or surface as a cryptic crypto error.
+
+Cross-instance cache invalidation: admin `PUT`/`DELETE` publishes the invalidated key on the platform `PubSub` (`oidc:smtp-cache-invalidate`, `oidc:social-cache-invalidate`). Every API instance subscribes at boot and evicts its local `TtlCache` entry on publish — see `services/ttl-cache.ts`. In single-instance / in-memory pub/sub deployments, the 30s null-TTL bounds worst-case staleness.
+
 ## Satellite integration example
 
 A minimal "Login with Appstrate" flow from a satellite app (PKCE + authorization code grant):

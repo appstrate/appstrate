@@ -205,6 +205,12 @@ export const applicationSmtpConfigs = pgTable("application_smtp_configs", {
   username: text("username").notNull(),
   // AES-256-GCM encrypted JSON blob (base64) via `encryptCredentials({ pass })`.
   passEncrypted: text("pass_encrypted").notNull(),
+  // Version tag of the `CONNECTION_ENCRYPTION_KEY` that produced
+  // `passEncrypted`. Stamped on every write. Rotation SOP in the module
+  // README instructs operators to re-upsert all rows after rotating the key;
+  // rows with a stale tag surface as "SMTP not configured" rather than a
+  // silent decryption error.
+  encryptionKeyVersion: text("encryption_key_version").notNull().default("v1"),
   fromAddress: text("from_address").notNull(),
   fromName: text("from_name"),
   // "auto" → secure=true iff port === 465. "tls" → explicit TLS. "starttls"
@@ -238,6 +244,9 @@ export const applicationSocialProviders = pgTable(
     // AES-256-GCM encrypted JSON blob (base64) via
     // `encryptCredentials({ clientSecret })`.
     clientSecretEncrypted: text("client_secret_encrypted").notNull(),
+    // Version tag of the `CONNECTION_ENCRYPTION_KEY` that produced
+    // `clientSecretEncrypted`. See `application_smtp_configs.encryptionKeyVersion`.
+    encryptionKeyVersion: text("encryption_key_version").notNull().default("v1"),
     // Optional per-app scope override. When null, the provider's default
     // scope set applies (Google: email/profile/openid, GitHub: user:email).
     scopes: text("scopes").array(),

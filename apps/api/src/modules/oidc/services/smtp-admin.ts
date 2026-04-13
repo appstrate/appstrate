@@ -14,6 +14,7 @@ import { db } from "@appstrate/db/client";
 import { encryptCredentials } from "@appstrate/connect";
 import { applicationSmtpConfigs } from "../schema.ts";
 import { invalidateSmtpCache, resolveSmtpForClient } from "./smtp-config.ts";
+import { CURRENT_ENCRYPTION_KEY_VERSION } from "./encryption-key-version.ts";
 
 export interface SmtpConfigView {
   applicationId: string;
@@ -72,6 +73,7 @@ export async function upsertSmtpConfig(
     port: input.port,
     username: input.username,
     passEncrypted,
+    encryptionKeyVersion: CURRENT_ENCRYPTION_KEY_VERSION,
     fromAddress: input.fromAddress,
     fromName: input.fromName ?? null,
     secureMode: input.secureMode ?? ("auto" as const),
@@ -85,7 +87,7 @@ export async function upsertSmtpConfig(
       set: values,
     })
     .returning();
-  invalidateSmtpCache(applicationId);
+  await invalidateSmtpCache(applicationId);
   return mapRow(row!);
 }
 
@@ -94,7 +96,7 @@ export async function deleteSmtpConfig(applicationId: string): Promise<boolean> 
     .delete(applicationSmtpConfigs)
     .where(eq(applicationSmtpConfigs.applicationId, applicationId))
     .returning({ id: applicationSmtpConfigs.applicationId });
-  invalidateSmtpCache(applicationId);
+  await invalidateSmtpCache(applicationId);
   return deleted.length > 0;
 }
 

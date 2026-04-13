@@ -14,6 +14,7 @@ import { db } from "@appstrate/db/client";
 import { encryptCredentials } from "@appstrate/connect";
 import { applicationSocialProviders } from "../schema.ts";
 import { invalidateSocialCache, type SocialProviderId } from "./social-config.ts";
+import { CURRENT_ENCRYPTION_KEY_VERSION } from "./encryption-key-version.ts";
 
 export interface SocialProviderView {
   applicationId: string;
@@ -70,6 +71,7 @@ export async function upsertSocialProvider(
     provider,
     clientId: input.clientId,
     clientSecretEncrypted,
+    encryptionKeyVersion: CURRENT_ENCRYPTION_KEY_VERSION,
     scopes: input.scopes ?? null,
     updatedAt: now,
   };
@@ -81,7 +83,7 @@ export async function upsertSocialProvider(
       set: values,
     })
     .returning();
-  invalidateSocialCache(applicationId, provider);
+  await invalidateSocialCache(applicationId, provider);
   return mapRow(row!);
 }
 
@@ -98,6 +100,6 @@ export async function deleteSocialProvider(
       ),
     )
     .returning({ applicationId: applicationSocialProviders.applicationId });
-  invalidateSocialCache(applicationId, provider);
+  await invalidateSocialCache(applicationId, provider);
   return deleted.length > 0;
 }

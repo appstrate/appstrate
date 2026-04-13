@@ -31,6 +31,8 @@ import { applicationSmtpConfigs } from "../schema.ts";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { createTestSpy } from "./test-spy.ts";
+import { CURRENT_ENCRYPTION_KEY_VERSION } from "./encryption-key-version.ts";
+import { logger } from "../../../lib/logger.ts";
 
 export interface ResolvedSmtpConfig {
   transport: Transporter;
@@ -40,7 +42,7 @@ export interface ResolvedSmtpConfig {
 }
 
 const INSTANCE_CACHE_KEY = "__instance__";
-const cache = createTtlCache<ResolvedSmtpConfig>();
+const cache = createTtlCache<ResolvedSmtpConfig>("oidc:smtp-cache-invalidate");
 
 /**
  * Test-only mail spy. When set, every transport built by the resolver is
@@ -91,28 +93,28 @@ function buildTransport(row: typeof applicationSmtpConfigs.$inferSelect): Transp
 }
 
 async function resolvePerAppSmtp(applicationId: string): Promise<ResolvedSmtpConfig | null> {
-  const cached = cache.get(applicationId);
-  if (cached !== undefined) return cached;
-
-  const [row] = await db
-    .select()
-    .from(applicationSmtpConfigs)
-    .where(eq(applicationSmtpConfigs.applicationId, applicationId))
-    .limit(1);
-
-  if (!row) {
-    cache.set(applicationId, null);
-    return null;
-  }
-
-  const value: ResolvedSmtpConfig = {
-    transport: wrapForSpy(buildTransport(row), "per-app"),
-    fromAddress: row.fromAddress,
-    fromName: row.fromName,
-    source: "per-app",
-  };
-  cache.set(applicationId, value);
-  return value;
+  return cache.getOrLoad(applicationId, async () => {
+    const [row] = await db
+      .select()
+      .from(applicationSmtpConfigs)
+      .where(eq(applicationSmtpConfigs.applicationId, applicationId))
+      .limit(1);
+    if (!row) return null;
+    if (row.encryptionKeyVersion !== CURRENT_ENCRYPTION_KEY_VERSION) {
+      logger.warn("oidc smtp: stale encryption key version, treating as unconfigured", {
+        applicationId,
+        rowVersion: row.encryptionKeyVersion,
+        currentVersion: CURRENT_ENCRYPTION_KEY_VERSION,
+      });
+      return null;
+    }
+    return {
+      transport: wrapForSpy(buildTransport(row), "per-app"),
+      fromAddress: row.fromAddress,
+      fromName: row.fromName,
+      source: "per-app",
+    };
+  });
 }
 
 function resolveInstanceSmtp(): ResolvedSmtpConfig | null {
@@ -161,9 +163,12 @@ export async function resolveSmtpForClient(
   return resolveInstanceSmtp();
 }
 
-/** Invalidate a cached per-app SMTP transport (call on upsert/delete). */
-export function invalidateSmtpCache(applicationId: string): void {
-  cache.delete(applicationId);
+/**
+ * Invalidate a cached per-app SMTP transport (call on upsert/delete).
+ * Published to Redis pub/sub so every instance evicts — see `ttl-cache.ts`.
+ */
+export async function invalidateSmtpCache(applicationId: string): Promise<void> {
+  await cache.delete(applicationId);
 }
 
 /** Test-only: clear the entire cache. Used by the resolver unit tests. */
