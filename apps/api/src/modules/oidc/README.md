@@ -64,38 +64,55 @@ Frontend reads `useAppConfig().features.oidc` to conditionally show the OAuth ta
 ```ts
 publicPaths: [
   "/api/oauth/login",
+  "/api/oauth/register",
   "/api/oauth/consent",
+  "/api/oauth/logout",
+  "/api/oauth/magic-link",
+  "/api/oauth/forgot-password",
+  "/api/oauth/reset-password",
+  "/api/oauth/assets/social-sign-in.js",
   "/.well-known/openid-configuration",
   "/.well-known/oauth-authorization-server",
 ];
 ```
 
-The login and consent pages are anonymous — they validate `client_id` against the `oauth_client` registry before rendering. Any unknown or disabled client id returns 404 before the HTML is assembled. The `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server` endpoints are served at the HTTP origin root (RFC 5785 / RFC 8414 compliant) — the module router is mounted at `/`, not `/api`, so the module can register any path its routes need. Real-world OIDC client libraries look for discovery at this exact location without applying any path-insertion rules.
+The end-user-facing HTML pages (login, register, consent, magic-link, forgot/reset-password, logout) are anonymous — they validate `client_id` against the `oauth_client` registry before rendering. Any unknown or disabled client id returns 404 before the HTML is assembled. The `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server` endpoints are served at the HTTP origin root (RFC 5785 / RFC 8414 compliant) — the module router is mounted at `/`, not `/api`, so the module can register any path its routes need. Real-world OIDC client libraries look for discovery at this exact location without applying any path-insertion rules.
 
-## App-scoped route prefixes
+## Routing scope
 
-```ts
-appScopedPaths: ["/api/oauth"];
-```
+The OIDC admin endpoints (`/api/oauth/clients*`, `/api/oauth/scopes`) are **org-scoped** and gated by the `X-Org-Id` header (same as any other org-scoped core route). They do NOT require `X-App-Id`: clients are created against a specific `referencedOrgId` (org-level clients) or `referencedApplicationId` (application-level clients) passed in the request body, so the binding is explicit per-call. The module manifest therefore declares no `appScopedPaths`.
 
-Client admin routes (`/api/oauth/clients*`) require `X-App-Id`.
+End-user-facing routes under `/api/oauth/*` resolve the target application from the `client_id` query parameter, not from a header.
 
 ## Routes
 
-| Method | Path                                      | Permission             | Purpose                                                                                                                                         |
-| ------ | ----------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/oauth/clients`                      | `oauth-clients:write`  | Register a new client. Returns plaintext `clientSecret` once.                                                                                   |
-| GET    | `/api/oauth/clients`                      | `oauth-clients:read`   | List clients for the current app.                                                                                                               |
-| GET    | `/api/oauth/clients/:clientId`            | `oauth-clients:read`   | Get one client (secret hidden).                                                                                                                 |
-| PATCH  | `/api/oauth/clients/:clientId`            | `oauth-clients:write`  | Update `redirectUris` / `disabled`.                                                                                                             |
-| DELETE | `/api/oauth/clients/:clientId`            | `oauth-clients:delete` | Delete a client.                                                                                                                                |
-| POST   | `/api/oauth/clients/:clientId/rotate`     | `oauth-clients:write`  | Issue a fresh plaintext secret.                                                                                                                 |
-| GET    | `/api/oauth/login`                        | public                 | Server-rendered login form. Validates `client_id`, loads app branding, issues a one-shot CSRF token paired with an httpOnly `oidc_csrf` cookie. |
-| POST   | `/api/oauth/login`                        | public                 | Verifies CSRF, calls `auth.api.signInEmail`, redirects to `/api/auth/oauth2/authorize` on success (preserving the signed query string).         |
-| GET    | `/api/oauth/consent`                      | public                 | Server-rendered consent form with app branding + scope descriptions + CSRF token.                                                               |
-| POST   | `/api/oauth/consent`                      | public                 | Verifies CSRF, calls `auth.api.oauth2Consent` (accept/deny), forwards the plugin's redirect response.                                           |
-| GET    | `/.well-known/openid-configuration`       | public                 | RFC-compliant OIDC discovery document at the HTTP origin root. Proxies `auth.api.getOpenIdConfig`.                                              |
-| GET    | `/.well-known/oauth-authorization-server` | public                 | RFC 8414 authorization server metadata at the HTTP origin root. Proxies `auth.api.getOAuthServerConfig`.                                        |
+| Method | Path                                      | Permission             | Purpose                                                                                                                                                                |
+| ------ | ----------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/oauth/clients`                      | `oauth-clients:write`  | Register a new org- or application-level client. Body requires `level` + `referencedOrgId` or `referencedApplicationId`. Returns plaintext `clientSecret` once.        |
+| GET    | `/api/oauth/clients`                      | `oauth-clients:read`   | List every client visible to the current org (org-level pinned to the org + application-level pinned to any application the org owns).                                 |
+| GET    | `/api/oauth/scopes`                       | `oauth-clients:read`   | List the OAuth scopes advertised by this instance (identity scopes + `OIDC_ALLOWED_SCOPES`).                                                                           |
+| GET    | `/api/oauth/clients/:clientId`            | `oauth-clients:read`   | Get one client (secret hidden).                                                                                                                                        |
+| PATCH  | `/api/oauth/clients/:clientId`            | `oauth-clients:write`  | Update `redirectUris`, `postLogoutRedirectUris`, `scopes`, `disabled`, `isFirstParty`, `allowSignup`, `signupRole`. Client `level` and pinned reference are immutable. |
+| DELETE | `/api/oauth/clients/:clientId`            | `oauth-clients:delete` | Delete a client.                                                                                                                                                       |
+| POST   | `/api/oauth/clients/:clientId/rotate`     | `oauth-clients:write`  | Issue a fresh plaintext secret.                                                                                                                                        |
+| GET    | `/api/oauth/login`                        | public                 | Server-rendered login form. Validates `client_id`, loads app branding, issues a one-shot CSRF token paired with an httpOnly `oidc_csrf` cookie.                        |
+| POST   | `/api/oauth/login`                        | public                 | Verifies CSRF, calls `auth.api.signInEmail`, redirects to `/api/auth/oauth2/authorize` on success (preserving the signed query string). Per-email limit 5/15 min.      |
+| GET    | `/api/oauth/register`                     | public                 | Server-rendered sign-up form (only available when the client's `allowSignup` policy permits it). Same CSRF contract as login.                                          |
+| POST   | `/api/oauth/register`                     | public                 | Creates the Better Auth user, fires verification email if SMTP is configured, then forwards to authorize.                                                              |
+| GET    | `/api/oauth/magic-link`                   | public                 | Server-rendered magic-link request form (enter email → receive one-time sign-in link).                                                                                 |
+| POST   | `/api/oauth/magic-link`                   | public                 | Issues a signed magic-link token, emails it via the `oidc-magic-link` template.                                                                                        |
+| GET    | `/api/oauth/forgot-password`              | public                 | Server-rendered "enter your email" form.                                                                                                                               |
+| POST   | `/api/oauth/forgot-password`              | public                 | Emails a password-reset token via the `oidc-reset-password` template. Always returns 200 (no user enumeration).                                                        |
+| GET    | `/api/oauth/reset-password`               | public                 | Server-rendered new-password form, gated on a valid reset token.                                                                                                       |
+| POST   | `/api/oauth/reset-password`               | public                 | Validates the reset token, updates the Better Auth password, redirects to login.                                                                                       |
+| GET    | `/api/oauth/consent`                      | public                 | Server-rendered consent form with app branding + scope descriptions + CSRF token.                                                                                      |
+| POST   | `/api/oauth/consent`                      | public                 | Verifies CSRF, calls `auth.api.oauth2Consent` (accept/deny), forwards the plugin's redirect response.                                                                  |
+| GET    | `/api/oauth/logout`                       | public                 | Clears the Better Auth session cookie and redirects to the client's registered `postLogoutRedirectUri` (OIDC RP-Initiated Logout).                                     |
+| GET    | `/api/oauth/assets/social-sign-in.js`     | public                 | Static JS asset served by the login/register pages to bootstrap provider-specific social sign-in flows.                                                                |
+| GET    | `/.well-known/openid-configuration`       | public                 | RFC-compliant OIDC discovery document at the HTTP origin root. Proxies `auth.api.getOpenIdConfig`.                                                                     |
+| GET    | `/.well-known/oauth-authorization-server` | public                 | RFC 8414 authorization server metadata at the HTTP origin root. Proxies `auth.api.getOAuthServerConfig`.                                                               |
+
+The OAuth 2.1 / OIDC protocol endpoints themselves (`/api/auth/oauth2/authorize`, `/token`, `/introspect`, `/revoke`, `/userinfo`, plus `/api/auth/jwks` and `/api/auth/.well-known/openid-configuration`) are wired by Better Auth's `oauthProvider` + `jwt` plugins — they are not registered in this module's router. They follow RFC 6749 / RFC 8414 / RFC 7662 / RFC 7009 exactly and are therefore deliberately omitted from the Appstrate OpenAPI spec; satellites consume them through discovery. See _Better Auth plugins contributed_ below for the wiring details.
 
 `oauth-clients` is a core RBAC resource added to `apps/api/src/lib/permissions.ts` in the same PR (per CLAUDE.md: modules that introduce new RBAC resources must edit `permissions.ts` alongside).
 
@@ -163,7 +180,33 @@ Colors are validated by `AppBrandingSchema` at resolve time, so a misconfigured 
 
 **Admin UI:** Settings → Application → OAuth tab → "New client". Captures the name + redirect URIs; displays `clientId` + `clientSecret` exactly once. Subsequent operations (rotate secret, disable, delete, update URIs) happen through the same tab.
 
-**Headless:** `POST /api/oauth/clients` with `{ name, redirectUris, scopes? }` + an admin API key with `oauth-clients:write`.
+**Headless:** `POST /api/oauth/clients` with an admin API key carrying `oauth-clients:write` and the `X-Org-Id` header set. The body is a discriminated union on `level`:
+
+```jsonc
+// application-level client (end-users of an embedded app)
+{
+  "level": "application",
+  "name": "Mobile app",
+  "redirectUris": ["https://mobile.example.com/callback"],
+  "referencedApplicationId": "app_…",
+  "scopes": ["openid", "profile", "email", "offline_access", "runs:read"],
+  "isFirstParty": false
+}
+
+// org-level client (dashboard users of a specific org)
+{
+  "level": "org",
+  "name": "Admin dashboard",
+  "redirectUris": ["https://admin.example.com/callback"],
+  "postLogoutRedirectUris": ["https://admin.example.com"],
+  "referencedOrgId": "org_…",
+  "scopes": ["openid", "profile", "email", "offline_access"],
+  "allowSignup": false,
+  "signupRole": "member"
+}
+```
+
+The plaintext `clientSecret` is returned exactly once on create and on `POST /:clientId/rotate`.
 
 ## Instance-level satellite clients via `OIDC_INSTANCE_CLIENTS`
 
