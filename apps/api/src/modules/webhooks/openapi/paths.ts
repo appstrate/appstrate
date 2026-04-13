@@ -373,8 +373,7 @@ export const webhooksPaths = {
       operationId: "rotateWebhookSecret",
       tags: ["Webhooks"],
       summary: "Rotate webhook secret",
-      description:
-        "Generate a new secret. The previous secret remains valid for 24 hours (grace period). During rotation, signatures are emitted with both secrets.",
+      description: "Generate a new secret. The previous secret is immediately invalidated.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

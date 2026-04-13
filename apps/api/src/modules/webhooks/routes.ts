@@ -199,7 +199,7 @@ export function createWebhooksRouter() {
     },
   );
 
-  // POST /api/webhooks/:id/rotate — rotate secret (24h grace period)
+  // POST /api/webhooks/:id/rotate — rotate secret
   router.post(
     "/api/webhooks/:id/rotate",
     rateLimit(5),

@@ -4,7 +4,7 @@ Standard Webhooks delivery for run lifecycle events.
 
 ## Purpose
 
-Lets applications subscribe to run status changes (`run.started`, `run.success`, `run.failed`, `run.timeout`, `run.cancelled`) and receive signed HTTP callbacks. Implements the Standard Webhooks specification (HMAC-SHA256 signing, secret rotation with grace period, 8-attempt exponential backoff, delivery history).
+Lets applications subscribe to run status changes (`run.started`, `run.success`, `run.failed`, `run.timeout`, `run.cancelled`) and receive signed HTTP callbacks. Implements the Standard Webhooks specification (HMAC-SHA256 signing, secret rotation, 8-attempt exponential backoff, delivery history).
 
 ## Owned tables
 
@@ -50,7 +50,7 @@ Members and viewers have no access — webhooks are considered developer tooling
 
 ## Workers & background activity
 
-- BullMQ `webhook-delivery` worker. Processes delivery jobs, builds the Standard Webhooks envelope, signs it with the subscription's active secret (or the previous secret if still within the rotation grace period), POSTs to the subscriber URL, records the attempt, and schedules retries with exponential backoff (8 attempts total). SSRF protection runs on every delivery URL.
+- BullMQ `webhook-delivery` worker. Processes delivery jobs, builds the Standard Webhooks envelope, signs it with the subscription's secret, POSTs to the subscriber URL, records the attempt, and schedules retries with exponential backoff (8 attempts total). SSRF protection runs on every delivery URL.
 
 ## Disable behavior
 
