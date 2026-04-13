@@ -11,10 +11,23 @@ import { scopedWhere } from "../lib/db-helpers.ts";
 /**
  * Middleware: extract X-Org-Id header, verify membership, inject orgId + orgRole + orgSlug.
  * Returns 400 if header is missing, 403 if user is not a member of the org.
+ *
+ * If an auth strategy already pinned an org (e.g. an OIDC dashboard token
+ * scoped to a specific org), the X-Org-Id header MUST match the pinned
+ * value. Otherwise a holder of a token scoped to org A — who is also a
+ * member of org B by session — could spoof `X-Org-Id: B` and bypass the
+ * token's consent scope. Symmetric with `requireAppContext`.
  */
 export function requireOrgContext() {
   return async (c: Context<AppEnv>, next: Next) => {
-    const orgId = c.req.header("X-Org-Id");
+    const headerOrg = c.req.header("X-Org-Id");
+    const pinned = c.get("orgId");
+
+    if (pinned && headerOrg && headerOrg !== pinned) {
+      throw forbidden("X-Org-Id does not match authenticated organization");
+    }
+
+    const orgId = pinned ?? headerOrg;
     if (!orgId) {
       throw invalidRequest("X-Org-Id header is required", "X-Org-Id");
     }

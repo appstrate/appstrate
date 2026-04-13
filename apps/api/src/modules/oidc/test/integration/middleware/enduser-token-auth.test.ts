@@ -393,6 +393,61 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     expect(res.status).toBe(200);
   });
 
+  it("ignores a spoofed X-Org-Id header when the JWT pinned a different org", async () => {
+    // Cross-org escalation guard. A user who is a member of orgs X and Y
+    // holds a dashboard token scoped to org X (consent only granted there).
+    // Sending the token with `X-Org-Id: Y` must NOT grant access to Y —
+    // the token's `org_id` claim wins, the header is silently ignored.
+    // Invariant: orgId pinned by the auth strategy is authoritative.
+    const { organizationMembers, applications } = await import("@appstrate/db/schema");
+
+    // Make authUserId a member of the original org (X) as admin.
+    await db.insert(organizationMembers).values({
+      userId: authUserId,
+      orgId,
+      role: "admin",
+    });
+
+    // Create a second org (Y) where the same user is also a member.
+    const { id: otherOwnerId } = await createTestUser();
+    const { org: otherOrg, defaultAppId: otherAppId } = await createTestOrg(otherOwnerId, {
+      slug: "crossorg",
+    });
+    await db.insert(organizationMembers).values({
+      userId: authUserId,
+      orgId: otherOrg.id,
+      role: "admin",
+    });
+    expect(otherOrg.id).not.toBe(orgId);
+
+    // Token scoped to org X.
+    const token = await mintToken({
+      sub: authUserId,
+      actor_type: "dashboard_user",
+      org_id: orgId,
+      org_role: "admin",
+      email: "stage3@example.com",
+      scope: "openid",
+    });
+
+    // Send token + X-Org-Id: Y (spoof attempt). Hit an org-scoped route that
+    // reads c.get("orgId") so we can observe which org actually resolved.
+    const res = await app.request("/api/applications", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Org-Id": otherOrg.id,
+      },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: Array<{ id: string }> };
+    // Must list applications of org X (token scope), NOT org Y (spoofed header).
+    const ids = body.data.map((a) => a.id);
+    expect(ids).toContain(applicationId);
+    expect(ids).not.toContain(otherAppId);
+
+    void applications;
+  });
+
   it("rejects a dashboard_user token when user is no longer an org member", async () => {
     // Token was minted when user was a member, but membership was revoked.
     // The strategy re-verifies membership from the DB and rejects.
