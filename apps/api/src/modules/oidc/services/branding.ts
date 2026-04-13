@@ -77,7 +77,7 @@ const DEFAULT_ACCENT = "#4338ca";
 
 export const PLATFORM_DEFAULT_BRANDING: ResolvedAppBranding = {
   name: "Appstrate",
-  logoUrl: null,
+  logoUrl: "/logo-dark.svg",
   primaryColor: DEFAULT_PRIMARY,
   accentColor: DEFAULT_ACCENT,
   supportEmail: null,
@@ -140,11 +140,16 @@ export async function resolveAppBranding(applicationId: string): Promise<Resolve
  */
 export async function resolveBrandingForClient(client: {
   level: string;
+  name: string | null;
   referencedOrgId: string | null;
   referencedApplicationId: string | null;
 }): Promise<ResolvedAppBranding> {
   if (client.level === "instance") {
-    return { ...PLATFORM_DEFAULT_BRANDING };
+    return {
+      ...PLATFORM_DEFAULT_BRANDING,
+      name: client.name ?? PLATFORM_DEFAULT_BRANDING.name,
+      fromName: client.name ?? PLATFORM_DEFAULT_BRANDING.fromName,
+    };
   }
   if (client.level === "application" && client.referencedApplicationId) {
     return resolveAppBranding(client.referencedApplicationId);

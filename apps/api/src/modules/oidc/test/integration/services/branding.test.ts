@@ -15,7 +15,11 @@ import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
-import { resolveAppBranding } from "../../../services/branding.ts";
+import {
+  resolveAppBranding,
+  resolveBrandingForClient,
+  PLATFORM_DEFAULT_BRANDING,
+} from "../../../services/branding.ts";
 
 async function seedAppWithSettings(settings: unknown): Promise<string> {
   const { id } = await createTestUser();
@@ -125,5 +129,35 @@ describe("resolveAppBranding", () => {
     expect(resolved.primaryColor).toBe("#22c55e");
     // Resolver uses parsed.accentColor ?? parsed.primaryColor ?? DEFAULT_ACCENT
     expect(resolved.accentColor).toBe("#22c55e");
+  });
+});
+
+describe("resolveBrandingForClient — instance-level", () => {
+  // Instance-level clients don't touch the DB so these cases need no seeding.
+  // They guard the end-user-visible brand for OIDC_INSTANCE_CLIENTS entries:
+  // the operator-declared `name` MUST surface under the logo on the login
+  // page instead of the generic "Appstrate" platform default.
+  it("uses the client name when present", async () => {
+    const resolved = await resolveBrandingForClient({
+      level: "instance",
+      name: "Mon Admin Dashboard",
+      referencedOrgId: null,
+      referencedApplicationId: null,
+    });
+    expect(resolved.name).toBe("Mon Admin Dashboard");
+    expect(resolved.fromName).toBe("Mon Admin Dashboard");
+    expect(resolved.logoUrl).toBe(PLATFORM_DEFAULT_BRANDING.logoUrl);
+    expect(resolved.primaryColor).toBe(PLATFORM_DEFAULT_BRANDING.primaryColor);
+  });
+
+  it("falls back to platform default name when client.name is null", async () => {
+    const resolved = await resolveBrandingForClient({
+      level: "instance",
+      name: null,
+      referencedOrgId: null,
+      referencedApplicationId: null,
+    });
+    expect(resolved.name).toBe(PLATFORM_DEFAULT_BRANDING.name);
+    expect(resolved.fromName).toBe(PLATFORM_DEFAULT_BRANDING.fromName);
   });
 });
