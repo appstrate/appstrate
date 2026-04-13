@@ -120,49 +120,45 @@ export function oidcBetterAuthPlugins(): unknown[] {
       customUserInfoClaims: async ({ jwt, user }) => {
         const claims = (jwt ?? {}) as Record<string, unknown>;
         const actorType = claims.actor_type;
-        if (actorType === "dashboard_user") {
-          return {
-            actor_type: "dashboard_user",
-            email: stringOr(claims.email, user?.email),
-            email_verified: boolOr(claims.email_verified, false),
-            name: stringOr(claims.name, user?.name),
-            org_id: stringOrNull(claims.org_id),
-            org_role: stringOrNull(claims.org_role),
-          };
+        if (actorType !== "dashboard_user" && actorType !== "end_user" && actorType !== "user") {
+          return {};
         }
+        const base = {
+          actor_type: actorType,
+          email: str(claims.email) ?? user?.email,
+          name: str(claims.name) ?? user?.name,
+        };
         if (actorType === "end_user") {
           return {
-            actor_type: "end_user",
-            email: stringOr(claims.email, user?.email),
-            name: stringOr(claims.name, user?.name),
-            org_id: stringOrNull(claims.org_id),
-            application_id: stringOrNull(claims.application_id),
-            end_user_id: stringOrNull(claims.end_user_id),
+            ...base,
+            org_id: strOrNull(claims.org_id),
+            application_id: strOrNull(claims.application_id),
+            end_user_id: strOrNull(claims.end_user_id),
           };
         }
-        if (actorType === "user") {
+        const withVerified = {
+          ...base,
+          email_verified:
+            typeof claims.email_verified === "boolean" ? claims.email_verified : false,
+        };
+        if (actorType === "dashboard_user") {
           return {
-            actor_type: "user",
-            email: stringOr(claims.email, user?.email),
-            email_verified: boolOr(claims.email_verified, false),
-            name: stringOr(claims.name, user?.name),
+            ...withVerified,
+            org_id: strOrNull(claims.org_id),
+            org_role: strOrNull(claims.org_role),
           };
         }
-        return {};
+        return withVerified;
       },
     }),
   ];
 }
 
-function stringOr(...candidates: unknown[]): string | undefined {
-  for (const c of candidates) if (typeof c === "string" && c.length > 0) return c;
-  return undefined;
+function str(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
-function stringOrNull(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-function boolOr(value: unknown, fallback: boolean): boolean {
-  return typeof value === "boolean" ? value : fallback;
+function strOrNull(value: unknown): string | null {
+  return str(value) ?? null;
 }
 
 /**
