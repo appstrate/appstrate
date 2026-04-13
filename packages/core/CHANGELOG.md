@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated `Run` schema with enrichment fields (`userName`, `endUserName`, `apiKeyName`, `scheduleName`).
+- Updated `Run` schema with enrichment fields (`dashboardUserName`, `endUserName`, `apiKeyName`, `scheduleName`).
 
 ## [2.10.3] — 2026-04-02
 

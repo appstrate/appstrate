@@ -18,6 +18,7 @@ import { isValidVersion } from "@appstrate/core/semver";
 import { zipArtifact } from "@appstrate/core/zip";
 import { encryptCredentials } from "@appstrate/connect";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
+import { scopedWhere } from "../lib/db-helpers.ts";
 import { isSystemPackage } from "./system-packages.ts";
 import { createVersionAndUpload } from "./package-versions.ts";
 import { listPackages } from "./agent-service.ts";
@@ -129,7 +130,7 @@ export async function updateProvider(
     await tx
       .update(packages)
       .set({ draftManifest: manifest, updatedAt: new Date() })
-      .where(and(eq(packages.id, providerId), eq(packages.orgId, orgId)));
+      .where(scopedWhere(packages, { orgId, extra: [eq(packages.id, providerId)] }));
 
     if (adminCredentials && Object.keys(adminCredentials).length > 0 && applicationId) {
       await upsertAppCredentials(tx, applicationId, providerId, adminCredentials, true);
@@ -191,15 +192,15 @@ export async function invalidateConnections(
   providerId: string,
   providerCredentialId: string,
 ): Promise<void> {
-  await db
-    .delete(userProviderConnections)
-    .where(
-      and(
+  await db.delete(userProviderConnections).where(
+    scopedWhere(userProviderConnections, {
+      orgId,
+      extra: [
         eq(userProviderConnections.providerId, providerId),
-        eq(userProviderConnections.orgId, orgId),
         eq(userProviderConnections.providerCredentialId, providerCredentialId),
-      ),
-    );
+      ],
+    }),
+  );
   logger.info("Invalidated user connections after credential update", {
     providerId,
     orgId,
@@ -219,7 +220,9 @@ export async function deleteProvider(
   const usageCount = await countProviderUsage(orgId, providerId);
   if (usageCount > 0) return { ok: false, usageCount };
 
-  await db.delete(packages).where(and(eq(packages.orgId, orgId), eq(packages.id, providerId)));
+  await db
+    .delete(packages)
+    .where(scopedWhere(packages, { orgId, extra: [eq(packages.id, providerId)] }));
   return { ok: true };
 }
 

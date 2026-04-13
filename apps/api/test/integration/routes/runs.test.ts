@@ -513,7 +513,7 @@ describe("Runs API", () => {
   // ─── Enriched run responses ─────────────────────────────────
 
   describe("Enriched run responses", () => {
-    it("GET /api/runs/:id returns userName from profile", async () => {
+    it("GET /api/runs/:id returns dashboardUserName from profile", async () => {
       await seedAgent({ id: "@runorg/enriched-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const run = await seedRun({
         packageId: "@runorg/enriched-agent",
@@ -529,8 +529,8 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.userName).toBeString();
-      expect(body.userName).toBeTruthy();
+      expect(body.dashboardUserName).toBeString();
+      expect(body.dashboardUserName).toBeTruthy();
       expect(body.endUserName).toBeNull();
       expect(body.apiKeyName).toBeNull();
       // scheduleName is populated from a LEFT JOIN on package_schedules — null
@@ -560,7 +560,7 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.endUserName).toBe("Alice External");
-      expect(body.userName).toBeNull();
+      expect(body.dashboardUserName).toBeNull();
     });
 
     it("GET /api/runs/:id returns endUserName from externalId fallback", async () => {
@@ -639,7 +639,7 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.scheduleName).toBe("Daily Sync");
-      expect(body.userName).toBeNull();
+      expect(body.dashboardUserName).toBeNull();
     });
 
     it("GET /api/agents/:scope/:name/runs returns enriched fields in list", async () => {
@@ -660,8 +660,8 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.runs).toHaveLength(1);
-      expect(body.runs[0].userName).toBeString();
-      expect(body.runs[0].userName).toBeTruthy();
+      expect(body.runs[0].dashboardUserName).toBeString();
+      expect(body.runs[0].dashboardUserName).toBeTruthy();
       expect(body.runs[0].endUserName).toBeNull();
       expect(body.runs[0].apiKeyName).toBeNull();
       expect(body.runs[0].scheduleName).toBeNull();

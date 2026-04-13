@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import { eq, and, or, desc, isNull, type InferSelectModel } from "drizzle-orm";
+import { eq, or, desc, isNull, type InferSelectModel } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { webhooks, webhookDeliveries } from "./schema.ts";
 import { logger } from "../../lib/logger.ts";
@@ -203,7 +203,7 @@ export async function createWebhook(params: CreateWebhookInput): Promise<Webhook
   const scopeFilter =
     params.level === "application"
       ? scopedWhere(webhooks, { orgId: params.orgId, applicationId: params.applicationId })
-      : and(eq(webhooks.orgId, params.orgId), isNull(webhooks.applicationId));
+      : scopedWhere(webhooks, { orgId: params.orgId, extra: [isNull(webhooks.applicationId)] });
   const existing = await db.select({ id: webhooks.id }).from(webhooks).where(scopeFilter);
   if (existing.length >= MAX_WEBHOOKS_PER_SCOPE) {
     throw new ApiError({
@@ -252,13 +252,13 @@ export async function listWebhooks(
 ): Promise<WebhookInfo[]> {
   const { applicationId, all } = opts;
   const filter = all
-    ? eq(webhooks.orgId, orgId)
+    ? scopedWhere(webhooks, { orgId })
     : applicationId
-      ? and(
-          eq(webhooks.orgId, orgId),
-          or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId)),
-        )
-      : and(eq(webhooks.orgId, orgId), isNull(webhooks.applicationId));
+      ? scopedWhere(webhooks, {
+          orgId,
+          extra: [or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId))],
+        })
+      : scopedWhere(webhooks, { orgId, extra: [isNull(webhooks.applicationId)] });
 
   const rows = await db.select().from(webhooks).where(filter).orderBy(desc(webhooks.createdAt));
   return rows.map(toWebhookResponse);
@@ -268,7 +268,7 @@ export async function getWebhook(orgId: string, webhookId: string): Promise<Webh
   const [row] = await db
     .select()
     .from(webhooks)
-    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)))
+    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }))
     .limit(1);
 
   if (!row) throw notFound(`Webhook '${webhookId}' not found`);
@@ -295,7 +295,7 @@ export async function updateWebhook(
   const [updated] = await db
     .update(webhooks)
     .set(updates)
-    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)))
+    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }))
     .returning();
 
   return toWebhookResponse(updated!);
@@ -303,7 +303,9 @@ export async function updateWebhook(
 
 export async function deleteWebhook(orgId: string, webhookId: string): Promise<void> {
   await getWebhook(orgId, webhookId);
-  await db.delete(webhooks).where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)));
+  await db
+    .delete(webhooks)
+    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }));
 }
 
 export async function rotateSecret(orgId: string, webhookId: string): Promise<{ secret: string }> {
@@ -313,7 +315,7 @@ export async function rotateSecret(orgId: string, webhookId: string): Promise<{ 
   await db
     .update(webhooks)
     .set({ secret: newSecret, updatedAt: new Date() })
-    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)));
+    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }));
 
   return { secret: newSecret };
 }
@@ -415,11 +417,13 @@ export async function dispatchWebhookEvents(
     })
     .from(webhooks)
     .where(
-      and(
-        eq(webhooks.orgId, orgId),
-        eq(webhooks.enabled, true),
-        or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId)),
-      ),
+      scopedWhere(webhooks, {
+        orgId,
+        extra: [
+          eq(webhooks.enabled, true),
+          or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId)),
+        ],
+      }),
     );
 
   const queue = await getDeliveryQueue();

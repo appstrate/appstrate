@@ -400,9 +400,10 @@ export const schemas = {
         description: "Additional metadata (e.g. creditsUsed in cloud mode)",
         additionalProperties: true,
       },
-      userName: {
+      dashboardUserName: {
         type: ["string", "null"],
-        description: "Display name of the user who triggered the run (from profiles table)",
+        description:
+          "Display name of the dashboard user who triggered the run (from profiles table)",
       },
       endUserName: {
         type: ["string", "null"],

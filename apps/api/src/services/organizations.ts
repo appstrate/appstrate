@@ -13,8 +13,9 @@ import {
   packages,
   orgInvitations,
 } from "@appstrate/db/schema";
-import { eq, and, inArray, count } from "drizzle-orm";
+import { eq, inArray, count } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
+import { scopedWhere } from "../lib/db-helpers.ts";
 
 interface OrgResult {
   id: string;
@@ -168,7 +169,12 @@ export async function getOrgMember(orgId: string, userId: string) {
   const [row] = await db
     .select()
     .from(organizationMembers)
-    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
+    .where(
+      scopedWhere(organizationMembers, {
+        orgId,
+        extra: [eq(organizationMembers.userId, userId)],
+      }),
+    )
     .limit(1);
 
   return row ?? null;
@@ -204,7 +210,12 @@ export async function addMember(
 export async function removeMember(orgId: string, userId: string): Promise<void> {
   const deleted = await db
     .delete(organizationMembers)
-    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
+    .where(
+      scopedWhere(organizationMembers, {
+        orgId,
+        extra: [eq(organizationMembers.userId, userId)],
+      }),
+    )
     .returning({ orgId: organizationMembers.orgId });
 
   if (deleted.length === 0) {
@@ -220,7 +231,12 @@ export async function updateMemberRole(
   const updated = await db
     .update(organizationMembers)
     .set({ role })
-    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, userId)))
+    .where(
+      scopedWhere(organizationMembers, {
+        orgId,
+        extra: [eq(organizationMembers.userId, userId)],
+      }),
+    )
     .returning({ orgId: organizationMembers.orgId });
 
   if (updated.length === 0) {
@@ -243,7 +259,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
   const runningResult = await db
     .select({ runningCount: count() })
     .from(runs)
-    .where(and(eq(runs.orgId, orgId), inArray(runs.status, ["pending", "running"])));
+    .where(scopedWhere(runs, { orgId, extra: [inArray(runs.status, ["pending", "running"])] }));
 
   if ((runningResult[0]?.runningCount ?? 0) > 0) {
     throw new Error("Cannot delete organization: runs are in progress");

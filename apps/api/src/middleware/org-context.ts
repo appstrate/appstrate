@@ -2,10 +2,11 @@
 
 import type { Context, Next } from "hono";
 import type { AppEnv, OrgRole } from "../types/index.ts";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, organizations } from "@appstrate/db/schema";
 import { invalidRequest, forbidden } from "../lib/errors.ts";
+import { scopedWhere } from "../lib/db-helpers.ts";
 
 /**
  * Middleware: extract X-Org-Id header, verify membership, inject orgId + orgRole + orgSlug.
@@ -23,7 +24,12 @@ export function requireOrgContext() {
       .select({ role: organizationMembers.role, slug: organizations.slug })
       .from(organizationMembers)
       .innerJoin(organizations, eq(organizations.id, organizationMembers.orgId))
-      .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, user.id)))
+      .where(
+        scopedWhere(organizationMembers, {
+          orgId,
+          extra: [eq(organizationMembers.userId, user.id)],
+        }),
+      )
       .limit(1);
 
     if (!rows[0]) {

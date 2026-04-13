@@ -345,7 +345,7 @@ export async function getRunningRunCountForOrg(orgId: string): Promise<number> {
   const [row] = await db
     .select({ count: count() })
     .from(runs)
-    .where(and(eq(runs.orgId, orgId), inArray(runs.status, ["running", "pending"])));
+    .where(scopedWhere(runs, { orgId, extra: [inArray(runs.status, ["running", "pending"])] }));
   return row?.count ?? 0;
 }
 
@@ -423,7 +423,7 @@ export async function listRunsWithFilter(
   const rows = await db
     .select({
       run: runs,
-      userName: profiles.displayName,
+      dashboardUserName: profiles.displayName,
       endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
       apiKeyName: apiKeys.name,
       scheduleName: schedules.name,
@@ -441,7 +441,7 @@ export async function listRunsWithFilter(
   return {
     runs: rows.map((r) => ({
       ...r.run,
-      userName: r.userName ?? null,
+      dashboardUserName: r.dashboardUserName ?? null,
       endUserName: r.endUserName ?? null,
       apiKeyName: r.apiKeyName ?? null,
       scheduleName: r.scheduleName ?? null,
@@ -499,7 +499,7 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
   const [row] = await db
     .select({
       run: runs,
-      userName: profiles.displayName,
+      dashboardUserName: profiles.displayName,
       endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
       apiKeyName: apiKeys.name,
       scheduleName: schedules.name,
@@ -515,7 +515,7 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
   if (!row) return null;
   return {
     ...row.run,
-    userName: row.userName ?? null,
+    dashboardUserName: row.dashboardUserName ?? null,
     endUserName: row.endUserName ?? null,
     apiKeyName: row.apiKeyName ?? null,
     scheduleName: row.scheduleName ?? null,

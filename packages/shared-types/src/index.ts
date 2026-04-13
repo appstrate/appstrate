@@ -14,9 +14,9 @@ export type { Run } from "@appstrate/db/schema";
 
 import type { Run } from "@appstrate/db/schema";
 
-/** Run with enriched display names from LEFT JOINs (user, end-user, API key, schedule). */
+/** Run with enriched display names from LEFT JOINs (dashboard user, end-user, API key, schedule). */
 export type EnrichedRun = Run & {
-  userName: string | null;
+  dashboardUserName: string | null;
   endUserName: string | null;
   apiKeyName: string | null;
   scheduleName: string | null;

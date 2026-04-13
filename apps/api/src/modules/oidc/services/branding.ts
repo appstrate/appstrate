@@ -18,11 +18,12 @@
  */
 
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
+import { scopedWhere } from "../../../lib/db-helpers.ts";
 
 /**
  * Branding logos are injected into `<img src="...">` on server-rendered
@@ -158,7 +159,12 @@ export async function resolveBrandingForClient(client: {
     const [row] = await db
       .select({ id: applications.id })
       .from(applications)
-      .where(and(eq(applications.orgId, client.referencedOrgId), eq(applications.isDefault, true)))
+      .where(
+        scopedWhere(applications, {
+          orgId: client.referencedOrgId,
+          extra: [eq(applications.isDefault, true)],
+        }),
+      )
       .limit(1);
     if (row) return resolveAppBranding(row.id);
   }

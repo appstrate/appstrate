@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgSystemProviderKeys } from "@appstrate/db/schema";
 import { encrypt, decrypt } from "@appstrate/connect";
 import { getSystemProviderKeys } from "./model-registry.ts";
 import type { OrgProviderKeyInfo, TestResult } from "@appstrate/shared-types";
 import { testModelConfig } from "./org-models.ts";
-import { mergeSystemAndDb, buildUpdateSet } from "../lib/db-helpers.ts";
+import { mergeSystemAndDb, buildUpdateSet, scopedWhere } from "../lib/db-helpers.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
 
 // --- List (system + DB) ---
@@ -17,7 +17,7 @@ export async function listOrgProviderKeys(orgId: string): Promise<OrgProviderKey
   const rows = await db
     .select()
     .from(orgSystemProviderKeys)
-    .where(eq(orgSystemProviderKeys.orgId, orgId));
+    .where(scopedWhere(orgSystemProviderKeys, { orgId }));
   const now = toISORequired(new Date());
 
   return mergeSystemAndDb({
@@ -81,13 +81,17 @@ export async function updateOrgProviderKey(
   await db
     .update(orgSystemProviderKeys)
     .set(updates)
-    .where(and(eq(orgSystemProviderKeys.id, id), eq(orgSystemProviderKeys.orgId, orgId)));
+    .where(
+      scopedWhere(orgSystemProviderKeys, { orgId, extra: [eq(orgSystemProviderKeys.id, id)] }),
+    );
 }
 
 export async function deleteOrgProviderKey(orgId: string, id: string): Promise<void> {
   await db
     .delete(orgSystemProviderKeys)
-    .where(and(eq(orgSystemProviderKeys.id, id), eq(orgSystemProviderKeys.orgId, orgId)));
+    .where(
+      scopedWhere(orgSystemProviderKeys, { orgId, extra: [eq(orgSystemProviderKeys.id, id)] }),
+    );
 }
 
 // --- Credential loading ---
@@ -109,7 +113,7 @@ export async function loadProviderKeyCredentials(
       apiKeyEncrypted: orgSystemProviderKeys.apiKeyEncrypted,
     })
     .from(orgSystemProviderKeys)
-    .where(and(eq(orgSystemProviderKeys.id, id), eq(orgSystemProviderKeys.orgId, orgId)))
+    .where(scopedWhere(orgSystemProviderKeys, { orgId, extra: [eq(orgSystemProviderKeys.id, id)] }))
     .limit(1);
   if (!row) return null;
   try {

@@ -12,6 +12,7 @@ import { deletePackageFiles } from "./storage.ts";
 import { asRecord } from "../../lib/safe-json.ts";
 import { orgOrSystemFilter, getPackageDisplayName } from "../../lib/package-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
+import { scopedWhere } from "../../lib/db-helpers.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(
@@ -46,7 +47,7 @@ async function findDependentPackages(
   const orgPkgs = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
-    .where(eq(packages.orgId, orgId));
+    .where(scopedWhere(packages, { orgId }));
 
   const dependents: { id: string; displayName: string }[] = [];
   for (const pkg of orgPkgs) {
@@ -161,11 +162,10 @@ export async function updateOrgItem(
       lockVersion: sql`${packages.lockVersion} + 1`,
     })
     .where(
-      and(
-        eq(packages.id, id),
-        eq(packages.orgId, orgId),
-        eq(packages.lockVersion, expectedVersion),
-      ),
+      scopedWhere(packages, {
+        orgId,
+        extra: [eq(packages.id, id), eq(packages.lockVersion, expectedVersion)],
+      }),
     )
     .returning();
 
@@ -214,7 +214,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, applic
   const allOrgPkgs = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
-    .where(eq(packages.orgId, orgId));
+    .where(scopedWhere(packages, { orgId }));
   for (const pkg of allOrgPkgs) {
     if (!pkg.draftManifest) continue;
     const deps = extractDependencies(asRecord(pkg.draftManifest) as Partial<Manifest>);
@@ -293,9 +293,12 @@ export async function deleteOrgItem(
     return { ok: false, error: "IN_USE", dependents };
   }
 
-  await db
-    .delete(packages)
-    .where(and(eq(packages.orgId, orgId), eq(packages.id, itemId), eq(packages.type, cfg.type)));
+  await db.delete(packages).where(
+    scopedWhere(packages, {
+      orgId,
+      extra: [eq(packages.id, itemId), eq(packages.type, cfg.type)],
+    }),
+  );
 
   await deletePackageFiles(cfg.storageFolder, orgId, itemId);
 

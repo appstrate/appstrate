@@ -8,6 +8,7 @@ import { getAppConfig } from "../lib/app-config.ts";
 import { sendEmail } from "./email.ts";
 import { getAuth } from "@appstrate/db/auth";
 import { logger } from "../lib/logger.ts";
+import { scopedWhere } from "../lib/db-helpers.ts";
 
 /** Roles assignable via invitation (excludes owner — transferred, not invited). */
 export const ASSIGNABLE_ROLES = ["viewer", "member", "admin"] as const;
@@ -47,11 +48,10 @@ export async function createInvitation({
     .update(orgInvitations)
     .set({ status: "cancelled" })
     .where(
-      and(
-        eq(orgInvitations.orgId, orgId),
-        eq(orgInvitations.email, normalizedEmail),
-        eq(orgInvitations.status, "pending"),
-      ),
+      scopedWhere(orgInvitations, {
+        orgId,
+        extra: [eq(orgInvitations.email, normalizedEmail), eq(orgInvitations.status, "pending")],
+      }),
     );
 
   const token = generateToken();
@@ -105,7 +105,7 @@ export async function getOrgInvitations(orgId: string) {
   return db
     .select()
     .from(orgInvitations)
-    .where(and(eq(orgInvitations.orgId, orgId), eq(orgInvitations.status, "pending")))
+    .where(scopedWhere(orgInvitations, { orgId, extra: [eq(orgInvitations.status, "pending")] }))
     .orderBy(desc(orgInvitations.createdAt));
 }
 
@@ -120,7 +120,7 @@ export async function cancelInvitation(invitationId: string, orgId: string) {
   const [cancelled] = await db
     .update(orgInvitations)
     .set({ status: "cancelled" })
-    .where(and(eq(orgInvitations.id, invitationId), eq(orgInvitations.orgId, orgId)))
+    .where(scopedWhere(orgInvitations, { orgId, extra: [eq(orgInvitations.id, invitationId)] }))
     .returning({ id: orgInvitations.id });
   return cancelled ?? null;
 }
@@ -134,11 +134,10 @@ export async function updateInvitationRole(
     .update(orgInvitations)
     .set({ role })
     .where(
-      and(
-        eq(orgInvitations.id, invitationId),
-        eq(orgInvitations.orgId, orgId),
-        eq(orgInvitations.status, "pending"),
-      ),
+      scopedWhere(orgInvitations, {
+        orgId,
+        extra: [eq(orgInvitations.id, invitationId), eq(orgInvitations.status, "pending")],
+      }),
     )
     .returning();
 
