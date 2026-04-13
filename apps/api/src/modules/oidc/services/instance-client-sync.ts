@@ -2,7 +2,7 @@
 
 /**
  * Declarative provisioning of instance-level OAuth clients from the
- * `APPSTRATE_OIDC_INSTANCE_CLIENTS` env var.
+ * `OIDC_INSTANCE_CLIENTS` env var.
  *
  * Called once from `oidcModule.init()` at boot, after `ensureInstanceClient()`
  * has provisioned the platform SPA client. The sync materializes every
@@ -129,7 +129,7 @@ export class InstanceClientSyncError extends Error {
  */
 export async function syncInstanceClientsFromEnv(): Promise<void> {
   const env = getEnv();
-  const raw = env.APPSTRATE_OIDC_INSTANCE_CLIENTS;
+  const raw = env.OIDC_INSTANCE_CLIENTS;
 
   // Step 1 — parse + validate.
   const parseResult = declaredInstanceClientsSchema.safeParse(raw);
@@ -138,9 +138,7 @@ export async function syncInstanceClientsFromEnv(): Promise<void> {
     const issues = parseResult.error.issues
       .map((i) => `  - ${i.path.join(".") || "<root>"}: ${i.message}`)
       .join("\n");
-    throw new InstanceClientSyncError(
-      `APPSTRATE_OIDC_INSTANCE_CLIENTS: invalid JSON schema\n${issues}`,
-    );
+    throw new InstanceClientSyncError(`OIDC_INSTANCE_CLIENTS: invalid JSON schema\n${issues}`);
   }
   const declared = parseResult.data;
 
@@ -149,7 +147,7 @@ export async function syncInstanceClientsFromEnv(): Promise<void> {
   for (const entry of declared) {
     if (seen.has(entry.clientId)) {
       throw new InstanceClientSyncError(
-        `APPSTRATE_OIDC_INSTANCE_CLIENTS: duplicate clientId '${entry.clientId}' in declaration`,
+        `OIDC_INSTANCE_CLIENTS: duplicate clientId '${entry.clientId}' in declaration`,
       );
     }
     seen.add(entry.clientId);
@@ -165,7 +163,7 @@ export async function syncInstanceClientsFromEnv(): Promise<void> {
       drift = await compareDeclaredClientWithStored(input);
     } catch (err) {
       throw new InstanceClientSyncError(
-        `APPSTRATE_OIDC_INSTANCE_CLIENTS: failed to load stored client '${entry.clientId}': ${(err as Error).message}`,
+        `OIDC_INSTANCE_CLIENTS: failed to load stored client '${entry.clientId}': ${(err as Error).message}`,
       );
     }
 
@@ -175,11 +173,11 @@ export async function syncInstanceClientsFromEnv(): Promise<void> {
       } catch (err) {
         if (err instanceof OAuthAdminValidationError) {
           throw new InstanceClientSyncError(
-            `APPSTRATE_OIDC_INSTANCE_CLIENTS: client '${entry.clientId}' rejected by service validation on field '${err.field}': ${err.message}`,
+            `OIDC_INSTANCE_CLIENTS: client '${entry.clientId}' rejected by service validation on field '${err.field}': ${err.message}`,
           );
         }
         throw new InstanceClientSyncError(
-          `APPSTRATE_OIDC_INSTANCE_CLIENTS: failed to create client '${entry.clientId}': ${(err as Error).message}`,
+          `OIDC_INSTANCE_CLIENTS: failed to create client '${entry.clientId}': ${(err as Error).message}`,
         );
       }
       createdCount++;
@@ -193,7 +191,7 @@ export async function syncInstanceClientsFromEnv(): Promise<void> {
 
     if (drift.kind === "wrong-level") {
       throw new InstanceClientSyncError(
-        `APPSTRATE_OIDC_INSTANCE_CLIENTS: clientId '${entry.clientId}' collides with an existing ${drift.storedLevel}-level OAuth client. Refusing to operate — pick a different clientId or remove the conflicting row manually.`,
+        `OIDC_INSTANCE_CLIENTS: clientId '${entry.clientId}' collides with an existing ${drift.storedLevel}-level OAuth client. Refusing to operate — pick a different clientId or remove the conflicting row manually.`,
       );
     }
 
@@ -222,7 +220,7 @@ export async function syncInstanceClientsFromEnv(): Promise<void> {
       )
       .join("\n");
     throw new InstanceClientSyncError(
-      `APPSTRATE_OIDC_INSTANCE_CLIENTS: drift detected on client '${entry.clientId}' (fields: ${fields}).\n` +
+      `OIDC_INSTANCE_CLIENTS: drift detected on client '${entry.clientId}' (fields: ${fields}).\n` +
         `  The env declaration no longer matches the stored client. To change these fields, delete\n` +
         `  the oauth_clients row manually (SQL: DELETE FROM oauth_clients WHERE client_id='${entry.clientId}')\n` +
         `  and restart — this refuses silent updates to avoid invalidating prod satellite sessions.\n` +
@@ -239,7 +237,7 @@ export async function syncInstanceClientsFromEnv(): Promise<void> {
   const orphans = storedIds.filter((id) => !declaredIds.has(id) && !id.startsWith("oauth_"));
   for (const orphanId of orphans) {
     logger.warn(
-      "OIDC instance client exists in DB but is absent from APPSTRATE_OIDC_INSTANCE_CLIENTS — ignoring (no automatic deletion)",
+      "OIDC instance client exists in DB but is absent from OIDC_INSTANCE_CLIENTS — ignoring (no automatic deletion)",
       { module: "oidc", clientId: orphanId },
     );
   }

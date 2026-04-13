@@ -253,7 +253,7 @@ function isSmtpEnabled(): boolean {
  * Passed to `renderLoginPage` / `renderRegisterPage` / `renderMagicLinkPage`
  * so they can hide the signup-only CTAs when signup is closed.
  *
- * Instance clients declared via `APPSTRATE_OIDC_INSTANCE_CLIENTS` are
+ * Instance clients declared via `OIDC_INSTANCE_CLIENTS` are
  * inserted with `allowSignup: false` — satellites like an admin portal
  * that opt into the platform login should never open signup on the shared
  * page; membership is provisioned out-of-band.

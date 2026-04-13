@@ -48,7 +48,7 @@ const envSchema = z
     // clients (admin dashboards, second-party web apps). Parsed loosely
     // here; the oidc module applies a strict Zod schema at boot. See
     // `apps/api/src/modules/oidc/services/instance-client-sync.ts`.
-    APPSTRATE_OIDC_INSTANCE_CLIENTS: z
+    OIDC_INSTANCE_CLIENTS: z
       .string()
       .default("[]")
       .transform((s) => JSON.parse(s) as unknown[]),

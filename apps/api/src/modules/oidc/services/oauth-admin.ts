@@ -530,7 +530,7 @@ export async function getClientOwningOrg(clientId: string): Promise<string | nul
  * Lookup the platform SPA instance-level client's `clientId`.
  *
  * Consumed by `oidcModule.appConfigContribution()` to publish the platform
- * SPA's OIDC config. With `APPSTRATE_OIDC_INSTANCE_CLIENTS`, multiple
+ * SPA's OIDC config. With `OIDC_INSTANCE_CLIENTS`, multiple
  * instance-level clients can coexist (the platform one + env-provisioned
  * satellites). `ensureInstanceClient()` runs BEFORE `syncInstanceClientsFromEnv()`
  * in `oidcModule.init()`, so the platform client always carries the earliest
@@ -577,7 +577,7 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
 // ─── Env-provisioned instance clients ─────────────────────────────────────────
 //
 // Satellite apps (admin dashboards, second-party web apps) are declared in
-// `APPSTRATE_OIDC_INSTANCE_CLIENTS` and materialized here. Unlike
+// `OIDC_INSTANCE_CLIENTS` and materialized here. Unlike
 // `createClient`, the operator supplies both `clientId` and `clientSecret`
 // out-of-band — no HTTP surface, no admin route. See
 // `services/instance-client-sync.ts` for the boot sync driver.

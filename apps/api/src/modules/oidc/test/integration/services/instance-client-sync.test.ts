@@ -2,7 +2,7 @@
 
 /**
  * Integration tests for declarative provisioning of instance-level OAuth
- * clients via `APPSTRATE_OIDC_INSTANCE_CLIENTS`.
+ * clients via `OIDC_INSTANCE_CLIENTS`.
  *
  * Covers the full sync policy: create, idempotence, drift (redirect URIs
  * and secret rotation), orphan warning, cross-level collision, validation
@@ -24,15 +24,15 @@ import { hashSecret, ensureInstanceClient } from "../../../services/oauth-admin.
 
 const VALID_SECRET = "abcd1234".repeat(4); // 32 chars
 
-const ORIGINAL_ENV = process.env.APPSTRATE_OIDC_INSTANCE_CLIENTS;
+const ORIGINAL_ENV = process.env.OIDC_INSTANCE_CLIENTS;
 
 function setDeclaration(value: unknown): void {
-  process.env.APPSTRATE_OIDC_INSTANCE_CLIENTS = JSON.stringify(value);
+  process.env.OIDC_INSTANCE_CLIENTS = JSON.stringify(value);
   _resetCacheForTesting();
 }
 
 function clearDeclaration(): void {
-  delete process.env.APPSTRATE_OIDC_INSTANCE_CLIENTS;
+  delete process.env.OIDC_INSTANCE_CLIENTS;
   _resetCacheForTesting();
 }
 
@@ -55,9 +55,9 @@ beforeEach(async () => {
 
 afterEach(() => {
   if (ORIGINAL_ENV === undefined) {
-    delete process.env.APPSTRATE_OIDC_INSTANCE_CLIENTS;
+    delete process.env.OIDC_INSTANCE_CLIENTS;
   } else {
-    process.env.APPSTRATE_OIDC_INSTANCE_CLIENTS = ORIGINAL_ENV;
+    process.env.OIDC_INSTANCE_CLIENTS = ORIGINAL_ENV;
   }
   _resetCacheForTesting();
 });
@@ -351,7 +351,7 @@ describe("syncInstanceClientsFromEnv — validation", () => {
 // ─── Empty / unset env ────────────────────────────────────────────────────────
 
 describe("syncInstanceClientsFromEnv — env absent", () => {
-  it("is a no-op when APPSTRATE_OIDC_INSTANCE_CLIENTS is unset", async () => {
+  it("is a no-op when OIDC_INSTANCE_CLIENTS is unset", async () => {
     clearDeclaration();
     await syncInstanceClientsFromEnv();
     const rows = await db.select().from(oauthClient);
@@ -363,7 +363,7 @@ describe("syncInstanceClientsFromEnv — env absent", () => {
 //
 // End-to-end coverage for the boot path: invoking `oidcModule.init()` with
 // a realistic `ModuleInitContext` must (a) run `ensureInstanceClient` for
-// the platform SPA and (b) reconcile `APPSTRATE_OIDC_INSTANCE_CLIENTS`.
+// the platform SPA and (b) reconcile `OIDC_INSTANCE_CLIENTS`.
 // This is the only test that proves the module's `init` hook actually
 // drives the sync — `getTestApp()` only wires `createRouter()`.
 

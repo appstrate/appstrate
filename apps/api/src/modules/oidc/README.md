@@ -165,14 +165,14 @@ Colors are validated by `AppBrandingSchema` at resolve time, so a misconfigured 
 
 **Headless:** `POST /api/oauth/clients` with `{ name, redirectUris, scopes? }` + an admin API key with `oauth-clients:write`.
 
-## Instance-level satellite clients via `APPSTRATE_OIDC_INSTANCE_CLIENTS`
+## Instance-level satellite clients via `OIDC_INSTANCE_CLIENTS`
 
-Instance-level clients power **satellite apps that share the Appstrate login at the instance level** — typically an admin dashboard, a second-party web app, or any trusted confidential client that needs to let a user pick their org at runtime (via `X-Org-Id`, same contract as the platform SPA). These clients are intentionally NOT exposable through an HTTP admin endpoint: a compromised owner account could otherwise mint an arbitrary satellite and exfiltrate tokens. The only creation path is declarative, via the `APPSTRATE_OIDC_INSTANCE_CLIENTS` env var, reconciled at boot by `services/instance-client-sync.ts`.
+Instance-level clients power **satellite apps that share the Appstrate login at the instance level** — typically an admin dashboard, a second-party web app, or any trusted confidential client that needs to let a user pick their org at runtime (via `X-Org-Id`, same contract as the platform SPA). These clients are intentionally NOT exposable through an HTTP admin endpoint: a compromised owner account could otherwise mint an arbitrary satellite and exfiltrate tokens. The only creation path is declarative, via the `OIDC_INSTANCE_CLIENTS` env var, reconciled at boot by `services/instance-client-sync.ts`.
 
 ### Format
 
 ```sh
-export APPSTRATE_OIDC_INSTANCE_CLIENTS='[
+export OIDC_INSTANCE_CLIENTS='[
   {
     "clientId": "admin-dashboard",
     "clientSecret": "'$(openssl rand -base64 32)'",
