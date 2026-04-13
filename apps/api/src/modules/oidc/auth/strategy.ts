@@ -98,7 +98,7 @@ export const oidcAuthStrategy: AuthStrategy = {
     if (claims.actorType === "end_user") {
       return resolveEndUser(claims);
     }
-    // No actor_type claim — legacy or malformed token. Fall through so core
+    // No actor_type claim — malformed token. Fall through so core
     // Bearer / cookie auth gets a chance to handle it.
     return null;
   },

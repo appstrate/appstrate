@@ -39,12 +39,10 @@
  */
 
 import { eq, or, inArray } from "drizzle-orm";
-import { z } from "zod";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
 import { oauthClient } from "../schema.ts";
 import { prefixedId } from "../../../lib/ids.ts";
-import { logger } from "../../../lib/logger.ts";
 import { APPSTRATE_SCOPES } from "../auth/scopes.ts";
 import { isValidRedirectUri } from "./redirect-uri.ts";
 
@@ -128,55 +126,34 @@ function assertValidRedirectUris(uris: readonly string[]): void {
 export const SIGNUP_ROLE_ALLOWED = ["admin", "member", "viewer"] as const;
 export type SignupRole = (typeof SIGNUP_ROLE_ALLOWED)[number];
 
-export const oauthClientBaseSchema = z.object({
-  id: z.string(),
-  clientId: z.string(),
-  name: z.string().nullable(),
-  level: z.enum(["instance", "org", "application"]),
-  referencedOrgId: z.string().nullable(),
-  referencedApplicationId: z.string().nullable(),
-  redirectUris: z.array(z.url()),
-  postLogoutRedirectUris: z.array(z.url()),
-  scopes: z.array(z.string()),
-  disabled: z.boolean(),
-  isFirstParty: z.boolean(),
+export interface OAuthClientRecord {
+  id: string;
+  clientId: string;
+  name: string | null;
+  level: OAuthClientLevel;
+  referencedOrgId: string | null;
+  referencedApplicationId: string | null;
+  redirectUris: string[];
+  postLogoutRedirectUris: string[];
+  scopes: string[];
+  disabled: boolean;
+  isFirstParty: boolean;
   /** Org-level: whether non-members are auto-joined on first sign-in. Defaults to `false`. */
-  allowSignup: z.boolean(),
+  allowSignup: boolean;
   /** Org-level: role assigned on auto-join. `owner` forbidden. Defaults to `"member"`. */
-  signupRole: z.enum(SIGNUP_ROLE_ALLOWED),
-  createdAt: z.string().nullable(),
-  updatedAt: z.string().nullable(),
-});
-
-export const oauthClientWithSecretSchema = oauthClientBaseSchema.extend({
-  clientSecret: z.string(),
-});
-
-export type OAuthClientRecord = z.infer<typeof oauthClientBaseSchema>;
-export type OAuthClientWithSecret = z.infer<typeof oauthClientWithSecretSchema>;
-
-/** @internal exported for unit tests */
-export function isKnownLevel(level: unknown): level is OAuthClientLevel {
-  return level === "instance" || level === "org" || level === "application";
+  signupRole: SignupRole;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
-/**
- * Strict row mapper — throws on unexpected `level` values. Use this for
- * single-row lookups (`getClient`, `createClient`, `updateClient`) where
- * a corrupted row is a hard failure the caller should surface.
- */
+export interface OAuthClientWithSecret extends OAuthClientRecord {
+  clientSecret: string;
+}
+
 function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
-  if (!isKnownLevel(row.level)) {
+  if (row.level !== "instance" && row.level !== "org" && row.level !== "application") {
     throw new Error(`OIDC: unexpected oauth_client.level value: ${String(row.level)}`);
   }
-  // Drizzle returns `signup_role` as `string` (no enum narrowing on reads).
-  // Narrow it back to the allowlist and fall back to `"member"` on any
-  // unexpected value — the DB CHECK constraint prevents bad values from
-  // ever being written, so this branch is defense in depth against
-  // out-of-band SQL mutations.
-  const signupRole: SignupRole = (SIGNUP_ROLE_ALLOWED as readonly string[]).includes(row.signupRole)
-    ? (row.signupRole as SignupRole)
-    : "member";
   return {
     id: row.id,
     clientId: row.clientId,
@@ -190,38 +167,10 @@ function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
     disabled: row.disabled ?? false,
     isFirstParty: row.skipConsent ?? false,
     allowSignup: row.allowSignup ?? false,
-    signupRole,
+    signupRole: row.signupRole as SignupRole,
     createdAt: row.createdAt ? row.createdAt.toISOString() : null,
     updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
   };
-}
-
-/**
- * Lenient row mapper — returns `null` and logs a warning for unexpected
- * `level` values instead of throwing. Use this in list/batch operations
- * so one corrupted row (e.g. after a botched migration) cannot crash the
- * entire listing and lock admins out of the UI.
- */
-/** @internal exported for unit tests */
-export function mapRowSafe(row: typeof oauthClient.$inferSelect): OAuthClientRecord | null {
-  if (!isKnownLevel(row.level)) {
-    logger.warn("oidc: skipping oauth_client row with unexpected level", {
-      module: "oidc",
-      clientId: row.clientId,
-      level: String(row.level),
-    });
-    return null;
-  }
-  return mapRow(row);
-}
-
-function mapRowsSafe(rows: (typeof oauthClient.$inferSelect)[]): OAuthClientRecord[] {
-  const out: OAuthClientRecord[] = [];
-  for (const row of rows) {
-    const mapped = mapRowSafe(row);
-    if (mapped) out.push(mapped);
-  }
-  return out;
 }
 
 function randomSecret(): string {
@@ -293,7 +242,7 @@ export function _resetClientCache(): void {
 
 export async function listClientsForOrg(orgId: string): Promise<OAuthClientRecord[]> {
   const rows = await db.select().from(oauthClient).where(eq(oauthClient.referencedOrgId, orgId));
-  return mapRowsSafe(rows);
+  return rows.map(mapRow);
 }
 
 export async function listClientsForApp(applicationId: string): Promise<OAuthClientRecord[]> {
@@ -301,7 +250,7 @@ export async function listClientsForApp(applicationId: string): Promise<OAuthCli
     .select()
     .from(oauthClient)
     .where(eq(oauthClient.referencedApplicationId, applicationId));
-  return mapRowsSafe(rows);
+  return rows.map(mapRow);
 }
 
 /** Combined list for the admin UI — returns every client the caller's org can see in a single query. */
@@ -317,7 +266,7 @@ export async function listClientsForOrgAndApps(
     .select()
     .from(oauthClient)
     .where(or(...conditions));
-  return mapRowsSafe(rows);
+  return rows.map(mapRow);
 }
 
 export async function getClient(clientId: string): Promise<OAuthClientRecord | null> {

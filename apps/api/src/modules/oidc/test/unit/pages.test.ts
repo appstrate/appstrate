@@ -11,6 +11,7 @@ import { PLATFORM_DEFAULT_BRANDING } from "../../services/branding.ts";
 const DEFAULT_PROPS = {
   branding: PLATFORM_DEFAULT_BRANDING,
   csrfToken: "tok_test",
+  allowSignup: true,
 };
 
 describe("renderLoginPage", () => {
@@ -89,6 +90,7 @@ describe("page branding + CSRF", () => {
       queryString: "?client_id=c1",
       branding,
       csrfToken: "tok_abcdef",
+      allowSignup: true,
     }).value;
     expect(out).toContain('src="https://cdn.example.com/logo.png"');
     expect(out).toContain("Mon Workspace");

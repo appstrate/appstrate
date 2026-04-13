@@ -3,16 +3,58 @@
 /**
  * OpenAPI component schemas for the OIDC module.
  *
- * Derived from the Zod schemas in `../services/oauth-admin.ts` so the
- * shape is defined exactly once — the backend services, the OpenAPI
- * spec, and (transitively, via type inference) the frontend hooks all
- * read from the same single source of truth.
+ * Hand-written JSON schema — kept in lockstep with the `OAuthClientRecord`
+ * interface in `../services/oauth-admin.ts`. `verify-openapi` will flag
+ * any drift between the runtime responses and this shape.
  */
 
-import { z } from "zod";
-import { oauthClientBaseSchema, oauthClientWithSecretSchema } from "../services/oauth-admin.ts";
+const oauthClientObject: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "clientId",
+    "name",
+    "level",
+    "referencedOrgId",
+    "referencedApplicationId",
+    "redirectUris",
+    "postLogoutRedirectUris",
+    "scopes",
+    "disabled",
+    "isFirstParty",
+    "allowSignup",
+    "signupRole",
+    "createdAt",
+    "updatedAt",
+  ],
+  properties: {
+    id: { type: "string" },
+    clientId: { type: "string" },
+    name: { type: ["string", "null"] },
+    level: { type: "string", enum: ["instance", "org", "application"] },
+    referencedOrgId: { type: ["string", "null"] },
+    referencedApplicationId: { type: ["string", "null"] },
+    redirectUris: { type: "array", items: { type: "string", format: "uri" } },
+    postLogoutRedirectUris: { type: "array", items: { type: "string", format: "uri" } },
+    scopes: { type: "array", items: { type: "string" } },
+    disabled: { type: "boolean" },
+    isFirstParty: { type: "boolean" },
+    allowSignup: { type: "boolean" },
+    signupRole: { type: "string", enum: ["admin", "member", "viewer"] },
+    createdAt: { type: ["string", "null"] },
+    updatedAt: { type: ["string", "null"] },
+  },
+};
 
 export const oidcSchemas = {
-  OAuthClientObject: z.toJSONSchema(oauthClientBaseSchema) as Record<string, unknown>,
-  OAuthClientWithSecret: z.toJSONSchema(oauthClientWithSecretSchema) as Record<string, unknown>,
+  OAuthClientObject: oauthClientObject,
+  OAuthClientWithSecret: {
+    ...oauthClientObject,
+    required: [...(oauthClientObject.required as string[]), "clientSecret"],
+    properties: {
+      ...(oauthClientObject.properties as Record<string, unknown>),
+      clientSecret: { type: "string" },
+    },
+  },
 };

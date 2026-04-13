@@ -63,9 +63,6 @@ export interface AccessTokenClaims {
   endUserId?: string;
 }
 
-/** @deprecated Kept as an alias for backward-compat with older callers. */
-export type EndUserClaims = AccessTokenClaims;
-
 export type JwksResolver = (
   protectedHeader?: jose.JWSHeaderParameters,
   token?: jose.FlattenedJWSInput,

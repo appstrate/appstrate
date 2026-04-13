@@ -38,10 +38,9 @@ export interface LoginPageProps {
    * existing members who linked a Google/GitHub account (or never set a
    * password) can still sign in. Orphan user creation is prevented at the
    * BA `beforeSignup` hook layer (`oidcBeforeSignupGuard`), so showing
-   * these buttons is safe. Defaults to `true` (backward compatible for
-   * app/instance clients and pre-feature callers).
+   * these buttons is safe.
    */
-  allowSignup?: boolean;
+  allowSignup: boolean;
 }
 
 export function renderLoginPage(props: LoginPageProps): RawHtml {
@@ -58,7 +57,7 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
   // magic-link to sign in without a password. Orphan creation on closed
   // clients is blocked by the `beforeSignup` BA hook
   // (`oidcBeforeSignupGuard`).
-  const allowSignup = props.allowSignup ?? true;
+  const allowSignup = props.allowSignup;
   const google = props.socialProviders?.google ?? false;
   const github = props.socialProviders?.github ?? false;
   const magicLink = props.smtpEnabled ?? false;

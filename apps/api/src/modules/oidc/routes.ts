@@ -38,6 +38,7 @@ import {
   updateClient,
   OAuthAdminValidationError,
   SIGNUP_ROLE_ALLOWED,
+  type OAuthClientRecord,
 } from "./services/oauth-admin.ts";
 import {
   OrgSignupClosedError,
@@ -139,56 +140,44 @@ export const updateOAuthClientSchema = z.object({
 
 // ─── Shared page context loader ───────────────────────────────────────────────
 
-interface ClientContext {
-  client: {
-    id: string;
-    name: string | null;
-    level: "org" | "application" | "instance";
-    referencedOrgId: string | null;
-    referencedApplicationId: string | null;
-    isFirstParty: boolean;
-    /** Org-level auto-provisioning policy; `false` / `"member"` on app/instance. */
-    allowSignup: boolean;
-    signupRole: "admin" | "member" | "viewer";
-  };
+interface PageContext {
+  client: OAuthClientRecord;
   branding: Awaited<ReturnType<typeof resolveBrandingForClient>>;
   csrfToken: string;
 }
 
-async function loadClientContext(c: Context<AppEnv>, clientId: string): Promise<ClientContext> {
-  // Use the short-TTL cache from `oauth-admin.ts` so the GET → POST
-  // login round-trip doesn't re-fetch the same client row from DB. The
-  // cache is invalidated synchronously on `updateClient` / `deleteClient`
-  // / `rotateClientSecret`, so admin mutations take effect immediately.
-  const record = await getClientCached(clientId);
-  if (!record || record.disabled) throw notFound("Unknown OAuth client");
-  const client = {
-    id: record.clientId,
-    name: record.name,
-    level: record.level,
-    isFirstParty: record.isFirstParty,
-    referencedOrgId: record.referencedOrgId,
-    referencedApplicationId: record.referencedApplicationId,
-    allowSignup: record.allowSignup,
-    signupRole: record.signupRole,
-  };
-  const branding = await resolveBrandingForClient(client);
-  const csrfToken = issueCsrfToken(c);
-  return { client, branding, csrfToken };
-}
-
 /**
- * Wrapper around `loadClientContext` for public browser-facing routes.
- * Returns `null` (+ renders an error page) instead of throwing `notFound`
- * so the user sees styled HTML — not raw JSON.
+ * Shared entrypoint for every public `/api/oauth/*` page handler.
+ *
+ * Runs the boilerplate every handler repeats:
+ *  1. (optional) SMTP gate — renders a 404 error page when SMTP features
+ *     are required but not configured.
+ *  2. `client_id` extraction — renders a 400 error page when missing.
+ *  3. Client load via the short-TTL cache from `oauth-admin.ts` (so the
+ *     GET → POST round-trip reuses a single DB read) — renders a 404
+ *     error page when the client is unknown / disabled.
+ *  4. Branding + CSRF token resolution.
+ *
+ * Returns `{ url, ctx }` on success so handlers can chain directly, or a
+ * ready-to-return `Response` on any failure above.
  */
-async function loadClientContextOrRenderError(
+async function loadPageContext(
   c: Context<AppEnv>,
-  clientId: string,
-): Promise<ClientContext | Response> {
-  try {
-    return await loadClientContext(c, clientId);
-  } catch {
+  opts: {
+    missingClientId: { title: string; message: string };
+    requireSmtp?: { title: string; message: string };
+  },
+): Promise<{ url: URL; ctx: PageContext } | Response> {
+  if (opts.requireSmtp && !isSmtpEnabled()) {
+    return c.html(renderErrorPage(opts.requireSmtp).value, 404);
+  }
+  const url = new URL(c.req.url);
+  const clientId = url.searchParams.get("client_id");
+  if (!clientId) {
+    return c.html(renderErrorPage(opts.missingClientId).value, 400);
+  }
+  const record = await getClientCached(clientId);
+  if (!record || record.disabled) {
     return c.html(
       renderErrorPage({
         title: "Application introuvable",
@@ -198,6 +187,47 @@ async function loadClientContextOrRenderError(
       404,
     );
   }
+  return {
+    url,
+    ctx: {
+      client: record,
+      branding: await resolveBrandingForClient(record),
+      csrfToken: issueCsrfToken(c),
+    },
+  };
+}
+
+/**
+ * Forward Better Auth session `set-cookie` headers to the browser, capping
+ * `Max-Age` to 5 minutes for third-party clients so the intermediate BA
+ * session lasts exactly long enough for the OAuth redirect chain. First-party
+ * clients keep the default TTL because their BA session IS the primary auth.
+ *
+ * Uses `c.header("set-cookie", …, { append: true })` (not `new Response`)
+ * so the forwarded cookies survive alongside the CSRF cookie deletion that
+ * `verifyCsrfToken` already queued on the context.
+ */
+const OAUTH_SESSION_MAX_AGE_SECONDS = 300;
+function forwardOAuthSessionCookies(
+  c: Context<AppEnv>,
+  authResponse: Response,
+  isFirstParty: boolean,
+): number {
+  const getSetCookie = (authResponse.headers as unknown as { getSetCookie?: () => string[] })
+    .getSetCookie;
+  const setCookies =
+    typeof getSetCookie === "function" ? getSetCookie.call(authResponse.headers) : [];
+  for (const raw of setCookies) {
+    if (isFirstParty) {
+      c.header("set-cookie", raw, { append: true });
+    } else {
+      const patched = raw.includes("Max-Age=")
+        ? raw.replace(/Max-Age=\d+/gi, `Max-Age=${OAUTH_SESSION_MAX_AGE_SECONDS}`)
+        : `${raw}; Max-Age=${OAUTH_SESSION_MAX_AGE_SECONDS}`;
+      c.header("set-cookie", patched, { append: true });
+    }
+  }
+  return setCookies.length;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -452,41 +482,34 @@ export function createOidcRouter() {
   // ── Public polymorphic login/consent pages ─────────────────────────────────
 
   router.get("/api/oauth/login", rateLimitByIp(60), async (c) => {
-    const url = new URL(c.req.url);
-    const clientId = url.searchParams.get("client_id");
-    if (!clientId) {
-      return c.html(
-        renderErrorPage({
-          title: "Lien de connexion invalide",
-          message:
-            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
-        }).value,
-        400,
-      );
-    }
+    const page = await loadPageContext(c, {
+      missingClientId: {
+        title: "Lien de connexion invalide",
+        message:
+          "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+      },
+    });
+    if (page instanceof Response) return page;
+    const { url, ctx } = page;
     // Better Auth signs the redirect with `exp` (Unix seconds). Reject
     // expired login URLs so stale links cannot create upstream sessions.
     if (isLoginLinkExpired(url.searchParams.get("exp"))) {
-      const result = await loadClientContextOrRenderError(c, clientId);
-      if (result instanceof Response) return result;
       const body = renderLoginPage({
         queryString: url.search,
-        branding: result.branding,
+        branding: ctx.branding,
         csrfToken: "",
         socialProviders: getSocialProviders(),
         smtpEnabled: isSmtpEnabled(),
-        allowSignup: allowSignupForClient(result.client),
+        allowSignup: allowSignupForClient(ctx.client),
         error:
           "Ce lien de connexion a expiré. Veuillez relancer la connexion depuis l'application.",
       });
       return c.html(body.value, 400);
     }
-    const getResult = await loadClientContextOrRenderError(c, clientId);
-    if (getResult instanceof Response) return getResult;
     // Pin the pending client_id in a signed cookie so the BA `beforeSignup`
     // hook can enforce the signup policy on social / magic-link flows that
     // bypass our own POST handlers. See `services/pending-client-cookie.ts`.
-    issuePendingClientCookie(c, getResult.client.id);
+    issuePendingClientCookie(c, ctx.client.clientId);
     // Better Auth appends `?error=<code>` to `errorCallbackURL` when the
     // social callback fails — including when our `beforeSignup` guard throws
     // `signup_disabled` for a closed org-level client. Surface a friendly
@@ -495,42 +518,39 @@ export function createOidcRouter() {
     const errorMessage = errorCode ? mapLoginErrorCode(errorCode) : undefined;
     const body = renderLoginPage({
       queryString: stripErrorFromQueryString(url.search),
-      branding: getResult.branding,
-      csrfToken: getResult.csrfToken,
+      branding: ctx.branding,
+      csrfToken: ctx.csrfToken,
       socialProviders: getSocialProviders(),
       smtpEnabled: isSmtpEnabled(),
-      allowSignup: allowSignupForClient(getResult.client),
+      allowSignup: allowSignupForClient(ctx.client),
       error: errorMessage,
     });
     return c.html(body.value);
   });
 
   router.post("/api/oauth/login", rateLimitByIp(60), async (c) => {
-    const url = new URL(c.req.url);
-    const clientId = url.searchParams.get("client_id");
-    if (!clientId) {
-      return c.html(
-        renderErrorPage({
-          title: "Lien de connexion invalide",
-          message:
-            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
-        }).value,
-        400,
-      );
-    }
+    const page = await loadPageContext(c, {
+      missingClientId: {
+        title: "Lien de connexion invalide",
+        message:
+          "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+      },
+    });
+    if (page instanceof Response) return page;
+    const { url, ctx } = page;
+    const allowSignup = allowSignupForClient(ctx.client);
     // Reject form submissions for expired login URLs — prevents creating a
     // Better Auth session from a stale link. Render the login page with an
     // inline error (same as the GET handler) instead of returning JSON —
     // the browser submitted a form, not an API call.
     if (isLoginLinkExpired(url.searchParams.get("exp"))) {
-      const result = await loadClientContextOrRenderError(c, clientId);
-      if (result instanceof Response) return result;
       const body = renderLoginPage({
         queryString: url.search,
-        branding: result.branding,
+        branding: ctx.branding,
         csrfToken: "",
         socialProviders: getSocialProviders(),
         smtpEnabled: isSmtpEnabled(),
+        allowSignup,
         error:
           "Ce lien de connexion a expiré. Veuillez relancer la connexion depuis l'application.",
       });
@@ -538,10 +558,6 @@ export function createOidcRouter() {
     }
 
     const form = await c.req.parseBody();
-    const ctxResult = await loadClientContextOrRenderError(c, clientId);
-    if (ctxResult instanceof Response) return ctxResult;
-    const ctx = ctxResult;
-    const allowSignup = allowSignupForClient(ctx.client);
     if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
       const page = renderLoginPage({
         queryString: url.search,
@@ -744,42 +760,9 @@ export function createOidcRouter() {
       }
     }
 
-    // Headers.getSetCookie() returns each Set-Cookie as a distinct entry —
-    // plain iteration collapses duplicate headers into a comma-joined string
-    // which breaks cookie forwarding. We must use the Hono context header
-    // accumulator (not a fresh Response) so the forwarded cookies survive
-    // alongside the CSRF cookie deletion that verifyCsrfToken already queued.
-    //
-    // SECURITY: Cap the session cookie Max-Age to 5 minutes for third-party
-    // clients. The BA session is only needed for the OAuth redirect chain
-    // (login → authorize → consent → callback). Without this cap, the
-    // session persists indefinitely — if the downstream client rejects the
-    // callback (e.g. expired state), the surviving BA session enables
-    // silent re-authentication, bypassing the client's CSRF protection.
-    //
-    // Exception: first-party clients (e.g. the platform SPA) keep the
-    // default session TTL because the session IS the primary auth mechanism
-    // — the OIDC flow is only used to route through the shared login page.
-    const OAUTH_SESSION_MAX_AGE = 300; // 5 minutes — enough for the redirect chain
-    const setCookies =
-      typeof (authResponse.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie ===
-      "function"
-        ? (authResponse.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
-        : [];
-    for (const raw of setCookies) {
-      if (ctx.client.isFirstParty) {
-        // First-party: forward cookies as-is (default 7-day session TTL)
-        c.header("set-cookie", raw, { append: true });
-      } else {
-        // Third-party: cap to 5 minutes for the OAuth redirect chain only
-        const patched = raw.includes("Max-Age=")
-          ? raw.replace(/Max-Age=\d+/gi, `Max-Age=${OAUTH_SESSION_MAX_AGE}`)
-          : `${raw}; Max-Age=${OAUTH_SESSION_MAX_AGE}`;
-        c.header("set-cookie", patched, { append: true });
-      }
-    }
+    const cookieCount = forwardOAuthSessionCookies(c, authResponse, ctx.client.isFirstParty);
     logger.info("oidc: login success, forwarding cookies", {
-      cookieCount: setCookies.length,
+      cookieCount,
       firstParty: ctx.client.isFirstParty,
       email,
     });
@@ -792,39 +775,34 @@ export function createOidcRouter() {
   // ── Public registration page ──────────────────────────────────────────────
 
   router.get("/api/oauth/register", rateLimitByIp(30), async (c) => {
-    const url = new URL(c.req.url);
-    const clientId = url.searchParams.get("client_id");
-    if (!clientId) {
-      return c.html(
-        renderErrorPage({
-          title: "Lien d'inscription invalide",
-          message:
-            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
-        }).value,
-        400,
-      );
-    }
-    const result = await loadClientContextOrRenderError(c, clientId);
-    if (result instanceof Response) return result;
+    const page = await loadPageContext(c, {
+      missingClientId: {
+        title: "Lien d'inscription invalide",
+        message:
+          "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+      },
+    });
+    if (page instanceof Response) return page;
+    const { url, ctx } = page;
     // Org-level + closed signup → no register form at all.
-    if (result.client.level === "org" && !result.client.allowSignup) {
+    if (ctx.client.level === "org" && !ctx.client.allowSignup) {
       return c.html(
         renderErrorPage({
           title: "Inscription fermée",
           message:
             "L'inscription n'est pas ouverte sur cette application. Contactez votre administrateur pour obtenir un accès.",
-          branding: result.branding,
+          branding: ctx.branding,
         }).value,
         403,
       );
     }
     // Same pending-client cookie as GET /api/oauth/login — covers the social
     // sign-in buttons surfaced on the register page.
-    issuePendingClientCookie(c, result.client.id);
+    issuePendingClientCookie(c, ctx.client.clientId);
     const body = renderRegisterPage({
       queryString: url.search,
-      branding: result.branding,
-      csrfToken: result.csrfToken,
+      branding: ctx.branding,
+      csrfToken: ctx.csrfToken,
       socialProviders: getSocialProviders(),
       allowSignup: true,
     });
@@ -832,21 +810,15 @@ export function createOidcRouter() {
   });
 
   router.post("/api/oauth/register", rateLimitByIp(20), async (c) => {
-    const url = new URL(c.req.url);
-    const clientId = url.searchParams.get("client_id");
-    if (!clientId) {
-      return c.html(
-        renderErrorPage({
-          title: "Lien d'inscription invalide",
-          message:
-            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
-        }).value,
-        400,
-      );
-    }
-    const ctxResult = await loadClientContextOrRenderError(c, clientId);
-    if (ctxResult instanceof Response) return ctxResult;
-    const ctx = ctxResult;
+    const page = await loadPageContext(c, {
+      missingClientId: {
+        title: "Lien d'inscription invalide",
+        message:
+          "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+      },
+    });
+    if (page instanceof Response) return page;
+    const { url, ctx } = page;
 
     // Defense in depth: the GET handler hides the form when signup is
     // closed, but a hand-crafted POST must still be rejected here. Returning
@@ -969,23 +941,7 @@ export function createOidcRouter() {
       );
     }
 
-    // Forward session cookies — same pattern as login POST handler
-    const setCookies =
-      typeof (authResponse.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie ===
-      "function"
-        ? (authResponse.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
-        : [];
-    for (const raw of setCookies) {
-      if (ctx.client.isFirstParty) {
-        c.header("set-cookie", raw, { append: true });
-      } else {
-        const OAUTH_SESSION_MAX_AGE = 300;
-        const patched = raw.includes("Max-Age=")
-          ? raw.replace(/Max-Age=\d+/gi, `Max-Age=${OAUTH_SESSION_MAX_AGE}`)
-          : `${raw}; Max-Age=${OAUTH_SESSION_MAX_AGE}`;
-        c.header("set-cookie", patched, { append: true });
-      }
-    }
+    const cookieCount = forwardOAuthSessionCookies(c, authResponse, ctx.client.isFirstParty);
 
     // Org-level clients: provision the `organization_members` row now so
     // the subsequent `authorize` redirect chain mints a token with the
@@ -1035,7 +991,7 @@ export function createOidcRouter() {
     // interstitial that matches the client's logo/colors. The verification
     // link itself (in the email) will resume the OAuth flow via the
     // `callbackURL` we pinned to `signUpEmail` above.
-    if (isSmtpEnabled() && setCookies.length === 0) {
+    if (isSmtpEnabled() && cookieCount === 0) {
       const sentPage = renderVerifyEmailSentPage({
         queryString: url.search,
         branding: ctx.branding,
@@ -1057,89 +1013,62 @@ export function createOidcRouter() {
   // OIDC wrapper to keep the failure obvious rather than letting BA emit an
   // opaque 500 from an undefined endpoint.
 
+  const MAGIC_LINK_SMTP_GATE = {
+    title: "Connexion par lien magique indisponible",
+    message: "Cette méthode de connexion n'est pas activée sur cette instance.",
+  };
+  const MAGIC_LINK_MISSING_CLIENT = {
+    title: "Lien de connexion invalide",
+    message:
+      "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+  };
+
   router.get("/api/oauth/magic-link", rateLimitByIp(60), async (c) => {
-    if (!isSmtpEnabled()) {
-      return c.html(
-        renderErrorPage({
-          title: "Connexion par lien magique indisponible",
-          message: "Cette méthode de connexion n'est pas activée sur cette instance.",
-        }).value,
-        404,
-      );
-    }
-    const url = new URL(c.req.url);
-    const clientId = url.searchParams.get("client_id");
-    if (!clientId) {
-      return c.html(
-        renderErrorPage({
-          title: "Lien de connexion invalide",
-          message:
-            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
-        }).value,
-        400,
-      );
-    }
-    const result = await loadClientContextOrRenderError(c, clientId);
-    if (result instanceof Response) return result;
+    const page = await loadPageContext(c, {
+      requireSmtp: MAGIC_LINK_SMTP_GATE,
+      missingClientId: MAGIC_LINK_MISSING_CLIENT,
+    });
+    if (page instanceof Response) return page;
+    const { url, ctx } = page;
     // The pending cookie pins the client_id so the BA `beforeSignup` guard
     // (`oidcBeforeSignupGuard`) applies the org-level signup policy at
     // verify time: creation is allowed for instance/app clients and for
     // org-level clients with `allowSignup: true`, and blocked otherwise.
-    issuePendingClientCookie(c, result.client.id);
+    issuePendingClientCookie(c, ctx.client.clientId);
     const body = renderMagicLinkPage({
       queryString: url.search,
-      branding: result.branding,
-      csrfToken: result.csrfToken,
+      branding: ctx.branding,
+      csrfToken: ctx.csrfToken,
     });
     return c.html(body.value);
   });
 
   router.post("/api/oauth/magic-link", rateLimitByIp(20), async (c) => {
-    if (!isSmtpEnabled()) {
-      return c.html(
-        renderErrorPage({
-          title: "Connexion par lien magique indisponible",
-          message: "Cette méthode de connexion n'est pas activée sur cette instance.",
-        }).value,
-        404,
-      );
-    }
-    const url = new URL(c.req.url);
-    const clientId = url.searchParams.get("client_id");
-    if (!clientId) {
-      return c.html(
-        renderErrorPage({
-          title: "Lien de connexion invalide",
-          message:
-            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
-        }).value,
-        400,
-      );
-    }
-    const ctxResult = await loadClientContextOrRenderError(c, clientId);
-    if (ctxResult instanceof Response) return ctxResult;
-    const ctx = ctxResult;
+    const page = await loadPageContext(c, {
+      requireSmtp: MAGIC_LINK_SMTP_GATE,
+      missingClientId: MAGIC_LINK_MISSING_CLIENT,
+    });
+    if (page instanceof Response) return page;
+    const { url, ctx } = page;
 
     const form = await c.req.parseBody();
+    const renderFormError = (error: string, status: 400 | 403) =>
+      c.html(
+        renderMagicLinkPage({
+          queryString: url.search,
+          branding: ctx.branding,
+          csrfToken: ctx.csrfToken,
+          error,
+        }).value,
+        status,
+      );
     if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
-      const page = renderMagicLinkPage({
-        queryString: url.search,
-        branding: ctx.branding,
-        csrfToken: ctx.csrfToken,
-        error: "Votre session a expiré. Veuillez réessayer.",
-      });
-      return c.html(page.value, 403);
+      return renderFormError("Votre session a expiré. Veuillez réessayer.", 403);
     }
 
     const email = readFormString(form, "email")?.toLowerCase().trim();
     if (!email) {
-      const page = renderMagicLinkPage({
-        queryString: url.search,
-        branding: ctx.branding,
-        csrfToken: ctx.csrfToken,
-        error: "Email requis.",
-      });
-      return c.html(page.value, 400);
+      return renderFormError("Email requis.", 400);
     }
 
     // The verification link, once clicked, creates a BA session and
@@ -1174,14 +1103,14 @@ export function createOidcRouter() {
     }
 
     logger.info("oidc: magic link requested", { email });
-    const page = renderMagicLinkPage({
+    const sentPage = renderMagicLinkPage({
       queryString: url.search,
       branding: ctx.branding,
       csrfToken: ctx.csrfToken,
       email,
       sent: true,
     });
-    return c.html(page.value);
+    return c.html(sentPage.value);
   });
 
   // ── Public forgot-password page ───────────────────────────────────────────
@@ -1196,84 +1125,57 @@ export function createOidcRouter() {
   // handler validates the token, then 302s to
   // `/api/oauth/reset-password?{queryString}&token={token}`.
 
+  const FORGOT_PASSWORD_SMTP_GATE = {
+    title: "Réinitialisation du mot de passe indisponible",
+    message:
+      "La réinitialisation par email n'est pas activée sur cette instance. Contactez l'administrateur.",
+  };
+  const FORGOT_PASSWORD_MISSING_CLIENT = {
+    title: "Lien invalide",
+    message: "L'identifiant de l'application est manquant.",
+  };
+
   router.get("/api/oauth/forgot-password", rateLimitByIp(60), async (c) => {
-    if (!isSmtpEnabled()) {
-      return c.html(
-        renderErrorPage({
-          title: "Réinitialisation du mot de passe indisponible",
-          message:
-            "La réinitialisation par email n'est pas activée sur cette instance. Contactez l'administrateur.",
-        }).value,
-        404,
-      );
-    }
-    const url = new URL(c.req.url);
-    const clientId = url.searchParams.get("client_id");
-    if (!clientId) {
-      return c.html(
-        renderErrorPage({
-          title: "Lien invalide",
-          message: "L'identifiant de l'application est manquant.",
-        }).value,
-        400,
-      );
-    }
-    const result = await loadClientContextOrRenderError(c, clientId);
-    if (result instanceof Response) return result;
+    const page = await loadPageContext(c, {
+      requireSmtp: FORGOT_PASSWORD_SMTP_GATE,
+      missingClientId: FORGOT_PASSWORD_MISSING_CLIENT,
+    });
+    if (page instanceof Response) return page;
+    const { url, ctx } = page;
     const body = renderForgotPasswordPage({
       queryString: url.search,
-      branding: result.branding,
-      csrfToken: result.csrfToken,
+      branding: ctx.branding,
+      csrfToken: ctx.csrfToken,
     });
     return c.html(body.value);
   });
 
   router.post("/api/oauth/forgot-password", rateLimitByIp(20), async (c) => {
-    if (!isSmtpEnabled()) {
-      return c.html(
-        renderErrorPage({
-          title: "Réinitialisation du mot de passe indisponible",
-          message:
-            "La réinitialisation par email n'est pas activée sur cette instance. Contactez l'administrateur.",
-        }).value,
-        404,
-      );
-    }
-    const url = new URL(c.req.url);
-    const clientId = url.searchParams.get("client_id");
-    if (!clientId) {
-      return c.html(
-        renderErrorPage({
-          title: "Lien invalide",
-          message: "L'identifiant de l'application est manquant.",
-        }).value,
-        400,
-      );
-    }
-    const ctxResult = await loadClientContextOrRenderError(c, clientId);
-    if (ctxResult instanceof Response) return ctxResult;
-    const ctx = ctxResult;
+    const page = await loadPageContext(c, {
+      requireSmtp: FORGOT_PASSWORD_SMTP_GATE,
+      missingClientId: FORGOT_PASSWORD_MISSING_CLIENT,
+    });
+    if (page instanceof Response) return page;
+    const { url, ctx } = page;
 
     const form = await c.req.parseBody();
+    const renderFormError = (error: string, status: 400 | 403) =>
+      c.html(
+        renderForgotPasswordPage({
+          queryString: url.search,
+          branding: ctx.branding,
+          csrfToken: ctx.csrfToken,
+          error,
+        }).value,
+        status,
+      );
     if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
-      const page = renderForgotPasswordPage({
-        queryString: url.search,
-        branding: ctx.branding,
-        csrfToken: ctx.csrfToken,
-        error: "Votre session a expiré. Veuillez réessayer.",
-      });
-      return c.html(page.value, 403);
+      return renderFormError("Votre session a expiré. Veuillez réessayer.", 403);
     }
 
     const email = readFormString(form, "email")?.toLowerCase().trim();
     if (!email) {
-      const page = renderForgotPasswordPage({
-        queryString: url.search,
-        branding: ctx.branding,
-        csrfToken: ctx.csrfToken,
-        error: "Email requis.",
-      });
-      return c.html(page.value, 400);
+      return renderFormError("Email requis.", 400);
     }
 
     // Absolute URL so Better Auth's origin-check accepts it — see the
@@ -1295,14 +1197,14 @@ export function createOidcRouter() {
     }
 
     logger.info("oidc: password reset requested", { email });
-    const page = renderForgotPasswordPage({
+    const sentPage = renderForgotPasswordPage({
       queryString: url.search,
       branding: ctx.branding,
       csrfToken: ctx.csrfToken,
       email,
       sent: true,
     });
-    return c.html(page.value);
+    return c.html(sentPage.value);
   });
 
   // ── Public reset-password page (second leg of the reset flow) ──────────────
@@ -1319,29 +1221,22 @@ export function createOidcRouter() {
   // bounces back to /api/oauth/login${queryString} so the user signs in with
   // the new password and resumes the OAuth flow.
 
+  const RESET_PASSWORD_SMTP_GATE = {
+    title: "Réinitialisation du mot de passe indisponible",
+    message: "La réinitialisation par email n'est pas activée sur cette instance.",
+  };
+  const RESET_PASSWORD_MISSING_CLIENT = {
+    title: "Lien invalide",
+    message: "L'identifiant de l'application est manquant.",
+  };
+
   router.get("/api/oauth/reset-password", rateLimitByIp(60), async (c) => {
-    if (!isSmtpEnabled()) {
-      return c.html(
-        renderErrorPage({
-          title: "Réinitialisation du mot de passe indisponible",
-          message: "La réinitialisation par email n'est pas activée sur cette instance.",
-        }).value,
-        404,
-      );
-    }
-    const url = new URL(c.req.url);
-    const clientId = url.searchParams.get("client_id");
-    if (!clientId) {
-      return c.html(
-        renderErrorPage({
-          title: "Lien invalide",
-          message: "L'identifiant de l'application est manquant.",
-        }).value,
-        400,
-      );
-    }
-    const result = await loadClientContextOrRenderError(c, clientId);
-    if (result instanceof Response) return result;
+    const page = await loadPageContext(c, {
+      requireSmtp: RESET_PASSWORD_SMTP_GATE,
+      missingClientId: RESET_PASSWORD_MISSING_CLIENT,
+    });
+    if (page instanceof Response) return page;
+    const { url, ctx } = page;
 
     // Strip our own locally-owned params from the forwarded queryString so
     // that links back to login/forgot-password don't carry stale tokens.
@@ -1351,43 +1246,26 @@ export function createOidcRouter() {
     const error = url.searchParams.get("error");
     if (!token || error) {
       return c.html(
-        renderInvalidTokenPage({ queryString: forwardQuery, branding: result.branding }).value,
+        renderInvalidTokenPage({ queryString: forwardQuery, branding: ctx.branding }).value,
         400,
       );
     }
     const body = renderResetPasswordPage({
       queryString: forwardQuery,
       token,
-      branding: result.branding,
-      csrfToken: result.csrfToken,
+      branding: ctx.branding,
+      csrfToken: ctx.csrfToken,
     });
     return c.html(body.value);
   });
 
   router.post("/api/oauth/reset-password", rateLimitByIp(20), async (c) => {
-    if (!isSmtpEnabled()) {
-      return c.html(
-        renderErrorPage({
-          title: "Réinitialisation du mot de passe indisponible",
-          message: "La réinitialisation par email n'est pas activée sur cette instance.",
-        }).value,
-        404,
-      );
-    }
-    const url = new URL(c.req.url);
-    const clientId = url.searchParams.get("client_id");
-    if (!clientId) {
-      return c.html(
-        renderErrorPage({
-          title: "Lien invalide",
-          message: "L'identifiant de l'application est manquant.",
-        }).value,
-        400,
-      );
-    }
-    const ctxResult = await loadClientContextOrRenderError(c, clientId);
-    if (ctxResult instanceof Response) return ctxResult;
-    const ctx = ctxResult;
+    const page = await loadPageContext(c, {
+      requireSmtp: RESET_PASSWORD_SMTP_GATE,
+      missingClientId: RESET_PASSWORD_MISSING_CLIENT,
+    });
+    if (page instanceof Response) return page;
+    const { url, ctx } = page;
 
     const forwardQuery = stripResetParams(url.searchParams);
 
@@ -1401,14 +1279,14 @@ export function createOidcRouter() {
           403,
         );
       }
-      const page = renderResetPasswordPage({
+      const csrfPage = renderResetPasswordPage({
         queryString: forwardQuery,
         token,
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,
         error: "Votre session a expiré. Veuillez réessayer.",
       });
-      return c.html(page.value, 403);
+      return c.html(csrfPage.value, 403);
     }
 
     if (!token) {
@@ -1421,16 +1299,17 @@ export function createOidcRouter() {
     const password = readFormString(form, "password") ?? "";
     const passwordConfirm = readFormString(form, "password_confirm") ?? "";
 
-    const renderFormError = (error: string, status: 400 | 500) => {
-      const page = renderResetPasswordPage({
-        queryString: forwardQuery,
-        token,
-        branding: ctx.branding,
-        csrfToken: ctx.csrfToken,
-        error,
-      });
-      return c.html(page.value, status);
-    };
+    const renderFormError = (error: string, status: 400 | 500) =>
+      c.html(
+        renderResetPasswordPage({
+          queryString: forwardQuery,
+          token,
+          branding: ctx.branding,
+          csrfToken: ctx.csrfToken,
+          error,
+        }).value,
+        status,
+      );
 
     if (password.length < 8) {
       return renderFormError("Le mot de passe doit contenir au moins 8 caractères.", 400);
@@ -1469,37 +1348,31 @@ export function createOidcRouter() {
     }
 
     logger.info("oidc: password reset success");
-    const page = renderResetPasswordPage({
+    const successPage = renderResetPasswordPage({
       queryString: forwardQuery,
       token,
       branding: ctx.branding,
       csrfToken: ctx.csrfToken,
       success: true,
     });
-    return c.html(page.value);
+    return c.html(successPage.value);
   });
 
-  router.get("/api/oauth/consent", rateLimitByIp(60), async (c) => {
-    const url = new URL(c.req.url);
-    const clientId = url.searchParams.get("client_id");
-    const scope = url.searchParams.get("scope") ?? "openid";
-    if (!clientId) {
-      return c.html(
-        renderErrorPage({
-          title: "Page d'autorisation invalide",
-          message:
-            "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
-        }).value,
-        400,
-      );
-    }
+  const CONSENT_MISSING_CLIENT = {
+    title: "Page d'autorisation invalide",
+    message:
+      "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+  };
 
-    const consentResult = await loadClientContextOrRenderError(c, clientId);
-    if (consentResult instanceof Response) return consentResult;
+  router.get("/api/oauth/consent", rateLimitByIp(60), async (c) => {
+    const page = await loadPageContext(c, { missingClientId: CONSENT_MISSING_CLIENT });
+    if (page instanceof Response) return page;
+    const { url, ctx } = page;
+    const scope = url.searchParams.get("scope") ?? "openid";
 
     // First-party clients skip the consent screen — the user already trusts
     // the platform SPA or an admin-designated first-party app.
-    if (consentResult.client.isFirstParty) {
+    if (ctx.client.isFirstParty) {
       const oauthQuery = url.search.startsWith("?") ? url.search.slice(1) : url.search;
       const authApi = getOidcAuthApi();
       try {
@@ -1512,12 +1385,12 @@ export function createOidcRouter() {
         return maybeJsonRedirectToLocation(consentResponse, true);
       } catch (err) {
         if (err instanceof UnverifiedEmailConflictError) {
-          const page = renderErrorPage({
+          const errorPage = renderErrorPage({
             title: "Vérification requise",
             message:
               "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
           });
-          return c.html(page.value, 409);
+          return c.html(errorPage.value, 409);
         }
         throw err;
       }
@@ -1525,40 +1398,34 @@ export function createOidcRouter() {
 
     const scopes = scope.split(/\s+/).filter(Boolean);
     const body = renderConsentPage({
-      clientName: consentResult.client.name ?? consentResult.client.id,
+      clientName: ctx.client.name ?? ctx.client.clientId,
       scopes,
       action: `/api/oauth/consent${url.search}`,
-      branding: consentResult.branding,
-      csrfToken: consentResult.csrfToken,
+      branding: ctx.branding,
+      csrfToken: ctx.csrfToken,
     });
     return c.html(body.value);
   });
 
   router.post("/api/oauth/consent", rateLimitByIp(60), async (c) => {
-    const url = new URL(c.req.url);
+    const page = await loadPageContext(c, { missingClientId: CONSENT_MISSING_CLIENT });
+    if (page instanceof Response) return page;
+    const { url, ctx } = page;
 
     const form = await c.req.parseBody();
     if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
       // Re-render the consent page instead of returning JSON — the user
       // submitted a form (browser context), not an API call.
-      const clientId = url.searchParams.get("client_id");
-      if (clientId) {
-        const csrfResult = await loadClientContextOrRenderError(c, clientId);
-        if (csrfResult instanceof Response) return csrfResult;
-        const { client, branding, csrfToken } = csrfResult;
-        const scope = url.searchParams.get("scope") ?? "openid";
-        const scopes = scope.split(/\s+/).filter(Boolean);
-        const body = renderConsentPage({
-          clientName: client.name ?? client.id,
-          scopes,
-          action: `/api/oauth/consent${url.search}`,
-          branding,
-          csrfToken,
-          error: "Votre session a expiré. Veuillez réessayer.",
-        });
-        return c.html(body.value, 403);
-      }
-      throw forbidden("CSRF token missing or invalid — reload the consent page and try again");
+      const scope = url.searchParams.get("scope") ?? "openid";
+      const body = renderConsentPage({
+        clientName: ctx.client.name ?? ctx.client.clientId,
+        scopes: scope.split(/\s+/).filter(Boolean),
+        action: `/api/oauth/consent${url.search}`,
+        branding: ctx.branding,
+        csrfToken: ctx.csrfToken,
+        error: "Votre session a expiré. Veuillez réessayer.",
+      });
+      return c.html(body.value, 403);
     }
 
     const accept = readFormString(form, "accept") === "true";
@@ -1593,23 +1460,17 @@ export function createOidcRouter() {
       })) as Response;
     } catch (err) {
       if (err instanceof UnverifiedEmailConflictError) {
-        const clientIdParam = consentParams.get("client_id");
-        if (clientIdParam) {
-          const ctxOrRes = await loadClientContextOrRenderError(c, clientIdParam);
-          if (ctxOrRes instanceof Response) return ctxOrRes;
-          const ctx = ctxOrRes;
-          const page = renderLoginPage({
-            queryString: `?${oauthQuery}`,
-            branding: ctx.branding,
-            csrfToken: ctx.csrfToken,
-            socialProviders: getSocialProviders(),
-            smtpEnabled: isSmtpEnabled(),
-            allowSignup: allowSignupForClient(ctx.client),
-            error:
-              "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
-          });
-          return c.html(page.value, 409);
-        }
+        const loginPage = renderLoginPage({
+          queryString: `?${oauthQuery}`,
+          branding: ctx.branding,
+          csrfToken: ctx.csrfToken,
+          socialProviders: getSocialProviders(),
+          smtpEnabled: isSmtpEnabled(),
+          allowSignup: allowSignupForClient(ctx.client),
+          error:
+            "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
+        });
+        return c.html(loginPage.value, 409);
       }
       throw err;
     }
@@ -1684,14 +1545,14 @@ export function createOidcRouter() {
   return router;
 }
 
-export function prefersHtml(acceptHeader: string | undefined | null): boolean {
+function prefersHtml(acceptHeader: string | undefined | null): boolean {
   if (!acceptHeader) return false;
   const lower = acceptHeader.toLowerCase();
   if (lower.includes("application/json")) return false;
   return lower.includes("text/html") || lower.includes("*/*");
 }
 
-export async function maybeJsonRedirectToLocation(
+async function maybeJsonRedirectToLocation(
   response: Response,
   acceptsHtml: boolean,
 ): Promise<Response> {
