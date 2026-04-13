@@ -271,4 +271,262 @@ export const oidcPaths = {
       },
     },
   },
+
+  // ─── OAuth 2.1 / OIDC protocol endpoints ────────────────────────────────
+  // Mounted by the `@better-auth/oauth-provider` + `jwt` plugins contributed
+  // via `betterAuthPlugins()`. Documented here (rather than in a generated
+  // plugin spec) so external integrators can discover the public surface
+  // from `/api/docs` alone.
+
+  "/api/auth/oauth2/authorize": {
+    get: {
+      operationId: "oauth2Authorize",
+      tags: ["OAuth Clients"],
+      summary: "OAuth 2.1 authorization endpoint",
+      description:
+        "Authorization Code + PKCE entry point. Unauthenticated browsers are redirected to `/api/oauth/login` → `/api/oauth/consent` → back here on accept. Returns `302` to the client `redirect_uri` with `code` + `state`.",
+      parameters: [
+        { name: "client_id", in: "query", required: true, schema: { type: "string" } },
+        {
+          name: "redirect_uri",
+          in: "query",
+          required: true,
+          schema: { type: "string", format: "uri" },
+        },
+        {
+          name: "response_type",
+          in: "query",
+          required: true,
+          schema: { type: "string", enum: ["code"] },
+        },
+        { name: "scope", in: "query", required: true, schema: { type: "string" } },
+        { name: "state", in: "query", required: false, schema: { type: "string" } },
+        { name: "code_challenge", in: "query", required: true, schema: { type: "string" } },
+        {
+          name: "code_challenge_method",
+          in: "query",
+          required: true,
+          schema: { type: "string", enum: ["S256"] },
+        },
+        {
+          name: "resource",
+          in: "query",
+          required: false,
+          schema: { type: "string", format: "uri" },
+          description: "RFC 8707 resource indicator.",
+        },
+      ],
+      responses: {
+        "200": {
+          description:
+            "HTML login/consent page when the browser is unauthenticated or consent is required.",
+        },
+        "302": {
+          description:
+            "Redirect to `redirect_uri` with `code`+`state`, or to the login/consent pages.",
+        },
+      },
+    },
+  },
+  "/api/auth/oauth2/token": {
+    post: {
+      operationId: "oauth2Token",
+      tags: ["OAuth Clients"],
+      summary: "OAuth 2.1 token endpoint",
+      description:
+        "Exchanges an authorization `code` (+ PKCE verifier) for an access + refresh token, or refreshes an existing token. Rate-limited to 30 req/min/IP. RFC 8707 `resource` required.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/x-www-form-urlencoded": {
+            schema: {
+              type: "object",
+              required: ["grant_type", "client_id", "resource"],
+              properties: {
+                grant_type: { type: "string", enum: ["authorization_code", "refresh_token"] },
+                client_id: { type: "string" },
+                client_secret: { type: "string" },
+                code: { type: "string" },
+                code_verifier: { type: "string" },
+                redirect_uri: { type: "string", format: "uri" },
+                refresh_token: { type: "string" },
+                resource: { type: "string", format: "uri" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Token response.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["access_token", "token_type", "expires_in"],
+                properties: {
+                  access_token: {
+                    type: "string",
+                    description:
+                      "ES256-signed JWT carrying `sub`, `endUserId`, `applicationId`, `orgId`.",
+                  },
+                  token_type: { type: "string", enum: ["Bearer"] },
+                  expires_in: { type: "integer" },
+                  refresh_token: { type: "string" },
+                  id_token: {
+                    type: "string",
+                    description: "Present when `openid` scope is granted.",
+                  },
+                  scope: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": { description: "`invalid_grant`, `invalid_request`, or RFC 8707 mismatch." },
+        "429": { description: "Rate limit exceeded." },
+      },
+    },
+  },
+  "/api/auth/oauth2/userinfo": {
+    get: {
+      operationId: "oauth2Userinfo",
+      tags: ["OAuth Clients"],
+      summary: "OIDC UserInfo endpoint",
+      description:
+        "Returns claims for the end-user identified by the `Authorization: Bearer ey…` OIDC access token (JWT).",
+      responses: {
+        "200": { description: "UserInfo claims." },
+        "401": { description: "Missing/invalid Bearer token." },
+      },
+    },
+  },
+  "/api/auth/oauth2/introspect": {
+    post: {
+      operationId: "oauth2Introspect",
+      tags: ["OAuth Clients"],
+      summary: "RFC 7662 token introspection",
+      requestBody: {
+        required: true,
+        content: {
+          "application/x-www-form-urlencoded": {
+            schema: {
+              type: "object",
+              required: ["token"],
+              properties: { token: { type: "string" }, token_type_hint: { type: "string" } },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Introspection response.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["active"],
+                properties: {
+                  active: { type: "boolean" },
+                  scope: { type: "string" },
+                  client_id: { type: "string" },
+                  exp: { type: "integer" },
+                  sub: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/auth/oauth2/revoke": {
+    post: {
+      operationId: "oauth2Revoke",
+      tags: ["OAuth Clients"],
+      summary: "RFC 7009 token revocation",
+      requestBody: {
+        required: true,
+        content: {
+          "application/x-www-form-urlencoded": {
+            schema: {
+              type: "object",
+              required: ["token"],
+              properties: { token: { type: "string" }, token_type_hint: { type: "string" } },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": { description: "Revocation succeeded (even on unknown token, per RFC 7009)." },
+      },
+    },
+  },
+  "/api/auth/jwks": {
+    get: {
+      operationId: "oauth2Jwks",
+      tags: ["OAuth Clients"],
+      summary: "JWKS endpoint",
+      description: "Public ES256 signing keys used to verify access tokens. Cacheable.",
+      responses: {
+        "200": {
+          description: "JSON Web Key Set.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { keys: { type: "array", items: { type: "object" } } },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+
+  // ─── OIDC discovery (RFC-compliant, root-mounted) ───────────────────────
+
+  "/.well-known/openid-configuration": {
+    get: {
+      operationId: "oidcDiscovery",
+      tags: ["OAuth Clients"],
+      summary: "OpenID Connect discovery document",
+      description:
+        "RFC-compliant discovery endpoint. Mounted at the HTTP origin root (NOT under `/api`) per OIDC Discovery 1.0 §4.",
+      responses: { "200": { description: "OpenID Configuration document." } },
+    },
+  },
+  "/.well-known/oauth-authorization-server": {
+    get: {
+      operationId: "oauthServerMetadata",
+      tags: ["OAuth Clients"],
+      summary: "OAuth 2.0 Authorization Server Metadata (RFC 8414)",
+      responses: { "200": { description: "Authorization server metadata document." } },
+    },
+  },
+
+  // ─── Logout ─────────────────────────────────────────────────────────────
+
+  "/api/oauth/logout": {
+    get: {
+      operationId: "oauthLogout",
+      tags: ["OAuth Clients"],
+      summary: "Clear session + RP-initiated logout redirect",
+      description:
+        "Clears the Better Auth session cookie and, if `post_logout_redirect_uri` matches one registered on the client, redirects there. Otherwise redirects to `/`.",
+      parameters: [
+        { name: "client_id", in: "query", required: false, schema: { type: "string" } },
+        {
+          name: "post_logout_redirect_uri",
+          in: "query",
+          required: false,
+          schema: { type: "string", format: "uri" },
+        },
+      ],
+      responses: {
+        "200": { description: "Not typically returned — logout always redirects." },
+        "302": { description: "Redirect to validated URI or `/`." },
+      },
+    },
+  },
 };
