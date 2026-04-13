@@ -84,9 +84,26 @@ async function sha256HexVerify(clientSecret: string, storedHash: string): Promis
   return timingSafeEqual(a, b);
 }
 
-export function oidcBetterAuthPlugins(): unknown[] {
+export interface OidcBetterAuthPluginsOptions {
+  /**
+   * ClientIds of first-party (`skip_consent = true`) OAuth clients known at
+   * boot. Forwarded to `oauthProvider({ cachedTrustedClients })` so the
+   * plugin's in-memory TTLCache short-circuits the DB lookup on authorize /
+   * introspect / revoke for trusted clients. Static snapshot — clients
+   * promoted to first-party post-boot fall back to the regular DB lookup
+   * until the next restart. See `listFirstPartyClientIds` in
+   * `services/oauth-admin.ts`.
+   */
+  cachedTrustedClientIds?: readonly string[];
+}
+
+export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): unknown[] {
   const env = getEnv();
   const validAudiences = [env.APP_URL, `${env.APP_URL}/api/auth`];
+  const cachedTrustedClients =
+    opts.cachedTrustedClientIds && opts.cachedTrustedClientIds.length > 0
+      ? new Set(opts.cachedTrustedClientIds)
+      : undefined;
   return [
     oidcGuardsPlugin({ validAudiences }),
     jwt({
@@ -97,6 +114,7 @@ export function oidcBetterAuthPlugins(): unknown[] {
       consentPage: "/api/oauth/consent",
       scopes: [...APPSTRATE_SCOPES],
       validAudiences,
+      cachedTrustedClients,
       storeClientSecret: {
         hash: hashSecret,
         verify: sha256HexVerify,

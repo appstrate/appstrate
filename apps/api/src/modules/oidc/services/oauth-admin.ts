@@ -538,6 +538,21 @@ export async function getClientOwningOrg(clientId: string): Promise<string | nul
  * and returns the platform client regardless of how many satellites are
  * declared in the env.
  */
+/**
+ * Snapshot all first-party (`skip_consent = true`) clientIds at boot. Fed to
+ * `oauthProvider({ cachedTrustedClients })` so the plugin's hot-path skips a
+ * DB lookup on each authorize call. The cache is a static snapshot — clients
+ * promoted to first-party post-boot fall back to the regular DB lookup until
+ * the next restart, which is fine: `skipConsent` flips are operationally rare.
+ */
+export async function listFirstPartyClientIds(): Promise<string[]> {
+  const rows = await db
+    .select({ clientId: oauthClient.clientId })
+    .from(oauthClient)
+    .where(eq(oauthClient.skipConsent, true));
+  return rows.map((r) => r.clientId);
+}
+
 export async function getInstanceClientId(): Promise<string | null> {
   const [row] = await db
     .select({ clientId: oauthClient.clientId })

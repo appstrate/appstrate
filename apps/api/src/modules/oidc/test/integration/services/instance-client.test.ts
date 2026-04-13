@@ -124,6 +124,54 @@ describe("ensureInstanceClient", () => {
   });
 });
 
+// ─── cachedTrustedClients snapshot ────────────────────────────────────────────
+//
+// Fed to `oauthProvider({ cachedTrustedClients })` at boot. Guards the
+// `init()` ordering invariant: `listFirstPartyClientIds` must run AFTER
+// `ensureInstanceClient` so the platform client is captured in the snapshot.
+
+describe("listFirstPartyClientIds", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("returns the platform client after ensureInstanceClient", async () => {
+    const { ensureInstanceClient, listFirstPartyClientIds } =
+      await import("../../../services/oauth-admin.ts");
+    const clientId = await ensureInstanceClient("http://localhost:3000");
+    const ids = await listFirstPartyClientIds();
+    expect(ids).toContain(clientId);
+  });
+
+  it("excludes non-first-party clients", async () => {
+    const { ensureInstanceClient, createClient, listFirstPartyClientIds } =
+      await import("../../../services/oauth-admin.ts");
+    const platformClientId = await ensureInstanceClient("http://localhost:3000");
+
+    const user = await createTestUser();
+    const { org } = await createTestOrg(user.id);
+    const thirdParty = await createClient({
+      level: "org",
+      referencedOrgId: org.id,
+      name: "Third-party app",
+      redirectUris: ["https://third-party.example.com/callback"],
+      postLogoutRedirectUris: [],
+      scopes: ["openid", "profile"],
+      isFirstParty: false,
+    });
+
+    const ids = await listFirstPartyClientIds();
+    expect(ids).toContain(platformClientId);
+    expect(ids).not.toContain(thirdParty.clientId);
+  });
+
+  it("returns an empty array when no first-party client exists", async () => {
+    const { listFirstPartyClientIds } = await import("../../../services/oauth-admin.ts");
+    const ids = await listFirstPartyClientIds();
+    expect(ids).toEqual([]);
+  });
+});
+
 // ─── Strategy resolution ──────────────────────────────────────────────────────
 
 describe("instance token strategy", () => {

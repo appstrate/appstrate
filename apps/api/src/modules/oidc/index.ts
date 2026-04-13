@@ -39,8 +39,18 @@ import { createOidcRouter, createOAuthClientSchema, updateOAuthClientSchema } fr
 import { oidcPaths } from "./openapi/paths.ts";
 import { oidcSchemas } from "./openapi/schemas.ts";
 import { jwks, oauthClient, oauthAccessToken, oauthRefreshToken, oauthConsent } from "./schema.ts";
-import { ensureInstanceClient, getInstanceClientId } from "./services/oauth-admin.ts";
+import {
+  ensureInstanceClient,
+  getInstanceClientId,
+  listFirstPartyClientIds,
+} from "./services/oauth-admin.ts";
 import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
+
+// Snapshot of first-party clientIds captured at `init()` time and forwarded
+// to `oauthProvider({ cachedTrustedClients })` when `betterAuthPlugins()` is
+// invoked — the boot sequence calls `getModuleContributions()` after every
+// module's `init()` has completed (see `apps/api/src/lib/boot.ts`).
+let cachedTrustedClientIds: readonly string[] = [];
 
 const oidcModule: AppstrateModule = {
   manifest: { id: "oidc", name: "OIDC Identity Provider", version: "1.0.0" },
@@ -59,6 +69,14 @@ const oidcModule: AppstrateModule = {
     // platform client always has the earliest `created_at` — see
     // `getInstanceClientId()` for why that ordering matters.
     await syncInstanceClientsFromEnv();
+    // Snapshot first-party clientIds AFTER both provisioning steps — the
+    // platform client + any env-declared satellites with `skipConsent: true`
+    // are now present in the DB.
+    cachedTrustedClientIds = await listFirstPartyClientIds();
+    logger.info("OIDC cached trusted clients snapshotted", {
+      module: "oidc",
+      count: cachedTrustedClientIds.length,
+    });
   },
 
   // Router mounted at HTTP origin root. Declares full paths — `/api/oauth/*`
@@ -91,7 +109,7 @@ const oidcModule: AppstrateModule = {
   },
 
   betterAuthPlugins() {
-    return oidcBetterAuthPlugins();
+    return oidcBetterAuthPlugins({ cachedTrustedClientIds });
   },
 
   drizzleSchemas() {
