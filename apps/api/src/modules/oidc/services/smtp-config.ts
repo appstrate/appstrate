@@ -29,6 +29,8 @@ import { decryptCredentials } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { applicationSmtpConfigs } from "../schema.ts";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
+import { createTtlCache } from "./ttl-cache.ts";
+import { createTestSpy } from "./test-spy.ts";
 
 export interface ResolvedSmtpConfig {
   transport: Transporter;
@@ -37,16 +39,8 @@ export interface ResolvedSmtpConfig {
   source: "per-app" | "instance";
 }
 
-interface CacheEntry {
-  value: ResolvedSmtpConfig | null;
-  expiresAt: number;
-}
-
-const PER_APP_TTL_MS = 60_000;
-const NULL_TTL_MS = 30_000;
 const INSTANCE_CACHE_KEY = "__instance__";
-
-const cache = new Map<string, CacheEntry>();
+const cache = createTtlCache<ResolvedSmtpConfig>();
 
 /**
  * Test-only mail spy. When set, every transport built by the resolver is
@@ -54,26 +48,22 @@ const cache = new Map<string, CacheEntry>();
  * source tag (per-app vs instance). Used by E2E tests to assert how many
  * mails were sent and via which SMTP path.
  */
-export interface SpiedMail {
+export interface SpiedSmtpSend {
   source: "per-app" | "instance";
   to: string;
   from: string;
   subject: string;
 }
-let testMailSpy: ((mail: SpiedMail) => void) | null = null;
-export function _setTestMailSpy(fn: ((mail: SpiedMail) => void) | null): void {
-  testMailSpy = fn;
-}
+const smtpSpy = createTestSpy<SpiedSmtpSend>("_setSmtpSpy");
+export const _setSmtpSpy = smtpSpy.setter;
 
 function wrapForSpy(transport: Transporter, source: "per-app" | "instance"): Transporter {
   const originalSendMail = transport.sendMail.bind(transport);
   transport.sendMail = async (mail: Parameters<Transporter["sendMail"]>[0]) => {
     const result = await originalSendMail(mail);
-    if (testMailSpy) {
-      const to = Array.isArray(mail.to) ? mail.to.join(",") : String(mail.to ?? "");
-      const from = typeof mail.from === "string" ? mail.from : String(mail.from ?? "");
-      testMailSpy({ source, to, from, subject: String(mail.subject ?? "") });
-    }
+    const to = Array.isArray(mail.to) ? mail.to.join(",") : String(mail.to ?? "");
+    const from = typeof mail.from === "string" ? mail.from : String(mail.from ?? "");
+    smtpSpy.emit({ source, to, from, subject: String(mail.subject ?? "") });
     return result;
   };
   return transport;
@@ -101,9 +91,8 @@ function buildTransport(row: typeof applicationSmtpConfigs.$inferSelect): Transp
 }
 
 async function resolvePerAppSmtp(applicationId: string): Promise<ResolvedSmtpConfig | null> {
-  const now = Date.now();
   const cached = cache.get(applicationId);
-  if (cached && cached.expiresAt > now) return cached.value;
+  if (cached !== undefined) return cached;
 
   const [row] = await db
     .select()
@@ -112,7 +101,7 @@ async function resolvePerAppSmtp(applicationId: string): Promise<ResolvedSmtpCon
     .limit(1);
 
   if (!row) {
-    cache.set(applicationId, { value: null, expiresAt: now + NULL_TTL_MS });
+    cache.set(applicationId, null);
     return null;
   }
 
@@ -122,19 +111,18 @@ async function resolvePerAppSmtp(applicationId: string): Promise<ResolvedSmtpCon
     fromName: row.fromName,
     source: "per-app",
   };
-  cache.set(applicationId, { value, expiresAt: now + PER_APP_TTL_MS });
+  cache.set(applicationId, value);
   return value;
 }
 
 function resolveInstanceSmtp(): ResolvedSmtpConfig | null {
-  const now = Date.now();
   const cached = cache.get(INSTANCE_CACHE_KEY);
-  if (cached && cached.expiresAt > now) return cached.value;
+  if (cached !== undefined) return cached;
 
   const env = getEnv();
   const enabled = !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM);
   if (!enabled) {
-    cache.set(INSTANCE_CACHE_KEY, { value: null, expiresAt: now + NULL_TTL_MS });
+    cache.set(INSTANCE_CACHE_KEY, null);
     return null;
   }
 
@@ -154,7 +142,7 @@ function resolveInstanceSmtp(): ResolvedSmtpConfig | null {
     fromName: null,
     source: "instance",
   };
-  cache.set(INSTANCE_CACHE_KEY, { value, expiresAt: now + PER_APP_TTL_MS });
+  cache.set(INSTANCE_CACHE_KEY, value);
   return value;
 }
 
@@ -180,5 +168,5 @@ export function invalidateSmtpCache(applicationId: string): void {
 
 /** Test-only: clear the entire cache. Used by the resolver unit tests. */
 export function _clearSmtpCacheForTesting(): void {
-  cache.clear();
+  cache.clearForTesting();
 }

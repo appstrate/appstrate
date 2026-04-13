@@ -32,8 +32,8 @@ import { createClient, _resetClientCache } from "../../../services/oauth-admin.t
 import { upsertSocialProvider } from "../../../services/social-admin.ts";
 import {
   _clearSocialCacheForTesting,
-  _setTestSocialSpy,
-  type SpiedResolve,
+  _setSocialSpy,
+  type SpiedSocialResolve,
 } from "../../../services/social-config.ts";
 import oidcModule from "../../../index.ts";
 
@@ -96,18 +96,18 @@ async function setupAppClient(opts: {
 }
 
 describe("OIDC per-app social auth — E2E (app-level clients)", () => {
-  let resolves: SpiedResolve[] = [];
+  let resolves: SpiedSocialResolve[] = [];
 
   beforeEach(async () => {
     await truncateAll();
     _resetClientCache();
     _clearSocialCacheForTesting();
     resolves = [];
-    _setTestSocialSpy((e) => resolves.push(e));
+    _setSocialSpy((e) => resolves.push(e));
   });
 
   afterEach(() => {
-    _setTestSocialSpy(null);
+    _setSocialSpy(null);
   });
 
   // ─── Button gating on login page ───────────────────────────────────────────

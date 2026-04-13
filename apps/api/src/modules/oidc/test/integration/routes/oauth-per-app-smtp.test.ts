@@ -36,8 +36,8 @@ import { createClient, _resetClientCache } from "../../../services/oauth-admin.t
 import { upsertSmtpConfig } from "../../../services/smtp-admin.ts";
 import {
   _clearSmtpCacheForTesting,
-  _setTestMailSpy,
-  type SpiedMail,
+  _setSmtpSpy,
+  type SpiedSmtpSend,
 } from "../../../services/smtp-config.ts";
 import oidcModule from "../../../index.ts";
 
@@ -105,18 +105,18 @@ async function getCsrf(res: Response): Promise<{ csrfToken: string; cookie: stri
 describe("OIDC per-app SMTP — E2E matrix (app-level clients)", () => {
   enableSmtpForSuite();
 
-  let mails: SpiedMail[] = [];
+  let mails: SpiedSmtpSend[] = [];
 
   beforeEach(async () => {
     await truncateAll();
     _resetClientCache();
     _clearSmtpCacheForTesting();
     mails = [];
-    _setTestMailSpy((m) => mails.push(m));
+    _setSmtpSpy((m) => mails.push(m));
   });
 
   afterEach(() => {
-    _setTestMailSpy(null);
+    _setSmtpSpy(null);
   });
 
   // ─── Signup ────────────────────────────────────────────────────────────────

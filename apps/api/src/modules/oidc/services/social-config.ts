@@ -26,9 +26,22 @@ import { db } from "@appstrate/db/client";
 import { decryptCredentials } from "@appstrate/connect";
 import { applicationSocialProviders } from "../schema.ts";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
+import { createTtlCache } from "./ttl-cache.ts";
+import { createTestSpy } from "./test-spy.ts";
 
 export type SocialProviderId = "google" | "github";
 
+/**
+ * Note on the `source` asymmetry vs `ResolvedSmtpConfig`:
+ * SMTP's resolver handles the env-fallback ("instance" source) itself, because
+ * BA's mail-sending callbacks route through `withSmtpOverride` + env fallback
+ * at the route layer. Social auth fallback to env creds is NOT handled here
+ * at all — env `GOOGLE_CLIENT_ID` / `GITHUB_CLIENT_ID` flow through BA's
+ * `socialProviders` getters in `packages/db/src/auth.ts`, which consult
+ * `getSocialOverride()` (set by the BA before-hook) and fall through to env
+ * when no per-app override exists. This resolver is therefore per-app only:
+ * a `null` return means "no per-app config" and the getter layer takes over.
+ */
 export interface ResolvedSocialProvider {
   clientId: string;
   clientSecret: string; // decrypted
@@ -36,15 +49,7 @@ export interface ResolvedSocialProvider {
   source: "per-app";
 }
 
-interface CacheEntry {
-  value: ResolvedSocialProvider | null;
-  expiresAt: number;
-}
-
-const PER_APP_TTL_MS = 60_000;
-const NULL_TTL_MS = 30_000;
-
-const cache = new Map<string, CacheEntry>();
+const cache = createTtlCache<ResolvedSocialProvider>();
 
 function cacheKey(applicationId: string, provider: SocialProviderId): string {
   return `${applicationId}:${provider}`;
@@ -53,29 +58,26 @@ function cacheKey(applicationId: string, provider: SocialProviderId): string {
 /**
  * Test-only resolve spy. When set, every resolution (hit, miss, cached)
  * invokes the spy with the resolved source so E2E tests can assert which
- * per-app creds were looked up for a given request. Mirrors `_setTestMailSpy`
+ * per-app creds were looked up for a given request. Mirrors `_setSmtpSpy`
  * in `smtp-config.ts`.
  */
-export interface SpiedResolve {
+export interface SpiedSocialResolve {
   applicationId: string;
   provider: SocialProviderId;
   hit: boolean;
 }
-let testSocialSpy: ((e: SpiedResolve) => void) | null = null;
-export function _setTestSocialSpy(fn: ((e: SpiedResolve) => void) | null): void {
-  testSocialSpy = fn;
-}
+const socialResolveSpy = createTestSpy<SpiedSocialResolve>("_setSocialSpy");
+export const _setSocialSpy = socialResolveSpy.setter;
 
 async function resolvePerApp(
   applicationId: string,
   provider: SocialProviderId,
 ): Promise<ResolvedSocialProvider | null> {
-  const now = Date.now();
   const key = cacheKey(applicationId, provider);
   const cached = cache.get(key);
-  if (cached && cached.expiresAt > now) {
-    testSocialSpy?.({ applicationId, provider, hit: cached.value !== null });
-    return cached.value;
+  if (cached !== undefined) {
+    socialResolveSpy.emit({ applicationId, provider, hit: cached !== null });
+    return cached;
   }
 
   const [row] = await db
@@ -90,8 +92,8 @@ async function resolvePerApp(
     .limit(1);
 
   if (!row) {
-    cache.set(key, { value: null, expiresAt: now + NULL_TTL_MS });
-    testSocialSpy?.({ applicationId, provider, hit: false });
+    cache.set(key, null);
+    socialResolveSpy.emit({ applicationId, provider, hit: false });
     return null;
   }
 
@@ -102,8 +104,8 @@ async function resolvePerApp(
     scopes: row.scopes,
     source: "per-app",
   };
-  cache.set(key, { value, expiresAt: now + PER_APP_TTL_MS });
-  testSocialSpy?.({ applicationId, provider, hit: true });
+  cache.set(key, value);
+  socialResolveSpy.emit({ applicationId, provider, hit: true });
   return value;
 }
 
@@ -136,5 +138,5 @@ export function invalidateSocialCache(applicationId: string, provider?: SocialPr
 
 /** Test-only: clear the entire cache. */
 export function _clearSocialCacheForTesting(): void {
-  cache.clear();
+  cache.clearForTesting();
 }
