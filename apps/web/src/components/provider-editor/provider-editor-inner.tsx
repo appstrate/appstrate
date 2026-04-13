@@ -149,6 +149,26 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
       return;
     }
 
+    if (authMode === "oauth2") {
+      if (!oauth2.authorizationUrl || !oauth2.tokenUrl) {
+        setError(t("providers.form.errorOAuth2Required"));
+        setActiveTab("auth");
+        return;
+      }
+    } else if (authMode === "oauth1") {
+      if (!oauth1.requestTokenUrl || !oauth1.accessTokenUrl) {
+        setError(t("providers.form.errorOAuth1Required"));
+        setActiveTab("auth");
+        return;
+      }
+    } else if (authMode === "api_key" || authMode === "basic" || authMode === "custom") {
+      if (credentialFields.length === 0) {
+        setError(t("providers.form.errorCredentialsRequired"));
+        setActiveTab("auth");
+        return;
+      }
+    }
+
     allowNavigation();
     const body = { manifest: state.manifest, content: state.content };
     if (isEdit) {
