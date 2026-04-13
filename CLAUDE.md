@@ -532,5 +532,5 @@ Core schema: `packages/db/src/schema.ts` (Drizzle ORM). Module-owned tables live
 ## Known Issues & Technical Debt
 
 1. **No `stream: false` mode**: The run route always returns SSE. The spec defines a synchronous mode — not yet implemented. `stream?: boolean` in request body is ignored.
-2. **Scheduler**: Redis-backed via BullMQ. Distributed exactly-once cron firing, worker rate limiting (max 5/min). Schedules synced from `packageSchedules` table to BullMQ at boot.
+2. **Scheduler**: Redis-backed via BullMQ. Distributed exactly-once cron firing, worker rate limiting (max 5/min). Schedules synced from `schedules` table to BullMQ at boot.
 3. **Orphan cleanup**: On startup, orphaned runs (still `running`/`pending`) are marked `failed` and all containers labeled `appstrate.managed=true` are cleaned up via `cleanupOrphanedContainers()` in `docker.ts`.

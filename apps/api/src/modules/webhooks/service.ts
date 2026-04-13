@@ -26,7 +26,7 @@ type WebhookRow = InferSelectModel<typeof webhooks>;
 type WebhookDeliveryRow = InferSelectModel<typeof webhookDeliveries>;
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { toISORequired } from "../../lib/date-helpers.ts";
-import { buildUpdateSet } from "../../lib/db-helpers.ts";
+import { buildUpdateSet, scopedWhere } from "../../lib/db-helpers.ts";
 import { createQueue, PermanentJobError } from "../../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../../infra/queue/index.ts";
 import { isDevEnvironment, LOCALHOST_HOSTS } from "../../services/redirect-validation.ts";
@@ -202,7 +202,7 @@ export async function createWebhook(params: CreateWebhookInput): Promise<Webhook
   // Per-scope limit (per app for app-level, per org for org-level).
   const scopeFilter =
     params.level === "application"
-      ? and(eq(webhooks.orgId, params.orgId), eq(webhooks.applicationId, params.applicationId))
+      ? scopedWhere(webhooks, { orgId: params.orgId, applicationId: params.applicationId })
       : and(eq(webhooks.orgId, params.orgId), isNull(webhooks.applicationId));
   const existing = await db.select({ id: webhooks.id }).from(webhooks).where(scopeFilter);
   if (existing.length >= MAX_WEBHOOKS_PER_SCOPE) {

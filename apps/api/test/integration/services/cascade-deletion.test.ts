@@ -23,7 +23,7 @@ import {
   endUsers,
   apiKeys,
   runs,
-  packageSchedules,
+  schedules,
 } from "@appstrate/db/schema";
 import { bindAppProfileProvider } from "../../../src/services/state/app-profile-bindings.ts";
 import {
@@ -240,7 +240,7 @@ describe("Cascade Deletion", () => {
       await assertDbHas(endUsers, eq(endUsers.id, eu.id));
       await assertDbHas(apiKeys, eq(apiKeys.id, key.id));
       await assertDbHas(runs, eq(runs.id, run.id));
-      await assertDbHas(packageSchedules, eq(packageSchedules.id, sched.id));
+      await assertDbHas(schedules, eq(schedules.id, sched.id));
 
       // Delete the application
       await deleteApplication(orgId, customApp.id);
@@ -254,7 +254,7 @@ describe("Cascade Deletion", () => {
       await assertDbMissing(endUsers, eq(endUsers.id, eu.id));
       await assertDbMissing(apiKeys, eq(apiKeys.id, key.id));
       await assertDbMissing(runs, eq(runs.id, run.id));
-      await assertDbMissing(packageSchedules, eq(packageSchedules.id, sched.id));
+      await assertDbMissing(schedules, eq(schedules.id, sched.id));
     });
 
     it("does not affect the default application or its resources", async () => {

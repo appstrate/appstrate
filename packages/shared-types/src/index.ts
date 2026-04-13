@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
+
 export type { Profile, RunLog, ConnectionProfile } from "@appstrate/db/schema";
 import type {
   PackageType,
@@ -67,9 +69,8 @@ export type RunStatus = (typeof runStatusEnum.enumValues)[number];
 
 // --- Schedule Types ---
 
-// `package_schedules` is a legacy DB name — the public type drops the prefix.
-// TODO: rename the table + Drizzle variable to `schedules` in a follow-up PR.
-import type { PackageSchedule as Schedule } from "@appstrate/db/schema";
+// `package_schedules` is a legacy DB name — the Drizzle export is `schedules`.
+import type { Schedule } from "@appstrate/db/schema";
 export type { Schedule };
 
 export interface ScheduleReadiness {

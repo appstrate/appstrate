@@ -229,7 +229,7 @@ export const runsPaths = {
               example: {
                 id: "run_cm1abc123def456",
                 packageId: "@acme/email-sorter",
-                userId: "usr_k7x9m2p4q1",
+                dashboardUserId: "usr_k7x9m2p4q1",
                 orgId: "org_r3t5w8y1z6",
                 status: "success",
                 input: { folder: "inbox", maxEmails: 50 },

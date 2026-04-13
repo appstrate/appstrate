@@ -34,7 +34,7 @@ describe("Notifications API", () => {
         packageId: agent.id,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
         notifiedAt: new Date(),
       });
@@ -79,7 +79,7 @@ describe("Notifications API", () => {
         packageId: "@notiforg/silent-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
         // notifiedAt is null by default — should not be counted
       });
@@ -176,7 +176,7 @@ describe("Notifications API", () => {
         packageId: "@notiforg/no-notif",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
 
@@ -235,7 +235,7 @@ describe("Notifications API", () => {
         packageId: "@notiforg/already-read",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
         notifiedAt: new Date(),
         readAt: new Date(),
@@ -280,14 +280,14 @@ describe("Notifications API", () => {
         packageId: "@notiforg/list-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@notiforg/list-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "failed",
       });
 
@@ -318,14 +318,14 @@ describe("Notifications API", () => {
         packageId: "@notiforg/shared-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@notiforg/shared-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: otherUser.id,
+        dashboardUserId: otherUser.id,
         status: "success",
       });
 
@@ -355,14 +355,14 @@ describe("Notifications API", () => {
         packageId: "@notiforg/filter-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@notiforg/filter-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: otherUser.id,
+        dashboardUserId: otherUser.id,
         status: "success",
       });
 
@@ -372,12 +372,12 @@ describe("Notifications API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        runs: { userId: string }[];
+        runs: { dashboardUserId: string }[];
         total: number;
       };
       expect(body.runs).toHaveLength(1);
       expect(body.total).toBe(1);
-      expect(body.runs[0]!.userId).toBe(ctx.user.id);
+      expect(body.runs[0]!.dashboardUserId).toBe(ctx.user.id);
     });
 
     it("respects limit parameter", async () => {
@@ -391,7 +391,7 @@ describe("Notifications API", () => {
           packageId: "@notiforg/limit-agent",
           orgId: ctx.orgId,
           applicationId: ctx.defaultAppId,
-          userId: ctx.user.id,
+          dashboardUserId: ctx.user.id,
           status: "success",
         });
       }
@@ -420,7 +420,7 @@ describe("Notifications API", () => {
           packageId: "@notiforg/offset-agent",
           orgId: ctx.orgId,
           applicationId: ctx.defaultAppId,
-          userId: ctx.user.id,
+          dashboardUserId: ctx.user.id,
           status: "success",
         });
       }
@@ -449,7 +449,7 @@ describe("Notifications API", () => {
         packageId: "@otherotherorg/secret-agent",
         orgId: otherCtx.orgId,
         applicationId: otherCtx.defaultAppId,
-        userId: otherCtx.user.id,
+        dashboardUserId: otherCtx.user.id,
         status: "success",
       });
 
@@ -560,7 +560,7 @@ describe("Notifications API", () => {
         packageId: "@notiforg/eu-markall-agent",
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
+        dashboardUserId: ctx.user.id,
         status: "success",
         notifiedAt: new Date(),
       });

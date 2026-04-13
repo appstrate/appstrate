@@ -6,6 +6,7 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import { createTransport } from "nodemailer";
 import { eq } from "drizzle-orm";
 import { renderEmail } from "@appstrate/emails";
+import type { BeforeSignupContext, AfterSignupContext } from "@appstrate/core/module";
 import { db } from "./client.ts";
 import * as schema from "./schema.ts";
 import { profiles, orgInvitations, organizations, user } from "./schema.ts";
@@ -17,33 +18,14 @@ import { getEnv } from "@appstrate/env";
 // (`smtpEnabled`, `smtpTransport`, `socialProviders`, `basePlugins`) live
 // inside `buildAuth()` for the same reason.
 
-// ─── Before-signup hook (injected at boot via module system) ───
+// ─── Signup hooks (injected at boot via module system) ───
 //
-// The platform exposes a single injection slot consumed by the module
+// The platform exposes single injection slots consumed by the module
 // loader (`apps/api/src/lib/boot.ts`) which fans out to every registered
-// module's `beforeSignup` hook. The signature passes both the legacy
-// `email` string AND an optional `ctx` carrying the request headers — so
-// modules that need to read request state (e.g. the OIDC pending-client
-// cookie in `auth/signup-guard.ts`) can do so without adding a parallel
-// hook channel. Modules that only care about the email (e.g. cloud's
-// free-tier handler) keep their existing `(email) => {...}` shape —
-// extra arguments are dropped by JavaScript, so this is backward
-// compatible.
-
-export interface BeforeSignupContext {
-  /** Request headers when the signup happens inside an HTTP request, `null` otherwise. */
-  headers: Headers | null;
-}
-
-/**
- * Post-creation context passed to `afterSignup` hooks. Unlike `before`, we
- * now have the committed BA user id — modules can attach it to their own
- * tables (e.g. OIDC auto-joining the user to an org) inside the same
- * transaction as the user creation.
- */
-export interface AfterSignupContext {
-  headers: Headers | null;
-}
+// module's `beforeSignup` / `afterSignup` hook. Both signatures carry a
+// `ctx` with the request headers so modules that need to read request
+// state (e.g. the OIDC pending-client cookie in `auth/signup-guard.ts`)
+// can do so without adding a parallel hook channel.
 
 let _beforeSignupHook: ((email: string, ctx: BeforeSignupContext) => void | Promise<void>) | null =
   null;

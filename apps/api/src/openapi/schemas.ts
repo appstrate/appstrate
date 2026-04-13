@@ -349,7 +349,10 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       packageId: { type: "string" },
-      userId: { type: "string" },
+      dashboardUserId: {
+        type: ["string", "null"],
+        description: "Dashboard user ID that triggered the run (null for end-user/schedule runs)",
+      },
       orgId: { type: "string" },
       status: {
         type: "string",

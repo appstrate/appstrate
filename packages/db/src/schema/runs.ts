@@ -42,7 +42,7 @@ export const runs = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    userId: text("user_id").references(() => user.id, {
+    dashboardUserId: text("dashboard_user_id").references(() => user.id, {
       onDelete: "set null",
     }),
     endUserId: text("end_user_id").references(() => endUsers.id, {
@@ -72,7 +72,7 @@ export const runs = pgTable(
     connectionProfileId: uuid("connection_profile_id").references(() => connectionProfiles.id, {
       onDelete: "set null",
     }),
-    scheduleId: text("schedule_id").references(() => packageSchedules.id, {
+    scheduleId: text("schedule_id").references(() => schedules.id, {
       onDelete: "set null",
     }),
     versionLabel: text("version_label"),
@@ -94,13 +94,21 @@ export const runs = pgTable(
   (table) => [
     index("idx_runs_package_id").on(table.packageId),
     index("idx_runs_status").on(table.status),
-    index("idx_runs_user_id").on(table.userId),
+    index("idx_runs_dashboard_user_id").on(table.dashboardUserId),
     index("idx_runs_end_user_id").on(table.endUserId),
     index("idx_runs_application_id").on(table.applicationId),
     index("idx_runs_app_status_started").on(table.applicationId, table.status, table.startedAt),
     index("idx_runs_org_id").on(table.orgId),
-    index("idx_runs_notification").on(table.userId, table.orgId, table.notifiedAt, table.readAt),
-    check("runs_at_most_one_actor", sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`),
+    index("idx_runs_notification").on(
+      table.dashboardUserId,
+      table.orgId,
+      table.notifiedAt,
+      table.readAt,
+    ),
+    check(
+      "runs_at_most_one_actor",
+      sql`NOT (dashboard_user_id IS NOT NULL AND end_user_id IS NOT NULL)`,
+    ),
   ],
 );
 
@@ -154,7 +162,7 @@ export const packageMemories = pgTable(
   ],
 );
 
-export const packageSchedules = pgTable(
+export const schedules = pgTable(
   "package_schedules",
   {
     id: text("id").primaryKey(),

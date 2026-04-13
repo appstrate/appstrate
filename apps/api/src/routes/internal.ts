@@ -57,7 +57,7 @@ async function verifyRunToken(c: Context): Promise<{
   runId: string;
   run: {
     packageId: string;
-    userId: string | null;
+    dashboardUserId: string | null;
     endUserId: string | null;
     orgId: string;
     applicationId: string;
@@ -85,7 +85,7 @@ async function verifyRunToken(c: Context): Promise<{
   const rows = await db
     .select({
       packageId: runs.packageId,
-      userId: runs.userId,
+      dashboardUserId: runs.dashboardUserId,
       endUserId: runs.endUserId,
       orgId: runs.orgId,
       applicationId: runs.applicationId,
@@ -110,7 +110,7 @@ async function verifyRunToken(c: Context): Promise<{
     runId,
     run: {
       packageId: run.packageId!,
-      userId: run.userId,
+      dashboardUserId: run.dashboardUserId,
       endUserId: run.endUserId,
       orgId: run.orgId,
       applicationId: run.applicationId,
@@ -154,7 +154,7 @@ export function createInternalRouter() {
     const fields: ("state" | "result")[] = parsed?.length ? parsed : ["state"];
 
     try {
-      const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
+      const actor: Actor | null = actorFromIds(run.dashboardUserId, run.endUserId);
       const recentRuns = await getRecentRuns(run.packageId, actor, run.orgId, run.applicationId, {
         limit,
         fields,

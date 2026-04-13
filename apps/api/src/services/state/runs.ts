@@ -2,10 +2,23 @@
 
 import { eq, and, ne, desc, isNotNull, inArray, count, max, type SQL, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, runLogs, profiles, endUsers, apiKeys, packageSchedules } from "@appstrate/db/schema";
+import { runs, runLogs, profiles, endUsers, apiKeys, schedules } from "@appstrate/db/schema";
 import type { RunProviderSnapshot } from "@appstrate/shared-types";
 import { logger } from "../../lib/logger.ts";
-import { type Actor, actorInsert, actorFilter } from "../../lib/actor.ts";
+import { scopedWhere } from "../../lib/db-helpers.ts";
+import { type Actor, actorFilter } from "../../lib/actor.ts";
+
+/** Maps an Actor to the runs table's `dashboardUserId`/`endUserId` columns. */
+function runActorInsert(actor: Actor | null): {
+  dashboardUserId: string | null;
+  endUserId: string | null;
+} {
+  if (!actor) return { dashboardUserId: null, endUserId: null };
+  return {
+    dashboardUserId: actor.type === "member" ? actor.id : null,
+    endUserId: actor.type === "end_user" ? actor.id : null,
+  };
+}
 import { asRecordOrNull } from "../../lib/safe-json.ts";
 import { toISO } from "../../lib/date-helpers.ts";
 
@@ -20,11 +33,11 @@ async function nextRunNumber(
     .select({ maxNum: max(runs.runNumber) })
     .from(runs)
     .where(
-      and(
-        eq(runs.packageId, packageId),
-        eq(runs.orgId, orgId),
-        eq(runs.applicationId, applicationId),
-      ),
+      scopedWhere(runs, {
+        orgId,
+        applicationId,
+        extra: [eq(runs.packageId, packageId)],
+      }),
     );
   return (maxRow?.maxNum ?? 0) + 1;
 }
@@ -55,7 +68,7 @@ export async function createRun(params: CreateRunParams): Promise<void> {
   await db.insert(runs).values({
     id,
     packageId,
-    ...(actor ? actorInsert(actor) : { userId: null, endUserId: null }),
+    ...runActorInsert(actor),
     orgId,
     status: "pending",
     input,
@@ -95,7 +108,7 @@ export async function createFailedRun(
   await db.insert(runs).values({
     id,
     packageId,
-    ...(actor ? actorInsert(actor) : { userId: null, endUserId: null }),
+    ...runActorInsert(actor),
     orgId,
     applicationId,
     status: "failed",
@@ -145,7 +158,7 @@ export async function updateRun(
     await db
       .update(runs)
       .set(set)
-      .where(and(eq(runs.id, id), eq(runs.orgId, orgId), eq(runs.applicationId, applicationId)));
+      .where(scopedWhere(runs, { orgId, applicationId, extra: [eq(runs.id, id)] }));
   } catch (err) {
     logger.error("Failed to update run", {
       runId: id,
@@ -167,7 +180,9 @@ export async function getLastRunState(
     isNotNull(runs.state),
   ];
   if (actor) {
-    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
+    conditions.push(
+      actorFilter(actor, { userId: runs.dashboardUserId, endUserId: runs.endUserId }),
+    );
   }
 
   const [row] = await db
@@ -200,7 +215,9 @@ export async function getRecentRuns(
     eq(runs.status, "success"),
   ];
   if (actor) {
-    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
+    conditions.push(
+      actorFilter(actor, { userId: runs.dashboardUserId, endUserId: runs.endUserId }),
+    );
   }
 
   if (options.excludeRunId) {
@@ -246,7 +263,9 @@ export async function getLastRun(
     eq(runs.applicationId, applicationId),
   ];
   if (actor) {
-    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
+    conditions.push(
+      actorFilter(actor, { userId: runs.dashboardUserId, endUserId: runs.endUserId }),
+    );
   }
 
   const [row] = await db
@@ -310,7 +329,9 @@ export async function getRunningRunsForPackage(
   conditions.push(eq(runs.applicationId, applicationId));
 
   if (actor) {
-    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
+    conditions.push(
+      actorFilter(actor, { userId: runs.dashboardUserId, endUserId: runs.endUserId }),
+    );
   }
 
   const [row] = await db
@@ -336,11 +357,11 @@ export async function getRunningRunCounts(
     .select({ packageId: runs.packageId, count: count() })
     .from(runs)
     .where(
-      and(
-        eq(runs.orgId, orgId),
-        eq(runs.applicationId, applicationId),
-        inArray(runs.status, ["running", "pending"]),
-      ),
+      scopedWhere(runs, {
+        orgId,
+        applicationId,
+        extra: [inArray(runs.status, ["running", "pending"])],
+      }),
     )
     .groupBy(runs.packageId);
 
@@ -362,7 +383,7 @@ export async function getRun(id: string, orgId: string, applicationId: string) {
     .select({
       id: runs.id,
       status: runs.status,
-      userId: runs.userId,
+      dashboardUserId: runs.dashboardUserId,
       endUserId: runs.endUserId,
       orgId: runs.orgId,
       packageId: runs.packageId,
@@ -382,11 +403,11 @@ export async function deletePackageRuns(
   const deleted = await db
     .delete(runs)
     .where(
-      and(
-        eq(runs.packageId, packageId),
-        eq(runs.orgId, orgId),
-        eq(runs.applicationId, applicationId),
-      ),
+      scopedWhere(runs, {
+        orgId,
+        applicationId,
+        extra: [eq(runs.packageId, packageId)],
+      }),
     )
     .returning({ id: runs.id });
   return deleted.length;
@@ -405,13 +426,13 @@ export async function listRunsWithFilter(
       userName: profiles.displayName,
       endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
       apiKeyName: apiKeys.name,
-      scheduleName: packageSchedules.name,
+      scheduleName: schedules.name,
     })
     .from(runs)
-    .leftJoin(profiles, eq(runs.userId, profiles.id))
+    .leftJoin(profiles, eq(runs.dashboardUserId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
     .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
-    .leftJoin(packageSchedules, eq(runs.scheduleId, packageSchedules.id))
+    .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
     .where(filter)
     .orderBy(desc(runs.startedAt))
     .limit(limit)
@@ -458,11 +479,11 @@ export async function listScheduleRuns(
 ) {
   const { limit = 20, offset = 0, applicationId } = options;
   return listRunsWithFilter(
-    and(
-      eq(runs.scheduleId, scheduleId),
-      eq(runs.orgId, orgId),
-      eq(runs.applicationId, applicationId),
-    )!,
+    scopedWhere(runs, {
+      orgId,
+      applicationId,
+      extra: [eq(runs.scheduleId, scheduleId)],
+    })!,
     limit,
     offset,
   );
@@ -481,13 +502,13 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
       userName: profiles.displayName,
       endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
       apiKeyName: apiKeys.name,
-      scheduleName: packageSchedules.name,
+      scheduleName: schedules.name,
     })
     .from(runs)
-    .leftJoin(profiles, eq(runs.userId, profiles.id))
+    .leftJoin(profiles, eq(runs.dashboardUserId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
     .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
-    .leftJoin(packageSchedules, eq(runs.scheduleId, packageSchedules.id))
+    .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
     .where(and(...conditions))
     .limit(1);
 

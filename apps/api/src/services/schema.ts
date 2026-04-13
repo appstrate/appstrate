@@ -15,13 +15,101 @@ import { normalizeConfigForValidation } from "../lib/agent-readiness-utils.ts";
 
 const ajv = new Ajv({ coerceTypes: true, allErrors: true, strict: false });
 
-function validateWithAjv(
+// --- Section C: Validation functions ---
+
+export interface ValidationResult {
+  valid: boolean;
+  errors: { field: string; message: string }[];
+  data?: Record<string, unknown>;
+}
+
+/**
+ * Shared AJV validation path for config/input/output.
+ *
+ * Differences between the three kinds, encoded here:
+ * - "config":  validates the raw schema, normalizes empty strings as missing for required fields.
+ * - "input":   filters out file fields (validated separately), normalizes empty strings for the
+ *              remaining required fields. Accepts `undefined` input (defaults to `{}`).
+ * - "output":  relaxes `additionalProperties: true` (extra fields like state/tokenUsage allowed),
+ *              skips normalization, and returns errors as pre-formatted strings (different return
+ *              shape from config/input).
+ */
+function runValidate(
+  kind: "config",
   data: Record<string, unknown>,
   schema: JSONSchemaObject,
-): ValidationResult {
-  const validate = ajv.compile(schema);
-  const valid = validate(data);
-  if (valid) return { valid: true, errors: [], data };
+): ValidationResult;
+function runValidate(
+  kind: "input",
+  data: Record<string, unknown> | undefined,
+  schema: JSONSchemaObject,
+): ValidationResult;
+function runValidate(
+  kind: "output",
+  data: Record<string, unknown>,
+  schema: JSONSchemaObject,
+): { valid: boolean; errors: string[] };
+function runValidate(
+  kind: "config" | "input" | "output",
+  data: Record<string, unknown> | undefined,
+  schema: JSONSchemaObject,
+): ValidationResult | { valid: boolean; errors: string[] } {
+  // 1. Empty-schema short circuit
+  if (!schema.properties || Object.keys(schema.properties).length === 0) {
+    if (kind === "output") return { valid: true, errors: [] };
+    return {
+      valid: true,
+      errors: [],
+      data: kind === "input" ? (data ?? {}) : data,
+    };
+  }
+
+  // 2. Per-kind schema + data preparation
+  let effectiveSchema: JSONSchemaObject = schema;
+  let effectiveData: Record<string, unknown> = data ?? {};
+
+  if (kind === "config") {
+    // Treat empty strings as missing for required fields (aligned with frontend validation)
+    effectiveData = normalizeConfigForValidation(effectiveData, schema.required ?? []);
+  } else if (kind === "input") {
+    // Exclude file fields from AJV validation (they're validated separately)
+    const nonFileProps: Record<string, JSONSchema7> = {};
+    for (const [key, prop] of Object.entries(schema.properties)) {
+      if (!isFileField(prop)) nonFileProps[key] = prop;
+    }
+    if (Object.keys(nonFileProps).length === 0) {
+      return { valid: true, errors: [], data: effectiveData };
+    }
+    const nonFileRequired = schema.required?.filter((k) => nonFileProps[k]) ?? [];
+    effectiveSchema = {
+      type: "object",
+      properties: nonFileProps,
+      ...(nonFileRequired.length > 0 ? { required: nonFileRequired } : {}),
+    };
+    // Treat empty strings as missing for required fields (aligned with config validation)
+    effectiveData = normalizeConfigForValidation(effectiveData, nonFileRequired);
+  } else {
+    // output: allow extra fields (state, tokenUsage, etc.)
+    effectiveSchema = { ...schema, additionalProperties: true } as JSONSchemaObject & {
+      additionalProperties: boolean;
+    };
+  }
+
+  // 3. Compile + validate
+  const validate = ajv.compile(effectiveSchema);
+  const valid = validate(effectiveData);
+
+  // 4. Per-kind error mapping
+  if (kind === "output") {
+    if (valid) return { valid: true, errors: [] };
+    const errors = (validate.errors || []).map(
+      (e) =>
+        `Field '${e.instancePath.replace(/^\//, "") || (e.params as { missingProperty?: string })?.missingProperty || "unknown"}': ${e.message || "Validation failed"}`,
+    );
+    return { valid: false, errors };
+  }
+
+  if (valid) return { valid: true, errors: [], data: effectiveData };
   const errors = (validate.errors || []).map((e) => ({
     field:
       e.instancePath.replace(/^\//, "") ||
@@ -32,50 +120,18 @@ function validateWithAjv(
   return { valid: false, errors };
 }
 
-// --- Section C: Validation functions ---
-
-export interface ValidationResult {
-  valid: boolean;
-  errors: { field: string; message: string }[];
-  data?: Record<string, unknown>;
-}
-
 export function validateConfig(
   data: Record<string, unknown>,
   schema: JSONSchemaObject,
 ): ValidationResult {
-  if (!schema.properties || Object.keys(schema.properties).length === 0) {
-    return { valid: true, errors: [], data };
-  }
-  // Treat empty strings as missing for required fields (aligned with frontend validation)
-  const cleaned = normalizeConfigForValidation(data, schema.required ?? []);
-  return validateWithAjv(cleaned, schema);
+  return runValidate("config", data, schema);
 }
 
 export function validateInput(
   input: Record<string, unknown> | undefined,
   schema: JSONSchemaObject,
 ): ValidationResult {
-  if (!schema.properties || Object.keys(schema.properties).length === 0) {
-    return { valid: true, errors: [], data: input ?? {} };
-  }
-  // Exclude file fields from AJV validation (they're validated separately)
-  const nonFileProps: Record<string, JSONSchema7> = {};
-  for (const [key, prop] of Object.entries(schema.properties)) {
-    if (!isFileField(prop)) nonFileProps[key] = prop;
-  }
-  if (Object.keys(nonFileProps).length === 0) {
-    return { valid: true, errors: [], data: input ?? {} };
-  }
-  const nonFileRequired = schema.required?.filter((k) => nonFileProps[k]) ?? [];
-  const nonFileSchema: JSONSchemaObject = {
-    type: "object",
-    properties: nonFileProps,
-    ...(nonFileRequired.length > 0 ? { required: nonFileRequired } : {}),
-  };
-  // Treat empty strings as missing for required fields (aligned with config validation)
-  const cleaned = normalizeConfigForValidation(input ?? {}, nonFileRequired);
-  return validateWithAjv(cleaned, nonFileSchema);
+  return runValidate("input", input, schema);
 }
 
 export function validateFileInputs(
@@ -191,22 +247,7 @@ export function validateOutput(
   result: Record<string, unknown>,
   schema: JSONSchemaObject,
 ): { valid: boolean; errors: string[] } {
-  if (!schema.properties || Object.keys(schema.properties).length === 0) {
-    return { valid: true, errors: [] };
-  }
-  // Use additionalProperties: true to allow extra fields (state, tokenUsage, etc.)
-  const looseSchema: JSONSchemaObject & { additionalProperties: boolean } = {
-    ...schema,
-    additionalProperties: true,
-  };
-  const validate = ajv.compile(looseSchema);
-  const valid = validate(result);
-  if (valid) return { valid: true, errors: [] };
-  const errors = (validate.errors || []).map(
-    (e) =>
-      `Field '${e.instancePath.replace(/^\//, "") || (e.params as { missingProperty?: string })?.missingProperty || "unknown"}': ${e.message || "Validation failed"}`,
-  );
-  return { valid: false, errors };
+  return runValidate("output", result, schema);
 }
 
 export function validateAgentContent(

@@ -2,37 +2,12 @@
 
 import type { Dispatch, SetStateAction } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "@appstrate/shared-types";
 import { api } from "@/api";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { useCurrentApplicationId } from "@/hooks/use-current-application";
-export interface WebhookInfo {
-  id: string;
-  object: "webhook";
-  applicationId: string;
-  url: string;
-  events: string[];
-  packageId: string | null;
-  payloadMode: "full" | "summary";
-  enabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
 
-export interface WebhookCreateResponse extends WebhookInfo {
-  secret: string;
-}
-
-export interface WebhookDelivery {
-  id: string;
-  eventId: string;
-  eventType: string;
-  status: "pending" | "success" | "failed";
-  statusCode: number | null;
-  latency: number | null;
-  attempt: number;
-  error: string | null;
-  createdAt: string;
-}
+export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery };
 
 /** Toggle an event in a state setter — shared by create and edit forms. */
 export function toggleEvent(event: string, setter: Dispatch<SetStateAction<string[]>>) {

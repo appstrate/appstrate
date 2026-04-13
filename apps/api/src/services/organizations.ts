@@ -47,7 +47,7 @@ export async function createOrganization(
       name,
       slug,
       createdBy: userId,
-      settings: { apiVersion: CURRENT_API_VERSION },
+      orgSettings: { apiVersion: CURRENT_API_VERSION },
     })
     .returning();
 
@@ -111,12 +111,12 @@ export type OrgSettings = z.infer<typeof orgSettingsSchema>;
 
 export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
   const [row] = await db
-    .select({ settings: organizations.settings })
+    .select({ orgSettings: organizations.orgSettings })
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
 
-  return (row?.settings as OrgSettings) ?? {};
+  return (row?.orgSettings as OrgSettings) ?? {};
 }
 
 export async function updateOrgSettings(
@@ -128,11 +128,11 @@ export async function updateOrgSettings(
 
   const [row] = await db
     .update(organizations)
-    .set({ settings: merged, updatedAt: new Date() })
+    .set({ orgSettings: merged, updatedAt: new Date() })
     .where(eq(organizations.id, orgId))
-    .returning({ settings: organizations.settings });
+    .returning({ orgSettings: organizations.orgSettings });
 
-  return (row?.settings as OrgSettings) ?? {};
+  return (row?.orgSettings as OrgSettings) ?? {};
 }
 
 export async function getOrgMembers(orgId: string) {
@@ -254,7 +254,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // run_logs → runs (cascade exists, but org_id FK needs manual delete)
     await tx.delete(runLogs).where(eq(runLogs.orgId, orgId));
     await tx.delete(runs).where(eq(runs.orgId, orgId));
-    // Org-scoped tables (package_schedules, org_models, org_provider_keys,
+    // Org-scoped tables (package_schedules, org_models, org_system_provider_keys,
     // and module-owned tables like webhooks) cascade via their orgId FK —
     // no explicit delete needed.
     // applicationPackages cascade through applications → orgId
