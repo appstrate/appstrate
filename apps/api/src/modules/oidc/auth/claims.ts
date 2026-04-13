@@ -85,7 +85,7 @@ export function scopesToPermissions(
       if (isAllowedOidcScope(s)) {
         granted.add(s);
       } else {
-        logger.warn("oidc: end_user scope dropped (not in OIDC_ALLOWED_SCOPES)", {
+        logger.debug("oidc: end_user scope dropped (not in OIDC_ALLOWED_SCOPES)", {
           module: "oidc",
           scope: s,
         });
@@ -98,7 +98,7 @@ export function scopesToPermissions(
       granted.add(s);
       continue;
     }
-    logger.warn("oidc: dashboard scope dropped — role ceiling does not allow it", {
+    logger.debug("oidc: dashboard scope dropped — role ceiling does not allow it", {
       module: "oidc",
       scope: s,
       orgRole,

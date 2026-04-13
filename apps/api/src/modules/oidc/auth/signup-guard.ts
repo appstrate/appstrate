@@ -71,45 +71,11 @@ export async function oidcBeforeSignupGuard(input: BeforeSignupGuardInput): Prom
   }
 
   const policy = await loadClientSignupPolicy(pendingClientId);
-  if (!policy) {
-    // Unknown or disabled client → no policy to enforce. Let core handle
-    // the signup through its default path.
-    logger.debug("oidc: beforeSignup guard pass-through", {
-      module: "oidc",
-      pendingClientId,
-      email: input.user.email,
-      reason: "no-policy",
-    });
-    return;
-  }
-
-  if (policy.level === "application") {
-    // Application-level clients mint end-user tokens, not Better Auth
-    // users. The pending-client cookie is still set for symmetry, but the
-    // signup going through BA here is unrelated (e.g. a staff login on the
-    // same origin) and must not be blocked.
-    logger.debug("oidc: beforeSignup guard pass-through", {
-      module: "oidc",
-      pendingClientId,
-      email: input.user.email,
-      reason: "application-level",
-    });
-    return;
-  }
-
-  if (policy.allowSignup) {
-    // Open policy (org with opt-in signup or platform instance client) —
-    // let the signup through; `afterSignup` may auto-join for org-level.
-    logger.debug("oidc: beforeSignup guard pass-through", {
-      module: "oidc",
-      pendingClientId,
-      level: policy.level,
-      orgId: policy.orgId,
-      email: input.user.email,
-      reason: "signup-open",
-    });
-    return;
-  }
+  // Pass-through cases:
+  //   - no policy (unknown/disabled client) → let core handle default signup
+  //   - application-level → end-users don't go through BA; unrelated signup
+  //   - open policy → afterSignup may auto-join for org-level
+  if (!policy || policy.level === "application" || policy.allowSignup) return;
 
   // Closed policy: block the BA user creation outright. The browser ends
   // up on `errorCallbackURL` (/api/oauth/login?...) for social flows, or

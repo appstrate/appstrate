@@ -764,9 +764,8 @@ export function createOidcRouter() {
       }
     }
 
-    const cookieCount = forwardOAuthSessionCookies(c, authResponse, ctx.client.isFirstParty);
-    logger.info("oidc: login success, forwarding cookies", {
-      cookieCount,
+    forwardOAuthSessionCookies(c, authResponse, ctx.client.isFirstParty);
+    logger.info("oidc: login success", {
       firstParty: ctx.client.isFirstParty,
       email,
     });
