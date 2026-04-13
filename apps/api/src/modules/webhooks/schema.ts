@@ -38,8 +38,6 @@ export const webhooks = pgTable(
     payloadMode: text("payload_mode").notNull().default("full"), // "full" | "summary"
     enabled: boolean("enabled").notNull().default(true),
     secret: text("secret").notNull(), // whsec_ prefix, plaintext (needed for HMAC signing)
-    previousSecret: text("previous_secret"), // for rotation grace period
-    previousSecretExpiresAt: timestamp("previous_secret_expires_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

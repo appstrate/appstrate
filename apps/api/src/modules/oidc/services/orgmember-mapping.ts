@@ -60,14 +60,8 @@ import { db } from "@appstrate/db/client";
 import { organizationMembers } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import type { OrgRole } from "../../../types/index.ts";
+import type { AuthIdentity } from "../auth/types.ts";
 import { getClientCached } from "./oauth-admin.ts";
-
-export interface AuthIdentity {
-  /** Better Auth `user.id`. */
-  id: string;
-  /** Better Auth `user.email` — informational only, used in error messages. */
-  email: string;
-}
 
 export interface OrgSignupPolicy {
   /** When false, non-members are rejected with `OrgSignupClosedError`. */

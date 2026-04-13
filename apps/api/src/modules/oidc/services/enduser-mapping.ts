@@ -33,7 +33,10 @@ import { endUsers, applications } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import { prefixedId } from "../../../lib/ids.ts";
 import type { AppContextRow } from "../../../middleware/app-context.ts";
+import type { AuthIdentity } from "../auth/types.ts";
 import { oidcEndUserProfiles } from "../schema.ts";
+
+export type { AuthIdentity };
 
 /**
  * Load an application row by id — shared helper for callers that need the
@@ -62,16 +65,6 @@ async function requireAppById(applicationId: string): Promise<AppContextRow> {
     throw new Error(`OIDC: application '${applicationId}' not found`);
   }
   return app;
-}
-
-export interface AuthIdentity {
-  /** Better Auth `user.id`. */
-  id: string;
-  /** Better Auth `user.email` — lowercased + trimmed before use. */
-  email: string;
-  name?: string | null;
-  /** `true` only when Better Auth explicitly verified the email (strict). */
-  emailVerified?: boolean;
 }
 
 export interface ResolvedEndUser {

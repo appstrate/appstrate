@@ -77,10 +77,9 @@ function generateSecret(): string {
 
 /**
  * Convert a webhooks row to the public API DTO. Strips sensitive fields
- * (`orgId`, `secret`, `previousSecret`, `previousSecretExpiresAt`),
- * narrows `payloadMode`, and serializes dates. The input type is anchored
- * to the Drizzle schema — drop or rename a column and this function fails
- * to typecheck.
+ * (`orgId`, `secret`), narrows `payloadMode`, and serializes dates. The
+ * input type is anchored to the Drizzle schema — drop or rename a column
+ * and this function fails to typecheck.
  */
 /**
  * Convert a webhook_deliveries row to the public API DTO. Narrows `status`
@@ -307,28 +306,14 @@ export async function deleteWebhook(orgId: string, webhookId: string): Promise<v
   await db.delete(webhooks).where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)));
 }
 
-/** Grace period for the previous secret after rotation (24 hours). */
-const SECRET_ROTATION_GRACE_MS = 24 * 60 * 60 * 1000;
-
 export async function rotateSecret(orgId: string, webhookId: string): Promise<{ secret: string }> {
-  const [row] = await db
-    .select({ id: webhooks.id, secret: webhooks.secret })
-    .from(webhooks)
-    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)))
-    .limit(1);
-
-  if (!row) throw notFound(`Webhook '${webhookId}' not found`);
+  await getWebhook(orgId, webhookId);
 
   const newSecret = generateSecret();
   await db
     .update(webhooks)
-    .set({
-      secret: newSecret,
-      previousSecret: row.secret,
-      previousSecretExpiresAt: new Date(Date.now() + SECRET_ROTATION_GRACE_MS),
-      updatedAt: new Date(),
-    })
-    .where(eq(webhooks.id, webhookId));
+    .set({ secret: newSecret, updatedAt: new Date() })
+    .where(and(eq(webhooks.id, webhookId), eq(webhooks.orgId, orgId)));
 
   return { secret: newSecret };
 }
@@ -468,12 +453,7 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
   const attempt = job.attemptsMade + 1; // attemptsMade is 0-based before this attempt
 
   const [wh] = await db
-    .select({
-      url: webhooks.url,
-      secret: webhooks.secret,
-      previousSecret: webhooks.previousSecret,
-      previousSecretExpiresAt: webhooks.previousSecretExpiresAt,
-    })
+    .select({ url: webhooks.url, secret: webhooks.secret })
     .from(webhooks)
     .where(eq(webhooks.id, webhookId))
     .limit(1);
@@ -484,14 +464,7 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
   }
 
   const timestamp = Math.floor(Date.now() / 1000);
-
-  // Sign with current secret; during grace period, include previous secret signature too
   const headers = await buildSignedHeaders(eventId, timestamp, payload, wh.secret);
-  if (wh.previousSecret && wh.previousSecretExpiresAt && wh.previousSecretExpiresAt > new Date()) {
-    const content = `${eventId}.${timestamp}.${payload}`;
-    const prevSig = await sign(wh.previousSecret, content);
-    headers["webhook-signature"] = `${headers["webhook-signature"]} ${prevSig}`;
-  }
   headers["webhook-attempt"] = String(attempt);
 
   const start = Date.now();

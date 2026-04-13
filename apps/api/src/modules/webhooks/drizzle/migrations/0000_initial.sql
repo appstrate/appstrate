@@ -11,8 +11,6 @@ CREATE TABLE "webhooks" (
   "payload_mode" text DEFAULT 'full' NOT NULL,
   "enabled" boolean DEFAULT true NOT NULL,
   "secret" text NOT NULL,
-  "previous_secret" text,
-  "previous_secret_expires_at" timestamp,
   "created_at" timestamp DEFAULT now() NOT NULL,
   "updated_at" timestamp DEFAULT now() NOT NULL,
   CONSTRAINT "webhooks_level_values" CHECK (level IN ('org', 'application')),
