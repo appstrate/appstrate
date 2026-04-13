@@ -82,6 +82,49 @@ function formatFrom(override: SmtpOverride): string {
     : override.fromAddress;
 }
 
+// ─── Social provider override (per-request) ──────────────────────────────────
+//
+// Flows driven by a `level=application` OIDC client must redirect through the
+// TENANT's Google/GitHub OAuth App, not the platform's — so the consent
+// screen shows the tenant's branding, scopes are tenant-controlled, and
+// audit/revocation happen on the tenant's OAuth App. Like SMTP, we can't
+// rebuild the BA singleton per request; instead the `socialProviders` entries
+// below expose `clientId` / `clientSecret` as **getters** that look up an
+// AsyncLocalStorage override before falling back to env. The OIDC module's
+// BA `before` hook calls `enterSocialOverride()` after reading the pending-
+// client cookie and resolving per-app creds — all subsequent BA property
+// accesses (in Google/GitHub provider factories, validate-authorization-code,
+// create-authorization-url) see the tenant's creds.
+//
+// BA calls its social provider factories once at init with the `options`
+// object (see `@better-auth/core/social-providers/google.mjs`). Each method
+// on the returned provider reads `options.clientId` / `options.clientSecret`
+// lazily via property access — confirmed in the 1.6.2 source. That's why the
+// getters fire at request time rather than boot time.
+
+export interface SocialOverride {
+  google?: { clientId: string; clientSecret: string };
+  github?: { clientId: string; clientSecret: string };
+}
+
+const socialOverrideStore = new AsyncLocalStorage<SocialOverride>();
+
+/**
+ * Set the active social-provider override for the CURRENT async context.
+ * Uses `enterWith` (not `run`) because the BA `before` hook returns void
+ * and cannot wrap downstream execution — the override must persist until
+ * the async context naturally unwinds. Per-tenant isolation is preserved
+ * because AsyncLocalStorage is scoped to the current async chain.
+ */
+export function enterSocialOverride(override: SocialOverride): void {
+  socialOverrideStore.enterWith(override);
+}
+
+/** Return the active social override, if any. Called from the getters below. */
+export function getSocialOverride(): SocialOverride | undefined {
+  return socialOverrideStore.getStore();
+}
+
 export function setAfterSignupHook(
   hook: (user: { id: string; email: string }, ctx: AfterSignupContext) => void | Promise<void>,
 ): void {
@@ -260,46 +303,59 @@ function buildAuth(
           auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
         })
     : null;
-  const googleEnabled = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
-  const githubEnabled = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
-  const anySocialEnabled = googleEnabled || githubEnabled;
-  const socialProviders:
-    | Record<
-        string,
-        {
-          clientId: string;
-          clientSecret: string;
-          mapProfileToUser?: (profile: unknown) => { emailVerified?: boolean };
-        }
-      >
-    | undefined = anySocialEnabled
-    ? {
-        ...(googleEnabled && {
-          google: {
-            clientId: env.GOOGLE_CLIENT_ID!,
-            clientSecret: env.GOOGLE_CLIENT_SECRET!,
-            // Treat the email as verified for every social signup. Rationale:
-            // a successful OAuth round-trip with Google/GitHub already proves
-            // the user controls that provider account, which is the security
-            // guarantee a second verification email would provide. Without
-            // this override, BA's `link-account.mjs` falls back to checking
-            // the provider's `emailVerified` flag — GitHub's `/user/emails`
-            // returns `false` when the OAuth App lacks the `user:email`
-            // scope grant on a pre-existing authorization, triggering a
-            // spurious verification email on a user who literally just
-            // logged in via the provider. See `sendOnSignUp: true` above.
-            mapProfileToUser: () => ({ emailVerified: true }),
-          },
-        }),
-        ...(githubEnabled && {
-          github: {
-            clientId: env.GITHUB_CLIENT_ID!,
-            clientSecret: env.GITHUB_CLIENT_SECRET!,
-            mapProfileToUser: () => ({ emailVerified: true }),
-          },
-        }),
-      }
-    : undefined;
+  const googleEnvEnabled = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+  const githubEnvEnabled = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
+  // Both providers are ALWAYS registered on BA so per-app credentials
+  // injected via `enterSocialOverride()` (OIDC module plugin, see
+  // `apps/api/src/modules/oidc/services/ba-social-override-plugin.ts`) have a
+  // live provider factory to flow through — even when the env vars are
+  // absent. At the call site the getter returns the override's value if
+  // present, else the env value, else the empty string (which makes the
+  // provider's own guard throw `CLIENT_ID_AND_SECRET_REQUIRED` — the BA
+  // error surfaced to the UI when a tenant hasn't configured creds).
+  //
+  // `anySocialEnabled` still gates account-linking + trusted providers on
+  // env-configured providers only: per-app social applies exclusively to
+  // `level=application` OIDC clients, which have their own auth surface —
+  // the instance-wide account linking flag is an env concern.
+  const anySocialEnabled = googleEnvEnabled || githubEnvEnabled;
+  const socialProviders: Record<
+    string,
+    {
+      clientId: string;
+      clientSecret: string;
+      mapProfileToUser?: (profile: unknown) => { emailVerified?: boolean };
+    }
+  > = {
+    google: {
+      get clientId() {
+        return getSocialOverride()?.google?.clientId ?? env.GOOGLE_CLIENT_ID ?? "";
+      },
+      get clientSecret() {
+        return getSocialOverride()?.google?.clientSecret ?? env.GOOGLE_CLIENT_SECRET ?? "";
+      },
+      // Treat the email as verified for every social signup. Rationale:
+      // a successful OAuth round-trip with Google/GitHub already proves
+      // the user controls that provider account, which is the security
+      // guarantee a second verification email would provide. Without
+      // this override, BA's `link-account.mjs` falls back to checking
+      // the provider's `emailVerified` flag — GitHub's `/user/emails`
+      // returns `false` when the OAuth App lacks the `user:email`
+      // scope grant on a pre-existing authorization, triggering a
+      // spurious verification email on a user who literally just
+      // logged in via the provider. See `sendOnSignUp: true` above.
+      mapProfileToUser: () => ({ emailVerified: true }),
+    },
+    github: {
+      get clientId() {
+        return getSocialOverride()?.github?.clientId ?? env.GITHUB_CLIENT_ID ?? "";
+      },
+      get clientSecret() {
+        return getSocialOverride()?.github?.clientSecret ?? env.GITHUB_CLIENT_SECRET ?? "";
+      },
+      mapProfileToUser: () => ({ emailVerified: true }),
+    },
+  };
   const basePlugins = buildBasePlugins(env, smtpTransport);
   return betterAuth({
     database: drizzleAdapter(db, {
@@ -365,8 +421,8 @@ function buildAuth(
       accountLinking: {
         enabled: anySocialEnabled,
         trustedProviders: [
-          ...(googleEnabled ? ["google" as const] : []),
-          ...(githubEnabled ? ["github" as const] : []),
+          ...(googleEnvEnabled ? ["google" as const] : []),
+          ...(githubEnvEnabled ? ["github" as const] : []),
         ],
         allowDifferentEmails: true,
       },

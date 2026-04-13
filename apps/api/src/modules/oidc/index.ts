@@ -35,7 +35,12 @@ import { logger } from "../../lib/logger.ts";
 import { oidcAuthStrategy } from "./auth/strategy.ts";
 import { oidcBetterAuthPlugins } from "./auth/plugins.ts";
 import { oidcBeforeSignupGuard, oidcAfterSignupHandler } from "./auth/signup-guard.ts";
-import { createOidcRouter, createOAuthClientSchema, updateOAuthClientSchema } from "./routes.ts";
+import {
+  createOidcRouter,
+  createOAuthClientSchema,
+  updateOAuthClientSchema,
+  socialProviderUpsertSchema,
+} from "./routes.ts";
 import { oidcPaths } from "./openapi/paths.ts";
 import { oidcSchemas } from "./openapi/schemas.ts";
 import { jwks, oauthClient, oauthAccessToken, oauthRefreshToken, oauthConsent } from "./schema.ts";
@@ -150,6 +155,12 @@ const oidcModule: AppstrateModule = {
         path: "/api/oauth/clients/{clientId}",
         jsonSchema: z.toJSONSchema(updateOAuthClientSchema) as Record<string, unknown>,
         description: "Update OAuth client",
+      },
+      {
+        method: "PUT",
+        path: "/api/applications/{id}/social-providers/{provider}",
+        jsonSchema: z.toJSONSchema(socialProviderUpsertSchema) as Record<string, unknown>,
+        description: "Upsert per-application social auth provider",
       },
     ];
   },

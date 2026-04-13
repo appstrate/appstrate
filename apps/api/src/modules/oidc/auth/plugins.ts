@@ -46,6 +46,7 @@ import {
   resolveOrCreateOrgMembership,
 } from "../services/orgmember-mapping.ts";
 import { hashSecret } from "../services/oauth-admin.ts";
+import { socialOverridePlugin } from "../services/ba-social-override-plugin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 import { APPSTRATE_SCOPES } from "./scopes.ts";
 
@@ -106,6 +107,7 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       : undefined;
   return [
     oidcGuardsPlugin({ validAudiences }),
+    socialOverridePlugin(),
     jwt({
       jwks: { keyPairConfig: { alg: "ES256" } },
     }),

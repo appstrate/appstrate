@@ -36,7 +36,16 @@
  * `.references()` inline. Core → module is never permitted.
  */
 
-import { pgTable, text, integer, timestamp, boolean, uuid, index } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  integer,
+  timestamp,
+  boolean,
+  uuid,
+  index,
+  primaryKey,
+} from "drizzle-orm/pg-core";
 import { user, session, endUsers, organizations, applications } from "@appstrate/db/schema";
 
 // ─── Better Auth: jwt plugin ──────────────────────────────────────────────────
@@ -206,3 +215,34 @@ export const applicationSmtpConfigs = pgTable("application_smtp_configs", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// ─── Per-application social auth providers ───────────────────────────────────
+//
+// Stores Google/GitHub OAuth App credentials scoped to a single application,
+// consumed by `level=application` OAuth clients so the tenant's login page
+// authenticates through the TENANT's OAuth App (branded consent screen,
+// tenant-controlled scopes, tenant-owned audit). Row absent → that provider's
+// button is hidden on the tenant's login/register pages (no fallback to
+// instance env creds, same rule as `application_smtp_configs`). Client secret
+// encrypted at rest via `@appstrate/connect` (`CONNECTION_ENCRYPTION_KEY`).
+// Composite PK (application_id, provider) allows per-provider granularity —
+// a tenant may configure Google today and GitHub tomorrow.
+export const applicationSocialProviders = pgTable(
+  "application_social_providers",
+  {
+    applicationId: text("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    provider: text("provider", { enum: ["google", "github"] }).notNull(),
+    clientId: text("client_id").notNull(),
+    // AES-256-GCM encrypted JSON blob (base64) via
+    // `encryptCredentials({ clientSecret })`.
+    clientSecretEncrypted: text("client_secret_encrypted").notNull(),
+    // Optional per-app scope override. When null, the provider's default
+    // scope set applies (Google: email/profile/openid, GitHub: user:email).
+    scopes: text("scopes").array(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.applicationId, t.provider] })],
+);

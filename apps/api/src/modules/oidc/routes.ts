@@ -58,6 +58,12 @@ import {
   sendTestEmail,
 } from "./services/smtp-admin.ts";
 import { resolveSmtpForClient, type ResolvedSmtpConfig } from "./services/smtp-config.ts";
+import {
+  getSocialProvider,
+  upsertSocialProvider,
+  deleteSocialProvider,
+} from "./services/social-admin.ts";
+import { resolveSocialProviderForClient, type SocialProviderId } from "./services/social-config.ts";
 import { isBlockedHost } from "@appstrate/core/ssrf";
 import { getOidcAuthApi } from "./auth/api.ts";
 import { withSmtpOverride } from "@appstrate/db/auth";
@@ -157,6 +163,14 @@ export const smtpConfigTestSchema = z.object({
   to: z.email(),
 });
 
+export const socialProviderIdSchema = z.enum(["google", "github"]);
+
+export const socialProviderUpsertSchema = z.object({
+  clientId: z.string().min(1).max(512),
+  clientSecret: z.string().min(1).max(2048),
+  scopes: z.array(z.string().min(1).max(128)).max(32).optional(),
+});
+
 export const updateOAuthClientSchema = z.object({
   redirectUris: z.array(redirectUriSchema).min(1).optional(),
   postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
@@ -173,8 +187,17 @@ interface PageContext {
   client: OAuthClientRecord;
   branding: Awaited<ReturnType<typeof resolveBrandingForClient>>;
   csrfToken: string;
-  features: { smtp: boolean };
+  features: { smtp: boolean; socialGoogle: boolean; socialGithub: boolean };
   smtp: ResolvedSmtpConfig | null;
+  /**
+   * Per-client social-provider availability, passed verbatim to
+   * `renderSocialButtons` on every OIDC page. For `level=application`
+   * clients, reflects `application_social_providers` rows — buttons appear
+   * only when the tenant has configured creds for that provider. For
+   * `level=org` / `level=instance`, falls back to env presence (legacy
+   * shared-OAuth-App behavior for non-app clients).
+   */
+  socialProviders: { google: boolean; github: boolean };
 }
 
 /**
@@ -226,14 +249,34 @@ async function loadPageContext(
   if (opts.requireSmtp && !smtp) {
     return c.html(renderErrorPage(opts.requireSmtp).value, 404);
   }
+  // Per-client social provider availability. Application-level clients read
+  // from `application_social_providers` (tenant-owned OAuth App). Org and
+  // instance clients keep the legacy env-based fallback — the platform's
+  // shared Google/GitHub OAuth App is the appropriate identity issuer for
+  // dashboard / satellite flows.
+  let socialGoogle: boolean;
+  let socialGithub: boolean;
+  if (record.level === "application") {
+    const [g, gh] = await Promise.all([
+      resolveSocialProviderForClient(record, "google"),
+      resolveSocialProviderForClient(record, "github"),
+    ]);
+    socialGoogle = !!g;
+    socialGithub = !!gh;
+  } else {
+    const env = getEnv();
+    socialGoogle = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+    socialGithub = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
+  }
   return {
     url,
     ctx: {
       client: record,
       branding: await resolveBrandingForClient(record),
       csrfToken: issueCsrfToken(c),
-      features: { smtp: !!smtp },
+      features: { smtp: !!smtp, socialGoogle, socialGithub },
       smtp,
+      socialProviders: { google: socialGoogle, github: socialGithub },
     },
   };
 }
@@ -272,15 +315,6 @@ function forwardOAuthSessionCookies(
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/** Detect available social auth providers from env vars. */
-function getSocialProviders(): { google: boolean; github: boolean } {
-  const env = getEnv();
-  return {
-    google: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
-    github: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
-  };
-}
 
 /**
  * Instance-level SMTP presence. Kept for the signup handler's cookieCount
@@ -599,6 +633,64 @@ export function createOidcRouter() {
     },
   );
 
+  // ── Admin: per-application social auth providers ──────────────────────────
+  //
+  // Scoped to applications owned by the caller's org. Per-app social auth
+  // replaces the instance env `GOOGLE_CLIENT_*` / `GITHUB_CLIENT_*` pair for
+  // `level=application` OIDC flows — without a row for a given provider, that
+  // provider's button is hidden on the tenant's login/register pages (no
+  // fallback to env creds, same rule as SMTP). See `services/social-config.ts`
+  // for the resolver.
+
+  const parseProvider = (raw: string): SocialProviderId => {
+    const result = socialProviderIdSchema.safeParse(raw);
+    if (!result.success) throw notFound("Unknown social provider");
+    return result.data;
+  };
+
+  router.get(
+    "/api/applications/:id/social-providers/:provider",
+    rateLimit(300),
+    requirePermission("applications", "read"),
+    async (c) => {
+      const applicationId = c.req.param("id")!;
+      await assertAppBelongsToOrg(c, applicationId);
+      const provider = parseProvider(c.req.param("provider")!);
+      const config = await getSocialProvider(applicationId, provider);
+      if (!config) throw notFound("Social provider configuration not found");
+      return c.json(config);
+    },
+  );
+
+  router.put(
+    "/api/applications/:id/social-providers/:provider",
+    rateLimit(20),
+    requirePermission("applications", "write"),
+    async (c) => {
+      const applicationId = c.req.param("id")!;
+      await assertAppBelongsToOrg(c, applicationId);
+      const provider = parseProvider(c.req.param("provider")!);
+      const body = await c.req.json();
+      const data = parseBody(socialProviderUpsertSchema, body);
+      const saved = await upsertSocialProvider(applicationId, provider, data);
+      return c.json(saved);
+    },
+  );
+
+  router.delete(
+    "/api/applications/:id/social-providers/:provider",
+    rateLimit(10),
+    requirePermission("applications", "write"),
+    async (c) => {
+      const applicationId = c.req.param("id")!;
+      await assertAppBelongsToOrg(c, applicationId);
+      const provider = parseProvider(c.req.param("provider")!);
+      const deleted = await deleteSocialProvider(applicationId, provider);
+      if (!deleted) throw notFound("Social provider configuration not found");
+      return c.body(null, 204);
+    },
+  );
+
   // ── Public static assets ──────────────────────────────────────────────────
   //
   // Served as external JS (not inline) so login/register pages stay
@@ -636,7 +728,7 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: ctx.branding,
         csrfToken: "",
-        socialProviders: getSocialProviders(),
+        socialProviders: ctx.socialProviders,
         smtpEnabled: ctx.features.smtp,
         allowSignup: allowSignupForClient(ctx.client),
         error:
@@ -658,7 +750,7 @@ export function createOidcRouter() {
       queryString: stripErrorFromQueryString(url.search),
       branding: ctx.branding,
       csrfToken: ctx.csrfToken,
-      socialProviders: getSocialProviders(),
+      socialProviders: ctx.socialProviders,
       smtpEnabled: ctx.features.smtp,
       allowSignup: allowSignupForClient(ctx.client),
       error: errorMessage,
@@ -686,7 +778,7 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: ctx.branding,
         csrfToken: "",
-        socialProviders: getSocialProviders(),
+        socialProviders: ctx.socialProviders,
         smtpEnabled: ctx.features.smtp,
         allowSignup,
         error:
@@ -701,14 +793,14 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,
-        socialProviders: getSocialProviders(),
+        socialProviders: ctx.socialProviders,
         smtpEnabled: ctx.features.smtp,
         allowSignup,
         error: "Votre session a expiré. Veuillez réessayer.",
       });
       return c.html(page.value, 403);
     }
-    const socialProviders = getSocialProviders();
+    const socialProviders = ctx.socialProviders;
     const smtpEnabled = ctx.features.smtp;
     const renderError = (
       error: string,
@@ -940,7 +1032,7 @@ export function createOidcRouter() {
       queryString: url.search,
       branding: ctx.branding,
       csrfToken: ctx.csrfToken,
-      socialProviders: getSocialProviders(),
+      socialProviders: ctx.socialProviders,
       allowSignup: true,
     });
     return c.html(body.value);
@@ -979,7 +1071,7 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,
-        socialProviders: getSocialProviders(),
+        socialProviders: ctx.socialProviders,
         allowSignup: allowSignupForClient(ctx.client),
         error: "Votre session a expiré. Veuillez réessayer.",
       });
@@ -996,7 +1088,7 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,
-        socialProviders: getSocialProviders(),
+        socialProviders: ctx.socialProviders,
         allowSignup: allowSignupForClient(ctx.client),
         error,
         email,
@@ -1643,7 +1735,7 @@ export function createOidcRouter() {
           queryString: `?${oauthQuery}`,
           branding: ctx.branding,
           csrfToken: ctx.csrfToken,
-          socialProviders: getSocialProviders(),
+          socialProviders: ctx.socialProviders,
           smtpEnabled: ctx.features.smtp,
           allowSignup: allowSignupForClient(ctx.client),
           error:

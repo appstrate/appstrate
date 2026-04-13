@@ -12,14 +12,16 @@ Phase 1 is **complete**. Token-issuance plugin wiring via `@better-auth/oauth-pr
 
 ## Owned tables
 
-| Table                    | Purpose                                                                                                                                    |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `jwks`                   | ES256 keypair storage for the Better Auth `jwt` plugin (rotated automatically).                                                            |
-| `oauth_client`           | Registered OAuth clients, scoped to an Appstrate `applicationId` via `reference_id`. SHA-256-hashed `client_secret` at rest.               |
-| `oauth_access_token`     | Access-token tracking table used by `@better-auth/oauth-provider` at token exchange + introspection time.                                  |
-| `oauth_refresh_token`    | Refresh-token tracking table used by `@better-auth/oauth-provider` for `grant_type=refresh_token`.                                         |
-| `oauth_consent`          | Per-user consent grants written by `/api/auth/oauth2/consent` on accept.                                                                   |
-| `oidc_end_user_profiles` | Shadow table linking `end_users.id` ↔ Better Auth `user.id` + verification status + `active` / `pending_verification` / `suspended` status |
+| Table                          | Purpose                                                                                                                                                                 |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `jwks`                         | ES256 keypair storage for the Better Auth `jwt` plugin (rotated automatically).                                                                                         |
+| `oauth_client`                 | Registered OAuth clients, scoped to an Appstrate `applicationId` via `reference_id`. SHA-256-hashed `client_secret` at rest.                                            |
+| `oauth_access_token`           | Access-token tracking table used by `@better-auth/oauth-provider` at token exchange + introspection time.                                                               |
+| `oauth_refresh_token`          | Refresh-token tracking table used by `@better-auth/oauth-provider` for `grant_type=refresh_token`.                                                                      |
+| `oauth_consent`                | Per-user consent grants written by `/api/auth/oauth2/consent` on accept.                                                                                                |
+| `oidc_end_user_profiles`       | Shadow table linking `end_users.id` ↔ Better Auth `user.id` + verification status + `active` / `pending_verification` / `suspended` status                              |
+| `application_smtp_configs`     | Per-application SMTP credentials for `level=application` OIDC flows (verification, magic-link, reset-password). Password AES-256-GCM encrypted.                         |
+| `application_social_providers` | Per-application Google/GitHub OAuth App credentials for `level=application` OIDC flows. Client secret AES-256-GCM encrypted. Composite PK `(application_id, provider)`. |
 
 The core `end_users` table is NEVER modified by this module — all OIDC-specific fields live on the shadow table. Core runs filtering continues to strict-filter by `end_users.id` alone.
 
@@ -291,6 +293,28 @@ Support for public clients (CLI / desktop / pure-SPA) is tracked as a follow-up.
 - **`reference_id` → `applicationId` invariant**: every OAuth client row carries a `reference_id` matching an existing `applications.id`. The admin route enforces this on create, and the auth strategy double-checks `endUser.applicationId === claims.applicationId` on every request.
 - **Admin bypass is not shipped**: Phase 0 made core runs filtering strict with no hook. Embedding apps that want an "admin sees all runs" view authenticate admins via API key (no `endUser` in context), not via an OIDC JWT. See `apps/api/src/modules/README.md` for the end-user run-visibility contract.
 - **Production guards plugin** (`auth/guards.ts`): a small Better Auth plugin mounted before `@better-auth/oauth-provider` that uses `hooks.before` on `/oauth2/token`, `/oauth2/authorize`, `/oauth2/introspect`, `/oauth2/revoke` to (1) enforce RFC 8707 resource indicators on token requests and (2) rate-limit each endpoint via the shared `rate-limiter-flexible` Redis backend. Limits: token 30/min/IP + 20/min/`client_id` (brute-force protection against distributed attacks or XFF-spoofed sources), authorize 30/min/IP, introspect 60/min/IP, revoke 60/min/IP. The login POST also has a per-email limit of 5 attempts / 15 min. The guards plugin deliberately supersedes `@better-auth/oauth-provider`'s own `rateLimit` config so there is only one limiter chain — see `auth/plugins.ts` for why. Rejections surface as `better-call` `APIError` → OAuth2-shaped 400/429 bodies.
+
+## Per-application social auth
+
+For `level=application` OIDC clients, Google/GitHub sign-in routes through the **tenant's** OAuth App — not the platform's. The tenant controls branding on the consent screen, requested scopes, and audit/revocation; the platform's env `GOOGLE_CLIENT_*` / `GITHUB_CLIENT_*` never touch an app-level flow. When a tenant hasn't configured credentials for a provider, that provider's button is hidden on the tenant's login/register pages (no fallback).
+
+**Storage**: `application_social_providers` keyed on `(application_id, provider)` with `clientId` + AES-256-GCM-encrypted `clientSecret` + optional `scopes[]`. ON DELETE CASCADE with `applications`.
+
+**Runtime wiring**:
+
+- `services/social-config.ts` — resolver with a 60s/30s TTL in-memory cache. Invalidated on every upsert/delete so admin changes are visible within one request.
+- `services/ba-social-override-plugin.ts` — a Better Auth plugin whose `before` hook matches `/sign-in/social` + `/callback/:provider`. It reads the signed `oidc_pending_client` cookie, looks up the OIDC client, resolves per-app creds, and calls `enterSocialOverride()` (AsyncLocalStorage).
+- `packages/db/src/auth.ts` — the `socialProviders.{google,github}.{clientId,clientSecret}` entries are **getters** that first consult `getSocialOverride()` and fall back to env. This relies on Better Auth's provider factories (`@better-auth/core/social-providers/{google,github}.mjs`) reading `options.clientId` / `options.clientSecret` lazily via property access inside `createAuthorizationURL` / `validateAuthorizationCode` rather than destructuring at init time — verified against BA 1.6.2.
+- `loadPageContext` in `routes.ts` populates `ctx.features.socialGoogle` / `.socialGithub` per-client: `application` → resolver result, `org`/`instance` → env presence.
+
+**Tenant setup**:
+
+1. Register a Google OAuth App at <https://console.cloud.google.com/apis/credentials> (or a GitHub OAuth App at <https://github.com/settings/developers>).
+2. Set the authorized redirect URI to `{APP_URL}/api/auth/callback/google` (or `.../github`). This URL is shared across all tenants — each tenant's OAuth App must register it.
+3. `PUT /api/applications/{applicationId}/social-providers/{google|github}` with `{ "clientId": "…", "clientSecret": "…", "scopes": ["openid","email","profile"] }` (scopes optional).
+4. The provider's button appears on the next login-page render (resolver cache: ≤60s).
+
+**Testing**: `services/social-config.ts` exposes `_setTestSocialSpy` so E2E tests can assert which per-app row a given request resolved against — mirrors `_setTestMailSpy` in `smtp-config.ts`.
 
 ## Production deployment checklist
 

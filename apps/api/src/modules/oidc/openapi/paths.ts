@@ -630,4 +630,93 @@ export const oidcPaths = {
       },
     },
   },
+  "/api/applications/{id}/social-providers/{provider}": {
+    get: {
+      tags: ["OAuth Clients"],
+      operationId: "getApplicationSocialProvider",
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "provider",
+          in: "path",
+          required: true,
+          schema: { type: "string", enum: ["google", "github"] },
+        },
+      ],
+      summary: "Get per-application social auth provider configuration",
+      description:
+        "Returns the stored OAuth App credentials for a given provider on this application. The client secret is NEVER returned. When absent, the provider's button is hidden on the tenant's login/register pages for `level: application` OAuth clients — no fallback to the instance env OAuth App.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      responses: {
+        "200": { description: "Social provider configuration" },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+    put: {
+      tags: ["OAuth Clients"],
+      operationId: "upsertApplicationSocialProvider",
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "provider",
+          in: "path",
+          required: true,
+          schema: { type: "string", enum: ["google", "github"] },
+        },
+      ],
+      summary: "Upsert per-application social auth provider configuration",
+      description:
+        "Creates or replaces the OAuth App credentials for a given provider on this application. The `clientSecret` field is encrypted at rest and never returned in any response.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["clientId", "clientSecret"],
+              properties: {
+                clientId: { type: "string", minLength: 1, maxLength: 512 },
+                clientSecret: {
+                  type: "string",
+                  writeOnly: true,
+                  minLength: 1,
+                  maxLength: 2048,
+                },
+                scopes: {
+                  type: "array",
+                  items: { type: "string", minLength: 1, maxLength: 128 },
+                  maxItems: 32,
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": { description: "Social provider configuration saved" },
+        "400": { description: "Validation error" },
+        "404": { description: "Application not found" },
+      },
+    },
+    delete: {
+      tags: ["OAuth Clients"],
+      operationId: "deleteApplicationSocialProvider",
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "provider",
+          in: "path",
+          required: true,
+          schema: { type: "string", enum: ["google", "github"] },
+        },
+      ],
+      summary: "Delete per-application social auth provider configuration",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      responses: {
+        "204": { description: "Deleted" },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+  },
 };
