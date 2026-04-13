@@ -1,0 +1,47 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/shortcut",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Shortcut",
+  "description": "Project management platform for software development teams",
+  "iconUrl": "https://cdn.simpleicons.org/shortcut",
+  "categories": ["project-management", "issue-tracking", "development"],
+  "docsUrl": "https://developer.shortcut.com/api/rest/v3",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "description": "Shortcut API token (generate from Settings > API Tokens)"
+          }
+        },
+        "required": ["api_key"]
+      },
+      "fieldName": "api_key"
+    },
+    "credentialHeaderName": "Shortcut-Token",
+    "credentialHeaderPrefix": "",
+    "authorizedUris": [
+      "https://api.app.shortcut.com/*"
+    ]
+  },
+  "setupGuide": {
+    "steps": [
+      {
+        "label": "Go to Shortcut Settings > API Tokens",
+        "url": "https://app.shortcut.com/settings/account/api-tokens"
+      },
+      {
+        "label": "Generate a new API token"
+      },
+      {
+        "label": "Copy the API token"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

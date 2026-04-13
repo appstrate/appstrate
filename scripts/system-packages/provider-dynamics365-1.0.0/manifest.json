@@ -1,0 +1,65 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/dynamics365",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Microsoft Dynamics 365",
+  "description": "Enterprise CRM and ERP platform by Microsoft",
+  "iconUrl": "https://cdn.simpleicons.org/dynamics365",
+  "categories": ["crm", "sales", "erp"],
+  "docsUrl": "https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/overview",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "tokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "refreshUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "defaultScopes": ["https://dynamics.microsoft.com/user_impersonation", "offline_access"],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_post",
+      "authorizationParams": {
+        "prompt": "consent"
+      }
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://*.dynamics.com/*",
+      "https://*.api.crm.dynamics.com/*",
+      "https://*.api.crm2.dynamics.com/*",
+      "https://*.api.crm3.dynamics.com/*",
+      "https://*.api.crm4.dynamics.com/*",
+      "https://*.api.crm5.dynamics.com/*",
+      "https://*.api.crm6.dynamics.com/*",
+      "https://*.api.crm7.dynamics.com/*",
+      "https://*.api.crm8.dynamics.com/*",
+      "https://*.api.crm9.dynamics.com/*",
+      "https://*.api.crm10.dynamics.com/*",
+      "https://*.api.crm11.dynamics.com/*"
+    ],
+    "availableScopes": [
+      { "value": "https://dynamics.microsoft.com/user_impersonation", "label": "Access Dynamics 365 as the user" },
+      { "value": "offline_access", "label": "Offline access (refresh tokens)" },
+      { "value": "openid", "label": "OpenID Connect identity" },
+      { "value": "profile", "label": "Read user profile" },
+      { "value": "email", "label": "Read user email" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Register an application in Microsoft Entra ID (Azure AD)",
+        "url": "https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
+      },
+      {
+        "label": "Add Dynamics CRM API permissions and configure redirect URI"
+      },
+      {
+        "label": "Create a Client Secret and copy Application (Client) ID"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

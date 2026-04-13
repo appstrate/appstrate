@@ -1,0 +1,52 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/freshsales",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Freshsales",
+  "description": "CRM platform for sales teams with AI-powered lead scoring",
+  "iconUrl": "https://cdn.simpleicons.org/freshworks",
+  "categories": ["crm", "sales"],
+  "docsUrl": "https://developers.freshworks.com/crm/api/",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "description": "Freshsales API key (found in Settings > API Settings)"
+          },
+          "subdomain": {
+            "type": "string",
+            "description": "Your Freshworks subdomain (e.g. 'mycompany' from mycompany.myfreshworks.com)"
+          }
+        },
+        "required": ["api_key", "subdomain"]
+      },
+      "fieldName": "api_key"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Token token=",
+    "authorizedUris": [
+      "https://*.myfreshworks.com/*",
+      "https://*.freshsales.io/*"
+    ]
+  },
+  "setupGuide": {
+    "steps": [
+      {
+        "label": "Log in to your Freshsales account",
+        "url": "https://www.freshworks.com/freshsales-crm/"
+      },
+      {
+        "label": "Go to Settings > API Settings to find your API key"
+      },
+      {
+        "label": "Copy the API key and note your subdomain"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

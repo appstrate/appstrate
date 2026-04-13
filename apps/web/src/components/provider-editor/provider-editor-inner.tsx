@@ -231,6 +231,26 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
       return;
     }
 
+    if (authMode === "oauth2") {
+      if (!oauth2.authorizationUrl || !oauth2.tokenUrl) {
+        setError(t("providers.form.errorOAuth2Required"));
+        setActiveTab("auth");
+        return;
+      }
+    } else if (authMode === "oauth1") {
+      if (!oauth1.requestTokenUrl || !oauth1.accessTokenUrl) {
+        setError(t("providers.form.errorOAuth1Required"));
+        setActiveTab("auth");
+        return;
+      }
+    } else if (authMode === "api_key" || authMode === "basic" || authMode === "custom") {
+      if (credentialFields.length === 0) {
+        setError(t("providers.form.errorCredentialsRequired"));
+        setActiveTab("auth");
+        return;
+      }
+    }
+
     allowNavigation();
     const body = { manifest: state.manifest, content: state.content };
     if (isEdit) {
@@ -495,21 +515,45 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex flex-1 items-end gap-2">
-                  <Checkbox
-                    id="pe-pkce"
-                    checked={(oauth2.pkceEnabled as boolean) ?? true}
-                    onCheckedChange={(checked) =>
-                      patchAuthSub("oauth2", { pkceEnabled: Boolean(checked) })
-                    }
-                  />
-                  <Label
-                    htmlFor="pe-pkce"
-                    className="text-muted-foreground cursor-pointer text-sm font-normal"
-                  >
-                    {t("providers.form.pkceEnabled")}
+                <div className="flex-1 space-y-1">
+                  <Label htmlFor="pe-tokenContentType">
+                    {t("providers.form.tokenContentType")}
                   </Label>
+                  <Select
+                    value={
+                      (oauth2.tokenContentType as string) ?? "application/x-www-form-urlencoded"
+                    }
+                    onValueChange={(v) => patchAuthSub("oauth2", { tokenContentType: v })}
+                  >
+                    <SelectTrigger id="pe-tokenContentType">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="application/x-www-form-urlencoded">
+                        {t("providers.form.tokenContentTypeForm")}
+                      </SelectItem>
+                      <SelectItem value="application/json">
+                        {t("providers.form.tokenContentTypeJson")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="pe-pkce"
+                  checked={(oauth2.pkceEnabled as boolean) ?? true}
+                  onCheckedChange={(checked) =>
+                    patchAuthSub("oauth2", { pkceEnabled: Boolean(checked) })
+                  }
+                />
+                <Label
+                  htmlFor="pe-pkce"
+                  className="text-muted-foreground cursor-pointer text-sm font-normal"
+                >
+                  {t("providers.form.pkceEnabled")}
+                </Label>
               </div>
 
               {/* Credential header config */}
@@ -698,6 +742,105 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
                   onChange={(e) => patchDef({ credentialHeaderPrefix: e.target.value })}
                   placeholder="Bearer "
                 />
+              </div>
+
+              {/* Credential schema — lets users define multi-field credentials
+                  (email + api_key, etc.) referenced by credentialTransform. */}
+              <SchemaSection
+                title={t("providers.form.sectionCredentials")}
+                mode="credentials"
+                fields={credentialFields}
+                onChange={onCredentialFieldsChange}
+              />
+
+              {/* Credential transform — template-based pre-encoding (AFPS §7.4) */}
+              <div className="text-muted-foreground mt-2 text-sm font-medium">
+                {t("providers.form.sectionCredentialTransform")}
+              </div>
+              <div className="text-muted-foreground text-xs">
+                {t("providers.form.credentialTransformHint")}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="pe-credTransformTemplate">
+                  {t("providers.form.credentialTransformTemplate")}
+                </Label>
+                <Textarea
+                  id="pe-credTransformTemplate"
+                  value={
+                    ((def.credentialTransform as Record<string, unknown> | undefined)
+                      ?.template as string) ?? ""
+                  }
+                  onChange={(e) => {
+                    const template = e.target.value;
+                    const prev =
+                      (def.credentialTransform as Record<string, unknown> | undefined) ?? {};
+                    if (!template) {
+                      setState((s) => {
+                        const d = { ...getDef(s.manifest) };
+                        delete d.credentialTransform;
+                        return { ...s, manifest: { ...s.manifest, definition: d } };
+                      });
+                    } else {
+                      patchDef({
+                        credentialTransform: {
+                          ...prev,
+                          template,
+                          encoding: (prev.encoding as string) ?? "base64",
+                        },
+                      });
+                    }
+                  }}
+                  rows={2}
+                  placeholder={t("providers.form.credentialTransformTemplatePlaceholder")}
+                  className="font-mono text-sm"
+                />
+                {credentialFields.length > 0 ? (
+                  <div className="text-muted-foreground text-xs">
+                    {t("providers.form.credentialTransformAvailableVars")}:{" "}
+                    {credentialFields.map((f, i) => (
+                      <span key={f.key}>
+                        {i > 0 && ", "}
+                        <code className="bg-muted rounded px-1 py-0.5">{`{{${f.key}}}`}</code>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-muted-foreground text-xs">
+                    {t("providers.form.credentialTransformNoVars")}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="pe-credTransformEncoding">
+                  {t("providers.form.credentialTransformEncoding")}
+                </Label>
+                <Select
+                  value={
+                    ((def.credentialTransform as Record<string, unknown> | undefined)
+                      ?.encoding as string) ?? "base64"
+                  }
+                  onValueChange={(v) => {
+                    const prev =
+                      (def.credentialTransform as Record<string, unknown> | undefined) ?? {};
+                    patchDef({
+                      credentialTransform: {
+                        ...prev,
+                        template: (prev.template as string) ?? "",
+                        encoding: v,
+                      },
+                    });
+                  }}
+                  disabled={!(def.credentialTransform as Record<string, unknown> | undefined)}
+                >
+                  <SelectTrigger id="pe-credTransformEncoding">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="base64">base64</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </>
           )}

@@ -5,7 +5,7 @@ import type { Db } from "@appstrate/db/client";
 import type { OAuthStateRecord, OAuthStateStore } from "./types.ts";
 import type { Actor } from "./types.ts";
 import { getProviderOrThrow, getProviderOAuthCredentialsOrThrow } from "./registry.ts";
-import { parseTokenResponse, buildTokenHeaders } from "./token-utils.ts";
+import { parseTokenResponse, buildTokenHeaders, buildTokenBody } from "./token-utils.ts";
 import { extractErrorMessage } from "./utils.ts";
 
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
@@ -153,7 +153,7 @@ export async function handleOAuthCallback(
   // Exchange code for tokens
   const useBasicAuth = provider.tokenAuthMethod === "client_secret_basic";
 
-  const tokenBody = new URLSearchParams({
+  const tokenParams: Record<string, string> = {
     grant_type: "authorization_code",
     code,
     redirect_uri: stateRow.redirectUri,
@@ -162,7 +162,9 @@ export async function handleOAuthCallback(
       : { client_id: oauthCreds.clientId, client_secret: oauthCreds.clientSecret }),
     ...(provider.pkceEnabled !== false ? { code_verifier: stateRow.codeVerifier } : {}),
     ...(provider.tokenParams ?? {}),
-  });
+  };
+
+  const tokenBody = buildTokenBody(tokenParams, provider.tokenContentType);
 
   let tokenResponse: Response;
   try {
@@ -172,8 +174,9 @@ export async function handleOAuthCallback(
         provider.tokenAuthMethod,
         oauthCreds.clientId,
         oauthCreds.clientSecret,
+        provider.tokenContentType,
       ),
-      body: tokenBody.toString(),
+      body: tokenBody,
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {

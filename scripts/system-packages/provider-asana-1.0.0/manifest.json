@@ -1,0 +1,50 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/asana",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Asana",
+  "description": "Work management platform for teams to organize and track projects",
+  "iconUrl": "https://cdn.simpleicons.org/asana",
+  "categories": ["project-management", "collaboration"],
+  "docsUrl": "https://developers.asana.com/docs/overview",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://app.asana.com/-/oauth_authorize",
+      "tokenUrl": "https://app.asana.com/-/oauth_token",
+      "refreshUrl": "https://app.asana.com/-/oauth_token",
+      "defaultScopes": ["default"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://app.asana.com/api/*"
+    ],
+    "availableScopes": [
+      { "value": "default", "label": "Full access to all resources" },
+      { "value": "openid", "label": "OpenID Connect identity" },
+      { "value": "email", "label": "Read user email" },
+      { "value": "profile", "label": "Read user profile" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URL to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create an app in the Asana Developer Console",
+        "url": "https://app.asana.com/0/my-apps"
+      },
+      {
+        "label": "Configure OAuth settings and add the redirect URL"
+      },
+      {
+        "label": "Copy your Client ID and Client Secret"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

@@ -536,12 +536,38 @@ export const schemas = {
       scopeSeparator: { type: "string" },
       pkceEnabled: { type: "boolean" },
       tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
+      tokenContentType: {
+        type: "string",
+        enum: ["application/x-www-form-urlencoded", "application/json"],
+        description:
+          "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
+      },
       authorizationParams: { type: "object" },
       tokenParams: { type: "object" },
       credentialSchema: { type: "object" },
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
+      credentialTransform: {
+        type: "object",
+        required: ["template", "encoding"],
+        properties: {
+          template: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
+          },
+          encoding: {
+            type: "string",
+            enum: ["base64"],
+            description:
+              "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
+          },
+        },
+        description:
+          "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
+      },
       availableScopes: {
         type: "array",
         items: {
@@ -584,12 +610,38 @@ export const schemas = {
       scopeSeparator: { type: "string" },
       pkceEnabled: { type: "boolean" },
       tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
+      tokenContentType: {
+        type: "string",
+        enum: ["application/x-www-form-urlencoded", "application/json"],
+        description:
+          "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
+      },
       authorizationParams: { type: "object" },
       tokenParams: { type: "object" },
       credentialSchema: { type: "object", description: "JSON Schema for custom credential fields" },
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
+      credentialTransform: {
+        type: "object",
+        required: ["template", "encoding"],
+        properties: {
+          template: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
+          },
+          encoding: {
+            type: "string",
+            enum: ["base64"],
+            description:
+              "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
+          },
+        },
+        description:
+          "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
+      },
       availableScopes: {
         type: "array",
         items: {
@@ -630,12 +682,38 @@ export const schemas = {
       scopeSeparator: { type: "string" },
       pkceEnabled: { type: "boolean" },
       tokenAuthMethod: { type: "string", enum: ["client_secret_post", "client_secret_basic"] },
+      tokenContentType: {
+        type: "string",
+        enum: ["application/x-www-form-urlencoded", "application/json"],
+        description:
+          "Content-Type used for OAuth2 token endpoint request bodies. Defaults to application/x-www-form-urlencoded; set to application/json for providers like Atlassian/Jira that require a JSON body.",
+      },
       authorizationParams: { type: "object" },
       tokenParams: { type: "object" },
       credentialSchema: { type: "object", description: "JSON Schema for custom credential fields" },
       credentialFieldName: { type: "string" },
       credentialHeaderName: { type: "string" },
       credentialHeaderPrefix: { type: "string" },
+      credentialTransform: {
+        type: "object",
+        required: ["template", "encoding"],
+        properties: {
+          template: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Free-form template with {{var}} placeholders resolved against the user-provided credential fields.",
+          },
+          encoding: {
+            type: "string",
+            enum: ["base64"],
+            description:
+              "Whitelisted post-substitution transform applied to the rendered template. AFPS v1: base64 only.",
+          },
+        },
+        description:
+          "Generic, template-based pre-encoding for api_key credentials. Lets manifests express any provider-specific Basic-auth convention (Freshdesk/Teamwork, Zendesk, …) without spec changes.",
+      },
       availableScopes: {
         type: "array",
         items: {

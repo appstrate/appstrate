@@ -1,0 +1,56 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/zendesk",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Zendesk",
+  "description": "Customer service and support ticketing platform",
+  "iconUrl": "https://cdn.simpleicons.org/zendesk",
+  "categories": ["crm", "support", "customer-service"],
+  "docsUrl": "https://developer.zendesk.com/api-reference/",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "description": "Zendesk API token (found in Admin Center > Apps and integrations > Zendesk API)"
+          },
+          "email": {
+            "type": "string",
+            "description": "Email address of the Zendesk agent (used for authentication)"
+          },
+          "subdomain": {
+            "type": "string",
+            "description": "Your Zendesk subdomain (e.g. 'mycompany' from mycompany.zendesk.com)"
+          }
+        },
+        "required": ["api_key", "email", "subdomain"]
+      }
+    },
+    "credentialTransform": {
+      "template": "{{email}}/token:{{api_key}}",
+      "encoding": "base64"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Basic",
+    "authorizedUris": ["https://*.zendesk.com/*"]
+  },
+  "setupGuide": {
+    "steps": [
+      {
+        "label": "Go to Admin Center > Apps and integrations > Zendesk API",
+        "url": "https://www.zendesk.com/"
+      },
+      {
+        "label": "Enable Token Access and generate a new API token"
+      },
+      {
+        "label": "Copy the API token, your agent email, and your subdomain"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

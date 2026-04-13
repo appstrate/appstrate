@@ -1,0 +1,55 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/monday",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Monday.com",
+  "description": "Work operating system for project management and team collaboration",
+  "iconUrl": "https://cdn.simpleicons.org/mondaydotcom",
+  "categories": ["project-management", "collaboration"],
+  "docsUrl": "https://developer.monday.com/api-reference/reference",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://auth.monday.com/oauth2/authorize",
+      "tokenUrl": "https://auth.monday.com/oauth2/token",
+      "defaultScopes": [],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://api.monday.com/*"
+    ],
+    "availableScopes": [
+      { "value": "me:read", "label": "Read authenticated user info" },
+      { "value": "boards:read", "label": "Read boards" },
+      { "value": "boards:write", "label": "Create and modify boards" },
+      { "value": "workspaces:read", "label": "Read workspaces" },
+      { "value": "workspaces:write", "label": "Create and modify workspaces" },
+      { "value": "users:read", "label": "Read users" },
+      { "value": "users:write", "label": "Manage users" },
+      { "value": "account:read", "label": "Read account info" },
+      { "value": "updates:read", "label": "Read updates" },
+      { "value": "updates:write", "label": "Create updates" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create an app in the Monday.com Developer Center",
+        "url": "https://monday.com/developers/apps"
+      },
+      {
+        "label": "Configure OAuth settings and add the redirect URI"
+      },
+      {
+        "label": "Copy your Client ID and Client Secret"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/pipedrive",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Pipedrive",
+  "description": "Sales CRM and pipeline management platform",
+  "iconUrl": "https://cdn.simpleicons.org/pipedrive",
+  "categories": ["crm", "sales"],
+  "docsUrl": "https://developers.pipedrive.com/docs/api/v1",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://oauth.pipedrive.com/oauth/authorize",
+      "tokenUrl": "https://oauth.pipedrive.com/oauth/token",
+      "refreshUrl": "https://oauth.pipedrive.com/oauth/token",
+      "defaultScopes": ["deals:read", "contacts:read", "users:read"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_basic"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://api.pipedrive.com/*",
+      "https://*.pipedrive.com/api/*"
+    ],
+    "availableScopes": [
+      { "value": "deals:read", "label": "Read deals" },
+      { "value": "deals:full", "label": "Full access to deals" },
+      { "value": "contacts:read", "label": "Read persons and organizations" },
+      { "value": "contacts:full", "label": "Full access to persons and organizations" },
+      { "value": "activities:read", "label": "Read activities" },
+      { "value": "activities:full", "label": "Full access to activities" },
+      { "value": "leads:read", "label": "Read leads" },
+      { "value": "leads:full", "label": "Full access to leads" },
+      { "value": "products:read", "label": "Read products" },
+      { "value": "products:full", "label": "Full access to products" },
+      { "value": "users:read", "label": "Read user information" },
+      { "value": "mail:read", "label": "Read mail" },
+      { "value": "mail:full", "label": "Full access to mail" },
+      { "value": "recents:read", "label": "Read recent changes" },
+      { "value": "search:read", "label": "Search across items" },
+      { "value": "admin", "label": "Admin access" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the callback URL to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create an app in the Pipedrive Developer Hub",
+        "url": "https://developers.pipedrive.com/"
+      },
+      {
+        "label": "Configure OAuth settings and select required scopes"
+      },
+      {
+        "label": "Copy your Client ID and Client Secret"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

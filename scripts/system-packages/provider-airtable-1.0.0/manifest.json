@@ -1,0 +1,55 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/airtable",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Airtable",
+  "description": "Low-code platform for building collaborative databases and apps",
+  "iconUrl": "https://cdn.simpleicons.org/airtable",
+  "categories": ["project-management", "database", "collaboration"],
+  "docsUrl": "https://airtable.com/developers/web/api/introduction",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://airtable.com/oauth2/v1/authorize",
+      "tokenUrl": "https://airtable.com/oauth2/v1/token",
+      "refreshUrl": "https://airtable.com/oauth2/v1/token",
+      "defaultScopes": ["data.records:read", "schema.bases:read"],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_post"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://api.airtable.com/*"
+    ],
+    "availableScopes": [
+      { "value": "data.records:read", "label": "Read records" },
+      { "value": "data.records:write", "label": "Create, update, and delete records" },
+      { "value": "data.recordComments:read", "label": "Read record comments" },
+      { "value": "data.recordComments:write", "label": "Create and manage comments" },
+      { "value": "schema.bases:read", "label": "Read base schema (tables, fields)" },
+      { "value": "schema.bases:write", "label": "Modify base schema" },
+      { "value": "webhook:manage", "label": "Manage webhooks" },
+      { "value": "block:manage", "label": "Manage extensions/blocks" },
+      { "value": "user.email:read", "label": "Read user email" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URL to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create an OAuth integration in Airtable",
+        "url": "https://airtable.com/create/oauth"
+      },
+      {
+        "label": "Configure the redirect URL and select required scopes"
+      },
+      {
+        "label": "Copy your Client ID and Client Secret"
+      }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

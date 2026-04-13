@@ -3,20 +3,28 @@
 /**
  * Shared token utilities.
  * Used by both oauth.ts (initial token exchange) and token-refresh.ts (refresh flow).
+ *
+ * OAuthTokenAuthMethod and OAuthTokenContentType live in @appstrate/core/validation
+ * as the single source of truth and are imported directly there by callers.
  */
+
+import type { OAuthTokenAuthMethod, OAuthTokenContentType } from "@appstrate/core/validation";
 
 /**
  * Build headers for an OAuth2 token endpoint request.
  * When tokenAuthMethod is "client_secret_basic", credentials are sent
  * as an Authorization: Basic header (RFC 6749 §2.3.1) instead of POST body.
+ * When tokenContentType is "application/json", the Content-Type is set to JSON
+ * (required by providers like Atlassian/Jira that don't accept form-urlencoded).
  */
 export function buildTokenHeaders(
-  tokenAuthMethod: string | undefined,
+  tokenAuthMethod: OAuthTokenAuthMethod | undefined,
   clientId: string,
   clientSecret: string,
+  tokenContentType?: OAuthTokenContentType,
 ): Record<string, string> {
   const headers: Record<string, string> = {
-    "Content-Type": "application/x-www-form-urlencoded",
+    "Content-Type": tokenContentType ?? "application/x-www-form-urlencoded",
     Accept: "application/json",
   };
   if (tokenAuthMethod === "client_secret_basic") {
@@ -27,6 +35,21 @@ export function buildTokenHeaders(
     headers["Authorization"] = `Basic ${encoded}`;
   }
   return headers;
+}
+
+/**
+ * Build the token request body.
+ * When tokenContentType is "application/json", returns a JSON string.
+ * Otherwise returns a URLSearchParams string (standard form-urlencoded).
+ */
+export function buildTokenBody(
+  params: Record<string, string>,
+  tokenContentType?: OAuthTokenContentType,
+): string {
+  if (tokenContentType === "application/json") {
+    return JSON.stringify(params);
+  }
+  return new URLSearchParams(params).toString();
 }
 
 export interface ParsedTokenResponse {
