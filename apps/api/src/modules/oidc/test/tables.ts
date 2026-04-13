@@ -11,5 +11,6 @@ export default [
   "oauth_consents",
   "oauth_clients",
   "oidc_end_user_profiles",
+  "application_smtp_configs",
   "jwks",
 ] as const;

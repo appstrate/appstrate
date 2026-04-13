@@ -16,7 +16,7 @@
  * trigger function bodies against the current schema.
  */
 
-import { describe, it, expect, beforeAll, beforeEach } from "bun:test";
+import { describe, it, beforeAll, beforeEach } from "bun:test";
 import { db } from "../../helpers/db.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
@@ -61,7 +61,6 @@ describe("NOTIFY triggers (regression)", () => {
     });
     // A status transition is what production hits on every run lifecycle step.
     await db.execute(
-       
       (await import("drizzle-orm")).sql`UPDATE runs SET status = 'running' WHERE id = ${run.id}`,
     );
   });

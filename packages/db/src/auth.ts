@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
-import { createTransport } from "nodemailer";
+import { createTransport, type Transporter } from "nodemailer";
 import { eq } from "drizzle-orm";
 import { renderEmail } from "@appstrate/emails";
 import type { BeforeSignupContext, AfterSignupContext } from "@appstrate/core/module";
@@ -38,6 +39,47 @@ export function setBeforeSignupHook(
   hook: (email: string, ctx: BeforeSignupContext) => void | Promise<void>,
 ): void {
   _beforeSignupHook = hook;
+}
+
+// ─── SMTP override (per-request) ─────────────────────────────────────────────
+//
+// Flows driven by a `level=application` OIDC client must send verification
+// emails, magic-links, and password-reset mails through the TENANT's SMTP
+// transport, not the instance env transport. The Better Auth singleton is
+// built once at boot with callbacks that capture `smtpTransport` by closure
+// — we cannot rebuild BA per request without defeating its plugin/cache
+// assumptions. Instead, the OIDC module wraps each BA call in
+// `withSmtpOverride(override, fn)`; the callbacks below look up
+// `getSmtpOverride()` on every invocation and use the override's transport
+// + `from` when present, falling back to the captured env transport for all
+// other code paths (admin dashboard, org invitations, instance clients).
+
+export interface SmtpOverride {
+  transport: Transporter;
+  fromAddress: string;
+  fromName: string | null;
+}
+
+const smtpOverrideStore = new AsyncLocalStorage<SmtpOverride>();
+
+/** Run `fn` with `override` as the active SMTP context for any BA mail callback fired downstream. */
+export function withSmtpOverride<T>(
+  override: SmtpOverride | null,
+  fn: () => Promise<T>,
+): Promise<T> {
+  if (!override) return fn();
+  return smtpOverrideStore.run(override, fn);
+}
+
+/** Return the active SMTP override, if any. Called from BA mail callbacks. */
+export function getSmtpOverride(): SmtpOverride | undefined {
+  return smtpOverrideStore.getStore();
+}
+
+function formatFrom(override: SmtpOverride): string {
+  return override.fromName
+    ? `"${override.fromName}" <${override.fromAddress}>`
+    : override.fromAddress;
 }
 
 export function setAfterSignupHook(
@@ -172,12 +214,10 @@ function buildBasePlugins(
                   }));
                 }
 
-                await smtpTransport!.sendMail({
-                  from: env.SMTP_FROM,
-                  to: email,
-                  subject,
-                  html,
-                });
+                const override = getSmtpOverride();
+                const transport = override?.transport ?? smtpTransport!;
+                const from = override ? formatFrom(override) : env.SMTP_FROM;
+                await transport.sendMail({ from, to: email, subject, html });
               } catch {
                 // Fire-and-forget
               }
@@ -285,12 +325,10 @@ function buildAuth(
               url,
               locale: "fr",
             });
-            await smtpTransport!.sendMail({
-              from: env.SMTP_FROM,
-              to: user.email,
-              subject,
-              html,
-            });
+            const override = getSmtpOverride();
+            const transport = override?.transport ?? smtpTransport!;
+            const from = override ? formatFrom(override) : env.SMTP_FROM;
+            await transport.sendMail({ from, to: user.email, subject, html });
           } catch {
             // Fire-and-forget — don't block reset flow if email fails
           }
@@ -310,12 +348,10 @@ function buildAuth(
               url,
               locale: "fr",
             });
-            await smtpTransport!.sendMail({
-              from: env.SMTP_FROM,
-              to: user.email,
-              subject,
-              html,
-            });
+            const override = getSmtpOverride();
+            const transport = override?.transport ?? smtpTransport!;
+            const from = override ? formatFrom(override) : env.SMTP_FROM;
+            await transport.sendMail({ from, to: user.email, subject, html });
           } catch {
             // Fire-and-forget — don't block signup if email fails
           }

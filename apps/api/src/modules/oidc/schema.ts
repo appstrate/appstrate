@@ -36,7 +36,7 @@
  * `.references()` inline. Core → module is never permitted.
  */
 
-import { pgTable, text, timestamp, boolean, uuid, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, timestamp, boolean, uuid, index } from "drizzle-orm/pg-core";
 import { user, session, endUsers, organizations, applications } from "@appstrate/db/schema";
 
 // ─── Better Auth: jwt plugin ──────────────────────────────────────────────────
@@ -177,3 +177,32 @@ export const oidcEndUserProfiles = pgTable(
   },
   (table) => [index("idx_oidc_profiles_auth_user").on(table.authUserId)],
 );
+
+// ─── Per-application SMTP configuration ──────────────────────────────────────
+//
+// Stores SMTP credentials scoped to a single application, used by `level=application`
+// OAuth clients for verification emails, magic links, and password reset. Row
+// absent → email features disabled for that app's OIDC flows (no fallback to
+// instance env SMTP — delivering customer emails from the platform domain
+// defeats the purpose). Password encrypted at rest via `@appstrate/connect`
+// (`CONNECTION_ENCRYPTION_KEY`). ON DELETE CASCADE ensures secrets don't
+// outlive the app.
+export const applicationSmtpConfigs = pgTable("application_smtp_configs", {
+  applicationId: text("application_id")
+    .primaryKey()
+    .references(() => applications.id, { onDelete: "cascade" }),
+  host: text("host").notNull(),
+  port: integer("port").notNull(),
+  username: text("username").notNull(),
+  // AES-256-GCM encrypted JSON blob (base64) via `encryptCredentials({ pass })`.
+  passEncrypted: text("pass_encrypted").notNull(),
+  fromAddress: text("from_address").notNull(),
+  fromName: text("from_name"),
+  // "auto" → secure=true iff port === 465. "tls" → explicit TLS. "starttls"
+  // → opportunistic TLS. "none" → plaintext (dev relays only).
+  secureMode: text("secure_mode", { enum: ["auto", "tls", "starttls", "none"] })
+    .notNull()
+    .default("auto"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});

@@ -529,4 +529,105 @@ export const oidcPaths = {
       },
     },
   },
+  "/api/applications/{id}/smtp-config": {
+    get: {
+      tags: ["OAuth Clients"],
+      operationId: "getApplicationSmtpConfig",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      summary: "Get per-application SMTP configuration",
+      description:
+        "Returns the SMTP configuration for an application. Password is NEVER returned. Drives email features (verification, magic-link, reset-password) for OAuth clients with `level: application` scoped to this app.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      responses: {
+        "200": { description: "SMTP configuration" },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+    put: {
+      tags: ["OAuth Clients"],
+      operationId: "upsertApplicationSmtpConfig",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      summary: "Upsert per-application SMTP configuration",
+      description:
+        "Creates or replaces the SMTP configuration for an application. The `pass` field is encrypted at rest and never returned in any response.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["host", "port", "username", "pass", "fromAddress"],
+              properties: {
+                host: { type: "string" },
+                port: { type: "integer", minimum: 1, maximum: 65535 },
+                username: { type: "string" },
+                pass: { type: "string", writeOnly: true },
+                fromAddress: { type: "string", format: "email" },
+                fromName: { type: "string" },
+                secureMode: { type: "string", enum: ["auto", "tls", "starttls", "none"] },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": { description: "SMTP configuration saved" },
+        "400": { description: "Validation error (invalid host / SSRF block)" },
+        "404": { description: "Application not found" },
+      },
+    },
+    delete: {
+      tags: ["OAuth Clients"],
+      operationId: "deleteApplicationSmtpConfig",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      summary: "Delete per-application SMTP configuration",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      responses: {
+        "204": { description: "Deleted" },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+  },
+  "/api/applications/{id}/smtp-config/test": {
+    post: {
+      tags: ["OAuth Clients"],
+      operationId: "testApplicationSmtpConfig",
+      summary: "Send a test email using the stored per-app SMTP configuration",
+      description:
+        "Rate-limited. Uses the persisted config — upsert first, then test. SMTP server errors are surfaced verbatim so DKIM/SPF/auth issues reach the operator.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["to"],
+              properties: { to: { type: "string", format: "email" } },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Test email sent",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  ok: { type: "boolean" },
+                  messageId: { type: "string" },
+                  error: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+  },
 };
