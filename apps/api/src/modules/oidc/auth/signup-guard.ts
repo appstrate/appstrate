@@ -6,36 +6,38 @@
  * Runs during Better Auth's user creation for every signup path — email +
  * password (our own `POST /api/oauth/register`), social (`POST
  * /api/auth/sign-in/social` + provider callback), and magic-link verify.
- * Blocks the creation of a brand-new Better Auth user when the user is
- * signing in through an org-level OAuth client whose signup policy is
- * closed. Preventing the orphan user at BA-level is strictly stronger than
- * relying on the GET-time guards (which only hide the UI surfaces) or the
- * late reject in `buildOrgLevelClaims` (which leaves a dangling BA user row
- * with no org membership).
+ * Blocks the creation of a brand-new Better Auth user whenever the pending
+ * OAuth client has `allowSignup === false`, regardless of level. Preventing
+ * the orphan user at BA-level is strictly stronger than relying on the
+ * GET-time guards (which only hide the UI surfaces) or the late reject in
+ * `buildOrgLevelClaims` (which leaves a dangling BA user row with no org
+ * membership).
  *
  * Mechanism: the OIDC entry pages (`/api/oauth/login`, `/api/oauth/register`,
  * `/api/oauth/magic-link`) issue a signed `oidc_pending_client` cookie that
  * pins the client_id context. This guard reads the cookie on the BA hook
  * path (the only state that survives the cross-site social redirect chain)
- * and applies the policy.
+ * and applies a single, level-agnostic policy check via
+ * `loadClientSignupPolicy`.
  *
- * Safe fallthrough: the guard is a no-op when:
- *   - no cookie is present → signup is happening outside an OIDC flow
- *     (e.g. the dashboard SPA signup endpoint), let core handle it
- *   - cookie signature is invalid / expired → treat as no-cookie
- *   - client is not org-level → application-level uses the end-user mapping
- *     path which auto-provisions unconditionally (see enduser-mapping.ts)
- *   - org-level client has `allowSignup === true` → auto-provisioning is
- *     opt-in; the membership row is created later in
- *     `resolveOrCreateOrgMembership`
+ * Level semantics:
+ *   - `org`      → `allowSignup` gates the guard; on pass, `oidcAfterSignupHandler`
+ *                  auto-joins the new BA user to `referencedOrgId`.
+ *   - `instance` → `allowSignup` gates the guard; auto-provisioned platform
+ *                  client is `true`, env-declared satellites are `false`.
+ *                  No post-signup action.
+ *   - `application` → pass-through. End-users are created via the headless
+ *                     API, not through Better Auth; the pending-client
+ *                     cookie should never block a legitimate flow.
  *
- * Only the org-level + `allowSignup === false` path throws.
+ * Safe fallthrough: the guard is a no-op when no cookie is present, its
+ * signature is invalid/expired, or the client is unknown / disabled.
  */
 
 import { APIError } from "better-auth/api";
 import { logger } from "../../../lib/logger.ts";
 import {
-  loadOrgClientPolicy,
+  loadClientSignupPolicy,
   resolveOrCreateOrgMembership,
   OrgSignupClosedError,
 } from "../services/orgmember-mapping.ts";
@@ -68,25 +70,40 @@ export async function oidcBeforeSignupGuard(input: BeforeSignupGuardInput): Prom
     return;
   }
 
-  const policy = await loadOrgClientPolicy(pendingClientId);
+  const policy = await loadClientSignupPolicy(pendingClientId);
   if (!policy) {
-    // Unknown client, disabled client, or non-org client → this signup is
-    // not under our org-level policy gate. The end-user mapping path
-    // handles application-level provisioning at token-mint time; instance
-    // clients have no signup restrictions.
+    // Unknown or disabled client → no policy to enforce. Let core handle
+    // the signup through its default path.
     logger.debug("oidc: beforeSignup guard pass-through", {
       module: "oidc",
       pendingClientId,
       email: input.user.email,
-      reason: "no-org-policy",
+      reason: "no-policy",
+    });
+    return;
+  }
+
+  if (policy.level === "application") {
+    // Application-level clients mint end-user tokens, not Better Auth
+    // users. The pending-client cookie is still set for symmetry, but the
+    // signup going through BA here is unrelated (e.g. a staff login on the
+    // same origin) and must not be blocked.
+    logger.debug("oidc: beforeSignup guard pass-through", {
+      module: "oidc",
+      pendingClientId,
+      email: input.user.email,
+      reason: "application-level",
     });
     return;
   }
 
   if (policy.allowSignup) {
+    // Open policy (org with opt-in signup or platform instance client) —
+    // let the signup through; `afterSignup` may auto-join for org-level.
     logger.debug("oidc: beforeSignup guard pass-through", {
       module: "oidc",
       pendingClientId,
+      level: policy.level,
       orgId: policy.orgId,
       email: input.user.email,
       reason: "signup-open",
@@ -97,21 +114,23 @@ export async function oidcBeforeSignupGuard(input: BeforeSignupGuardInput): Prom
   // Closed policy: block the BA user creation outright. The browser ends
   // up on `errorCallbackURL` (/api/oauth/login?...) for social flows, or
   // sees a JSON error for direct API calls.
+  //
+  // NOTE on the body shape: Better Auth's `APIError` extends better-call's
+  // `InternalAPIError`, whose constructor does `super(body?.message)` — so
+  // the `.message` field is what flows through `handleOAuthUserInfo`'s
+  // catch block as `result.error`. Using an OAuth2-flavored
+  // `{ error, error_description }` body leaves `.message` empty, which BA
+  // then reads as a falsy `result.error`, skips the error branch in
+  // `callback.mjs`, and crashes on `const { session } = result.data`.
+  // Always put the primary string in `message`; keep the machine-readable
+  // code under `code` so frontends can still switch on it.
   logger.info("oidc: beforeSignup guard blocked orphan signup", {
     module: "oidc",
     pendingClientId,
+    level: policy.level,
     orgId: policy.orgId,
     email: input.user.email,
   });
-  // NOTE on the body shape: Better Auth's `APIError` extends better-call's
-  // `InternalAPIError`, whose constructor does `super(body?.message)` — so the
-  // `.message` field is what ultimately flows through
-  // `handleOAuthUserInfo`'s catch block as `result.error`. Using an OAuth2-
-  // flavored `{ error, error_description }` body leaves `.message` empty,
-  // which BA then reads as a falsy `result.error`, skips the error branch
-  // in `callback.mjs`, and crashes on `const { session } = result.data`.
-  // Always put the primary string in `message`; keep the machine-readable
-  // code under `code` so frontends can still switch on it.
   throw new APIError("FORBIDDEN", {
     message: "signup_disabled",
     code: "signup_disabled",
@@ -153,9 +172,14 @@ export async function oidcAfterSignupHandler(input: {
   const pendingClientId = readPendingClientCookieFromHeaders(input.headers);
   if (!pendingClientId) return;
 
-  const policy = await loadOrgClientPolicy(pendingClientId);
+  const policy = await loadClientSignupPolicy(pendingClientId);
   if (!policy) return;
 
+  // Only org-level clients need a post-signup auto-join. Instance and
+  // application clients have no org context to map into — the before
+  // guard already let them through (or blocked them).
+  if (policy.level !== "org") return;
+  if (!policy.orgId) return;
   if (!policy.allowSignup) {
     // Defensive: `before` guard should have thrown already.
     return;

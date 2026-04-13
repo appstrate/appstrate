@@ -44,6 +44,15 @@ const envSchema = z
       .default("[]")
       .transform((s) => JSON.parse(s) as unknown[]),
 
+    // OIDC instance clients — declarative provisioning of satellite OAuth
+    // clients (admin dashboards, second-party web apps). Parsed loosely
+    // here; the oidc module applies a strict Zod schema at boot. See
+    // `apps/api/src/modules/oidc/services/instance-client-sync.ts`.
+    APPSTRATE_OIDC_INSTANCE_CLIENTS: z
+      .string()
+      .default("[]")
+      .transform((s) => JSON.parse(s) as unknown[]),
+
     // Modules (comma-separated specifiers, empty = OSS mode)
     APPSTRATE_MODULES: z.string().default(""),
 

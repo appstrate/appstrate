@@ -167,26 +167,44 @@ async function findMembership(
 }
 
 /**
- * Load the auto-provisioning policy for an org-level OAuth client, reusing
- * the short-TTL cache from `oauth-admin.ts`. Returns `null` if the client
- * does not exist, is disabled, or is not org-level (policy is meaningful only
- * for org-level clients — application-level clients go through the end-user
- * mapping path instead).
+ * Unified signup policy for any OAuth client, regardless of level. Returns
+ * `null` when the client is unknown or disabled (caller treats as a
+ * pass-through, not a gate). Otherwise returns the client's level + its
+ * `allowSignup` flag, plus the org-specific fields when the level is `org`.
  *
- * This helper is the single entry point for `buildOrgLevelClaims` so the
- * plugin closure does not need to know how the policy is stored or cached.
+ * Semantics by level:
+ *   - `instance` — `allowSignup` is honored (the auto-provisioned platform
+ *     client defaults to `true`; env-declared satellites default to `false`).
+ *     No org context.
+ *   - `org` — `allowSignup` is honored; `orgId` + `signupRole` drive the
+ *     post-signup auto-join in `oidcAfterSignupHandler`.
+ *   - `application` — the Better Auth user path does not apply. End-user
+ *     provisioning happens out-of-band via the headless API at token-mint
+ *     time (see `enduser-mapping.ts`). The `allowSignup` field is persisted
+ *     as `false` for parity but the guard explicitly short-circuits on this
+ *     level so the pending-client cookie cannot block a legitimate end-user.
+ *
+ * Backed by the short-TTL `getClientCached` so a single call covers both
+ * the `beforeSignup` / `afterSignup` guards and `buildOrgLevelClaims` in
+ * `auth/plugins.ts` without duplicating DB lookups.
  */
-export async function loadOrgClientPolicy(clientId: string): Promise<{
-  orgId: string;
+export interface ClientSignupPolicy {
+  clientId: string;
+  level: "org" | "application" | "instance";
   allowSignup: boolean;
+  /** Set only when `level === "org"`. */
+  orgId: string | null;
   signupRole: Exclude<OrgRole, "owner">;
-} | null> {
+}
+
+export async function loadClientSignupPolicy(clientId: string): Promise<ClientSignupPolicy | null> {
   const client = await getClientCached(clientId);
   if (!client || client.disabled) return null;
-  if (client.level !== "org" || !client.referencedOrgId) return null;
   return {
-    orgId: client.referencedOrgId,
+    clientId,
+    level: client.level,
     allowSignup: client.allowSignup,
+    orgId: client.level === "org" ? (client.referencedOrgId ?? null) : null,
     signupRole: client.signupRole,
   };
 }

@@ -40,6 +40,7 @@ import { oidcPaths } from "./openapi/paths.ts";
 import { oidcSchemas } from "./openapi/schemas.ts";
 import { jwks, oauthClient, oauthAccessToken, oauthRefreshToken, oauthConsent } from "./schema.ts";
 import { ensureInstanceClient, getInstanceClientId } from "./services/oauth-admin.ts";
+import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
 
 const oidcModule: AppstrateModule = {
   manifest: { id: "oidc", name: "OIDC Identity Provider", version: "1.0.0" },
@@ -52,7 +53,12 @@ const oidcModule: AppstrateModule = {
     // platform dashboard SPA. Idempotent — skips if one already exists.
     const env = getEnv();
     const clientId = await ensureInstanceClient(env.APP_URL);
-    logger.info("OIDC instance client ready", { module: "oidc", clientId });
+    logger.info("OIDC platform client ready", { module: "oidc", clientId });
+    // Reconcile env-declared satellite instance clients (admin dashboards,
+    // second-party web apps). Runs AFTER `ensureInstanceClient` so the
+    // platform client always has the earliest `created_at` — see
+    // `getInstanceClientId()` for why that ordering matters.
+    await syncInstanceClientsFromEnv();
   },
 
   // Router mounted at HTTP origin root. Declares full paths — `/api/oauth/*`

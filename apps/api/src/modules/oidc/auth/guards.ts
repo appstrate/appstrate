@@ -36,6 +36,8 @@ import { createAuthMiddleware, APIError } from "better-auth/api";
 import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import { getRateLimiterFactory } from "../../../infra/index.ts";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
+import { loadClientSignupPolicy } from "../services/orgmember-mapping.ts";
+import { readPendingClientCookieFromHeaders } from "../services/pending-client-cookie.ts";
 
 const TOKEN_RL_POINTS = 30;
 const AUTHORIZE_RL_POINTS = 30;
@@ -207,6 +209,76 @@ async function enforceClientRateLimit(clientId: string): Promise<void> {
  * layer to keep `@better-auth/core` types out of the module's public
  * surface — `oidcBetterAuthPlugins()` merges it into the plugin list.
  */
+/**
+ * Pre-empt `/magic-link/verify` when the pending OAuth client has a closed
+ * signup policy AND the token would create a new user. Produces the same
+ * `errorCallbackURL?error=<code>` redirect Better Auth uses natively for
+ * its own signup-gating (`disableSignUp` in magic-link, social callback
+ * via `oauth2/link-account.mjs` → `callback.mjs:158`), so the OIDC login
+ * page can render the localized banner via `mapLoginErrorCode`.
+ *
+ * Why a pre-check and not the `databaseHooks.user.create.before` guard:
+ * BA's magic-link verify does NOT wrap `internalAdapter.createUser` in a
+ * try/catch (contrast with `oauth2/link-account.mjs:104` for social and
+ * `api/routes/sign-up.mjs:217` for email+password). An `APIError` thrown
+ * from the db hook therefore escapes as a raw JSON response instead of
+ * being converted into an `errorCallbackURL` redirect. This before-hook
+ * looks up the verification token (read-only, no attempt increment) to
+ * determine whether the verify would create a new user and short-circuits
+ * with the redirect before BA reaches `createUser`. The db hook remains
+ * as defense-in-depth for every other signup path.
+ */
+async function enforceMagicLinkSignupPolicy(ctx: {
+  request?: Request;
+  query?: unknown;
+  context: { baseURL: string; internalAdapter?: unknown };
+  redirect: (url: string) => unknown;
+}): Promise<void> {
+  const pendingClientId = readPendingClientCookieFromHeaders(ctx.request?.headers ?? null);
+  if (!pendingClientId) return;
+
+  const policy = await loadClientSignupPolicy(pendingClientId);
+  if (!policy) return;
+  if (policy.level === "application") return;
+  if (policy.allowSignup) return;
+
+  const query = (ctx.query ?? {}) as {
+    token?: string;
+    errorCallbackURL?: string;
+    callbackURL?: string;
+  };
+  const token = query.token;
+  if (!token) return;
+
+  const adapter = ctx.context.internalAdapter as
+    | {
+        findVerificationValue: (key: string) => Promise<{ value: string; expiresAt: Date } | null>;
+        findUserByEmail: (email: string) => Promise<{ user: unknown } | null>;
+      }
+    | undefined;
+  if (!adapter) return;
+
+  const row = await adapter.findVerificationValue(token);
+  if (!row) return;
+  let email: string | undefined;
+  try {
+    const parsed = JSON.parse(row.value) as { email?: unknown };
+    if (typeof parsed.email === "string") email = parsed.email;
+  } catch {
+    return;
+  }
+  if (!email) return;
+
+  const existing = await adapter.findUserByEmail(email);
+  if (existing?.user) return;
+
+  const rawErrorCallback = query.errorCallbackURL ?? query.callbackURL;
+  if (!rawErrorCallback) return;
+  const target = new URL(decodeURIComponent(rawErrorCallback), ctx.context.baseURL);
+  target.searchParams.set("error", "signup_disabled");
+  throw ctx.redirect(target.toString());
+}
+
 export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
   const audiences = [...opts.validAudiences];
 
@@ -214,6 +286,10 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
     id: "oidc-guards",
     hooks: {
       before: [
+        {
+          matcher: (ctx: { path?: string }) => ctx.path === "/magic-link/verify",
+          handler: createAuthMiddleware(enforceMagicLinkSignupPolicy),
+        },
         {
           matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/token",
           handler: createAuthMiddleware(async (ctx) => {

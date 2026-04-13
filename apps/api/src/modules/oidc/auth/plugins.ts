@@ -42,7 +42,7 @@ import {
 } from "../services/enduser-mapping.ts";
 import {
   OrgSignupClosedError,
-  loadOrgClientPolicy,
+  loadClientSignupPolicy,
   resolveOrCreateOrgMembership,
 } from "../services/orgmember-mapping.ts";
 import { hashSecret } from "../services/oauth-admin.ts";
@@ -60,7 +60,7 @@ export interface ClientMetadata {
    * The OAuth client id — stashed by `createClient` so the
    * `customAccessTokenClaims` closure can recover the client identity and
    * look up mutable policy (e.g. `allowSignup` / `signupRole`) via
-   * `loadOrgClientPolicy`. The Better Auth oauth-provider plugin does not
+   * `loadClientSignupPolicy`. The Better Auth oauth-provider plugin does not
    * pass `client.clientId` to the closure directly.
    */
   clientId?: string;
@@ -235,8 +235,8 @@ async function buildOrgLevelClaims(
     signupRole: "member",
   };
   if (metadata.clientId) {
-    const loaded = await loadOrgClientPolicy(metadata.clientId);
-    if (loaded && loaded.orgId === orgId) {
+    const loaded = await loadClientSignupPolicy(metadata.clientId);
+    if (loaded && loaded.level === "org" && loaded.orgId === orgId) {
       policy = { allowSignup: loaded.allowSignup, signupRole: loaded.signupRole };
     } else if (!loaded) {
       logger.warn("oidc: could not load policy for org-level client — defaulting to closed", {

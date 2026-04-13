@@ -241,23 +241,43 @@ function buildAuth(
   const googleEnabled = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
   const githubEnabled = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
   const anySocialEnabled = googleEnabled || githubEnabled;
-  const socialProviders: Record<string, { clientId: string; clientSecret: string }> | undefined =
-    anySocialEnabled
-      ? {
-          ...(googleEnabled && {
-            google: {
-              clientId: env.GOOGLE_CLIENT_ID!,
-              clientSecret: env.GOOGLE_CLIENT_SECRET!,
-            },
-          }),
-          ...(githubEnabled && {
-            github: {
-              clientId: env.GITHUB_CLIENT_ID!,
-              clientSecret: env.GITHUB_CLIENT_SECRET!,
-            },
-          }),
+  const socialProviders:
+    | Record<
+        string,
+        {
+          clientId: string;
+          clientSecret: string;
+          mapProfileToUser?: (profile: unknown) => { emailVerified?: boolean };
         }
-      : undefined;
+      >
+    | undefined = anySocialEnabled
+    ? {
+        ...(googleEnabled && {
+          google: {
+            clientId: env.GOOGLE_CLIENT_ID!,
+            clientSecret: env.GOOGLE_CLIENT_SECRET!,
+            // Treat the email as verified for every social signup. Rationale:
+            // a successful OAuth round-trip with Google/GitHub already proves
+            // the user controls that provider account, which is the security
+            // guarantee a second verification email would provide. Without
+            // this override, BA's `link-account.mjs` falls back to checking
+            // the provider's `emailVerified` flag — GitHub's `/user/emails`
+            // returns `false` when the OAuth App lacks the `user:email`
+            // scope grant on a pre-existing authorization, triggering a
+            // spurious verification email on a user who literally just
+            // logged in via the provider. See `sendOnSignUp: true` above.
+            mapProfileToUser: () => ({ emailVerified: true }),
+          },
+        }),
+        ...(githubEnabled && {
+          github: {
+            clientId: env.GITHUB_CLIENT_ID!,
+            clientSecret: env.GITHUB_CLIENT_SECRET!,
+            mapProfileToUser: () => ({ emailVerified: true }),
+          },
+        }),
+      }
+    : undefined;
   const basePlugins = buildBasePlugins(env, smtpTransport);
   return betterAuth({
     database: drizzleAdapter(db, {

@@ -248,18 +248,22 @@ function isSmtpEnabled(): boolean {
 
 /**
  * Effective "is signup open" flag for a client's entry pages. Org-level
- * clients honor their configured `allowSignup`; app/instance clients are
- * open by default (end-user provisioning is handled elsewhere, and the
- * instance client is first-party). Passed to `renderLoginPage` /
- * `renderRegisterPage` / `renderMagicLinkPage` so they can hide the
- * signup-only CTAs when the org is closed.
+ * and instance-level clients honor their stored `allowSignup`; application
+ * clients are open by default (end-user provisioning is handled elsewhere).
+ * Passed to `renderLoginPage` / `renderRegisterPage` / `renderMagicLinkPage`
+ * so they can hide the signup-only CTAs when signup is closed.
+ *
+ * Instance clients declared via `APPSTRATE_OIDC_INSTANCE_CLIENTS` are
+ * inserted with `allowSignup: false` — satellites like an admin portal
+ * that opt into the platform login should never open signup on the shared
+ * page; membership is provisioned out-of-band.
  */
 function allowSignupForClient(client: {
   level: "org" | "application" | "instance";
   allowSignup: boolean;
 }): boolean {
-  if (client.level === "org") return client.allowSignup;
-  return true;
+  if (client.level === "application") return true;
+  return client.allowSignup;
 }
 
 /**
@@ -784,8 +788,8 @@ export function createOidcRouter() {
     });
     if (page instanceof Response) return page;
     const { url, ctx } = page;
-    // Org-level + closed signup → no register form at all.
-    if (ctx.client.level === "org" && !ctx.client.allowSignup) {
+    // Org / instance + closed signup → no register form at all.
+    if (ctx.client.level !== "application" && !ctx.client.allowSignup) {
       return c.html(
         renderErrorPage({
           title: "Inscription fermée",
@@ -824,7 +828,7 @@ export function createOidcRouter() {
     // closed, but a hand-crafted POST must still be rejected here. Returning
     // the styled error page (instead of `renderRegError` with a banner)
     // matches the GET behavior — there is no form to retry.
-    if (ctx.client.level === "org" && !ctx.client.allowSignup) {
+    if (ctx.client.level !== "application" && !ctx.client.allowSignup) {
       return c.html(
         renderErrorPage({
           title: "Inscription fermée",

@@ -38,7 +38,7 @@
  * `rotateClientSecret` — subsequent reads never expose them.
  */
 
-import { eq, or, inArray } from "drizzle-orm";
+import { eq, or, inArray, asc } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
 import { oauthClient } from "../schema.ts";
@@ -288,9 +288,9 @@ export interface CreateOrgClientInput {
   scopes?: string[];
   referencedOrgId: string;
   isFirstParty?: boolean;
-  /** Defaults to `false`. Only honored for org-level clients. */
+  /** Defaults to `false` at org level. */
   allowSignup?: boolean;
-  /** Defaults to `"member"`. Only honored for org-level clients. `owner` forbidden. */
+  /** Defaults to `"member"`. `owner` forbidden. */
   signupRole?: SignupRole;
 }
 
@@ -311,6 +311,9 @@ export interface CreateInstanceClientInput {
   postLogoutRedirectUris?: string[];
   scopes?: string[];
   isFirstParty?: boolean;
+  /** Defaults to `false`. Set explicitly by `ensureInstanceClient()`. */
+  allowSignup?: boolean;
+  signupRole?: SignupRole;
 }
 
 export type CreateClientInput =
@@ -342,24 +345,33 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
   }
   // instance: no FK fields in metadata
 
-  // Org-level signup policy. Mutable (unlike the rest of `metadata`) so it
-  // lives only in dedicated SQL columns — the plugin reads it at token mint
-  // via `loadOrgClientPolicy` (backed by `getClientCached`) rather than the
-  // frozen metadata JSON. Rejected on application/instance clients to
-  // prevent silent-ignore footguns.
-  if (input.level === "org") {
-    // no-op — defaults apply if unset
-  } else if (
-    (input as { allowSignup?: unknown }).allowSignup !== undefined ||
-    (input as { signupRole?: unknown }).signupRole !== undefined
-  ) {
-    throw new OAuthAdminValidationError(
-      "signupPolicy",
-      "OIDC: allowSignup / signupRole are only valid for org-level clients",
-    );
+  // Signup policy (`allowSignup` + `signupRole`). Mutable — unlike the rest
+  // of `metadata` — so it lives only in dedicated SQL columns and is read by
+  // the signup guard + plugin at token-mint time via `loadClientSignupPolicy`
+  // (backed by `getClientCached`). Valid for org + instance; rejected on
+  // application clients where end-user provisioning is out-of-band via the
+  // headless API and the flag has no effect.
+  if (input.level === "application") {
+    if (
+      (input as { allowSignup?: unknown }).allowSignup !== undefined ||
+      (input as { signupRole?: unknown }).signupRole !== undefined
+    ) {
+      throw new OAuthAdminValidationError(
+        "signupPolicy",
+        "OIDC: allowSignup / signupRole are only valid for org- or instance-level clients",
+      );
+    }
   }
-  const allowSignup = input.level === "org" ? (input.allowSignup ?? false) : false;
-  const signupRole: SignupRole = input.level === "org" ? (input.signupRole ?? "member") : "member";
+  // Default signup policy: closed (`allowSignup: false`) for every level.
+  // Opt-in is explicit at the call site — notably `ensureInstanceClient()`
+  // passes `allowSignup: true` at boot so the first-party platform client
+  // keeps the Appstrate signup page open on a fresh install. Org tenant
+  // dashboards and env-declared satellite instance clients keep the closed
+  // default unless the operator flips the flag. Application clients ignore
+  // the flag entirely (end-user provisioning happens via the headless API).
+  const allowSignup = input.level === "application" ? false : (input.allowSignup ?? false);
+  const signupRole: SignupRole =
+    input.level === "application" ? "member" : (input.signupRole ?? "member");
 
   const inserted = await db
     .insert(oauthClient)
@@ -420,9 +432,9 @@ export interface UpdateClientInput {
   scopes?: string[];
   disabled?: boolean;
   isFirstParty?: boolean;
-  /** Org-level only — rejected on app/instance clients with a clear error. */
+  /** Honored for org + instance clients; rejected on application. */
   allowSignup?: boolean;
-  /** Org-level only — rejected on app/instance clients. `owner` forbidden. */
+  /** Honored for org + instance clients; rejected on application. `owner` forbidden. */
   signupRole?: SignupRole;
 }
 
@@ -437,15 +449,17 @@ export async function updateClient(
     assertValidScopes(input.scopes);
   }
 
-  // Reject signup policy updates on non-org clients early — the caller
-  // probably meant to PATCH a different client. Silently ignoring would
-  // hide configuration mistakes.
+  // Reject signup policy updates on application-level clients early —
+  // application clients provision end-users out-of-band via the headless
+  // API, so the flag has no effect and the caller probably meant a
+  // different client. Silently ignoring would hide configuration
+  // mistakes. Org and instance levels both honor the flag.
   if (input.allowSignup !== undefined || input.signupRole !== undefined) {
     const existing = await getClient(clientId);
-    if (existing && existing.level !== "org") {
+    if (existing && existing.level === "application") {
       throw new OAuthAdminValidationError(
         "signupPolicy",
-        "OIDC: allowSignup / signupRole are only valid for org-level clients",
+        "OIDC: allowSignup / signupRole are only valid for org- or instance-level clients",
       );
     }
   }
@@ -512,12 +526,24 @@ export async function getClientOwningOrg(clientId: string): Promise<string | nul
 
 // ─── Instance client helpers ──────────────────────────────────────────────────
 
-/** Lookup the (unique) instance-level client's clientId. */
+/**
+ * Lookup the platform SPA instance-level client's `clientId`.
+ *
+ * Consumed by `oidcModule.appConfigContribution()` to publish the platform
+ * SPA's OIDC config. With `APPSTRATE_OIDC_INSTANCE_CLIENTS`, multiple
+ * instance-level clients can coexist (the platform one + env-provisioned
+ * satellites). `ensureInstanceClient()` runs BEFORE `syncInstanceClientsFromEnv()`
+ * in `oidcModule.init()`, so the platform client always carries the earliest
+ * `created_at` — `ORDER BY created_at ASC LIMIT 1` is therefore deterministic
+ * and returns the platform client regardless of how many satellites are
+ * declared in the env.
+ */
 export async function getInstanceClientId(): Promise<string | null> {
   const [row] = await db
     .select({ clientId: oauthClient.clientId })
     .from(oauthClient)
     .where(eq(oauthClient.level, "instance"))
+    .orderBy(asc(oauthClient.createdAt))
     .limit(1);
   return row?.clientId ?? null;
 }
@@ -531,6 +557,11 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
   const existing = await getInstanceClientId();
   if (existing) return existing;
 
+  // The platform auto-provisioned instance client is the ONE OAuth client
+  // that opts into open signup: without it, a fresh Appstrate install has
+  // no way to register the first user. Every other client — env-declared
+  // satellite instance clients, org tenant dashboards — keeps the closed
+  // `allowSignup: false` default from `createClient()`.
   const created = await createClient({
     level: "instance",
     name: "Appstrate Platform",
@@ -538,6 +569,227 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
     postLogoutRedirectUris: [appUrl, `${appUrl}/login`],
     scopes: ["openid", "profile", "email", "offline_access"],
     isFirstParty: true,
+    allowSignup: true,
   });
   return created.clientId;
+}
+
+// ─── Env-provisioned instance clients ─────────────────────────────────────────
+//
+// Satellite apps (admin dashboards, second-party web apps) are declared in
+// `APPSTRATE_OIDC_INSTANCE_CLIENTS` and materialized here. Unlike
+// `createClient`, the operator supplies both `clientId` and `clientSecret`
+// out-of-band — no HTTP surface, no admin route. See
+// `services/instance-client-sync.ts` for the boot sync driver.
+
+export interface CreateInstanceClientFromEnvInput {
+  /** Operator-chosen stable identifier. Becomes the OAuth `client_id`. */
+  clientId: string;
+  /** Operator-supplied secret. Hashed at insert; never stored in plaintext. */
+  clientSecretPlaintext: string;
+  name: string;
+  redirectUris: string[];
+  postLogoutRedirectUris: string[];
+  scopes: string[];
+  /** Skip the consent screen for this client (first-party semantic). */
+  skipConsent: boolean;
+  /**
+   * Whether BA should let a brand-new user sign up through this client.
+   * Mutable policy — re-synced by `updateInstanceClientPolicyFromEnv` on
+   * every boot, so an operator can toggle it in env without touching the
+   * DB. Defaults to `false` upstream in the Zod schema.
+   */
+  allowSignup: boolean;
+}
+
+/**
+ * Insert a new instance-level OAuth client using operator-supplied
+ * `clientId` + `clientSecret`. The secret is hashed with `hashSecret()`
+ * before insert and is never echoed back (contrast with `createClient()`,
+ * which returns the plaintext).
+ *
+ * Throws `OAuthAdminValidationError` on bad `redirectUris` / `scopes`.
+ * The caller is responsible for checking that no row with this `clientId`
+ * already exists — this function will surface a DB unique-constraint
+ * violation otherwise.
+ */
+export async function createInstanceClientFromEnv(
+  input: CreateInstanceClientFromEnvInput,
+): Promise<OAuthClientRecord> {
+  assertValidRedirectUris(input.redirectUris);
+  assertValidScopes(input.scopes);
+
+  const id = prefixedId("oac");
+  const hashedSecret = await hashSecret(input.clientSecretPlaintext);
+  const now = new Date();
+
+  // Mirror `createClient()` — see oauth-admin.ts metadata shape for the
+  // rationale. `clientId` is stashed alongside `level` so
+  // `customAccessTokenClaims` in plugins.ts can dispatch to
+  // `buildInstanceLevelClaims` at token-mint time.
+  const metadata: Record<string, unknown> = {
+    level: "instance",
+    clientId: input.clientId,
+  };
+
+  const inserted = await db
+    .insert(oauthClient)
+    .values({
+      id,
+      clientId: input.clientId,
+      clientSecret: hashedSecret,
+      name: input.name,
+      redirectUris: input.redirectUris,
+      postLogoutRedirectUris: input.postLogoutRedirectUris,
+      scopes: input.scopes,
+      level: "instance",
+      referencedOrgId: null,
+      referencedApplicationId: null,
+      metadata: JSON.stringify(metadata),
+      skipConsent: input.skipConsent,
+      allowSignup: input.allowSignup,
+      signupRole: "member",
+      disabled: false,
+      type: "web",
+      tokenEndpointAuthMethod: "client_secret_basic",
+      grantTypes: ["authorization_code", "refresh_token"],
+      responseTypes: ["code"],
+      requirePKCE: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+  if (inserted.length === 0) {
+    throw new Error("OIDC: failed to insert oauth_clients row from env declaration");
+  }
+  return mapRow(inserted[0]!);
+}
+
+export interface InstanceClientDriftMismatch {
+  field: string;
+  stored: unknown;
+  declared: unknown;
+}
+
+export type InstanceClientDriftResult =
+  | { kind: "not-found" }
+  | { kind: "wrong-level"; storedLevel: string }
+  | { kind: "match" }
+  | { kind: "drift"; mismatches: InstanceClientDriftMismatch[] };
+
+function setEquals(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const setA = new Set(a);
+  for (const v of b) if (!setA.has(v)) return false;
+  return true;
+}
+
+/**
+ * Compare a declared env-provisioned instance client against its stored row.
+ *
+ * - `not-found`: no row with this `clientId` exists.
+ * - `wrong-level`: a row exists but its `level` is not `"instance"` — caller
+ *   should refuse to operate on it (it belongs to an org/application client
+ *   with the same `clientId`, which is an authorization-critical collision).
+ * - `match`: every managed field matches.
+ * - `drift`: managed fields differ — caller should fail boot with the list.
+ *
+ * Managed fields: `name`, `redirectUris`, `postLogoutRedirectUris`, `scopes`,
+ * `skipConsent`, `clientSecret` hash. Order-insensitive for array fields.
+ */
+export async function compareDeclaredClientWithStored(
+  declared: CreateInstanceClientFromEnvInput,
+): Promise<InstanceClientDriftResult> {
+  const [row] = await db
+    .select()
+    .from(oauthClient)
+    .where(eq(oauthClient.clientId, declared.clientId))
+    .limit(1);
+  if (!row) return { kind: "not-found" };
+  if (row.level !== "instance") {
+    return { kind: "wrong-level", storedLevel: row.level };
+  }
+
+  const mismatches: InstanceClientDriftMismatch[] = [];
+
+  if (row.name !== declared.name) {
+    mismatches.push({ field: "name", stored: row.name, declared: declared.name });
+  }
+  if (!setEquals(row.redirectUris ?? [], declared.redirectUris)) {
+    mismatches.push({
+      field: "redirectUris",
+      stored: row.redirectUris ?? [],
+      declared: declared.redirectUris,
+    });
+  }
+  if (!setEquals(row.postLogoutRedirectUris ?? [], declared.postLogoutRedirectUris)) {
+    mismatches.push({
+      field: "postLogoutRedirectUris",
+      stored: row.postLogoutRedirectUris ?? [],
+      declared: declared.postLogoutRedirectUris,
+    });
+  }
+  if (!setEquals(row.scopes ?? [], declared.scopes)) {
+    mismatches.push({
+      field: "scopes",
+      stored: row.scopes ?? [],
+      declared: declared.scopes,
+    });
+  }
+  if ((row.skipConsent ?? false) !== declared.skipConsent) {
+    mismatches.push({
+      field: "skipConsent",
+      stored: row.skipConsent ?? false,
+      declared: declared.skipConsent,
+    });
+  }
+  const declaredSecretHash = await hashSecret(declared.clientSecretPlaintext);
+  if (row.clientSecret !== declaredSecretHash) {
+    // Never leak the hashes themselves in the mismatch — just signal the
+    // field. A drift on the secret means the operator rotated it; the new
+    // value is already visible in their env.
+    mismatches.push({
+      field: "clientSecret",
+      stored: "<hash>",
+      declared: "<hash>",
+    });
+  }
+
+  if (mismatches.length === 0) return { kind: "match" };
+  return { kind: "drift", mismatches };
+}
+
+/**
+ * Idempotently update the mutable signup policy fields on an env-declared
+ * instance client. Called by `syncInstanceClientsFromEnv` on every boot so
+ * `allowSignup` is always authoritative from env — unlike structural fields
+ * (name, redirectUris, secret, …) where drift is fatal, a policy flag is
+ * designed to be toggled without touching the DB.
+ *
+ * Also invalidates the `getClientCached` entry so the new value is visible
+ * to `loadClientSignupPolicy` (and the magic-link pre-check in
+ * `auth/guards.ts`) on the next request rather than after a 30s TTL.
+ */
+export async function updateInstanceClientPolicyFromEnv(
+  clientId: string,
+  policy: { allowSignup: boolean },
+): Promise<void> {
+  await db
+    .update(oauthClient)
+    .set({ allowSignup: policy.allowSignup, updatedAt: new Date() })
+    .where(eq(oauthClient.clientId, clientId));
+  cacheInvalidate(clientId);
+}
+
+/**
+ * List every instance-level client's `clientId`. Used by the env sync to
+ * detect orphans (clients present in DB but not in the current env
+ * declaration). Returns `clientId` only to keep the row small.
+ */
+export async function listInstanceClientIds(): Promise<string[]> {
+  const rows = await db
+    .select({ clientId: oauthClient.clientId })
+    .from(oauthClient)
+    .where(eq(oauthClient.level, "instance"));
+  return rows.map((r) => r.clientId);
 }

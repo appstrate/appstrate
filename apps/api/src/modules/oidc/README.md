@@ -165,6 +165,81 @@ Colors are validated by `AppBrandingSchema` at resolve time, so a misconfigured 
 
 **Headless:** `POST /api/oauth/clients` with `{ name, redirectUris, scopes? }` + an admin API key with `oauth-clients:write`.
 
+## Instance-level satellite clients via `APPSTRATE_OIDC_INSTANCE_CLIENTS`
+
+Instance-level clients power **satellite apps that share the Appstrate login at the instance level** — typically an admin dashboard, a second-party web app, or any trusted confidential client that needs to let a user pick their org at runtime (via `X-Org-Id`, same contract as the platform SPA). These clients are intentionally NOT exposable through an HTTP admin endpoint: a compromised owner account could otherwise mint an arbitrary satellite and exfiltrate tokens. The only creation path is declarative, via the `APPSTRATE_OIDC_INSTANCE_CLIENTS` env var, reconciled at boot by `services/instance-client-sync.ts`.
+
+### Format
+
+```sh
+export APPSTRATE_OIDC_INSTANCE_CLIENTS='[
+  {
+    "clientId": "admin-dashboard",
+    "clientSecret": "'$(openssl rand -base64 32)'",
+    "name": "Admin Dashboard",
+    "redirectUris": ["https://admin.example.com/auth/callback"],
+    "postLogoutRedirectUris": ["https://admin.example.com"],
+    "scopes": ["openid", "profile", "email", "offline_access"],
+    "skipConsent": false
+  }
+]'
+```
+
+| Field                    | Required | Notes                                                                                                                                                                |
+| ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `clientId`               | yes      | Operator-chosen stable identifier (`^[a-zA-Z0-9_-]+$`, 3–100 chars). Cannot start with `oauth_` — that prefix is reserved for the auto-provisioned platform client.  |
+| `clientSecret`           | yes      | Operator-supplied, minimum 32 chars. Hashed SHA-256 at rest — plaintext lives only in memory for the duration of the hash call and is NEVER logged.                  |
+| `name`                   | yes      | Human-readable name shown on the consent screen (when `skipConsent: false`).                                                                                         |
+| `redirectUris`           | yes      | At least one. Validated by `services/redirect-uri.ts → isValidRedirectUri` — `https://` only in production, `http://localhost` / `http://127.0.0.1` only in dev.     |
+| `postLogoutRedirectUris` | no       | Defaults to `[]`.                                                                                                                                                    |
+| `scopes`                 | no       | Defaults to `["openid", "profile", "email", "offline_access"]`. Must be a subset of `APPSTRATE_SCOPES` — invalid scopes are rejected at the service validation step. |
+| `skipConsent`            | no       | Defaults to `false`. Set to `true` for trusted first-party satellites to skip the consent screen.                                                                    |
+
+### Sync policy — create-only + fail-on-drift
+
+At each boot, the sync:
+
+1. Parses the JSON (strict Zod). Parse error → **boot fails** with a diagnosable message.
+2. Rejects duplicate `clientId` values inside the declaration → **boot fails**.
+3. For each entry:
+   - **Not in DB** → INSERT via `createInstanceClientFromEnv` (level=instance, type=web, `client_secret_basic`, `requirePKCE: true`).
+   - **In DB as instance client, every managed field matches** → no-op.
+   - **In DB as instance client, any field differs** (`name`, `redirectUris`, `postLogoutRedirectUris`, `scopes`, `skipConsent`, secret hash) → **boot fails** with the list of divergent fields.
+   - **In DB at a different level (org / application)** → **boot fails** with a collision error.
+4. Rows present in DB as instance clients but absent from the declaration → logged at `warn` level, left untouched. The operator owns deletion.
+5. The auto-provisioned platform client (clientId prefixed `oauth_`) is whitelisted from orphan warnings — it is never part of the env declaration.
+
+### Changing a satellite after creation
+
+Any change to `redirectUris`, `postLogoutRedirectUris`, `scopes`, `name`, `skipConsent`, or `clientSecret` in the env **will fail boot on the next restart**. This is deliberate — a silent update to `redirectUris` in prod would invalidate every in-flight satellite session without any operator awareness. To legitimately change a field:
+
+```sql
+DELETE FROM oauth_clients WHERE client_id = 'admin-dashboard';
+```
+
+…then edit the env and restart. All active sessions for that client are invalidated, which is the correct loud behavior for a production change.
+
+### Token shape
+
+Tokens minted for env-provisioned instance clients carry `actor_type: "user"` and no `org_id` claim. Satellites resolve the current org per-request via the `X-Org-Id` header — identical to the platform dashboard SPA. See `auth/strategy.ts → resolveInstanceUser` (`deferOrgResolution: true`).
+
+### Flow for a satellite admin dashboard
+
+1. Satellite backend hits `/.well-known/openid-configuration` to discover endpoints.
+2. Standard PKCE authorization-code flow against `/api/auth/oauth2/authorize` with `client_id=admin-dashboard`, `redirect_uri=<env-registered>`, `resource=<APPSTRATE_URL>` (RFC 8707 — required by `oidcGuardsPlugin`), `scope=openid profile email offline_access`.
+3. Exchange code at `/api/auth/oauth2/token` with `client_secret` from env.
+4. Receive JWT access token. Call `GET /api/organizations` with `Authorization: Bearer <token>` → list of orgs the user belongs to. Satellite displays an org picker.
+5. Subsequent calls include `X-Org-Id: <selected>` — core resolves the org and role per-request via the `X-Org-Id` middleware.
+
+### Why not `type: "native"` / public clients (CLI, desktop)?
+
+Two blockers identified at Phase 1:
+
+1. **`isValidRedirectUri` rejects loopback redirects in production** (`services/redirect-uri.ts:40`) — dev-mode only. A CLI cannot register `http://127.0.0.1:<port>/callback` in prod.
+2. **Better Auth `@better-auth/oauth-provider` strict-equality matches `redirect_uri`** — no RFC 8252 port-flexible matching. A CLI would have to register a fixed port or a list of fallback ports.
+
+Support for public clients (CLI / desktop / pure-SPA) is tracked as a follow-up. Better Auth oauth-provider DOES technically support public clients (`token_endpoint_auth_method: "none"`, `type: "native"`/`"user-agent-based"`, PKCE auto-enforced, no secret generated — see `utils-B9Pj9EPf.mjs:408` and `index.mjs:1182` in the plugin dist), so the future work is localized to `redirect-uri.ts` and `createClient`.
+
 ## Security notes
 
 - **JWKS rotation**: the Better Auth `jwt` plugin auto-rotates the ES256 keypair every 90 days with a 7-day grace window. Internally, `services/enduser-token.ts` caches the parsed keyset for 5 minutes and eagerly refetches on any `ERR_JWKS_NO_MATCHING_KEY` from `jose`, so key rotation propagates to verification within one token-verify cycle — no process restart required. External clients that cache the JWKS document directly should stay under a 5-minute ceiling for the same reason.
