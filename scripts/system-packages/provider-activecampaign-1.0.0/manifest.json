@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "ActiveCampaign",
   "description": "Marketing automation and CRM platform — contacts, deals, campaigns, and automations",
-  "iconUrl": "activecampaign",
+  "iconUrl": "https://api.iconify.design/logos/active-campaign.svg",
   "categories": ["marketing", "crm"],
   "docsUrl": "https://developers.activecampaign.com/reference/overview",
   "definition": {

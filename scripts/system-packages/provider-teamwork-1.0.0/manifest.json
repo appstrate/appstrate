@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Teamwork",
   "description": "Project management and collaboration platform for client work",
-  "iconUrl": "https://cdn.simpleicons.org/teamwork",
+  "iconUrl": "https://api.iconify.design/logos/teamwork.svg",
   "categories": ["project-management", "collaboration"],
   "docsUrl": "https://apidocs.teamwork.com/",
   "definition": {
