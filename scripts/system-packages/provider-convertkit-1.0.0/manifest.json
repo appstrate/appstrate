@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "ConvertKit (Kit)",
   "description": "Email marketing platform for creators",
-  "iconUrl": "convertkit",
+  "iconUrl": "kit",
   "categories": ["email-marketing", "marketing"],
   "docsUrl": "https://developers.kit.com/",
   "definition": {
@@ -27,7 +27,10 @@
   "setupGuide": {
     "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
     "steps": [
-      { "label": "Create a Kit (ConvertKit) OAuth app", "url": "https://app.kit.com/account_settings/developer_settings" },
+      {
+        "label": "Create a Kit (ConvertKit) OAuth app",
+        "url": "https://app.kit.com/account_settings/developer_settings"
+      },
       { "label": "Configure the redirect URI" },
       { "label": "Copy your Client ID and Client Secret" }
     ]
