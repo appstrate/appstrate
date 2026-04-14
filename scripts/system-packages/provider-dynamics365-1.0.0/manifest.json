@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Microsoft Dynamics 365",
   "description": "Enterprise CRM and ERP platform by Microsoft",
-  "iconUrl": "https://www.google.com/s2/favicons?domain=dynamics.microsoft.com&sz=128",
+  "iconUrl": "microsoftdynamics",
   "categories": ["crm", "sales", "erp"],
   "docsUrl": "https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/overview",
   "definition": {

@@ -93,6 +93,7 @@ const ICON_MAP: Record<string, IconEntry> = {
   linkedin: { icon: FaLinkedin, color: "#0A66C2" },
   loom: { icon: SiLoom, color: "#625DF5" },
   mailchimp: { icon: SiMailchimp, color: "#FFE01B", darkInvert: true },
+  microsoftdynamics: { icon: FaMicrosoft, color: "#002050" },
   microsoftonedrive: { icon: FaMicrosoft, color: "#0078D4" },
   microsoftoutlook: { icon: FaMicrosoft, color: "#0078D4" },
   microsoftteams: { icon: FaMicrosoft, color: "#4B53BC" },
