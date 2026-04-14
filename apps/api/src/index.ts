@@ -27,6 +27,7 @@ import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
 import { createEndUsersRouter } from "./routes/end-users.ts";
+import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads.ts";
 import healthRouter from "./routes/health.ts";
 import { createConnectionsRouter } from "./routes/connections.ts";
 import { createLibraryRouter } from "./routes/library.ts";
@@ -128,6 +129,7 @@ const CORE_APP_SCOPED_PREFIXES = [
   "/api/providers",
   "/api/connections",
   "/api/app-profiles",
+  "/api/uploads",
 ];
 let _appScopedPrefixes: string[] | null = null;
 function getAppScopedPrefixes(): string[] {
@@ -188,6 +190,10 @@ app.route("/api", runsRouter);
 app.route("/api", schedulesRouter);
 app.route("/api/packages", createPackagesRouter());
 app.route("/api/end-users", createEndUsersRouter());
+// Upload content sink MUST be registered BEFORE /api/uploads — more specific path first.
+// Public path (no auth middleware — authenticated via HMAC token), rate-limited.
+app.route("/api/uploads/_content", createUploadContentRouter());
+app.route("/api/uploads", createUploadsRouter());
 app.route("/api/providers", createProvidersRouter());
 app.route("/api/api-keys", createApiKeysRouter());
 app.route("/api/proxies", createProxiesRouter());

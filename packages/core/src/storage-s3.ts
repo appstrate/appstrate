@@ -8,7 +8,8 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
-import type { Storage } from "./storage.ts";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import type { Storage, CreateUploadUrlOptions, UploadUrlDescriptor } from "./storage.ts";
 
 /** Configuration for the S3 storage client. */
 export interface S3StorageConfig {
@@ -98,6 +99,26 @@ export function createS3Storage(config: S3StorageConfig): Storage {
           Key: makeKey(bucket, path),
         }),
       );
+    },
+
+    async createUploadUrl(
+      bucket: string,
+      path: string,
+      opts?: CreateUploadUrlOptions,
+    ): Promise<UploadUrlDescriptor> {
+      const expiresIn = opts?.expiresIn ?? 900;
+      const key = makeKey(bucket, path);
+      const cmd = new PutObjectCommand({
+        Bucket: config.bucket,
+        Key: key,
+        ...(opts?.mime ? { ContentType: opts.mime } : {}),
+        ...(opts?.maxSize ? { ContentLength: opts.maxSize } : {}),
+      });
+      const url = await getSignedUrl(client, cmd, { expiresIn });
+      // Client must echo the same Content-Type declared in the signature.
+      const headers: Record<string, string> = {};
+      if (opts?.mime) headers["Content-Type"] = opts.mime;
+      return { url, method: "PUT", headers, expiresIn };
     },
   };
 }

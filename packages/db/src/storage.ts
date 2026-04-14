@@ -3,7 +3,7 @@
 import { getEnv } from "@appstrate/env";
 import { createS3Storage } from "@appstrate/core/storage-s3";
 import { createFileSystemStorage } from "@appstrate/core/storage-fs";
-import type { Storage } from "@appstrate/core/storage";
+import type { Storage, CreateUploadUrlOptions, UploadUrlDescriptor } from "@appstrate/core/storage";
 
 let store: Storage | null = null;
 
@@ -18,7 +18,11 @@ function getStore(): Storage {
       endpoint: env.S3_ENDPOINT,
     });
   } else {
-    store = createFileSystemStorage({ basePath: env.FS_STORAGE_PATH });
+    store = createFileSystemStorage({
+      basePath: env.FS_STORAGE_PATH,
+      uploadBaseUrl: env.APP_URL,
+      uploadSecret: env.BETTER_AUTH_SECRET,
+    });
   }
 
   return store;
@@ -42,4 +46,12 @@ export function deleteFile(bucket: string, path: string): Promise<void> {
 
 export function ensureBucket(): Promise<void> {
   return getStore().ensureBucket();
+}
+
+export function createUploadUrl(
+  bucket: string,
+  path: string,
+  opts?: CreateUploadUrlOptions,
+): Promise<UploadUrlDescriptor> {
+  return getStore().createUploadUrl(bucket, path, opts);
 }

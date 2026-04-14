@@ -464,7 +464,6 @@ export function createRunsRouter() {
             effectiveAgent.manifest.input?.schema
               ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
               : undefined,
-            effectiveAgent.manifest.input?.fileConstraints,
           ),
         ]);
 
