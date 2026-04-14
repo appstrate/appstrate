@@ -12,8 +12,11 @@ import type {
   TitleFieldProps,
   DescriptionFieldProps,
   SubmitButtonProps,
+  ArrayFieldTemplateProps,
+  ArrayFieldItemTemplateProps,
 } from "@rjsf/utils";
 import { getSubmitButtonOptions } from "@rjsf/utils";
+import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -37,16 +40,28 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
     rawErrors,
   } = props;
 
-  const inputType =
-    type ?? (schema.format === "email" ? "email" : schema.format === "uri" ? "url" : "text");
+  const formatType =
+    schema.format === "email"
+      ? "email"
+      : schema.format === "uri"
+        ? "url"
+        : schema.format === "date"
+          ? "date"
+          : schema.format === "date-time"
+            ? "datetime-local"
+            : schema.format === "time"
+              ? "time"
+              : "text";
+  const inputType = type ?? formatType;
 
+  const isConst = schema && "const" in schema;
   return (
     <Input
       id={id}
       type={inputType}
       value={(value as string | number | undefined) ?? ""}
       required={required}
-      readOnly={readonly}
+      readOnly={readonly || isConst}
       disabled={disabled}
       autoFocus={autofocus}
       placeholder={(placeholder ?? (options?.["ui:placeholder"] as string | undefined)) as string}
@@ -96,7 +111,7 @@ export function FieldTemplate(props: FieldTemplateProps) {
         </Label>
       )}
       {children}
-      {rawDescription && !isFileWidget && (
+      {rawDescription && !isFileWidget && !isContainer && (
         <p className="text-muted-foreground text-xs">{rawDescription}</p>
       )}
       {rawErrors && rawErrors.length > 0 && (
@@ -130,6 +145,79 @@ export function DescriptionFieldTemplate(props: DescriptionFieldProps) {
     <p id={id} className="text-muted-foreground text-xs">
       {description}
     </p>
+  );
+}
+
+export function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
+  const { children, buttonsProps, hasToolbar } = props;
+  const {
+    hasMoveUp,
+    hasMoveDown,
+    hasRemove,
+    disabled,
+    onMoveUpItem,
+    onMoveDownItem,
+    onRemoveItem,
+  } = buttonsProps;
+  return (
+    <div className="border-border bg-muted/30 relative space-y-2 rounded-md border p-3">
+      <div className="space-y-3">{children}</div>
+      {hasToolbar && (hasMoveUp || hasMoveDown || hasRemove) && !disabled && (
+        <div className="flex justify-end gap-1">
+          {hasMoveUp && (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              onClick={onMoveUpItem}
+              aria-label="Move up"
+            >
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+          )}
+          {hasMoveDown && (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              onClick={onMoveDownItem}
+              aria-label="Move down"
+            >
+              <ArrowDown className="h-4 w-4" />
+            </Button>
+          )}
+          {hasRemove && (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              onClick={onRemoveItem}
+              aria-label="Remove"
+            >
+              <Trash2 className="text-destructive h-4 w-4" />
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function ArrayFieldTemplate(props: ArrayFieldTemplateProps) {
+  const { items, canAdd, onAddClick, disabled, readonly, title, schema, uiSchema } = props;
+  const description = (uiSchema?.["ui:description"] as string | undefined) ?? schema.description;
+  return (
+    <div className="space-y-3">
+      {title && <h3 className="text-sm font-medium">{title}</h3>}
+      {description && <p className="text-muted-foreground text-xs">{description}</p>}
+      {items && items.length > 0 && <div className="space-y-2">{items}</div>}
+      {canAdd && !readonly && (
+        <Button type="button" variant="outline" size="sm" onClick={onAddClick} disabled={disabled}>
+          <Plus className="mr-1 h-4 w-4" />
+          Ajouter
+        </Button>
+      )}
+    </div>
   );
 }
 

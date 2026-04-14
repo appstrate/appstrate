@@ -27,7 +27,7 @@ import {
 } from "@appstrate/db/storage";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
-import { invalidRequest, notFound } from "../lib/errors.ts";
+import { invalidRequest, notFound, conflict, gone } from "../lib/errors.ts";
 
 const UPLOAD_BUCKET = "uploads";
 const DEFAULT_EXPIRY_SECONDS = 900; // 15 min
@@ -173,10 +173,10 @@ export async function consumeUpload(
     throw notFound(`Upload '${uploadId}' not found`);
   }
   if (row.consumedAt) {
-    throw invalidRequest(`Upload '${uploadId}' has already been consumed`);
+    throw conflict("upload_consumed", `Upload '${uploadId}' has already been consumed`);
   }
   if (row.expiresAt.getTime() < Date.now()) {
-    throw invalidRequest(`Upload '${uploadId}' has expired`);
+    throw gone("upload_expired", `Upload '${uploadId}' has expired`);
   }
 
   const [bucket, ...rest] = row.storageKey.split("/");
@@ -188,17 +188,30 @@ export async function consumeUpload(
 
   const buffer = Buffer.from(data);
 
-  // Magic-byte MIME check (file-type reads first ~4100 bytes)
+  // Magic-byte MIME check (file-type reads first ~4100 bytes).
+  //
+  // When the manifest declares a specific binary MIME (e.g. application/pdf,
+  // image/png), we require `file-type` to recognise the bytes AND match. This
+  // closes the "client declares PDF, uploads plain text" hole — `file-type`
+  // returns undefined for text and an attacker-controlled payload would
+  // otherwise slip through.
+  //
+  // `application/octet-stream` is the explicit "any blob" marker — we accept
+  // whatever the client sent without sniffing.
   const sniffed = await fileTypeFromBuffer(buffer);
-  if (sniffed && row.mime && sniffed.mime !== row.mime) {
-    logger.warn("upload mime mismatch on consume", {
-      uploadId,
-      declared: row.mime,
-      sniffed: sniffed.mime,
-    });
-    throw invalidRequest(
-      `Upload '${uploadId}' content type '${sniffed.mime}' does not match declared '${row.mime}'`,
-    );
+  if (row.mime && row.mime !== "application/octet-stream") {
+    if (!sniffed || sniffed.mime !== row.mime) {
+      logger.warn("upload mime mismatch on consume", {
+        uploadId,
+        declared: row.mime,
+        sniffed: sniffed?.mime ?? null,
+      });
+      throw invalidRequest(
+        sniffed
+          ? `Upload '${uploadId}' content type '${sniffed.mime}' does not match declared '${row.mime}'`
+          : `Upload '${uploadId}' content does not match declared mime '${row.mime}'`,
+      );
+    }
   }
   if (buffer.length !== row.size) {
     logger.warn("upload size mismatch on consume", {

@@ -164,8 +164,10 @@ export function mapAfpsToRjsf(wrapper: SchemaWrapper): {
   schema: JSONSchemaObject;
   uiSchema: RjsfUiSchema;
 } {
-  const { schema, fileConstraints, uiHints, propertyOrder } = wrapper;
+  const { schema: rawSchema, fileConstraints, uiHints, propertyOrder } = wrapper;
   const uiSchema: RjsfUiSchema = {};
+  const properties: Record<string, JSONSchema7> = { ...(rawSchema?.properties ?? {}) };
+  const schema: JSONSchemaObject = { ...rawSchema, properties };
 
   if (propertyOrder?.length && schema?.properties) {
     const order = propertyOrder.filter((k) => k in schema.properties);
@@ -179,9 +181,17 @@ export function mapAfpsToRjsf(wrapper: SchemaWrapper): {
     const field: RjsfUiSchemaField = {};
     const hint = uiHints?.[key];
     const constraint = fileConstraints?.[key];
+    const items = getItems(prop);
+    const isArrayOfEnum =
+      getType(prop) === "array" && Array.isArray(items?.enum) && items.enum.length > 0;
+    const isConst = "const" in prop;
 
     if (hint?.placeholder) {
       field["ui:placeholder"] = hint.placeholder;
+    }
+
+    if (isConst) {
+      field["ui:readonly"] = true;
     }
 
     if (isFileField(prop)) {
@@ -192,6 +202,17 @@ export function mapAfpsToRjsf(wrapper: SchemaWrapper): {
       if (constraint?.maxSize != null) opts.maxSize = constraint.maxSize;
       if (prop.maxItems != null) opts.maxFiles = prop.maxItems;
       if (Object.keys(opts).length > 0) field["ui:options"] = opts;
+    } else if (isArrayOfEnum) {
+      // RJSF's ArrayField renders array-of-enum as repeatable rows (add/remove)
+      // unless `uniqueItems: true` is set — in which case it picks the multi-
+      // select path. Manifest authors writing `items.enum` almost always mean
+      // "pick N distinct values from this set", so we inject the flag here to
+      // spare them the footgun. Safe because backend validation runs against
+      // the original manifest schema, not this UI-adapted copy.
+      if (!prop.uniqueItems) {
+        properties[key] = { ...prop, uniqueItems: true };
+      }
+      field["ui:widget"] = "multiselect";
     } else if (typeof prop.maxLength === "number" && prop.maxLength > 500) {
       field["ui:widget"] = "textarea";
     }

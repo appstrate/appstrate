@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo } from "react";
 import type { WidgetProps } from "@rjsf/utils";
 import Select from "react-select";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { FileWidget } from "./file-widget";
+export { FileWidget } from "./file-widget";
 
 export function TextareaWidget(props: WidgetProps) {
   const { id, value, onChange, required, readonly, disabled, placeholder, rawErrors } = props;
@@ -87,10 +86,8 @@ export function MultiSelectWidget(props: WidgetProps) {
   const enumOptions =
     (options.enumOptions as { value: unknown; label: string }[] | undefined) ?? [];
 
-  const selected = useMemo(() => {
-    const raw = Array.isArray(value) ? value : [];
-    return enumOptions.filter((o) => raw.some((v) => String(v) === String(o.value)));
-  }, [value, enumOptions]);
+  const raw = Array.isArray(value) ? value : [];
+  const selected = enumOptions.filter((o) => raw.some((v) => String(v) === String(o.value)));
 
   return (
     <Select
@@ -122,11 +119,3 @@ export function MultiSelectWidget(props: WidgetProps) {
     />
   );
 }
-
-export const widgets = {
-  file: FileWidget,
-  TextareaWidget,
-  CheckboxWidget,
-  SelectWidget,
-  multiselect: MultiSelectWidget,
-};

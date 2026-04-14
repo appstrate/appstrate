@@ -15,34 +15,40 @@
 import { forwardRef, type ReactNode } from "react";
 import type { FormProps as RjsfFormProps } from "@rjsf/core";
 import RjsfForm from "@rjsf/core";
-import { customizeValidator } from "@rjsf/validator-ajv8";
-import Ajv2020 from "ajv/dist/2020.js";
 import { mapAfpsToRjsf, type SchemaWrapper } from "@appstrate/core/form";
+import { schemaFormValidator } from "./validator";
 import {
   BaseInputTemplate,
   FieldTemplate,
   TitleFieldTemplate,
   DescriptionFieldTemplate,
+  ArrayFieldTemplate,
+  ArrayFieldItemTemplate,
   SubmitButton,
 } from "./templates";
-import { widgets } from "./widgets";
+import {
+  FileWidget,
+  TextareaWidget,
+  CheckboxWidget,
+  SelectWidget,
+  MultiSelectWidget,
+} from "./widgets";
 
-// Validator with JSON Schema 2020-12 + ajv-formats, matching the backend. The
-// types exported by @rjsf/validator-ajv8 model AjvClass as the default Ajv
-// (draft-07). Supplying the 2020-12 class is fully supported at runtime but
-// requires a narrow cast at the boundary.
-export const schemaFormValidator = customizeValidator({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  AjvClass: Ajv2020 as unknown as any,
-  ajvOptionsOverrides: { strict: false },
-  ajvFormatOptions: {},
-});
+const widgets = {
+  file: FileWidget,
+  TextareaWidget,
+  CheckboxWidget,
+  SelectWidget,
+  multiselect: MultiSelectWidget,
+};
 
 const templates = {
   BaseInputTemplate,
   FieldTemplate,
   TitleFieldTemplate,
   DescriptionFieldTemplate,
+  ArrayFieldTemplate,
+  ArrayFieldItemTemplate,
   ButtonTemplates: { SubmitButton },
 };
 

@@ -13,7 +13,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import { rateLimit } from "../middleware/rate-limit.ts";
+import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { createUpload, writeFsUploadContent } from "../services/uploads.ts";
 import { parseBody, invalidRequest, unauthorized } from "../lib/errors.ts";
 import { verifyFsUploadToken } from "@appstrate/core/storage-fs";
@@ -70,7 +70,7 @@ export function createUploadsRouter() {
 export function createUploadContentRouter() {
   const router = new Hono<AppEnv>();
 
-  router.put("/", rateLimit(60), async (c) => {
+  router.put("/", rateLimitByIp(60), async (c) => {
     const token = c.req.query("token");
     if (!token) throw unauthorized("missing upload token");
     const env = getEnv();

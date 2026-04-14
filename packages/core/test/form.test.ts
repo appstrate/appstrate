@@ -62,14 +62,79 @@ describe("mergeWithDefaults", () => {
 });
 
 describe("mapAfpsToRjsf", () => {
-  it("passes schema through unchanged", () => {
+  it("preserves schema contents when no adapter-level tweaks apply", () => {
     const schema: JSONSchemaObject = {
       type: "object",
       properties: { name: { type: "string" } },
       required: ["name"],
     };
     const { schema: out } = mapAfpsToRjsf({ schema });
-    expect(out).toBe(schema);
+    expect(out).toEqual(schema);
+  });
+
+  it("marks const properties as read-only", () => {
+    const wrapper: SchemaWrapper = {
+      schema: {
+        type: "object",
+        properties: {
+          platform: { type: "string", const: "appstrate" },
+          name: { type: "string" },
+        },
+      },
+    };
+    const { uiSchema } = mapAfpsToRjsf(wrapper);
+    expect(uiSchema.platform).toMatchObject({ "ui:readonly": true });
+    expect(uiSchema.name).toBeUndefined();
+  });
+
+  it("maps array-of-enum to multiselect and injects uniqueItems", () => {
+    const wrapper: SchemaWrapper = {
+      schema: {
+        type: "object",
+        properties: {
+          channels: {
+            type: "array",
+            items: { type: "string", enum: ["email", "sms", "slack"] },
+          },
+        },
+      },
+    };
+    const { schema, uiSchema } = mapAfpsToRjsf(wrapper);
+    expect(uiSchema.channels).toMatchObject({ "ui:widget": "multiselect" });
+    expect(schema.properties.channels.uniqueItems).toBe(true);
+  });
+
+  it("preserves existing uniqueItems on array-of-enum", () => {
+    const wrapper: SchemaWrapper = {
+      schema: {
+        type: "object",
+        properties: {
+          tags: {
+            type: "array",
+            uniqueItems: false,
+            items: { type: "string", enum: ["a", "b"] },
+          },
+        },
+      },
+    };
+    const { schema } = mapAfpsToRjsf(wrapper);
+    // Falsy uniqueItems still triggers injection (the manifest author almost
+    // certainly wants the multi-select UX).
+    expect(schema.properties.tags?.uniqueItems).toBe(true);
+  });
+
+  it("does not mutate the input schema", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: {
+        tags: {
+          type: "array",
+          items: { type: "string", enum: ["a", "b"] },
+        },
+      },
+    };
+    mapAfpsToRjsf({ schema });
+    expect(schema.properties.tags?.uniqueItems).toBeUndefined();
   });
 
   it("maps file fields to ui:widget=file with options", () => {
