@@ -8,7 +8,7 @@
  * `test/integration/services/oauth-flows.test.ts`.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll } from "bun:test";
 import { db } from "@appstrate/db/client";
 import { endUsers } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
@@ -775,6 +775,126 @@ describe("Public end-user pages — /api/oauth/*", () => {
       // Display-only — never forwarded to BA.
       expect(location).not.toContain("email=");
       expect(location).not.toContain("display%40example.com");
+    });
+  });
+
+  // ─── Realm assignment at signup — full hook → adapter → DB round-trip ────
+  //
+  // These tests exercise the real browser-equivalent flow:
+  //   GET /api/oauth/register → captures the signed `oidc_pending_client`
+  //   cookie → POST /api/oauth/register with that cookie + form fields →
+  //   SELECT realm FROM "user" (and "session"). They are the canonical
+  //   coverage for the `setRealmResolver` → `user.create.before` hook →
+  //   BA drizzle-adapter INSERT path.
+  //
+  // Historically this was only covered at the token-mint layer
+  // (`oauth-flows.test.ts`, `realm-isolation.test.ts`), but those helpers
+  // short-circuit the hook by `db.update()`-ing `realm` directly after
+  // signup. That masked a real bug where BA's adapter stripped the
+  // `realm` column from the INSERT payload because it wasn't declared in
+  // `user.additionalFields` / `session.additionalFields` — the resolver
+  // returned the correct value, the hook merged it into `data`, then BA
+  // filtered it out on the way to the DB. The round-trip assertions
+  // below are what would have caught that.
+  describe("realm assignment at signup — hook → adapter → DB round-trip", () => {
+    // The test preload builds the BA singleton with every module's PLUGINS,
+    // but it does NOT run each module's `init()` (unlike the production
+    // boot path). The realm resolver is installed from inside `init()` via
+    // `setRealmResolver(oidcRealmResolver)` — without this wiring the BA
+    // `user.create.before` hook falls back to the "platform" default.
+    // Call the setter here so this suite exercises the real production
+    // code path. Idempotent: later calls overwrite the same module-level
+    // slot with the same function.
+    beforeAll(async () => {
+      const { setRealmResolver } = await import("@appstrate/db/auth");
+      const { oidcRealmResolver } = await import("../../../services/realm-resolver.ts");
+      setRealmResolver(oidcRealmResolver);
+    });
+
+    it("POST /register tags the user with realm='end_user:<applicationId>' for an application-level client", async () => {
+      const { clientId } = await registerClient(ctx);
+      const email = `realm-roundtrip+${crypto.randomUUID().slice(0, 8)}@example.com`;
+
+      // GET /register → capture the signed `oidc_pending_client` cookie
+      // and the CSRF token that the form includes in its hidden field.
+      const getRes = await app.request(
+        `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=x`,
+      );
+      expect(getRes.status).toBe(200);
+      // Use `getSetCookie()` to get each Set-Cookie header separately.
+      // Splitting on `,` is unsafe because cookies include `Expires=<RFC-1123 date>`
+      // which itself contains commas.
+      const getSetCookie = (getRes.headers as unknown as { getSetCookie?: () => string[] })
+        .getSetCookie;
+      const setCookies =
+        typeof getSetCookie === "function" ? getSetCookie.call(getRes.headers) : [];
+      const pendingCookie = setCookies.find((c) => c.startsWith("oidc_pending_client="));
+      const csrfCookie = setCookies.find((c) => c.startsWith("oidc_csrf="));
+      expect(pendingCookie).toBeDefined();
+      expect(csrfCookie).toBeDefined();
+      const html = await getRes.text();
+      const csrfToken = html.match(/name="_csrf"\s+value="([^"]+)"/)?.[1];
+      expect(csrfToken).toBeDefined();
+
+      // POST /register with both cookies + password fields.
+      const form = new URLSearchParams({
+        _csrf: csrfToken!,
+        name: "Roundtrip User",
+        email,
+        password: "Sup3rSecretPass!",
+      });
+      const postRes = await app.request(
+        `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=x`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            cookie: `${pendingCookie!.split(";")[0]}; ${csrfCookie!.split(";")[0]}`,
+          },
+          body: form.toString(),
+        },
+      );
+      // 302 (redirect to /authorize) or 200 (interstitial w/ verify email).
+      expect([200, 302]).toContain(postRes.status);
+
+      const { user: userTable, session: sessionTable } = await import("@appstrate/db/schema");
+      const { eq } = await import("drizzle-orm");
+      const [userRow] = await db
+        .select({ id: userTable.id, realm: userTable.realm })
+        .from(userTable)
+        .where(eq(userTable.email, email))
+        .limit(1);
+      expect(userRow).toBeDefined();
+      expect(userRow!.realm).toBe(`end_user:${ctx.defaultAppId}`);
+
+      // Sessions are created inline on signup when SMTP is disabled;
+      // when enabled the session appears only after email verification.
+      // Assert the denormalization path only when a row exists.
+      const sessionRows = await db
+        .select({ realm: sessionTable.realm })
+        .from(sessionTable)
+        .where(eq(sessionTable.userId, userRow!.id));
+      for (const s of sessionRows) {
+        expect(s.realm).toBe(`end_user:${ctx.defaultAppId}`);
+      }
+    });
+
+    it("POST /api/auth/sign-up/email without pending-client cookie tags user as realm='platform'", async () => {
+      const email = `platform-default+${crypto.randomUUID().slice(0, 8)}@example.com`;
+      const res = await app.request("/api/auth/sign-up/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password: "Sup3rSecretPass!", name: "Platform" }),
+      });
+      expect(res.status).toBe(200);
+      const { user: userTable } = await import("@appstrate/db/schema");
+      const { eq } = await import("drizzle-orm");
+      const [row] = await db
+        .select({ realm: userTable.realm })
+        .from(userTable)
+        .where(eq(userTable.email, email))
+        .limit(1);
+      expect(row?.realm).toBe("platform");
     });
   });
 });

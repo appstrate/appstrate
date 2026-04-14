@@ -496,10 +496,26 @@ function buildAuth(
         enabled: true,
         maxAge: 5 * 60, // 5 minutes
       },
+      additionalFields: {
+        // Denormalized from `user.realm` by `databaseHooks.session.create.before`.
+        // Same reason as `user.additionalFields.realm`: BA's adapter strips
+        // columns not declared here.
+        realm: { type: "string", required: false, input: false },
+      },
     },
 
     user: {
-      additionalFields: {},
+      additionalFields: {
+        // `realm` is set by `databaseHooks.user.create.before` via the
+        // injected realm resolver (see `setRealmResolver`). Declared here
+        // so BA's drizzle adapter doesn't strip it out of the create
+        // payload — BA filters the INSERT data against its own derived
+        // schema, which only includes columns declared via
+        // `additionalFields`. Without this, the `{ data: { realm } }`
+        // returned from the before-hook never reaches the DB and every
+        // new user falls back to the SQL default ("platform").
+        realm: { type: "string", required: false, input: false },
+      },
       changeEmail: {
         enabled: true,
         updateEmailWithoutVerification: !smtpEnabled,
