@@ -537,7 +537,7 @@ export const oidcPaths = {
   },
   "/api/applications/{id}/smtp-config": {
     get: {
-      tags: ["OAuth Clients"],
+      tags: ["Application Auth Config"],
       operationId: "getApplicationSmtpConfig",
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
       summary: "Get per-application SMTP configuration",
@@ -545,12 +545,19 @@ export const oidcPaths = {
         "Returns the SMTP configuration for an application. Password is NEVER returned. Drives email features (verification, magic-link, reset-password) for OAuth clients with `level: application` scoped to this app.",
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
-        "200": { description: "SMTP configuration" },
+        "200": {
+          description: "SMTP configuration",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SmtpConfigView" },
+            },
+          },
+        },
         "404": { description: "Application or configuration not found" },
       },
     },
     put: {
-      tags: ["OAuth Clients"],
+      tags: ["Application Auth Config"],
       operationId: "upsertApplicationSmtpConfig",
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
       summary: "Upsert per-application SMTP configuration",
@@ -565,12 +572,18 @@ export const oidcPaths = {
               type: "object",
               required: ["host", "port", "username", "pass", "fromAddress"],
               properties: {
-                host: { type: "string" },
+                host: { type: "string", minLength: 1, maxLength: 253 },
                 port: { type: "integer", minimum: 1, maximum: 65535 },
-                username: { type: "string" },
-                pass: { type: "string", writeOnly: true },
+                username: { type: "string", minLength: 1, maxLength: 320 },
+                pass: { type: "string", writeOnly: true, minLength: 1, maxLength: 1024 },
                 fromAddress: { type: "string", format: "email" },
-                fromName: { type: "string" },
+                fromName: {
+                  type: "string",
+                  maxLength: 200,
+                  pattern: '^[^"\\r\\n]*$',
+                  description:
+                    "Rejects quotes and CRLF to prevent email-header injection at send time.",
+                },
                 secureMode: { type: "string", enum: ["auto", "tls", "starttls", "none"] },
               },
             },
@@ -578,13 +591,20 @@ export const oidcPaths = {
         },
       },
       responses: {
-        "200": { description: "SMTP configuration saved" },
+        "200": {
+          description: "SMTP configuration saved",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SmtpConfigView" },
+            },
+          },
+        },
         "400": { description: "Validation error (invalid host / SSRF block)" },
-        "404": { description: "Application not found" },
+        "404": { description: "Application or configuration not found" },
       },
     },
     delete: {
-      tags: ["OAuth Clients"],
+      tags: ["Application Auth Config"],
       operationId: "deleteApplicationSmtpConfig",
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
       summary: "Delete per-application SMTP configuration",
@@ -597,7 +617,7 @@ export const oidcPaths = {
   },
   "/api/applications/{id}/smtp-config/test": {
     post: {
-      tags: ["OAuth Clients"],
+      tags: ["Application Auth Config"],
       operationId: "testApplicationSmtpConfig",
       summary: "Send a test email using the stored per-app SMTP configuration",
       description:
@@ -638,7 +658,7 @@ export const oidcPaths = {
   },
   "/api/applications/{id}/social-providers/{provider}": {
     get: {
-      tags: ["OAuth Clients"],
+      tags: ["Application Auth Config"],
       operationId: "getApplicationSocialProvider",
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -654,12 +674,19 @@ export const oidcPaths = {
         "Returns the stored OAuth App credentials for a given provider on this application. The client secret is NEVER returned. When absent, the provider's button is hidden on the tenant's login/register pages for `level: application` OAuth clients — no fallback to the instance env OAuth App.",
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
-        "200": { description: "Social provider configuration" },
+        "200": {
+          description: "Social provider configuration",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SocialProviderView" },
+            },
+          },
+        },
         "404": { description: "Application or configuration not found" },
       },
     },
     put: {
-      tags: ["OAuth Clients"],
+      tags: ["Application Auth Config"],
       operationId: "upsertApplicationSocialProvider",
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -700,13 +727,20 @@ export const oidcPaths = {
         },
       },
       responses: {
-        "200": { description: "Social provider configuration saved" },
+        "200": {
+          description: "Social provider configuration saved",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SocialProviderView" },
+            },
+          },
+        },
         "400": { description: "Validation error" },
-        "404": { description: "Application not found" },
+        "404": { description: "Application or configuration not found" },
       },
     },
     delete: {
-      tags: ["OAuth Clients"],
+      tags: ["Application Auth Config"],
       operationId: "deleteApplicationSocialProvider",
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string" } },
