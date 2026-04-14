@@ -620,4 +620,112 @@ describe("Public end-user pages — /api/oauth/*", () => {
       expect(html).toContain("Créer un compte");
     });
   });
+
+  describe("Magic-link confirmation interstitial — /api/oauth/magic-link/confirm", () => {
+    // The email embeds a URL pointing at this route (instead of directly at
+    // BA's `/api/auth/magic-link/verify`) so that email prefetchers (Resend
+    // click-tracking, SafeLinks, Gmail preview) cannot burn the one-shot
+    // token. GET renders a static page — safe to prefetch. POST verifies
+    // CSRF and 302s the browser to the BA verify endpoint.
+
+    function buildConfirmUrl(params: {
+      token: string;
+      clientId?: string;
+      callbackPath?: string;
+    }): string {
+      const origin = "http://localhost:3000";
+      const callbackURL = params.clientId
+        ? `${origin}/api/auth/oauth2/authorize?client_id=${encodeURIComponent(params.clientId)}&state=x`
+        : `${origin}${params.callbackPath ?? "/invite/tok/accept"}`;
+      const errorCallbackURL = `${origin}/api/oauth/login?client_id=${encodeURIComponent(params.clientId ?? "")}`;
+      const qp = new URLSearchParams();
+      qp.set("token", params.token);
+      qp.set("callbackURL", callbackURL);
+      qp.set("errorCallbackURL", errorCallbackURL);
+      return `/api/oauth/magic-link/confirm?${qp.toString()}`;
+    }
+
+    it("GET renders a confirmation form with CSRF token, does not consume the magic-link token", async () => {
+      const { clientId } = await registerClient(ctx);
+      const res = await app.request(buildConfirmUrl({ token: "magic_tok_abc", clientId }));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      const html = await res.text();
+      expect(html).toContain("Confirmer la connexion");
+      expect(html).toContain('name="_csrf"');
+      expect(html).toContain('method="POST"');
+      expect(html).toContain('action="/api/oauth/magic-link/confirm?');
+      // The confirm route never calls BA's verify — no session cookie is
+      // set. Only the CSRF cookie should appear.
+      const setCookie = res.headers.get("set-cookie") ?? "";
+      expect(setCookie).toContain("oidc_csrf=");
+      expect(setCookie).not.toContain("better-auth.session_token");
+    });
+
+    it("GET 400s when the token is missing", async () => {
+      const res = await app.request("/api/oauth/magic-link/confirm?callbackURL=x");
+      expect(res.status).toBe(400);
+      const html = await res.text();
+      expect(html).toContain("Lien de connexion invalide");
+    });
+
+    it("GET falls back to platform branding when the callbackURL has no client_id", async () => {
+      const res = await app.request(
+        buildConfirmUrl({ token: "magic_tok_inv", callbackPath: "/invite/tok/accept" }),
+      );
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain("Confirmer la connexion");
+    });
+
+    it("POST without CSRF re-renders the confirmation form with 403", async () => {
+      const { clientId } = await registerClient(ctx);
+      const res = await app.request(buildConfirmUrl({ token: "magic_tok", clientId }), {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "_csrf=wrong",
+      });
+      expect(res.status).toBe(403);
+      const html = await res.text();
+      expect(html).toContain("Confirmer la connexion");
+    });
+
+    it("POST with valid CSRF 302s to Better Auth's verify endpoint preserving token + callbackURL", async () => {
+      const { clientId } = await registerClient(ctx);
+      const confirmUrl = buildConfirmUrl({ token: "magic_tok_xyz", clientId });
+
+      // Prime CSRF via GET.
+      const getRes = await app.request(confirmUrl);
+      const csrfCookie = (getRes.headers.get("set-cookie") ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith("oidc_csrf="));
+      expect(csrfCookie).toBeDefined();
+      const csrf = csrfCookie!.slice("oidc_csrf=".length).split(";")[0]!;
+
+      const res = await app.request(confirmUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          cookie: csrfCookie!,
+        },
+        body: `_csrf=${encodeURIComponent(csrf)}`,
+      });
+      expect(res.status).toBe(302);
+      const location = res.headers.get("location") ?? "";
+      expect(location).toContain("/api/auth/magic-link/verify");
+      expect(location).toContain("token=magic_tok_xyz");
+      expect(location).toContain("callbackURL=");
+      expect(location).toContain("errorCallbackURL=");
+    });
+
+    it("POST 400s when the token is missing", async () => {
+      const res = await app.request("/api/oauth/magic-link/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "_csrf=x",
+      });
+      expect(res.status).toBe(400);
+    });
+  });
 });

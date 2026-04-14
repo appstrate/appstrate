@@ -102,6 +102,7 @@ const oidcModule: AppstrateModule = {
     "/api/oauth/consent",
     "/api/oauth/logout",
     "/api/oauth/magic-link",
+    "/api/oauth/magic-link/confirm",
     "/api/oauth/forgot-password",
     "/api/oauth/reset-password",
     "/api/oauth/assets/social-sign-in.js",

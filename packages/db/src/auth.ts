@@ -189,13 +189,31 @@ function buildBasePlugins(
             disableSignUp: false,
             expiresIn: 7 * 24 * 60 * 60, // 7 days — matches invitation expiry
             allowedAttempts: 5, // Browsers may hit verify multiple times (prefetch, preconnect)
-            sendMagicLink: async ({ email, url }) => {
+            sendMagicLink: async ({ email, url: rawUrl }) => {
               try {
                 const normalizedEmail = email.toLowerCase().trim();
 
                 // Parse callbackURL from the magic link to determine context
-                const callbackURL = new URL(url).searchParams.get("callbackURL") ?? "";
+                const callbackURL = new URL(rawUrl).searchParams.get("callbackURL") ?? "";
                 const isInvitation = callbackURL.startsWith("/invite/");
+
+                // Rewrite the verify URL to route through the OIDC module's
+                // confirmation interstitial so that one-shot token consumption
+                // is gated behind an explicit click. Without this, email
+                // clients (Resend click-tracking, Outlook SafeLinks, Gmail
+                // preview, Apple Mail preview, corporate URL scanners)
+                // prefetch the `GET` link and burn the token before the user
+                // clicks — producing a `session_expired` on the relying-party
+                // callback. Mirrors Slack/Notion/Linear/Supabase.
+                //
+                // The confirm page lives in the OIDC module but is generic
+                // (falls back to platform branding when the callbackURL has
+                // no client_id, e.g. invitation flows).
+                const rewritten = new URL(rawUrl);
+                if (rewritten.pathname === "/api/auth/magic-link/verify") {
+                  rewritten.pathname = "/api/oauth/magic-link/confirm";
+                }
+                const url = rewritten.toString();
 
                 let subject: string;
                 let html: string;

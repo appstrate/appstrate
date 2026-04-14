@@ -49,7 +49,7 @@ import {
   clearPendingClientCookie,
 } from "./services/pending-client-cookie.ts";
 import { isValidRedirectUri } from "./services/redirect-uri.ts";
-import { resolveBrandingForClient } from "./services/branding.ts";
+import { resolveBrandingForClient, PLATFORM_DEFAULT_BRANDING } from "./services/branding.ts";
 import { issueCsrfToken, verifyCsrfToken } from "./services/csrf.ts";
 import {
   getSmtpConfig,
@@ -79,6 +79,7 @@ import { getEnv } from "@appstrate/env";
 import { renderLoginPage } from "./pages/login.ts";
 import { renderRegisterPage } from "./pages/register.ts";
 import { renderMagicLinkPage } from "./pages/magic-link.ts";
+import { renderMagicLinkConfirmPage } from "./pages/magic-link-confirm.ts";
 import { renderVerifyEmailSentPage } from "./pages/verify-email-sent.ts";
 import { renderForgotPasswordPage } from "./pages/forgot-password.ts";
 import { renderResetPasswordPage, renderInvalidTokenPage } from "./pages/reset-password.ts";
@@ -1388,6 +1389,121 @@ export function createOidcRouter() {
       sent: true,
     });
     return c.html(sentPage.value);
+  });
+
+  // ── Magic-link confirmation interstitial ──────────────────────────────────
+  //
+  // Gates the one-shot BA `/api/auth/magic-link/verify` behind an explicit
+  // click. The outgoing email (see `sendMagicLink` in packages/db/src/auth.ts)
+  // is rewritten to point here instead of directly at BA's verify endpoint.
+  //
+  // GET renders a static "Confirm sign-in" page — safe to prefetch (no state
+  // change). POST verifies the CSRF cookie and 302s the user's browser to
+  // BA's verify URL, where the token is consumed and the session cookie is
+  // set in the user's own browser (not the prefetcher's).
+  //
+  // Branding: client_id lives inside the URL-encoded `callbackURL` query
+  // param — we parse it defensively and fall back to platform defaults on
+  // any error. The confirm page is a short transitional surface; a missing
+  // brand is acceptable (the user is about to land on the authorize /
+  // application redirect anyway).
+
+  async function resolveConfirmBranding(
+    callbackURL: string | null,
+  ): Promise<Awaited<ReturnType<typeof resolveBrandingForClient>>> {
+    if (!callbackURL) return { ...PLATFORM_DEFAULT_BRANDING };
+    try {
+      const cb = new URL(callbackURL);
+      const clientId = cb.searchParams.get("client_id");
+      if (!clientId) return { ...PLATFORM_DEFAULT_BRANDING };
+      const record = await getClientCached(clientId);
+      if (!record) return { ...PLATFORM_DEFAULT_BRANDING };
+      return await resolveBrandingForClient(record);
+    } catch {
+      return { ...PLATFORM_DEFAULT_BRANDING };
+    }
+  }
+
+  function buildConfirmActionQuery(
+    token: string,
+    callbackURL: string | null,
+    errorCallbackURL: string | null,
+  ): string {
+    const params = new URLSearchParams();
+    params.set("token", token);
+    if (callbackURL) params.set("callbackURL", callbackURL);
+    if (errorCallbackURL) params.set("errorCallbackURL", errorCallbackURL);
+    return `?${params.toString()}`;
+  }
+
+  router.get("/api/oauth/magic-link/confirm", rateLimitByIp(60), async (c) => {
+    const url = new URL(c.req.url);
+    const token = url.searchParams.get("token");
+    if (!token) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien de connexion invalide",
+          message: "Ce lien de connexion n'est pas valide. Veuillez relancer la connexion.",
+        }).value,
+        400,
+      );
+    }
+    const callbackURL = url.searchParams.get("callbackURL");
+    const errorCallbackURL = url.searchParams.get("errorCallbackURL");
+    const branding = await resolveConfirmBranding(callbackURL);
+    const csrfToken = issueCsrfToken(c);
+    const body = renderMagicLinkConfirmPage({
+      action: `/api/oauth/magic-link/confirm${buildConfirmActionQuery(
+        token,
+        callbackURL,
+        errorCallbackURL,
+      )}`,
+      csrfToken,
+      branding,
+    });
+    return c.html(body.value);
+  });
+
+  router.post("/api/oauth/magic-link/confirm", rateLimitByIp(60), async (c) => {
+    const url = new URL(c.req.url);
+    const token = url.searchParams.get("token");
+    if (!token) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien de connexion invalide",
+          message: "Ce lien de connexion n'est pas valide. Veuillez relancer la connexion.",
+        }).value,
+        400,
+      );
+    }
+    const form = await c.req.parseBody();
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
+      const callbackURL = url.searchParams.get("callbackURL");
+      const errorCallbackURL = url.searchParams.get("errorCallbackURL");
+      const branding = await resolveConfirmBranding(callbackURL);
+      const csrfToken = issueCsrfToken(c);
+      const retry = renderMagicLinkConfirmPage({
+        action: `/api/oauth/magic-link/confirm${buildConfirmActionQuery(
+          token,
+          callbackURL,
+          errorCallbackURL,
+        )}`,
+        csrfToken,
+        branding,
+      });
+      return c.html(retry.value, 403);
+    }
+
+    // Hand off to Better Auth's verify endpoint in the USER's browser — BA
+    // consumes the single-use token, sets the session cookie on their origin,
+    // and 302s to callbackURL (the authorize endpoint).
+    const verifyUrl = new URL("/api/auth/magic-link/verify", url.origin);
+    verifyUrl.searchParams.set("token", token);
+    const callbackURL = url.searchParams.get("callbackURL");
+    const errorCallbackURL = url.searchParams.get("errorCallbackURL");
+    if (callbackURL) verifyUrl.searchParams.set("callbackURL", callbackURL);
+    if (errorCallbackURL) verifyUrl.searchParams.set("errorCallbackURL", errorCallbackURL);
+    return c.redirect(verifyUrl.toString(), 302);
   });
 
   // ── Public forgot-password page ───────────────────────────────────────────
