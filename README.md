@@ -4,6 +4,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![Docker Image](https://img.shields.io/badge/Docker-ghcr.io%2Fappstrate%2Fappstrate-blue)](https://github.com/appstrate/appstrate/pkgs/container/appstrate)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
+[![Discord](https://img.shields.io/discord/1492939551495426169?logo=discord&logoColor=white&label=community&color=5865F2)](https://discord.gg/5Js2CKWNnh)
 
 An open-source platform for running autonomous AI agents in sandboxed Docker containers. Each agent receives its full context (prompt, config, input, credentials) and runs to completion without human interaction — then returns structured results. Connect OAuth/API key services, click "Run" or schedule via cron, and let the AI handle the rest.
 
@@ -298,9 +299,16 @@ Appstrate runs autonomous AI agents in isolated containers, not predefined step-
 **Is this production-ready?**
 The platform is actively used in production. See [SECURITY.md](./SECURITY.md) for the threat model and defense layers, and [CHANGELOG.md](./CHANGELOG.md) for release history.
 
+## Community
+
+- 💬 [Discord](https://discord.gg/5Js2CKWNnh) — chat, questions, showcase what you're building
+- 💡 [GitHub Discussions](https://github.com/appstrate/appstrate/discussions) — long-form Q&A and proposals
+- 🐛 [GitHub Issues](https://github.com/appstrate/appstrate/issues) — bugs and feature requests
+
 ## Support
 
 - **Bug reports**: [GitHub Issues](https://github.com/appstrate/appstrate/issues)
+- **Questions**: [Discord](https://discord.gg/5Js2CKWNnh) or [GitHub Discussions](https://github.com/appstrate/appstrate/discussions)
 - **Security vulnerabilities**: See [SECURITY.md](./SECURITY.md) for responsible disclosure
 - **Developer guide**: See [CLAUDE.md](./CLAUDE.md) for architecture, testing, and conventions
 - **Email**: hello@appstrate.dev
