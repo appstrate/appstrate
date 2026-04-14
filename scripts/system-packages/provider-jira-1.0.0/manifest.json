@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Jira",
   "description": "Project tracking and issue management platform by Atlassian",
-  "iconUrl": "https://cdn.simpleicons.org/jira",
+  "iconUrl": "jira",
   "categories": ["project-management", "issue-tracking"],
   "docsUrl": "https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/",
   "definition": {
@@ -26,9 +26,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://api.atlassian.com/*"
-    ],
+    "authorizedUris": ["https://api.atlassian.com/*"],
     "availableScopes": [
       { "value": "read:jira-work", "label": "Read project and issue data" },
       { "value": "write:jira-work", "label": "Create and edit issues" },

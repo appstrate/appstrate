@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Basecamp",
   "description": "Project management and team communication platform",
-  "iconUrl": "https://cdn.simpleicons.org/basecamp",
+  "iconUrl": "basecamp",
   "categories": ["project-management", "collaboration"],
   "docsUrl": "https://github.com/basecamp/bc3-api",
   "definition": {
@@ -25,10 +25,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://3.basecampapi.com/*",
-      "https://launchpad.37signals.com/*"
-    ],
+    "authorizedUris": ["https://3.basecampapi.com/*", "https://launchpad.37signals.com/*"],
     "availableScopes": []
   },
   "setupGuide": {

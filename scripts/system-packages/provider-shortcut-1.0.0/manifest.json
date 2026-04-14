@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Shortcut",
   "description": "Project management platform for software development teams",
-  "iconUrl": "https://cdn.simpleicons.org/shortcut",
+  "iconUrl": "shortcut",
   "categories": ["project-management", "issue-tracking", "development"],
   "docsUrl": "https://developer.shortcut.com/api/rest/v3",
   "definition": {
@@ -25,9 +25,7 @@
     },
     "credentialHeaderName": "Shortcut-Token",
     "credentialHeaderPrefix": "",
-    "authorizedUris": [
-      "https://api.app.shortcut.com/*"
-    ]
+    "authorizedUris": ["https://api.app.shortcut.com/*"]
   },
   "setupGuide": {
     "steps": [

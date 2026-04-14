@@ -5,6 +5,9 @@ import { cn } from "@/lib/utils";
 
 /* ── react-icons: tree-shaken per-icon imports ────────────────────────── */
 import {
+  SiAirtable,
+  SiAsana,
+  SiBasecamp,
   SiBrevo,
   SiCalendly,
   SiCanva,
@@ -20,7 +23,9 @@ import {
   SiGooglesheets,
   SiHubspot,
   SiIntercom,
+  SiJira,
   SiKit,
+  SiLinear,
   SiLoom,
   SiMailchimp,
   SiNotion,
@@ -28,7 +33,9 @@ import {
   SiPinterest,
   SiQuickbooks,
   SiReddit,
+  SiSalesforce,
   SiShopify,
+  SiShortcut,
   SiSlack,
   SiStripe,
   SiTelegram,
@@ -40,6 +47,8 @@ import {
   SiX,
   SiXero,
   SiYoutube,
+  SiZendesk,
+  SiZoho,
   SiZoom,
 } from "react-icons/si";
 import { FaLinkedin, FaMicrosoft } from "react-icons/fa6";
@@ -60,6 +69,9 @@ interface IconEntry {
  * Add entries here when new system providers are added.
  */
 const ICON_MAP: Record<string, IconEntry> = {
+  airtable: { icon: SiAirtable, color: "#18BFFF" },
+  asana: { icon: SiAsana, color: "#F06A6A" },
+  basecamp: { icon: SiBasecamp, color: "#1D2D35", darkInvert: true },
   brevo: { icon: SiBrevo, color: "#0B996E" },
   calendly: { icon: SiCalendly, color: "#006BFF" },
   canva: { icon: SiCanva, color: "#00C4CC" },
@@ -75,7 +87,9 @@ const ICON_MAP: Record<string, IconEntry> = {
   googlesheets: { icon: SiGooglesheets, color: "#34A853" },
   hubspot: { icon: SiHubspot, color: "#FF7A59" },
   intercom: { icon: SiIntercom, color: "#1F8DED" },
+  jira: { icon: SiJira, color: "#0052CC" },
   kit: { icon: SiKit, color: "#FB6970" },
+  linear: { icon: SiLinear, color: "#5E6AD2" },
   linkedin: { icon: FaLinkedin, color: "#0A66C2" },
   loom: { icon: SiLoom, color: "#625DF5" },
   mailchimp: { icon: SiMailchimp, color: "#FFE01B", darkInvert: true },
@@ -87,7 +101,9 @@ const ICON_MAP: Record<string, IconEntry> = {
   pinterest: { icon: SiPinterest, color: "#BD081C" },
   quickbooks: { icon: SiQuickbooks, color: "#2CA01C" },
   reddit: { icon: SiReddit, color: "#FF4500" },
+  salesforce: { icon: SiSalesforce, color: "#00A1E0" },
   shopify: { icon: SiShopify, color: "#7AB55C" },
+  shortcut: { icon: SiShortcut, color: "#000000", darkInvert: true },
   slack: { icon: SiSlack, color: "#4A154B" },
   stripe: { icon: SiStripe, color: "#635BFF" },
   telegram: { icon: SiTelegram, color: "#26A5E4" },
@@ -100,6 +116,8 @@ const ICON_MAP: Record<string, IconEntry> = {
   x: { icon: SiX, color: "#000000", darkInvert: true },
   xero: { icon: SiXero, color: "#13B5EA" },
   youtube: { icon: SiYoutube, color: "#FF0000" },
+  zendesk: { icon: SiZendesk, color: "#03363D", darkInvert: true },
+  zoho: { icon: SiZoho, color: "#C8202F" },
   zoom: { icon: SiZoom, color: "#0B5CFF" },
 };
 

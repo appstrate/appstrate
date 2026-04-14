@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Asana",
   "description": "Work management platform for teams to organize and track projects",
-  "iconUrl": "https://cdn.simpleicons.org/asana",
+  "iconUrl": "asana",
   "categories": ["project-management", "collaboration"],
   "docsUrl": "https://developers.asana.com/docs/overview",
   "definition": {
