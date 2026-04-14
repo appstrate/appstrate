@@ -5,7 +5,7 @@ import { db, isEmbeddedDb, getPGliteClient, reservePgConnection } from "@appstra
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
-import { cleanupExpiredUploads } from "../services/uploads.ts";
+import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
 import { loadModules, getModules, getModuleContributions } from "./modules/module-loader.ts";
@@ -203,6 +203,9 @@ export async function boot(): Promise<void> {
   ];
 
   await Promise.all(parallelInits);
+
+  // Kick off the recurring upload sweep once initial cleanup is scheduled.
+  startUploadGc();
 }
 
 /**

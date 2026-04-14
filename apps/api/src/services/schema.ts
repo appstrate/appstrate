@@ -1,21 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import Ajv2020 from "ajv/dist/2020.js";
-import addFormatsImport from "ajv-formats";
-
-// ajv-formats ships a CJS default-export under an ESM wrapper; the named
-// type exposed by @types/ajv-formats expects AJV's Ajv (draft-07) class.
-// We use the 2020-12 vocabulary here so we cast through `unknown` — the
-// runtime shape is a function(Ajv instance), which matches either draft.
-const addFormats = addFormatsImport as unknown as (ajv: Ajv2020) => Ajv2020;
+import { createAjv } from "@appstrate/core/ajv";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import { normalizeConfigForValidation } from "../lib/agent-readiness-utils.ts";
 
 // --- AJV runtime validation ---
-
-const ajv = new Ajv2020({ coerceTypes: true, allErrors: true, strict: false });
-addFormats(ajv);
+//
+// Shared Ajv2020 + ajv-formats factory — mirrors the frontend RJSF validator so
+// client- and server-side validation agree. See packages/core/src/ajv.ts.
+const ajv = createAjv({ coerceTypes: true });
 
 // --- Section C: Validation functions ---
 

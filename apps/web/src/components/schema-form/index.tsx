@@ -68,8 +68,16 @@ export interface SchemaFormProps extends Omit<
   children?: ReactNode;
 }
 
+/**
+ * Submit-button rendering is controlled by a single signal:
+ * `ui:submitButtonOptions.norender`. When `showSubmitButton` is false (default)
+ * we set `norender: true` and let RJSF render whatever `children` the caller
+ * passes as a footer (or nothing). We never additionally pass `<></>` children —
+ * forwarding a non-null child and setting `norender` simultaneously was the
+ * redundant signal the review flagged.
+ */
 export const SchemaForm = forwardRef<RjsfForm, SchemaFormProps>(function SchemaForm(
-  { wrapper, showSubmitButton, children, uiSchema: extraUi, ...rest },
+  { wrapper, showSubmitButton = false, children, uiSchema: extraUi, ...rest },
   ref,
 ) {
   const mapped = mapAfpsToRjsf(wrapper);
@@ -89,7 +97,7 @@ export const SchemaForm = forwardRef<RjsfForm, SchemaFormProps>(function SchemaF
       templates={templates}
       {...rest}
     >
-      {children ?? (showSubmitButton ? undefined : <></>)}
+      {children}
     </RjsfForm>
   );
 });

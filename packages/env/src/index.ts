@@ -21,6 +21,10 @@ const envSchema = z
     // PGlite data directory (used when DATABASE_URL is absent)
     PGLITE_DATA_DIR: z.string().default("./data/pglite"),
     BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
+    // Dedicated HMAC secret for FS upload-sink tokens. When absent, falls back
+    // to BETTER_AUTH_SECRET — set this explicitly so rotating auth secrets
+    // does not invalidate in-flight uploads (and vice versa).
+    UPLOAD_SIGNING_SECRET: z.string().min(16).optional(),
     // S3 storage (optional — falls back to filesystem when S3_BUCKET is absent)
     S3_BUCKET: z.string().optional(),
     S3_REGION: z.string().optional(),

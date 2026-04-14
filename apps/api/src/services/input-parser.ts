@@ -38,7 +38,12 @@ function getArrayItems(prop: JSONSchema7): JSONSchema7 | undefined {
   return prop.items;
 }
 
-function collectUploadRefs(
+/**
+ * Walk the schema, find file-shaped properties, and validate that each
+ * matching input value is an `upload://` URI (or an array of them). Pure —
+ * exported for unit tests, has no I/O.
+ */
+export function collectUploadRefs(
   schema: JSONSchemaObject,
   input: Record<string, unknown>,
 ): { fieldName: string; uri: string }[] {

@@ -15,7 +15,7 @@
  *  - Expiry window (default 15 min) + GC worker removes orphans
  */
 
-import { and, eq, lt, isNull, inArray } from "drizzle-orm";
+import { and, eq, lt, isNull, inArray, sql } from "drizzle-orm";
 import { fileTypeFromBuffer } from "file-type";
 import { db } from "@appstrate/db/client";
 import { uploads } from "@appstrate/db/schema";
@@ -156,27 +156,65 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
 // ---------------------------------------------------------------------------
 
 /**
- * Look up an upload row, verify ownership + freshness, download the payload,
- * sniff the MIME via magic bytes, and mark it consumed.
+ * MIME prefixes/values where `file-type` cannot sniff a signature — these
+ * formats have no magic bytes (plain text, JSON, CSV, XML source, JS, etc.).
+ * For these we skip the sniff check and trust the declared mime. Callers
+ * that need strict binary validation should declare a concrete binary MIME
+ * (application/pdf, image/*, etc.) which `file-type` can identify.
+ */
+function isUnsniffableMime(mime: string): boolean {
+  if (mime.startsWith("text/")) return true;
+  if (mime === "application/json") return true;
+  if (mime === "application/xml" || mime === "application/x-yaml") return true;
+  if (mime === "application/javascript" || mime === "application/ecmascript") return true;
+  return false;
+}
+
+/**
+ * Look up an upload row, verify ownership + freshness, claim it atomically,
+ * download the payload, and sniff the MIME via magic bytes.
  *
- * Throws `invalidRequest` / `notFound` with stable codes — callers map them
- * back to RFC 9457 problem responses via the error handler.
+ * The claim (`UPDATE … WHERE consumedAt IS NULL RETURNING`) is what prevents
+ * the TOCTOU double-consume — two concurrent runs posting the same URI will
+ * see exactly one winning row.
+ *
+ * Throws `invalidRequest` / `notFound` / `conflict` / `gone` with stable
+ * codes — callers map them back to RFC 9457 problem responses.
  */
 export async function consumeUpload(
   uploadId: string,
   ctx: { orgId: string; applicationId: string },
 ): Promise<ConsumedUpload> {
+  // Pre-check so we can return the right shape of error (not-found vs
+  // cross-tenant vs already-consumed vs expired). The atomic claim below
+  // is what makes concurrent calls safe — this SELECT is just UX.
   const [row] = await db.select().from(uploads).where(eq(uploads.id, uploadId)).limit(1);
   if (!row) throw notFound(`Upload '${uploadId}' not found`);
   if (row.orgId !== ctx.orgId || row.applicationId !== ctx.applicationId) {
     // Hide cross-tenant existence
     throw notFound(`Upload '${uploadId}' not found`);
   }
-  if (row.consumedAt) {
-    throw conflict("upload_consumed", `Upload '${uploadId}' has already been consumed`);
-  }
   if (row.expiresAt.getTime() < Date.now()) {
     throw gone("upload_expired", `Upload '${uploadId}' has expired`);
+  }
+
+  // Atomic claim: only the caller whose UPDATE flips NULL → now() proceeds.
+  // Any racing caller gets zero rows back and is reported as already-consumed.
+  const claimed = await db
+    .update(uploads)
+    .set({ consumedAt: new Date() })
+    .where(
+      and(
+        eq(uploads.id, uploadId),
+        eq(uploads.orgId, ctx.orgId),
+        eq(uploads.applicationId, ctx.applicationId),
+        isNull(uploads.consumedAt),
+        sql`${uploads.expiresAt} >= now()`,
+      ),
+    )
+    .returning({ id: uploads.id });
+  if (claimed.length === 0) {
+    throw conflict("upload_consumed", `Upload '${uploadId}' has already been consumed`);
   }
 
   const [bucket, ...rest] = row.storageKey.split("/");
@@ -188,18 +226,35 @@ export async function consumeUpload(
 
   const buffer = Buffer.from(data);
 
+  // Reject mismatched size outright — an attacker can declare 1KB in the
+  // pre-signed request and PUT 100MB if the storage adapter doesn't enforce
+  // ContentLength at sign time (S3 currently does not).
+  if (buffer.length !== row.size) {
+    logger.warn("upload size mismatch on consume", {
+      uploadId,
+      declared: row.size,
+      actual: buffer.length,
+    });
+    throw invalidRequest(
+      `Upload '${uploadId}' size mismatch: declared ${row.size} bytes, got ${buffer.length}`,
+    );
+  }
+
   // Magic-byte MIME check (file-type reads first ~4100 bytes).
   //
-  // When the manifest declares a specific binary MIME (e.g. application/pdf,
-  // image/png), we require `file-type` to recognise the bytes AND match. This
-  // closes the "client declares PDF, uploads plain text" hole — `file-type`
-  // returns undefined for text and an attacker-controlled payload would
-  // otherwise slip through.
+  // When the manifest declares a concrete binary MIME (application/pdf,
+  // image/png, …), we require `file-type` to recognise the bytes AND match.
+  // This closes the "client declares PDF, uploads plain text" hole.
   //
-  // `application/octet-stream` is the explicit "any blob" marker — we accept
-  // whatever the client sent without sniffing.
-  const sniffed = await fileTypeFromBuffer(buffer);
-  if (row.mime && row.mime !== "application/octet-stream") {
+  // Two escape hatches:
+  //  - `application/octet-stream` is the explicit "any blob" marker.
+  //  - Text-ish MIMEs (text/*, application/json, application/xml, …) have
+  //    no magic signature, so `file-type` always returns undefined for them.
+  //    Strict matching would reject every legitimate text upload. We trust
+  //    the declared MIME for these — manifests that need binary-grade
+  //    validation must declare a sniffable MIME.
+  if (row.mime && row.mime !== "application/octet-stream" && !isUnsniffableMime(row.mime)) {
+    const sniffed = await fileTypeFromBuffer(buffer);
     if (!sniffed || sniffed.mime !== row.mime) {
       logger.warn("upload mime mismatch on consume", {
         uploadId,
@@ -213,15 +268,6 @@ export async function consumeUpload(
       );
     }
   }
-  if (buffer.length !== row.size) {
-    logger.warn("upload size mismatch on consume", {
-      uploadId,
-      declared: row.size,
-      actual: buffer.length,
-    });
-  }
-
-  await db.update(uploads).set({ consumedAt: new Date() }).where(eq(uploads.id, uploadId));
 
   return {
     id: uploadId,
@@ -265,32 +311,75 @@ export async function writeFsUploadContent(
  * Returns the number of rows removed.
  */
 export async function cleanupExpiredUploads(): Promise<number> {
-  const now = new Date();
-  const expired = await db
-    .select({ id: uploads.id, storageKey: uploads.storageKey })
-    .from(uploads)
-    .where(and(lt(uploads.expiresAt, now), isNull(uploads.consumedAt)))
-    .limit(500);
+  let totalRemoved = 0;
+  // Drain in batches — a long-running instance may accumulate more than the
+  // per-query cap between sweeps.
+  while (true) {
+    const expired = await db
+      .select({ id: uploads.id, storageKey: uploads.storageKey })
+      .from(uploads)
+      .where(and(lt(uploads.expiresAt, new Date()), isNull(uploads.consumedAt)))
+      .limit(500);
 
-  if (expired.length === 0) return 0;
+    if (expired.length === 0) break;
 
-  await Promise.all(
-    expired.map(async (row) => {
-      const [bucket, ...rest] = row.storageKey.split("/");
-      if (!bucket || rest.length === 0) return;
-      try {
-        await storageDelete(bucket, rest.join("/"));
-      } catch (err) {
-        logger.warn("failed to delete expired upload storage", {
-          uploadId: row.id,
+    await Promise.all(
+      expired.map(async (row) => {
+        const [bucket, ...rest] = row.storageKey.split("/");
+        if (!bucket || rest.length === 0) return;
+        try {
+          await storageDelete(bucket, rest.join("/"));
+        } catch (err) {
+          logger.warn("failed to delete expired upload storage", {
+            uploadId: row.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }),
+    );
+
+    const ids = expired.map((r) => r.id);
+    await db.delete(uploads).where(inArray(uploads.id, ids));
+    totalRemoved += expired.length;
+    if (expired.length < 500) break;
+  }
+  return totalRemoved;
+}
+
+// ---------------------------------------------------------------------------
+// Periodic GC timer
+// ---------------------------------------------------------------------------
+
+/** How often the background sweep runs. Aligned with the 15-min expiry window. */
+const UPLOAD_GC_INTERVAL_MS = 15 * 60 * 1000;
+
+let gcTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Start a background sweep that drains expired unconsumed uploads on a fixed
+ * interval. Safe to call multiple times — a no-op after the first.
+ */
+export function startUploadGc(): void {
+  if (gcTimer) return;
+  gcTimer = setInterval(() => {
+    cleanupExpiredUploads()
+      .then((count) => {
+        if (count > 0) logger.info("Removed expired unconsumed uploads", { count });
+      })
+      .catch((err) => {
+        logger.warn("Periodic upload GC failed", {
           error: err instanceof Error ? err.message : String(err),
         });
-      }
-    }),
-  );
+      });
+  }, UPLOAD_GC_INTERVAL_MS);
+  // Don't hold the event loop open for this timer alone.
+  gcTimer.unref?.();
+}
 
-  const ids = expired.map((r) => r.id);
-  await db.delete(uploads).where(inArray(uploads.id, ids));
-
-  return expired.length;
+/** Stop the background sweep. Called from the shutdown handler. */
+export function stopUploadGc(): void {
+  if (gcTimer) {
+    clearInterval(gcTimer);
+    gcTimer = null;
+  }
 }

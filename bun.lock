@@ -158,7 +158,8 @@
       "version": "2.10.7",
       "dependencies": {
         "@afps-spec/schema": "^1.3.1",
-        "@aws-sdk/s3-request-presigner": "^3.1030.0",
+        "ajv": "^8.18.0",
+        "ajv-formats": "^3.0.1",
         "fflate": "^0.8.0",
         "pino": "^10.3.1",
         "semver": "^7.7.1",
@@ -166,11 +167,13 @@
       },
       "peerDependencies": {
         "@aws-sdk/client-s3": "^3",
+        "@aws-sdk/s3-request-presigner": "^3",
         "hono": "^4.12.9",
         "typescript": "^5",
       },
       "optionalPeers": [
         "@aws-sdk/client-s3",
+        "@aws-sdk/s3-request-presigner",
         "hono",
       ],
     },
@@ -322,8 +325,6 @@
 
     "@aws-sdk/region-config-resolver": ["@aws-sdk/region-config-resolver@3.972.11", "", { "dependencies": { "@aws-sdk/types": "^3.973.7", "@smithy/config-resolver": "^4.4.14", "@smithy/node-config-provider": "^4.3.13", "@smithy/types": "^4.14.0", "tslib": "^2.6.2" } }, "sha512-6Q8B1dcx6BBqUTY1Mc/eROKA0FImEEY5VPSd6AGPEUf0ErjExz4snVqa9kNJSoVDV1rKaNf3qrWojgcKW+SdDg=="],
 
-    "@aws-sdk/s3-request-presigner": ["@aws-sdk/s3-request-presigner@3.1030.0", "", { "dependencies": { "@aws-sdk/signature-v4-multi-region": "^3.996.16", "@aws-sdk/types": "^3.973.7", "@aws-sdk/util-format-url": "^3.972.9", "@smithy/middleware-endpoint": "^4.4.29", "@smithy/protocol-http": "^5.3.13", "@smithy/smithy-client": "^4.12.9", "@smithy/types": "^4.14.0", "tslib": "^2.6.2" } }, "sha512-rLM1DjBb9QlQwijKGtVSfWGi2gEz8yYj244RRWsPoGAhl57xKS0OGq6MygP/UYTPVc6r5qr4a8Gq1wos4QxnVw=="],
-
     "@aws-sdk/signature-v4-multi-region": ["@aws-sdk/signature-v4-multi-region@3.996.16", "", { "dependencies": { "@aws-sdk/middleware-sdk-s3": "^3.972.28", "@aws-sdk/types": "^3.973.7", "@smithy/protocol-http": "^5.3.13", "@smithy/signature-v4": "^5.3.13", "@smithy/types": "^4.14.0", "tslib": "^2.6.2" } }, "sha512-EMdXYB4r/k5RWq86fugjRhid5JA+Z6MpS7n4sij4u5/C+STrkvuf9aFu41rJA9MjUzxCLzv8U2XL8cH2GSRYpQ=="],
 
     "@aws-sdk/token-providers": ["@aws-sdk/token-providers@3.1019.0", "", { "dependencies": { "@aws-sdk/core": "^3.973.25", "@aws-sdk/nested-clients": "^3.996.16", "@aws-sdk/types": "^3.973.6", "@smithy/property-provider": "^4.2.12", "@smithy/shared-ini-file-loader": "^4.4.7", "@smithy/types": "^4.13.1", "tslib": "^2.6.2" } }, "sha512-OF+2RfRmUKyjzrRWlDcyju3RBsuqcrYDQ8TwrJg8efcOotMzuZN4U9mpVTIdATpmEc4lWNZBMSjPzrGm6JPnAQ=="],
@@ -334,7 +335,7 @@
 
     "@aws-sdk/util-endpoints": ["@aws-sdk/util-endpoints@3.996.6", "", { "dependencies": { "@aws-sdk/types": "^3.973.7", "@smithy/types": "^4.14.0", "@smithy/url-parser": "^4.2.13", "@smithy/util-endpoints": "^3.3.4", "tslib": "^2.6.2" } }, "sha512-2nUQ+2ih7CShuKHpGSIYvvAIOHy52dOZguYG36zptBukhw6iFwcvGfG0tes0oZFWQqEWvgZe9HLWaNlvXGdOrg=="],
 
-    "@aws-sdk/util-format-url": ["@aws-sdk/util-format-url@3.972.9", "", { "dependencies": { "@aws-sdk/types": "^3.973.7", "@smithy/querystring-builder": "^4.2.13", "@smithy/types": "^4.14.0", "tslib": "^2.6.2" } }, "sha512-fNJXHrs0ZT7Wx0KGIqKv7zLxlDXt2vqjx9z6oKUQFmpE5o4xxnSryvVHfHpIifYHWKz94hFccIldJ0YSZjlCBw=="],
+    "@aws-sdk/util-format-url": ["@aws-sdk/util-format-url@3.972.8", "", { "dependencies": { "@aws-sdk/types": "^3.973.6", "@smithy/querystring-builder": "^4.2.12", "@smithy/types": "^4.13.1", "tslib": "^2.6.2" } }, "sha512-J6DS9oocrgxM8xlUTTmQOuwRF6rnAGEujAN9SAzllcrQmwn5iJ58ogxy3SEhD0Q7JZvlA5jvIXBkpQRqEqlE9A=="],
 
     "@aws-sdk/util-locate-window": ["@aws-sdk/util-locate-window@3.965.5", "", { "dependencies": { "tslib": "^2.6.2" } }, "sha512-WhlJNNINQB+9qtLtZJcpQdgZw3SCDCpXdUJP7cToGwHbCWCnRckGlc6Bx/OhWwIYFNAn+FIydY8SZ0QmVu3xTQ=="],
 
@@ -2182,8 +2183,6 @@
 
     "@aws-sdk/middleware-websocket/@aws-sdk/types": ["@aws-sdk/types@3.973.6", "", { "dependencies": { "@smithy/types": "^4.13.1", "tslib": "^2.6.2" } }, "sha512-Atfcy4E++beKtwJHiDln2Nby8W/mam64opFPTiHEqgsthqeydFS1pY+OUlN1ouNOmf8ArPU/6cDS65anOP3KQw=="],
 
-    "@aws-sdk/middleware-websocket/@aws-sdk/util-format-url": ["@aws-sdk/util-format-url@3.972.8", "", { "dependencies": { "@aws-sdk/types": "^3.973.6", "@smithy/querystring-builder": "^4.2.12", "@smithy/types": "^4.13.1", "tslib": "^2.6.2" } }, "sha512-J6DS9oocrgxM8xlUTTmQOuwRF6rnAGEujAN9SAzllcrQmwn5iJ58ogxy3SEhD0Q7JZvlA5jvIXBkpQRqEqlE9A=="],
-
     "@aws-sdk/middleware-websocket/@smithy/eventstream-serde-browser": ["@smithy/eventstream-serde-browser@4.2.12", "", { "dependencies": { "@smithy/eventstream-serde-universal": "^4.2.12", "@smithy/types": "^4.13.1", "tslib": "^2.6.2" } }, "sha512-XUSuMxlTxV5pp4VpqZf6Sa3vT/Q75FVkLSpSSE3KkWBvAQWeuWt1msTv8fJfgA4/jcJhrbrbMzN1AC/hvPmm5A=="],
 
     "@aws-sdk/middleware-websocket/@smithy/fetch-http-handler": ["@smithy/fetch-http-handler@5.3.15", "", { "dependencies": { "@smithy/protocol-http": "^5.3.12", "@smithy/querystring-builder": "^4.2.12", "@smithy/types": "^4.13.1", "@smithy/util-base64": "^4.3.2", "tslib": "^2.6.2" } }, "sha512-T4jFU5N/yiIfrtrsb9uOQn7RdELdM/7HbyLNr6uO/mpkj1ctiVs7CihVr51w4LyQlXWDpXFn4BElf1WmQvZu/A=="],
@@ -2265,6 +2264,12 @@
     "@aws-sdk/token-providers/@smithy/shared-ini-file-loader": ["@smithy/shared-ini-file-loader@4.4.7", "", { "dependencies": { "@smithy/types": "^4.13.1", "tslib": "^2.6.2" } }, "sha512-HrOKWsUb+otTeo1HxVWeEb99t5ER1XrBi/xka2Wv6NVmTbuCUC1dvlrksdvxFtODLBjsC+PHK+fuy2x/7Ynyiw=="],
 
     "@aws-sdk/token-providers/@smithy/types": ["@smithy/types@4.13.1", "", { "dependencies": { "tslib": "^2.6.2" } }, "sha512-787F3yzE2UiJIQ+wYW1CVg2odHjmaWLGksnKQHUrK/lYZSEcy1msuLVvxaR/sI2/aDe9U+TBuLsXnr3vod1g0g=="],
+
+    "@aws-sdk/util-format-url/@aws-sdk/types": ["@aws-sdk/types@3.973.6", "", { "dependencies": { "@smithy/types": "^4.13.1", "tslib": "^2.6.2" } }, "sha512-Atfcy4E++beKtwJHiDln2Nby8W/mam64opFPTiHEqgsthqeydFS1pY+OUlN1ouNOmf8ArPU/6cDS65anOP3KQw=="],
+
+    "@aws-sdk/util-format-url/@smithy/querystring-builder": ["@smithy/querystring-builder@4.2.12", "", { "dependencies": { "@smithy/types": "^4.13.1", "@smithy/util-uri-escape": "^4.2.2", "tslib": "^2.6.2" } }, "sha512-6wTZjGABQufekycfDGMEB84BgtdOE/rCVTov+EDXQ8NHKTUNIp/j27IliwP7tjIU9LR+sSzyGBOXjeEtVgzCHg=="],
+
+    "@aws-sdk/util-format-url/@smithy/types": ["@smithy/types@4.13.1", "", { "dependencies": { "tslib": "^2.6.2" } }, "sha512-787F3yzE2UiJIQ+wYW1CVg2odHjmaWLGksnKQHUrK/lYZSEcy1msuLVvxaR/sI2/aDe9U+TBuLsXnr3vod1g0g=="],
 
     "@babel/core/semver": ["semver@6.3.1", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA=="],
 
@@ -2499,8 +2504,6 @@
     "@aws-sdk/client-bedrock-runtime/@smithy/util-defaults-mode-node/@smithy/property-provider": ["@smithy/property-provider@4.2.12", "", { "dependencies": { "@smithy/types": "^4.13.1", "tslib": "^2.6.2" } }, "sha512-jqve46eYU1v7pZ5BM+fmkbq3DerkSluPr5EhvOcHxygxzD05ByDRppRwRPPpFrsFo5yDtCYLKu+kreHKVrvc7A=="],
 
     "@aws-sdk/client-bedrock-runtime/@smithy/util-retry/@smithy/service-error-classification": ["@smithy/service-error-classification@4.2.12", "", { "dependencies": { "@smithy/types": "^4.13.1" } }, "sha512-LlP29oSQN0Tw0b6D0Xo6BIikBswuIiGYbRACy5ujw/JgWSzTdYj46U83ssf6Ux0GyNJVivs2uReU8pt7Eu9okQ=="],
-
-    "@aws-sdk/middleware-websocket/@aws-sdk/util-format-url/@smithy/querystring-builder": ["@smithy/querystring-builder@4.2.12", "", { "dependencies": { "@smithy/types": "^4.13.1", "@smithy/util-uri-escape": "^4.2.2", "tslib": "^2.6.2" } }, "sha512-6wTZjGABQufekycfDGMEB84BgtdOE/rCVTov+EDXQ8NHKTUNIp/j27IliwP7tjIU9LR+sSzyGBOXjeEtVgzCHg=="],
 
     "@aws-sdk/middleware-websocket/@smithy/eventstream-serde-browser/@smithy/eventstream-serde-universal": ["@smithy/eventstream-serde-universal@4.2.12", "", { "dependencies": { "@smithy/eventstream-codec": "^4.2.12", "@smithy/types": "^4.13.1", "tslib": "^2.6.2" } }, "sha512-+yNuTiyBACxOJUTvbsNsSOfH9G9oKbaJE1lNL3YHpGcuucl6rPZMi3nrpehpVOVR2E07YqFFmtwpImtpzlouHQ=="],
 
