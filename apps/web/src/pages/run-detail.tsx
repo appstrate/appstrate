@@ -175,8 +175,8 @@ export function RunDetailPage() {
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           agent={agent}
-          onSubmit={(input, files) => {
-            runAgent.mutate({ input, files }, { onSuccess: () => setInputOpen(false) });
+          onSubmit={(input) => {
+            runAgent.mutate({ input }, { onSuccess: () => setInputOpen(false) });
           }}
           isPending={runAgent.isPending}
           initialValues={(run.input as Record<string, unknown>) ?? undefined}
