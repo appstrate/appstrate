@@ -1189,14 +1189,18 @@ export function createOidcRouter() {
 
     let cookieCount = forwardOAuthSessionCookies(c, authResponse, ctx.client.isFirstParty);
 
-    // Application-level clients without per-app SMTP → no way to deliver a
-    // verification email for this tenant. Auto-verify the freshly-created
-    // user and re-sign-in to get a session, so the subsequent /authorize
-    // redirect mints a token transparently. Instance env SMTP is explicitly
-    // NOT used as fallback — mixing tenant traffic through the platform's
-    // transport is the exact branding/deliverability leak this architecture
-    // is designed to prevent. Org-level and instance-level clients keep the
-    // env-driven flow.
+    // Application-level client without per-app SMTP → no tenant-owned transport
+    // to deliver a verification email. We auto-verify and re-sign-in so the
+    // subsequent /authorize redirect mints a token transparently. No tenant
+    // email is ever sent via the platform's instance SMTP.
+    //
+    // The `isInstanceSmtpEnabled()` guard is a behavioural precondition, not a
+    // fallback: when instance SMTP is configured, Better Auth wires
+    // `requireEmailVerification=true` and `sendOnSignUp=true` at boot, so the
+    // signUp call above blocks session issuance (cookieCount === 0) pending an
+    // email that will never arrive for this tenant. When instance SMTP is
+    // absent those BA flags are off, signUp already returns a session, and
+    // this branch is unnecessary.
     if (
       ctx.client.level === "application" &&
       !ctx.features.smtp &&

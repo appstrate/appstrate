@@ -27,7 +27,6 @@ import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
 import { applicationSocialProviders } from "../schema.ts";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
-import { createTestSpy } from "./test-spy.ts";
 import { logger } from "../../../lib/logger.ts";
 
 const ENCRYPTION_KEY_VERSION = "v1";
@@ -67,8 +66,11 @@ export interface SpiedSocialResolve {
   provider: SocialProviderId;
   hit: boolean;
 }
-const socialResolveSpy = createTestSpy<SpiedSocialResolve>("_setSocialSpy");
-export const _setSocialSpy = socialResolveSpy.setter;
+let socialResolveSpy: ((e: SpiedSocialResolve) => void) | null = null;
+export function _setSocialSpy(fn: ((e: SpiedSocialResolve) => void) | null): void {
+  if (process.env.NODE_ENV !== "test") throw new Error("_setSocialSpy is test-only");
+  socialResolveSpy = fn;
+}
 
 type SocialRow = typeof applicationSocialProviders.$inferSelect;
 
@@ -128,7 +130,7 @@ async function resolvePerApp(
       source: "per-app",
     };
   });
-  socialResolveSpy.emit({ applicationId, provider, hit: value !== null });
+  if (socialResolveSpy) socialResolveSpy({ applicationId, provider, hit: value !== null });
   return value;
 }
 

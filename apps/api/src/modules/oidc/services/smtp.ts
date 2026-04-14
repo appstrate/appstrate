@@ -35,7 +35,6 @@ import { getEnv } from "@appstrate/env";
 import { applicationSmtpConfigs } from "../schema.ts";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
-import { createTestSpy } from "./test-spy.ts";
 import { logger } from "../../../lib/logger.ts";
 
 const ENCRYPTION_KEY_VERSION = "v1";
@@ -78,16 +77,21 @@ export interface SpiedSmtpSend {
   from: string;
   subject: string;
 }
-const smtpSpy = createTestSpy<SpiedSmtpSend>("_setSmtpSpy");
-export const _setSmtpSpy = smtpSpy.setter;
+let smtpSpy: ((e: SpiedSmtpSend) => void) | null = null;
+export function _setSmtpSpy(fn: ((e: SpiedSmtpSend) => void) | null): void {
+  if (process.env.NODE_ENV !== "test") throw new Error("_setSmtpSpy is test-only");
+  smtpSpy = fn;
+}
 
 function wrapForSpy(transport: Transporter, source: "per-app" | "instance"): Transporter {
   const originalSendMail = transport.sendMail.bind(transport);
   transport.sendMail = async (mail: Parameters<Transporter["sendMail"]>[0]) => {
     const result = await originalSendMail(mail);
-    const to = Array.isArray(mail.to) ? mail.to.join(",") : String(mail.to ?? "");
-    const from = typeof mail.from === "string" ? mail.from : String(mail.from ?? "");
-    smtpSpy.emit({ source, to, from, subject: String(mail.subject ?? "") });
+    if (smtpSpy) {
+      const to = Array.isArray(mail.to) ? mail.to.join(",") : String(mail.to ?? "");
+      const from = typeof mail.from === "string" ? mail.from : String(mail.from ?? "");
+      smtpSpy({ source, to, from, subject: String(mail.subject ?? "") });
+    }
     return result;
   };
   return transport;
