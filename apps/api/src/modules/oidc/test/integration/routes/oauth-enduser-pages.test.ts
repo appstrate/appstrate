@@ -8,7 +8,7 @@
  * `test/integration/services/oauth-flows.test.ts`.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll } from "bun:test";
 import { db } from "@appstrate/db/client";
 import { endUsers } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
@@ -28,13 +28,21 @@ const app = getTestApp({ modules: [oidcModule] });
 
 async function registerClient(
   ctx: TestContext,
-  overrides: { name?: string; redirectUris?: string[] } = {},
+  overrides: {
+    name?: string;
+    redirectUris?: string[];
+    allowSignup?: boolean;
+  } = {},
 ): Promise<{ clientId: string; clientSecret: string }> {
   const body = {
     level: "application" as const,
     name: overrides.name ?? "Acme Portal",
     redirectUris: overrides.redirectUris ?? ["https://acme.example.com/oauth/callback"],
     referencedApplicationId: ctx.defaultAppId,
+    // Default to JIT ON for the end-user page happy-path tests — they
+    // simulate brand-new end-user sign-ups that would otherwise be rejected
+    // by the secure-by-default gate.
+    allowSignup: overrides.allowSignup ?? true,
   };
   const res = await app.request("/api/oauth/clients", {
     method: "POST",
@@ -556,6 +564,337 @@ describe("Public end-user pages — /api/oauth/*", () => {
           ),
         );
       expect(row?.role).toBe("admin");
+    });
+  });
+
+  describe("Application-level signup policy (unified with org/instance)", () => {
+    // Symmetric to the org-level tests above — since commit a2aae3af the
+    // `allowSignup` flag is honored uniformly across all client levels
+    // (SOTA alignment with FusionAuth/Auth0/Okta: CTA hidden when closed,
+    // not show-and-reject).
+
+    it("GET /login hides the 'Créer un compte' CTA when allowSignup=false on an app client", async () => {
+      const { clientId } = await registerClient(ctx, { allowSignup: false });
+      const res = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=x`,
+      );
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain('name="password"');
+      expect(html).not.toContain("Créer un compte");
+    });
+
+    it("GET /register renders an error page when allowSignup=false on an app client", async () => {
+      const { clientId } = await registerClient(ctx, { allowSignup: false });
+      const res = await app.request(
+        `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=x`,
+      );
+      expect(res.status).toBe(403);
+      const html = await res.text();
+      expect(html).toContain("Inscription fermée");
+      expect(html).not.toContain('name="password"');
+    });
+
+    it("POST /register rejects with 403 when allowSignup=false on an app client", async () => {
+      const { clientId } = await registerClient(ctx, { allowSignup: false });
+      const res = await app.request(
+        `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=x`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: "email=a@b.com&password=TestPassword123!&name=A",
+        },
+      );
+      expect(res.status).toBe(403);
+      const html = await res.text();
+      expect(html).toContain("Inscription fermée");
+    });
+
+    it("GET /login keeps the 'Créer un compte' CTA when allowSignup=true on an app client", async () => {
+      const { clientId } = await registerClient(ctx, { allowSignup: true });
+      const res = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=x`,
+      );
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain("Créer un compte");
+    });
+  });
+
+  describe("Magic-link confirmation interstitial — /api/oauth/magic-link/confirm", () => {
+    // The email embeds a URL pointing at this route (instead of directly at
+    // BA's `/api/auth/magic-link/verify`) so that email prefetchers (Resend
+    // click-tracking, SafeLinks, Gmail preview) cannot burn the one-shot
+    // token. GET renders a static page — safe to prefetch. POST verifies
+    // CSRF and 302s the browser to the BA verify endpoint.
+
+    function buildConfirmUrl(params: {
+      token: string;
+      clientId?: string;
+      callbackPath?: string;
+      email?: string;
+    }): string {
+      const origin = "http://localhost:3000";
+      const callbackURL = params.clientId
+        ? `${origin}/api/auth/oauth2/authorize?client_id=${encodeURIComponent(params.clientId)}&state=x`
+        : `${origin}${params.callbackPath ?? "/invite/tok/accept"}`;
+      const errorCallbackURL = `${origin}/api/oauth/login?client_id=${encodeURIComponent(params.clientId ?? "")}`;
+      const qp = new URLSearchParams();
+      qp.set("token", params.token);
+      qp.set("callbackURL", callbackURL);
+      qp.set("errorCallbackURL", errorCallbackURL);
+      if (params.email) qp.set("email", params.email);
+      return `/api/oauth/magic-link/confirm?${qp.toString()}`;
+    }
+
+    it("GET renders a confirmation form with CSRF token, does not consume the magic-link token", async () => {
+      const { clientId } = await registerClient(ctx);
+      const res = await app.request(buildConfirmUrl({ token: "magic_tok_abc", clientId }));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      const html = await res.text();
+      expect(html).toContain("Confirmer la connexion");
+      expect(html).toContain('name="_csrf"');
+      expect(html).toContain('method="POST"');
+      expect(html).toContain('action="/api/oauth/magic-link/confirm?');
+      // The confirm route never calls BA's verify — no session cookie is
+      // set. Only the CSRF cookie should appear.
+      const setCookie = res.headers.get("set-cookie") ?? "";
+      expect(setCookie).toContain("oidc_csrf=");
+      expect(setCookie).not.toContain("better-auth.session_token");
+    });
+
+    it("GET 400s when the token is missing", async () => {
+      const res = await app.request("/api/oauth/magic-link/confirm?callbackURL=x");
+      expect(res.status).toBe(400);
+      const html = await res.text();
+      expect(html).toContain("Lien de connexion invalide");
+    });
+
+    it("GET falls back to platform branding when the callbackURL has no client_id", async () => {
+      const res = await app.request(
+        buildConfirmUrl({ token: "magic_tok_inv", callbackPath: "/invite/tok/accept" }),
+      );
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain("Confirmer la connexion");
+    });
+
+    it("POST without CSRF re-renders the confirmation form with 403", async () => {
+      const { clientId } = await registerClient(ctx);
+      const res = await app.request(buildConfirmUrl({ token: "magic_tok", clientId }), {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "_csrf=wrong",
+      });
+      expect(res.status).toBe(403);
+      const html = await res.text();
+      expect(html).toContain("Confirmer la connexion");
+    });
+
+    it("POST with valid CSRF 302s to Better Auth's verify endpoint preserving token + callbackURL", async () => {
+      const { clientId } = await registerClient(ctx);
+      const confirmUrl = buildConfirmUrl({ token: "magic_tok_xyz", clientId });
+
+      // Prime CSRF via GET.
+      const getRes = await app.request(confirmUrl);
+      const csrfCookie = (getRes.headers.get("set-cookie") ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith("oidc_csrf="));
+      expect(csrfCookie).toBeDefined();
+      const csrf = csrfCookie!.slice("oidc_csrf=".length).split(";")[0]!;
+
+      const res = await app.request(confirmUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          cookie: csrfCookie!,
+        },
+        body: `_csrf=${encodeURIComponent(csrf)}`,
+      });
+      expect(res.status).toBe(302);
+      const location = res.headers.get("location") ?? "";
+      expect(location).toContain("/api/auth/magic-link/verify");
+      expect(location).toContain("token=magic_tok_xyz");
+      expect(location).toContain("callbackURL=");
+      expect(location).toContain("errorCallbackURL=");
+    });
+
+    it("POST 400s when the token is missing", async () => {
+      const res = await app.request("/api/oauth/magic-link/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "_csrf=x",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("GET displays the recipient email when provided (SOTA UX: Slack/Linear)", async () => {
+      const { clientId } = await registerClient(ctx);
+      const res = await app.request(
+        buildConfirmUrl({ token: "magic_tok_email", clientId, email: "user@example.com" }),
+      );
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain("user@example.com");
+      expect(html).toContain("en tant que");
+    });
+
+    it("GET renders a no-referrer meta tag to prevent token leakage in Referer", async () => {
+      const { clientId } = await registerClient(ctx);
+      const res = await app.request(buildConfirmUrl({ token: "magic_tok_ref", clientId }));
+      const html = await res.text();
+      expect(html).toContain('<meta name="referrer" content="no-referrer"');
+    });
+
+    it("POST forwards only token + callbackURLs to BA verify, not the display email", async () => {
+      const { clientId } = await registerClient(ctx);
+      const confirmUrl = buildConfirmUrl({
+        token: "magic_tok_forward",
+        clientId,
+        email: "display@example.com",
+      });
+      const getRes = await app.request(confirmUrl);
+      const csrfCookie = (getRes.headers.get("set-cookie") ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith("oidc_csrf="));
+      const csrf = csrfCookie!.slice("oidc_csrf=".length).split(";")[0]!;
+
+      const res = await app.request(confirmUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          cookie: csrfCookie!,
+        },
+        body: `_csrf=${encodeURIComponent(csrf)}`,
+      });
+      expect(res.status).toBe(302);
+      const location = res.headers.get("location") ?? "";
+      // Display-only — never forwarded to BA.
+      expect(location).not.toContain("email=");
+      expect(location).not.toContain("display%40example.com");
+    });
+  });
+
+  // ─── Realm assignment at signup — full hook → adapter → DB round-trip ────
+  //
+  // These tests exercise the real browser-equivalent flow:
+  //   GET /api/oauth/register → captures the signed `oidc_pending_client`
+  //   cookie → POST /api/oauth/register with that cookie + form fields →
+  //   SELECT realm FROM "user" (and "session"). They are the canonical
+  //   coverage for the `setRealmResolver` → `user.create.before` hook →
+  //   BA drizzle-adapter INSERT path.
+  //
+  // Historically this was only covered at the token-mint layer
+  // (`oauth-flows.test.ts`, `realm-isolation.test.ts`), but those helpers
+  // short-circuit the hook by `db.update()`-ing `realm` directly after
+  // signup. That masked a real bug where BA's adapter stripped the
+  // `realm` column from the INSERT payload because it wasn't declared in
+  // `user.additionalFields` / `session.additionalFields` — the resolver
+  // returned the correct value, the hook merged it into `data`, then BA
+  // filtered it out on the way to the DB. The round-trip assertions
+  // below are what would have caught that.
+  describe("realm assignment at signup — hook → adapter → DB round-trip", () => {
+    // The test preload builds the BA singleton with every module's PLUGINS,
+    // but it does NOT run each module's `init()` (unlike the production
+    // boot path). The realm resolver is installed from inside `init()` via
+    // `setRealmResolver(oidcRealmResolver)` — without this wiring the BA
+    // `user.create.before` hook falls back to the "platform" default.
+    // Call the setter here so this suite exercises the real production
+    // code path. Idempotent: later calls overwrite the same module-level
+    // slot with the same function.
+    beforeAll(async () => {
+      const { setRealmResolver } = await import("@appstrate/db/auth");
+      const { oidcRealmResolver } = await import("../../../services/oidc-realm-resolver.ts");
+      setRealmResolver(oidcRealmResolver);
+    });
+
+    it("POST /register tags the user with realm='end_user:<applicationId>' for an application-level client", async () => {
+      const { clientId } = await registerClient(ctx);
+      const email = `realm-roundtrip+${crypto.randomUUID().slice(0, 8)}@example.com`;
+
+      // GET /register → capture the signed `oidc_pending_client` cookie
+      // and the CSRF token that the form includes in its hidden field.
+      const getRes = await app.request(
+        `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=x`,
+      );
+      expect(getRes.status).toBe(200);
+      // Use `getSetCookie()` to get each Set-Cookie header separately.
+      // Splitting on `,` is unsafe because cookies include `Expires=<RFC-1123 date>`
+      // which itself contains commas.
+      const getSetCookie = (getRes.headers as unknown as { getSetCookie?: () => string[] })
+        .getSetCookie;
+      const setCookies =
+        typeof getSetCookie === "function" ? getSetCookie.call(getRes.headers) : [];
+      const pendingCookie = setCookies.find((c) => c.startsWith("oidc_pending_client="));
+      const csrfCookie = setCookies.find((c) => c.startsWith("oidc_csrf="));
+      expect(pendingCookie).toBeDefined();
+      expect(csrfCookie).toBeDefined();
+      const html = await getRes.text();
+      const csrfToken = html.match(/name="_csrf"\s+value="([^"]+)"/)?.[1];
+      expect(csrfToken).toBeDefined();
+
+      // POST /register with both cookies + password fields.
+      const form = new URLSearchParams({
+        _csrf: csrfToken!,
+        name: "Roundtrip User",
+        email,
+        password: "Sup3rSecretPass!",
+      });
+      const postRes = await app.request(
+        `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=x`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            cookie: `${pendingCookie!.split(";")[0]}; ${csrfCookie!.split(";")[0]}`,
+          },
+          body: form.toString(),
+        },
+      );
+      // 302 (redirect to /authorize) or 200 (interstitial w/ verify email).
+      expect([200, 302]).toContain(postRes.status);
+
+      const { user: userTable, session: sessionTable } = await import("@appstrate/db/schema");
+      const { eq } = await import("drizzle-orm");
+      const [userRow] = await db
+        .select({ id: userTable.id, realm: userTable.realm })
+        .from(userTable)
+        .where(eq(userTable.email, email))
+        .limit(1);
+      expect(userRow).toBeDefined();
+      expect(userRow!.realm).toBe(`end_user:${ctx.defaultAppId}`);
+
+      // Sessions are created inline on signup when SMTP is disabled;
+      // when enabled the session appears only after email verification.
+      // Assert the denormalization path only when a row exists.
+      const sessionRows = await db
+        .select({ realm: sessionTable.realm })
+        .from(sessionTable)
+        .where(eq(sessionTable.userId, userRow!.id));
+      for (const s of sessionRows) {
+        expect(s.realm).toBe(`end_user:${ctx.defaultAppId}`);
+      }
+    });
+
+    it("POST /api/auth/sign-up/email without pending-client cookie tags user as realm='platform'", async () => {
+      const email = `platform-default+${crypto.randomUUID().slice(0, 8)}@example.com`;
+      const res = await app.request("/api/auth/sign-up/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password: "Sup3rSecretPass!", name: "Platform" }),
+      });
+      expect(res.status).toBe(200);
+      const { user: userTable } = await import("@appstrate/db/schema");
+      const { eq } = await import("drizzle-orm");
+      const [row] = await db
+        .select({ realm: userTable.realm })
+        .from(userTable)
+        .where(eq(userTable.email, email))
+        .limit(1);
+      expect(row?.realm).toBe("platform");
     });
   });
 });

@@ -12,14 +12,16 @@ Phase 1 is **complete**. Token-issuance plugin wiring via `@better-auth/oauth-pr
 
 ## Owned tables
 
-| Table                    | Purpose                                                                                                                                    |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `jwks`                   | ES256 keypair storage for the Better Auth `jwt` plugin (rotated automatically).                                                            |
-| `oauth_client`           | Registered OAuth clients, scoped to an Appstrate `applicationId` via `reference_id`. SHA-256-hashed `client_secret` at rest.               |
-| `oauth_access_token`     | Access-token tracking table used by `@better-auth/oauth-provider` at token exchange + introspection time.                                  |
-| `oauth_refresh_token`    | Refresh-token tracking table used by `@better-auth/oauth-provider` for `grant_type=refresh_token`.                                         |
-| `oauth_consent`          | Per-user consent grants written by `/api/auth/oauth2/consent` on accept.                                                                   |
-| `oidc_end_user_profiles` | Shadow table linking `end_users.id` ↔ Better Auth `user.id` + verification status + `active` / `pending_verification` / `suspended` status |
+| Table                          | Purpose                                                                                                                                                                 |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `jwks`                         | ES256 keypair storage for the Better Auth `jwt` plugin (rotated automatically).                                                                                         |
+| `oauth_client`                 | Registered OAuth clients, scoped to an Appstrate `applicationId` via `reference_id`. SHA-256-hashed `client_secret` at rest.                                            |
+| `oauth_access_token`           | Access-token tracking table used by `@better-auth/oauth-provider` at token exchange + introspection time.                                                               |
+| `oauth_refresh_token`          | Refresh-token tracking table used by `@better-auth/oauth-provider` for `grant_type=refresh_token`.                                                                      |
+| `oauth_consent`                | Per-user consent grants written by `/api/auth/oauth2/consent` on accept.                                                                                                |
+| `oidc_end_user_profiles`       | Shadow table linking `end_users.id` ↔ Better Auth `user.id` + verification status + `active` / `pending_verification` / `suspended` status                              |
+| `application_smtp_configs`     | Per-application SMTP credentials for `level=application` OIDC flows (verification, magic-link, reset-password). Password AES-256-GCM encrypted.                         |
+| `application_social_providers` | Per-application Google/GitHub OAuth App credentials for `level=application` OIDC flows. Client secret AES-256-GCM encrypted. Composite PK `(application_id, provider)`. |
 
 The core `end_users` table is NEVER modified by this module — all OIDC-specific fields live on the shadow table. Core runs filtering continues to strict-filter by `end_users.id` alone.
 
@@ -43,11 +45,56 @@ When an end-user authenticates via the OIDC flow, the module resolves the applic
 
 1. **Linked** — INNER JOIN `end_users ⋈ oidc_end_user_profiles` on `auth_user_id` + `applicationId`. If a profile already links this Better Auth identity to an end-user in this app, return it. Single SELECT, idempotent.
 2. **Adopt by verified email** — If the auth identity's email is **strictly** verified (`emailVerified === true`), look for an API-created `end_users` row in this app with the same email and no profile row yet (or a profile row with `auth_user_id IS NULL`). If found, link it via `linkProfileAtomic()` (upsert with `WHERE auth_user_id IS NULL`, so only one caller wins the race; the loser falls back to step 1 on the next call).
-3. **Create fresh** — Insert a new `end_users` row + companion `oidc_end_user_profiles` row in a single `db.transaction()` so the shadow row can never be missing. On unique-index violation (another concurrent sign-in committed first), retry from step 1.
+3. **Create fresh** — Gated by the client's `allowSignup` policy. When `false` (secure-by-default), throws `AppSignupClosedError` and the token mint fails with an OAuth `access_denied` — admins must pre-create the end-user via `POST /api/end-users` first. When `true`, inserts a new `end_users` row + companion `oidc_end_user_profiles` row in a single `db.transaction()` so the shadow row can never be missing. On unique-index violation (another concurrent sign-in committed first), retry from step 1.
 
 ### `UnverifiedEmailConflictError`
 
 Thrown in step 2 when an `end_users` row with the same email already exists in the application **and** the authenticating identity has not strictly verified the email address. Rather than silently create a duplicate or adopt the row (either would enable account takeover when SMTP verification is disabled), the module refuses and propagates the error all the way up to `customAccessTokenClaims` → the plugin's `/oauth2/consent` endpoint → the module's consent handler, which catches it and renders an FR error page asking the user to verify their email before logging in. Unverified-email attempts therefore fail loudly at the edge, never at a later scoped request.
+
+### `AppSignupClosedError`
+
+Thrown in step 3 when the client's `allowSignup` is `false` and no existing `end_users` row can be linked/adopted. Same propagation path as `UnverifiedEmailConflictError`: bubbles up through `customAccessTokenClaims` and is caught by the consent handler to render an FR "contact your administrator" page. Mirrors the Auth0 "Disable Sign-Ups" / Keycloak "User Registration: off" / Okta JIT-off posture — secure-by-default for every new application client; opt in explicitly by setting `allowSignup: true` at create/update time when JIT provisioning is desired.
+
+## Audience isolation (`user.realm`)
+
+Appstrate shares a single Better Auth `user` table across audiences — platform operators (dashboard signup, org invitations, `level: "instance"` + `level: "org"` clients) AND end-users of third-party applications (`level: "application"` clients). Without a discriminator, a BA cookie session minted via the OIDC end-user flow would be indistinguishable from a platform session at the middleware layer — one logged-in end-user of app A would also have access to `/api/orgs`, `/api/agents`, etc. on the Appstrate platform itself.
+
+The `user.realm` column (added in `packages/db/drizzle/0001_add_user_realm.sql`) tags every BA row with its intended audience:
+
+- `"platform"` — dashboard users, org members, instance/org-level OIDC clients. Default for any signup that does not carry an `oidc_pending_client` cookie pointing at an `application`-level client.
+- `"end_user:<applicationId>"` — end-user of the named application. Assigned by the OIDC module's realm resolver (`services/oidc-realm-resolver.ts`) during `user.create.before` when the in-flight signup's pending-client cookie resolves to an `application`-level client.
+
+### Assignment — BA `user.create.before` hook
+
+The module's `init()` installs the resolver via `setRealmResolver()` in `packages/db/src/auth.ts`. At user creation time, BA calls the hook with the request headers; the resolver:
+
+1. Reads the signed `oidc_pending_client` cookie (same plumbing as `oidcBeforeSignupGuard`).
+2. Looks up the client's signup policy via `loadClientSignupPolicy`.
+3. Returns `"end_user:<applicationId>"` when the client is `level: "application"`, `"platform"` otherwise (no cookie, unknown client, org/instance level).
+
+The resulting realm is written into `user.realm` before the row is inserted. Production flows never need to update `realm` after creation — the audience is fixed at signup.
+
+### Enforcement — two guards in defense-in-depth
+
+1. **Request-time realm guard** (`middleware/realm-guard.ts`, wired in `lib/auth-pipeline.ts`). Runs after BA's cookie-session auth. For cookie sessions (`authMethod === "session"`), the pipeline reads `user.realm` via one indexed PK lookup and sets it on `c.sessionRealm`. The guard then rejects any cookie session whose realm is not `"platform"` when the request targets platform routes — except `/api/oauth/*` (OIDC entry pages legitimately accept end-user sessions) and `/api/auth/*` (BA's own endpoints for sign-out, email change, etc.). Returns 403 `problem+json`.
+
+2. **Token-mint realm guard** (`auth/plugins.ts::assertUserRealm`). Runs inside each claim builder (`buildInstanceLevelClaims`, `buildOrgLevelClaims`, `buildApplicationLevelClaims`) at `/oauth2/token` exchange:
+   - Instance + org builders require `realm === "platform"` — end-user sessions cannot mint dashboard tokens.
+   - Application builder requires `realm === "end_user:<applicationId>"` with an exact match against the client's `referencedApplicationId` — a platform admin cannot mint an end-user token for their own app, and an end-user of app A cannot mint a token for app B.
+
+   Mismatches throw RFC 6749 `access_denied` with a short description, so satellites render a clean "use an account provisioned for this audience" page instead of a generic 500.
+
+Non-cookie auth methods (Bearer API key, OIDC JWT auth strategies) are untouched by the request-time guard — API keys carry their own `applicationId` scope and JWTs set `endUser` context explicitly.
+
+### Design trade-off — single user table, global unique email
+
+Decision: keep `user.email` globally unique (not composite `(email, realm)`). Consequence: **one email can only exist in one realm**. A platform admin cannot be an end-user of their own app without signing up with a different email, and an end-user of app A cannot become an end-user of app B with the same email. This matches the Clerk / Auth0 / Keycloak "separate user pool per audience" posture, implemented at the application layer rather than via multiple tables. The alternative (composite unique) would require patching BA's email-based sign-in lookup to be realm-aware, which BA's adapter does not natively support in 1.6.
+
+If the product later needs cross-app shared end-user identities, the composite-unique migration is additive (index swap) — no data loss.
+
+### Test coverage
+
+`test/integration/routes/realm-isolation.test.ts` covers the default-platform assignment, platform session accepted on `/api/orgs`, end-user session rejected with 403 on `/api/orgs`, end-user session accepted on `/api/oauth/*`, session-realm denormalization, plus two token-mint cross-audience rejections (platform user → app client, end-user of app A → app B client). The happy-path application-level flow is covered end-to-end in `test/integration/services/oauth-flows.test.ts`.
 
 ## Feature flag
 
@@ -190,7 +237,8 @@ Colors are validated by `AppBrandingSchema` at resolve time, so a misconfigured 
   "redirectUris": ["https://mobile.example.com/callback"],
   "referencedApplicationId": "app_…",
   "scopes": ["openid", "profile", "email", "offline_access", "runs:read"],
-  "isFirstParty": false
+  "isFirstParty": false,
+  "allowSignup": false
 }
 
 // org-level client (dashboard users of a specific org)
@@ -292,6 +340,28 @@ Support for public clients (CLI / desktop / pure-SPA) is tracked as a follow-up.
 - **Admin bypass is not shipped**: Phase 0 made core runs filtering strict with no hook. Embedding apps that want an "admin sees all runs" view authenticate admins via API key (no `endUser` in context), not via an OIDC JWT. See `apps/api/src/modules/README.md` for the end-user run-visibility contract.
 - **Production guards plugin** (`auth/guards.ts`): a small Better Auth plugin mounted before `@better-auth/oauth-provider` that uses `hooks.before` on `/oauth2/token`, `/oauth2/authorize`, `/oauth2/introspect`, `/oauth2/revoke` to (1) enforce RFC 8707 resource indicators on token requests and (2) rate-limit each endpoint via the shared `rate-limiter-flexible` Redis backend. Limits: token 30/min/IP + 20/min/`client_id` (brute-force protection against distributed attacks or XFF-spoofed sources), authorize 30/min/IP, introspect 60/min/IP, revoke 60/min/IP. The login POST also has a per-email limit of 5 attempts / 15 min. The guards plugin deliberately supersedes `@better-auth/oauth-provider`'s own `rateLimit` config so there is only one limiter chain — see `auth/plugins.ts` for why. Rejections surface as `better-call` `APIError` → OAuth2-shaped 400/429 bodies.
 
+## Per-application social auth
+
+For `level=application` OIDC clients, Google/GitHub sign-in routes through the **tenant's** OAuth App — not the platform's. The tenant controls branding on the consent screen, requested scopes, and audit/revocation; the platform's env `GOOGLE_CLIENT_*` / `GITHUB_CLIENT_*` never touch an app-level flow. When a tenant hasn't configured credentials for a provider, that provider's button is hidden on the tenant's login/register pages (no fallback).
+
+**Storage**: `application_social_providers` keyed on `(application_id, provider)` with `clientId` + AES-256-GCM-encrypted `clientSecret` + optional `scopes[]`. ON DELETE CASCADE with `applications`.
+
+**Runtime wiring**:
+
+- `services/social.ts` — resolver with a 60s/30s TTL in-memory cache. Invalidated on every upsert/delete so admin changes are visible within one request.
+- `services/ba-social-override-plugin.ts` — a Better Auth plugin whose `before` hook matches `/sign-in/social` + `/callback/:provider`. It reads the signed `oidc_pending_client` cookie, looks up the OIDC client, resolves per-app creds, and calls `enterSocialOverride()` (AsyncLocalStorage).
+- `packages/db/src/auth.ts` — the `socialProviders.{google,github}.{clientId,clientSecret}` entries are **getters** that first consult `getSocialOverride()` and fall back to env. This relies on Better Auth's provider factories (`@better-auth/core/social-providers/{google,github}.mjs`) reading `options.clientId` / `options.clientSecret` lazily via property access inside `createAuthorizationURL` / `validateAuthorizationCode` rather than destructuring at init time — verified against BA 1.6.2.
+- `loadPageContext` in `routes.ts` populates `ctx.features.socialGoogle` / `.socialGithub` per-client: `application` → resolver result, `org`/`instance` → env presence.
+
+**Tenant setup**:
+
+1. Register a Google OAuth App at <https://console.cloud.google.com/apis/credentials> (or a GitHub OAuth App at <https://github.com/settings/developers>).
+2. Set the authorized redirect URI to `{APP_URL}/api/auth/callback/google` (or `.../github`). This URL is shared across all tenants — each tenant's OAuth App must register it.
+3. `PUT /api/applications/{applicationId}/social-providers/{google|github}` with `{ "clientId": "…", "clientSecret": "…", "scopes": ["openid","email","profile"] }` (scopes optional).
+4. The provider's button appears on the next login-page render (resolver cache: ≤60s).
+
+**Testing**: `services/social.ts` exposes `_setTestSocialSpy` so E2E tests can assert which per-app row a given request resolved against — mirrors `_setTestMailSpy` in `smtp-config.ts`.
+
 ## Production deployment checklist
 
 Before exposing the module to external satellites:
@@ -302,6 +372,19 @@ Before exposing the module to external satellites:
 - **JWKS rotation**: Better Auth's `jwt` plugin auto-rotates the ES256 keypair every 90 days with a 7-day grace window. Satellites that cache JWKS for longer WILL see transient `invalid_signature` errors. Document a 7-day cache ceiling in your satellite integration guide.
 - **`resource` parameter is now enforced**: `/oauth2/token` rejects `authorization_code` / `refresh_token` grants without a whitelisted `resource=` parameter. This is a **compat-break** vs. earlier builds which silently issued opaque tokens — satellites that previously "worked" (received opaque tokens) now fail fast with a diagnosable 400. See the satellite integration example below for the correct shape.
 - **`TRUST_PROXY` must match the deployment topology**: the OIDC rate limiters key on client IP, read via `lib/client-ip.ts` → `getClientIpFromRequest()`. That helper returns `X-Forwarded-For` when `TRUST_PROXY` is `"true"` or a positive integer, otherwise it falls back to the socket peer. If `TRUST_PROXY` is enabled but any hop between the public internet and the app does not strip untrusted XFF, an attacker can spoof the header and bypass per-IP limits. The per-`client_id` limiter on `/oauth2/token` is the defense-in-depth for this scenario — but do not rely on it alone: set `TRUST_PROXY` correctly for your topology (default `"false"` is the safe choice when in doubt).
+
+### Per-app secret encryption — rotation SOP
+
+`application_smtp_configs.pass_encrypted` and `application_social_providers.client_secret_encrypted` are AES-256-GCM encrypted via `CONNECTION_ENCRYPTION_KEY`. Each row also carries an `encryption_key_version` tag stamped at write time (see `services/smtp.ts or services/social.ts`). On read, the resolver compares the row's tag with `ENCRYPTION_KEY_VERSION`; a mismatch is treated as "not configured" (no silent decryption error, no silent fallback to env credentials).
+
+To rotate `CONNECTION_ENCRYPTION_KEY`:
+
+1. Bump `ENCRYPTION_KEY_VERSION` in `services/smtp.ts or services/social.ts` (e.g. `v1` → `v2`).
+2. Roll out the new `CONNECTION_ENCRYPTION_KEY` and the new constant together (blue/green).
+3. After deploy, per-app email + social auth are disabled for every tenant until an operator re-`PUT`s each `/api/applications/:id/smtp-config` and `/api/applications/:id/social-providers/:provider` row. For deployments with more than a handful of tenants, drive this via a one-off migration script that reads `CONNECTION_ENCRYPTION_KEY_OLD` + `CONNECTION_ENCRYPTION_KEY_NEW` side by side, decrypts each row with the old key, re-encrypts with the new key, and writes back via the admin API (which stamps the new `encryption_key_version`). Per-tenant `PUT`s become the fallback, not the default path.
+4. Rows carrying the old tag stay unreachable until explicitly rewritten — this is intentional: a stale ciphertext must never silently fall through to instance-level env credentials or surface as a cryptic crypto error.
+
+Cross-instance cache invalidation: admin `PUT`/`DELETE` publishes the invalidated key on the platform `PubSub` (`oidc:smtp-cache-invalidate`, `oidc:social-cache-invalidate`). Every API instance subscribes at boot and evicts its local `TtlCache` entry on publish — see `services/ttl-cache.ts`. When Redis is unavailable the subscribe fails open (logged as `oidc per-app cache: pub/sub subscribe failed, running single-instance`); in that mode, other pods only see admin mutations after the **10-second null TTL** expires. Multi-instance deployments MUST configure `REDIS_URL` for immediate invalidation. Operators should also expect a ≤10 s propagation window on freshly-configured SMTP/social rows (first read caches `null`, subsequent reads see the new row once the null entry expires).
 
 ## Satellite integration example
 

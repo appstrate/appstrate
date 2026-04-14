@@ -81,5 +81,14 @@ export type AppEnv = {
     apiVersion: string;
     /** Set by auth strategies that defer org resolution to X-Org-Id middleware. */
     deferOrgResolution?: boolean;
+    /**
+     * Realm captured from the BA session row (or user row) at auth time.
+     * `"platform"` for platform audiences (default, dashboard, org/instance
+     * OIDC clients); `"end_user:<applicationId>"` for end-users of an
+     * application-level OIDC client. Consumed by `requirePlatformRealm()`
+     * to reject BA cookie sessions that belong to a non-platform audience
+     * when hitting platform routes.
+     */
+    sessionRealm?: string;
   };
 };

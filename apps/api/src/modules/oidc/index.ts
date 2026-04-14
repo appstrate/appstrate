@@ -35,7 +35,13 @@ import { logger } from "../../lib/logger.ts";
 import { oidcAuthStrategy } from "./auth/strategy.ts";
 import { oidcBetterAuthPlugins } from "./auth/plugins.ts";
 import { oidcBeforeSignupGuard, oidcAfterSignupHandler } from "./auth/signup-guard.ts";
-import { createOidcRouter, createOAuthClientSchema, updateOAuthClientSchema } from "./routes.ts";
+import {
+  createOidcRouter,
+  createOAuthClientSchema,
+  updateOAuthClientSchema,
+  smtpConfigUpsertSchema,
+  socialProviderUpsertSchema,
+} from "./routes.ts";
 import { oidcPaths } from "./openapi/paths.ts";
 import { oidcSchemas } from "./openapi/schemas.ts";
 import { jwks, oauthClient, oauthAccessToken, oauthRefreshToken, oauthConsent } from "./schema.ts";
@@ -45,6 +51,8 @@ import {
   listFirstPartyClientIds,
 } from "./services/oauth-admin.ts";
 import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
+import { oidcRealmResolver } from "./services/oidc-realm-resolver.ts";
+import { setRealmResolver } from "@appstrate/db/auth";
 
 // Snapshot of first-party clientIds captured at `init()` time and forwarded
 // to `oauthProvider({ cachedTrustedClients })` when `betterAuthPlugins()` is
@@ -59,6 +67,12 @@ const oidcModule: AppstrateModule = {
     await ctx.applyMigrations("oidc", resolve(import.meta.dir, "drizzle/migrations"), {
       requireCoreTables: ["end_users", "user", "session", "organizations", "applications"],
     });
+    // Install the realm resolver so the BA user-create hook tags new
+    // end-user rows with `realm="end_user:<applicationId>"`. Platform-side
+    // signups (dashboard, org invitation, instance/org-level OIDC clients)
+    // keep the default "platform" realm. See the resolver file header and
+    // `packages/db/src/auth.ts::setRealmResolver` for the full contract.
+    setRealmResolver(oidcRealmResolver);
     // Auto-provision the instance-level first-party OIDC client for the
     // platform dashboard SPA. Idempotent — skips if one already exists.
     const env = getEnv();
@@ -97,6 +111,7 @@ const oidcModule: AppstrateModule = {
     "/api/oauth/consent",
     "/api/oauth/logout",
     "/api/oauth/magic-link",
+    "/api/oauth/magic-link/confirm",
     "/api/oauth/forgot-password",
     "/api/oauth/reset-password",
     "/api/oauth/assets/social-sign-in.js",
@@ -134,7 +149,14 @@ const oidcModule: AppstrateModule = {
   },
 
   openApiTags() {
-    return [{ name: "OAuth Clients", description: "OAuth 2.1 client registry for end-user auth" }];
+    return [
+      { name: "OAuth Clients", description: "OAuth 2.1 client registry for end-user auth" },
+      {
+        name: "Application Auth Config",
+        description:
+          "Per-application SMTP + social OAuth App configuration for `level: application` OIDC clients",
+      },
+    ];
   },
 
   openApiSchemas() {
@@ -150,6 +172,18 @@ const oidcModule: AppstrateModule = {
         path: "/api/oauth/clients/{clientId}",
         jsonSchema: z.toJSONSchema(updateOAuthClientSchema) as Record<string, unknown>,
         description: "Update OAuth client",
+      },
+      {
+        method: "PUT",
+        path: "/api/applications/{id}/smtp-config",
+        jsonSchema: z.toJSONSchema(smtpConfigUpsertSchema) as Record<string, unknown>,
+        description: "Upsert per-application SMTP configuration",
+      },
+      {
+        method: "PUT",
+        path: "/api/applications/{id}/social-providers/{provider}",
+        jsonSchema: z.toJSONSchema(socialProviderUpsertSchema) as Record<string, unknown>,
+        description: "Upsert per-application social auth provider",
       },
     ];
   },

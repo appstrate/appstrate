@@ -35,7 +35,10 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import type { Context } from "hono";
 import { getEnv } from "@appstrate/env";
+import { logger } from "../../../lib/logger.ts";
 import type { AppEnv } from "../../../types/index.ts";
+
+let insecureCookieWarned = false;
 
 const COOKIE_NAME = "oidc_pending_client";
 const COOKIE_MAX_AGE = 10 * 60; // 10 minutes
@@ -50,10 +53,22 @@ export function issuePendingClientCookie(c: Context<AppEnv>, clientId: string): 
   const payload = `${clientId}.${exp}`;
   const sig = signPayload(payload);
   const value = `${payload}.${sig}`;
+  const env = getEnv();
+  const secure = env.APP_URL.startsWith("https://");
+  if (!secure && process.env.NODE_ENV === "production" && !insecureCookieWarned) {
+    // An operator who mistyped `APP_URL` or fronts the platform with HTTP in
+    // production will ship the pending-client cookie unencrypted. Warn once
+    // per process so it surfaces in logs without flooding.
+    logger.warn(
+      "oidc: APP_URL is not https in production — pending-client cookie will be sent without Secure flag",
+      { appUrl: env.APP_URL },
+    );
+    insecureCookieWarned = true;
+  }
   setCookie(c, COOKIE_NAME, value, {
     httpOnly: true,
     sameSite: "Lax",
-    secure: getEnv().APP_URL.startsWith("https://"),
+    secure,
     path: "/",
     maxAge: COOKIE_MAX_AGE,
   });

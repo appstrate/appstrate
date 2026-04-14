@@ -127,13 +127,13 @@ describe("oidcBeforeSignupGuard + pending-client cookie", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("pass-through when the pending client is application-level", async () => {
+  it("blocks BA signup on an application-level client with allowSignup=false (unified semantic)", async () => {
     await expect(
       oidcBeforeSignupGuard({
         user: { email: "app@example.com" },
         headers: await signedCookieHeader(appClientId),
       }),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow();
   });
 
   it("pass-through on an org-level client with allowSignup=true", async () => {

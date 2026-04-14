@@ -45,6 +45,7 @@ import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { enableSmtpForSuite } from "../../../../../../test/helpers/smtp.ts";
 import { createClient } from "../../../services/oauth-admin.ts";
 import { _resetClientCache } from "../../../services/oauth-admin.ts";
+import { upsertSmtpConfig, _clearSmtpCacheForTesting } from "../../../services/smtp.ts";
 import oidcModule from "../../../index.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
@@ -98,6 +99,24 @@ async function setupSmtpFixture(): Promise<{
     name: "Verify Email Client",
     redirectUris: ["https://acme.example.com/oauth/callback"],
     referencedApplicationId: appId,
+    // This suite exercises brand-new end-user sign-ups through the
+    // OIDC verify-email / magic-link / password flows — JIT provisioning
+    // must be ON for the happy-path tests to mint a token.
+    allowSignup: true,
+  });
+
+  // Per-app SMTP is now required for email features on level=application
+  // clients (instance env SMTP is no longer used as fallback for tenant
+  // flows — it would mix customer email traffic on the platform domain).
+  // Wire a jsonTransport config here so the verify-email / magic-link /
+  // forgot-password branches stay reachable under test.
+  await upsertSmtpConfig(appId, {
+    host: "__test_json__",
+    port: 587,
+    username: "test",
+    pass: "test",
+    fromAddress: `no-reply@${appId}.test`,
+    fromName: "Verify Email App",
   });
 
   return { orgId: org!.id, defaultAppId: appId, clientId: client.clientId };
@@ -128,6 +147,7 @@ describe("OIDC email verification flow — SMTP enabled", () => {
   beforeEach(async () => {
     await truncateAll();
     _resetClientCache();
+    _clearSmtpCacheForTesting();
     fixture = await setupSmtpFixture();
   });
 

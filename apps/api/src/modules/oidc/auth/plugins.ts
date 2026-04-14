@@ -30,14 +30,18 @@
  */
 
 import { timingSafeEqual } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { jwt } from "better-auth/plugins";
 import { APIError } from "better-auth/api";
 import { getEnv } from "@appstrate/env";
+import { db } from "@appstrate/db/client";
+import { user as userTable } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import {
   resolveOrCreateEndUser,
   UnverifiedEmailConflictError,
+  AppSignupClosedError,
   loadAppById,
 } from "../services/enduser-mapping.ts";
 import {
@@ -46,6 +50,7 @@ import {
   resolveOrCreateOrgMembership,
 } from "../services/orgmember-mapping.ts";
 import { hashSecret } from "../services/oauth-admin.ts";
+import { socialOverridePlugin } from "../services/ba-social-override-plugin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 import { APPSTRATE_SCOPES } from "./scopes.ts";
 
@@ -106,6 +111,7 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       : undefined;
   return [
     oidcGuardsPlugin({ validAudiences }),
+    socialOverridePlugin(),
     jwt({
       jwks: { keyPairConfig: { alg: "ES256" } },
     }),
@@ -180,6 +186,54 @@ function strOrNull(value: unknown): string | null {
 }
 
 /**
+ * Enforce realm isolation at token-mint time. The BA `user.realm` column
+ * segregates audiences sharing the user table — platform operators
+ * (`"platform"`) vs end-users of application-level OIDC clients
+ * (`"end_user:<applicationId>"`). Without this check, a session minted
+ * under one audience could mint a token for another (e.g. end-user of
+ * app A requesting a token for app B, or a platform admin requesting an
+ * end-user token for their own app).
+ *
+ * Throws RFC 6749 `access_denied` on mismatch — the satellite client
+ * renders a clean auth error instead of a generic 500. Users recover by
+ * logging out + re-authenticating with an account provisioned for the
+ * target audience.
+ *
+ * Legacy users with NULL realm (pre-migration rows, should not exist
+ * after 0001_add_user_realm due to the default clause) are treated as
+ * `"platform"` — safer default since the request-time realm guard in the
+ * auth pipeline already blocks non-platform sessions from platform
+ * routes.
+ */
+async function assertUserRealm(
+  userId: string,
+  expected: string,
+  context: { clientLevel: string; applicationId?: string | null; orgId?: string | null },
+): Promise<void> {
+  const [row] = await db
+    .select({ realm: userTable.realm })
+    .from(userTable)
+    .where(eq(userTable.id, userId))
+    .limit(1);
+  const actual = row?.realm ?? "platform";
+  if (actual === expected) return;
+  logger.warn("oidc: realm mismatch at token mint — rejecting", {
+    module: "oidc",
+    userId,
+    expected,
+    actual,
+    clientLevel: context.clientLevel,
+    applicationId: context.applicationId ?? null,
+    orgId: context.orgId ?? null,
+  });
+  throw new APIError("FORBIDDEN", {
+    error: "access_denied",
+    error_description:
+      "This account is not permitted to sign in to this application. Sign out and use an account provisioned for this audience.",
+  });
+}
+
+/**
  * Dispatch on `metadata.level`. Defensive fallback returns `{}` so the
  * plugin still mints a token — at worst the strategy rejects it at verify
  * time because `actor_type` is missing.
@@ -214,6 +268,10 @@ async function buildInstanceLevelClaims(user: {
   name?: string | null;
   emailVerified?: boolean;
 }): Promise<Record<string, unknown>> {
+  // Instance clients serve platform audiences — dashboard SPA + satellite
+  // admin tools. Reject end-user realm sessions so an OIDC token minted
+  // under app A's scope cannot be replayed to mint an instance token.
+  await assertUserRealm(user.id, "platform", { clientLevel: "instance" });
   // Instance tokens carry NO org or application context. The user is a
   // Better Auth user who may belong to multiple organizations — org is
   // resolved per-request via X-Org-Id after authentication.
@@ -240,31 +298,20 @@ async function buildOrgLevelClaims(
     });
   }
 
+  // Org-level clients serve platform audiences (dashboard users mapped to
+  // org_members). Reject end-user realm sessions — an end-user of app A
+  // cannot become a dashboard user of org X by OIDC replay.
+  await assertUserRealm(user.id, "platform", { clientLevel: "org", orgId });
+
   // Load the mutable signup policy via the short-TTL client cache. Falls
-  // back to the "closed" default if the lookup fails for any reason —
-  // better to reject a legitimate mint than silently auto-join to a wrong
-  // role because the cache is cold.
-  let policy: { allowSignup: boolean; signupRole: "admin" | "member" | "viewer" } = {
-    allowSignup: false,
-    signupRole: "member",
-  };
-  if (metadata.clientId) {
-    const loaded = await loadClientSignupPolicy(metadata.clientId);
-    if (loaded && loaded.level === "org" && loaded.orgId === orgId) {
-      policy = { allowSignup: loaded.allowSignup, signupRole: loaded.signupRole };
-    } else if (!loaded) {
-      logger.warn("oidc: could not load policy for org-level client — defaulting to closed", {
-        module: "oidc",
-        clientId: metadata.clientId,
-      });
-    }
-  } else {
-    logger.warn("oidc: org-level client metadata missing clientId — defaulting to closed", {
-      module: "oidc",
-      userId: user.id,
-      orgId,
-    });
-  }
+  // back to the "closed" default if the client was deleted/disabled or its
+  // metadata drifted — better to reject a legitimate mint than silently
+  // auto-join to a wrong role.
+  const loaded = metadata.clientId ? await loadClientSignupPolicy(metadata.clientId) : null;
+  const policy: { allowSignup: boolean; signupRole: "admin" | "member" | "viewer" } =
+    loaded && loaded.level === "org" && loaded.orgId === orgId
+      ? { allowSignup: loaded.allowSignup, signupRole: loaded.signupRole }
+      : { allowSignup: false, signupRole: "member" };
 
   // Resolve or create the membership. For existing members this is a
   // single SELECT (the proactive call in routes.ts already created the row
@@ -338,6 +385,27 @@ async function buildApplicationLevelClaims(
     });
     throw new Error("oidc: referenced application not found");
   }
+
+  // Application-level tokens are end-user tokens. Enforce that the
+  // authenticating BA user was provisioned for THIS application — reject
+  // platform admins (realm="platform") and end-users of a different app
+  // (realm="end_user:B"). Per decision #2 (no cross-audience sharing),
+  // a platform admin wanting to test their own app as an end-user must
+  // re-signup with a separate account.
+  await assertUserRealm(user.id, `end_user:${applicationId}`, {
+    clientLevel: "application",
+    applicationId,
+  });
+  // Load the signup policy via the short-TTL cache — closed default on any
+  // lookup failure. Same rationale as `buildOrgLevelClaims`.
+  const loaded = metadata.clientId ? await loadClientSignupPolicy(metadata.clientId) : null;
+  const signupPolicy = {
+    allowSignup:
+      loaded?.level === "application" &&
+      loaded.applicationId === applicationId &&
+      loaded.allowSignup,
+  };
+
   // NOTE: this call may be the SECOND invocation for a given login —
   // `routes.ts` POST /api/oauth/login pre-resolves the end-user to surface
   // `UnverifiedEmailConflictError` as a 409 before the redirect chain. That
@@ -354,6 +422,7 @@ async function buildApplicationLevelClaims(
         emailVerified: user.emailVerified === true,
       },
       app,
+      signupPolicy,
     );
     return {
       actor_type: "end_user",
@@ -371,6 +440,20 @@ async function buildApplicationLevelClaims(
         email: err.email,
       });
       throw err;
+    }
+    if (err instanceof AppSignupClosedError) {
+      logger.warn("oidc: end-user signup blocked by client policy", {
+        module: "oidc",
+        applicationId: err.applicationId,
+        authUserId: err.authUserId,
+      });
+      // Map to a structured OAuth2 error so downstream satellites (portal)
+      // can render a "contact your admin" page instead of a generic 500.
+      throw new APIError("FORBIDDEN", {
+        error: "access_denied",
+        error_description:
+          "Sign-up is disabled for this application. Ask your administrator to create your account before signing in.",
+      });
     }
     logger.error("oidc: end-user resolution failed during token issuance", {
       module: "oidc",

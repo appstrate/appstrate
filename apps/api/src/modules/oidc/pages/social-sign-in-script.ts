@@ -126,8 +126,7 @@ export const SOCIAL_SIGN_IN_SCRIPT = `(function () {
       var data = await res.json();
       if (!data || !data.url) throw new Error("missing url");
       window.location.href = data.url;
-    } catch (err) {
-      console.error("social sign-in failed", err);
+    } catch (_err) {
       button.disabled = false;
       button.removeAttribute("aria-busy");
       button.innerHTML = original;

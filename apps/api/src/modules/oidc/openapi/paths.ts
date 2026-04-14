@@ -64,6 +64,11 @@ const applicationLevelClientRequest = {
     scopes: { type: "array", items: { type: "string" } },
     referencedApplicationId: { type: "string" },
     isFirstParty: { type: "boolean" },
+    allowSignup: {
+      type: "boolean",
+      description:
+        "When `true`, a successful OIDC login creates the `end_users` row on the fly (JIT provisioning). When `false` (default, secure-by-default), unknown end-users are rejected with an OAuth `access_denied` error — admins must pre-create them via `POST /api/end-users` first.",
+    },
   },
 };
 
@@ -96,12 +101,13 @@ const updateClientRequest = {
     allowSignup: {
       type: "boolean",
       description:
-        "Org-level only. When `true`, users signing in for the first time through this client are auto-joined to the referenced org with `signupRole`. Rejected with 400 on application/instance clients.",
+        "Unified signup opt-in. Instance: allows brand-new BA users platform-wide. Org: brand-new BA users + auto-join to the referenced org with `signupRole`. Application: brand-new BA users + JIT `end_users` provisioning.",
     },
     signupRole: {
       type: "string",
       enum: ["admin", "member", "viewer"],
-      description: "Org-level only. Role assigned on auto-join. `owner` forbidden.",
+      description:
+        "Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/application clients.",
     },
   },
 };
@@ -526,6 +532,230 @@ export const oidcPaths = {
       responses: {
         "200": { description: "Not typically returned — logout always redirects." },
         "302": { description: "Redirect to validated URI or `/`." },
+      },
+    },
+  },
+  "/api/applications/{id}/smtp-config": {
+    get: {
+      tags: ["Application Auth Config"],
+      operationId: "getApplicationSmtpConfig",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      summary: "Get per-application SMTP configuration",
+      description:
+        "Returns the SMTP configuration for an application. Password is NEVER returned. Drives email features (verification, magic-link, reset-password) for OAuth clients with `level: application` scoped to this app.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      responses: {
+        "200": {
+          description: "SMTP configuration",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SmtpConfigView" },
+            },
+          },
+        },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+    put: {
+      tags: ["Application Auth Config"],
+      operationId: "upsertApplicationSmtpConfig",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      summary: "Upsert per-application SMTP configuration",
+      description:
+        "Creates or replaces the SMTP configuration for an application. The `pass` field is encrypted at rest and never returned in any response.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["host", "port", "username", "pass", "fromAddress"],
+              properties: {
+                host: { type: "string", minLength: 1, maxLength: 253 },
+                port: { type: "integer", minimum: 1, maximum: 65535 },
+                username: { type: "string", minLength: 1, maxLength: 320 },
+                pass: { type: "string", writeOnly: true, minLength: 1, maxLength: 1024 },
+                fromAddress: { type: "string", format: "email" },
+                fromName: {
+                  type: "string",
+                  maxLength: 200,
+                  pattern: '^[^"\\r\\n]*$',
+                  description:
+                    "Rejects quotes and CRLF to prevent email-header injection at send time.",
+                },
+                secureMode: { type: "string", enum: ["auto", "tls", "starttls", "none"] },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "SMTP configuration saved",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SmtpConfigView" },
+            },
+          },
+        },
+        "400": { description: "Validation error (invalid host / SSRF block)" },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+    delete: {
+      tags: ["Application Auth Config"],
+      operationId: "deleteApplicationSmtpConfig",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      summary: "Delete per-application SMTP configuration",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      responses: {
+        "204": { description: "Deleted" },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+  },
+  "/api/applications/{id}/smtp-config/test": {
+    post: {
+      tags: ["Application Auth Config"],
+      operationId: "testApplicationSmtpConfig",
+      summary: "Send a test email using the stored per-app SMTP configuration",
+      description:
+        "Rate-limited. Uses the persisted config — upsert first, then test. SMTP server errors are surfaced verbatim so DKIM/SPF/auth issues reach the operator.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["to"],
+              properties: { to: { type: "string", format: "email" } },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Test email sent",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  ok: { type: "boolean" },
+                  messageId: { type: "string" },
+                  error: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+  },
+  "/api/applications/{id}/social-providers/{provider}": {
+    get: {
+      tags: ["Application Auth Config"],
+      operationId: "getApplicationSocialProvider",
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "provider",
+          in: "path",
+          required: true,
+          schema: { type: "string", enum: ["google", "github"] },
+        },
+      ],
+      summary: "Get per-application social auth provider configuration",
+      description:
+        "Returns the stored OAuth App credentials for a given provider on this application. The client secret is NEVER returned. When absent, the provider's button is hidden on the tenant's login/register pages for `level: application` OAuth clients — no fallback to the instance env OAuth App.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      responses: {
+        "200": {
+          description: "Social provider configuration",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SocialProviderView" },
+            },
+          },
+        },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+    put: {
+      tags: ["Application Auth Config"],
+      operationId: "upsertApplicationSocialProvider",
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "provider",
+          in: "path",
+          required: true,
+          schema: { type: "string", enum: ["google", "github"] },
+        },
+      ],
+      summary: "Upsert per-application social auth provider configuration",
+      description:
+        "Creates or replaces the OAuth App credentials for a given provider on this application. The `clientSecret` field is encrypted at rest and never returned in any response.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["clientId", "clientSecret"],
+              properties: {
+                clientId: { type: "string", minLength: 1, maxLength: 512 },
+                clientSecret: {
+                  type: "string",
+                  writeOnly: true,
+                  minLength: 1,
+                  maxLength: 2048,
+                },
+                scopes: {
+                  type: "array",
+                  items: { type: "string", minLength: 1, maxLength: 128 },
+                  maxItems: 32,
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Social provider configuration saved",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SocialProviderView" },
+            },
+          },
+        },
+        "400": { description: "Validation error" },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+    delete: {
+      tags: ["Application Auth Config"],
+      operationId: "deleteApplicationSocialProvider",
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "provider",
+          in: "path",
+          required: true,
+          schema: { type: "string", enum: ["google", "github"] },
+        },
+      ],
+      summary: "Delete per-application social auth provider configuration",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      responses: {
+        "204": { description: "Deleted" },
+        "404": { description: "Application or configuration not found" },
       },
     },
   },

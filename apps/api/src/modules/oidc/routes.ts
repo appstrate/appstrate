@@ -49,13 +49,31 @@ import {
   clearPendingClientCookie,
 } from "./services/pending-client-cookie.ts";
 import { isValidRedirectUri } from "./services/redirect-uri.ts";
-import { resolveBrandingForClient } from "./services/branding.ts";
+import { resolveBrandingForClient, PLATFORM_DEFAULT_BRANDING } from "./services/branding.ts";
 import { issueCsrfToken, verifyCsrfToken } from "./services/csrf.ts";
+import {
+  getSmtpConfig,
+  upsertSmtpConfig,
+  deleteSmtpConfig,
+  sendTestEmail,
+  resolveSmtpForClient,
+  type ResolvedSmtpConfig,
+} from "./services/smtp.ts";
+import {
+  getSocialProvider,
+  upsertSocialProvider,
+  deleteSocialProvider,
+  resolveSocialProviderForClient,
+  type SocialProviderId,
+} from "./services/social.ts";
+import { isBlockedHost } from "@appstrate/core/ssrf";
 import { getOidcAuthApi } from "./auth/api.ts";
+import { withSmtpOverride } from "@appstrate/db/auth";
 import { APPSTRATE_SCOPES } from "./auth/scopes.ts";
 import { consumeLoginEmailAttempt, resetLoginEmailAttempts } from "./auth/guards.ts";
 import {
   UnverifiedEmailConflictError,
+  AppSignupClosedError,
   resolveOrCreateEndUser,
   loadAppById,
 } from "./services/enduser-mapping.ts";
@@ -63,6 +81,7 @@ import { getEnv } from "@appstrate/env";
 import { renderLoginPage } from "./pages/login.ts";
 import { renderRegisterPage } from "./pages/register.ts";
 import { renderMagicLinkPage } from "./pages/magic-link.ts";
+import { renderMagicLinkConfirmPage } from "./pages/magic-link-confirm.ts";
 import { renderVerifyEmailSentPage } from "./pages/verify-email-sent.ts";
 import { renderForgotPasswordPage } from "./pages/forgot-password.ts";
 import { renderResetPasswordPage, renderInvalidTokenPage } from "./pages/reset-password.ts";
@@ -116,10 +135,12 @@ const createApplicationClientSchema = z.object({
   scopes: z.array(z.string().min(1)).optional(),
   referencedApplicationId: z.string().min(1),
   isFirstParty: z.boolean().optional(),
-  // Passed through to the service so we can reject them with a clear 400.
-  // Zod by default strips unknown keys; accepting them here lets us fail
-  // loudly rather than silently dropping the caller's intent.
+  // Unified signup opt-in. Secure-by-default → when omitted, the service
+  // stores `false` and fresh end-user sign-ins are rejected until the
+  // admin pre-creates them via the headless API.
   allowSignup: z.boolean().optional(),
+  // Passed through to the service so we can reject it with a clear 400
+  // (signupRole is only meaningful on org-level clients).
   signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
 });
 
@@ -127,6 +148,34 @@ export const createOAuthClientSchema = z.discriminatedUnion("level", [
   createOrgClientSchema,
   createApplicationClientSchema,
 ]);
+
+export const smtpConfigUpsertSchema = z.object({
+  host: z.string().min(1).max(253),
+  port: z.number().int().min(1).max(65535),
+  username: z.string().min(1).max(320),
+  pass: z.string().min(1).max(1024),
+  fromAddress: z.email(),
+  // Reject CRLF/quotes to prevent email header injection — value is
+  // concatenated into `"${fromName}" <${fromAddress}>` at send time.
+  fromName: z
+    .string()
+    .max(200)
+    .regex(/^[^"\r\n]*$/, "fromName must not contain quotes or line breaks")
+    .optional(),
+  secureMode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
+});
+
+export const smtpConfigTestSchema = z.object({
+  to: z.email(),
+});
+
+export const socialProviderIdSchema = z.enum(["google", "github"]);
+
+export const socialProviderUpsertSchema = z.object({
+  clientId: z.string().min(1).max(512),
+  clientSecret: z.string().min(1).max(2048),
+  scopes: z.array(z.string().min(1).max(128)).max(32).optional(),
+});
 
 export const updateOAuthClientSchema = z.object({
   redirectUris: z.array(redirectUriSchema).min(1).optional(),
@@ -144,6 +193,17 @@ interface PageContext {
   client: OAuthClientRecord;
   branding: Awaited<ReturnType<typeof resolveBrandingForClient>>;
   csrfToken: string;
+  features: { smtp: boolean; socialGoogle: boolean; socialGithub: boolean };
+  smtp: ResolvedSmtpConfig | null;
+  /**
+   * Per-client social-provider availability, passed verbatim to
+   * `renderSocialButtons` on every OIDC page. For `level=application`
+   * clients, reflects `application_social_providers` rows — buttons appear
+   * only when the tenant has configured creds for that provider. For
+   * `level=org` / `level=instance`, falls back to env presence (legacy
+   * shared-OAuth-App behavior for non-app clients).
+   */
+  socialProviders: { google: boolean; github: boolean };
 }
 
 /**
@@ -168,12 +228,13 @@ async function loadPageContext(
     requireSmtp?: { title: string; message: string };
   },
 ): Promise<{ url: URL; ctx: PageContext } | Response> {
-  if (opts.requireSmtp && !isSmtpEnabled()) {
-    return c.html(renderErrorPage(opts.requireSmtp).value, 404);
-  }
   const url = new URL(c.req.url);
   const clientId = url.searchParams.get("client_id");
   if (!clientId) {
+    // requireSmtp gate is evaluated *after* client resolution below. Missing
+    // client_id is a separate, earlier failure — rendering it first keeps the
+    // error reason honest (no "SMTP disabled" banner when the caller has not
+    // even identified a client).
     return c.html(renderErrorPage(opts.missingClientId).value, 400);
   }
   const record = await getClientCached(clientId);
@@ -187,12 +248,41 @@ async function loadPageContext(
       404,
     );
   }
+  // Resolve SMTP per-client: `level=application` reads `application_smtp_configs`,
+  // `level=org`/`level=instance` falls back to env SMTP. Null → email features
+  // disabled for this flow (no instance fallback for app-level clients).
+  const smtp = await resolveSmtpForClient(record);
+  if (opts.requireSmtp && !smtp) {
+    return c.html(renderErrorPage(opts.requireSmtp).value, 404);
+  }
+  // Per-client social provider availability. Application-level clients read
+  // from `application_social_providers` (tenant-owned OAuth App). Org and
+  // instance clients keep the legacy env-based fallback — the platform's
+  // shared Google/GitHub OAuth App is the appropriate identity issuer for
+  // dashboard / satellite flows.
+  let socialGoogle: boolean;
+  let socialGithub: boolean;
+  if (record.level === "application") {
+    const [g, gh] = await Promise.all([
+      resolveSocialProviderForClient(record, "google"),
+      resolveSocialProviderForClient(record, "github"),
+    ]);
+    socialGoogle = !!g;
+    socialGithub = !!gh;
+  } else {
+    const env = getEnv();
+    socialGoogle = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+    socialGithub = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
+  }
   return {
     url,
     ctx: {
       client: record,
       branding: await resolveBrandingForClient(record),
       csrfToken: issueCsrfToken(c),
+      features: { smtp: !!smtp, socialGoogle, socialGithub },
+      smtp,
+      socialProviders: { google: socialGoogle, github: socialGithub },
     },
   };
 }
@@ -232,37 +322,31 @@ function forwardOAuthSessionCookies(
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Detect available social auth providers from env vars. */
-function getSocialProviders(): { google: boolean; github: boolean } {
-  const env = getEnv();
-  return {
-    google: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
-    github: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
-  };
-}
-
-function isSmtpEnabled(): boolean {
+/**
+ * Instance-level SMTP presence. Kept for the signup handler's cookieCount
+ * interstitial branch, which runs before any per-client SMTP resolution and
+ * only cares whether Better Auth sent a verification email via env SMTP.
+ * All other OIDC flows read `ctx.features.smtp` from `PageContext`.
+ */
+function isInstanceSmtpEnabled(): boolean {
   const env = getEnv();
   return !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM);
 }
 
 /**
- * Effective "is signup open" flag for a client's entry pages. Org-level
- * and instance-level clients honor their stored `allowSignup`; application
- * clients are open by default (end-user provisioning is handled elsewhere).
- * Passed to `renderLoginPage` / `renderRegisterPage` / `renderMagicLinkPage`
- * so they can hide the signup-only CTAs when signup is closed.
+ * Effective "is signup open" flag for a client's entry pages. Unified
+ * across all levels (instance / org / application) per `a2aae3af` — aligns
+ * with FusionAuth (per-application `registrationConfiguration.enabled`),
+ * Auth0 (per-connection `disable_signups`), and Okta (policy-bound SSR):
+ * when signup is closed the hosted login UI hides the CTA rather than
+ * showing it and rejecting at submit.
  *
- * Instance clients declared via `OIDC_INSTANCE_CLIENTS` are
- * inserted with `allowSignup: false` — satellites like an admin portal
- * that opt into the platform login should never open signup on the shared
- * page; membership is provisioned out-of-band.
+ * Instance clients declared via `OIDC_INSTANCE_CLIENTS` default to
+ * `allowSignup: false` (satellites like an admin portal provision members
+ * out-of-band). `ensureInstanceClient()` opts the fresh-install first-party
+ * client in at boot.
  */
-function allowSignupForClient(client: {
-  level: "org" | "application" | "instance";
-  allowSignup: boolean;
-}): boolean {
-  if (client.level === "application") return true;
+function allowSignupForClient(client: { allowSignup: boolean }): boolean {
   return client.allowSignup;
 }
 
@@ -465,6 +549,151 @@ export function createOidcRouter() {
     },
   );
 
+  // ── Admin: per-application SMTP configuration ─────────────────────────────
+  //
+  // Scoped to applications owned by the caller's org. Per-app SMTP replaces
+  // instance-level env SMTP for `level=application` OIDC flows — without a
+  // row, verification emails, magic-link, and reset-password are disabled for
+  // that app's clients. See `services/smtp.ts` for the resolver.
+
+  const assertAppBelongsToOrg = async (c: Context<AppEnv>, applicationId: string) => {
+    const orgId = c.get("orgId");
+    const [app] = await db
+      .select({ orgId: applications.orgId })
+      .from(applications)
+      .where(eq(applications.id, applicationId))
+      .limit(1);
+    if (!app || app.orgId !== orgId) throw notFound("Application not found");
+  };
+
+  router.get(
+    "/api/applications/:id/smtp-config",
+    rateLimit(300),
+    requirePermission("applications", "read"),
+    async (c) => {
+      const applicationId = c.req.param("id")!;
+      await assertAppBelongsToOrg(c, applicationId);
+      const config = await getSmtpConfig(applicationId);
+      if (!config) throw notFound("SMTP configuration not found");
+      return c.json(config);
+    },
+  );
+
+  router.put(
+    "/api/applications/:id/smtp-config",
+    rateLimit(20),
+    requirePermission("applications", "write"),
+    async (c) => {
+      const applicationId = c.req.param("id")!;
+      await assertAppBelongsToOrg(c, applicationId);
+      const body = await c.req.json();
+      const data = parseBody(smtpConfigUpsertSchema, body);
+      // SSRF: block configurations that would make Appstrate bounce
+      // email traffic off internal metadata endpoints / loopback relays.
+      if (isBlockedHost(data.host)) {
+        throw invalidRequest("host resolves to a private/internal network", "host");
+      }
+      const saved = await upsertSmtpConfig(applicationId, data);
+      return c.json(saved);
+    },
+  );
+
+  router.delete(
+    "/api/applications/:id/smtp-config",
+    rateLimit(10),
+    requirePermission("applications", "write"),
+    async (c) => {
+      const applicationId = c.req.param("id")!;
+      await assertAppBelongsToOrg(c, applicationId);
+      const deleted = await deleteSmtpConfig(applicationId);
+      if (!deleted) throw notFound("SMTP configuration not found");
+      return c.body(null, 204);
+    },
+  );
+
+  router.post(
+    "/api/applications/:id/smtp-config/test",
+    rateLimit(5),
+    requirePermission("applications", "write"),
+    async (c) => {
+      const applicationId = c.req.param("id")!;
+      await assertAppBelongsToOrg(c, applicationId);
+      const body = await c.req.json();
+      const data = parseBody(smtpConfigTestSchema, body);
+      try {
+        const result = await sendTestEmail(applicationId, data.to);
+        return c.json({ ok: true, messageId: result.messageId });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // Surface the SMTP server's response verbatim — DKIM/SPF/auth
+        // misconfigurations are the admin's to fix, so we must not swallow
+        // the underlying error.
+        if (message.includes("SMTP configuration not found")) {
+          throw notFound(message);
+        }
+        return c.json({ ok: false, error: message }, 400);
+      }
+    },
+  );
+
+  // ── Admin: per-application social auth providers ──────────────────────────
+  //
+  // Scoped to applications owned by the caller's org. Per-app social auth
+  // replaces the instance env `GOOGLE_CLIENT_*` / `GITHUB_CLIENT_*` pair for
+  // `level=application` OIDC flows — without a row for a given provider, that
+  // provider's button is hidden on the tenant's login/register pages (no
+  // fallback to env creds, same rule as SMTP). See `services/social.ts`
+  // for the resolver.
+
+  const parseProvider = (raw: string): SocialProviderId => {
+    const result = socialProviderIdSchema.safeParse(raw);
+    if (!result.success) throw notFound("Unknown social provider");
+    return result.data;
+  };
+
+  router.get(
+    "/api/applications/:id/social-providers/:provider",
+    rateLimit(300),
+    requirePermission("applications", "read"),
+    async (c) => {
+      const applicationId = c.req.param("id")!;
+      await assertAppBelongsToOrg(c, applicationId);
+      const provider = parseProvider(c.req.param("provider")!);
+      const config = await getSocialProvider(applicationId, provider);
+      if (!config) throw notFound("Social provider configuration not found");
+      return c.json(config);
+    },
+  );
+
+  router.put(
+    "/api/applications/:id/social-providers/:provider",
+    rateLimit(20),
+    requirePermission("applications", "write"),
+    async (c) => {
+      const applicationId = c.req.param("id")!;
+      await assertAppBelongsToOrg(c, applicationId);
+      const provider = parseProvider(c.req.param("provider")!);
+      const body = await c.req.json();
+      const data = parseBody(socialProviderUpsertSchema, body);
+      const saved = await upsertSocialProvider(applicationId, provider, data);
+      return c.json(saved);
+    },
+  );
+
+  router.delete(
+    "/api/applications/:id/social-providers/:provider",
+    rateLimit(10),
+    requirePermission("applications", "write"),
+    async (c) => {
+      const applicationId = c.req.param("id")!;
+      await assertAppBelongsToOrg(c, applicationId);
+      const provider = parseProvider(c.req.param("provider")!);
+      const deleted = await deleteSocialProvider(applicationId, provider);
+      if (!deleted) throw notFound("Social provider configuration not found");
+      return c.body(null, 204);
+    },
+  );
+
   // ── Public static assets ──────────────────────────────────────────────────
   //
   // Served as external JS (not inline) so login/register pages stay
@@ -502,8 +731,8 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: ctx.branding,
         csrfToken: "",
-        socialProviders: getSocialProviders(),
-        smtpEnabled: isSmtpEnabled(),
+        socialProviders: ctx.socialProviders,
+        smtpEnabled: ctx.features.smtp,
         allowSignup: allowSignupForClient(ctx.client),
         error:
           "Ce lien de connexion a expiré. Veuillez relancer la connexion depuis l'application.",
@@ -524,8 +753,8 @@ export function createOidcRouter() {
       queryString: stripErrorFromQueryString(url.search),
       branding: ctx.branding,
       csrfToken: ctx.csrfToken,
-      socialProviders: getSocialProviders(),
-      smtpEnabled: isSmtpEnabled(),
+      socialProviders: ctx.socialProviders,
+      smtpEnabled: ctx.features.smtp,
       allowSignup: allowSignupForClient(ctx.client),
       error: errorMessage,
     });
@@ -552,8 +781,8 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: ctx.branding,
         csrfToken: "",
-        socialProviders: getSocialProviders(),
-        smtpEnabled: isSmtpEnabled(),
+        socialProviders: ctx.socialProviders,
+        smtpEnabled: ctx.features.smtp,
         allowSignup,
         error:
           "Ce lien de connexion a expiré. Veuillez relancer la connexion depuis l'application.",
@@ -567,15 +796,15 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,
-        socialProviders: getSocialProviders(),
-        smtpEnabled: isSmtpEnabled(),
+        socialProviders: ctx.socialProviders,
+        smtpEnabled: ctx.features.smtp,
         allowSignup,
         error: "Votre session a expiré. Veuillez réessayer.",
       });
       return c.html(page.value, 403);
     }
-    const socialProviders = getSocialProviders();
-    const smtpEnabled = isSmtpEnabled();
+    const socialProviders = ctx.socialProviders;
+    const smtpEnabled = ctx.features.smtp;
     const renderError = (
       error: string,
       status: 400 | 401 | 403 | 409 | 429 | 500,
@@ -749,12 +978,20 @@ export function createOidcRouter() {
                 emailVerified: authUserRow.emailVerified === true,
               },
               app,
+              { allowSignup: ctx.client.allowSignup },
             );
           } catch (err) {
             if (err instanceof UnverifiedEmailConflictError) {
               return renderError(
                 "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
                 409,
+                email,
+              );
+            }
+            if (err instanceof AppSignupClosedError) {
+              return renderError(
+                "L'inscription automatique est désactivée pour cette application. Contactez votre administrateur pour qu'il crée votre compte avant votre connexion.",
+                403,
                 email,
               );
             }
@@ -787,8 +1024,8 @@ export function createOidcRouter() {
     });
     if (page instanceof Response) return page;
     const { url, ctx } = page;
-    // Org / instance + closed signup → no register form at all.
-    if (ctx.client.level !== "application" && !ctx.client.allowSignup) {
+    // Closed signup → no register form at all (uniform across levels).
+    if (!ctx.client.allowSignup) {
       return c.html(
         renderErrorPage({
           title: "Inscription fermée",
@@ -806,7 +1043,7 @@ export function createOidcRouter() {
       queryString: url.search,
       branding: ctx.branding,
       csrfToken: ctx.csrfToken,
-      socialProviders: getSocialProviders(),
+      socialProviders: ctx.socialProviders,
       allowSignup: true,
     });
     return c.html(body.value);
@@ -827,7 +1064,7 @@ export function createOidcRouter() {
     // closed, but a hand-crafted POST must still be rejected here. Returning
     // the styled error page (instead of `renderRegError` with a banner)
     // matches the GET behavior — there is no form to retry.
-    if (ctx.client.level !== "application" && !ctx.client.allowSignup) {
+    if (!ctx.client.allowSignup) {
       return c.html(
         renderErrorPage({
           title: "Inscription fermée",
@@ -845,7 +1082,7 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,
-        socialProviders: getSocialProviders(),
+        socialProviders: ctx.socialProviders,
         allowSignup: allowSignupForClient(ctx.client),
         error: "Votre session a expiré. Veuillez réessayer.",
       });
@@ -862,7 +1099,7 @@ export function createOidcRouter() {
         queryString: url.search,
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,
-        socialProviders: getSocialProviders(),
+        socialProviders: ctx.socialProviders,
         allowSignup: allowSignupForClient(ctx.client),
         error,
         email,
@@ -896,17 +1133,23 @@ export function createOidcRouter() {
     const verificationCallbackURL = `/api/auth/oauth2/authorize${url.search}`;
     let authResponse: Response;
     try {
-      authResponse = (await authApi.signUpEmail({
-        // Same reason as signInEmail: `callbackURL` is accepted at runtime
-        // by BA's sign-up endpoint but absent from the input type.
-        body: { email, password, name, callbackURL: verificationCallbackURL } as {
-          email: string;
-          password: string;
-          name: string;
-        },
-        headers: c.req.raw.headers,
-        asResponse: true,
-      })) as Response;
+      // Wrap the BA call in the per-client SMTP override so every OIDC flow
+      // — application, org, instance — routes its outbound mail through the
+      // same resolver-provided transport. `ctx.smtp` is the resolver's
+      // answer (per-app row for app-level clients, env SMTP for org/instance,
+      // null when nothing is configured) and supersedes the boot-time
+      // transport captured in `@appstrate/db/auth`.
+      authResponse = (await withSmtpOverride(ctx.smtp, () =>
+        authApi.signUpEmail({
+          body: { email, password, name, callbackURL: verificationCallbackURL } as {
+            email: string;
+            password: string;
+            name: string;
+          },
+          headers: c.req.raw.headers,
+          asResponse: true,
+        }),
+      )) as Response;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error("oidc: signUpEmail failed", { error: msg, email });
@@ -944,7 +1187,43 @@ export function createOidcRouter() {
       );
     }
 
-    const cookieCount = forwardOAuthSessionCookies(c, authResponse, ctx.client.isFirstParty);
+    let cookieCount = forwardOAuthSessionCookies(c, authResponse, ctx.client.isFirstParty);
+
+    // Application-level client without per-app SMTP → no tenant-owned transport
+    // to deliver a verification email. We auto-verify and re-sign-in so the
+    // subsequent /authorize redirect mints a token transparently. No tenant
+    // email is ever sent via the platform's instance SMTP.
+    //
+    // The `isInstanceSmtpEnabled()` guard is a behavioural precondition, not a
+    // fallback: when instance SMTP is configured, Better Auth wires
+    // `requireEmailVerification=true` and `sendOnSignUp=true` at boot, so the
+    // signUp call above blocks session issuance (cookieCount === 0) pending an
+    // email that will never arrive for this tenant. When instance SMTP is
+    // absent those BA flags are off, signUp already returns a session, and
+    // this branch is unnecessary.
+    if (
+      ctx.client.level === "application" &&
+      !ctx.features.smtp &&
+      cookieCount === 0 &&
+      isInstanceSmtpEnabled()
+    ) {
+      await db.update(user).set({ emailVerified: true }).where(eq(user.email, email));
+      try {
+        const reSignIn = (await authApi.signInEmail({
+          body: { email, password } as { email: string; password: string },
+          headers: c.req.raw.headers,
+          asResponse: true,
+        })) as Response;
+        if (reSignIn.ok) {
+          cookieCount = forwardOAuthSessionCookies(c, reSignIn, ctx.client.isFirstParty);
+        }
+      } catch (err) {
+        logger.warn("oidc: auto-verify re-signin failed", {
+          error: err instanceof Error ? err.message : String(err),
+          email,
+        });
+      }
+    }
 
     // Org-level clients: provision the `organization_members` row now so
     // the subsequent `authorize` redirect chain mints a token with the
@@ -994,7 +1273,7 @@ export function createOidcRouter() {
     // interstitial that matches the client's logo/colors. The verification
     // link itself (in the email) will resume the OAuth flow via the
     // `callbackURL` we pinned to `signUpEmail` above.
-    if (isSmtpEnabled() && cookieCount === 0) {
+    if (ctx.features.smtp && cookieCount === 0) {
       const sentPage = renderVerifyEmailSentPage({
         queryString: url.search,
         branding: ctx.branding,
@@ -1091,11 +1370,13 @@ export function createOidcRouter() {
 
     const authApi = getOidcAuthApi();
     try {
-      await authApi.signInMagicLink({
-        body: { email, callbackURL, errorCallbackURL },
-        headers: c.req.raw.headers,
-        asResponse: true,
-      });
+      await withSmtpOverride(ctx.smtp, () =>
+        authApi.signInMagicLink({
+          body: { email, callbackURL, errorCallbackURL },
+          headers: c.req.raw.headers,
+          asResponse: true,
+        }),
+      );
     } catch (err) {
       // Better Auth already swallows per-user failures internally (the
       // plugin's sendMagicLink handler is fire-and-forget). A throw here
@@ -1114,6 +1395,129 @@ export function createOidcRouter() {
       sent: true,
     });
     return c.html(sentPage.value);
+  });
+
+  // ── Magic-link confirmation interstitial ──────────────────────────────────
+  //
+  // Gates the one-shot BA `/api/auth/magic-link/verify` behind an explicit
+  // click. The outgoing email (see `sendMagicLink` in packages/db/src/auth.ts)
+  // is rewritten to point here instead of directly at BA's verify endpoint.
+  //
+  // GET renders a static "Confirm sign-in" page — safe to prefetch (no state
+  // change). POST verifies the CSRF cookie and 302s the user's browser to
+  // BA's verify URL, where the token is consumed and the session cookie is
+  // set in the user's own browser (not the prefetcher's).
+  //
+  // Branding: client_id lives inside the URL-encoded `callbackURL` query
+  // param — we parse it defensively and fall back to platform defaults on
+  // any error. The confirm page is a short transitional surface; a missing
+  // brand is acceptable (the user is about to land on the authorize /
+  // application redirect anyway).
+
+  async function resolveConfirmBranding(
+    callbackURL: string | null,
+  ): Promise<Awaited<ReturnType<typeof resolveBrandingForClient>>> {
+    if (!callbackURL) return { ...PLATFORM_DEFAULT_BRANDING };
+    try {
+      const cb = new URL(callbackURL);
+      const clientId = cb.searchParams.get("client_id");
+      if (!clientId) return { ...PLATFORM_DEFAULT_BRANDING };
+      const record = await getClientCached(clientId);
+      if (!record) return { ...PLATFORM_DEFAULT_BRANDING };
+      return await resolveBrandingForClient(record);
+    } catch {
+      return { ...PLATFORM_DEFAULT_BRANDING };
+    }
+  }
+
+  function buildConfirmActionQuery(
+    token: string,
+    callbackURL: string | null,
+    errorCallbackURL: string | null,
+    email: string | null,
+  ): string {
+    const params = new URLSearchParams();
+    params.set("token", token);
+    if (callbackURL) params.set("callbackURL", callbackURL);
+    if (errorCallbackURL) params.set("errorCallbackURL", errorCallbackURL);
+    if (email) params.set("email", email);
+    return `?${params.toString()}`;
+  }
+
+  router.get("/api/oauth/magic-link/confirm", rateLimitByIp(60), async (c) => {
+    const url = new URL(c.req.url);
+    const token = url.searchParams.get("token");
+    if (!token) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien de connexion invalide",
+          message: "Ce lien de connexion n'est pas valide. Veuillez relancer la connexion.",
+        }).value,
+        400,
+      );
+    }
+    const callbackURL = url.searchParams.get("callbackURL");
+    const errorCallbackURL = url.searchParams.get("errorCallbackURL");
+    const email = url.searchParams.get("email");
+    const branding = await resolveConfirmBranding(callbackURL);
+    const csrfToken = issueCsrfToken(c);
+    const body = renderMagicLinkConfirmPage({
+      action: `/api/oauth/magic-link/confirm${buildConfirmActionQuery(
+        token,
+        callbackURL,
+        errorCallbackURL,
+        email,
+      )}`,
+      csrfToken,
+      branding,
+      email: email ?? undefined,
+    });
+    return c.html(body.value);
+  });
+
+  router.post("/api/oauth/magic-link/confirm", rateLimitByIp(60), async (c) => {
+    const url = new URL(c.req.url);
+    const token = url.searchParams.get("token");
+    if (!token) {
+      return c.html(
+        renderErrorPage({
+          title: "Lien de connexion invalide",
+          message: "Ce lien de connexion n'est pas valide. Veuillez relancer la connexion.",
+        }).value,
+        400,
+      );
+    }
+    const form = await c.req.parseBody();
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
+      const callbackURL = url.searchParams.get("callbackURL");
+      const errorCallbackURL = url.searchParams.get("errorCallbackURL");
+      const email = url.searchParams.get("email");
+      const branding = await resolveConfirmBranding(callbackURL);
+      const csrfToken = issueCsrfToken(c);
+      const retry = renderMagicLinkConfirmPage({
+        action: `/api/oauth/magic-link/confirm${buildConfirmActionQuery(
+          token,
+          callbackURL,
+          errorCallbackURL,
+          email,
+        )}`,
+        csrfToken,
+        branding,
+        email: email ?? undefined,
+      });
+      return c.html(retry.value, 403);
+    }
+
+    // Hand off to Better Auth's verify endpoint in the USER's browser — BA
+    // consumes the single-use token, sets the session cookie on their origin,
+    // and 302s to callbackURL (the authorize endpoint).
+    const verifyUrl = new URL("/api/auth/magic-link/verify", url.origin);
+    verifyUrl.searchParams.set("token", token);
+    const callbackURL = url.searchParams.get("callbackURL");
+    const errorCallbackURL = url.searchParams.get("errorCallbackURL");
+    if (callbackURL) verifyUrl.searchParams.set("callbackURL", callbackURL);
+    if (errorCallbackURL) verifyUrl.searchParams.set("errorCallbackURL", errorCallbackURL);
+    return c.redirect(verifyUrl.toString(), 302);
   });
 
   // ── Public forgot-password page ───────────────────────────────────────────
@@ -1188,11 +1592,13 @@ export function createOidcRouter() {
 
     const authApi = getOidcAuthApi();
     try {
-      await authApi.requestPasswordReset({
-        body: { email, redirectTo },
-        headers: c.req.raw.headers,
-        asResponse: true,
-      });
+      await withSmtpOverride(ctx.smtp, () =>
+        authApi.requestPasswordReset({
+          body: { email, redirectTo },
+          headers: c.req.raw.headers,
+          asResponse: true,
+        }),
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn("oidc: requestPasswordReset threw", { error: msg, email });
@@ -1467,8 +1873,8 @@ export function createOidcRouter() {
           queryString: `?${oauthQuery}`,
           branding: ctx.branding,
           csrfToken: ctx.csrfToken,
-          socialProviders: getSocialProviders(),
-          smtpEnabled: isSmtpEnabled(),
+          socialProviders: ctx.socialProviders,
+          smtpEnabled: ctx.features.smtp,
           allowSignup: allowSignupForClient(ctx.client),
           error:
             "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",

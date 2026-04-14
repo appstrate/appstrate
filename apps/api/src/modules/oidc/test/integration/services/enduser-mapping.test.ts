@@ -19,6 +19,7 @@ import {
   resolveOrCreateEndUser,
   lookupEndUser,
   UnverifiedEmailConflictError,
+  AppSignupClosedError,
 } from "../../../services/enduser-mapping.ts";
 import { oidcEndUserProfiles } from "../../../schema.ts";
 import { prefixedId } from "../../../../../lib/ids.ts";
@@ -54,6 +55,7 @@ describe("resolveOrCreateEndUser", () => {
         emailVerified: true,
       },
       applicationId,
+      { allowSignup: true },
     );
     expect(resolved.endUserId).toStartWith("eu_");
     expect(resolved.applicationId).toBe(applicationId);
@@ -79,6 +81,7 @@ describe("resolveOrCreateEndUser", () => {
         emailVerified: true,
       },
       applicationId,
+      { allowSignup: true },
     );
     const second = await resolveOrCreateEndUser(
       {
@@ -87,6 +90,7 @@ describe("resolveOrCreateEndUser", () => {
         emailVerified: true,
       },
       applicationId,
+      { allowSignup: true },
     );
     expect(second.endUserId).toBe(first.endUserId);
 
@@ -122,6 +126,7 @@ describe("resolveOrCreateEndUser", () => {
         emailVerified: true,
       },
       applicationId,
+      { allowSignup: true },
     );
     expect(resolved.endUserId).toBe(seededId);
 
@@ -152,6 +157,7 @@ describe("resolveOrCreateEndUser", () => {
           emailVerified: false,
         },
         applicationId,
+        { allowSignup: true },
       ),
     ).rejects.toBeInstanceOf(UnverifiedEmailConflictError);
   });
@@ -173,6 +179,7 @@ describe("resolveOrCreateEndUser", () => {
           // emailVerified omitted → unverified → conflict.
         },
         applicationId,
+        { allowSignup: true },
       ),
     ).rejects.toBeInstanceOf(UnverifiedEmailConflictError);
   });
@@ -186,6 +193,7 @@ describe("resolveOrCreateEndUser", () => {
         emailVerified: false,
       },
       applicationId,
+      { allowSignup: true },
     );
     expect(resolved.endUserId).toStartWith("eu_");
   });
@@ -203,10 +211,12 @@ describe("resolveOrCreateEndUser", () => {
       resolveOrCreateEndUser(
         { id: authUserId, email: "enduser1@example.com", emailVerified: true },
         appA,
+        { allowSignup: true },
       ),
       resolveOrCreateEndUser(
         { id: authUserId, email: "enduser1@example.com", emailVerified: true },
         appB,
+        { allowSignup: true },
       ),
     ]);
     expect(inA.endUserId).not.toBe(inB.endUserId);
@@ -219,8 +229,64 @@ describe("resolveOrCreateEndUser", () => {
       resolveOrCreateEndUser(
         { id: authUserId, email: "enduser1@example.com", emailVerified: true },
         "app_does_not_exist",
+        { allowSignup: true },
       ),
     ).rejects.toThrow(/application 'app_does_not_exist' not found/);
+  });
+
+  describe("allowSignup policy", () => {
+    it("blocks fresh end-user creation when allowSignup=false", async () => {
+      await expect(
+        resolveOrCreateEndUser(
+          { id: authUserId, email: "enduser1@example.com", emailVerified: true },
+          applicationId,
+          { allowSignup: false },
+        ),
+      ).rejects.toBeInstanceOf(AppSignupClosedError);
+
+      // And no end_users / profile row was created as a side effect.
+      const rows = await db
+        .select()
+        .from(endUsers)
+        .where(eq(endUsers.applicationId, applicationId));
+      expect(rows.length).toBe(0);
+    });
+
+    it("still adopts a pre-created end_users row even with allowSignup=false", async () => {
+      // Admin pre-creates the end-user via the headless API path. The JIT
+      // gate only applies to step 3 (fresh creation) — step 2 (verified
+      // email adoption) succeeds because the row already exists.
+      const seededId = prefixedId("eu");
+      await db.insert(endUsers).values({
+        id: seededId,
+        applicationId,
+        orgId,
+        email: "enduser1@example.com",
+        name: "Pre-created",
+      });
+      const resolved = await resolveOrCreateEndUser(
+        { id: authUserId, email: "enduser1@example.com", emailVerified: true },
+        applicationId,
+        { allowSignup: false },
+      );
+      expect(resolved.endUserId).toBe(seededId);
+    });
+
+    it("returns already-linked end-user even with allowSignup=false (step 1 short-circuit)", async () => {
+      // Bootstrap the link with the flag ON, then re-resolve with flag OFF —
+      // the existing profile row short-circuits at step 1 before the gate.
+      const first = await resolveOrCreateEndUser(
+        { id: authUserId, email: "enduser1@example.com", emailVerified: true },
+        applicationId,
+        { allowSignup: true },
+      );
+      const second = await resolveOrCreateEndUser(
+        { id: authUserId, email: "enduser1@example.com", emailVerified: true },
+        applicationId,
+        { allowSignup: false },
+      );
+      expect(second.endUserId).toBe(first.endUserId);
+    });
   });
 });
 
@@ -240,6 +306,7 @@ describe("lookupEndUser", () => {
     const resolved = await resolveOrCreateEndUser(
       { id: euAuthId, email: "lookup@example.com", emailVerified: true },
       defaultAppId,
+      { allowSignup: true },
     );
     const looked = await lookupEndUser(resolved.endUserId);
     expect(looked).not.toBeNull();

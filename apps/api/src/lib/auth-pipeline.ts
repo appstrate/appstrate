@@ -18,10 +18,14 @@
 
 import type { Hono } from "hono";
 import type { AuthStrategy } from "@appstrate/core/module";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { user as userTable } from "@appstrate/db/schema";
 import { getAuth } from "@appstrate/db/auth";
 import { validateApiKey } from "../services/api-keys.ts";
 import { ensureDefaultProfile } from "../services/connection-profiles.ts";
 import { requireOrgContext } from "../middleware/org-context.ts";
+import { requirePlatformRealm } from "../middleware/realm-guard.ts";
 import { isEndUserInApp } from "../services/end-users.ts";
 import { ApiError, unauthorized } from "./errors.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "./permissions.ts";
@@ -182,6 +186,22 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       name: session.user.name ?? "",
     });
     c.set("authMethod", "session");
+    // Look up the user's realm so the realm guard middleware below can
+    // reject cookie sessions minted for a non-platform audience (OIDC
+    // end-users) from hitting platform routes. We query the DB rather
+    // than read `session.user.realm` because BA's `cookieCache` serializes
+    // only the standard user fields into the cookie — custom columns
+    // like `realm` are not reliably exposed on cached session objects
+    // across BA versions. One indexed lookup on the user PK per
+    // authenticated request is an acceptable cost for audience
+    // enforcement; the platform route guards run after this so the
+    // query cost is only paid on session-backed requests.
+    const [userRow] = await db
+      .select({ realm: userTable.realm })
+      .from(userTable)
+      .where(eq(userTable.id, session.user.id))
+      .limit(1);
+    if (userRow?.realm) c.set("sessionRealm", userRow.realm);
 
     // Ensure the user has a default connection profile (fire-and-forget)
     ensureDefaultProfile({ type: "member", id: session.user.id }).catch((err) => {
@@ -192,6 +212,19 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     });
 
     return next();
+  });
+
+  // Realm guard: reject BA cookie sessions belonging to a non-platform
+  // audience (OIDC end-users) from hitting platform routes. Runs after
+  // the auth middleware has resolved the session and set `sessionRealm`,
+  // but before org-context + permission resolution (both of which are
+  // meaningless for end-user sessions). OIDC/BA paths are exempt — see
+  // `requirePlatformRealm` for the allowlist rationale.
+  const realmGuard = requirePlatformRealm();
+  app.use("*", async (c, next) => {
+    if (skipAuth(c.req.path, publicPaths())) return next();
+    if (!c.get("user")) return next();
+    return realmGuard(c, next);
   });
 
   // Org context middleware: require X-Org-Id for org-scoped /api/* routes.

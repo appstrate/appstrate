@@ -29,13 +29,16 @@ const OAuthClientsTab = lazy(() =>
     default: m.OAuthClientsTab,
   })),
 );
+const AppAuthTab = lazy(() =>
+  import("../modules/oidc/components/app-auth-tab").then((m) => ({ default: m.AppAuthTab })),
+);
 
 interface SettingsFormData {
   name: string;
 }
 
 const BASE_TABS = ["general", "profiles"] as const;
-type Tab = "general" | "profiles" | "oauth";
+type Tab = "general" | "profiles" | "oauth" | "auth";
 
 export function AppSettingsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -45,7 +48,7 @@ export function AppSettingsPage() {
   const { features } = useAppConfig();
   const oidcEnabled = features.oidc === true;
   const tabs: readonly Tab[] = oidcEnabled
-    ? [...BASE_TABS, "oauth"]
+    ? [...BASE_TABS, "auth", "oauth"]
     : (BASE_TABS as readonly Tab[]);
   const [tab, setTab] = useTabWithHash<Tab>(tabs, "general");
 
@@ -75,6 +78,7 @@ export function AppSettingsPage() {
           <TabsList>
             <TabsTrigger value="general">{t("appSettings.tabGeneral")}</TabsTrigger>
             <TabsTrigger value="profiles">{t("appSettings.tabProfiles")}</TabsTrigger>
+            {oidcEnabled && <TabsTrigger value="auth">{t("appSettings.tabAuth")}</TabsTrigger>}
             {oidcEnabled && <TabsTrigger value="oauth">{t("appSettings.tabOauth")}</TabsTrigger>}
           </TabsList>
         </Tabs>
@@ -82,6 +86,11 @@ export function AppSettingsPage() {
 
       {tab === "general" && <GeneralTab appId={appId} application={application} />}
       {tab === "profiles" && <AppProfilesTab />}
+      {tab === "auth" && oidcEnabled && (
+        <Suspense fallback={<LoadingState />}>
+          <AppAuthTab />
+        </Suspense>
+      )}
       {tab === "oauth" && oidcEnabled && (
         <Suspense fallback={<LoadingState />}>
           <OAuthClientsTab level="application" />
