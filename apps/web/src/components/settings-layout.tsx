@@ -31,7 +31,7 @@ export interface SettingsNavItem {
 }
 
 export interface SettingsSection {
-  label?: string;
+  label?: React.ReactNode;
   items: SettingsNavItem[];
 }
 
@@ -103,7 +103,12 @@ export function SettingsLayout({
         <SidebarContent>
           {visibleSections.map((section, idx) => (
             <SidebarGroup key={idx}>
-              {section.label && <SidebarGroupLabel>{section.label}</SidebarGroupLabel>}
+              {section.label &&
+                (typeof section.label === "string" ? (
+                  <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
+                ) : (
+                  section.label
+                ))}
               <SidebarMenu>
                 {section.items.map((item) => {
                   const isActive = activeItem?.to === item.to;

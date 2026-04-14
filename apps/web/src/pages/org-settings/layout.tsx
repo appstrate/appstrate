@@ -1,26 +1,129 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { BrainCircuit, Building, CreditCard, Globe, KeyRound, Users } from "lucide-react";
-import { SettingsLayout } from "../../components/settings-layout";
+import { useLocation } from "react-router-dom";
+import {
+  BrainCircuit,
+  Building,
+  CreditCard,
+  Globe,
+  KeyRound,
+  LayoutGrid,
+  Settings,
+  Shield,
+  UserCircle,
+  Users,
+} from "lucide-react";
+import { SettingsLayout, type SettingsSection } from "../../components/settings-layout";
+import { AppSettingsSwitcher } from "../../components/app-settings-switcher";
+import type { BreadcrumbEntry } from "../../components/page-header";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
+import { useCurrentApplicationId } from "../../hooks/use-current-application";
+import { useApplication } from "../../hooks/use-applications";
 
 export function OrgSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
   const { features } = useAppConfig();
+  const appId = useCurrentApplicationId();
+  const { data: application } = useApplication(appId ?? "");
+  const location = useLocation();
 
   const oidcEnabled = !!features.oidc;
+
+  const sections: SettingsSection[] = [
+    {
+      label: t("orgSettings.sectionOrganization"),
+      items: [
+        { to: "/org-settings/general", icon: Building, label: t("orgSettings.tabGeneral") },
+        {
+          to: "/org-settings/members",
+          icon: Users,
+          label: t("orgSettings.tabMembers", { count: 0 }),
+        },
+        {
+          to: "/org-settings/applications",
+          icon: LayoutGrid,
+          label: t("applications.pageTitle"),
+        },
+        {
+          to: "/org-settings/models",
+          icon: BrainCircuit,
+          label: t("models.tabTitle"),
+          show: isAdmin,
+        },
+        {
+          to: "/org-settings/proxies",
+          icon: Globe,
+          label: t("proxies.tabTitle"),
+          show: isAdmin,
+        },
+        {
+          to: "/org-settings/oauth",
+          icon: KeyRound,
+          label: "OAuth",
+          show: isAdmin && oidcEnabled,
+        },
+        {
+          to: "/org-settings/billing",
+          icon: CreditCard,
+          label: t("billing.tabTitle"),
+          show: !!features.billing,
+        },
+      ],
+    },
+    ...(isAdmin && application
+      ? [
+          {
+            label: t("orgSettings.sectionApplication"),
+            items: [
+              {
+                to: "/org-settings/app/general",
+                icon: Settings,
+                label: t("appSettings.tabGeneral"),
+              },
+              {
+                to: "/org-settings/app/profiles",
+                icon: UserCircle,
+                label: t("appSettings.tabProfiles"),
+              },
+              {
+                to: "/org-settings/app/auth",
+                icon: Shield,
+                label: t("appSettings.tabAuth"),
+                show: oidcEnabled,
+              },
+              {
+                to: "/org-settings/app/oauth",
+                icon: KeyRound,
+                label: t("appSettings.tabOauth"),
+                show: oidcEnabled,
+              },
+            ],
+          },
+        ]
+      : []),
+  ];
+
+  const allItems = sections.flatMap((s) => s.items);
+  const activeItem =
+    allItems.find((i) => location.pathname === i.to) ??
+    allItems.find((i) => location.pathname.startsWith(i.to + "/"));
+  const isAppRoute = location.pathname.startsWith("/org-settings/app/");
+
+  const breadcrumbs: BreadcrumbEntry[] = [
+    { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+    { label: t("orgSettings.pageTitle"), href: "/org-settings" },
+    ...(isAppRoute ? [{ label: application?.name ?? "", node: <AppSettingsSwitcher /> }] : []),
+    ...(activeItem ? [{ label: activeItem.label }] : []),
+  ];
 
   return (
     <SettingsLayout
       title={t("orgSettings.pageTitle")}
       emoji="⚙️"
-      breadcrumbs={[
-        { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-        { label: t("orgSettings.pageTitle") },
-      ]}
+      breadcrumbs={breadcrumbs}
       legacyHashRedirects={{
         general: "/org-settings/general",
         members: "/org-settings/members",
@@ -29,42 +132,7 @@ export function OrgSettingsLayout() {
         oauth: "/org-settings/oauth",
         billing: "/org-settings/billing",
       }}
-      sections={[
-        {
-          items: [
-            { to: "/org-settings/general", icon: Building, label: t("orgSettings.tabGeneral") },
-            {
-              to: "/org-settings/members",
-              icon: Users,
-              label: t("orgSettings.tabMembers", { count: 0 }),
-            },
-            {
-              to: "/org-settings/models",
-              icon: BrainCircuit,
-              label: t("models.tabTitle"),
-              show: isAdmin,
-            },
-            {
-              to: "/org-settings/proxies",
-              icon: Globe,
-              label: t("proxies.tabTitle"),
-              show: isAdmin,
-            },
-            {
-              to: "/org-settings/oauth",
-              icon: KeyRound,
-              label: "OAuth",
-              show: isAdmin && oidcEnabled,
-            },
-            {
-              to: "/org-settings/billing",
-              icon: CreditCard,
-              label: t("billing.tabTitle"),
-              show: !!features.billing,
-            },
-          ],
-        },
-      ]}
+      sections={sections}
     />
   );
 }

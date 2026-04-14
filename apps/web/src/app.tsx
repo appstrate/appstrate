@@ -24,10 +24,13 @@ import { OrgSettingsModelsPage } from "./pages/org-settings/models";
 import { OrgSettingsProxiesPage } from "./pages/org-settings/proxies";
 import { OrgSettingsOAuthPage } from "./pages/org-settings/oauth";
 import { OrgSettingsBillingPage } from "./pages/org-settings/billing";
-import { ApplicationsPage } from "./pages/applications-page";
+import { OrgSettingsApplicationsPage } from "./pages/org-settings/applications";
+import { OrgSettingsAppGeneralPage } from "./pages/org-settings/app/general";
+import { OrgSettingsAppProfilesPage } from "./pages/org-settings/app/profiles";
+import { OrgSettingsAppAuthPage } from "./pages/org-settings/app/auth";
+import { OrgSettingsAppOauthPage } from "./pages/org-settings/app/oauth";
 import { ApiKeysPage } from "./pages/api-keys-page";
 import { EndUsersPage } from "./pages/end-users-page";
-import { AppSettingsPage } from "./pages/app-settings-page";
 import { SkillsPage } from "./pages/skills-page";
 import { ToolsPage } from "./pages/tools-page";
 import { ProvidersPage } from "./pages/providers-page";
@@ -284,7 +287,7 @@ export function App() {
             <Route path="/providers" element={<ProvidersPage />} />
             <Route
               path="/app-profiles"
-              element={<Navigate to="/app-settings#profiles" replace />}
+              element={<Navigate to="/org-settings/app/profiles" replace />}
             />
             <Route path="/app-profiles/:id" element={<AppProfileDetailPage />} />
             <Route path="/skills/new" element={<PackageEditorPage type="skill" />} />
@@ -318,7 +321,10 @@ export function App() {
               element={<UnifiedPackageDetailPage type="provider" />}
             />
             <Route path="/library" element={<LibraryPage />} />
-            <Route path="/applications" element={<ApplicationsPage />} />
+            <Route
+              path="/applications"
+              element={<Navigate to="/org-settings/applications" replace />}
+            />
             <Route path="/preferences" element={<PreferencesLayout />}>
               <Route index element={<Navigate to="general" replace />} />
               <Route path="general" element={<PreferencesGeneralPage />} />
@@ -350,15 +356,23 @@ export function App() {
             {/* App-scoped routes (read applicationId from store, like orgId) */}
             <Route path="/end-users" element={<EndUsersPage />} />
             <Route path="/api-keys" element={<ApiKeysPage />} />
-            <Route path="/app-settings" element={<AppSettingsPage />} />
+            <Route
+              path="/app-settings"
+              element={<Navigate to="/org-settings/app/general" replace />}
+            />
             <Route path="/org-settings" element={<OrgSettingsLayout />}>
               <Route index element={<Navigate to="general" replace />} />
               <Route path="general" element={<OrgSettingsGeneralPage />} />
               <Route path="members" element={<OrgSettingsMembersPage />} />
+              <Route path="applications" element={<OrgSettingsApplicationsPage />} />
               <Route path="models" element={<OrgSettingsModelsPage />} />
               <Route path="proxies" element={<OrgSettingsProxiesPage />} />
               <Route path="oauth" element={<OrgSettingsOAuthPage />} />
               <Route path="billing" element={<OrgSettingsBillingPage />} />
+              <Route path="app/general" element={<OrgSettingsAppGeneralPage />} />
+              <Route path="app/profiles" element={<OrgSettingsAppProfilesPage />} />
+              <Route path="app/auth" element={<OrgSettingsAppAuthPage />} />
+              <Route path="app/oauth" element={<OrgSettingsAppOauthPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
