@@ -4,25 +4,28 @@ import { describe, it, expect, afterEach } from "bun:test";
 import { getModuleRegistry } from "../../../src/lib/modules/registry.ts";
 
 describe("getModuleRegistry", () => {
-  const originalValue = process.env.APPSTRATE_MODULES;
+  const originalValue = process.env.MODULES;
 
   afterEach(() => {
     if (originalValue === undefined) {
-      delete process.env.APPSTRATE_MODULES;
+      delete process.env.MODULES;
     } else {
-      process.env.APPSTRATE_MODULES = originalValue;
+      process.env.MODULES = originalValue;
     }
   });
 
-  it("returns empty array when APPSTRATE_MODULES is unset or empty", () => {
-    delete process.env.APPSTRATE_MODULES;
-    expect(getModuleRegistry()).toEqual([]);
-    process.env.APPSTRATE_MODULES = "";
+  it("returns built-in OSS modules when MODULES is unset", () => {
+    delete process.env.MODULES;
+    expect(getModuleRegistry()).toEqual(["oidc", "webhooks"]);
+  });
+
+  it("returns empty array when MODULES is empty string", () => {
+    process.env.MODULES = "";
     expect(getModuleRegistry()).toEqual([]);
   });
 
   it("parses comma-separated specifiers, trims whitespace, drops empty segments", () => {
-    process.env.APPSTRATE_MODULES = " @appstrate/cloud , @acme/analytics ,,";
-    expect(getModuleRegistry()).toEqual(["@appstrate/cloud", "@acme/analytics"]);
+    process.env.MODULES = " @scope/module , @acme/analytics ,,";
+    expect(getModuleRegistry()).toEqual(["@scope/module", "@acme/analytics"]);
   });
 });

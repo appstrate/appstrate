@@ -11,7 +11,7 @@
  *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas
  *
  * Module-owned paths and schemas are loaded dynamically from built-in modules.
- * The set of modules validated matches `APPSTRATE_MODULES` (default: all built-in).
+ * The set of modules validated matches `MODULES` (default: all built-in).
  *
  * Usage: bun scripts/verify-openapi.ts
  */
@@ -29,8 +29,8 @@ import { collectModuleOpenApi } from "./lib/module-openapi.ts";
 // ---------------------------------------------------------------------------
 //
 // Discovery scans `apps/api/src/modules/*/index.ts` — no hardcoded list.
-// External modules (e.g. @appstrate/cloud) are not validated here; they're
-// loaded at runtime via APPSTRATE_MODULES and can't be imported without full boot.
+// External modules (npm-published) are not validated here; they're
+// loaded at runtime via MODULES and can't be imported without full boot.
 
 const {
   paths: modulePaths,

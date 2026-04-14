@@ -1,12 +1,14 @@
 # Built-in Modules
 
-Built-in modules extend the Appstrate platform with optional features (currently: webhooks). They follow the same `AppstrateModule` contract as external modules like `@appstrate/cloud`, but live inside the API package so they can share test infrastructure and be discovered automatically.
+Built-in modules extend the Appstrate platform with optional features (currently: oidc, webhooks). They follow the same `AppstrateModule` contract as external modules published on npm, but live inside the API package so they can share test infrastructure and be discovered automatically.
 
 ## Auto-discovery
 
 At boot, `apps/api/src/lib/modules/module-loader.ts` scans this directory and registers every subdirectory with an `index.ts` as a candidate built-in module. The module `id` equals the directory name. The loader does not read any hardcoded list — adding a new module is literally dropping a new folder here.
 
-Only modules listed in the `APPSTRATE_MODULES` environment variable are actually initialized. Everything else is inert: no tables, no routes, no workers, no hook handlers.
+Only modules listed in the `MODULES` environment variable are actually initialized. Everything else is inert: no tables, no routes, no workers, no hook handlers.
+
+The default value is `oidc,webhooks` — these are built-in OSS modules that ship with the platform and are loaded out of the box. Override `MODULES` to extend (by appending external npm specifiers) or to remove a built-in.
 
 ## Directory layout
 
@@ -190,6 +192,6 @@ Because discovery is filesystem-based, adding a new endpoint only requires touch
 
 ## Disabling a module
 
-`APPSTRATE_MODULES` is comma-separated. Remove the module id (or package specifier) and the platform boots without importing a single byte of its code. The module's tables remain in the database (data is preserved), but no queries, routes, hooks, events, permissions, or feature flags are wired up. To drop the tables as well, write a separate migration or run a manual `DROP TABLE`.
+`MODULES` is comma-separated. Remove the module id (or package specifier) and the platform boots without importing a single byte of its code. The module's tables remain in the database (data is preserved), but no queries, routes, hooks, events, permissions, or feature flags are wired up. To drop the tables as well, write a separate migration or run a manual `DROP TABLE`.
 
 This is the "zero footprint" guarantee: the only coupling between core and a module is through the `AppstrateModule` contract. If core ever needs to special-case a specific module id, that is a design failure — use hooks, events, or feature flags instead.
