@@ -14,7 +14,7 @@ import {
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
-import { _clearSmtpCacheForTesting } from "../../../services/smtp-config.ts";
+import { _clearSmtpCacheForTesting } from "../../../services/smtp.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 

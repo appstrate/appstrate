@@ -14,7 +14,7 @@ import {
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
-import { _clearSocialCacheForTesting } from "../../../services/social-config.ts";
+import { _clearSocialCacheForTesting } from "../../../services/social.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 

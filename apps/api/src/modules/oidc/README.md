@@ -62,7 +62,7 @@ Appstrate shares a single Better Auth `user` table across audiences — platform
 The `user.realm` column (added in `packages/db/drizzle/0001_add_user_realm.sql`) tags every BA row with its intended audience:
 
 - `"platform"` — dashboard users, org members, instance/org-level OIDC clients. Default for any signup that does not carry an `oidc_pending_client` cookie pointing at an `application`-level client.
-- `"end_user:<applicationId>"` — end-user of the named application. Assigned by the OIDC module's realm resolver (`services/realm-resolver.ts`) during `user.create.before` when the in-flight signup's pending-client cookie resolves to an `application`-level client.
+- `"end_user:<applicationId>"` — end-user of the named application. Assigned by the OIDC module's realm resolver (`services/oidc-realm-resolver.ts`) during `user.create.before` when the in-flight signup's pending-client cookie resolves to an `application`-level client.
 
 ### Assignment — BA `user.create.before` hook
 
@@ -348,7 +348,7 @@ For `level=application` OIDC clients, Google/GitHub sign-in routes through the *
 
 **Runtime wiring**:
 
-- `services/social-config.ts` — resolver with a 60s/30s TTL in-memory cache. Invalidated on every upsert/delete so admin changes are visible within one request.
+- `services/social.ts` — resolver with a 60s/30s TTL in-memory cache. Invalidated on every upsert/delete so admin changes are visible within one request.
 - `services/ba-social-override-plugin.ts` — a Better Auth plugin whose `before` hook matches `/sign-in/social` + `/callback/:provider`. It reads the signed `oidc_pending_client` cookie, looks up the OIDC client, resolves per-app creds, and calls `enterSocialOverride()` (AsyncLocalStorage).
 - `packages/db/src/auth.ts` — the `socialProviders.{google,github}.{clientId,clientSecret}` entries are **getters** that first consult `getSocialOverride()` and fall back to env. This relies on Better Auth's provider factories (`@better-auth/core/social-providers/{google,github}.mjs`) reading `options.clientId` / `options.clientSecret` lazily via property access inside `createAuthorizationURL` / `validateAuthorizationCode` rather than destructuring at init time — verified against BA 1.6.2.
 - `loadPageContext` in `routes.ts` populates `ctx.features.socialGoogle` / `.socialGithub` per-client: `application` → resolver result, `org`/`instance` → env presence.
@@ -360,7 +360,7 @@ For `level=application` OIDC clients, Google/GitHub sign-in routes through the *
 3. `PUT /api/applications/{applicationId}/social-providers/{google|github}` with `{ "clientId": "…", "clientSecret": "…", "scopes": ["openid","email","profile"] }` (scopes optional).
 4. The provider's button appears on the next login-page render (resolver cache: ≤60s).
 
-**Testing**: `services/social-config.ts` exposes `_setTestSocialSpy` so E2E tests can assert which per-app row a given request resolved against — mirrors `_setTestMailSpy` in `smtp-config.ts`.
+**Testing**: `services/social.ts` exposes `_setTestSocialSpy` so E2E tests can assert which per-app row a given request resolved against — mirrors `_setTestMailSpy` in `smtp-config.ts`.
 
 ## Production deployment checklist
 
@@ -375,11 +375,11 @@ Before exposing the module to external satellites:
 
 ### Per-app secret encryption — rotation SOP
 
-`application_smtp_configs.pass_encrypted` and `application_social_providers.client_secret_encrypted` are AES-256-GCM encrypted via `CONNECTION_ENCRYPTION_KEY`. Each row also carries an `encryption_key_version` tag stamped at write time (see `services/encryption-key-version.ts`). On read, the resolver compares the row's tag with `CURRENT_ENCRYPTION_KEY_VERSION`; a mismatch is treated as "not configured" (no silent decryption error, no silent fallback to env credentials).
+`application_smtp_configs.pass_encrypted` and `application_social_providers.client_secret_encrypted` are AES-256-GCM encrypted via `CONNECTION_ENCRYPTION_KEY`. Each row also carries an `encryption_key_version` tag stamped at write time (see `services/smtp.ts or services/social.ts`). On read, the resolver compares the row's tag with `ENCRYPTION_KEY_VERSION`; a mismatch is treated as "not configured" (no silent decryption error, no silent fallback to env credentials).
 
 To rotate `CONNECTION_ENCRYPTION_KEY`:
 
-1. Bump `CURRENT_ENCRYPTION_KEY_VERSION` in `services/encryption-key-version.ts` (e.g. `v1` → `v2`).
+1. Bump `ENCRYPTION_KEY_VERSION` in `services/smtp.ts or services/social.ts` (e.g. `v1` → `v2`).
 2. Roll out the new `CONNECTION_ENCRYPTION_KEY` and the new constant together (blue/green).
 3. After deploy, per-app email + social auth are disabled for every tenant until an operator re-`PUT`s each `/api/applications/:id/smtp-config` and `/api/applications/:id/social-providers/:provider` row. For deployments with more than a handful of tenants, drive this via a one-off migration script that reads `CONNECTION_ENCRYPTION_KEY_OLD` + `CONNECTION_ENCRYPTION_KEY_NEW` side by side, decrypts each row with the old key, re-encrypts with the new key, and writes back via the admin API (which stamps the new `encryption_key_version`). Per-tenant `PUT`s become the fallback, not the default path.
 4. Rows carrying the old tag stay unreachable until explicitly rewritten — this is intentional: a stale ciphertext must never silently fall through to instance-level env credentials or surface as a cryptic crypto error.

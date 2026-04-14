@@ -1,29 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * TTL cache + in-flight dedup shared by the per-app resolvers
- * (`smtp-config.ts`, `social-config.ts`).
+ * TTL cache with cross-instance invalidation — shared by the per-app
+ * resolvers (`smtp.ts`, `social.ts`).
  *
  * Features:
  *  - Lookup by string key with short TTL (null entries cached with shorter TTL).
- *  - In-flight promise dedup so concurrent cache misses for the same key
- *    share a single DB round-trip.
  *  - Cross-instance invalidation via the platform Pub/Sub (Redis when
  *    `REDIS_URL` is set, in-memory EventEmitter otherwise). Each cache
- *    instance declares a channel name at construction; `delete()` publishes
- *    the invalidated key to that channel, and every subscriber (including
- *    the publisher itself) evicts locally. The null TTL (30s) bounds the
- *    worst-case staleness window when pub/sub is unavailable.
+ *    instance declares a channel at construction; `delete()` publishes the
+ *    invalidated key, every subscriber (including the publisher) evicts
+ *    locally. The null TTL bounds the worst-case staleness window when
+ *    pub/sub is unavailable.
+ *
+ * Deliberately *not* included: in-flight promise dedup. Per-app SMTP/social
+ * config is admin-reconfigured rarely; the occasional duplicate DB round-trip
+ * on a cold-cache burst is not worth the extra state machine.
  */
 
 import { getPubSub } from "../../../infra/index.ts";
 import { logger } from "../../../lib/logger.ts";
 
 const PER_APP_TTL_MS = 60_000;
-// Short null TTL so a freshly-configured admin sees changes quickly. This
-// also bounds the worst-case cross-pod staleness window when Redis pub/sub
-// is unavailable: if `delete()` can't publish, other pods only see the
-// invalidation after the null entry expires. Keep this well under a minute.
 const NULL_TTL_MS = 10_000;
 
 interface Entry<V> {
@@ -35,11 +33,6 @@ export interface TtlCache<V> {
   get(key: string): V | null | undefined;
   set(key: string, value: V | null): void;
   delete(key: string): Promise<void>;
-  /**
-   * Run `loader` while deduping concurrent calls for the same key. If another
-   * caller is already resolving the same key, the in-flight promise is
-   * returned. Result is cached with the usual TTL rules.
-   */
   getOrLoad(key: string, loader: () => Promise<V | null>): Promise<V | null>;
   /** Test-only: clear all entries. Guarded by NODE_ENV check. */
   clearForTesting(): void;
@@ -47,10 +40,7 @@ export interface TtlCache<V> {
 
 export function createTtlCache<V>(channel: string): TtlCache<V> {
   const map = new Map<string, Entry<V>>();
-  const inflight = new Map<string, Promise<V | null>>();
 
-  // Subscribe once at construction. Any publish (local or from another
-  // instance) invalidates the matching key.
   void (async () => {
     try {
       const pubsub = await getPubSub();
@@ -96,26 +86,15 @@ export function createTtlCache<V>(channel: string): TtlCache<V> {
     async getOrLoad(key, loader) {
       const cached = cache.get(key);
       if (cached !== undefined) return cached;
-      const existing = inflight.get(key);
-      if (existing) return existing;
-      const promise = (async () => {
-        try {
-          const value = await loader();
-          cache.set(key, value);
-          return value;
-        } finally {
-          inflight.delete(key);
-        }
-      })();
-      inflight.set(key, promise);
-      return promise;
+      const value = await loader();
+      cache.set(key, value);
+      return value;
     },
     clearForTesting() {
       if (process.env.NODE_ENV !== "test") {
         throw new Error("clearForTesting is test-only");
       }
       map.clear();
-      inflight.clear();
     },
   };
 

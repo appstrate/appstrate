@@ -19,6 +19,15 @@
  *  - `/callback/:provider` — return leg (token exchange + profile fetch)
  *  - `/oauth2-callback/:provider` — alternative BA callback path
  *
+ * AsyncLocalStorage propagation invariant: BA dispatches `before` hooks
+ * synchronously within the Hono request stack, and the downstream provider
+ * factory (`@better-auth/core/social-providers/{google,github}.mjs`) reads
+ * `options.clientId` / `options.clientSecret` lazily inside the same async
+ * context. Because Node's `AsyncLocalStorage` propagates across all awaited
+ * continuations rooted in the hook's execution, the `enterSocialOverride()`
+ * call below remains visible for the entire request — no explicit `run()`
+ * wrapper is required.
+ *
  * No-op when the pending-client cookie is missing, the referenced client is
  * not `level=application`, or no per-app creds are configured. In that last
  * case the getters fall through to env — which, for an app-level client
@@ -34,7 +43,7 @@ import { enterSocialOverride, type SocialOverride } from "@appstrate/db/auth";
 import { logger } from "../../../lib/logger.ts";
 import { getClientCached } from "./oauth-admin.ts";
 import { readPendingClientCookieFromHeaders } from "./pending-client-cookie.ts";
-import { resolveSocialProviderForClient } from "./social-config.ts";
+import { resolveSocialProviderForClient } from "./social.ts";
 
 async function applyOverride(ctx: { request?: Request }): Promise<void> {
   const pendingClientId = readPendingClientCookieFromHeaders(ctx.request?.headers ?? null);
@@ -59,14 +68,10 @@ async function applyOverride(ctx: { request?: Request }): Promise<void> {
       enterSocialOverride(override);
     }
   } catch (err) {
-    // A resolver failure (DB blip, decryption error, …) must not leak the
-    // platform's env creds to a tenant's flow — safer to fail closed. Log
-    // and let the downstream BA provider surface its own
-    // `CLIENT_ID_AND_SECRET_REQUIRED` error.
-    // Resolver failure is expected during key rotation (stale rows return null
-    // upstream but a decryption throw surfaces here). Log as `warn` for parity
-    // with `smtp-config.ts` — the downstream BA provider will surface a proper
-    // `CLIENT_ID_AND_SECRET_REQUIRED` if this was not a transient blip.
+    // Fail closed: a resolver failure (DB blip, decryption error, stale key
+    // rotation, …) must not leak the platform's env creds to a tenant's flow.
+    // Downstream BA surfaces `CLIENT_ID_AND_SECRET_REQUIRED` if this was not
+    // a transient blip.
     logger.warn("oidc: failed to resolve per-app social credentials", {
       module: "oidc",
       clientId: pendingClientId,

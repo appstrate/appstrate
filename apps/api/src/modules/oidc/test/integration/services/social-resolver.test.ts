@@ -12,8 +12,9 @@ import {
   resolveSocialProviderForClient,
   invalidateSocialCache,
   _clearSocialCacheForTesting,
-} from "../../../services/social-config.ts";
-import { upsertSocialProvider, deleteSocialProvider } from "../../../services/social-admin.ts";
+  upsertSocialProvider,
+  deleteSocialProvider,
+} from "../../../services/social.ts";
 
 async function seedApp(): Promise<string> {
   const ownerId = `user-${crypto.randomUUID()}`;

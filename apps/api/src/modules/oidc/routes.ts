@@ -56,14 +56,16 @@ import {
   upsertSmtpConfig,
   deleteSmtpConfig,
   sendTestEmail,
-} from "./services/smtp-admin.ts";
-import { resolveSmtpForClient, type ResolvedSmtpConfig } from "./services/smtp-config.ts";
+  resolveSmtpForClient,
+  type ResolvedSmtpConfig,
+} from "./services/smtp.ts";
 import {
   getSocialProvider,
   upsertSocialProvider,
   deleteSocialProvider,
-} from "./services/social-admin.ts";
-import { resolveSocialProviderForClient, type SocialProviderId } from "./services/social-config.ts";
+  resolveSocialProviderForClient,
+  type SocialProviderId,
+} from "./services/social.ts";
 import { isBlockedHost } from "@appstrate/core/ssrf";
 import { getOidcAuthApi } from "./auth/api.ts";
 import { withSmtpOverride } from "@appstrate/db/auth";
@@ -552,7 +554,7 @@ export function createOidcRouter() {
   // Scoped to applications owned by the caller's org. Per-app SMTP replaces
   // instance-level env SMTP for `level=application` OIDC flows — without a
   // row, verification emails, magic-link, and reset-password are disabled for
-  // that app's clients. See `services/smtp-config.ts` for the resolver.
+  // that app's clients. See `services/smtp.ts` for the resolver.
 
   const assertAppBelongsToOrg = async (c: Context<AppEnv>, applicationId: string) => {
     const orgId = c.get("orgId");
@@ -640,7 +642,7 @@ export function createOidcRouter() {
   // replaces the instance env `GOOGLE_CLIENT_*` / `GITHUB_CLIENT_*` pair for
   // `level=application` OIDC flows — without a row for a given provider, that
   // provider's button is hidden on the tenant's login/register pages (no
-  // fallback to env creds, same rule as SMTP). See `services/social-config.ts`
+  // fallback to env creds, same rule as SMTP). See `services/social.ts`
   // for the resolver.
 
   const parseProvider = (raw: string): SocialProviderId => {

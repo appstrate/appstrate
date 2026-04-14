@@ -807,7 +807,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
     // slot with the same function.
     beforeAll(async () => {
       const { setRealmResolver } = await import("@appstrate/db/auth");
-      const { oidcRealmResolver } = await import("../../../services/realm-resolver.ts");
+      const { oidcRealmResolver } = await import("../../../services/oidc-realm-resolver.ts");
       setRealmResolver(oidcRealmResolver);
     });
 

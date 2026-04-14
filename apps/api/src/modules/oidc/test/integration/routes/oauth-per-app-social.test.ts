@@ -29,12 +29,12 @@ import {
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
-import { upsertSocialProvider } from "../../../services/social-admin.ts";
 import {
+  upsertSocialProvider,
   _clearSocialCacheForTesting,
   _setSocialSpy,
   type SpiedSocialResolve,
-} from "../../../services/social-config.ts";
+} from "../../../services/social.ts";
 import oidcModule from "../../../index.ts";
 
 const app = getTestApp({ modules: [oidcModule] });

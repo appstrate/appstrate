@@ -51,7 +51,7 @@ import {
   listFirstPartyClientIds,
 } from "./services/oauth-admin.ts";
 import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
-import { oidcRealmResolver } from "./services/realm-resolver.ts";
+import { oidcRealmResolver } from "./services/oidc-realm-resolver.ts";
 import { setRealmResolver } from "@appstrate/db/auth";
 
 // Snapshot of first-party clientIds captured at `init()` time and forwarded

@@ -12,8 +12,9 @@ import {
   resolveSmtpForClient,
   invalidateSmtpCache,
   _clearSmtpCacheForTesting,
-} from "../../../services/smtp-config.ts";
-import { upsertSmtpConfig, deleteSmtpConfig } from "../../../services/smtp-admin.ts";
+  upsertSmtpConfig,
+  deleteSmtpConfig,
+} from "../../../services/smtp.ts";
 
 async function seedApp(): Promise<string> {
   const ownerId = `user-${crypto.randomUUID()}`;

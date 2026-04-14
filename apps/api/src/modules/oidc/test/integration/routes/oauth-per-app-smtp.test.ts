@@ -33,12 +33,12 @@ import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { enableSmtpForSuite } from "../../../../../../test/helpers/smtp.ts";
 import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
-import { upsertSmtpConfig } from "../../../services/smtp-admin.ts";
 import {
+  upsertSmtpConfig,
   _clearSmtpCacheForTesting,
   _setSmtpSpy,
   type SpiedSmtpSend,
-} from "../../../services/smtp-config.ts";
+} from "../../../services/smtp.ts";
 import oidcModule from "../../../index.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
