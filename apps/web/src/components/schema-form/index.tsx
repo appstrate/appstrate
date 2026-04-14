@@ -24,6 +24,7 @@ import {
   DescriptionFieldTemplate,
   ArrayFieldTemplate,
   ArrayFieldItemTemplate,
+  ObjectFieldTemplate,
   SubmitButton,
 } from "./templates";
 import {
@@ -49,6 +50,7 @@ const templates = {
   DescriptionFieldTemplate,
   ArrayFieldTemplate,
   ArrayFieldItemTemplate,
+  ObjectFieldTemplate,
   ButtonTemplates: { SubmitButton },
 };
 

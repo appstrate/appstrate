@@ -14,6 +14,7 @@ import type {
   SubmitButtonProps,
   ArrayFieldTemplateProps,
   ArrayFieldItemTemplateProps,
+  ObjectFieldTemplateProps,
 } from "@rjsf/utils";
 import { getSubmitButtonOptions } from "@rjsf/utils";
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
@@ -55,17 +56,21 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
   const inputType = type ?? formatType;
 
   const isConst = schema && "const" in schema;
+  const isReadOnly = readonly || isConst;
   return (
     <Input
       id={id}
       type={inputType}
       value={(value as string | number | undefined) ?? ""}
       required={required}
-      readOnly={readonly || isConst}
+      readOnly={isReadOnly}
       disabled={disabled}
-      autoFocus={autofocus}
+      autoFocus={autofocus && !isReadOnly}
       placeholder={(placeholder ?? (options?.["ui:placeholder"] as string | undefined)) as string}
-      className={cn(rawErrors && rawErrors.length > 0 && "border-destructive")}
+      className={cn(
+        isReadOnly && "bg-muted/50 cursor-not-allowed",
+        rawErrors && rawErrors.length > 0 && "border-destructive",
+      )}
       onChange={(e) =>
         onChange(
           e.target.value === "" ? (options?.emptyValue as T) : (e.target.value as unknown as T),
@@ -97,23 +102,27 @@ export function FieldTemplate(props: FieldTemplateProps) {
   // File widget renders its own label so we skip the FieldTemplate label.
   const widget = (uiSchema as Record<string, unknown>)?.["ui:widget"];
   const isFileWidget = widget === "file";
-  // Objects and arrays render labels via TitleField, so don't double up here.
-  const isContainer = schema.type === "object" || schema.type === "array";
+  // Objects and arrays render labels via TitleField, so don't double up here —
+  // unless a custom single-control widget (multi-select) is in play, in which
+  // case we DO want the field-level label.
+  const isSingleControlWidget = widget === "multiselect";
+  const isContainer =
+    !isSingleControlWidget && (schema.type === "object" || schema.type === "array");
 
   const showLabel = displayLabel && !isFileWidget && !isContainer && label;
 
+  const showDescription = rawDescription && !isFileWidget && !isContainer;
+
   return (
-    <div className={cn("space-y-2", classNames)}>
+    <div className={cn("space-y-1.5", classNames)}>
       {showLabel && (
         <Label htmlFor={id}>
           {label}
           {required && " *"}
         </Label>
       )}
+      {showDescription && <p className="text-muted-foreground text-xs">{rawDescription}</p>}
       {children}
-      {rawDescription && !isFileWidget && !isContainer && (
-        <p className="text-muted-foreground text-xs">{rawDescription}</p>
-      )}
       {rawErrors && rawErrors.length > 0 && (
         <ul className="space-y-0.5">
           {rawErrors.map((err, i) => (
@@ -145,6 +154,20 @@ export function DescriptionFieldTemplate(props: DescriptionFieldProps) {
     <p id={id} className="text-muted-foreground text-xs">
       {description}
     </p>
+  );
+}
+
+export function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
+  const { title, description, properties, fieldPathId } = props;
+  const isRoot = fieldPathId?.$id === "root";
+  return (
+    <div className={isRoot ? "space-y-6" : "space-y-4"}>
+      {title && !isRoot && <h3 className="text-sm font-medium">{title}</h3>}
+      {description && !isRoot && <p className="text-muted-foreground text-xs">{description}</p>}
+      {properties.map((p) => (
+        <div key={p.name}>{p.content}</div>
+      ))}
+    </div>
   );
 }
 
