@@ -97,7 +97,7 @@ export function ProvidersPage() {
   );
 
   return (
-    <>
+    <div className="p-6">
       <ItemTab
         config={providerTabConfig}
         badgeMap={badgeMap}
@@ -162,6 +162,6 @@ export function ProvidersPage() {
           onClose={() => setConfigureProvider(null)}
         />
       )}
-    </>
+    </div>
   );
 }

@@ -114,7 +114,7 @@ export function PackageList() {
   }));
 
   return (
-    <>
+    <div className="p-6">
       <PackageTab
         title={t("list.tabAgents")}
         emoji="⚡"
@@ -142,6 +142,6 @@ export function PackageList() {
         }
       />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
-    </>
+    </div>
   );
 }

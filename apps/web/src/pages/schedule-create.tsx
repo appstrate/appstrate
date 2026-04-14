@@ -32,7 +32,7 @@ export function ScheduleCreatePage() {
     inputSchema?.properties && Object.values(inputSchema.properties).some(isFileField);
 
   return (
-    <>
+    <div className="p-6">
       <PageHeader
         title={t("schedule.titleNew")}
         emoji="📅"
@@ -59,6 +59,6 @@ export function ScheduleCreatePage() {
         }}
         onCancel={() => navigate(-1)}
       />
-    </>
+    </div>
   );
 }

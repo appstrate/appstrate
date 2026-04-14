@@ -23,7 +23,7 @@ export function WebhookDetailPage() {
   if (!webhook) return <ErrorState />;
 
   return (
-    <div>
+    <div className="p-6">
       <PageHeader
         title={webhook.url}
         emoji="🪝"

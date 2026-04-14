@@ -21,7 +21,7 @@ import { applyModuleMigrations } from "./migrate.ts";
 // Registry — env-driven module specifiers
 // ---------------------------------------------------------------------------
 //
-// Each specifier in APPSTRATE_MODULES is resolved at boot by `loadModules`:
+// Each specifier in MODULES is resolved at boot by `loadModules`:
 // a matching `apps/api/src/modules/<specifier>/index.ts` directory is loaded
 // as a built-in, otherwise the specifier is treated as an npm package name
 // and resolved via dynamic import.
@@ -30,19 +30,23 @@ import { applyModuleMigrations } from "./migrate.ts";
 /**
  * Returns the list of module entries to load at boot.
  *
- * Reads `APPSTRATE_MODULES` (comma-separated specifiers) directly from
+ * Reads `MODULES` (comma-separated specifiers) directly from
  * `process.env` rather than the cached `getEnv()`, so callers can mutate
  * the env in tests without flushing the whole env cache. The field is a
  * plain comma-separated string — no validation beyond trim/filter is useful.
  *
- * Empty by default (OSS mode). Cloud deployments set:
- *   APPSTRATE_MODULES=@appstrate/cloud
+ * Defaults to the built-in OSS modules (`oidc,webhooks`) when the env
+ * var is unset. External deployments extend the list by appending npm
+ * package specifiers, e.g.:
+ *   MODULES=oidc,webhooks,@scope/module
  *
  * All declared modules are required — if a module is in the list, it must
  * load and init successfully or the platform crashes.
  */
+const DEFAULT_MODULES = "oidc,webhooks";
+
 export function getModuleRegistry(): string[] {
-  return (process.env.APPSTRATE_MODULES ?? "")
+  return (process.env.MODULES ?? DEFAULT_MODULES)
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);

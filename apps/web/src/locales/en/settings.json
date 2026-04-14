@@ -70,6 +70,8 @@
   "createOrg.creating": "Creating...",
   "createOrg.submit": "Create organization",
   "orgSettings.pageTitle": "Organization Settings",
+  "orgSettings.sectionOrganization": "Organization",
+  "orgSettings.sectionApplication": "Application",
   "orgSettings.tabGeneral": "General",
   "orgSettings.tabMembers": "Members",
   "orgSettings.tabProfiles": "Profiles",

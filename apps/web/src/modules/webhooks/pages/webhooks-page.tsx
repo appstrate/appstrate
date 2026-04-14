@@ -24,7 +24,7 @@ export function WebhooksPage() {
   if (error) return <ErrorState message={error.message} />;
 
   return (
-    <div>
+    <div className="p-6">
       <PageHeader
         title={t("settings:webhooks.pageTitle")}
         emoji="🪝"

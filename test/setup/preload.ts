@@ -13,7 +13,7 @@
  *
  * Both are optional. Running core tests alone still picks up installed modules
  * because anything under the modules directory is part of the repo — there is
- * no "module disabled" state in tests, unlike production (APPSTRATE_MODULES env var).
+ * no "module disabled" state in tests, unlike production (MODULES env var).
  */
 import { resolve, join } from "path";
 import { readdirSync, existsSync, statSync } from "fs";

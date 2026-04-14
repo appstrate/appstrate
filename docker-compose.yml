@@ -144,25 +144,53 @@ services:
     restart: unless-stopped
     mem_limit: 8g
     environment:
+      # ── Core ──
       - PORT=3000
-      - DATABASE_URL=postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
       - APP_URL=${APP_URL:-http://localhost:3000}
-      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env}
       - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
-      - SYSTEM_PROVIDER_KEYS=${SYSTEM_PROVIDER_KEYS:-[]}
+      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
+      - TRUST_PROXY=${TRUST_PROXY:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - MODULES=${MODULES:-oidc,webhooks}
+      # ── Auth / Crypto ──
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env}
       - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY:?Set CONNECTION_ENCRYPTION_KEY in .env}
+      - RUN_TOKEN_SECRET=${RUN_TOKEN_SECRET:-}
+      # ── Database / Redis ──
+      - DATABASE_URL=postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
       - REDIS_URL=redis://appstrate-redis:6379
+      # ── S3 Storage ──
       - S3_BUCKET=${S3_BUCKET:-appstrate}
       - S3_REGION=${S3_REGION:-us-east-1}
       - S3_ENDPOINT=${S3_ENDPOINT:-http://appstrate-minio:9000}
       - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
       - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      # ── Run / Sidecar ──
       - RUN_ADAPTER=${RUN_ADAPTER:-docker}
       - DOCKER_SOCKET=/var/run/docker.sock
+      - PLATFORM_API_URL=${PLATFORM_API_URL:-}
       - SIDECAR_POOL_SIZE=${SIDECAR_POOL_SIZE:-2}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
       - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
       - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
+      # ── System config (JSON arrays) ──
+      - SYSTEM_PROVIDER_KEYS=${SYSTEM_PROVIDER_KEYS:-[]}
+      - SYSTEM_PROXIES=${SYSTEM_PROXIES:-[]}
+      - PROXY_URL=${PROXY_URL:-}
+      - OIDC_INSTANCE_CLIENTS=${OIDC_INSTANCE_CLIENTS:-[]}
+      # ── Social login (optional) ──
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      # ── SMTP (optional) ──
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      # ── Legal (optional) ──
+      - LEGAL_TERMS_URL=${LEGAL_TERMS_URL:-}
+      - LEGAL_PRIVACY_URL=${LEGAL_PRIVACY_URL:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:

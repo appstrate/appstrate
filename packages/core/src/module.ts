@@ -3,8 +3,8 @@
 /**
  * Appstrate Module System — contract types.
  *
- * Published in @appstrate/core so that external modules (e.g. @appstrate/cloud)
- * can implement the interface without depending on the API package.
+ * Published in @appstrate/core so that external modules can implement
+ * the interface without depending on the API package.
  *
  * Hono is the only framework dependency — all Appstrate modules must provide
  * Hono routers. It is declared as an optional peer dependency.
@@ -178,9 +178,9 @@ export interface AppstrateModule {
    * Naming: `beforeX` (gates), `afterX` (post-lifecycle patches).
    *
    * Priority order: topological order from `manifest.dependencies`. Modules
-   * without dependencies keep the order they appear in `APPSTRATE_MODULES`.
+   * without dependencies keep the order they appear in `MODULES`.
    *
-   * Example: `APPSTRATE_MODULES=cloud,quota` — if both provide `beforeRun`,
+   * Example: `MODULES=cloud,quota` — if both provide `beforeRun`,
    * cloud runs first. To force ordering, add `dependencies: ["cloud"]` on
    * quota so the topo sort always places cloud earlier.
    */
