@@ -21,7 +21,7 @@ function getStore(): Storage {
     store = createFileSystemStorage({
       basePath: env.FS_STORAGE_PATH,
       uploadBaseUrl: env.APP_URL,
-      uploadSecret: env.UPLOAD_SIGNING_SECRET ?? env.BETTER_AUTH_SECRET,
+      uploadSecret: env.UPLOAD_SIGNING_SECRET,
     });
   }
 

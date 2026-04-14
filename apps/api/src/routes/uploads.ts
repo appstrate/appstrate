@@ -74,7 +74,7 @@ export function createUploadContentRouter() {
     const token = c.req.query("token");
     if (!token) throw unauthorized("missing upload token");
     const env = getEnv();
-    const payload = verifyFsUploadToken(token, env.UPLOAD_SIGNING_SECRET ?? env.BETTER_AUTH_SECRET);
+    const payload = verifyFsUploadToken(token, env.UPLOAD_SIGNING_SECRET);
     if (!payload) throw unauthorized("invalid or expired upload token");
 
     // Normalize both sides: strip parameters (charset, boundary, …) and
