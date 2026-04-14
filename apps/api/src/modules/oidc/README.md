@@ -45,11 +45,15 @@ When an end-user authenticates via the OIDC flow, the module resolves the applic
 
 1. **Linked** — INNER JOIN `end_users ⋈ oidc_end_user_profiles` on `auth_user_id` + `applicationId`. If a profile already links this Better Auth identity to an end-user in this app, return it. Single SELECT, idempotent.
 2. **Adopt by verified email** — If the auth identity's email is **strictly** verified (`emailVerified === true`), look for an API-created `end_users` row in this app with the same email and no profile row yet (or a profile row with `auth_user_id IS NULL`). If found, link it via `linkProfileAtomic()` (upsert with `WHERE auth_user_id IS NULL`, so only one caller wins the race; the loser falls back to step 1 on the next call).
-3. **Create fresh** — Insert a new `end_users` row + companion `oidc_end_user_profiles` row in a single `db.transaction()` so the shadow row can never be missing. On unique-index violation (another concurrent sign-in committed first), retry from step 1.
+3. **Create fresh** — Gated by the client's `allowSignup` policy. When `false` (secure-by-default), throws `AppSignupClosedError` and the token mint fails with an OAuth `access_denied` — admins must pre-create the end-user via `POST /api/end-users` first. When `true`, inserts a new `end_users` row + companion `oidc_end_user_profiles` row in a single `db.transaction()` so the shadow row can never be missing. On unique-index violation (another concurrent sign-in committed first), retry from step 1.
 
 ### `UnverifiedEmailConflictError`
 
 Thrown in step 2 when an `end_users` row with the same email already exists in the application **and** the authenticating identity has not strictly verified the email address. Rather than silently create a duplicate or adopt the row (either would enable account takeover when SMTP verification is disabled), the module refuses and propagates the error all the way up to `customAccessTokenClaims` → the plugin's `/oauth2/consent` endpoint → the module's consent handler, which catches it and renders an FR error page asking the user to verify their email before logging in. Unverified-email attempts therefore fail loudly at the edge, never at a later scoped request.
+
+### `AppSignupClosedError`
+
+Thrown in step 3 when the client's `allowSignup` is `false` and no existing `end_users` row can be linked/adopted. Same propagation path as `UnverifiedEmailConflictError`: bubbles up through `customAccessTokenClaims` and is caught by the consent handler to render an FR "contact your administrator" page. Mirrors the Auth0 "Disable Sign-Ups" / Keycloak "User Registration: off" / Okta JIT-off posture — secure-by-default for every new application client; opt in explicitly by setting `allowSignup: true` at create/update time when JIT provisioning is desired.
 
 ## Feature flag
 
@@ -192,7 +196,8 @@ Colors are validated by `AppBrandingSchema` at resolve time, so a misconfigured 
   "redirectUris": ["https://mobile.example.com/callback"],
   "referencedApplicationId": "app_…",
   "scopes": ["openid", "profile", "email", "offline_access", "runs:read"],
-  "isFirstParty": false
+  "isFirstParty": false,
+  "allowSignup": false
 }
 
 // org-level client (dashboard users of a specific org)

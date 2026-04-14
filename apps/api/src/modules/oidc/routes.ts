@@ -71,6 +71,7 @@ import { APPSTRATE_SCOPES } from "./auth/scopes.ts";
 import { consumeLoginEmailAttempt, resetLoginEmailAttempts } from "./auth/guards.ts";
 import {
   UnverifiedEmailConflictError,
+  AppSignupClosedError,
   resolveOrCreateEndUser,
   loadAppById,
 } from "./services/enduser-mapping.ts";
@@ -131,10 +132,12 @@ const createApplicationClientSchema = z.object({
   scopes: z.array(z.string().min(1)).optional(),
   referencedApplicationId: z.string().min(1),
   isFirstParty: z.boolean().optional(),
-  // Passed through to the service so we can reject them with a clear 400.
-  // Zod by default strips unknown keys; accepting them here lets us fail
-  // loudly rather than silently dropping the caller's intent.
+  // Unified signup opt-in. Secure-by-default → when omitted, the service
+  // stores `false` and fresh end-user sign-ins are rejected until the
+  // admin pre-creates them via the headless API.
   allowSignup: z.boolean().optional(),
+  // Passed through to the service so we can reject it with a clear 400
+  // (signupRole is only meaningful on org-level clients).
   signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
 });
 
@@ -975,12 +978,20 @@ export function createOidcRouter() {
                 emailVerified: authUserRow.emailVerified === true,
               },
               app,
+              { allowSignup: ctx.client.allowSignup },
             );
           } catch (err) {
             if (err instanceof UnverifiedEmailConflictError) {
               return renderError(
                 "Un compte existe déjà avec cet email mais n'est pas vérifié. Vérifiez votre email avant de vous connecter.",
                 409,
+                email,
+              );
+            }
+            if (err instanceof AppSignupClosedError) {
+              return renderError(
+                "L'inscription automatique est désactivée pour cette application. Contactez votre administrateur pour qu'il crée votre compte avant votre connexion.",
+                403,
                 email,
               );
             }

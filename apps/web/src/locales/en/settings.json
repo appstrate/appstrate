@@ -382,7 +382,7 @@
   "oauthClients.firstPartyEnabled": "Client marked as first-party",
   "oauthClients.firstPartyDisabled": "Client removed from first-party mode",
   "oauthClients.allowSignupLabel": "Allow new users to register",
-  "oauthClients.allowSignupHint": "When enabled, users signing in for the first time through this client are automatically added to this organization with the role below. When disabled, only existing members can sign in; new users are rejected with a clear error.",
+  "oauthClients.allowSignupHint": "When enabled, users signing in for the first time through this client are provisioned on the fly (user creation plus, for org-level clients, auto-join with the role below; end-user creation for application-level clients). When disabled, only pre-existing users can sign in; unknown users are rejected with a clear error.",
   "oauthClients.signupRoleLabel": "Role assigned on auto-join",
   "oauthClients.signupRoleHint": "Owner is intentionally unavailable — use the members page to promote a user to owner.",
   "oauthClients.signupRoleOption.member": "Member",

@@ -100,6 +100,10 @@ async function setupSmtpFixture(): Promise<{
     name: "Verify Email Client",
     redirectUris: ["https://acme.example.com/oauth/callback"],
     referencedApplicationId: appId,
+    // This suite exercises brand-new end-user sign-ups through the
+    // OIDC verify-email / magic-link / password flows — JIT provisioning
+    // must be ON for the happy-path tests to mint a token.
+    allowSignup: true,
   });
 
   // Per-app SMTP is now required for email features on level=application

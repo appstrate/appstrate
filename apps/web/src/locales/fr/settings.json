@@ -382,7 +382,7 @@
   "oauthClients.firstPartyEnabled": "Client marqué comme first-party",
   "oauthClients.firstPartyDisabled": "Client retiré du mode first-party",
   "oauthClients.allowSignupLabel": "Autoriser l'inscription de nouveaux utilisateurs",
-  "oauthClients.allowSignupHint": "Quand activé, les utilisateurs qui se connectent pour la première fois via ce client sont automatiquement ajoutés à cette organisation avec le rôle ci-dessous. Quand désactivé, seuls les membres existants peuvent se connecter ; les nouveaux utilisateurs sont rejetés avec un message explicite.",
+  "oauthClients.allowSignupHint": "Quand activé, les utilisateurs qui se connectent pour la première fois via ce client sont provisionnés à la volée (création du compte et, pour les clients de niveau org, auto-rattachement avec le rôle ci-dessous ; création de l'utilisateur final pour les clients de niveau application). Quand désactivé, seuls les utilisateurs déjà existants peuvent se connecter ; les inconnus sont rejetés avec un message explicite.",
   "oauthClients.signupRoleLabel": "Rôle attribué à l'auto-inscription",
   "oauthClients.signupRoleHint": "Le rôle owner est volontairement indisponible — utilisez la page des membres pour promouvoir un utilisateur.",
   "oauthClients.signupRoleOption.member": "Membre",

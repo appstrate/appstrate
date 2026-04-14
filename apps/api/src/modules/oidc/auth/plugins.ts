@@ -38,6 +38,7 @@ import { logger } from "../../../lib/logger.ts";
 import {
   resolveOrCreateEndUser,
   UnverifiedEmailConflictError,
+  AppSignupClosedError,
   loadAppById,
 } from "../services/enduser-mapping.ts";
 import {
@@ -243,30 +244,14 @@ async function buildOrgLevelClaims(
   }
 
   // Load the mutable signup policy via the short-TTL client cache. Falls
-  // back to the "closed" default if the lookup fails for any reason —
-  // better to reject a legitimate mint than silently auto-join to a wrong
-  // role because the cache is cold.
-  let policy: { allowSignup: boolean; signupRole: "admin" | "member" | "viewer" } = {
-    allowSignup: false,
-    signupRole: "member",
-  };
-  if (metadata.clientId) {
-    const loaded = await loadClientSignupPolicy(metadata.clientId);
-    if (loaded && loaded.level === "org" && loaded.orgId === orgId) {
-      policy = { allowSignup: loaded.allowSignup, signupRole: loaded.signupRole };
-    } else if (!loaded) {
-      logger.warn("oidc: could not load policy for org-level client — defaulting to closed", {
-        module: "oidc",
-        clientId: metadata.clientId,
-      });
-    }
-  } else {
-    logger.warn("oidc: org-level client metadata missing clientId — defaulting to closed", {
-      module: "oidc",
-      userId: user.id,
-      orgId,
-    });
-  }
+  // back to the "closed" default if the client was deleted/disabled or its
+  // metadata drifted — better to reject a legitimate mint than silently
+  // auto-join to a wrong role.
+  const loaded = metadata.clientId ? await loadClientSignupPolicy(metadata.clientId) : null;
+  const policy: { allowSignup: boolean; signupRole: "admin" | "member" | "viewer" } =
+    loaded && loaded.level === "org" && loaded.orgId === orgId
+      ? { allowSignup: loaded.allowSignup, signupRole: loaded.signupRole }
+      : { allowSignup: false, signupRole: "member" };
 
   // Resolve or create the membership. For existing members this is a
   // single SELECT (the proactive call in routes.ts already created the row
@@ -340,6 +325,16 @@ async function buildApplicationLevelClaims(
     });
     throw new Error("oidc: referenced application not found");
   }
+  // Load the signup policy via the short-TTL cache — closed default on any
+  // lookup failure. Same rationale as `buildOrgLevelClaims`.
+  const loaded = metadata.clientId ? await loadClientSignupPolicy(metadata.clientId) : null;
+  const signupPolicy = {
+    allowSignup:
+      loaded?.level === "application" &&
+      loaded.applicationId === applicationId &&
+      loaded.allowSignup,
+  };
+
   // NOTE: this call may be the SECOND invocation for a given login —
   // `routes.ts` POST /api/oauth/login pre-resolves the end-user to surface
   // `UnverifiedEmailConflictError` as a 409 before the redirect chain. That
@@ -356,6 +351,7 @@ async function buildApplicationLevelClaims(
         emailVerified: user.emailVerified === true,
       },
       app,
+      signupPolicy,
     );
     return {
       actor_type: "end_user",
@@ -373,6 +369,20 @@ async function buildApplicationLevelClaims(
         email: err.email,
       });
       throw err;
+    }
+    if (err instanceof AppSignupClosedError) {
+      logger.warn("oidc: end-user signup blocked by client policy", {
+        module: "oidc",
+        applicationId: err.applicationId,
+        authUserId: err.authUserId,
+      });
+      // Map to a structured OAuth2 error so downstream satellites (portal)
+      // can render a "contact your admin" page instead of a generic 500.
+      throw new APIError("FORBIDDEN", {
+        error: "access_denied",
+        error_description:
+          "Sign-up is disabled for this application. Ask your administrator to create your account before signing in.",
+      });
     }
     logger.error("oidc: end-user resolution failed during token issuance", {
       module: "oidc",

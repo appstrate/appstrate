@@ -97,6 +97,12 @@ async function registerClient(
       scopes: ["openid", "profile", "email", "offline_access", "connections:read", "runs:read"],
       referencedApplicationId: ctx.defaultAppId,
       isFirstParty: false,
+      // Secure-by-default `allowSignup=false` would block fresh
+      // end-user JIT creation during token mint. The E2E suite exercises
+      // the happy path where new end-users sign up via the OIDC flow, so
+      // we explicitly opt in here (matches a Portal-style deployment that
+      // wants JIT provisioning enabled for its application-level client).
+      allowSignup: true,
     }),
   });
   expect(res.status).toBe(201);

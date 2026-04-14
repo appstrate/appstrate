@@ -96,6 +96,18 @@ export class UnverifiedEmailConflictError extends Error {
   }
 }
 
+/** Thrown by `resolveOrCreateEndUser` step 3 when the client's `allowSignup` is `false`. */
+export class AppSignupClosedError extends Error {
+  readonly applicationId: string;
+  readonly authUserId: string;
+  constructor(applicationId: string, authUserId: string) {
+    super(`OIDC: signup is disabled for application '${applicationId}'`);
+    this.name = "AppSignupClosedError";
+    this.applicationId = applicationId;
+    this.authUserId = authUserId;
+  }
+}
+
 /**
  * Resolve (or create) the application-scoped end-user for an authenticated
  * Better Auth identity.
@@ -130,6 +142,7 @@ export class UnverifiedEmailConflictError extends Error {
 export async function resolveOrCreateEndUser(
   authUser: AuthIdentity,
   appOrId: AppContextRow | string,
+  policy: { allowSignup: boolean },
 ): Promise<ResolvedEndUser> {
   const app = typeof appOrId === "string" ? await requireAppById(appOrId) : appOrId;
   const applicationId = app.id;
@@ -158,7 +171,9 @@ export async function resolveOrCreateEndUser(
     }
   }
 
-  // Step 3: create fresh end_users + oidc_end_user_profiles rows.
+  // Step 3: signup gate. Closed clients reject fresh creation — the admin
+  // must pre-create the end-user via the headless API.
+  if (!policy.allowSignup) throw new AppSignupClosedError(applicationId, authUser.id);
   return createEndUser(authUser, app);
 }
 
@@ -217,23 +232,21 @@ async function adoptEndUserByEmail(
 
   if (!candidate) return null;
 
+  const result = {
+    endUserId: candidate.endUserId,
+    applicationId: candidate.applicationId,
+    orgId: candidate.orgId,
+    email: candidate.email,
+    name: candidate.name,
+  };
+
   // If a profile row already exists and already links to this auth identity, we're done.
-  if (candidate.existingAuthUserId === authUser.id) {
-    return {
-      endUserId: candidate.endUserId,
-      applicationId: candidate.applicationId,
-      orgId: candidate.orgId,
-      email: candidate.email,
-      name: candidate.name,
-    };
-  }
+  if (candidate.existingAuthUserId === authUser.id) return result;
 
   // Otherwise upsert the profile row with this auth identity.
   const linked = await linkProfileAtomic(candidate.endUserId, authUser.id);
-  if (!linked) {
-    // Lost the race — re-fetch via step 1.
-    return findLinkedEndUser(authUser.id, applicationId);
-  }
+  // Lost the race — re-fetch via step 1.
+  if (!linked) return findLinkedEndUser(authUser.id, applicationId);
 
   logger.info("Linked existing end-user to OIDC auth identity", {
     module: "oidc",
@@ -241,13 +254,7 @@ async function adoptEndUserByEmail(
     authUserId: authUser.id,
     applicationId,
   });
-  return {
-    endUserId: candidate.endUserId,
-    applicationId: candidate.applicationId,
-    orgId: candidate.orgId,
-    email: candidate.email,
-    name: candidate.name,
-  };
+  return result;
 }
 
 /**
@@ -255,6 +262,13 @@ async function adoptEndUserByEmail(
  * auth identity has claimed this end-user in the meantime.
  *
  * Returns `true` if we won the race, `false` if somebody else did.
+ *
+ * Invariant: this function is reached only via `adoptEndUserByEmail`, which
+ * is guarded upstream by `authUser.emailVerified === true` (see
+ * `resolveOrCreateEndUser` step 2). Consequently `emailVerified: true` on
+ * the profile row reflects the real auth-time state rather than a hardcoded
+ * placeholder. Do not call this function from any new path that has not
+ * enforced the same guard — use `adoptEndUserByEmail` instead.
  */
 async function linkProfileAtomic(endUserId: string, authUserId: string): Promise<boolean> {
   const now = new Date();

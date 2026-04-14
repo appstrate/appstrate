@@ -239,7 +239,6 @@ async function enforceMagicLinkSignupPolicy(ctx: {
 
   const policy = await loadClientSignupPolicy(pendingClientId);
   if (!policy) return;
-  if (policy.level === "application") return;
   if (policy.allowSignup) return;
 
   const query = (ctx.query ?? {}) as {

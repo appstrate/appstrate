@@ -64,6 +64,11 @@ const applicationLevelClientRequest = {
     scopes: { type: "array", items: { type: "string" } },
     referencedApplicationId: { type: "string" },
     isFirstParty: { type: "boolean" },
+    allowSignup: {
+      type: "boolean",
+      description:
+        "When `true`, a successful OIDC login creates the `end_users` row on the fly (JIT provisioning). When `false` (default, secure-by-default), unknown end-users are rejected with an OAuth `access_denied` error — admins must pre-create them via `POST /api/end-users` first.",
+    },
   },
 };
 
@@ -96,12 +101,13 @@ const updateClientRequest = {
     allowSignup: {
       type: "boolean",
       description:
-        "Org-level only. When `true`, users signing in for the first time through this client are auto-joined to the referenced org with `signupRole`. Rejected with 400 on application/instance clients.",
+        "Unified signup opt-in. Instance: allows brand-new BA users platform-wide. Org: brand-new BA users + auto-join to the referenced org with `signupRole`. Application: brand-new BA users + JIT `end_users` provisioning.",
     },
     signupRole: {
       type: "string",
       enum: ["admin", "member", "viewer"],
-      description: "Org-level only. Role assigned on auto-join. `owner` forbidden.",
+      description:
+        "Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/application clients.",
     },
   },
 };

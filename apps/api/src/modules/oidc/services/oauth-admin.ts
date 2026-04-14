@@ -138,7 +138,14 @@ export interface OAuthClientRecord {
   scopes: string[];
   disabled: boolean;
   isFirstParty: boolean;
-  /** Org-level: whether non-members are auto-joined on first sign-in. Defaults to `false`. */
+  /**
+   * Unified signup opt-in across all levels (mirrors Auth0 "Disable Sign-Ups",
+   * Keycloak "User Registration", Okta JIT toggle):
+   *   - `instance`: brand-new Better Auth user may be created platform-wide.
+   *   - `org`: brand-new BA user + auto-join to `referencedOrgId` with `signupRole`.
+   *   - `application`: brand-new BA user + JIT `end_users` provisioning.
+   * Defaults to `false` (secure-by-default) on every level.
+   */
   allowSignup: boolean;
   /** Org-level: role assigned on auto-join. `owner` forbidden. Defaults to `"member"`. */
   signupRole: SignupRole;
@@ -302,6 +309,8 @@ export interface CreateApplicationClientInput {
   scopes?: string[];
   referencedApplicationId: string;
   isFirstParty?: boolean;
+  /** Defaults to `false`. When `true`, a first OIDC login JIT-creates a BA user + `end_users` row. */
+  allowSignup?: boolean;
 }
 
 export interface CreateInstanceClientInput {
@@ -313,7 +322,6 @@ export interface CreateInstanceClientInput {
   isFirstParty?: boolean;
   /** Defaults to `false`. Set explicitly by `ensureInstanceClient()`. */
   allowSignup?: boolean;
-  signupRole?: SignupRole;
 }
 
 export type CreateClientInput =
@@ -345,33 +353,21 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
   }
   // instance: no FK fields in metadata
 
-  // Signup policy (`allowSignup` + `signupRole`). Mutable — unlike the rest
-  // of `metadata` — so it lives only in dedicated SQL columns and is read by
-  // the signup guard + plugin at token-mint time via `loadClientSignupPolicy`
-  // (backed by `getClientCached`). Valid for org + instance; rejected on
-  // application clients where end-user provisioning is out-of-band via the
-  // headless API and the flag has no effect.
-  if (input.level === "application") {
-    if (
-      (input as { allowSignup?: unknown }).allowSignup !== undefined ||
-      (input as { signupRole?: unknown }).signupRole !== undefined
-    ) {
-      throw new OAuthAdminValidationError(
-        "signupPolicy",
-        "OIDC: allowSignup / signupRole are only valid for org- or instance-level clients",
-      );
-    }
+  // `signupRole` is only meaningful on org-level clients (role assigned on
+  // auto-join). Application clients have no org membership to attach to;
+  // instance clients have no fixed org to attach to either. Reject loudly
+  // on the non-org levels to surface configuration mistakes.
+  if (input.level !== "org" && (input as { signupRole?: unknown }).signupRole !== undefined) {
+    throw new OAuthAdminValidationError(
+      "signupPolicy",
+      "OIDC: signupRole is only valid for org-level clients",
+    );
   }
-  // Default signup policy: closed (`allowSignup: false`) for every level.
-  // Opt-in is explicit at the call site — notably `ensureInstanceClient()`
-  // passes `allowSignup: true` at boot so the first-party platform client
-  // keeps the Appstrate signup page open on a fresh install. Org tenant
-  // dashboards and env-declared satellite instance clients keep the closed
-  // default unless the operator flips the flag. Application clients ignore
-  // the flag entirely (end-user provisioning happens via the headless API).
-  const allowSignup = input.level === "application" ? false : (input.allowSignup ?? false);
-  const signupRole: SignupRole =
-    input.level === "application" ? "member" : (input.signupRole ?? "member");
+  // `allowSignup` is honored on every level (unified Auth0/Keycloak/Okta
+  // semantic). Defaults to `false` (secure-by-default); `ensureInstanceClient()`
+  // opts in at boot to keep the fresh-install signup page open.
+  const allowSignup = input.allowSignup ?? false;
+  const signupRole: SignupRole = input.level === "org" ? (input.signupRole ?? "member") : "member";
 
   const inserted = await db
     .insert(oauthClient)
@@ -432,9 +428,9 @@ export interface UpdateClientInput {
   scopes?: string[];
   disabled?: boolean;
   isFirstParty?: boolean;
-  /** Honored for org + instance clients; rejected on application. */
+  /** Honored on every level (unified semantic). */
   allowSignup?: boolean;
-  /** Honored for org + instance clients; rejected on application. `owner` forbidden. */
+  /** Honored only on org-level clients; rejected on instance/application. `owner` forbidden. */
   signupRole?: SignupRole;
 }
 
@@ -449,17 +445,15 @@ export async function updateClient(
     assertValidScopes(input.scopes);
   }
 
-  // Reject signup policy updates on application-level clients early —
-  // application clients provision end-users out-of-band via the headless
-  // API, so the flag has no effect and the caller probably meant a
-  // different client. Silently ignoring would hide configuration
-  // mistakes. Org and instance levels both honor the flag.
-  if (input.allowSignup !== undefined || input.signupRole !== undefined) {
+  // `signupRole` is only meaningful on org-level clients — reject updates
+  // targeting instance/application levels loudly so configuration mistakes
+  // surface. `allowSignup` is valid on every level.
+  if (input.signupRole !== undefined) {
     const existing = await getClient(clientId);
-    if (existing && existing.level === "application") {
+    if (existing && existing.level !== "org") {
       throw new OAuthAdminValidationError(
         "signupPolicy",
-        "OIDC: allowSignup / signupRole are only valid for org- or instance-level clients",
+        "OIDC: signupRole is only valid for org-level clients",
       );
     }
   }
@@ -572,11 +566,11 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
   const existing = await getInstanceClientId();
   if (existing) return existing;
 
-  // The platform auto-provisioned instance client is the ONE OAuth client
-  // that opts into open signup: without it, a fresh Appstrate install has
-  // no way to register the first user. Every other client — env-declared
-  // satellite instance clients, org tenant dashboards — keeps the closed
-  // `allowSignup: false` default from `createClient()`.
+  // The platform auto-provisioned instance client opts into open signup at
+  // boot so a fresh Appstrate install can register its first user. Every
+  // other client (env-declared satellites, org tenants, application
+  // clients) keeps the closed `allowSignup: false` default from
+  // `createClient()` and can opt in independently via the admin API.
   const created = await createClient({
     level: "instance",
     name: "Appstrate Platform",

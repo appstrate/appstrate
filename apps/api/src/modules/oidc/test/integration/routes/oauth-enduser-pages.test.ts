@@ -28,13 +28,21 @@ const app = getTestApp({ modules: [oidcModule] });
 
 async function registerClient(
   ctx: TestContext,
-  overrides: { name?: string; redirectUris?: string[] } = {},
+  overrides: {
+    name?: string;
+    redirectUris?: string[];
+    allowSignup?: boolean;
+  } = {},
 ): Promise<{ clientId: string; clientSecret: string }> {
   const body = {
     level: "application" as const,
     name: overrides.name ?? "Acme Portal",
     redirectUris: overrides.redirectUris ?? ["https://acme.example.com/oauth/callback"],
     referencedApplicationId: ctx.defaultAppId,
+    // Default to JIT ON for the end-user page happy-path tests — they
+    // simulate brand-new end-user sign-ups that would otherwise be rejected
+    // by the secure-by-default gate.
+    allowSignup: overrides.allowSignup ?? true,
   };
   const res = await app.request("/api/oauth/clients", {
     method: "POST",

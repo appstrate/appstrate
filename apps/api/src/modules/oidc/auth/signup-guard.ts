@@ -73,9 +73,9 @@ export async function oidcBeforeSignupGuard(input: BeforeSignupGuardInput): Prom
   const policy = await loadClientSignupPolicy(pendingClientId);
   // Pass-through cases:
   //   - no policy (unknown/disabled client) → let core handle default signup
-  //   - application-level → end-users don't go through BA; unrelated signup
-  //   - open policy → afterSignup may auto-join for org-level
-  if (!policy || policy.level === "application" || policy.allowSignup) return;
+  //   - open policy → afterSignup may auto-join for org-level, and the
+  //     enduser-mapping layer handles JIT provisioning for application-level
+  if (!policy || policy.allowSignup) return;
 
   // Closed policy: block the BA user creation outright. The browser ends
   // up on `errorCallbackURL` (/api/oauth/login?...) for social flows, or
