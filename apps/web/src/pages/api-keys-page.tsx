@@ -48,7 +48,7 @@ export function ApiKeysPage() {
   };
 
   return (
-    <>
+    <div className="p-6">
       <PageHeader
         title={t("settings:apiKeys.pageTitle")}
         emoji="🔑"
@@ -164,6 +164,6 @@ export function ApiKeysPage() {
           });
         }}
       />
-    </>
+    </div>
   );
 }

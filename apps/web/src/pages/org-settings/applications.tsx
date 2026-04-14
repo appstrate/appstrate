@@ -3,18 +3,17 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import i18n from "../i18n";
+import i18n from "../../i18n";
 import { AppWindow, Settings } from "lucide-react";
-import { usePermissions } from "../hooks/use-permissions";
+import { usePermissions } from "../../hooks/use-permissions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useApplications } from "../hooks/use-applications";
-import { useAppSwitcher } from "../hooks/use-current-application";
-import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
-import { ApplicationCreateModal } from "../components/application-create-modal";
+import { useApplications } from "../../hooks/use-applications";
+import { useAppSwitcher } from "../../hooks/use-current-application";
+import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { ApplicationCreateModal } from "../../components/application-create-modal";
 
-export function ApplicationsPage() {
+export function OrgSettingsApplicationsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
   const { data: applications, isLoading, error } = useApplications();
@@ -26,7 +25,7 @@ export function ApplicationsPage() {
 
   const handleAppClick = (appId: string) => {
     switchApp(appId);
-    navigate("/app-settings");
+    navigate("/org-settings/app/general");
   };
 
   if (isLoading) return <LoadingState />;
@@ -34,19 +33,11 @@ export function ApplicationsPage() {
 
   return (
     <>
-      <PageHeader
-        title={t("applications.pageTitle")}
-        emoji="♻️"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("applications.pageTitle") },
-        ]}
-        actions={
-          <Button data-testid="create-application-button" onClick={() => setCreateOpen(true)}>
-            {t("applications.create")}
-          </Button>
-        }
-      />
+      <div className="mb-4 flex justify-end">
+        <Button data-testid="create-application-button" onClick={() => setCreateOpen(true)}>
+          {t("applications.create")}
+        </Button>
+      </div>
 
       {!applications || applications.length === 0 ? (
         <EmptyState

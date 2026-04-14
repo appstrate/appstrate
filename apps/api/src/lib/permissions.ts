@@ -22,7 +22,7 @@
  *
  * This is a deliberate coupling — RBAC is a core concern and type safety
  * at the call site outweighs the "zero-footprint module" invariant. If a
- * module is disabled via `APPSTRATE_MODULES`, its permission entries become
+ * module is disabled via `MODULES`, its permission entries become
  * unreachable (nothing mounts the routes that check them) but stay in the
  * type union — harmless.
  *

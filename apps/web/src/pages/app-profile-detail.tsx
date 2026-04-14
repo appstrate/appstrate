@@ -66,17 +66,17 @@ export function AppProfileDetailPage() {
 
   const handleDelete = () => {
     deleteMutation.mutate(profile.id, {
-      onSuccess: () => navigate("/app-settings#profiles"),
+      onSuccess: () => navigate("/org-settings/app/profiles"),
     });
   };
 
   return (
-    <>
+    <div className="p-6">
       <PageHeader
         title={profile.name}
         breadcrumbs={[
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("appSettings.tabProfiles"), href: "/app-settings#profiles" },
+          { label: t("appSettings.tabProfiles"), href: "/org-settings/app/profiles" },
           { label: profile.name },
         ]}
         actions={
@@ -219,6 +219,6 @@ export function AppProfileDetailPage() {
           {t("appProfiles.deleteConfirm", { name: profile.name })}
         </p>
       </Modal>
-    </>
+    </div>
   );
 }

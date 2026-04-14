@@ -80,7 +80,7 @@ async function resolveSpecifier(specifier: string): Promise<{
  * 3. Calls `init(ctx)` in dependency order
  *
  * All declared modules are required — any import or init failure is fatal.
- * If a module is not needed, remove it from the APPSTRATE_MODULES env var.
+ * If a module is not needed, remove it from the MODULES env var.
  */
 export async function loadModules(specifiers: string[], ctx: ModuleInitContext): Promise<void> {
   if (_initialized) {
@@ -376,9 +376,9 @@ export async function applyModuleFeatures(base: AppConfig): Promise<AppConfig> {
  * If the first module that provides a hook returns a value (including `null`),
  * subsequent modules are never consulted. Load order (determined by
  * `manifest.dependencies` topological sort) defines priority — modules with
- * no dependencies keep the order they appear in `APPSTRATE_MODULES`.
+ * no dependencies keep the order they appear in `MODULES`.
  *
- * Example: `APPSTRATE_MODULES=cloud,quota` — if both provide `beforeRun`,
+ * Example: `MODULES=cloud,quota` — if both provide `beforeRun`,
  * cloud runs first. To force ordering regardless of env order, add
  * `dependencies: ["cloud"]` on quota so the topo sort always places cloud
  * earlier.

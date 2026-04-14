@@ -2,7 +2,7 @@
 
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ChevronsUpDown, Check, Plus, Star, Settings, LayoutGrid, Library } from "lucide-react";
+import { ChevronsUpDown, Check, Plus, Star, Settings, Library } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useApplications } from "../hooks/use-applications";
 import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-application";
@@ -156,12 +156,6 @@ export function OrgSwitcher() {
               >
                 <Plus size={14} />
                 {t("switcher.createOrg")}
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link to="/applications" className="text-primary flex items-center gap-2">
-                <LayoutGrid size={14} />
-                {t("switcher.manageApps")}
               </Link>
             </DropdownMenuItem>
             {isAdmin && (

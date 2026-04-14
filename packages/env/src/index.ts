@@ -53,8 +53,10 @@ const envSchema = z
       .default("[]")
       .transform((s) => JSON.parse(s) as unknown[]),
 
-    // Modules (comma-separated specifiers, empty = OSS mode)
-    APPSTRATE_MODULES: z.string().default(""),
+    // Modules (comma-separated specifiers).
+    // Default loads built-in OSS modules (oidc, webhooks).
+    // Append external specifiers (npm package names) to extend.
+    MODULES: z.string().default("oidc,webhooks"),
 
     // App
     APP_URL: z.string().default("http://localhost:3000"),

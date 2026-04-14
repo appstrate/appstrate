@@ -4,5 +4,9 @@ import { ItemTab } from "./item-tab";
 import { skillTabConfig } from "./item-tab-configs";
 
 export function SkillsPage() {
-  return <ItemTab config={skillTabConfig} />;
+  return (
+    <div className="p-6">
+      <ItemTab config={skillTabConfig} />
+    </div>
+  );
 }

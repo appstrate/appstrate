@@ -25,7 +25,7 @@ export function SchedulesListPage() {
     agents?.find((f) => f.id === packageId)?.displayName ?? packageId;
 
   return (
-    <>
+    <div className="p-6">
       <PageHeader
         title={t("schedules.title")}
         emoji="📅"
@@ -57,6 +57,6 @@ export function SchedulesListPage() {
           ))}
         </div>
       )}
-    </>
+    </div>
   );
 }

@@ -148,7 +148,7 @@ export function RunDetailPage() {
   const date = run.startedAt ? formatDateField(run.startedAt) : "";
 
   return (
-    <>
+    <div className="p-6">
       <PageHeader
         title={
           runNumber ? t("exec.breadcrumb", { number: runNumber }) : date || runId?.slice(0, 8) || ""
@@ -252,6 +252,6 @@ export function RunDetailPage() {
       {activeTab === "state" && stateData && <JsonView data={stateData} />}
 
       {activeTab === "info" && <RunInfoTab run={enrichedRun} />}
-    </>
+    </div>
   );
 }

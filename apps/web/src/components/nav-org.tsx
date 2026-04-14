@@ -19,6 +19,7 @@ import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
+import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -61,20 +62,15 @@ export function NavOrg() {
 
   const renderItems = (items: typeof automationItems) =>
     items.map((item) => (
-      <SidebarMenuItem key={item.path}>
-        <SidebarMenuButton
-          asChild
-          isActive={
-            item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path)
-          }
-          tooltip={item.label}
-        >
-          <Link to={item.path}>
-            <item.icon />
-            <span>{item.label}</span>
-          </Link>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
+      <SidebarNavLink
+        key={item.path}
+        to={item.path}
+        icon={item.icon}
+        label={item.label}
+        isActive={
+          item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path)
+        }
+      />
     ));
 
   return (
