@@ -49,6 +49,7 @@ const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? "redis://localhost:6380";
 process.env.DATABASE_URL = TEST_DATABASE_URL;
 process.env.REDIS_URL = TEST_REDIS_URL;
 process.env.BETTER_AUTH_SECRET = "test-secret-at-least-32-chars-long-for-hmac";
+process.env.UPLOAD_SIGNING_SECRET = "test-upload-signing-secret-at-least-16-chars";
 process.env.CONNECTION_ENCRYPTION_KEY = Buffer.from("0123456789abcdef0123456789abcdef").toString(
   "base64",
 ); // 32 bytes

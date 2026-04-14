@@ -108,11 +108,13 @@ export function createS3Storage(config: S3StorageConfig): Storage {
     ): Promise<UploadUrlDescriptor> {
       const expiresIn = opts?.expiresIn ?? 900;
       const key = makeKey(bucket, path);
+      // ContentLength is intentionally NOT signed — S3 would then require the
+      // PUT to send exactly that many bytes, breaking any client-declared vs.
+      // actual size mismatch. Size is enforced server-side on consume instead.
       const cmd = new PutObjectCommand({
         Bucket: config.bucket,
         Key: key,
         ...(opts?.mime ? { ContentType: opts.mime } : {}),
-        ...(opts?.maxSize ? { ContentLength: opts.maxSize } : {}),
       });
       const url = await getSignedUrl(client, cmd, { expiresIn });
       // Client must echo the same Content-Type declared in the signature.

@@ -156,6 +156,7 @@ services:
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env}
       - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY:?Set CONNECTION_ENCRYPTION_KEY in .env}
       - RUN_TOKEN_SECRET=${RUN_TOKEN_SECRET:-}
+      - UPLOAD_SIGNING_SECRET=${UPLOAD_SIGNING_SECRET:?Set UPLOAD_SIGNING_SECRET in .env}
       # ── Database / Redis ──
       - DATABASE_URL=postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD}@appstrate-postgres:5432/appstrate
       - REDIS_URL=redis://appstrate-redis:6379

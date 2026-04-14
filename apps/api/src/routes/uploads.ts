@@ -74,11 +74,17 @@ export function createUploadContentRouter() {
     const token = c.req.query("token");
     if (!token) throw unauthorized("missing upload token");
     const env = getEnv();
-    const payload = verifyFsUploadToken(token, env.BETTER_AUTH_SECRET);
+    const payload = verifyFsUploadToken(token, env.UPLOAD_SIGNING_SECRET);
     if (!payload) throw unauthorized("invalid or expired upload token");
 
+    // Normalize both sides: strip parameters (charset, boundary, …) and
+    // lowercase. Prevents "application/pdf" vs "application/pdf; charset=…"
+    // from mismatching, and catches attackers padding the signed MIME with
+    // extra params.
+    const normalize = (v: string) => v.split(";")[0]?.trim().toLowerCase() ?? "";
     const declaredType = c.req.header("content-type");
-    if (payload.m && declaredType && declaredType.split(";")[0]?.trim() !== payload.m) {
+    const signedMime = normalize(payload.m);
+    if (signedMime && declaredType && normalize(declaredType) !== signedMime) {
       throw invalidRequest(`Content-Type '${declaredType}' does not match signed '${payload.m}'`);
     }
 
