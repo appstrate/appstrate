@@ -362,7 +362,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const resolvedVersion = isHistoricalVersion ? versionDetail?.version : undefined;
 
   return (
-    <>
+    <div className="p-6">
       <SharedHeader
         detail={unifiedForHeader}
         isHistoricalVersion={isHistoricalVersion}
@@ -662,6 +662,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           }
         }}
       />
-    </>
+    </div>
   );
 }

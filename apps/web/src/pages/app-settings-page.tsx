@@ -59,7 +59,7 @@ export function AppSettingsPage() {
   if (!application) return <ErrorState />;
 
   return (
-    <>
+    <div className="p-6">
       <PageHeader
         title={application.name}
         emoji="⚙️"
@@ -96,7 +96,7 @@ export function AppSettingsPage() {
           <OAuthClientsTab level="application" />
         </Suspense>
       )}
-    </>
+    </div>
   );
 }
 

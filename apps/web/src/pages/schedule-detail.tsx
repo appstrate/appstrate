@@ -63,7 +63,7 @@ export function ScheduleDetailPage() {
   };
 
   return (
-    <>
+    <div className="p-6">
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
         <PageHeader
           title={schedule.name || schedule.id}
@@ -146,7 +146,7 @@ export function ScheduleDetailPage() {
           });
         }}
       />
-    </>
+    </div>
   );
 }
 

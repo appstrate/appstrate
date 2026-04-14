@@ -33,7 +33,7 @@ export function ApplicationsPage() {
   if (error) return <ErrorState message={error.message} />;
 
   return (
-    <>
+    <div className="p-6">
       <PageHeader
         title={t("applications.pageTitle")}
         emoji="♻️"
@@ -93,6 +93,6 @@ export function ApplicationsPage() {
       )}
 
       <ApplicationCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
-    </>
+    </div>
   );
 }

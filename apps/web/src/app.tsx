@@ -17,7 +17,13 @@ import { OnboardingModelStep } from "./pages/onboarding/model-step";
 import { OnboardingProvidersStep } from "./pages/onboarding/providers-step";
 import { OnboardingMembersStep } from "./pages/onboarding/members-step";
 import { OnboardingDoneStep } from "./pages/onboarding/done-step";
-import { OrgSettingsPage } from "./pages/org-settings";
+import { OrgSettingsLayout } from "./pages/org-settings/layout";
+import { OrgSettingsGeneralPage } from "./pages/org-settings/general";
+import { OrgSettingsMembersPage } from "./pages/org-settings/members";
+import { OrgSettingsModelsPage } from "./pages/org-settings/models";
+import { OrgSettingsProxiesPage } from "./pages/org-settings/proxies";
+import { OrgSettingsOAuthPage } from "./pages/org-settings/oauth";
+import { OrgSettingsBillingPage } from "./pages/org-settings/billing";
 import { ApplicationsPage } from "./pages/applications-page";
 import { ApiKeysPage } from "./pages/api-keys-page";
 import { EndUsersPage } from "./pages/end-users-page";
@@ -29,7 +35,12 @@ import { AppProfileDetailPage } from "./pages/app-profile-detail";
 import { ScheduleDetailPage } from "./pages/schedule-detail";
 import { ScheduleCreatePage } from "./pages/schedule-create";
 import { ScheduleEditPage } from "./pages/schedule-edit";
-import { PreferencesPage } from "./pages/preferences";
+import { PreferencesLayout } from "./pages/preferences/layout";
+import { PreferencesGeneralPage } from "./pages/preferences/general";
+import { PreferencesAppearancePage } from "./pages/preferences/appearance";
+import { PreferencesSecurityPage } from "./pages/preferences/security";
+import { PreferencesConnectorsPage } from "./pages/preferences/connectors";
+import { PreferencesProfilesPage } from "./pages/preferences/profiles";
 import { LibraryPage } from "./pages/library-page";
 import { LoginPage } from "./pages/login";
 import { RegisterPage } from "./pages/register";
@@ -95,7 +106,7 @@ function MainLayout() {
             <NotificationBell />
           </div>
         </header>
-        <div className="flex flex-1 flex-col p-6">
+        <div className="flex flex-1 flex-col">
           <Outlet />
         </div>
       </SidebarInset>
@@ -308,7 +319,14 @@ export function App() {
             />
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/applications" element={<ApplicationsPage />} />
-            <Route path="/preferences" element={<PreferencesPage />} />
+            <Route path="/preferences" element={<PreferencesLayout />}>
+              <Route index element={<Navigate to="general" replace />} />
+              <Route path="general" element={<PreferencesGeneralPage />} />
+              <Route path="appearance" element={<PreferencesAppearancePage />} />
+              <Route path="security" element={<PreferencesSecurityPage />} />
+              <Route path="connectors" element={<PreferencesConnectorsPage />} />
+              <Route path="profiles" element={<PreferencesProfilesPage />} />
+            </Route>
             {features.webhooks && (
               <>
                 <Route
@@ -333,7 +351,15 @@ export function App() {
             <Route path="/end-users" element={<EndUsersPage />} />
             <Route path="/api-keys" element={<ApiKeysPage />} />
             <Route path="/app-settings" element={<AppSettingsPage />} />
-            <Route path="/org-settings" element={<OrgSettingsPage />} />
+            <Route path="/org-settings" element={<OrgSettingsLayout />}>
+              <Route index element={<Navigate to="general" replace />} />
+              <Route path="general" element={<OrgSettingsGeneralPage />} />
+              <Route path="members" element={<OrgSettingsMembersPage />} />
+              <Route path="models" element={<OrgSettingsModelsPage />} />
+              <Route path="proxies" element={<OrgSettingsProxiesPage />} />
+              <Route path="oauth" element={<OrgSettingsOAuthPage />} />
+              <Route path="billing" element={<OrgSettingsBillingPage />} />
+            </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

@@ -90,7 +90,7 @@ export function EditorShell({
     : t(breadcrumbNewKeys[type]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-6">
       <PageHeader title={title} emoji={emojiMap[type]} breadcrumbs={breadcrumbs} />
 
       {error && (

@@ -508,7 +508,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
 
   if (isEdit && isLoading) {
     return (
-      <div className="text-muted-foreground flex flex-col items-center justify-center py-16">
+      <div className="text-muted-foreground flex flex-col items-center justify-center p-6 py-16">
         <Spinner />
       </div>
     );

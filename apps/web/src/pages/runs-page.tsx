@@ -17,7 +17,7 @@ export function RunsPage() {
   const [userTab, setUserTab] = useState<UserTab>("all");
 
   return (
-    <>
+    <div className="p-6">
       <PageHeader
         title={t("runs.title")}
         emoji="▶️"
@@ -44,6 +44,6 @@ export function RunsPage() {
       </PageHeader>
 
       <RunList key={userTab} pageSize={15} user={userTab === "me" ? "me" : undefined} />
-    </>
+    </div>
   );
 }

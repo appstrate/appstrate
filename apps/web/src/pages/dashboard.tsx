@@ -87,7 +87,7 @@ export function DashboardPage() {
   const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       <h1 className="text-3xl font-bold">
         {t("dashboard.welcome", { name: firstName, ns: "common" })}
       </h1>

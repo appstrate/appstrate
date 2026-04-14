@@ -71,7 +71,7 @@ export function AppProfileDetailPage() {
   };
 
   return (
-    <>
+    <div className="p-6">
       <PageHeader
         title={profile.name}
         breadcrumbs={[
@@ -219,6 +219,6 @@ export function AppProfileDetailPage() {
           {t("appProfiles.deleteConfirm", { name: profile.name })}
         </p>
       </Modal>
-    </>
+    </div>
   );
 }
