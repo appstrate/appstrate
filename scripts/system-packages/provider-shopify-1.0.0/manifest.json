@@ -29,7 +29,6 @@
     },
     "credentialHeaderName": "X-Shopify-Access-Token",
     "credentialHeaderPrefix": "",
-    "allowAllUris": true,
     "authorizedUris": ["https://*.myshopify.com/*"]
   },
   "setupGuide": {

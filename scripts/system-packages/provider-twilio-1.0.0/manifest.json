@@ -24,16 +24,28 @@
           }
         },
         "required": ["account_sid", "auth_token"]
-      }
+      },
+      "fieldName": "auth_token"
+    },
+    "credentialTransform": {
+      "template": "{{account_sid}}:{{auth_token}}",
+      "encoding": "base64"
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Basic",
-    "authorizedUris": ["https://api.twilio.com/*", "https://lookups.twilio.com/*", "https://verify.twilio.com/*"]
+    "authorizedUris": [
+      "https://api.twilio.com/*",
+      "https://lookups.twilio.com/*",
+      "https://verify.twilio.com/*"
+    ]
   },
   "setupGuide": {
     "steps": [
       { "label": "Sign up and get your credentials", "url": "https://www.twilio.com/try-twilio" },
-      { "label": "Find your Account SID and Auth Token on the Console Dashboard", "url": "https://console.twilio.com/" },
+      {
+        "label": "Find your Account SID and Auth Token on the Console Dashboard",
+        "url": "https://console.twilio.com/"
+      },
       { "label": "Copy both credentials" }
     ]
   },
