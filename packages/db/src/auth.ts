@@ -7,6 +7,9 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import { createTransport, type Transporter } from "nodemailer";
 import { eq } from "drizzle-orm";
 import { renderEmail } from "@appstrate/emails";
+import { createLogger } from "@appstrate/core/logger";
+
+const logger = createLogger("info");
 import type { BeforeSignupContext, AfterSignupContext } from "@appstrate/core/module";
 import { db } from "./client.ts";
 import * as schema from "./schema.ts";
@@ -212,6 +215,21 @@ function buildBasePlugins(
                 const rewritten = new URL(rawUrl);
                 if (rewritten.pathname === "/api/auth/magic-link/verify") {
                   rewritten.pathname = "/api/oauth/magic-link/confirm";
+                  // Surface the recipient email on the confirm interstitial
+                  // ("You are signing in as foo@bar.com") to match SOTA UX
+                  // (Slack/Linear). Safe: the recipient already owns the
+                  // email, and the URL is only delivered to their inbox.
+                  rewritten.searchParams.set("email", normalizedEmail);
+                } else {
+                  // Defense against a silent BA path change in future upgrades.
+                  // If the path ever moves, the rewrite above becomes a no-op
+                  // and we'd regress to prefetch-vulnerable behavior — log
+                  // loudly so the drift is caught in ops before it reaches
+                  // users.
+                  logger.warn(
+                    "oidc: magic-link URL rewrite skipped — unexpected BA path, falling back to direct verify",
+                    { pathname: rewritten.pathname },
+                  );
                 }
                 const url = rewritten.toString();
 

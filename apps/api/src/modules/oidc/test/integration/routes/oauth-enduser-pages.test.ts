@@ -632,6 +632,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
       token: string;
       clientId?: string;
       callbackPath?: string;
+      email?: string;
     }): string {
       const origin = "http://localhost:3000";
       const callbackURL = params.clientId
@@ -642,6 +643,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
       qp.set("token", params.token);
       qp.set("callbackURL", callbackURL);
       qp.set("errorCallbackURL", errorCallbackURL);
+      if (params.email) qp.set("email", params.email);
       return `/api/oauth/magic-link/confirm?${qp.toString()}`;
     }
 
@@ -726,6 +728,53 @@ describe("Public end-user pages — /api/oauth/*", () => {
         body: "_csrf=x",
       });
       expect(res.status).toBe(400);
+    });
+
+    it("GET displays the recipient email when provided (SOTA UX: Slack/Linear)", async () => {
+      const { clientId } = await registerClient(ctx);
+      const res = await app.request(
+        buildConfirmUrl({ token: "magic_tok_email", clientId, email: "user@example.com" }),
+      );
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain("user@example.com");
+      expect(html).toContain("en tant que");
+    });
+
+    it("GET renders a no-referrer meta tag to prevent token leakage in Referer", async () => {
+      const { clientId } = await registerClient(ctx);
+      const res = await app.request(buildConfirmUrl({ token: "magic_tok_ref", clientId }));
+      const html = await res.text();
+      expect(html).toContain('<meta name="referrer" content="no-referrer"');
+    });
+
+    it("POST forwards only token + callbackURLs to BA verify, not the display email", async () => {
+      const { clientId } = await registerClient(ctx);
+      const confirmUrl = buildConfirmUrl({
+        token: "magic_tok_forward",
+        clientId,
+        email: "display@example.com",
+      });
+      const getRes = await app.request(confirmUrl);
+      const csrfCookie = (getRes.headers.get("set-cookie") ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith("oidc_csrf="));
+      const csrf = csrfCookie!.slice("oidc_csrf=".length).split(";")[0]!;
+
+      const res = await app.request(confirmUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          cookie: csrfCookie!,
+        },
+        body: `_csrf=${encodeURIComponent(csrf)}`,
+      });
+      expect(res.status).toBe(302);
+      const location = res.headers.get("location") ?? "";
+      // Display-only — never forwarded to BA.
+      expect(location).not.toContain("email=");
+      expect(location).not.toContain("display%40example.com");
     });
   });
 });

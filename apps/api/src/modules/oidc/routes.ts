@@ -1428,11 +1428,13 @@ export function createOidcRouter() {
     token: string,
     callbackURL: string | null,
     errorCallbackURL: string | null,
+    email: string | null,
   ): string {
     const params = new URLSearchParams();
     params.set("token", token);
     if (callbackURL) params.set("callbackURL", callbackURL);
     if (errorCallbackURL) params.set("errorCallbackURL", errorCallbackURL);
+    if (email) params.set("email", email);
     return `?${params.toString()}`;
   }
 
@@ -1450,6 +1452,7 @@ export function createOidcRouter() {
     }
     const callbackURL = url.searchParams.get("callbackURL");
     const errorCallbackURL = url.searchParams.get("errorCallbackURL");
+    const email = url.searchParams.get("email");
     const branding = await resolveConfirmBranding(callbackURL);
     const csrfToken = issueCsrfToken(c);
     const body = renderMagicLinkConfirmPage({
@@ -1457,9 +1460,11 @@ export function createOidcRouter() {
         token,
         callbackURL,
         errorCallbackURL,
+        email,
       )}`,
       csrfToken,
       branding,
+      email: email ?? undefined,
     });
     return c.html(body.value);
   });
@@ -1480,6 +1485,7 @@ export function createOidcRouter() {
     if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
       const callbackURL = url.searchParams.get("callbackURL");
       const errorCallbackURL = url.searchParams.get("errorCallbackURL");
+      const email = url.searchParams.get("email");
       const branding = await resolveConfirmBranding(callbackURL);
       const csrfToken = issueCsrfToken(c);
       const retry = renderMagicLinkConfirmPage({
@@ -1487,9 +1493,11 @@ export function createOidcRouter() {
           token,
           callbackURL,
           errorCallbackURL,
+          email,
         )}`,
         csrfToken,
         branding,
+        email: email ?? undefined,
       });
       return c.html(retry.value, 403);
     }

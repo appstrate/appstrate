@@ -58,5 +58,14 @@ export function renderMagicLinkConfirmPage(props: MagicLinkConfirmPageProps): Ra
       <button type="submit">Se connecter</button>
     </form>
   `;
-  return renderLayout({ branding: props.branding, title, maxWidth: 400, bodyHtml });
+  return renderLayout({
+    branding: props.branding,
+    title,
+    maxWidth: 400,
+    bodyHtml,
+    // The confirm URL carries a one-shot magic-link token in its query.
+    // Suppress `Referer` to prevent leakage if the user clicks an external
+    // link (or if any embedded logo host receives a sub-request).
+    noReferrer: true,
+  });
 }
