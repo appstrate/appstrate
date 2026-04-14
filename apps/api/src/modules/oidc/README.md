@@ -55,6 +55,47 @@ Thrown in step 2 when an `end_users` row with the same email already exists in t
 
 Thrown in step 3 when the client's `allowSignup` is `false` and no existing `end_users` row can be linked/adopted. Same propagation path as `UnverifiedEmailConflictError`: bubbles up through `customAccessTokenClaims` and is caught by the consent handler to render an FR "contact your administrator" page. Mirrors the Auth0 "Disable Sign-Ups" / Keycloak "User Registration: off" / Okta JIT-off posture — secure-by-default for every new application client; opt in explicitly by setting `allowSignup: true` at create/update time when JIT provisioning is desired.
 
+## Audience isolation (`user.realm`)
+
+Appstrate shares a single Better Auth `user` table across audiences — platform operators (dashboard signup, org invitations, `level: "instance"` + `level: "org"` clients) AND end-users of third-party applications (`level: "application"` clients). Without a discriminator, a BA cookie session minted via the OIDC end-user flow would be indistinguishable from a platform session at the middleware layer — one logged-in end-user of app A would also have access to `/api/orgs`, `/api/agents`, etc. on the Appstrate platform itself.
+
+The `user.realm` column (added in `packages/db/drizzle/0001_add_user_realm.sql`) tags every BA row with its intended audience:
+
+- `"platform"` — dashboard users, org members, instance/org-level OIDC clients. Default for any signup that does not carry an `oidc_pending_client` cookie pointing at an `application`-level client.
+- `"end_user:<applicationId>"` — end-user of the named application. Assigned by the OIDC module's realm resolver (`services/realm-resolver.ts`) during `user.create.before` when the in-flight signup's pending-client cookie resolves to an `application`-level client.
+
+### Assignment — BA `user.create.before` hook
+
+The module's `init()` installs the resolver via `setRealmResolver()` in `packages/db/src/auth.ts`. At user creation time, BA calls the hook with the request headers; the resolver:
+
+1. Reads the signed `oidc_pending_client` cookie (same plumbing as `oidcBeforeSignupGuard`).
+2. Looks up the client's signup policy via `loadClientSignupPolicy`.
+3. Returns `"end_user:<applicationId>"` when the client is `level: "application"`, `"platform"` otherwise (no cookie, unknown client, org/instance level).
+
+The resulting realm is written into `user.realm` before the row is inserted. Production flows never need to update `realm` after creation — the audience is fixed at signup.
+
+### Enforcement — two guards in defense-in-depth
+
+1. **Request-time realm guard** (`middleware/realm-guard.ts`, wired in `lib/auth-pipeline.ts`). Runs after BA's cookie-session auth. For cookie sessions (`authMethod === "session"`), the pipeline reads `user.realm` via one indexed PK lookup and sets it on `c.sessionRealm`. The guard then rejects any cookie session whose realm is not `"platform"` when the request targets platform routes — except `/api/oauth/*` (OIDC entry pages legitimately accept end-user sessions) and `/api/auth/*` (BA's own endpoints for sign-out, email change, etc.). Returns 403 `problem+json`.
+
+2. **Token-mint realm guard** (`auth/plugins.ts::assertUserRealm`). Runs inside each claim builder (`buildInstanceLevelClaims`, `buildOrgLevelClaims`, `buildApplicationLevelClaims`) at `/oauth2/token` exchange:
+   - Instance + org builders require `realm === "platform"` — end-user sessions cannot mint dashboard tokens.
+   - Application builder requires `realm === "end_user:<applicationId>"` with an exact match against the client's `referencedApplicationId` — a platform admin cannot mint an end-user token for their own app, and an end-user of app A cannot mint a token for app B.
+
+   Mismatches throw RFC 6749 `access_denied` with a short description, so satellites render a clean "use an account provisioned for this audience" page instead of a generic 500.
+
+Non-cookie auth methods (Bearer API key, OIDC JWT auth strategies) are untouched by the request-time guard — API keys carry their own `applicationId` scope and JWTs set `endUser` context explicitly.
+
+### Design trade-off — single user table, global unique email
+
+Decision: keep `user.email` globally unique (not composite `(email, realm)`). Consequence: **one email can only exist in one realm**. A platform admin cannot be an end-user of their own app without signing up with a different email, and an end-user of app A cannot become an end-user of app B with the same email. This matches the Clerk / Auth0 / Keycloak "separate user pool per audience" posture, implemented at the application layer rather than via multiple tables. The alternative (composite unique) would require patching BA's email-based sign-in lookup to be realm-aware, which BA's adapter does not natively support in 1.6.
+
+If the product later needs cross-app shared end-user identities, the composite-unique migration is additive (index swap) — no data loss.
+
+### Test coverage
+
+`test/integration/routes/realm-isolation.test.ts` covers the default-platform assignment, platform session accepted on `/api/orgs`, end-user session rejected with 403 on `/api/orgs`, end-user session accepted on `/api/oauth/*`, session-realm denormalization, plus two token-mint cross-audience rejections (platform user → app client, end-user of app A → app B client). The happy-path application-level flow is covered end-to-end in `test/integration/services/oauth-flows.test.ts`.
+
 ## Feature flag
 
 ```ts

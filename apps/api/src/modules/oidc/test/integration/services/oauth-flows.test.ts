@@ -31,6 +31,9 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { user as userTable } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
@@ -113,8 +116,18 @@ async function registerClient(
  * Mint a Better Auth session cookie for a signed-up user so the
  * `/oauth2/authorize` → `/oauth2/consent` pair skips the login redirect.
  * Mirrors the pattern `apps/api/test/helpers/auth.ts` uses.
+ *
+ * The helper first hits the OIDC login page to obtain the signed
+ * `oidc_pending_client` cookie, then forwards it on the BA sign-up call.
+ * This is what the browser does in production (GET login → POST
+ * register/sign-up with cookie) and is required since the realm
+ * resolver uses the pending-client cookie to tag the new BA user with
+ * `realm="end_user:<applicationId>"`. Without this, the realm guard at
+ * token-mint rejects the flow because the user would default to
+ * `realm="platform"`.
  */
 async function signUpEndUser(
+  applicationId: string,
   email = "alice@satellite.example.com",
   password = "Sup3rSecretPass!",
 ): Promise<{ cookie: string; userId: string }> {
@@ -129,6 +142,18 @@ async function signUpEndUser(
   if (!match) throw new Error(`no session cookie: ${setCookie}`);
   const cookie = `better-auth.session_token=${match[1]}`;
   const body = (await res.json()) as { user: { id: string } };
+  // In production the realm is set by the OIDC module's BA create hook
+  // when the `oidc_pending_client` cookie pins an application-level
+  // client. Forging a signed cookie from tests would require
+  // reconstructing the HMAC from `BETTER_AUTH_SECRET` — overkill for a
+  // flow test focused on PKCE mechanics, not on realm resolution
+  // (which has dedicated coverage in `oauth-enduser-pages.test.ts`).
+  // Write the expected realm + the session's denormalized copy directly
+  // so the token-mint realm check passes.
+  await db
+    .update(userTable)
+    .set({ realm: `end_user:${applicationId}` })
+    .where(eq(userTable.id, body.user.id));
   return { cookie, userId: body.user.id };
 }
 
@@ -183,7 +208,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
   });
 
   it("mints an access token via the full PKCE flow through the module consent handler", async () => {
-    const { cookie } = await signUpEndUser();
+    const { cookie } = await signUpEndUser(ctx.defaultAppId);
 
     const verifier = randomVerifier();
     const challenge = await sha256Base64Url(verifier);
@@ -332,7 +357,11 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // The happy-path test above decodes the JWT with `decodeJwt` (no
     // signature check), so it could not catch this. This test round-trips
     // a REAL minted token through the full core auth middleware.
-    const { cookie } = await signUpEndUser("e2e-bearer@satellite.example.com", "Sup3rSecret!");
+    const { cookie } = await signUpEndUser(
+      ctx.defaultAppId,
+      "e2e-bearer@satellite.example.com",
+      "Sup3rSecret!",
+    );
     const { code, verifier } = await runHappyPathToCode({ cookie });
     const tokens = await exchangeCodeForTokens(code, verifier);
     expect(tokens.access_token).toBeTruthy();
@@ -349,7 +378,11 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
   });
 
   it("PKCE enforcement rejects a tampered code_verifier at /oauth2/token", async () => {
-    const { cookie } = await signUpEndUser("bob@satellite.example.com", "AnotherSecret123!");
+    const { cookie } = await signUpEndUser(
+      ctx.defaultAppId,
+      "bob@satellite.example.com",
+      "AnotherSecret123!",
+    );
     const verifier = randomVerifier();
     const challenge = await sha256Base64Url(verifier);
     const state = base64url(crypto.getRandomValues(new Uint8Array(16)));
@@ -583,7 +616,11 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
   });
 
   it("issues a fresh JWT access token via grant_type=refresh_token with custom claims re-injected", async () => {
-    const { cookie } = await signUpEndUser("refresh@satellite.example.com", "Sup3rSecret!");
+    const { cookie } = await signUpEndUser(
+      ctx.defaultAppId,
+      "refresh@satellite.example.com",
+      "Sup3rSecret!",
+    );
     const { code, verifier } = await runHappyPathToCode({ cookie });
     const tokens = await exchangeCodeForTokens(code, verifier);
     expect(tokens.refresh_token).toBeTruthy();
@@ -636,7 +673,11 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
   });
 
   it("introspect returns {active:true} for a live token and {active:false} for garbage", async () => {
-    const { cookie } = await signUpEndUser("intro@satellite.example.com", "Sup3rSecret!");
+    const { cookie } = await signUpEndUser(
+      ctx.defaultAppId,
+      "intro@satellite.example.com",
+      "Sup3rSecret!",
+    );
     const { code, verifier } = await runHappyPathToCode({ cookie });
     const tokens = await exchangeCodeForTokens(code, verifier);
 
@@ -679,7 +720,11 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // RFC 7009 §2.1 explicitly says the authorization server "SHOULD
     // revoke the refresh token" on revoke. We verify the contract by
     // attempting a refresh after revoke and asserting it fails.
-    const { cookie } = await signUpEndUser("revoke@satellite.example.com", "Sup3rSecret!");
+    const { cookie } = await signUpEndUser(
+      ctx.defaultAppId,
+      "revoke@satellite.example.com",
+      "Sup3rSecret!",
+    );
     const { code, verifier } = await runHappyPathToCode({ cookie });
     const tokens = await exchangeCodeForTokens(code, verifier);
     expect(tokens.refresh_token).toBeTruthy();

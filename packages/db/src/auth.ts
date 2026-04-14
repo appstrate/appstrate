@@ -44,6 +44,31 @@ export function setBeforeSignupHook(
   _beforeSignupHook = hook;
 }
 
+// ─── Realm resolver (injected at boot, typically by the OIDC module) ───
+//
+// Decides the `user.realm` value assigned to a brand-new Better Auth user
+// row at creation time. The default ("platform") covers every signup flow
+// driven by the platform itself (dashboard signup, org invitation, direct
+// BA sign-up). The OIDC module overrides this via `setRealmResolver()`
+// during its `init()` to return `"end_user:<applicationId>"` whenever the
+// in-flight signup carries an `oidc_pending_client` cookie pointing at an
+// application-level OAuth client — the single-user-pool isolation fix that
+// prevents end-user sessions from being replayed against platform routes.
+//
+// Async signature so the resolver can look up the OAuth client's policy
+// (which includes `applicationId`) in the short-TTL cache — same plumbing
+// as `oidcBeforeSignupGuard`. Headers are the only request-scoped state
+// BA exposes to hooks, which is enough because the cookie is present on
+// every OIDC entry path (login, register, magic-link, social callback).
+
+export type RealmResolver = (headers: Headers | null) => Promise<string>;
+
+let _realmResolver: RealmResolver | null = null;
+
+export function setRealmResolver(resolver: RealmResolver): void {
+  _realmResolver = resolver;
+}
+
 // ─── SMTP override (per-request) ─────────────────────────────────────────────
 //
 // Flows driven by a `level=application` OIDC client must send verification
@@ -506,20 +531,25 @@ function buildAuth(
                 }
               | null
               | undefined;
+            // BA stores request headers in two possible locations depending
+            // on the code path: `context.headers` for email/password signup,
+            // `context.request.headers` for social OAuth callbacks. Match
+            // BA's own fallback chain (see internal-adapter.mjs) — missing
+            // this second path was the bug that let social signups bypass
+            // the OIDC `beforeSignup` guard. `context` is `null` when BA
+            // creates users outside an HTTP request (seeds, admin scripts).
+            const headers = ctx?.headers ?? ctx?.request?.headers ?? null;
             if (_beforeSignupHook) {
-              // BA stores request headers in two possible locations depending
-              // on the code path: `context.headers` for email/password signup,
-              // `context.request.headers` for social OAuth callbacks. Match
-              // BA's own fallback chain (see internal-adapter.mjs) — missing
-              // this second path was the bug that let social signups bypass
-              // the OIDC `beforeSignup` guard. `context` is `null` when BA
-              // creates users outside an HTTP request (seeds, admin scripts).
-              const headers = ctx?.headers ?? ctx?.request?.headers ?? null;
               await _beforeSignupHook(user.email, { headers });
             }
-            // Auto-verify email on social signup. See
-            // `shouldAutoVerifyEmailOnCreate` for the full rationale.
-            return shouldAutoVerifyEmailOnCreate(ctx);
+            // Merge realm resolution + email auto-verify into a single data
+            // patch returned to BA. The realm resolver falls back to
+            // "platform" when no OIDC module is loaded (OSS mode).
+            const realm = _realmResolver ? await _realmResolver(headers) : "platform";
+            const autoVerify = shouldAutoVerifyEmailOnCreate(ctx);
+            const data: Record<string, unknown> = { realm };
+            if (autoVerify) data.emailVerified = true;
+            return { data };
           },
           after: async (user, context) => {
             await db.insert(profiles).values({
@@ -535,6 +565,28 @@ function buildAuth(
               const headers = ctx?.headers ?? ctx?.request?.headers ?? null;
               await _afterSignupHook({ id: user.id, email: user.email }, { headers });
             }
+          },
+        },
+      },
+      session: {
+        create: {
+          // Denormalize `user.realm` onto the session row so the request-time
+          // realm guard in the auth pipeline (`requirePlatformRealm`) can
+          // reject mismatched audiences without an extra user-table lookup
+          // on every request. BA creates the session row by INSERT — we
+          // return a patch to merge the realm before the write.
+          before: async (sess) => {
+            const [row] = await db
+              .select({ realm: user.realm })
+              .from(user)
+              .where(eq(user.id, sess.userId))
+              .limit(1);
+            // If the user row vanished between session insert and our SELECT
+            // (shouldn't happen — BA inserts the user before the session in
+            // the same flow), fall back to "platform". The request-time guard
+            // then treats the session as platform-scoped, which is safer than
+            // leaking an end-user session.
+            return { data: { realm: row?.realm ?? "platform" } };
           },
         },
       },

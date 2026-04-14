@@ -50,6 +50,8 @@ import {
   listFirstPartyClientIds,
 } from "./services/oauth-admin.ts";
 import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
+import { oidcRealmResolver } from "./services/realm-resolver.ts";
+import { setRealmResolver } from "@appstrate/db/auth";
 
 // Snapshot of first-party clientIds captured at `init()` time and forwarded
 // to `oauthProvider({ cachedTrustedClients })` when `betterAuthPlugins()` is
@@ -64,6 +66,12 @@ const oidcModule: AppstrateModule = {
     await ctx.applyMigrations("oidc", resolve(import.meta.dir, "drizzle/migrations"), {
       requireCoreTables: ["end_users", "user", "session", "organizations", "applications"],
     });
+    // Install the realm resolver so the BA user-create hook tags new
+    // end-user rows with `realm="end_user:<applicationId>"`. Platform-side
+    // signups (dashboard, org invitation, instance/org-level OIDC clients)
+    // keep the default "platform" realm. See the resolver file header and
+    // `packages/db/src/auth.ts::setRealmResolver` for the full contract.
+    setRealmResolver(oidcRealmResolver);
     // Auto-provision the instance-level first-party OIDC client for the
     // platform dashboard SPA. Idempotent — skips if one already exists.
     const env = getEnv();
