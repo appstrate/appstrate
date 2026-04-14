@@ -26,9 +26,12 @@
  *   - `instance` → `allowSignup` gates the guard; auto-provisioned platform
  *                  client is `true`, env-declared satellites are `false`.
  *                  No post-signup action.
- *   - `application` → pass-through. End-users are created via the headless
- *                     API, not through Better Auth; the pending-client
- *                     cookie should never block a legitimate flow.
+ *   - `application` → `allowSignup` gates the guard (unified semantic per
+ *                     `a2aae3af`). When `false`, end-users must be
+ *                     pre-provisioned via the headless API; the BA-user
+ *                     creation that backs the OIDC end-user mapping is
+ *                     blocked here. `enduser-mapping.ts` surfaces the
+ *                     same gate as `AppSignupClosedError` for direct calls.
  *
  * Safe fallthrough: the guard is a no-op when no cookie is present, its
  * signature is invalid/expired, or the client is unknown / disabled.

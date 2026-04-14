@@ -36,6 +36,13 @@
       "when": 1776600000000,
       "tag": "0004_encryption_key_version",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776800000000,
+      "tag": "0005_app_clients_allow_signup_backfill",
+      "breakpoints": true
     }
   ]
 }

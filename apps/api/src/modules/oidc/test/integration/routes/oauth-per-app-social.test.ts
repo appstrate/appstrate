@@ -77,6 +77,9 @@ async function setupAppClient(opts: {
     name: "E2E Social Client",
     redirectUris: ["https://acme.example.com/oauth/callback"],
     referencedApplicationId: appId,
+    // The "register page shows both buttons" test hits GET /register which
+    // is now gated by `allowSignup` on every level — opt in.
+    allowSignup: true,
   });
 
   if (opts.google) {

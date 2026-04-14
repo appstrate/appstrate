@@ -29,6 +29,10 @@ async function registerClient(
     name: overrides.name ?? "Register Test App",
     redirectUris: overrides.redirectUris ?? ["https://acme.example.com/oauth/callback"],
     referencedApplicationId: ctx.defaultAppId,
+    // Register-page tests exercise the happy path — secure-by-default is
+    // `false`, which since `a2aae3af` closes the register route on every
+    // level (incl. application). Opt in explicitly.
+    allowSignup: true,
   };
   const res = await app.request("/api/oauth/clients", {
     method: "POST",

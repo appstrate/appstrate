@@ -78,6 +78,9 @@ async function setupAppClient(opts: { smtp: boolean }): Promise<{
     name: "E2E Client",
     redirectUris: ["https://acme.example.com/oauth/callback"],
     referencedApplicationId: appId,
+    // Signup tests exercise the happy path — opt in explicitly since
+    // `allowSignup` is secure-by-default `false` on every level.
+    allowSignup: true,
   });
 
   if (opts.smtp) {

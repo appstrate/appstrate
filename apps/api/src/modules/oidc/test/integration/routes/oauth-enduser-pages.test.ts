@@ -566,4 +566,58 @@ describe("Public end-user pages — /api/oauth/*", () => {
       expect(row?.role).toBe("admin");
     });
   });
+
+  describe("Application-level signup policy (unified with org/instance)", () => {
+    // Symmetric to the org-level tests above — since commit a2aae3af the
+    // `allowSignup` flag is honored uniformly across all client levels
+    // (SOTA alignment with FusionAuth/Auth0/Okta: CTA hidden when closed,
+    // not show-and-reject).
+
+    it("GET /login hides the 'Créer un compte' CTA when allowSignup=false on an app client", async () => {
+      const { clientId } = await registerClient(ctx, { allowSignup: false });
+      const res = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=x`,
+      );
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain('name="password"');
+      expect(html).not.toContain("Créer un compte");
+    });
+
+    it("GET /register renders an error page when allowSignup=false on an app client", async () => {
+      const { clientId } = await registerClient(ctx, { allowSignup: false });
+      const res = await app.request(
+        `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=x`,
+      );
+      expect(res.status).toBe(403);
+      const html = await res.text();
+      expect(html).toContain("Inscription fermée");
+      expect(html).not.toContain('name="password"');
+    });
+
+    it("POST /register rejects with 403 when allowSignup=false on an app client", async () => {
+      const { clientId } = await registerClient(ctx, { allowSignup: false });
+      const res = await app.request(
+        `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=x`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: "email=a@b.com&password=TestPassword123!&name=A",
+        },
+      );
+      expect(res.status).toBe(403);
+      const html = await res.text();
+      expect(html).toContain("Inscription fermée");
+    });
+
+    it("GET /login keeps the 'Créer un compte' CTA when allowSignup=true on an app client", async () => {
+      const { clientId } = await registerClient(ctx, { allowSignup: true });
+      const res = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=x`,
+      );
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain("Créer un compte");
+    });
+  });
 });

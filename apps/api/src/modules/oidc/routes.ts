@@ -331,22 +331,19 @@ function isInstanceSmtpEnabled(): boolean {
 }
 
 /**
- * Effective "is signup open" flag for a client's entry pages. Org-level
- * and instance-level clients honor their stored `allowSignup`; application
- * clients are open by default (end-user provisioning is handled elsewhere).
- * Passed to `renderLoginPage` / `renderRegisterPage` / `renderMagicLinkPage`
- * so they can hide the signup-only CTAs when signup is closed.
+ * Effective "is signup open" flag for a client's entry pages. Unified
+ * across all levels (instance / org / application) per `a2aae3af` — aligns
+ * with FusionAuth (per-application `registrationConfiguration.enabled`),
+ * Auth0 (per-connection `disable_signups`), and Okta (policy-bound SSR):
+ * when signup is closed the hosted login UI hides the CTA rather than
+ * showing it and rejecting at submit.
  *
- * Instance clients declared via `OIDC_INSTANCE_CLIENTS` are
- * inserted with `allowSignup: false` — satellites like an admin portal
- * that opt into the platform login should never open signup on the shared
- * page; membership is provisioned out-of-band.
+ * Instance clients declared via `OIDC_INSTANCE_CLIENTS` default to
+ * `allowSignup: false` (satellites like an admin portal provision members
+ * out-of-band). `ensureInstanceClient()` opts the fresh-install first-party
+ * client in at boot.
  */
-function allowSignupForClient(client: {
-  level: "org" | "application" | "instance";
-  allowSignup: boolean;
-}): boolean {
-  if (client.level === "application") return true;
+function allowSignupForClient(client: { allowSignup: boolean }): boolean {
   return client.allowSignup;
 }
 
@@ -1024,8 +1021,8 @@ export function createOidcRouter() {
     });
     if (page instanceof Response) return page;
     const { url, ctx } = page;
-    // Org / instance + closed signup → no register form at all.
-    if (ctx.client.level !== "application" && !ctx.client.allowSignup) {
+    // Closed signup → no register form at all (uniform across levels).
+    if (!ctx.client.allowSignup) {
       return c.html(
         renderErrorPage({
           title: "Inscription fermée",
@@ -1064,7 +1061,7 @@ export function createOidcRouter() {
     // closed, but a hand-crafted POST must still be rejected here. Returning
     // the styled error page (instead of `renderRegError` with a banner)
     // matches the GET behavior — there is no form to retry.
-    if (ctx.client.level !== "application" && !ctx.client.allowSignup) {
+    if (!ctx.client.allowSignup) {
       return c.html(
         renderErrorPage({
           title: "Inscription fermée",
