@@ -15,6 +15,7 @@ import type {
   ArrayFieldTemplateProps,
   ArrayFieldItemTemplateProps,
   ObjectFieldTemplateProps,
+  MultiSchemaFieldTemplateProps,
 } from "@rjsf/utils";
 import { getSubmitButtonOptions } from "@rjsf/utils";
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
@@ -154,6 +155,16 @@ export function DescriptionFieldTemplate(props: DescriptionFieldProps) {
     <p id={id} className="text-muted-foreground text-xs">
       {description}
     </p>
+  );
+}
+
+export function MultiSchemaFieldTemplate(props: MultiSchemaFieldTemplateProps) {
+  const { selector, optionSchemaField } = props;
+  return (
+    <div className="space-y-4">
+      {selector}
+      {optionSchemaField}
+    </div>
   );
 }
 

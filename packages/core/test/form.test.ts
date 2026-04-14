@@ -101,7 +101,7 @@ describe("mapAfpsToRjsf", () => {
     };
     const { schema, uiSchema } = mapAfpsToRjsf(wrapper);
     expect(uiSchema.channels).toMatchObject({ "ui:widget": "multiselect" });
-    expect(schema.properties.channels.uniqueItems).toBe(true);
+    expect(schema.properties.channels?.uniqueItems).toBe(true);
   });
 
   it("preserves existing uniqueItems on array-of-enum", () => {
