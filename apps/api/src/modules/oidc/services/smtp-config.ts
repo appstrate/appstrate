@@ -79,11 +79,26 @@ function resolveSecure(mode: "auto" | "tls" | "starttls" | "none", port: number)
   return port === 465;
 }
 
-function buildTransport(row: typeof applicationSmtpConfigs.$inferSelect): Transporter {
+function buildTransport(row: typeof applicationSmtpConfigs.$inferSelect): Transporter | null {
   if (row.host === "__test_json__") {
     return createTransport({ jsonTransport: true });
   }
-  const pass = decryptCredentials<{ pass: string }>(row.passEncrypted).pass;
+  let pass: string;
+  try {
+    pass = decryptCredentials<{ pass: string }>(row.passEncrypted).pass;
+  } catch (err) {
+    // Ciphertext produced with a different key or corrupted. The
+    // `encryption_key_version` check above should have caught this, so
+    // reaching here means a row was written at the current version but
+    // fails to decrypt — almost certainly a key mismatch. Fail closed
+    // (treat as unconfigured) rather than crashing the request pipeline.
+    logger.error("oidc smtp: decryption failed for per-app config, treating as unconfigured", {
+      applicationId: row.applicationId,
+      rowVersion: row.encryptionKeyVersion,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
   return createTransport({
     host: row.host,
     port: row.port,
@@ -108,8 +123,10 @@ async function resolvePerAppSmtp(applicationId: string): Promise<ResolvedSmtpCon
       });
       return null;
     }
+    const transport = buildTransport(row);
+    if (!transport) return null;
     return {
-      transport: wrapForSpy(buildTransport(row), "per-app"),
+      transport: wrapForSpy(transport, "per-app"),
       fromAddress: row.fromAddress,
       fromName: row.fromName,
       source: "per-app",

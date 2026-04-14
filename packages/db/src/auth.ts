@@ -141,8 +141,21 @@ const socialOverrideStore = new AsyncLocalStorage<SocialOverride>();
  * Set the active social-provider override for the CURRENT async context.
  * Uses `enterWith` (not `run`) because the BA `before` hook returns void
  * and cannot wrap downstream execution — the override must persist until
- * the async context naturally unwinds. Per-tenant isolation is preserved
- * because AsyncLocalStorage is scoped to the current async chain.
+ * the async context naturally unwinds.
+ *
+ * Isolation contract (IMPORTANT):
+ *   - The override is scoped to the async chain of the BA route handler
+ *     (one chain per HTTP request in Hono + Bun).
+ *   - Callers MUST NOT invoke `enterSocialOverride` outside a BA social/
+ *     callback route — reusing the same async context across two logical
+ *     operations would leak the first override into the second.
+ *   - Each new BA request enters through `createAuthMiddleware` which Bun
+ *     wraps in a fresh async context, so per-request isolation holds as
+ *     long as we only call this from the OIDC module's social `before`
+ *     hook (see `apps/api/src/modules/oidc/services/ba-social-override-plugin.ts`).
+ *   - Tested by `apps/api/src/modules/oidc/test/unit/social-override-isolation.test.ts`
+ *     which exercises two concurrent requests with distinct per-app creds
+ *     and asserts no cross-contamination.
  */
 export function enterSocialOverride(override: SocialOverride): void {
   socialOverrideStore.enterWith(override);

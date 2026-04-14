@@ -20,7 +20,11 @@ import { getPubSub } from "../../../infra/index.ts";
 import { logger } from "../../../lib/logger.ts";
 
 const PER_APP_TTL_MS = 60_000;
-const NULL_TTL_MS = 30_000;
+// Short null TTL so a freshly-configured admin sees changes quickly. This
+// also bounds the worst-case cross-pod staleness window when Redis pub/sub
+// is unavailable: if `delete()` can't publish, other pods only see the
+// invalidation after the null entry expires. Keep this well under a minute.
+const NULL_TTL_MS = 10_000;
 
 interface Entry<V> {
   value: V | null;

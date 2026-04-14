@@ -63,7 +63,11 @@ async function applyOverride(ctx: { request?: Request }): Promise<void> {
     // platform's env creds to a tenant's flow — safer to fail closed. Log
     // and let the downstream BA provider surface its own
     // `CLIENT_ID_AND_SECRET_REQUIRED` error.
-    logger.error("oidc: failed to resolve per-app social credentials", {
+    // Resolver failure is expected during key rotation (stale rows return null
+    // upstream but a decryption throw surfaces here). Log as `warn` for parity
+    // with `smtp-config.ts` — the downstream BA provider will surface a proper
+    // `CLIENT_ID_AND_SECRET_REQUIRED` if this was not a transient blip.
+    logger.warn("oidc: failed to resolve per-app social credentials", {
       module: "oidc",
       clientId: pendingClientId,
       applicationId: client.referencedApplicationId,

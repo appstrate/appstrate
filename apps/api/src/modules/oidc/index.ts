@@ -39,6 +39,7 @@ import {
   createOidcRouter,
   createOAuthClientSchema,
   updateOAuthClientSchema,
+  smtpConfigUpsertSchema,
   socialProviderUpsertSchema,
 } from "./routes.ts";
 import { oidcPaths } from "./openapi/paths.ts";
@@ -148,7 +149,14 @@ const oidcModule: AppstrateModule = {
   },
 
   openApiTags() {
-    return [{ name: "OAuth Clients", description: "OAuth 2.1 client registry for end-user auth" }];
+    return [
+      { name: "OAuth Clients", description: "OAuth 2.1 client registry for end-user auth" },
+      {
+        name: "Application Auth Config",
+        description:
+          "Per-application SMTP + social OAuth App configuration for `level: application` OIDC clients",
+      },
+    ];
   },
 
   openApiSchemas() {
@@ -164,6 +172,12 @@ const oidcModule: AppstrateModule = {
         path: "/api/oauth/clients/{clientId}",
         jsonSchema: z.toJSONSchema(updateOAuthClientSchema) as Record<string, unknown>,
         description: "Update OAuth client",
+      },
+      {
+        method: "PUT",
+        path: "/api/applications/{id}/smtp-config",
+        jsonSchema: z.toJSONSchema(smtpConfigUpsertSchema) as Record<string, unknown>,
+        description: "Upsert per-application SMTP configuration",
       },
       {
         method: "PUT",
