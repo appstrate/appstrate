@@ -9,7 +9,9 @@
 --
 -- Password is AES-256-GCM encrypted at rest (`encryptCredentials({ pass })`
 -- in @appstrate/connect). Rotation of `CONNECTION_ENCRYPTION_KEY` requires
--- operators to re-upsert every row via the admin API.
+-- operators to re-upsert every row via the admin API — `encryption_key_version`
+-- is stamped at write time and the resolver treats rows with a stale version
+-- as "unconfigured" (fails closed instead of decrypting with the wrong key).
 
 CREATE TABLE IF NOT EXISTS "application_smtp_configs" (
   "application_id" text PRIMARY KEY
@@ -18,6 +20,7 @@ CREATE TABLE IF NOT EXISTS "application_smtp_configs" (
   "port" integer NOT NULL,
   "username" text NOT NULL,
   "pass_encrypted" text NOT NULL,
+  "encryption_key_version" text NOT NULL DEFAULT 'v1',
   "from_address" text NOT NULL,
   "from_name" text,
   "secure_mode" text NOT NULL DEFAULT 'auto'

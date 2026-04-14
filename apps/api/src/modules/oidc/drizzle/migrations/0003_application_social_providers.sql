@@ -12,7 +12,9 @@
 -- Client secret is AES-256-GCM encrypted at rest
 -- (`encryptCredentials({ clientSecret })` in @appstrate/connect). Rotation
 -- of `CONNECTION_ENCRYPTION_KEY` requires operators to re-upsert every
--- row via the admin API.
+-- row via the admin API — `encryption_key_version` is stamped at write
+-- time and the resolver treats rows with a stale version as "unconfigured"
+-- (fails closed instead of decrypting with the wrong key).
 
 CREATE TABLE IF NOT EXISTS "application_social_providers" (
   "application_id" text NOT NULL
@@ -22,6 +24,7 @@ CREATE TABLE IF NOT EXISTS "application_social_providers" (
     CHECK ("provider" IN ('google', 'github')),
   "client_id" text NOT NULL,
   "client_secret_encrypted" text NOT NULL,
+  "encryption_key_version" text NOT NULL DEFAULT 'v1',
   "scopes" text[],
   "created_at" timestamp NOT NULL DEFAULT now(),
   "updated_at" timestamp NOT NULL DEFAULT now(),

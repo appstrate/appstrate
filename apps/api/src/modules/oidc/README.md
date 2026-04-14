@@ -381,10 +381,10 @@ To rotate `CONNECTION_ENCRYPTION_KEY`:
 
 1. Bump `CURRENT_ENCRYPTION_KEY_VERSION` in `services/encryption-key-version.ts` (e.g. `v1` → `v2`).
 2. Roll out the new `CONNECTION_ENCRYPTION_KEY` and the new constant together (blue/green).
-3. After deploy, per-app email + social auth are disabled for every tenant until an operator re-`PUT`s each `/api/applications/:id/smtp-config` and `/api/applications/:id/social-providers/:provider` row.
+3. After deploy, per-app email + social auth are disabled for every tenant until an operator re-`PUT`s each `/api/applications/:id/smtp-config` and `/api/applications/:id/social-providers/:provider` row. For deployments with more than a handful of tenants, drive this via a one-off migration script that reads `CONNECTION_ENCRYPTION_KEY_OLD` + `CONNECTION_ENCRYPTION_KEY_NEW` side by side, decrypts each row with the old key, re-encrypts with the new key, and writes back via the admin API (which stamps the new `encryption_key_version`). Per-tenant `PUT`s become the fallback, not the default path.
 4. Rows carrying the old tag stay unreachable until explicitly rewritten — this is intentional: a stale ciphertext must never silently fall through to instance-level env credentials or surface as a cryptic crypto error.
 
-Cross-instance cache invalidation: admin `PUT`/`DELETE` publishes the invalidated key on the platform `PubSub` (`oidc:smtp-cache-invalidate`, `oidc:social-cache-invalidate`). Every API instance subscribes at boot and evicts its local `TtlCache` entry on publish — see `services/ttl-cache.ts`. In single-instance / in-memory pub/sub deployments, the 30s null-TTL bounds worst-case staleness.
+Cross-instance cache invalidation: admin `PUT`/`DELETE` publishes the invalidated key on the platform `PubSub` (`oidc:smtp-cache-invalidate`, `oidc:social-cache-invalidate`). Every API instance subscribes at boot and evicts its local `TtlCache` entry on publish — see `services/ttl-cache.ts`. When Redis is unavailable the subscribe fails open (logged as `oidc per-app cache: pub/sub subscribe failed, running single-instance`); in that mode, other pods only see admin mutations after the **10-second null TTL** expires. Multi-instance deployments MUST configure `REDIS_URL` for immediate invalidation. Operators should also expect a ≤10 s propagation window on freshly-configured SMTP/social rows (first read caches `null`, subsequent reads see the new row once the null entry expires).
 
 ## Satellite integration example
 

@@ -97,7 +97,18 @@ async function resolvePerApp(
       });
       return null;
     }
-    const decrypted = decryptCredentials<{ clientSecret: string }>(row.clientSecretEncrypted);
+    let decrypted: { clientSecret: string };
+    try {
+      decrypted = decryptCredentials<{ clientSecret: string }>(row.clientSecretEncrypted);
+    } catch (err) {
+      logger.error("oidc social: decryption failed for per-app creds, treating as unconfigured", {
+        applicationId,
+        provider,
+        rowVersion: row.encryptionKeyVersion,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
     return {
       clientId: row.clientId,
       clientSecret: decrypted.clientSecret,
