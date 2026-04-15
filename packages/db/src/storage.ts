@@ -21,6 +21,7 @@ function getStore(): Storage {
       bucket: env.S3_BUCKET,
       region: env.S3_REGION!,
       endpoint: env.S3_ENDPOINT,
+      publicEndpoint: env.S3_PUBLIC_ENDPOINT,
     });
   } else {
     store = createFileSystemStorage({

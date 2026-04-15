@@ -21,6 +21,8 @@ export interface S3StorageConfig {
   region: string;
   /** Custom endpoint URL for S3-compatible services (MinIO, R2). Enables path-style access. */
   endpoint?: string;
+  /** Public endpoint used only for presigned URLs. Falls back to `endpoint` when unset. */
+  publicEndpoint?: string;
 }
 
 /** S3 SDK error shape used for status code and name checks. */
@@ -37,6 +39,17 @@ export function createS3Storage(config: S3StorageConfig): Storage {
     region: config.region,
     ...(config.endpoint ? { endpoint: config.endpoint, forcePathStyle: true } : {}),
   });
+
+  // Separate client for presigned URLs when a public endpoint is provided.
+  // The browser needs a URL it can reach, while the server-side SDK keeps
+  // talking to the internal endpoint.
+  const presignClient = config.publicEndpoint
+    ? new S3Client({
+        region: config.region,
+        endpoint: config.publicEndpoint,
+        forcePathStyle: true,
+      })
+    : client;
 
   function makeKey(bucket: string, filePath: string): string {
     const key = `${bucket}/${filePath}`.replace(/\/+/g, "/");
@@ -156,7 +169,7 @@ export function createS3Storage(config: S3StorageConfig): Storage {
         Key: key,
         ...(opts?.mime ? { ContentType: opts.mime } : {}),
       });
-      const url = await getSignedUrl(client, cmd, { expiresIn });
+      const url = await getSignedUrl(presignClient, cmd, { expiresIn });
       // Client must echo the same Content-Type declared in the signature.
       const headers: Record<string, string> = {};
       if (opts?.mime) headers["Content-Type"] = opts.mime;
