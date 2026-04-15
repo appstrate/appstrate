@@ -33,8 +33,7 @@
   "files": [
     "src",
     "LICENSE",
-    "NOTICE",
-    "README.md"
+    "NOTICE"
   ],
   "exports": {
     "./schema-form": "./src/schema-form/index.tsx"
