@@ -1,4 +1,4 @@
-FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.9-alpine AS builder
+FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.11-alpine AS builder
 
 LABEL org.opencontainers.image.source="https://github.com/appstrate/appstrate"
 LABEL org.opencontainers.image.description="Appstrate Sidecar — Credential-isolating HTTP proxy for agent containers"
