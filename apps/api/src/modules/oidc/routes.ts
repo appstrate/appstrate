@@ -1892,18 +1892,34 @@ export function createOidcRouter() {
   // Better Auth's /oauth2/end-session deletes the session from the DB
   // but does NOT clear the `better-auth.session_token` cookie. This
   // leaves a stale cookie that breaks the next authorize request
-  // ("session no longer exists"). This custom GET route clears the
-  // cookie and redirects to the post_logout_redirect_uri.
+  // ("session no longer exists"). This custom GET route delegates cookie
+  // cleanup to BA's `signOut` (which also invalidates the DB row) and
+  // forwards its Set-Cookie headers — the only source of truth for the
+  // exact cookie name/Domain/Secure attributes BA used at creation time.
+  // Manually crafting the deletion header silently breaks when
+  // `crossSubDomainCookies` / `__Secure-` prefix / `Domain=` are in play.
   // Satellites call this instead of /oauth2/end-session directly.
 
   router.get("/api/oauth/logout", rateLimitByIp(30), async (c: Context<AppEnv>) => {
     const postLogoutUri = c.req.query("post_logout_redirect_uri");
     const clientId = c.req.query("client_id");
 
-    // Clear the BA session cookie so the next authorize starts fresh.
-    c.header("set-cookie", "better-auth.session_token=; Path=/; HttpOnly; Max-Age=0", {
-      append: true,
-    });
+    // Delegate cookie deletion + DB session invalidation to BA. Forward
+    // every Set-Cookie verbatim so attributes match the originals.
+    try {
+      const signOutResponse = (await getOidcAuthApi().signOut({
+        headers: c.req.raw.headers,
+        request: c.req.raw,
+        asResponse: true,
+      })) as Response;
+      forwardOAuthSessionCookies(c, signOutResponse, true);
+    } catch (err) {
+      // Already-expired sessions throw — proceed with the redirect anyway.
+      logger.warn("oidc: signOut threw, continuing logout redirect", {
+        module: "oidc",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     // Validate redirect URI against the client's registered post-logout URIs
     // to prevent open redirect attacks (OWASP). Fall back to "/" if no URI,
