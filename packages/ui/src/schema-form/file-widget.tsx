@@ -196,12 +196,23 @@ export function FileWidget(props: WidgetProps) {
       </label>
       {attachments.length === 0 ? (
         <div
+          role="button"
+          tabIndex={locked ? -1 : 0}
+          aria-disabled={locked || undefined}
+          aria-label={labels.addFile}
           className={cn(
-            "text-muted-foreground hover:border-muted-foreground/50 flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center text-sm transition-colors",
+            "text-muted-foreground hover:border-muted-foreground/50 focus-visible:ring-ring flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center text-sm transition-colors focus-visible:ring-2 focus-visible:outline-none",
             dragOver && "border-primary bg-primary/5",
             locked && "pointer-events-none opacity-60",
           )}
           onClick={() => !locked && inputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (locked) return;
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              inputRef.current?.click();
+            }
+          }}
           onDragOver={(e) => {
             e.preventDefault();
             if (!locked) setDragOver(true);

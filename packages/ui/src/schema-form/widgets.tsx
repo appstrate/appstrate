@@ -6,30 +6,35 @@
 // consistent dropdown in every Appstrate surface.
 
 import type { WidgetProps } from "@rjsf/utils";
-import Select from "react-select";
+import Select, { type StylesConfig } from "react-select";
 import { cn } from "./cn.ts";
 import { LABEL_CLASS } from "./primitives.tsx";
 export { FileWidget } from "./file-widget.tsx";
 
+interface EnumOption {
+  value: unknown;
+  label: string;
+}
+
 // react-select custom styles mapped onto Appstrate's CSS variables so the
 // dropdown picks up the current theme (dark/light) via CSS tokens.
-const selectStyles = {
-  control: (base: Record<string, unknown>) => ({
+const selectStyles: StylesConfig<EnumOption> = {
+  control: (base) => ({
     ...base,
     backgroundColor: "transparent",
     borderColor: "var(--border)",
     minHeight: "2.25rem",
   }),
-  menu: (base: Record<string, unknown>) => ({ ...base, backgroundColor: "var(--popover)" }),
-  option: (base: Record<string, unknown>, state: { isFocused: boolean }) => ({
+  menu: (base) => ({ ...base, backgroundColor: "var(--popover)" }),
+  option: (base, state) => ({
     ...base,
     backgroundColor: state.isFocused ? "var(--accent)" : "transparent",
     color: "inherit",
   }),
-  multiValue: (base: Record<string, unknown>) => ({ ...base, backgroundColor: "var(--secondary)" }),
-  input: (base: Record<string, unknown>) => ({ ...base, color: "inherit" }),
-  singleValue: (base: Record<string, unknown>) => ({ ...base, color: "inherit" }),
-  placeholder: (base: Record<string, unknown>) => ({ ...base, color: "var(--muted-foreground)" }),
+  multiValue: (base) => ({ ...base, backgroundColor: "var(--secondary)" }),
+  input: (base) => ({ ...base, color: "inherit" }),
+  singleValue: (base) => ({ ...base, color: "inherit" }),
+  placeholder: (base) => ({ ...base, color: "var(--muted-foreground)" }),
 };
 
 export function TextareaWidget(props: WidgetProps) {
@@ -76,13 +81,12 @@ export function CheckboxWidget(props: WidgetProps) {
 
 export function SelectWidget(props: WidgetProps) {
   const { id, value, onChange, disabled, options, placeholder } = props;
-  const enumOptions =
-    (options.enumOptions as { value: unknown; label: string }[] | undefined) ?? [];
+  const enumOptions = (options.enumOptions as EnumOption[] | undefined) ?? [];
 
   const selected = enumOptions.find((o) => String(o.value) === String(value)) ?? null;
 
   return (
-    <Select
+    <Select<EnumOption, false>
       inputId={id}
       isDisabled={disabled}
       isClearable
@@ -99,14 +103,13 @@ export function SelectWidget(props: WidgetProps) {
 /** Array of enums → multi-select dropdown via react-select. */
 export function MultiSelectWidget(props: WidgetProps) {
   const { id, value, onChange, disabled, options } = props;
-  const enumOptions =
-    (options.enumOptions as { value: unknown; label: string }[] | undefined) ?? [];
+  const enumOptions = (options.enumOptions as EnumOption[] | undefined) ?? [];
 
   const raw = Array.isArray(value) ? value : [];
   const selected = enumOptions.filter((o) => raw.some((v) => String(v) === String(o.value)));
 
   return (
-    <Select
+    <Select<EnumOption, true>
       inputId={id}
       isMulti
       isDisabled={disabled}
@@ -114,7 +117,7 @@ export function MultiSelectWidget(props: WidgetProps) {
       value={selected}
       onChange={(sel) => onChange(sel.map((s) => s.value))}
       classNamePrefix="rjsf-ms"
-      styles={selectStyles}
+      styles={selectStyles as StylesConfig<EnumOption, true>}
     />
   );
 }
