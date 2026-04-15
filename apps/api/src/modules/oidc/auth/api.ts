@@ -70,6 +70,12 @@ interface JwksArgs {
   headers: Headers;
 }
 
+interface SignOutArgs {
+  headers: Headers;
+  request?: Request;
+  asResponse?: boolean;
+}
+
 export interface OidcAuthApi {
   signInEmail(args: SignInEmailArgs): Promise<Response | unknown>;
   signUpEmail(args: SignUpEmailArgs): Promise<Response | unknown>;
@@ -77,6 +83,7 @@ export interface OidcAuthApi {
   requestPasswordReset(args: RequestPasswordResetArgs): Promise<Response | unknown>;
   resetPassword(args: ResetPasswordArgs): Promise<Response | unknown>;
   oauth2Consent(args: OAuth2ConsentArgs): Promise<Response | unknown>;
+  signOut(args: SignOutArgs): Promise<Response | unknown>;
   getOpenIdConfig(args: DiscoveryArgs): Promise<unknown>;
   getOAuthServerConfig(args: DiscoveryArgs): Promise<unknown>;
   getJwks(args: JwksArgs): Promise<{ keys?: jose.JWK[] } | null>;
