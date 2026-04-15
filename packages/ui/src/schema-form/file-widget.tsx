@@ -4,7 +4,7 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { X } from "lucide-react";
 import type { WidgetProps } from "@rjsf/utils";
-import { Button, LABEL_CLASS } from "./templates.tsx";
+import { Button, LABEL_CLASS } from "./primitives.tsx";
 import { cn } from "./cn.ts";
 import { createUploader, isUploadUri, type UploadFn } from "./upload-client.ts";
 import type { SchemaFormContext } from "./context.ts";

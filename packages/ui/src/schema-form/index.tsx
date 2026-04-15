@@ -22,7 +22,7 @@
  * Schema 2020-12 is used via `customizeValidator({ AjvClass: Ajv2020 })`.
  */
 
-import { forwardRef, type ReactNode } from "react";
+import { forwardRef, useMemo, type ReactNode } from "react";
 import type { FormProps as RjsfFormProps } from "@rjsf/core";
 import RjsfForm from "@rjsf/core";
 import { mapAfpsToRjsf, type SchemaWrapper } from "@appstrate/core/form";
@@ -126,12 +126,13 @@ export const SchemaForm = forwardRef<RjsfForm, SchemaFormProps>(function SchemaF
     ...(showSubmitButton ? {} : { "ui:submitButtonOptions": { norender: true } }),
   };
 
-  const ctx: SchemaFormContext = {
-    ...(formContext ?? {}),
-    uploadPath,
-    upload,
-    labels,
-  };
+  // Stable identity so downstream `useMemo`s in FileWidget actually memoize.
+  const ctx = useMemo(
+    () =>
+      ({ ...(formContext ?? {}), uploadPath, upload, labels }) as SchemaFormContext &
+        Record<string, unknown>,
+    [formContext, uploadPath, upload, labels],
+  );
 
   return (
     <RjsfForm

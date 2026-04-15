@@ -13,5 +13,4 @@ export interface SchemaFormContext {
   uploadPath?: string;
   upload?: UploadFn;
   labels?: FileWidgetLabels & { addItem?: string };
-  [key: string]: unknown;
 }

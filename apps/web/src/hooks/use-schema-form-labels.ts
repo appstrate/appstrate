@@ -7,7 +7,7 @@ import type { FileWidgetLabels } from "@appstrate/ui/schema-form";
  * Builds the `labels` prop for `<SchemaForm>` from the i18next `settings`
  * namespace so the shared core widget picks up Appstrate's FR/EN strings.
  */
-export function useSchemaFormLabels(): FileWidgetLabels & { addItem?: string } {
+export function useSchemaFormLabels(): Required<FileWidgetLabels> & { addItem: string } {
   const { t } = useTranslation(["settings", "common"]);
   return {
     uploading: t("file.uploading", { ns: "settings" }),

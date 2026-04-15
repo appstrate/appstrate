@@ -46,7 +46,7 @@
     "@rjsf/core": "^6",
     "@rjsf/utils": "^6",
     "@rjsf/validator-ajv8": "^6",
-    "lucide-react": "^1 || >=0.400.0",
+    "lucide-react": ">=0.400.0",
     "react": "^19",
     "react-dom": "^19",
     "react-select": "^5",

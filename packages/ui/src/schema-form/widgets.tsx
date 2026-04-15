@@ -8,7 +8,7 @@
 import type { WidgetProps } from "@rjsf/utils";
 import Select from "react-select";
 import { cn } from "./cn.ts";
-import { LABEL_CLASS } from "./templates.tsx";
+import { LABEL_CLASS } from "./primitives.tsx";
 export { FileWidget } from "./file-widget.tsx";
 
 // react-select custom styles mapped onto Appstrate's CSS variables so the
