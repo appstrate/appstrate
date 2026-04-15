@@ -57,5 +57,6 @@ export const openApiInfo = {
     },
     { name: "End Users", description: "End-user management for headless API" },
     { name: "Provider Keys", description: "Organization provider keys and credentials" },
+    { name: "Uploads", description: "Direct-upload protocol for agent input files" },
   ],
 } as const;

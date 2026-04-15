@@ -315,6 +315,10 @@ const expectedEndpoints = [
   "GET /api/end-users/{id}",
   "PATCH /api/end-users/{id}",
   "DELETE /api/end-users/{id}",
+
+  // Uploads
+  "POST /api/uploads",
+  "PUT /api/uploads/_content",
 ];
 
 // Module-contributed endpoints are sourced directly from each module's

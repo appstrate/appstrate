@@ -187,7 +187,7 @@ export function RunAgentButton({
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           agent={detail}
-          onSubmit={(input, files) => runAgent.mutate({ input, files, version })}
+          onSubmit={(input) => runAgent.mutate({ input, version })}
           isPending={runAgent.isPending}
         />
       )}

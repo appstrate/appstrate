@@ -501,7 +501,7 @@ describe("buildEnrichedPrompt — documents", () => {
     const prompt = buildEnrichedPrompt(ctx);
     expect(prompt).toContain("## Documents");
     expect(prompt).toContain("report.pdf");
-    expect(prompt).toContain("/workspace/documents/");
+    expect(prompt).toContain("./documents/");
     expect(prompt).toContain("data.csv");
   });
 

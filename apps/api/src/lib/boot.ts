@@ -5,6 +5,7 @@ import { db, isEmbeddedDb, getPGliteClient, reservePgConnection } from "@appstra
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
+import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
 import { loadModules, getModules, getModuleContributions } from "./modules/module-loader.ts";
@@ -190,9 +191,21 @@ export async function boot(): Promise<void> {
           error: err instanceof Error ? err.message : String(err),
         });
       }),
+    cleanupExpiredUploads()
+      .then((count) => {
+        if (count > 0) logger.info("Removed expired unconsumed uploads", { count });
+      })
+      .catch((err) => {
+        logger.warn("Could not clean up expired uploads", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }),
   ];
 
   await Promise.all(parallelInits);
+
+  // Kick off the recurring upload sweep once initial cleanup is scheduled.
+  startUploadGc();
 }
 
 /**

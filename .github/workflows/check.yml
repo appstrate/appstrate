@@ -35,3 +35,4 @@ jobs:
         env:
           BETTER_AUTH_SECRET: ci-dummy-secret
           CONNECTION_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          UPLOAD_SIGNING_SECRET: ci-dummy-upload-signing-secret

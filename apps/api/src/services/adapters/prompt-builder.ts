@@ -43,8 +43,8 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     );
   }
   sections.push(
-    "- **Workspace**: `/workspace` is your working directory. " +
-      "Uploaded documents are available at `/workspace/documents/`. " +
+    "- **Workspace**: Your current working directory is the agent workspace. " +
+      "Uploaded documents are available under `./documents/` (relative to cwd). " +
       "You may use the filesystem for temporary processing during this run only.\n",
   );
 
@@ -210,10 +210,12 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     for (const file of ctx.files) {
       const safeName = sanitizeStorageKey(file.name);
       sections.push(
-        `- **${file.name}** (${file.type || "unknown"}, ${formatFileSize(file.size)}) → \`/workspace/documents/${safeName}\``,
+        `- **${file.name}** (${file.type || "unknown"}, ${formatFileSize(file.size)}) → \`./documents/${safeName}\``,
       );
     }
-    sections.push("\nRead the documents directly from the filesystem.\n");
+    sections.push(
+      "\nRead the documents directly from the filesystem (paths are relative to cwd).\n",
+    );
   }
 
   // --- Configuration ---

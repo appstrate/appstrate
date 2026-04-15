@@ -12,6 +12,7 @@ import {
 } from "../services/run-tracker.ts";
 import { shutdownScheduleWorker } from "../services/scheduler.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
+import { stopUploadGc } from "../services/uploads.ts";
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
 
@@ -24,6 +25,7 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     setShuttingDown();
 
     logger.info("Shutdown initiated, stopping sidecar pool...");
+    stopUploadGc();
     await getOrchestrator().shutdown();
 
     // Unsubscribe from cancel channel before draining to avoid processing

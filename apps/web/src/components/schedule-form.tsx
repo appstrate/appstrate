@@ -16,13 +16,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { InputFields } from "./input-fields";
-import {
-  initFormValues,
-  buildPayload,
-  type JSONSchemaObject,
-  type SchemaWrapper,
-} from "@appstrate/core/form";
+import { SchemaForm } from "./schema-form";
+import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { useConnectionProfiles, useAppProfiles } from "../hooks/use-connection-profiles";
 import { CombinedProfileSelect, type ForeignProfile } from "./combined-profile-select";
 
@@ -117,8 +112,8 @@ export function ScheduleForm({
   const hasInputSchema = Object.keys(schema.properties).length > 0;
   const wrapper: SchemaWrapper = { schema };
 
-  const [inputValues, setInputValues] = useState<Record<string, unknown>>(() =>
-    initFormValues(schema, (defaultValues?.input ?? {}) as Record<string, unknown>),
+  const [inputValues, setInputValues] = useState<Record<string, unknown>>(
+    () => (defaultValues?.input ?? {}) as Record<string, unknown>,
   );
 
   const {
@@ -152,7 +147,7 @@ export function ScheduleForm({
   }, [connectionProfileId, allProfiles, setValue]);
 
   const onFormSubmit = handleSubmit((data) => {
-    const input = hasInputSchema ? buildPayload(schema, inputValues) : undefined;
+    const input = hasInputSchema ? inputValues : undefined;
 
     onSubmit({
       connectionProfileId: data.connectionProfileId,
@@ -310,11 +305,10 @@ export function ScheduleForm({
       {hasInputSchema && (
         <div className="space-y-3">
           <Label>{t("schedule.inputTitle")}</Label>
-          <InputFields
-            schema={wrapper}
-            values={inputValues}
-            onChange={(key, v) => setInputValues((prev) => ({ ...prev, [key]: v }))}
-            idPrefix="sched-input"
+          <SchemaForm
+            wrapper={wrapper}
+            formData={inputValues}
+            onChange={(e) => setInputValues(e.formData as Record<string, unknown>)}
           />
         </div>
       )}
