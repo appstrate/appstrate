@@ -81,6 +81,7 @@ appstrate/
 │   └── templates/            # Layout + per-type templates (verification, invitation)
 │
 ├── packages/core/            # @appstrate/core — shared validation, storage, utilities
+├── packages/ui/              # @appstrate/ui — React components (schema-form, widgets) published to npm
 ├── packages/env/src/         # @appstrate/env — Zod env validation (authoritative)
 ├── packages/shared-types/    # @appstrate/shared-types — Drizzle InferSelectModel re-exports
 ├── packages/connect/         # @appstrate/connect — OAuth2/PKCE, API key, credential encryption

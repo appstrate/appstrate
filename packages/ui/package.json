@@ -65,6 +65,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "bun test"
   }
 }
