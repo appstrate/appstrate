@@ -744,15 +744,6 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
                 />
               </div>
 
-              {/* Credential schema — lets users define multi-field credentials
-                  (email + api_key, etc.) referenced by credentialTransform. */}
-              <SchemaSection
-                title={t("providers.form.sectionCredentials")}
-                mode="credentials"
-                fields={credentialFields}
-                onChange={onCredentialFieldsChange}
-              />
-
               {/* Credential transform — template-based pre-encoding (AFPS §7.4) */}
               <div className="text-muted-foreground mt-2 text-sm font-medium">
                 {t("providers.form.sectionCredentialTransform")}
