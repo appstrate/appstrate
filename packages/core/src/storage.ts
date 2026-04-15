@@ -23,6 +23,25 @@ export interface UploadUrlDescriptor {
   expiresIn: number;
 }
 
+/** Options for uploading a file. */
+export interface UploadFileOptions {
+  /**
+   * When true, refuse to overwrite an existing object at the same key.
+   * Implemented via `O_EXCL` on filesystem storage and `If-None-Match: *`
+   * on S3. Throws `StorageAlreadyExistsError` if the object already exists.
+   */
+  exclusive?: boolean;
+}
+
+/** Thrown by `uploadFile` when `exclusive: true` and the target already exists. */
+export class StorageAlreadyExistsError extends Error {
+  readonly code = "STORAGE_ALREADY_EXISTS" as const;
+  constructor(message = "storage object already exists") {
+    super(message);
+    this.name = "StorageAlreadyExistsError";
+  }
+}
+
 /** Abstract file storage interface for bucket-based object storage. */
 export interface Storage {
   /** Verify that the backing storage bucket exists and is accessible. */
@@ -30,7 +49,12 @@ export interface Storage {
   /** Build a safe, normalized storage key from a bucket prefix and file path. */
   safePath(bucket: string, filePath: string): string;
   /** Upload binary data to the given bucket/path and return the storage key. */
-  uploadFile(bucket: string, path: string, data: Uint8Array | Buffer): Promise<string>;
+  uploadFile(
+    bucket: string,
+    path: string,
+    data: Uint8Array | Buffer,
+    opts?: UploadFileOptions,
+  ): Promise<string>;
   /** Download a file from storage. Returns null if the file does not exist. */
   downloadFile(bucket: string, path: string): Promise<Uint8Array | null>;
   /** Delete a file from storage. */

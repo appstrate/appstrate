@@ -11,6 +11,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { Storage, CreateUploadUrlOptions, UploadUrlDescriptor } from "./storage.ts";
+import { StorageAlreadyExistsError } from "./storage.ts";
 
 /** Configuration for the S3 storage client. */
 export interface S3StorageConfig {
@@ -63,15 +64,35 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       return makeKey(bucket, filePath);
     },
 
-    async uploadFile(bucket, path, data) {
+    async uploadFile(bucket, path, data, opts) {
       const key = makeKey(bucket, path);
-      await client.send(
-        new PutObjectCommand({
-          Bucket: config.bucket,
-          Key: key,
-          Body: data,
-        }),
-      );
+      try {
+        await client.send(
+          new PutObjectCommand({
+            Bucket: config.bucket,
+            Key: key,
+            Body: data,
+            // S3 (as of 2024) supports `If-None-Match: *` on PutObject — it
+            // fails with 412 Precondition Failed if the key already exists,
+            // giving us an atomic create-new-or-fail primitive. Older S3-
+            // compatible services may ignore it; callers that rely on
+            // exclusivity for security should not use such backends.
+            ...(opts?.exclusive ? { IfNoneMatch: "*" } : {}),
+          }),
+        );
+      } catch (err: unknown) {
+        if (opts?.exclusive) {
+          const s3err = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+          if (
+            s3err.name === "PreconditionFailed" ||
+            s3err.$metadata?.httpStatusCode === 412 ||
+            s3err.$metadata?.httpStatusCode === 409
+          ) {
+            throw new StorageAlreadyExistsError();
+          }
+        }
+        throw err;
+      }
       return key;
     },
 

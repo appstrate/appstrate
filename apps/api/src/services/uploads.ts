@@ -23,9 +23,9 @@ import {
   uploadFile as storagePut,
   downloadFile as storageGet,
   deleteFile as storageDelete,
-  fileExists as storageExists,
   createUploadUrl,
 } from "@appstrate/db/storage";
+import { StorageAlreadyExistsError } from "@appstrate/core/storage";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import { invalidRequest, notFound, conflict, gone } from "../lib/errors.ts";
@@ -82,7 +82,10 @@ export function isUploadUri(value: unknown): value is string {
   return typeof value === "string" && value.startsWith(UPLOAD_URI_PREFIX);
 }
 
-/** Extract the upload id from an `upload://upl_xxx` URI. */
+/**
+ * Extract the upload id from an `upload://upl_xxx` URI.
+ * The `upl_` prefix matches `prefixedId("upl")` used in `createUpload()`.
+ */
 export function parseUploadUri(uri: string): string | null {
   if (!uri.startsWith(UPLOAD_URI_PREFIX)) return null;
   const id = uri.slice(UPLOAD_URI_PREFIX.length);
@@ -181,9 +184,10 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
  */
 function isUnsniffableMime(mime: string): boolean {
   if (mime.startsWith("text/")) return true;
-  if (mime === "application/json") return true;
+  if (mime === "application/json" || mime === "application/x-ndjson") return true;
   if (mime === "application/xml" || mime === "application/x-yaml") return true;
   if (mime === "application/javascript" || mime === "application/ecmascript") return true;
+  if (mime === "application/x-www-form-urlencoded") return true;
   return false;
 }
 
@@ -215,11 +219,12 @@ export async function consumeUpload(
     throw gone("upload_expired", `Upload '${uploadId}' has expired`);
   }
 
-  // Atomic claim: only the caller whose UPDATE flips NULL → now() proceeds.
+  // Atomic claim: only the caller whose UPDATE flips NULL → claimedAt proceeds.
   // Any racing caller gets zero rows back and is reported as already-consumed.
+  const claimedAt = new Date();
   const claimed = await db
     .update(uploads)
-    .set({ consumedAt: new Date() })
+    .set({ consumedAt: claimedAt })
     .where(
       and(
         eq(uploads.id, uploadId),
@@ -235,13 +240,13 @@ export async function consumeUpload(
   }
 
   // Past this point the claim has succeeded. If anything downstream throws
-  // (storage fetch, size/mime mismatch, …) we must release the claim so the
-  // client can retry after uploading the right bytes — otherwise the row is
-  // stuck "consumed" forever, the object leaks, and the user sees a cryptic
-  // 409 on retry.
+  // (storage fetch, size/mime mismatch, …) we must release the claim AND
+  // drop the stored object so a retry can re-PUT clean bytes. Without the
+  // storage delete, the FS sink would 409 on re-upload (exclusive write),
+  // leaving the caller stuck until GC.
+  const [bucket, ...rest] = row.storageKey.split("/");
+  const path = rest.join("/");
   try {
-    const [bucket, ...rest] = row.storageKey.split("/");
-    const path = rest.join("/");
     const data = await storageGet(bucket!, path);
     if (!data) {
       throw invalidRequest(`Upload '${uploadId}' binary is missing — client did not PUT the file`);
@@ -300,19 +305,31 @@ export async function consumeUpload(
       buffer,
     };
   } catch (err) {
-    // Release the claim so the row can be re-consumed after the client re-uploads
-    // or on a legitimate retry. Only the original claimant gets to release
-    // (guarded by `consumedAt` matching the claim timestamp we just set).
+    // Release the claim so the row can be re-consumed after the client re-uploads.
+    // Guarded by `consumedAt = claimedAt` so we only ever release OUR claim —
+    // a hypothetical concurrent consume that somehow held the row would be
+    // left untouched.
     await db
       .update(uploads)
       .set({ consumedAt: null })
-      .where(eq(uploads.id, uploadId))
+      .where(and(eq(uploads.id, uploadId), eq(uploads.consumedAt, claimedAt)))
       .catch((releaseErr) => {
         logger.warn("failed to release upload claim after consume error", {
           uploadId,
           error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
         });
       });
+    // Best-effort: drop the stored bytes so the next createUpload + PUT can
+    // succeed against a fresh exclusive-write slot. We intentionally do not
+    // delete on missing-binary errors (nothing to delete) but the storage
+    // adapter's deleteFile is idempotent on ENOENT, so the unconditional
+    // call is safe.
+    await storageDelete(bucket!, path).catch((delErr) => {
+      logger.warn("failed to delete upload storage after consume error", {
+        uploadId,
+        error: delErr instanceof Error ? delErr.message : String(delErr),
+      });
+    });
     throw err;
   }
 }
@@ -330,10 +347,10 @@ export interface FsContentWriteResult {
  * Write the body of a PUT to storage (FS adapter path). Token verification +
  * header checks happen in the route handler — this just streams to disk.
  *
- * Refuses to overwrite an existing object at the same storage key. The signed
- * token is valid for 15 min and could otherwise be replayed within its window
- * to swap the bytes of an already-populated upload between client PUT and
- * server-side consume.
+ * Atomic create-or-fail: refuses to overwrite an existing object at the same
+ * storage key via O_EXCL. The signed token is valid for 15 min and could
+ * otherwise be replayed within its window to swap the bytes of an already-
+ * populated upload between client PUT and server-side consume.
  */
 export async function writeFsUploadContent(
   storageKey: string,
@@ -342,10 +359,14 @@ export async function writeFsUploadContent(
   const [bucket, ...rest] = storageKey.split("/");
   if (!bucket || rest.length === 0) throw invalidRequest("invalid storage key");
   const path = rest.join("/");
-  if (await storageExists(bucket, path)) {
-    throw conflict("upload_already_written", "upload content has already been written");
+  try {
+    await storagePut(bucket, path, data, { exclusive: true });
+  } catch (err) {
+    if (err instanceof StorageAlreadyExistsError) {
+      throw conflict("upload_already_written", "upload content has already been written");
+    }
+    throw err;
   }
-  await storagePut(bucket, path, data);
   return { storageKey, size: data.byteLength };
 }
 

@@ -3,7 +3,12 @@
 import { getEnv } from "@appstrate/env";
 import { createS3Storage } from "@appstrate/core/storage-s3";
 import { createFileSystemStorage } from "@appstrate/core/storage-fs";
-import type { Storage, CreateUploadUrlOptions, UploadUrlDescriptor } from "@appstrate/core/storage";
+import type {
+  Storage,
+  CreateUploadUrlOptions,
+  UploadFileOptions,
+  UploadUrlDescriptor,
+} from "@appstrate/core/storage";
 
 let store: Storage | null = null;
 
@@ -32,8 +37,9 @@ export function uploadFile(
   bucket: string,
   path: string,
   data: Uint8Array | Buffer,
+  opts?: UploadFileOptions,
 ): Promise<string> {
-  return getStore().uploadFile(bucket, path, data);
+  return getStore().uploadFile(bucket, path, data, opts);
 }
 
 export function downloadFile(bucket: string, path: string): Promise<Uint8Array | null> {

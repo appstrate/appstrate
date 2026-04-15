@@ -90,24 +90,29 @@ export async function parseRequestInput(
     body = {};
   }
   const input = body.input ?? {};
-  const uploadedFiles: UploadedFile[] = [];
+  let uploadedFiles: UploadedFile[] = [];
 
   if (inputSchema) {
     const refs = collectUploadRefs(inputSchema, input);
     const orgId = c.get("orgId");
     const applicationId = c.get("applicationId");
-    for (const ref of refs) {
-      const id = parseUploadUri(ref.uri);
-      if (!id) throw invalidRequest(`Invalid upload URI '${ref.uri}'`, ref.fieldName);
-      const consumed = await consumeUpload(id, { orgId, applicationId });
-      uploadedFiles.push({
-        fieldName: ref.fieldName,
-        name: consumed.name,
-        type: consumed.mime,
-        size: consumed.size,
-        buffer: consumed.buffer,
-      });
-    }
+    // Resolve all upload references in parallel — each `consumeUpload` is an
+    // independent atomic claim. For multi-file forms this cuts wall-time from
+    // O(N * roundtrip) to O(roundtrip).
+    uploadedFiles = await Promise.all(
+      refs.map(async (ref) => {
+        const id = parseUploadUri(ref.uri);
+        if (!id) throw invalidRequest(`Invalid upload URI '${ref.uri}'`, ref.fieldName);
+        const consumed = await consumeUpload(id, { orgId, applicationId });
+        return {
+          fieldName: ref.fieldName,
+          name: consumed.name,
+          type: consumed.mime,
+          size: consumed.size,
+          buffer: consumed.buffer,
+        };
+      }),
+    );
 
     const inputValidation = validateInput(input, inputSchema);
     if (!inputValidation.valid) {

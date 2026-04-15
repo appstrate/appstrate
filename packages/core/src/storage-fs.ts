@@ -1,10 +1,11 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdir, unlink, realpath } from "node:fs/promises";
+import { mkdir, unlink, realpath, writeFile } from "node:fs/promises";
 import { join, dirname, normalize, resolve as resolvePath } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Storage, CreateUploadUrlOptions, UploadUrlDescriptor } from "./storage.ts";
+import { StorageAlreadyExistsError } from "./storage.ts";
 
 /** Configuration for the filesystem storage backend. */
 export interface FileSystemStorageConfig {
@@ -121,11 +122,25 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
       return makeKey(bucket, filePath);
     },
 
-    async uploadFile(bucket, path, data) {
+    async uploadFile(bucket, path, data, opts) {
       const fullPath = resolve(bucket, path);
       await mkdir(dirname(fullPath), { recursive: true });
       await verifyContainment(dirname(fullPath));
-      await Bun.write(fullPath, data);
+      if (opts?.exclusive) {
+        // "wx" = O_CREAT | O_EXCL — atomic "create-new-or-fail". Prevents two
+        // concurrent PUTs with the same signed token from both succeeding
+        // (Bun.write is overwrite-by-default and has no exclusive flag).
+        try {
+          await writeFile(fullPath, data, { flag: "wx" });
+        } catch (err: unknown) {
+          if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+            throw new StorageAlreadyExistsError();
+          }
+          throw err;
+        }
+      } else {
+        await Bun.write(fullPath, data);
+      }
       await verifyContainment(fullPath);
       return makeKey(bucket, path);
     },

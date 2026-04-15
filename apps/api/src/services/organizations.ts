@@ -211,12 +211,17 @@ export async function addMember(
 }
 
 function isUniqueViolation(err: unknown): boolean {
-  for (let cur: unknown = err; cur != null; cur = (cur as { cause?: unknown }).cause) {
-    if (typeof cur !== "object") continue;
-    const e = cur as { code?: unknown; message?: unknown };
-    if (e.code === "23505") return true;
-    const msg = typeof e.message === "string" ? e.message : "";
-    if (msg.includes("duplicate key") || msg.includes("unique constraint")) return true;
+  // Cap depth to defend against pathological / circular `cause` chains.
+  // Drizzle wraps once, postgres.js wraps once — 8 hops is generous.
+  let cur: unknown = err;
+  for (let depth = 0; cur != null && depth < 8; depth++) {
+    if (typeof cur === "object") {
+      const e = cur as { code?: unknown; message?: unknown };
+      if (e.code === "23505") return true;
+      const msg = typeof e.message === "string" ? e.message : "";
+      if (msg.includes("duplicate key") || msg.includes("unique constraint")) return true;
+    }
+    cur = (cur as { cause?: unknown }).cause;
   }
   return false;
 }
