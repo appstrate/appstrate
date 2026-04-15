@@ -1,6 +1,10 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalPassThroughEnv": ["BETTER_AUTH_SECRET", "CONNECTION_ENCRYPTION_KEY"],
+  "globalPassThroughEnv": [
+    "BETTER_AUTH_SECRET",
+    "CONNECTION_ENCRYPTION_KEY",
+    "UPLOAD_SIGNING_SECRET"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
