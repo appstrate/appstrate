@@ -34,6 +34,19 @@ The widget is i18n-agnostic — pass translated strings via `labels`. See `apps/
 ## Exports
 
 - `./schema-form` — `SchemaForm` component, `FileWidgetLabels` type, RJSF widgets/templates.
+- `./vite` — Vite preset that pre-bundles the schema-form dep graph (RJSF + ajv + transitive CJS). Use it via `mergeConfig`:
+
+  ```ts
+  import { defineConfig, mergeConfig } from "vite";
+  import { viteConfig as appstrateUi } from "@appstrate/ui/vite";
+
+  export default mergeConfig(
+    appstrateUi,
+    defineConfig({
+      /* app config */
+    }),
+  );
+  ```
 
 ## License
 
