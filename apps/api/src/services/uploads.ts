@@ -67,7 +67,15 @@ export interface ConsumedUpload {
 // Utilities
 // ---------------------------------------------------------------------------
 
-/** Strip path separators + nulls from a user-supplied filename. */
+/**
+ * Strip path separators + nulls from a user-supplied filename.
+ *
+ * Defense in depth only — the actual path-traversal block lives in the
+ * storage layer (`makeKey()` rejects any raw bucket/path containing `..`
+ * or `\0` before touching the filesystem). This helper keeps the stored
+ * filename human-readable and prevents a `..` segment from surviving into
+ * the final on-disk path even if the storage check ever regressed.
+ */
 export function sanitizeFilename(name: string): string {
   const cleaned = name
     .replace(/[/\\\0]/g, "_")
@@ -83,13 +91,21 @@ export function isUploadUri(value: unknown): value is string {
 }
 
 /**
- * Extract the upload id from an `upload://upl_xxx` URI.
- * The `upl_` prefix matches `prefixedId("upl")` used in `createUpload()`.
+ * Strict upload id shape: `upl_` + at least 8 alphanumeric/`_`/`-` characters.
+ * `prefixedId("upl")` produces ids well above this threshold, so the bound is
+ * safely below the real minimum. Rejects malformed input before it reaches
+ * the database SELECT.
+ */
+const UPLOAD_ID_RE = /^upl_[A-Za-z0-9_-]{8,}$/;
+
+/**
+ * Extract the upload id from an `upload://upl_xxx` URI. Returns null if the
+ * URI is missing the scheme or the id does not match the strict id shape.
  */
 export function parseUploadUri(uri: string): string | null {
   if (!uri.startsWith(UPLOAD_URI_PREFIX)) return null;
   const id = uri.slice(UPLOAD_URI_PREFIX.length);
-  if (!id.startsWith("upl_")) return null;
+  if (!UPLOAD_ID_RE.test(id)) return null;
   return id;
 }
 
@@ -184,10 +200,26 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
  */
 function isUnsniffableMime(mime: string): boolean {
   if (mime.startsWith("text/")) return true;
-  if (mime === "application/json" || mime === "application/x-ndjson") return true;
-  if (mime === "application/xml" || mime === "application/x-yaml") return true;
-  if (mime === "application/javascript" || mime === "application/ecmascript") return true;
-  if (mime === "application/x-www-form-urlencoded") return true;
+  // Structured text payloads with no reliable magic signature.
+  const unsniffable = new Set([
+    "application/json",
+    "application/x-ndjson",
+    "application/ld+json",
+    "application/xml",
+    "application/x-yaml",
+    "application/yaml",
+    "application/csv",
+    "application/javascript",
+    "application/ecmascript",
+    "application/x-sh",
+    "application/x-httpd-php",
+    "application/x-www-form-urlencoded",
+    "image/svg+xml", // XML-based, file-type never matches it
+  ]);
+  if (unsniffable.has(mime)) return true;
+  // Structured-suffix convention (RFC 6839) — `+json`, `+xml`, `+yaml`.
+  // Anything in these families is text-shaped and cannot be magic-sniffed.
+  if (mime.endsWith("+json") || mime.endsWith("+xml") || mime.endsWith("+yaml")) return true;
   return false;
 }
 
@@ -316,6 +348,22 @@ export async function consumeUpload(
       buffer,
     };
   } catch (err) {
+    // Order matters: delete the stored bytes FIRST, then release the claim.
+    // If we released first, a concurrent consumer could re-claim the row in
+    // the window before `storageDelete` completed and race our delete —
+    // they'd end up with either truncated bytes or a missing-binary error.
+    // Deleting first guarantees the next consumer sees a clean "no binary"
+    // state and can instruct the caller to re-PUT.
+    //
+    // The storage adapter's `deleteFile` is idempotent on ENOENT, so calling
+    // it even when there's nothing to delete (missing-binary error path)
+    // is safe.
+    await storageDelete(bucket!, path).catch((delErr) => {
+      logger.warn("failed to delete upload storage after consume error", {
+        uploadId,
+        error: delErr instanceof Error ? delErr.message : String(delErr),
+      });
+    });
     // Release the claim so the row can be re-consumed after the client re-uploads.
     // Guarded by `consumedAt = claimedAt` so we only ever release OUR claim —
     // a hypothetical concurrent consume that somehow held the row would be
@@ -330,17 +378,6 @@ export async function consumeUpload(
           error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
         });
       });
-    // Best-effort: drop the stored bytes so the next createUpload + PUT can
-    // succeed against a fresh exclusive-write slot. We intentionally do not
-    // delete on missing-binary errors (nothing to delete) but the storage
-    // adapter's deleteFile is idempotent on ENOENT, so the unconditional
-    // call is safe.
-    await storageDelete(bucket!, path).catch((delErr) => {
-      logger.warn("failed to delete upload storage after consume error", {
-        uploadId,
-        error: delErr instanceof Error ? delErr.message : String(delErr),
-      });
-    });
     throw err;
   }
 }

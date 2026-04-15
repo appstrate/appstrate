@@ -42,6 +42,7 @@ import { notificationsPaths } from "./paths/notifications.ts";
 import { packagesPaths } from "./paths/packages.ts";
 import { applicationsPaths } from "./paths/applications.ts";
 import { endUsersPaths } from "./paths/end-users.ts";
+import { uploadsPaths } from "./paths/uploads.ts";
 
 const corePaths = {
   ...healthPaths,
@@ -68,6 +69,7 @@ const corePaths = {
   ...packagesPaths,
   ...applicationsPaths,
   ...endUsersPaths,
+  ...uploadsPaths,
 };
 
 const components = {

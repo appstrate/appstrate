@@ -33,7 +33,10 @@ export function createUploadsRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/uploads — create an upload descriptor (signed URL + DB row)
-  router.post("/", rateLimit(120), async (c) => {
+  // 20/min/user — aligned with POST /agents/:id/run. Each descriptor reserves
+  // up to 100 MB of signed PUT capacity, so a higher ceiling would let a single
+  // session book multi-GB of storage slots per minute before GC catches up.
+  router.post("/", rateLimit(20), async (c) => {
     const orgId = c.get("orgId");
     const applicationId = c.get("applicationId");
     const user = c.get("user");
