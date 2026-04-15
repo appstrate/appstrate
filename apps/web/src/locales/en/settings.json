@@ -179,6 +179,8 @@
   "file.extError": "Extension not allowed for \"{{name}}\" (accepted: {{accept}})",
   "file.sizeError": "\"{{name}}\" exceeds max size ({{size}})",
   "file.addFile": "+ Add file",
+  "file.uploading": "Uploading…",
+  "file.uploadsDisabled": "File uploads are not configured for this form.",
   "providers.title": "Providers",
   "providers.addProvider": "Add provider",
   "providers.newProvider": "New provider",

@@ -3,8 +3,8 @@
 
 // Tailwind-styled RJSF templates matching the Appstrate dark theme. Only
 // templates we actually want to restyle are overridden — RJSF defaults
-// handle the rest. No shadcn/radix imports here so this module can live in
-// @appstrate/core and be consumed by any Appstrate frontend (main app,
+// handle the rest. No shadcn/radix imports here so this module ships in
+// `@appstrate/ui` and can be consumed by any Appstrate frontend (main app,
 // portal, future surfaces). Styling relies solely on CSS tokens that all
 // Appstrate UIs expose (`--background`, `--input`, `--primary`, …).
 

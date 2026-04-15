@@ -1,7 +1,7 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { X } from "lucide-react";
 import type { WidgetProps } from "@rjsf/utils";
 import { Button, LABEL_CLASS } from "./templates.tsx";
@@ -41,6 +41,7 @@ export interface FileWidgetLabels {
   uploading?: string;
   dragDrop?: string;
   addFile?: string;
+  uploadsDisabled?: string;
   maxSize?: (size: string) => string;
   maxFiles?: (count: number) => string;
   formats?: (formats: string) => string;
@@ -52,6 +53,7 @@ const DEFAULT_LABELS: Required<FileWidgetLabels> = {
   uploading: "Uploading…",
   dragDrop: "Drag and drop a file here, or click to select",
   addFile: "Add file",
+  uploadsDisabled: "File uploads are not configured for this form.",
   maxSize: (size) => `Max ${size}`,
   maxFiles: (count) => `At most ${count} files allowed`,
   formats: (formats) => `Formats: ${formats}`,
@@ -77,9 +79,14 @@ export function FileWidget(props: WidgetProps) {
     upload?: UploadFn;
     labels?: FileWidgetLabels;
   };
-  const labels = { ...DEFAULT_LABELS, ...(ctx.labels ?? {}) };
-  const upload: UploadFn | null =
-    ctx.upload ?? (ctx.uploadPath ? createUploader(ctx.uploadPath) : null);
+  const labels = useMemo<Required<FileWidgetLabels>>(
+    () => ({ ...DEFAULT_LABELS, ...(ctx.labels ?? {}) }),
+    [ctx.labels],
+  );
+  const upload = useMemo<UploadFn | null>(
+    () => ctx.upload ?? (ctx.uploadPath ? createUploader(ctx.uploadPath) : null),
+    [ctx.upload, ctx.uploadPath],
+  );
 
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -94,46 +101,44 @@ export function FileWidget(props: WidgetProps) {
   const maxSize = options?.maxSize as number | undefined;
   const maxFiles = options?.maxFiles as number | undefined;
 
-  const validateClientSide = (file: File): string | null => {
-    if (accept) {
-      const allowed = accept
-        .split(",")
-        .map((e) => e.trim().toLowerCase())
-        .filter(Boolean);
-      const ext = file.name.includes(".") ? `.${file.name.split(".").pop()!.toLowerCase()}` : "";
-      const mimeMatch = allowed.some((a) => {
-        if (a.startsWith(".")) return a === ext;
-        if (a.endsWith("/*")) return file.type.startsWith(a.slice(0, -1));
-        return file.type === a;
-      });
-      if (!mimeMatch) return labels.extError(file.name, accept);
-    }
-    if (maxSize && file.size > maxSize) {
-      return labels.sizeError(file.name, formatSize(maxSize));
-    }
-    return null;
-  };
-
-  const commit = (next: Attachment[]) => {
-    setAttachments(next);
-    if (multiple) {
-      onChange(next.map((a) => a.uri));
-    } else {
-      onChange(next[0]?.uri);
-    }
-  };
+  const commit = useCallback(
+    (next: Attachment[]) => {
+      setAttachments(next);
+      if (multiple) {
+        onChange(next.map((a) => a.uri));
+      } else {
+        onChange(next[0]?.uri);
+      }
+    },
+    [multiple, onChange],
+  );
 
   const addFiles = useCallback(
     async (incoming: File[]) => {
       setError(null);
       if (!upload) {
-        setError("File uploads are not configured for this form.");
+        setError(labels.uploadsDisabled);
         return;
       }
       for (const f of incoming) {
-        const err = validateClientSide(f);
-        if (err) {
-          setError(err);
+        if (accept) {
+          const allowed = accept
+            .split(",")
+            .map((e) => e.trim().toLowerCase())
+            .filter(Boolean);
+          const ext = f.name.includes(".") ? `.${f.name.split(".").pop()!.toLowerCase()}` : "";
+          const mimeMatch = allowed.some((a) => {
+            if (a.startsWith(".")) return a === ext;
+            if (a.endsWith("/*")) return f.type.startsWith(a.slice(0, -1));
+            return f.type === a;
+          });
+          if (!mimeMatch) {
+            setError(labels.extError(f.name, accept));
+            return;
+          }
+        }
+        if (maxSize && f.size > maxSize) {
+          setError(labels.sizeError(f.name, formatSize(maxSize)));
           return;
         }
       }
@@ -163,7 +168,7 @@ export function FileWidget(props: WidgetProps) {
         if (abortRef.current === ctrl) abortRef.current = null;
       }
     },
-    [accept, attachments, maxFiles, maxSize, multiple, upload],
+    [accept, attachments, commit, labels, maxFiles, maxSize, multiple, upload],
   );
 
   const handleDrop = (e: React.DragEvent) => {

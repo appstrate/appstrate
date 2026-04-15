@@ -3,7 +3,7 @@
 
 /**
  * Thin RJSF wrapper integrated with the Appstrate dark theme. Ships in
- * `@appstrate/core/schema-form` so every Appstrate frontend (main app,
+ * `@appstrate/ui/schema-form` so every Appstrate frontend (main app,
  * portal, future surfaces) renders AFPS input/config/output schemas
  * identically.
  *
@@ -124,10 +124,10 @@ export const SchemaForm = forwardRef<RjsfForm, SchemaFormProps>(function SchemaF
   };
 
   const ctx = {
+    ...(formContext ?? {}),
     uploadPath,
     upload,
     labels,
-    ...(formContext ?? {}),
   };
 
   return (
