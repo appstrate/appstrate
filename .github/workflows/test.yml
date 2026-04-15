@@ -103,6 +103,11 @@ jobs:
           # UI org switching). The webhooks module is opt-in via MODULES
           # since PR #72 — without this the webhook routes 404 and 12 specs fail.
           MODULES: webhooks
+          # Default system model so run-acceptance passes in specs that POST
+          # /agents/:id/run (e.g. upload-flow). The run pipeline only needs a
+          # resolvable model at acceptance time — the dummy apiKey is never
+          # called because RUN_ADAPTER=process doesn't actually hit the LLM.
+          SYSTEM_PROVIDER_KEYS: '[{"id":"e2e","label":"E2E","api":"anthropic-messages","baseUrl":"https://example.invalid","apiKey":"e2e-dummy","models":[{"modelId":"claude-sonnet-4-5","label":"E2E Default","isDefault":true}]}]'
 
       - name: Upload test report
         if: failure()
