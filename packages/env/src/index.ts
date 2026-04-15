@@ -29,6 +29,10 @@ const envSchema = z
     S3_BUCKET: z.string().optional(),
     S3_REGION: z.string().optional(),
     S3_ENDPOINT: z.string().optional(),
+    // Public-facing S3 endpoint used only for presigned URLs served to browsers.
+    // Falls back to S3_ENDPOINT when unset. Set this when S3_ENDPOINT points at
+    // an internal Docker hostname unreachable from the browser (e.g. MinIO).
+    S3_PUBLIC_ENDPOINT: z.string().optional(),
     // Filesystem storage path (used when S3_BUCKET is absent)
     FS_STORAGE_PATH: z.string().default("./data/storage"),
 
