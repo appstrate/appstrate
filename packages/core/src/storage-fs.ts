@@ -180,7 +180,11 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
         },
         config.uploadSecret,
       );
-      const url = `${config.uploadBaseUrl.replace(/\/+$/, "")}/api/uploads/_content?token=${encodeURIComponent(token)}`;
+      // Trim trailing slashes with a loop rather than /\/+$/ — the regex is
+      // polynomial on inputs like "http://x/////" and CodeQL flags it as ReDoS.
+      let baseUrl = config.uploadBaseUrl;
+      while (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
+      const url = `${baseUrl}/api/uploads/_content?token=${encodeURIComponent(token)}`;
       const headers: Record<string, string> = {};
       if (opts?.mime) headers["Content-Type"] = opts.mime;
       return { url, method: "PUT", headers, expiresIn };
