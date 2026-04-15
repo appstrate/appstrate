@@ -13,8 +13,17 @@ import { db } from "@appstrate/db/client";
 import { uploads } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
-import { consumeUpload, writeFsUploadContent } from "../../../src/services/uploads.ts";
-import { uploadFile as storagePut, downloadFile as storageGet } from "@appstrate/db/storage";
+import {
+  consumeUpload,
+  writeFsUploadContent,
+  cleanupExpiredUploads,
+} from "../../../src/services/uploads.ts";
+import {
+  uploadFile as storagePut,
+  downloadFile as storageGet,
+  fileExists as storageExists,
+} from "@appstrate/db/storage";
+import { eq } from "drizzle-orm";
 import { ApiError } from "../../../src/lib/errors.ts";
 
 const UPLOAD_BUCKET = "uploads";
@@ -194,7 +203,6 @@ describe("consumeUpload", () => {
   });
 
   it("releases the claim after a post-claim failure so the client can retry", async () => {
-    const { eq } = await import("drizzle-orm");
     const ctx = await createTestContext({ orgSlug: "org-rollback" });
     const id = "upl_rollback_1";
     // Size mismatch is a deterministic post-claim failure path.
@@ -211,6 +219,98 @@ describe("consumeUpload", () => {
     // Row should be re-consumable — consumedAt was rolled back.
     const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
     expect(row?.consumedAt).toBeNull();
+  });
+
+  it("deletes the storage object after a successful consume", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-cleanup-ok" });
+    const id = "upl_cleanup_ok_1";
+    const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
+    await seedUpload(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { id, bytes: PDF_BYTES },
+    );
+    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(true);
+
+    await consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+
+    // Storage copy is dead weight after consume — must be gone.
+    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
+    // DB row is kept (with consumedAt set) until the retention sweep runs.
+    const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
+    expect(row?.consumedAt).not.toBeNull();
+  });
+
+  it("deletes the storage object after a post-claim failure (release path)", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-cleanup-err" });
+    const id = "upl_cleanup_err_1";
+    const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
+    await seedUpload(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { id, bytes: PDF_BYTES, sizeOverride: PDF_BYTES.length + 1 },
+    );
+    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(true);
+
+    await consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }).catch(() => {});
+
+    // Release path drops the bytes so re-upload to a fresh slot can succeed.
+    expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(false);
+  });
+});
+
+describe("cleanupExpiredUploads", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("sweeps consumed rows older than the 24h retention window", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-gc-consumed" });
+    const id = "upl_gc_old_1";
+    await seedUpload(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { id, bytes: PDF_BYTES },
+    );
+    // Simulate a row consumed > 24h ago (retention window is 24h).
+    const oldTimestamp = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await db.update(uploads).set({ consumedAt: oldTimestamp }).where(eq(uploads.id, id));
+
+    const removed = await cleanupExpiredUploads();
+    expect(removed).toBeGreaterThanOrEqual(1);
+
+    const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
+    expect(row).toBeUndefined();
+  });
+
+  it("keeps consumed rows still within the retention window", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-gc-recent" });
+    const id = "upl_gc_recent_1";
+    await seedUpload(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { id, bytes: PDF_BYTES },
+    );
+    // Consumed 1h ago — well within the 24h window.
+    const recentTimestamp = new Date(Date.now() - 60 * 60 * 1000);
+    await db.update(uploads).set({ consumedAt: recentTimestamp }).where(eq(uploads.id, id));
+
+    await cleanupExpiredUploads();
+
+    const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
+    expect(row).toBeDefined();
+    expect(row?.consumedAt).not.toBeNull();
+  });
+
+  it("still sweeps expired unconsumed rows (regression on base case)", async () => {
+    const ctx = await createTestContext({ orgSlug: "org-gc-expired" });
+    const id = "upl_gc_expired_1";
+    await seedUpload(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { id, bytes: PDF_BYTES, expiresInSec: -60 },
+    );
+
+    const removed = await cleanupExpiredUploads();
+    expect(removed).toBeGreaterThanOrEqual(1);
+
+    const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
+    expect(row).toBeUndefined();
   });
 });
 

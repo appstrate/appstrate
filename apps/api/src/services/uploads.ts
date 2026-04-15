@@ -15,7 +15,7 @@
  *  - Expiry window (default 15 min) + GC worker removes orphans
  */
 
-import { and, eq, lt, isNull, inArray, sql } from "drizzle-orm";
+import { and, eq, lt, isNull, isNotNull, inArray, or, sql } from "drizzle-orm";
 import { fileTypeFromBuffer } from "file-type";
 import { db } from "@appstrate/db/client";
 import { uploads } from "@appstrate/db/schema";
@@ -297,6 +297,17 @@ export async function consumeUpload(
       }
     }
 
+    // The buffer is now in memory and will be injected into the run container.
+    // The storage copy is dead weight from here on — delete it best-effort so
+    // we don't leak S3/FS objects for every run. The GC's consumed-retention
+    // sweep is the safety net when this delete fails.
+    await storageDelete(bucket!, path).catch((delErr) => {
+      logger.warn("failed to delete upload storage after consume", {
+        uploadId,
+        error: delErr instanceof Error ? delErr.message : String(delErr),
+      });
+    });
+
     return {
       id: uploadId,
       name: row.name,
@@ -375,19 +386,40 @@ export async function writeFsUploadContent(
 // ---------------------------------------------------------------------------
 
 /**
- * Delete uploads whose pre-signed URL has expired and that were never consumed.
- * Also removes the underlying storage object on a best-effort basis.
- * Returns the number of rows removed.
+ * Retention window for consumed uploads before the GC drops the row (and any
+ * orphaned storage object). The successful-consume path deletes the object
+ * inline, so the sweep usually finds the storage key already gone — this is
+ * the safety net for cases where the inline delete failed transiently.
+ */
+const CONSUMED_RETENTION_MS = 24 * 60 * 60 * 1000; // 24 h
+
+/**
+ * Delete uploads that are no longer needed:
+ *   - expired AND never consumed (user never finished the PUT, or declared
+ *     MIME was wrong and they abandoned the flow), OR
+ *   - consumed more than `CONSUMED_RETENTION_MS` ago (the run already ran;
+ *     storage object should have been removed inline on consume, but this is
+ *     the safety net if that best-effort delete failed).
+ *
+ * Storage objects are removed on a best-effort basis. Returns the number of
+ * rows removed.
  */
 export async function cleanupExpiredUploads(): Promise<number> {
   let totalRemoved = 0;
   // Drain in batches — a long-running instance may accumulate more than the
   // per-query cap between sweeps.
   while (true) {
+    const now = new Date();
+    const consumedCutoff = new Date(now.getTime() - CONSUMED_RETENTION_MS);
     const expired = await db
       .select({ id: uploads.id, storageKey: uploads.storageKey })
       .from(uploads)
-      .where(and(lt(uploads.expiresAt, new Date()), isNull(uploads.consumedAt)))
+      .where(
+        or(
+          and(lt(uploads.expiresAt, now), isNull(uploads.consumedAt)),
+          and(isNotNull(uploads.consumedAt), lt(uploads.consumedAt, consumedCutoff)),
+        ),
+      )
       .limit(500);
 
     if (expired.length === 0) break;
