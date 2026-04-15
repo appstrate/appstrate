@@ -16,7 +16,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { SchemaForm } from "./schema-form";
+import { SchemaForm } from "@appstrate/ui/schema-form";
+import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
+import { UPLOADS_PATH } from "../api";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { useConnectionProfiles, useAppProfiles } from "../hooks/use-connection-profiles";
 import { CombinedProfileSelect, type ForeignProfile } from "./combined-profile-select";
@@ -111,6 +113,7 @@ export function ScheduleForm({
   const schema: JSONSchemaObject = inputSchema || { type: "object" as const, properties: {} };
   const hasInputSchema = Object.keys(schema.properties).length > 0;
   const wrapper: SchemaWrapper = { schema };
+  const labels = useSchemaFormLabels();
 
   const [inputValues, setInputValues] = useState<Record<string, unknown>>(
     () => (defaultValues?.input ?? {}) as Record<string, unknown>,
@@ -308,6 +311,8 @@ export function ScheduleForm({
           <SchemaForm
             wrapper={wrapper}
             formData={inputValues}
+            uploadPath={UPLOADS_PATH}
+            labels={labels}
             onChange={(e) => setInputValues(e.formData as Record<string, unknown>)}
           />
         </div>

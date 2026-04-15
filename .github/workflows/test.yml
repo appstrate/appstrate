@@ -36,7 +36,7 @@ jobs:
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
 
       - name: Run unit tests
-        run: bun test apps/api/test/unit/ runtime-pi/ packages/connect/
+        run: bun test apps/api/test/unit/ runtime-pi/ packages/connect/ packages/ui/
 
   integration:
     name: Integration tests

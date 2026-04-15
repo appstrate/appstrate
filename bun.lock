@@ -74,6 +74,7 @@
       "dependencies": {
         "@appstrate/core": "workspace:*",
         "@appstrate/shared-types": "workspace:*",
+        "@appstrate/ui": "workspace:*",
         "@dnd-kit/core": "^6.3.1",
         "@dnd-kit/sortable": "^10.0.0",
         "@dnd-kit/utilities": "^3.2.2",
@@ -217,6 +218,37 @@
         "@appstrate/db": "workspace:*",
       },
     },
+    "packages/ui": {
+      "name": "@appstrate/ui",
+      "version": "1.0.0",
+      "dependencies": {
+        "tailwind-merge": "^3.0.0",
+      },
+      "devDependencies": {
+        "@appstrate/core": "workspace:*",
+        "@rjsf/core": "^6.4.2",
+        "@rjsf/utils": "^6.4.2",
+        "@rjsf/validator-ajv8": "^6.4.2",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+        "lucide-react": "^1.8.0",
+        "react": "^19.2.5",
+        "react-dom": "^19.2.5",
+        "react-select": "^5.10.2",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@appstrate/core": "^2.10.0",
+        "@rjsf/core": "^6",
+        "@rjsf/utils": "^6",
+        "@rjsf/validator-ajv8": "^6",
+        "lucide-react": "^1 || >=0.400.0",
+        "react": "^19",
+        "react-dom": "^19",
+        "react-select": "^5",
+        "typescript": "^5",
+      },
+    },
     "runtime-pi": {
       "name": "appstrate-pi-runtime",
       "dependencies": {
@@ -255,6 +287,8 @@
     "@appstrate/env": ["@appstrate/env@workspace:packages/env"],
 
     "@appstrate/shared-types": ["@appstrate/shared-types@workspace:packages/shared-types"],
+
+    "@appstrate/ui": ["@appstrate/ui@workspace:packages/ui"],
 
     "@appstrate/web": ["@appstrate/web@workspace:apps/web"],
 

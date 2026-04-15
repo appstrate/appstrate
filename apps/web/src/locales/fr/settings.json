@@ -179,6 +179,8 @@
   "file.extError": "Extension non autorisée pour \"{{name}}\" (accepté: {{accept}})",
   "file.sizeError": "\"{{name}}\" dépasse la taille max ({{size}})",
   "file.addFile": "+ Ajouter un fichier",
+  "file.uploading": "Téléversement…",
+  "file.uploadsDisabled": "L'envoi de fichiers n'est pas configuré pour ce formulaire.",
   "providers.title": "Providers",
   "providers.addProvider": "Ajouter un provider",
   "providers.newProvider": "Nouveau provider",

@@ -1,3 +1,4 @@
+// Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
 // Shared Ajv2020 + ajv-formats validator for RJSF, matching the backend via
