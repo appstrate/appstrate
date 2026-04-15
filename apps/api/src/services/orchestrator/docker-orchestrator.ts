@@ -78,11 +78,13 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   ): Promise<WorkloadHandle> {
     const platformNetwork = await docker.detectPlatformNetwork();
 
-    // Resolve platform API URL (Docker-specific: use network hostname if containerized)
-    const resolvedPlatformApiUrl =
-      config.platformApiUrl && platformNetwork
-        ? `http://${platformNetwork.hostname}:${getEnv().PORT}`
-        : config.platformApiUrl;
+    // Resolve platform API URL. When we can talk to the platform over its
+    // Docker network, always prefer that: it keeps credential traffic inside
+    // the Docker bridge (no NAT, no public hop, no TLS overhead) and survives
+    // Coolify redeploys that rename the platform container.
+    const resolvedPlatformApiUrl = platformNetwork
+      ? `http://${platformNetwork.hostname}:${getEnv().PORT}`
+      : config.platformApiUrl;
 
     const resolvedConfig = {
       runToken: config.runToken,

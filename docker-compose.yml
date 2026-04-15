@@ -169,7 +169,11 @@ services:
       # ── Run / Sidecar ──
       - RUN_ADAPTER=${RUN_ADAPTER:-docker}
       - DOCKER_SOCKET=/var/run/docker.sock
-      - PLATFORM_API_URL=${PLATFORM_API_URL:-}
+      # PLATFORM_API_URL intentionally omitted: left unset, the platform
+      # auto-detects its Docker network and builds the sidecar-facing URL
+      # from the effective container hostname. Forwarding `${PLATFORM_API_URL:-}`
+      # injects an empty string, which bypasses the auto-detection path.
+      # Set it only if you need to point sidecars at a different host.
       - SIDECAR_POOL_SIZE=${SIDECAR_POOL_SIZE:-2}
       - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-latest}
       - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}
