@@ -22,6 +22,7 @@ import type {
 import { getSubmitButtonOptions } from "@rjsf/utils";
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "./cn.ts";
+import type { SchemaFormContext } from "./context.ts";
 
 // ─── Inline primitives (shadcn-equivalent look, zero extra deps) ──────────
 
@@ -286,7 +287,7 @@ export function ArrayFieldTemplate(props: ArrayFieldTemplateProps) {
   const { items, canAdd, onAddClick, disabled, readonly, title, schema, uiSchema, registry } =
     props;
   const description = (uiSchema?.["ui:description"] as string | undefined) ?? schema.description;
-  const ctx = (registry.formContext ?? {}) as { labels?: { addItem?: string } };
+  const ctx = (registry.formContext ?? {}) as SchemaFormContext;
   return (
     <div className="space-y-3">
       {title && <h3 className="text-sm font-medium">{title}</h3>}

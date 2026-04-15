@@ -221,6 +221,9 @@
     "packages/ui": {
       "name": "@appstrate/ui",
       "version": "1.0.0",
+      "dependencies": {
+        "tailwind-merge": "^3.0.0",
+      },
       "devDependencies": {
         "@appstrate/core": "workspace:*",
         "@rjsf/core": "^6.4.2",

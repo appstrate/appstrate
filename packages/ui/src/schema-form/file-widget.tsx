@@ -7,6 +7,7 @@ import type { WidgetProps } from "@rjsf/utils";
 import { Button, LABEL_CLASS } from "./templates.tsx";
 import { cn } from "./cn.ts";
 import { createUploader, isUploadUri, type UploadFn } from "./upload-client.ts";
+import type { SchemaFormContext } from "./context.ts";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -74,11 +75,7 @@ const DEFAULT_LABELS: Required<FileWidgetLabels> = {
 export function FileWidget(props: WidgetProps) {
   const { id, value, onChange, required, label, schema, disabled, readonly, options, formContext } =
     props;
-  const ctx = (formContext ?? {}) as {
-    uploadPath?: string;
-    upload?: UploadFn;
-    labels?: FileWidgetLabels;
-  };
+  const ctx = (formContext ?? {}) as SchemaFormContext;
   const labels = useMemo<Required<FileWidgetLabels>>(
     () => ({ ...DEFAULT_LABELS, ...(ctx.labels ?? {}) }),
     [ctx.labels],

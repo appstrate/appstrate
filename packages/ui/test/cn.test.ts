@@ -17,9 +17,8 @@ describe("cn", () => {
     expect(cn(false, null, undefined, "")).toBe("");
   });
 
-  it("does not deduplicate or merge conflicting Tailwind classes", () => {
-    // Documented invariant: templates must not produce conflicting classes.
-    // If this ever needs to change, swap cn for tailwind-merge.
-    expect(cn("p-2", "p-4")).toBe("p-2 p-4");
+  it("resolves conflicting Tailwind classes via tailwind-merge (later wins)", () => {
+    expect(cn("p-2", "p-4")).toBe("p-4");
+    expect(cn("border-input", "border-destructive")).toBe("border-destructive");
   });
 });

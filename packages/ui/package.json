@@ -38,6 +38,9 @@
   "exports": {
     "./schema-form": "./src/schema-form/index.tsx"
   },
+  "dependencies": {
+    "tailwind-merge": "^3.0.0"
+  },
   "peerDependencies": {
     "@appstrate/core": "^2.10.0",
     "@rjsf/core": "^6",

@@ -48,9 +48,12 @@ import {
 import type { FileWidgetLabels } from "./file-widget.tsx";
 import type { UploadFn } from "./upload-client.ts";
 
+import type { SchemaFormContext } from "./context.ts";
+
 export type { SchemaWrapper } from "@appstrate/core/form";
 export type { FileWidgetLabels } from "./file-widget.tsx";
 export type { UploadFn } from "./upload-client.ts";
+export type { SchemaFormContext } from "./context.ts";
 
 const widgets = {
   file: FileWidget,
@@ -123,7 +126,7 @@ export const SchemaForm = forwardRef<RjsfForm, SchemaFormProps>(function SchemaF
     ...(showSubmitButton ? {} : { "ui:submitButtonOptions": { norender: true } }),
   };
 
-  const ctx = {
+  const ctx: SchemaFormContext = {
     ...(formContext ?? {}),
     uploadPath,
     upload,
