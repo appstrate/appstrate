@@ -25,4 +25,7 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN null; END $$;
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_uploads_app" ON "uploads" ("application_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "idx_uploads_expires" ON "uploads" ("expires_at");
+-- Partial index tuned for the GC sweep (`expires_at < now() AND consumed_at IS NULL`).
+-- Consumed rows never need to be scanned and the hot set stays tiny as successful
+-- uploads accumulate over time.
+CREATE INDEX IF NOT EXISTS "idx_uploads_expires_unconsumed" ON "uploads" ("expires_at") WHERE "consumed_at" IS NULL;

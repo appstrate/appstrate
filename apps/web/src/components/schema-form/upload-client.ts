@@ -20,8 +20,12 @@ interface UploadDescriptor {
  *
  * Errors propagate the server-side RFC 9457 detail message so the caller
  * can surface it to the user.
+ *
+ * `signal` lets callers cancel an in-flight upload (tab close, modal dismiss).
+ * Progress reporting is intentionally not implemented here — `fetch()` offers
+ * no upload-progress hook; wiring an XHR-based fallback is tracked separately.
  */
-export async function uploadFile(file: File): Promise<string> {
+export async function uploadFile(file: File, signal?: AbortSignal): Promise<string> {
   const desc = await api<UploadDescriptor>("/uploads", {
     method: "POST",
     body: JSON.stringify({
@@ -29,12 +33,14 @@ export async function uploadFile(file: File): Promise<string> {
       size: file.size,
       mime: file.type || "application/octet-stream",
     }),
+    signal,
   });
 
   const putRes = await fetch(desc.url, {
     method: desc.method,
     headers: desc.headers,
     body: file,
+    signal,
   });
   if (!putRes.ok) {
     throw new Error(`upload failed: ${putRes.status} ${putRes.statusText}`);

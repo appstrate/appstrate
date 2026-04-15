@@ -13,8 +13,8 @@ import { db } from "@appstrate/db/client";
 import { uploads } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
-import { consumeUpload } from "../../../src/services/uploads.ts";
-import { uploadFile as storagePut } from "@appstrate/db/storage";
+import { consumeUpload, writeFsUploadContent } from "../../../src/services/uploads.ts";
+import { uploadFile as storagePut, downloadFile as storageGet } from "@appstrate/db/storage";
 import { ApiError } from "../../../src/lib/errors.ts";
 
 const UPLOAD_BUCKET = "uploads";
@@ -191,5 +191,50 @@ describe("consumeUpload", () => {
       expect((e as ApiError).status).toBe(400);
       expect((e as ApiError).message.toLowerCase()).toContain("mime");
     }
+  });
+
+  it("releases the claim after a post-claim failure so the client can retry", async () => {
+    const { eq } = await import("drizzle-orm");
+    const ctx = await createTestContext({ orgSlug: "org-rollback" });
+    const id = "upl_rollback_1";
+    // Size mismatch is a deterministic post-claim failure path.
+    await seedUpload(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { id, bytes: PDF_BYTES, sizeOverride: PDF_BYTES.length + 1 },
+    );
+    try {
+      await consumeUpload(id, { orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect((e as ApiError).status).toBe(400);
+    }
+    // Row should be re-consumable — consumedAt was rolled back.
+    const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
+    expect(row?.consumedAt).toBeNull();
+  });
+});
+
+describe("writeFsUploadContent (FS sink)", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("refuses to overwrite an existing object at the same storage key", async () => {
+    // Unique path per test run — `truncateAll()` only resets the DB, not the FS.
+    const unique = `upl_replay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const storagePath = `replay-test/${unique}/file.bin`;
+    const key = `${UPLOAD_BUCKET}/${storagePath}`;
+    await writeFsUploadContent(key, new Uint8Array([1, 2, 3]));
+    // Second PUT with the same (still-valid) token must be rejected.
+    try {
+      await writeFsUploadContent(key, new Uint8Array([4, 5, 6]));
+      throw new Error("expected to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(409);
+    }
+    // Original bytes preserved.
+    const stored = await storageGet(UPLOAD_BUCKET, storagePath);
+    expect(stored).toEqual(new Uint8Array([1, 2, 3]));
   });
 });

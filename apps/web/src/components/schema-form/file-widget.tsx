@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import type { WidgetProps } from "@rjsf/utils";
@@ -54,6 +54,9 @@ export function FileWidget(props: WidgetProps) {
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>(() => attachmentsFromValue(value));
+  const abortRef = useRef<AbortController | null>(null);
+  // Cancel any in-flight upload if the widget unmounts (modal closed, route change).
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const multiple = schema.type === "array" || (options?.multiple as boolean | undefined) === true;
   const accept = (options?.accept as string | undefined) ?? undefined;
@@ -106,18 +109,23 @@ export function FileWidget(props: WidgetProps) {
       }
 
       setUploading(true);
+      abortRef.current?.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
       try {
         const uploaded: Attachment[] = [];
         for (const f of incoming) {
-          const uri = await uploadFile(f);
+          const uri = await uploadFile(f, ctrl.signal);
           uploaded.push({ uri, name: f.name, size: f.size });
         }
         const next = multiple ? [...attachments, ...uploaded] : uploaded.slice(0, 1);
         commit(next);
       } catch (e) {
+        if ((e as { name?: string }).name === "AbortError") return;
         setError(e instanceof Error ? e.message : String(e));
       } finally {
         setUploading(false);
+        if (abortRef.current === ctrl) abortRef.current = null;
       }
     },
     // commit is stable inside this closure; disabling deps to avoid over-reacting

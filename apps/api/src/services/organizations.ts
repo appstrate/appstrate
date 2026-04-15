@@ -198,13 +198,27 @@ export async function addMember(
       role,
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("duplicate key") || message.includes("unique constraint")) {
+    // Drizzle wraps the postgres driver error in `DrizzleQueryError` whose
+    // `message` only says "Failed query: …" — the unique-violation details
+    // live on `err.cause` (with PG `code === "23505"`). Walk the cause chain
+    // so we match both the wrapped and the raw error shape.
+    if (isUniqueViolation(err)) {
       // User is already a member — idempotent, silently ignore
       return;
     }
     throw err;
   }
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  for (let cur: unknown = err; cur != null; cur = (cur as { cause?: unknown }).cause) {
+    if (typeof cur !== "object") continue;
+    const e = cur as { code?: unknown; message?: unknown };
+    if (e.code === "23505") return true;
+    const msg = typeof e.message === "string" ? e.message : "";
+    if (msg.includes("duplicate key") || msg.includes("unique constraint")) return true;
+  }
+  return false;
 }
 
 export async function removeMember(orgId: string, userId: string): Promise<void> {

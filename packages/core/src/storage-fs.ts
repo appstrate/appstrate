@@ -138,6 +138,12 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
       return new Uint8Array(await file.arrayBuffer());
     },
 
+    async fileExists(bucket, path) {
+      const fullPath = resolve(bucket, path);
+      await verifyContainment(fullPath);
+      return Bun.file(fullPath).exists();
+    },
+
     async deleteFile(bucket, path) {
       const fullPath = resolve(bucket, path);
       try {

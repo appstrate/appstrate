@@ -36,6 +36,12 @@ export interface Storage {
   /** Delete a file from storage. */
   deleteFile(bucket: string, path: string): Promise<void>;
   /**
+   * Report whether a file exists at the given path. Cheaper than downloadFile() —
+   * backends implement via HEAD / stat, not a full fetch. Used by the direct-upload
+   * sink to refuse overwrites on a single-use signed URL.
+   */
+  fileExists(bucket: string, path: string): Promise<boolean>;
+  /**
    * Create a URL the client can PUT a binary payload to directly, without proxying
    * through the API server. For S3, this is a pre-signed URL. For filesystem storage,
    * this is a short-lived signed URL pointing at an internal API route.

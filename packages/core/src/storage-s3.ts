@@ -4,6 +4,7 @@
 import {
   S3Client,
   HeadBucketCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
@@ -87,6 +88,24 @@ export function createS3Storage(config: S3StorageConfig): Storage {
         const err = e as S3Error;
         if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
           return null;
+        }
+        throw e;
+      }
+    },
+
+    async fileExists(bucket, path) {
+      try {
+        await client.send(
+          new HeadObjectCommand({
+            Bucket: config.bucket,
+            Key: makeKey(bucket, path),
+          }),
+        );
+        return true;
+      } catch (e: unknown) {
+        const err = e as S3Error;
+        if (err.name === "NotFound" || err.$metadata?.httpStatusCode === 404) {
+          return false;
         }
         throw e;
       }

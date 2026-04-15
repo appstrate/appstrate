@@ -229,6 +229,7 @@ function buildBasePlugins(
             // flow, magic-link signup is as open as email/password signup.
             disableSignUp: false,
             expiresIn: 7 * 24 * 60 * 60, // 7 days — matches invitation expiry
+            allowedAttempts: 5, // Browsers may hit verify multiple times (prefetch, preconnect)
             sendMagicLink: async ({ email, url: rawUrl }) => {
               try {
                 const normalizedEmail = email.toLowerCase().trim();

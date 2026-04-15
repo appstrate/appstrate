@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { pgTable, text, timestamp, integer, uuid, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
 import { applications } from "./applications.ts";
@@ -44,6 +45,10 @@ export const uploads = pgTable(
   },
   (table) => [
     index("idx_uploads_app").on(table.applicationId),
-    index("idx_uploads_expires").on(table.expiresAt),
+    // Partial index matching the GC sweep predicate so consumed rows never
+    // hit the index and the hot set stays tiny as uploads accumulate.
+    index("idx_uploads_expires_unconsumed")
+      .on(table.expiresAt)
+      .where(sql`${table.consumedAt} IS NULL`),
   ],
 );

@@ -23,11 +23,17 @@ import {
   uploadFile as storagePut,
   downloadFile as storageGet,
   deleteFile as storageDelete,
+  fileExists as storageExists,
   createUploadUrl,
 } from "@appstrate/db/storage";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import { invalidRequest, notFound, conflict, gone } from "../lib/errors.ts";
+
+/** Strip charset / boundary / other parameters from a MIME string and lowercase it. */
+function normalizeMime(mime: string): string {
+  return mime.split(";")[0]?.trim().toLowerCase() ?? "";
+}
 
 const UPLOAD_BUCKET = "uploads";
 const DEFAULT_EXPIRY_SECONDS = 900; // 15 min
@@ -105,7 +111,9 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
   if (!params.name || params.name.length > MAX_FILENAME_LEN) {
     throw invalidRequest(`name must be 1-${MAX_FILENAME_LEN} chars`, "name");
   }
-  if (!Number.isFinite(params.size) || params.size <= 0) {
+  // Zod at the route layer already enforces positive integer; this is a defence-in-depth
+  // check for direct service-layer callers.
+  if (params.size <= 0) {
     throw invalidRequest("size must be a positive integer", "size");
   }
   const maxSize = params.maxSize ?? DEFAULT_MAX_SIZE;
@@ -116,13 +124,22 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
     throw invalidRequest("mime is required", "mime");
   }
 
+  // Strip parameters (charset, boundary, …) and lowercase so consume-time
+  // comparison against sniffed MIME is an exact string match. An attacker
+  // padding the declared MIME with junk params would otherwise bypass the
+  // magic-byte check.
+  const normalizedMime = normalizeMime(params.mime);
+  if (!normalizedMime) {
+    throw invalidRequest("mime is required", "mime");
+  }
+
   const expiresIn = Math.min(Math.max(params.expiresIn ?? DEFAULT_EXPIRY_SECONDS, 60), 3600);
   const uploadId = prefixedId("upl");
   const safeName = sanitizeFilename(params.name);
   const storagePath = `${params.applicationId}/${uploadId}/${safeName}`;
 
   const descriptor = await createUploadUrl(UPLOAD_BUCKET, storagePath, {
-    mime: params.mime,
+    mime: normalizedMime,
     maxSize: Math.min(params.size, maxSize),
     expiresIn,
   });
@@ -135,7 +152,7 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
     createdBy: params.createdBy,
     storageKey: `${UPLOAD_BUCKET}/${storagePath}`,
     name: safeName,
-    mime: params.mime,
+    mime: normalizedMime,
     size: params.size,
     expiresAt,
   });
@@ -217,65 +234,87 @@ export async function consumeUpload(
     throw conflict("upload_consumed", `Upload '${uploadId}' has already been consumed`);
   }
 
-  const [bucket, ...rest] = row.storageKey.split("/");
-  const path = rest.join("/");
-  const data = await storageGet(bucket!, path);
-  if (!data) {
-    throw invalidRequest(`Upload '${uploadId}' binary is missing — client did not PUT the file`);
-  }
+  // Past this point the claim has succeeded. If anything downstream throws
+  // (storage fetch, size/mime mismatch, …) we must release the claim so the
+  // client can retry after uploading the right bytes — otherwise the row is
+  // stuck "consumed" forever, the object leaks, and the user sees a cryptic
+  // 409 on retry.
+  try {
+    const [bucket, ...rest] = row.storageKey.split("/");
+    const path = rest.join("/");
+    const data = await storageGet(bucket!, path);
+    if (!data) {
+      throw invalidRequest(`Upload '${uploadId}' binary is missing — client did not PUT the file`);
+    }
 
-  const buffer = Buffer.from(data);
+    const buffer = Buffer.from(data);
 
-  // Reject mismatched size outright — an attacker can declare 1KB in the
-  // pre-signed request and PUT 100MB if the storage adapter doesn't enforce
-  // ContentLength at sign time (S3 currently does not).
-  if (buffer.length !== row.size) {
-    logger.warn("upload size mismatch on consume", {
-      uploadId,
-      declared: row.size,
-      actual: buffer.length,
-    });
-    throw invalidRequest(
-      `Upload '${uploadId}' size mismatch: declared ${row.size} bytes, got ${buffer.length}`,
-    );
-  }
-
-  // Magic-byte MIME check (file-type reads first ~4100 bytes).
-  //
-  // When the manifest declares a concrete binary MIME (application/pdf,
-  // image/png, …), we require `file-type` to recognise the bytes AND match.
-  // This closes the "client declares PDF, uploads plain text" hole.
-  //
-  // Two escape hatches:
-  //  - `application/octet-stream` is the explicit "any blob" marker.
-  //  - Text-ish MIMEs (text/*, application/json, application/xml, …) have
-  //    no magic signature, so `file-type` always returns undefined for them.
-  //    Strict matching would reject every legitimate text upload. We trust
-  //    the declared MIME for these — manifests that need binary-grade
-  //    validation must declare a sniffable MIME.
-  if (row.mime && row.mime !== "application/octet-stream" && !isUnsniffableMime(row.mime)) {
-    const sniffed = await fileTypeFromBuffer(buffer);
-    if (!sniffed || sniffed.mime !== row.mime) {
-      logger.warn("upload mime mismatch on consume", {
+    // Reject mismatched size outright — an attacker can declare 1KB in the
+    // pre-signed request and PUT 100MB if the storage adapter doesn't enforce
+    // ContentLength at sign time (S3 currently does not).
+    if (buffer.length !== row.size) {
+      logger.warn("upload size mismatch on consume", {
         uploadId,
-        declared: row.mime,
-        sniffed: sniffed?.mime ?? null,
+        declared: row.size,
+        actual: buffer.length,
       });
       throw invalidRequest(
-        sniffed
-          ? `Upload '${uploadId}' content type '${sniffed.mime}' does not match declared '${row.mime}'`
-          : `Upload '${uploadId}' content does not match declared mime '${row.mime}'`,
+        `Upload '${uploadId}' size mismatch: declared ${row.size} bytes, got ${buffer.length}`,
       );
     }
-  }
 
-  return {
-    id: uploadId,
-    name: row.name,
-    mime: row.mime,
-    size: buffer.length,
-    buffer,
-  };
+    // Magic-byte MIME check (file-type reads first ~4100 bytes).
+    //
+    // When the manifest declares a concrete binary MIME (application/pdf,
+    // image/png, …), we require `file-type` to recognise the bytes AND match.
+    // This closes the "client declares PDF, uploads plain text" hole.
+    //
+    // Two escape hatches:
+    //  - `application/octet-stream` is the explicit "any blob" marker.
+    //  - Text-ish MIMEs (text/*, application/json, application/xml, …) have
+    //    no magic signature, so `file-type` always returns undefined for them.
+    //    Strict matching would reject every legitimate text upload. We trust
+    //    the declared MIME for these — manifests that need binary-grade
+    //    validation must declare a sniffable MIME.
+    if (row.mime && row.mime !== "application/octet-stream" && !isUnsniffableMime(row.mime)) {
+      const sniffed = await fileTypeFromBuffer(buffer);
+      if (!sniffed || sniffed.mime !== row.mime) {
+        logger.warn("upload mime mismatch on consume", {
+          uploadId,
+          declared: row.mime,
+          sniffed: sniffed?.mime ?? null,
+        });
+        throw invalidRequest(
+          sniffed
+            ? `Upload '${uploadId}' content type '${sniffed.mime}' does not match declared '${row.mime}'`
+            : `Upload '${uploadId}' content does not match declared mime '${row.mime}'`,
+        );
+      }
+    }
+
+    return {
+      id: uploadId,
+      name: row.name,
+      mime: row.mime,
+      size: buffer.length,
+      buffer,
+    };
+  } catch (err) {
+    // Release the claim so the row can be re-consumed after the client re-uploads
+    // or on a legitimate retry. Only the original claimant gets to release
+    // (guarded by `consumedAt` matching the claim timestamp we just set).
+    await db
+      .update(uploads)
+      .set({ consumedAt: null })
+      .where(eq(uploads.id, uploadId))
+      .catch((releaseErr) => {
+        logger.warn("failed to release upload claim after consume error", {
+          uploadId,
+          error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
+        });
+      });
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +329,11 @@ export interface FsContentWriteResult {
 /**
  * Write the body of a PUT to storage (FS adapter path). Token verification +
  * header checks happen in the route handler — this just streams to disk.
+ *
+ * Refuses to overwrite an existing object at the same storage key. The signed
+ * token is valid for 15 min and could otherwise be replayed within its window
+ * to swap the bytes of an already-populated upload between client PUT and
+ * server-side consume.
  */
 export async function writeFsUploadContent(
   storageKey: string,
@@ -297,7 +341,11 @@ export async function writeFsUploadContent(
 ): Promise<FsContentWriteResult> {
   const [bucket, ...rest] = storageKey.split("/");
   if (!bucket || rest.length === 0) throw invalidRequest("invalid storage key");
-  await storagePut(bucket, rest.join("/"), data);
+  const path = rest.join("/");
+  if (await storageExists(bucket, path)) {
+    throw conflict("upload_already_written", "upload content has already been written");
+  }
+  await storagePut(bucket, path, data);
   return { storageKey, size: data.byteLength };
 }
 

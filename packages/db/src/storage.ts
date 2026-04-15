@@ -44,6 +44,10 @@ export function deleteFile(bucket: string, path: string): Promise<void> {
   return getStore().deleteFile(bucket, path);
 }
 
+export function fileExists(bucket: string, path: string): Promise<boolean> {
+  return getStore().fileExists(bucket, path);
+}
+
 export function ensureBucket(): Promise<void> {
   return getStore().ensureBucket();
 }
