@@ -17,6 +17,7 @@ COPY packages/connect/package.json packages/connect/
 COPY packages/db/package.json packages/db/
 COPY packages/emails/package.json packages/emails/
 COPY packages/env/package.json packages/env/
+COPY packages/ui/package.json packages/ui/
 COPY runtime-pi/package.json runtime-pi/
 COPY runtime-pi/sidecar/package.json runtime-pi/sidecar/
 COPY e2e/package.json e2e/
@@ -38,6 +39,7 @@ COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modu
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
 COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
+COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 
 COPY . .
 
