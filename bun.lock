@@ -15,7 +15,7 @@
         "@commitlint/config-conventional": "^20.5.0",
         "@eslint/js": "^10.0.1",
         "@mariozechner/pi-ai": "^0.67.1",
-        "@readme/openapi-parser": "^5.5.0",
+        "@readme/openapi-parser": "^6.0.1",
         "@redocly/openapi-core": "^2.26.0",
         "@types/bun": "latest",
         "@types/json-schema": "7.0.15",
@@ -758,7 +758,7 @@
 
     "@readme/better-ajv-errors": ["@readme/better-ajv-errors@2.4.0", "", { "dependencies": { "@babel/code-frame": "^7.22.5", "@babel/runtime": "^7.22.5", "@humanwhocodes/momoa": "^2.0.3", "jsonpointer": "^5.0.0", "leven": "^3.1.0", "picocolors": "^1.1.1" }, "peerDependencies": { "ajv": "4.11.8 - 8" } }, "sha512-9WODaOAKSl/mU+MYNZ2aHCrkoRSvmQ+1YkLj589OEqqjOAhbn8j7Z+ilYoiTu/he6X63/clsxxAB4qny9/dDzg=="],
 
-    "@readme/openapi-parser": ["@readme/openapi-parser@5.5.0", "", { "dependencies": { "@apidevtools/json-schema-ref-parser": "^14.1.1", "@readme/better-ajv-errors": "^2.3.2", "@readme/openapi-schemas": "^3.1.0", "@types/json-schema": "^7.0.15", "ajv": "^8.12.0", "ajv-draft-04": "^1.0.0" }, "peerDependencies": { "openapi-types": ">=7" } }, "sha512-uY9+3ouf6NWd/ck5PzlhcRwvRFLDd9ajRsMzZPp/iqdReGgPR7m8xEXtCYbLTGXJZcrDgYyNsHUL7e87Wsh+ew=="],
+    "@readme/openapi-parser": ["@readme/openapi-parser@6.0.1", "", { "dependencies": { "@apidevtools/json-schema-ref-parser": "^14.1.1", "@readme/better-ajv-errors": "^2.3.2", "@readme/openapi-schemas": "^3.1.0", "@types/json-schema": "^7.0.15", "ajv": "^8.12.0", "ajv-draft-04": "^1.0.0" }, "peerDependencies": { "openapi-types": ">=7" } }, "sha512-uMtwMPVv86Xr5Y6A+QFrxLwWW1irJp3TIz7R3Zs2WaX383MPYX5kaQemPBsaHCu58ZULd+bosNIGUoFW8KM5Ew=="],
 
     "@readme/openapi-schemas": ["@readme/openapi-schemas@3.1.0", "", {}, "sha512-9FC/6ho8uFa8fV50+FPy/ngWN53jaUu4GRXlAjcxIRrzhltJnpKkBG2Tp0IDraFJeWrOpk84RJ9EMEEYzaI1Bw=="],
 
@@ -2335,8 +2335,6 @@
     "@radix-ui/react-separator/@radix-ui/react-primitive": ["@radix-ui/react-primitive@2.1.4", "", { "dependencies": { "@radix-ui/react-slot": "1.2.4" }, "peerDependencies": { "@types/react": "*", "@types/react-dom": "*", "react": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc", "react-dom": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc" }, "optionalPeers": ["@types/react", "@types/react-dom"] }, "sha512-9hQc4+GNVtJAIEPEqlYqW5RiYdrr8ea5XQ0ZOnD6fgru+83kqT15mq2OCcbe8KnjRZl5vF3ks69AKz3kh1jrhg=="],
 
     "@radix-ui/react-tooltip/@radix-ui/react-slot": ["@radix-ui/react-slot@1.2.3", "", { "dependencies": { "@radix-ui/react-compose-refs": "1.1.2" }, "peerDependencies": { "@types/react": "*", "react": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc" }, "optionalPeers": ["@types/react"] }, "sha512-aeNmHnBxbi2St0au6VBVC7JXFlhLlOnvIIlePNniyUNAClzmtAUEY8/pBiK3iHjufOlwA+c20/8jngo7xcrg8A=="],
-
-    "@readme/openapi-parser/ajv": ["@redocly/ajv@8.18.0", "", { "dependencies": { "fast-deep-equal": "^3.1.3", "fast-uri": "^3.0.1", "json-schema-traverse": "^1.0.0", "require-from-string": "^2.0.2" } }, "sha512-F+LMD2IDIXuHxgpLJh3nkLj9+tSaEzoUWd+7fONGq5pe2169FUDjpEkOfEpoGLz1sbZni/69p07OsecNfAOpqA=="],
 
     "@redocly/config/json-schema-to-ts": ["json-schema-to-ts@2.7.2", "", { "dependencies": { "@babel/runtime": "^7.18.3", "@types/json-schema": "^7.0.9", "ts-algebra": "^1.2.0" } }, "sha512-R1JfqKqbBR4qE8UyBR56Ms30LL62/nlhoz+1UkfI/VE7p54Awu919FZ6ZUPG8zIa3XB65usPJgr1ONVncUGSaQ=="],
 
