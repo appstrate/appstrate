@@ -80,7 +80,13 @@ const envSchema = z
     PORT: z.coerce.number().int().positive().default(3000),
     COOKIE_DOMAIN: z.string().optional(),
     DOCKER_SOCKET: z.string().default("/var/run/docker.sock"),
-    PLATFORM_API_URL: z.string().optional(),
+    // Empty string → undefined so downstream `??` fallbacks (and the sidecar
+    // platform-network auto-detection) kick in when the var is forwarded empty
+    // by Docker Compose / Coolify.
+    PLATFORM_API_URL: z
+      .string()
+      .optional()
+      .transform((v) => (v === "" ? undefined : v)),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
     // Run — execution backend: "docker" (isolated containers) or "process" (default, Bun subprocesses, no isolation)
