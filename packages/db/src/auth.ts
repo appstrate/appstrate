@@ -505,10 +505,15 @@ function buildAuth(
     session: {
       expiresIn: 60 * 60 * 24 * 7, // 7 days
       updateAge: 60 * 60 * 24, // Refresh every 24h
-      cookieCache: {
-        enabled: true,
-        maxAge: 5 * 60, // 5 minutes
-      },
+      // Disabled to work around BA 1.6 issue #7607 — when `session_data`
+      // expires (at `maxAge`), BA fails to regenerate it from the still-valid
+      // `session_token` under certain plugin configurations, logging the
+      // user out at the next request. Still open in 1.6.3.
+      // Re-enable once the upstream bug is fixed. Cost of disabling: one
+      // extra DB query per authenticated request (negligible at our scale).
+      // Verified none of our plugins (`@better-auth/oauth-provider`, `jwt`)
+      // depend on `session_data` — only `email-otp` does, which we don't use.
+      cookieCache: { enabled: false },
       additionalFields: {
         // Denormalized from `user.realm` by `databaseHooks.session.create.before`.
         // Same reason as `user.additionalFields.realm`: BA's adapter strips
