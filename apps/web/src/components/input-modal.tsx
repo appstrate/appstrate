@@ -6,8 +6,9 @@ import type RjsfForm from "@rjsf/core";
 import { Modal } from "./modal";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "./spinner";
-import { SchemaForm } from "./schema-form";
+import { SchemaForm } from "@appstrate/ui/schema-form";
 import type { SchemaWrapper, JSONSchemaObject } from "@appstrate/core/form";
+import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import type { AgentDetail } from "@appstrate/shared-types";
 
 interface InputModalProps {
@@ -72,6 +73,7 @@ function InputModalForm({
   const wrapper: SchemaWrapper = agent.input ?? { schema: EMPTY_SCHEMA };
   const [formData, setFormData] = useState<Record<string, unknown>>(initialValues ?? {});
   const formRef = useRef<RjsfForm>(null);
+  const labels = useSchemaFormLabels();
 
   return (
     <>
@@ -79,6 +81,8 @@ function InputModalForm({
         ref={formRef}
         wrapper={wrapper}
         formData={formData}
+        uploadPath="/api/uploads"
+        labels={labels}
         onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
         onSubmit={(e) => onSubmit(e.formData as Record<string, unknown>)}
       />

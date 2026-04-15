@@ -1,13 +1,12 @@
+// Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import type { WidgetProps } from "@rjsf/utils";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { uploadFile, isUploadUri } from "./upload-client";
+import { Button, LABEL_CLASS } from "./templates.tsx";
+import { cn } from "./cn.ts";
+import { createUploader, isUploadUri, type UploadFn } from "./upload-client.ts";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -15,8 +14,6 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-/** Client-side metadata for a staged file — we keep the original File object so
- *  the user can see its name/size without re-fetching the upload record. */
 interface Attachment {
   uri: string;
   name: string;
@@ -28,7 +25,6 @@ function attachmentsFromValue(value: unknown): Attachment[] {
   const raw = Array.isArray(value) ? value : value != null ? [value] : [];
   for (const v of raw) {
     if (isUploadUri(v)) {
-      // We don't have name/size once persisted — fall back to the URI suffix.
       const tail = v.slice("upload://".length);
       list.push({ uri: v, name: tail, size: 0 });
     }
@@ -37,25 +33,60 @@ function attachmentsFromValue(value: unknown): Attachment[] {
 }
 
 /**
+ * Labels consumed by FileWidget. Callers can pass translated strings via
+ * `<SchemaForm labels={...}>` so the widget integrates with the host app's
+ * i18n system without this package taking a hard dependency on i18next.
+ */
+export interface FileWidgetLabels {
+  uploading?: string;
+  dragDrop?: string;
+  addFile?: string;
+  maxSize?: (size: string) => string;
+  maxFiles?: (count: number) => string;
+  formats?: (formats: string) => string;
+  extError?: (name: string, accept: string) => string;
+  sizeError?: (name: string, size: string) => string;
+}
+
+const DEFAULT_LABELS: Required<FileWidgetLabels> = {
+  uploading: "Uploading…",
+  dragDrop: "Drag and drop a file here, or click to select",
+  addFile: "Add file",
+  maxSize: (size) => `Max ${size}`,
+  maxFiles: (count) => `At most ${count} files allowed`,
+  formats: (formats) => `Formats: ${formats}`,
+  extError: (name, accept) => `${name} is not a supported format (${accept})`,
+  sizeError: (name, size) => `${name} exceeds the ${size} size limit`,
+};
+
+/**
  * RJSF file widget. Accepts:
  *   - `{ type: "string", format: "uri", contentMediaType }`            → single
  *   - `{ type: "array", items: { type: "string", format: "uri", … } }` → multi
  *
- * The binary is uploaded directly to storage via `POST /api/uploads`, and
- * `onChange` writes back an `upload://upl_xxx` URI (or array of URIs).
- * RJSF then validates the schema on this URI — the server re-validates
- * when the run is triggered.
+ * The binary is uploaded directly to storage via the endpoint resolved from
+ * `formContext.uploadPath` (POST), and `onChange` writes back an
+ * `upload://upl_xxx` URI (or array of URIs). RJSF then validates the schema
+ * on this URI — the server re-validates when the run is triggered.
  */
 export function FileWidget(props: WidgetProps) {
-  const { id, value, onChange, required, label, schema, disabled, readonly, options } = props;
-  const { t } = useTranslation(["settings", "common"]);
+  const { id, value, onChange, required, label, schema, disabled, readonly, options, formContext } =
+    props;
+  const ctx = (formContext ?? {}) as {
+    uploadPath?: string;
+    upload?: UploadFn;
+    labels?: FileWidgetLabels;
+  };
+  const labels = { ...DEFAULT_LABELS, ...(ctx.labels ?? {}) };
+  const upload: UploadFn | null =
+    ctx.upload ?? (ctx.uploadPath ? createUploader(ctx.uploadPath) : null);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>(() => attachmentsFromValue(value));
   const abortRef = useRef<AbortController | null>(null);
-  // Cancel any in-flight upload if the widget unmounts (modal closed, route change).
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const multiple = schema.type === "array" || (options?.multiple as boolean | undefined) === true;
@@ -75,10 +106,10 @@ export function FileWidget(props: WidgetProps) {
         if (a.endsWith("/*")) return file.type.startsWith(a.slice(0, -1));
         return file.type === a;
       });
-      if (!mimeMatch) return t("file.extError", { name: file.name, accept });
+      if (!mimeMatch) return labels.extError(file.name, accept);
     }
     if (maxSize && file.size > maxSize) {
-      return t("file.sizeError", { name: file.name, size: formatSize(maxSize) });
+      return labels.sizeError(file.name, formatSize(maxSize));
     }
     return null;
   };
@@ -95,6 +126,10 @@ export function FileWidget(props: WidgetProps) {
   const addFiles = useCallback(
     async (incoming: File[]) => {
       setError(null);
+      if (!upload) {
+        setError("File uploads are not configured for this form.");
+        return;
+      }
       for (const f of incoming) {
         const err = validateClientSide(f);
         if (err) {
@@ -104,7 +139,7 @@ export function FileWidget(props: WidgetProps) {
       }
       const willHave = attachments.length + incoming.length;
       if (multiple && maxFiles && willHave > maxFiles) {
-        setError(t("file.maxFiles", { count: maxFiles }));
+        setError(labels.maxFiles(maxFiles));
         return;
       }
 
@@ -115,7 +150,7 @@ export function FileWidget(props: WidgetProps) {
       try {
         const uploaded: Attachment[] = [];
         for (const f of incoming) {
-          const uri = await uploadFile(f, ctrl.signal);
+          const uri = await upload(f, ctrl.signal);
           uploaded.push({ uri, name: f.name, size: f.size });
         }
         const next = multiple ? [...attachments, ...uploaded] : uploaded.slice(0, 1);
@@ -128,9 +163,7 @@ export function FileWidget(props: WidgetProps) {
         if (abortRef.current === ctrl) abortRef.current = null;
       }
     },
-    // commit is stable inside this closure; disabling deps to avoid over-reacting
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [accept, attachments, maxFiles, maxSize, multiple, t],
+    [accept, attachments, maxFiles, maxSize, multiple, upload],
   );
 
   const handleDrop = (e: React.DragEvent) => {
@@ -155,10 +188,10 @@ export function FileWidget(props: WidgetProps) {
 
   return (
     <div className="space-y-2">
-      <Label htmlFor={id}>
+      <label htmlFor={id} className={LABEL_CLASS}>
         {label}
         {required && " *"}
-      </Label>
+      </label>
       {attachments.length === 0 ? (
         <div
           className={cn(
@@ -174,11 +207,9 @@ export function FileWidget(props: WidgetProps) {
           onDragLeave={() => setDragOver(false)}
           onDrop={(e) => !locked && handleDrop(e)}
         >
-          {uploading ? t("file.uploading", { defaultValue: "Uploading…" }) : t("file.dragDrop")}
-          {accept && <span className="mt-1 text-xs">{t("file.formats", { formats: accept })}</span>}
-          {maxSize && (
-            <span className="mt-1 text-xs">{t("file.maxSize", { size: formatSize(maxSize) })}</span>
-          )}
+          {uploading ? labels.uploading : labels.dragDrop}
+          {accept && <span className="mt-1 text-xs">{labels.formats(accept)}</span>}
+          {maxSize && <span className="mt-1 text-xs">{labels.maxSize(formatSize(maxSize))}</span>}
         </div>
       ) : (
         <>
@@ -213,7 +244,7 @@ export function FileWidget(props: WidgetProps) {
               disabled={locked}
               onClick={() => inputRef.current?.click()}
             >
-              {uploading ? t("file.uploading", { defaultValue: "Uploading…" }) : t("file.addFile")}
+              {uploading ? labels.uploading : labels.addFile}
             </Button>
           )}
         </>

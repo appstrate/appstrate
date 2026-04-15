@@ -10,7 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { SchemaForm } from "../schema-form";
+import { SchemaForm } from "@appstrate/ui/schema-form";
+import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
 import { PROVIDER_ICONS } from "../icons";
 import { findProviderByApiAndBaseUrl } from "@/lib/model-presets";
 import { useModels, useAgentModel, useSetAgentModel } from "../../hooks/use-models";
@@ -39,6 +40,7 @@ function ConfigSection({
   const wrapper: SchemaWrapper = { schema };
 
   const [values, setValues] = useState<Record<string, unknown>>(() => current);
+  const labels = useSchemaFormLabels();
 
   if (!schema?.properties || Object.keys(schema.properties).length === 0) return null;
 
@@ -52,6 +54,8 @@ function ConfigSection({
       <SchemaForm
         wrapper={wrapper}
         formData={values}
+        uploadPath="/api/uploads"
+        labels={labels}
         onChange={(e) => setValues(e.formData as Record<string, unknown>)}
       />
       <div className="flex justify-end pt-2">

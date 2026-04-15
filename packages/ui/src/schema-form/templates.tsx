@@ -1,10 +1,12 @@
+// Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Tailwind-styled RJSF templates matching the Appstrate dark theme.
- * Only templates we actually want to restyle are overridden — RJSF
- * defaults handle the rest.
- */
+// Tailwind-styled RJSF templates matching the Appstrate dark theme. Only
+// templates we actually want to restyle are overridden — RJSF defaults
+// handle the rest. No shadcn/radix imports here so this module can live in
+// @appstrate/core and be consumed by any Appstrate frontend (main app,
+// portal, future surfaces). Styling relies solely on CSS tokens that all
+// Appstrate UIs expose (`--background`, `--input`, `--primary`, …).
 
 import type {
   BaseInputTemplateProps,
@@ -19,10 +21,51 @@ import type {
 } from "@rjsf/utils";
 import { getSubmitButtonOptions } from "@rjsf/utils";
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn } from "./cn.ts";
+
+// ─── Inline primitives (shadcn-equivalent look, zero extra deps) ──────────
+
+const INPUT_CLASS =
+  "border-input placeholder:text-muted-foreground focus-visible:ring-ring flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50";
+
+const LABEL_CLASS =
+  "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70";
+
+const BUTTON_VARIANTS: Record<string, string> = {
+  default: "bg-primary text-primary-foreground shadow hover:bg-primary/90",
+  outline:
+    "border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
+  ghost: "hover:bg-accent hover:text-accent-foreground",
+};
+
+const BUTTON_SIZES: Record<string, string> = {
+  default: "h-9 px-4 py-2",
+  sm: "h-8 rounded-md px-3 text-xs",
+  icon: "h-9 w-9",
+};
+
+function Button({
+  variant = "default",
+  size = "default",
+  className,
+  ...rest
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) {
+  return (
+    <button
+      {...rest}
+      className={cn(
+        "focus-visible:ring-ring inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors focus-visible:ring-1 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
+        BUTTON_VARIANTS[variant] ?? BUTTON_VARIANTS.default,
+        BUTTON_SIZES[size] ?? BUTTON_SIZES.default,
+        className,
+      )}
+    />
+  );
+}
+
+export { Button, INPUT_CLASS, LABEL_CLASS };
+
+// ─── Templates ────────────────────────────────────────────────────────────
 
 export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>) {
   const {
@@ -58,8 +101,9 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
 
   const isConst = schema && "const" in schema;
   const isReadOnly = readonly || isConst;
+
   return (
-    <Input
+    <input
       id={id}
       type={inputType}
       value={(value as string | number | undefined) ?? ""}
@@ -69,6 +113,7 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
       autoFocus={autofocus && !isReadOnly}
       placeholder={(placeholder ?? (options?.["ui:placeholder"] as string | undefined)) as string}
       className={cn(
+        INPUT_CLASS,
         isReadOnly && "bg-muted/50 cursor-not-allowed",
         rawErrors && rawErrors.length > 0 && "border-destructive",
       )}
@@ -117,10 +162,10 @@ export function FieldTemplate(props: FieldTemplateProps) {
   return (
     <div className={cn("space-y-1.5", classNames)}>
       {showLabel && (
-        <Label htmlFor={id}>
+        <label htmlFor={id} className={LABEL_CLASS}>
           {label}
           {required && " *"}
-        </Label>
+        </label>
       )}
       {showDescription && <p className="text-muted-foreground text-xs">{rawDescription}</p>}
       {children}
@@ -238,8 +283,10 @@ export function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
 }
 
 export function ArrayFieldTemplate(props: ArrayFieldTemplateProps) {
-  const { items, canAdd, onAddClick, disabled, readonly, title, schema, uiSchema } = props;
+  const { items, canAdd, onAddClick, disabled, readonly, title, schema, uiSchema, registry } =
+    props;
   const description = (uiSchema?.["ui:description"] as string | undefined) ?? schema.description;
+  const ctx = (registry.formContext ?? {}) as { labels?: { addItem?: string } };
   return (
     <div className="space-y-3">
       {title && <h3 className="text-sm font-medium">{title}</h3>}
@@ -248,7 +295,7 @@ export function ArrayFieldTemplate(props: ArrayFieldTemplateProps) {
       {canAdd && !readonly && (
         <Button type="button" variant="outline" size="sm" onClick={onAddClick} disabled={disabled}>
           <Plus className="mr-1 h-4 w-4" />
-          Ajouter
+          {ctx.labels?.addItem ?? "Add"}
         </Button>
       )}
     </div>
