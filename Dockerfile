@@ -1,5 +1,5 @@
 # ── Stage 1: Install dependencies ──────────────────────────────────
-FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.11-alpine AS deps
+FROM oven/bun:1.3.11-alpine AS deps
 
 LABEL org.opencontainers.image.source="https://github.com/appstrate/appstrate"
 LABEL org.opencontainers.image.description="Appstrate — Open-source platform for running autonomous AI agents in sandboxed Docker containers"
@@ -26,7 +26,7 @@ COPY patches/ patches/
 RUN bun install --frozen-lockfile
 
 # ── Stage 2: Build ────────────────────────────────────────────────
-FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.11-alpine AS build
+FROM oven/bun:1.3.11-alpine AS build
 
 WORKDIR /app
 
@@ -46,7 +46,7 @@ COPY . .
 RUN bun run build
 
 # ── Stage 3: Production image ─────────────────────────────────────
-FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.11-alpine
+FROM oven/bun:1.3.11-alpine
 
 WORKDIR /app
 

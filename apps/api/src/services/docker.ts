@@ -520,7 +520,14 @@ let platformNetworkCache:
  */
 export async function getDockerHostAddress(): Promise<string> {
   const platform = await detectPlatformNetwork();
-  return platform?.gatewayIp || "localhost";
+  // Not containerized (local dev) → real localhost
+  if (!platform) return "localhost";
+  // Containerized with a real gateway IP (typical Linux + bridge driver)
+  if (platform.gatewayIp) return platform.gatewayIp;
+  // Containerized but no gateway exposed (macOS Docker Desktop / OrbStack):
+  // rely on Docker's host alias. Requires extra_hosts: "host.docker.internal:host-gateway"
+  // in the compose file (already set on the appstrate service).
+  return "host.docker.internal";
 }
 
 /**
