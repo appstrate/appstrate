@@ -192,6 +192,231 @@ EOF
   ! port_in_use 59999
 }
 
+@test "port_in_use: /dev/tcp fallback returns false on free port when lsof/ss/netstat absent" {
+  # Shadow all three detectors so port_in_use falls through to /dev/tcp.
+  command_exists() { return 1; }
+  export -f command_exists
+  run port_in_use 59998
+  [ "$status" -eq 1 ]
+}
+
+@test "port_in_use: /dev/tcp fallback detects a listening port when detectors absent" {
+  # Use bash coproc as a self-contained listener (no nc/python dependency).
+  # coproc spawns a bash process accepting a single connection on a high port.
+  command -v python3 >/dev/null 2>&1 || skip "python3 not available for listener"
+  python3 -c "
+import socket, time
+s = socket.socket()
+s.bind(('127.0.0.1', 59997))
+s.listen(1)
+s.settimeout(5)
+print('ready', flush=True)
+try:
+  c, _ = s.accept()
+  c.close()
+except Exception:
+  pass
+" &
+  PID=$!
+  # Wait for the listener to print 'ready'
+  sleep 0.5
+
+  command_exists() { return 1; } # force /dev/tcp path
+  export -f command_exists
+  run port_in_use 59997
+  kill "$PID" 2>/dev/null || true
+  wait "$PID" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+}
+
+# ─── resolve_docker_gid (pure helper, no Docker/FS access) ───────────────────
+
+@test "resolve_docker_gid: Linux + stat=0 + docker group present → docker group GID" {
+  getent() {
+    if [ "$1" = "group" ] && [ "$2" = "docker" ]; then
+      echo "docker:x:999:"
+    fi
+  }
+  export -f getent
+  result=$(resolve_docker_gid "0" "Linux")
+  [ "$result" = "999" ]
+}
+
+@test "resolve_docker_gid: Linux + stat=0 + no docker group → falls back to 0" {
+  getent() { return 1; }
+  export -f getent
+  result=$(resolve_docker_gid "0" "Linux")
+  [ "$result" = "0" ]
+}
+
+@test "resolve_docker_gid: Darwin + stat=0 → passthrough (Docker Desktop case)" {
+  # Must not consult getent on Darwin even if stat=0
+  getent() {
+    echo "should-not-be-called" >&2
+    return 1
+  }
+  export -f getent
+  result=$(resolve_docker_gid "0" "Darwin")
+  [ "$result" = "0" ]
+}
+
+@test "resolve_docker_gid: Linux + non-zero observed GID → passthrough" {
+  getent() {
+    echo "should-not-be-called" >&2
+    return 1
+  }
+  export -f getent
+  result=$(resolve_docker_gid "988" "Linux")
+  [ "$result" = "988" ]
+}
+
+# ─── merge_env: obsolete-key warning (Phase 3) ───────────────────────────────
+
+@test "merge_env: warns on keys present in .env but absent from .env.example" {
+  APPSTRATE_VERSION="v1.1.0"
+  APPSTRATE_IMAGE_TAG="1.1.0"
+  cat >"$APPSTRATE_DIR/.env" <<EOF
+APPSTRATE_VERSION=v1.0.0
+POSTGRES_PASSWORD=x
+BETTER_AUTH_SECRET=x
+RUN_TOKEN_SECRET=x
+UPLOAD_SIGNING_SECRET=x
+CONNECTION_ENCRYPTION_KEY=x
+MINIO_ROOT_PASSWORD=x
+OLD_LEGACY_FLAG=legacyvalue
+EOF
+  cp "$FIXTURES/.env.example" "$APPSTRATE_DIR/.env.example"
+  run merge_env
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OLD_LEGACY_FLAG"* ]]
+  [[ "$output" == *"possibly obsolete"* ]]
+}
+
+@test "merge_env: ignores installer-managed keys (APPSTRATE_VERSION, DOCKER_GID)" {
+  APPSTRATE_VERSION="v1.1.0"
+  APPSTRATE_IMAGE_TAG="1.1.0"
+  cat >"$APPSTRATE_DIR/.env" <<EOF
+APPSTRATE_VERSION=v1.0.0
+DOCKER_GID=988
+POSTGRES_PASSWORD=x
+BETTER_AUTH_SECRET=x
+RUN_TOKEN_SECRET=x
+UPLOAD_SIGNING_SECRET=x
+CONNECTION_ENCRYPTION_KEY=x
+MINIO_ROOT_PASSWORD=x
+EOF
+  # Fixture does contain DOCKER_GID, so strip it to simulate an older .env.example
+  grep -v '^DOCKER_GID=' "$FIXTURES/.env.example" >"$APPSTRATE_DIR/.env.example"
+  run merge_env
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"possibly obsolete"* ]]
+}
+
+# ─── rollback_upgrade (Phase 4) ──────────────────────────────────────────────
+
+@test "rollback_upgrade: returns 1 when INSTALL_MODE != upgrade" {
+  INSTALL_MODE="fresh"
+  run rollback_upgrade
+  [ "$status" -eq 1 ]
+}
+
+@test "rollback_upgrade: returns 1 when no backup files exist" {
+  INSTALL_MODE="upgrade"
+  mkdir -p "$APPSTRATE_DIR"
+  LOG_FILE="$APPSTRATE_DIR/log"
+  : >"$LOG_FILE"
+  run rollback_upgrade
+  [ "$status" -eq 1 ]
+}
+
+@test "rollback_upgrade: restores latest .env and compose.yml from .bak-*" {
+  INSTALL_MODE="upgrade"
+  PREVIOUS_VERSION="v1.0.0"
+  LOG_FILE="$APPSTRATE_DIR/log"
+  : >"$LOG_FILE"
+
+  # Seed two backups — rollback must pick the most recent
+  echo "OLDER_COMPOSE" >"$APPSTRATE_DIR/docker-compose.yml.bak-20260101-100000"
+  sleep 0.1
+  echo "LATEST_COMPOSE" >"$APPSTRATE_DIR/docker-compose.yml.bak-20260101-120000"
+  echo "BROKEN_NEW_COMPOSE" >"$APPSTRATE_DIR/docker-compose.yml"
+
+  echo "OLDER_ENV" >"$APPSTRATE_DIR/.env.bak-20260101-100000"
+  sleep 0.1
+  echo "LATEST_ENV" >"$APPSTRATE_DIR/.env.bak-20260101-120000"
+  echo "NEW_ENV" >"$APPSTRATE_DIR/.env"
+
+  # Stub docker → treat `docker compose up -d` as success
+  docker() { return 0; }
+  export -f docker
+
+  run rollback_upgrade
+  [ "$status" -eq 0 ]
+
+  grep -q 'LATEST_COMPOSE' "$APPSTRATE_DIR/docker-compose.yml"
+  grep -q 'LATEST_ENV' "$APPSTRATE_DIR/.env"
+}
+
+@test "rollback_upgrade: returns 1 when only compose backup is present" {
+  # Partial backup = mismatched restore. Require BOTH files or abort.
+  INSTALL_MODE="upgrade"
+  PREVIOUS_VERSION="v1.0.0"
+  LOG_FILE="$APPSTRATE_DIR/log"
+  : >"$LOG_FILE"
+  echo "X" >"$APPSTRATE_DIR/docker-compose.yml.bak-1"
+  run rollback_upgrade
+  [ "$status" -eq 1 ]
+}
+
+@test "rollback_upgrade: returns 1 when only env backup is present" {
+  INSTALL_MODE="upgrade"
+  PREVIOUS_VERSION="v1.0.0"
+  LOG_FILE="$APPSTRATE_DIR/log"
+  : >"$LOG_FILE"
+  echo "Y" >"$APPSTRATE_DIR/.env.bak-1"
+  run rollback_upgrade
+  [ "$status" -eq 1 ]
+}
+
+@test "rollback_upgrade: returns 1 when docker compose up fails" {
+  INSTALL_MODE="upgrade"
+  PREVIOUS_VERSION="v1.0.0"
+  LOG_FILE="$APPSTRATE_DIR/log"
+  : >"$LOG_FILE"
+  echo "X" >"$APPSTRATE_DIR/docker-compose.yml.bak-1"
+  echo "Y" >"$APPSTRATE_DIR/.env.bak-1"
+
+  docker() { return 1; } # simulate compose up failure
+  export -f docker
+
+  run rollback_upgrade
+  [ "$status" -eq 1 ]
+}
+
+# ─── verify.sh (Phase 5 wrapper) ─────────────────────────────────────────────
+
+@test "verify.sh: exits with a clear error when public key is placeholder" {
+  run bash "$REPO_ROOT/scripts/verify.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not been provisioned"* ]]
+}
+
+@test "verify.sh: exits cleanly when minisign is absent" {
+  # Place a fake verify.sh with a non-placeholder pubkey, then hide minisign
+  # by pointing PATH at a directory that contains only a bash symlink.
+  tmp=$(mktemp -d)
+  sed 's|__APPSTRATE_MINISIGN_PUBKEY__|RWQfakefakefakefakefakefakefakefakefakefakefake=|' \
+    "$REPO_ROOT/scripts/verify.sh" >"$tmp/verify.sh"
+  chmod +x "$tmp/verify.sh"
+  # Minimal PATH: just bash, no minisign, no curl
+  mkdir "$tmp/bin"
+  ln -s "$(command -v bash)" "$tmp/bin/bash"
+  run env -i PATH="$tmp/bin" HOME="$HOME" bash "$tmp/verify.sh"
+  rm -rf "$tmp"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"minisign is required"* ]] || [[ "$output" == *"curl is required"* ]]
+}
+
 # ─── pull_images skip mode ───────────────────────────────────────────────────
 
 @test "pull_images: noop mode is a no-op" {
