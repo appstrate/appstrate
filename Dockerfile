@@ -43,6 +43,11 @@ COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 
 COPY . .
 
+# Re-link workspace packages after COPY overwrites symlinks. Without this,
+# Rolldown (Vite 8) can't resolve transitive deps like i18next via the broken
+# apps/web/node_modules/i18next → /app/node_modules/.bun/i18next@X symlink.
+RUN bun install --frozen-lockfile
+
 RUN bun run build
 
 # ── Stage 3: Production image ─────────────────────────────────────
