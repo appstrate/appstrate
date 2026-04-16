@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { api } from "../../api";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useAppConfig } from "../../hooks/use-app-config";
+import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Spinner } from "../../components/spinner";
@@ -20,6 +22,9 @@ export function OrgSettingsGeneralPage() {
   const navigate = useNavigate();
   const { currentOrg } = useOrg();
   const { isOwner, isAdmin } = usePermissions();
+  const { features } = useAppConfig();
+  const { data: orgSettings } = useOrgSettings();
+  const updateSettingsMutation = useUpdateOrgSettings();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
 
@@ -112,6 +117,53 @@ export function OrgSettingsGeneralPage() {
           )}
         </div>
       </div>
+
+      {isAdmin && features.oidc && (
+        <>
+          <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
+            {t("orgSettings.advancedSection")}
+          </div>
+          <div className="border-border bg-card mb-4 rounded-lg border p-5">
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold">{t("orgSettings.dashboardSsoTitle")}</h3>
+                <span className="text-muted-foreground text-sm">
+                  {t("orgSettings.dashboardSsoDesc")}
+                </span>
+              </div>
+              <Button
+                variant={orgSettings?.dashboardSsoEnabled ? "default" : "outline"}
+                disabled={updateSettingsMutation.isPending}
+                onClick={() =>
+                  updateSettingsMutation.mutate(
+                    { dashboardSsoEnabled: !orgSettings?.dashboardSsoEnabled },
+                    {
+                      onSuccess: (data) => {
+                        toast.success(
+                          data.dashboardSsoEnabled
+                            ? t("orgSettings.dashboardSsoEnabled")
+                            : t("orgSettings.dashboardSsoDisabled"),
+                        );
+                      },
+                      onError: (err: Error) => {
+                        toast.error(t("error.prefix", { message: err.message }));
+                      },
+                    },
+                  )
+                }
+              >
+                {updateSettingsMutation.isPending ? (
+                  <Spinner />
+                ) : orgSettings?.dashboardSsoEnabled ? (
+                  t("orgSettings.dashboardSsoDisable")
+                ) : (
+                  t("orgSettings.dashboardSsoEnable")
+                )}
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
 
       {isOwner && (
         <>

@@ -76,6 +76,11 @@ export const schemas = {
         description:
           "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated.",
       },
+      dashboardSsoEnabled: {
+        type: "boolean",
+        description:
+          "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need application-level SSO for their end-users.",
+      },
     },
   },
   ProfileBatchItem: {

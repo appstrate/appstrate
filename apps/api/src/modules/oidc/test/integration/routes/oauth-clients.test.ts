@@ -15,6 +15,7 @@ import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
   createTestContext,
   authHeaders,
+  enableDashboardSso,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
@@ -48,6 +49,11 @@ describe("OAuth clients admin routes (polymorphic)", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "oauthroutes" });
+    // These tests predate the per-org dashboardSsoEnabled gate and cover
+    // admin CRUD mechanics for both levels. Enable the flag so org-level
+    // creation / patch / rotate aren't blocked — gate behavior itself is
+    // covered in oauth-dashboard-sso-gate.test.ts.
+    await enableDashboardSso(ctx.orgId);
   });
 
   it("POST creates an end_user client and returns the plaintext secret once", async () => {
