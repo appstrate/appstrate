@@ -188,13 +188,24 @@ detect_environment() {
 }
 
 port_in_use() {
-  local p=$1
+  local p=$1 out
   if command_exists lsof; then
-    lsof -iTCP:"$p" -sTCP:LISTEN -Pn >/dev/null 2>&1
+    # lsof's exit code is unreliable as a "match found" signal: on macOS +
+    # Docker Desktop (and other envs), it regularly exits non-zero because
+    # it hit permission-denied errors while scanning unrelated sockets —
+    # even when it successfully printed the listener we care about. Check
+    # stdout instead, which is the only thing we actually care about.
+    out=$(lsof -iTCP:"$p" -sTCP:LISTEN -Pn 2>/dev/null || true)
+    [ -n "$out" ]
   elif command_exists ss; then
-    ss -lnt "sport = :$p" 2>/dev/null | grep -q LISTEN
+    # Capture output first to decouple ss's exit code from grep's — with
+    # pipefail enabled, an ss failure (old syntax, missing caps) would
+    # mask a legitimate grep match and report the port as free.
+    out=$(ss -lnt "sport = :$p" 2>/dev/null || true)
+    [[ "$out" == *LISTEN* ]]
   elif command_exists netstat; then
-    netstat -lnt 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${p}$"
+    out=$(netstat -lnt 2>/dev/null || true)
+    echo "$out" | awk '{print $4}' | grep -qE "[:.]${p}$"
   else
     # Bash builtin: /dev/tcp is a pseudo-device, no external dependency.
     # Only probes 127.0.0.1 — services bound to other interfaces are not
@@ -221,9 +232,13 @@ prepare_workdir() {
   LOG_FILE="$APPSTRATE_DIR/install-$(date +%Y%m%d-%H%M%S).log"
   : >"$LOG_FILE"
   chmod 600 "$LOG_FILE"
-  # Rotate old logs — keep last 5
+  # Rotate old logs — keep last 5. Sort by filename (names embed ISO
+  # timestamps, so lexicographic = chronological) rather than mtime: some
+  # filesystems (Alpine tmpfs, older ext4 without nsec) have 1-second mtime
+  # granularity, which makes `ls -t` non-deterministic when multiple logs
+  # land in the same second.
   # shellcheck disable=SC2012
-  ls -t "$APPSTRATE_DIR"/install-*.log 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+  ls -1r "$APPSTRATE_DIR"/install-*.log 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
   log "Working directory: $APPSTRATE_DIR"
 
   # Disk space check
@@ -271,7 +286,7 @@ download_assets() {
     ts=$(date +%Y%m%d-%H%M%S)
     cp "$APPSTRATE_DIR/docker-compose.yml" "$APPSTRATE_DIR/docker-compose.yml.bak-$ts"
     # shellcheck disable=SC2012
-    ls -t "$APPSTRATE_DIR"/docker-compose.yml.bak-* 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
+    ls -1r "$APPSTRATE_DIR"/docker-compose.yml.bak-* 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
   fi
   mv "$tmpdir/docker-compose.yml" "$APPSTRATE_DIR/docker-compose.yml"
   mv "$tmpdir/.env.example" "$APPSTRATE_DIR/.env.example"
@@ -300,7 +315,7 @@ handle_env_file() {
       chmod 600 "$APPSTRATE_DIR/.env"
       # Rotate old .env backups — keep last 3
       # shellcheck disable=SC2012
-      ls -t "$APPSTRATE_DIR"/.env.bak-* 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
+      ls -1r "$APPSTRATE_DIR"/.env.bak-* 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null || true
       ;;
     noop) : ;;
   esac
@@ -471,9 +486,12 @@ rollback_upgrade() {
 
   local latest_compose latest_env
   # shellcheck disable=SC2012
-  latest_compose=$(ls -t "$APPSTRATE_DIR"/docker-compose.yml.bak-* 2>/dev/null | head -1)
+  # Sort by filename (ISO timestamps in names) rather than mtime — same
+  # reason as the rotation logic in prepare_workdir: 1-second mtime
+  # granularity on some filesystems would make `ls -t` non-deterministic.
+  latest_compose=$(ls -1r "$APPSTRATE_DIR"/docker-compose.yml.bak-* 2>/dev/null | head -1)
   # shellcheck disable=SC2012
-  latest_env=$(ls -t "$APPSTRATE_DIR"/.env.bak-* 2>/dev/null | head -1)
+  latest_env=$(ls -1r "$APPSTRATE_DIR"/.env.bak-* 2>/dev/null | head -1)
 
   if [ -z "$latest_compose" ] || [ -z "$latest_env" ]; then
     return 1

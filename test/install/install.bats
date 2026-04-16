@@ -13,15 +13,23 @@ setup() {
   export APPSTRATE_VERSION="v1.0.0"
   export APPSTRATE_PORT=3000
   export NO_COLOR=1
-  # Source script — guarded do_install will not auto-execute.
-  # set +e before source so the import itself doesn't abort on non-fatal errors.
-  set +e
+  # Capture bats' own ERR/EXIT traps BEFORE sourcing — the script installs
+  # its own on_error/cleanup_tmp handlers that clobber bats' test-reporting
+  # machinery. Without this, assertion failures inside tests are silently
+  # swallowed and bats emits "Executed N instead of expected M" warnings
+  # instead of proper "not ok" lines.
+  BATS_SAVED_ERR_TRAP=$(trap -p ERR)
+  BATS_SAVED_EXIT_TRAP=$(trap -p EXIT)
   # shellcheck disable=SC1091
   source "$REPO_ROOT/scripts/install.sh"
-  # The sourced script runs `set -euo pipefail` which re-enables -e in this shell.
-  # Disable it again + clear the ERR trap so tests can assert on failures.
-  set +eo pipefail
-  trap - ERR
+  # install.sh sets `set -euo pipefail`. Drop pipefail (tests use `| grep -q`
+  # where grep's exit=1 on "no match" is the legitimate signal, not a failure).
+  # Keep `set -e` + `set -E` so assertion failures in functions propagate.
+  set +o pipefail
+  set -eE
+  # Restore bats' traps — overriding the script's on_error/cleanup_tmp.
+  eval "${BATS_SAVED_ERR_TRAP:-trap - ERR}"
+  eval "${BATS_SAVED_EXIT_TRAP:-trap - EXIT}"
 }
 
 teardown() {
@@ -101,8 +109,8 @@ teardown() {
 
 @test "generate_fresh_env permissions are 600" {
   generate_fresh_env
-  perms=$(stat -f '%Lp' "$APPSTRATE_DIR/.env" 2>/dev/null \
-       || stat -c '%a' "$APPSTRATE_DIR/.env")
+  perms=$(stat -c '%a' "$APPSTRATE_DIR/.env" 2>/dev/null \
+       || stat -f '%Lp' "$APPSTRATE_DIR/.env" 2>/dev/null)
   [ "$perms" = "600" ]
 }
 
@@ -227,6 +235,53 @@ except Exception:
   kill "$PID" 2>/dev/null || true
   wait "$PID" 2>/dev/null || true
   [ "$status" -eq 0 ]
+}
+
+@test "port_in_use: lsof branch detects listener with clean exit=0 + match on stdout" {
+  # Happy path for the lsof branch: exit 0, output contains a match.
+  lsof() {
+    printf 'COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n'
+    printf 'appstrat 1234 user 3u IPv4 0x1 0t0 TCP *:3000 (LISTEN)\n'
+    return 0
+  }
+  export -f lsof
+  # Only lsof exists — avoids falling through to ss/netstat.
+  command_exists() { case "$1" in lsof) return 0 ;; *) return 1 ;; esac; }
+  export -f command_exists
+
+  run port_in_use 3000
+  [ "$status" -eq 0 ]
+}
+
+@test "port_in_use: lsof branch still detects listener when exit=1 with match on stdout" {
+  # BUG REPRO: on macOS + Docker Desktop (and other envs), lsof regularly
+  # prints a valid listener on stdout AND exits non-zero because it hit
+  # permission-denied errors while scanning unrelated sockets/processes.
+  # port_in_use must rely on output, not on lsof's exit code.
+  lsof() {
+    printf 'COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n'
+    printf 'com.docke 999 root 42u IPv6 0x1 0t0 TCP *:3000 (LISTEN)\n'
+    return 1
+  }
+  export -f lsof
+  command_exists() { case "$1" in lsof) return 0 ;; *) return 1 ;; esac; }
+  export -f command_exists
+
+  run port_in_use 3000
+  [ "$status" -eq 0 ]
+}
+
+@test "port_in_use: lsof branch returns free when no output (regardless of exit code)" {
+  # No listener → no output. Exit code alone is ambiguous (1 on both
+  # "no match" and "match + permission noise"), so the correct signal is
+  # empty stdout.
+  lsof() { return 1; }
+  export -f lsof
+  command_exists() { case "$1" in lsof) return 0 ;; *) return 1 ;; esac; }
+  export -f command_exists
+
+  run port_in_use 3000
+  [ "$status" -eq 1 ]
 }
 
 # ─── resolve_docker_gid (pure helper, no Docker/FS access) ───────────────────
@@ -494,7 +549,7 @@ EOF
   [ -d "$APPSTRATE_DIR" ]
   [ -n "$LOG_FILE" ]
   [ -f "$LOG_FILE" ]
-  perms=$(stat -f '%Lp' "$LOG_FILE" 2>/dev/null \
-       || stat -c '%a' "$LOG_FILE")
+  perms=$(stat -c '%a' "$LOG_FILE" 2>/dev/null \
+       || stat -f '%Lp' "$LOG_FILE" 2>/dev/null)
   [ "$perms" = "600" ]
 }
