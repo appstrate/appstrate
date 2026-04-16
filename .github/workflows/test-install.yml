@@ -89,7 +89,11 @@ jobs:
               apk add --no-cache bash curl openssl lsof >/dev/null
 
               echo "── 1. First install (fresh) ──"
-              bash /install.sh
+              bash /install.sh || {
+                echo "── Install failed — log tail: ──"
+                tail -30 /root/.appstrate/install-*.log 2>/dev/null
+                exit 1
+              }
 
               echo "── 2. Health probe ──"
               curl -fsS --max-time 10 http://localhost:3000/ >/dev/null
