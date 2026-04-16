@@ -614,7 +614,9 @@ describe("validateProviderCredentialKeys", () => {
       },
     });
     expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((e) => e.includes("api-key"))).toBe(true);
+    const schemaErr = errors.find((e) => e.field === "schemaKey");
+    expect(schemaErr?.key).toBe("api-key");
+    expect(schemaErr?.message).toContain("api-key");
   });
 
   test("fieldName not matching schema properties is rejected", () => {
@@ -627,7 +629,8 @@ describe("validateProviderCredentialKeys", () => {
         },
       },
     });
-    expect(errors.some((e) => e.includes("not declared"))).toBe(true);
+    const fieldErr = errors.find((e) => e.field === "fieldName");
+    expect(fieldErr?.message).toContain("not declared");
   });
 
   test("fieldName with illegal characters is rejected", () => {
@@ -641,6 +644,50 @@ describe("validateProviderCredentialKeys", () => {
       },
     });
     expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]?.field).toBe("fieldName");
+  });
+
+  test("custom authMode with no credentials block passes (no schema to validate)", () => {
+    expect(validateProviderCredentialKeys({ definition: { authMode: "custom" } })).toEqual([]);
+  });
+
+  test("custom authMode with empty schema.properties and no fieldName passes", () => {
+    const errors = validateProviderCredentialKeys({
+      definition: {
+        authMode: "custom",
+        credentials: { schema: { type: "object", properties: {} } },
+      },
+    });
+    expect(errors).toEqual([]);
+  });
+
+  test("custom authMode with empty schema.properties accepts any canonical fieldName", () => {
+    // When no properties are declared, membership check is skipped — the
+    // fieldName only needs to satisfy the pattern. Pins intentional leniency.
+    const errors = validateProviderCredentialKeys({
+      definition: {
+        authMode: "custom",
+        credentials: {
+          schema: { type: "object", properties: {} },
+          fieldName: "any_key",
+        },
+      },
+    });
+    expect(errors).toEqual([]);
+  });
+
+  test("custom authMode still rejects non-canonical fieldName even with empty schema", () => {
+    const errors = validateProviderCredentialKeys({
+      definition: {
+        authMode: "custom",
+        credentials: {
+          schema: { type: "object", properties: {} },
+          fieldName: "Api-Key",
+        },
+      },
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]?.field).toBe("fieldName");
   });
 
   test("validateManifest propagates credential errors for provider manifests", () => {

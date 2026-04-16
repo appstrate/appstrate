@@ -182,8 +182,14 @@ const credentialRefinement = (data: CredentialRefinementInput, ctx: z.Refinement
       },
     },
   });
-  for (const msg of errors) {
-    ctx.addIssue({ code: "custom", path: ["credentials"], message: msg });
+  for (const err of errors) {
+    const path: (string | number)[] =
+      err.field === "fieldName"
+        ? ["credentialFieldName"]
+        : err.key !== undefined
+          ? ["credentialSchema", "properties", err.key]
+          : ["credentialSchema"];
+    ctx.addIssue({ code: "custom", path, message: err.message });
   }
 };
 

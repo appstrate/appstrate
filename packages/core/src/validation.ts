@@ -143,7 +143,7 @@ export type ProviderManifest = z.infer<typeof providerManifestSchema>;
 
 /**
  * Canonical credential key pattern — shared by the provider schema editor,
- * the AFPS validation, the Zod route schemas and the migration script.
+ * the AFPS validation and the Zod route schemas.
  *
  * Matches the `\w+` regex used by the sidecar substitution engine
  * (`runtime-pi/sidecar/helpers.ts`) and by `buildSidecarCredentials` /
@@ -153,8 +153,22 @@ export type ProviderManifest = z.infer<typeof providerManifestSchema>;
 export const CREDENTIAL_KEY_RE = /^[a-z][a-z0-9_]*$/;
 
 /**
+ * Structured error emitted by {@link validateProviderCredentialKeys}. The
+ * `field` discriminator lets callers (e.g. Zod refinements) route the issue
+ * to the right input path instead of a generic `credentials` bucket.
+ */
+export interface CredentialKeyError {
+  /** Which conceptual field failed. */
+  field: "schemaKey" | "fieldName";
+  /** Offending schema property key — only set when `field === "schemaKey"`. */
+  key?: string;
+  /** Human-readable message suitable for direct display. */
+  message: string;
+}
+
+/**
  * Validate credential-related fields on a provider manifest definition.
- * Pure function — returns human-readable error messages (empty array = valid).
+ * Pure function — returns structured errors (empty array = valid).
  *
  * Rules (api_key / basic / custom only — OAuth modes don't declare credentials):
  *  - `definition.credentials.schema.properties` keys match {@link CREDENTIAL_KEY_RE}
@@ -164,10 +178,11 @@ export const CREDENTIAL_KEY_RE = /^[a-z][a-z0-9_]*$/;
  * Called from:
  *  - {@link validateManifest} (ZIP import + package update)
  *  - `routes/providers.ts` Zod schemas (POST / PUT)
- *  - migration script
  */
-export function validateProviderCredentialKeys(manifest: Record<string, unknown>): string[] {
-  const errors: string[] = [];
+export function validateProviderCredentialKeys(
+  manifest: Record<string, unknown>,
+): CredentialKeyError[] {
+  const errors: CredentialKeyError[] = [];
   const def = (manifest.definition ?? {}) as Record<string, unknown>;
   const authMode = def.authMode as string | undefined;
 
@@ -182,26 +197,42 @@ export function validateProviderCredentialKeys(manifest: Record<string, unknown>
 
   for (const key of propertyKeys) {
     if (!CREDENTIAL_KEY_RE.test(key)) {
-      errors.push(
-        `definition.credentials.schema.properties: key "${key}" must match ${CREDENTIAL_KEY_RE} (lowercase letters, digits and underscores; must start with a letter)`,
-      );
+      errors.push({
+        field: "schemaKey",
+        key,
+        message: `key "${key}" must match ${CREDENTIAL_KEY_RE} (lowercase letters, digits and underscores; must start with a letter)`,
+      });
     }
   }
 
   const fieldName = credentials?.fieldName as string | undefined;
   if (fieldName !== undefined) {
     if (!CREDENTIAL_KEY_RE.test(fieldName)) {
-      errors.push(
-        `definition.credentials.fieldName: "${fieldName}" must match ${CREDENTIAL_KEY_RE}`,
-      );
+      errors.push({
+        field: "fieldName",
+        message: `"${fieldName}" must match ${CREDENTIAL_KEY_RE}`,
+      });
     } else if (propertyKeys.length > 0 && !propertyKeys.includes(fieldName)) {
-      errors.push(
-        `definition.credentials.fieldName: "${fieldName}" is not declared in definition.credentials.schema.properties`,
-      );
+      errors.push({
+        field: "fieldName",
+        message: `"${fieldName}" is not declared in definition.credentials.schema.properties`,
+      });
     }
   }
 
   return errors;
+}
+
+/**
+ * Format a {@link CredentialKeyError} into the dotted `path: message` shape
+ * used by {@link validateManifest}'s flat string error list.
+ */
+export function formatCredentialKeyError(error: CredentialKeyError): string {
+  const path =
+    error.field === "schemaKey"
+      ? "definition.credentials.schema.properties"
+      : "definition.credentials.fieldName";
+  return `${path}: ${error.message}`;
 }
 
 /**
@@ -312,10 +343,10 @@ export function buildProviderDefinitionFromManifest(
       : {}),
     // Credential fields (from definition.credentials)
     credentialSchema: credentials?.schema as Record<string, unknown> | undefined,
-    // Canonical shape: definition.credentials.fieldName.
-    // Back-compat fallback: a flat `definition.credentialFieldName` was briefly
-    // produced by the provider editor UI. Drop in @appstrate/core@2.12.0 once
-    // every deployed environment has run scripts/migrations/migrate-credential-field-name.ts.
+    // Canonical shape: definition.credentials.fieldName. Back-compat fallback
+    // accepts the flat `definition.credentialFieldName` briefly produced by the
+    // provider editor UI — existing rows keep working; the UI migrates them to
+    // the nested form on the next save.
     credentialFieldName:
       (credentials?.fieldName as string | undefined) ??
       (rawDef.credentialFieldName as string | undefined),
@@ -405,7 +436,7 @@ function parseWithSchema(
   if (schema === providerManifestSchema) {
     const credentialErrors = validateProviderCredentialKeys(result.data as Record<string, unknown>);
     if (credentialErrors.length > 0) {
-      return { valid: false, errors: credentialErrors };
+      return { valid: false, errors: credentialErrors.map(formatCredentialKeyError) };
     }
   }
 

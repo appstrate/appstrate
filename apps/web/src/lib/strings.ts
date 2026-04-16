@@ -26,6 +26,10 @@ export function toLiveSlug(value: string): string {
  * Underscores are preserved (unlike {@link toSlug}) because the sidecar
  * substitution regex (`\w+`) does not match hyphens. Use in credentials mode
  * of `SchemaSection` and in the provider editor field-name input.
+ *
+ * Guarantees the output is either empty or matches `CREDENTIAL_KEY_RE` — in
+ * particular, strips any leading non-letter characters (digits, underscores)
+ * so the pattern's `^[a-z]` anchor is never violated.
  */
 export function toCredentialKey(value: string): string {
   return value
@@ -33,7 +37,8 @@ export function toCredentialKey(value: string): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9_]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+    .replace(/^[^a-z]+/, "")
+    .replace(/_+$/, "");
 }
 
 /** Like toCredentialKey but keeps trailing underscores — use during typing. */
@@ -43,5 +48,5 @@ export function toLiveCredentialKey(value: string): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9_]+/g, "_")
-    .replace(/^_+/, "");
+    .replace(/^[^a-z]+/, "");
 }

@@ -12,13 +12,18 @@ export async function saveApiKeyConnection(
   orgId: string,
   applicationId: string,
 ): Promise<void> {
-  const providerCredentialId = await resolveProviderCredentialId(applicationId, provider);
+  // Fire both lookups concurrently — they hit independent tables
+  // (applicationProviderCredentials vs packages) and neither depends on the
+  // other. Avoids adding a sequential round-trip on the connect hot path.
+  const [providerCredentialId, providerDef] = await Promise.all([
+    resolveProviderCredentialId(applicationId, provider),
+    getProviderOrThrow(db, orgId, provider),
+  ]);
 
   // Store the key under the field name declared by the provider (defaults to
   // "api_key" for api_key mode). This must match the key the sidecar resolves
   // at request time via buildSidecarCredentials — otherwise {{field}} stays
   // unsubstituted in outbound headers.
-  const providerDef = await getProviderOrThrow(db, orgId, provider);
   const fieldName = getCredentialFieldName(providerDef);
 
   await saveConnection(
