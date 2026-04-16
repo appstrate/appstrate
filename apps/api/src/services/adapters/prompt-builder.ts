@@ -146,17 +146,14 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
           | undefined) ?? {};
       const varEntries = Object.entries(props);
 
-      // OAuth2/oauth1/api_key and basic all have a well-defined primary field
+      // OAuth2/oauth1/api_key/basic all have a well-defined primary field
       // (resolved by getCredentialFieldName). `custom` providers with no
       // explicit fieldName don't — fall back to listing all schema variables.
-      const explicitFieldName = provider.credentialFieldName;
       const resolvedFieldName =
-        explicitFieldName ??
-        (provider.authMode === "api_key" || provider.authMode === "basic"
+        provider.credentialFieldName ??
+        (provider.authMode !== "custom"
           ? getCredentialFieldName(provider as ProviderDefinition)
-          : provider.authMode !== "custom"
-            ? getCredentialFieldName(provider as ProviderDefinition)
-            : undefined);
+          : undefined);
 
       if (resolvedFieldName) {
         const headerName = provider.credentialHeaderName ?? "Authorization";
