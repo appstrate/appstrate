@@ -15,7 +15,7 @@ set -euo pipefail
 umask 077
 
 # ─── Constants (APPSTRATE_VERSION rewritten by publish-installer.yml) ─────────
-APPSTRATE_VERSION="${APPSTRATE_VERSION:-v1.0.0-alpha.50}"
+APPSTRATE_VERSION="${APPSTRATE_VERSION:-v1.0.0-alpha.51}"
 if [[ "$APPSTRATE_VERSION" == __* ]]; then
   echo "Error: APPSTRATE_VERSION was not set by the publish pipeline." >&2
   echo "Use: APPSTRATE_VERSION=v1.0.0 bash install.sh" >&2
@@ -340,6 +340,7 @@ PORT=$APPSTRATE_PORT
 LOG_LEVEL=info
 
 SIDECAR_POOL_SIZE=2
+RUN_ADAPTER=docker
 
 DOCKER_GID=$docker_gid
 EOF
