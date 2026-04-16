@@ -21,6 +21,7 @@ permissions:
 jobs:
   static:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -31,14 +32,19 @@ jobs:
           severity: warning
 
       - name: shfmt (format check)
+        env:
+          SHFMT_VERSION: "3.10.0"
+          SHFMT_SHA256: "1f57a384d59542f8fac5f503da1f3ea44242f46dff969569e80b524d64b71dbc"
         run: |
           curl -fsSL -o /tmp/shfmt \
-            https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64
+            "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
+          echo "${SHFMT_SHA256}  /tmp/shfmt" | sha256sum --check --strict
           chmod +x /tmp/shfmt
           /tmp/shfmt -d -i 2 -ci scripts/install.sh
 
   unit-bats:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -191,8 +197,9 @@ jobs:
           EF=/tmp/appstrate-e2e/.env
           for svc in appstrate postgres redis minio; do
             status=$(docker compose -f "$CF" --env-file "$EF" ps --format json "$svc" | head -1)
-            echo "$svc: $(echo "$status" | grep -oP '"State":"\K[^"]*' || echo "$status")"
-            echo "$status" | grep -qi "running" \
+            state=$(echo "$status" | jq -r '.State // empty' 2>/dev/null || echo "$status")
+            echo "$svc: $state"
+            echo "$status" | jq -e '.State == "running"' >/dev/null 2>&1 \
               || { echo "✗ $svc not running"; docker compose -f "$CF" --env-file "$EF" logs "$svc" --tail 20; exit 1; }
           done
           echo "✓ all services running"

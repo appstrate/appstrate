@@ -26,12 +26,24 @@ RUNTIME_TAG="${APPSTRATE_RUNTIME_TAG:-latest}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --port)         PORT="$2"; shift ;;
-    --keep)         KEEP=1 ;;
-    --no-build)     BUILD=0 ;;
-    --runtime-tag)  RUNTIME_TAG="$2"; shift ;;
-    -h|--help) sed -n '2,18p' "$0" | sed 's|^# \?||'; exit 0 ;;
-    *) echo "unknown arg: $1" >&2; exit 1 ;;
+    --port)
+      PORT="$2"
+      shift
+      ;;
+    --keep) KEEP=1 ;;
+    --no-build) BUILD=0 ;;
+    --runtime-tag)
+      RUNTIME_TAG="$2"
+      shift
+      ;;
+    -h | --help)
+      sed -n '2,18p' "$0" | sed 's|^# \?||'
+      exit 0
+      ;;
+    *)
+      echo "unknown arg: $1" >&2
+      exit 1
+      ;;
   esac
   shift
 done
@@ -40,9 +52,9 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TAG="local"
 WORKDIR="/tmp/appstrate-localtest"
 
-cyan(){ printf "\033[0;36m%s\033[0m\n" "$*"; }
-green(){ printf "\033[0;32m%s\033[0m\n" "$*"; }
-red(){ printf "\033[0;31m%s\033[0m\n" "$*" >&2; }
+cyan() { printf "\033[0;36m%s\033[0m\n" "$*"; }
+green() { printf "\033[0;32m%s\033[0m\n" "$*"; }
+red() { printf "\033[0;31m%s\033[0m\n" "$*" >&2; }
 
 cleanup_workdir() {
   if [ -f "$WORKDIR/docker-compose.yml" ]; then
@@ -54,7 +66,10 @@ cleanup_workdir() {
 cd "$REPO_ROOT"
 
 cyan "── 0. Pre-flight"
-docker info >/dev/null || { red "Docker daemon not running"; exit 1; }
+docker info >/dev/null || {
+  red "Docker daemon not running"
+  exit 1
+}
 cleanup_workdir
 
 if [ "$BUILD" -eq 0 ] && ! docker image inspect "ghcr.io/appstrate/appstrate:$TAG" >/dev/null 2>&1; then
@@ -78,19 +93,19 @@ done
 
 cyan "── 3. Running install.sh with local assets"
 RENDERED=$(mktemp)
-sed "s|__APPSTRATE_VERSION__|$TAG|g" scripts/install.sh > "$RENDERED"
+sed "s|__APPSTRATE_VERSION__|$TAG|g" scripts/install.sh >"$RENDERED"
 chmod +x "$RENDERED"
 
 APPSTRATE_DIR="$WORKDIR" \
-APPSTRATE_PORT="$PORT" \
-APPSTRATE_QUIET=1 \
-APPSTRATE_VERSION="$TAG" \
-APPSTRATE_ASSETS_DIR="$REPO_ROOT/examples/self-hosting" \
+  APPSTRATE_PORT="$PORT" \
+  APPSTRATE_QUIET=1 \
+  APPSTRATE_VERSION="$TAG" \
+  APPSTRATE_ASSETS_DIR="$REPO_ROOT/examples/self-hosting" \
   "$RENDERED"
 rm -f "$RENDERED"
 
 cyan "── 4. Probing http://localhost:$PORT (max 30s)"
-deadline=$(( $(date +%s) + 30 ))
+deadline=$(($(date +%s) + 30))
 while [ "$(date +%s)" -lt "$deadline" ]; do
   if curl -fsS --max-time 3 "http://localhost:$PORT" >/dev/null 2>&1; then
     green "✓ healthy"
@@ -106,12 +121,14 @@ curl -fsS --max-time 3 "http://localhost:$PORT" >/dev/null 2>&1 || {
 
 cyan "── 5. Re-running installer (must be noop)"
 APPSTRATE_DIR="$WORKDIR" APPSTRATE_PORT="$PORT" APPSTRATE_QUIET=1 \
-APPSTRATE_VERSION="$TAG" APPSTRATE_ASSETS_DIR="$REPO_ROOT/examples/self-hosting" \
-  bash <(sed "s|__APPSTRATE_VERSION__|$TAG|g" scripts/install.sh) > /tmp/run2.log 2>&1
+  APPSTRATE_VERSION="$TAG" APPSTRATE_ASSETS_DIR="$REPO_ROOT/examples/self-hosting" \
+  bash <(sed "s|__APPSTRATE_VERSION__|$TAG|g" scripts/install.sh) >/tmp/run2.log 2>&1
 if grep -q "Already at" /tmp/run2.log; then
   green "✓ noop confirmed"
 else
-  red "✗ noop check failed"; tail -10 /tmp/run2.log; exit 1
+  red "✗ noop check failed"
+  tail -10 /tmp/run2.log
+  exit 1
 fi
 
 if [ "$KEEP" -eq 1 ]; then

@@ -10,6 +10,10 @@ on:
         description: Tag to publish (e.g. v0.5.2)
         required: true
 
+concurrency:
+  group: publish-installer
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -40,6 +44,11 @@ jobs:
           mkdir -p out/${{ steps.ver.outputs.version }}
           sed "s|__APPSTRATE_VERSION__|${{ steps.ver.outputs.version }}|g" \
             scripts/install.sh > out/install.sh
+          # Verify all placeholders were replaced
+          if grep -q "__APPSTRATE_VERSION__" out/install.sh; then
+            echo "::error::Placeholder __APPSTRATE_VERSION__ was not fully replaced"
+            exit 1
+          fi
           cp out/install.sh out/${{ steps.ver.outputs.version }}/install.sh
           ( cd out && sha256sum install.sh > install.sh.sha256 )
           ( cd out/${{ steps.ver.outputs.version }} && sha256sum install.sh > install.sh.sha256 )

@@ -10,7 +10,8 @@ setup() {
   FIXTURES="$REPO_ROOT/test/install/fixtures"
   TMPDIR_TEST="$(mktemp -d)"
   export APPSTRATE_DIR="$TMPDIR_TEST"
-  export APPSTRATE_VERSION="v1.0.0-test"
+  export APPSTRATE_VERSION="v1.0.0"
+  export APPSTRATE_PORT=3000
   export NO_COLOR=1
   # Source script — guarded do_install will not auto-execute.
   # set +e before source so the import itself doesn't abort on non-fatal errors.
@@ -34,10 +35,12 @@ teardown() {
   [ "${#result}" -eq 64 ]   # 32 bytes = 64 hex chars
 }
 
-@test "rand_b64 produces non-empty output" {
+@test "rand_b64 produces non-empty output with expected length" {
   result=$(rand_b64 32)
   [ -n "$result" ]
   [[ "$result" != *$'\n'* ]]   # no trailing newline
+  # openssl rand -base64 32 → 44 base64 chars (ceil(32/3)*4)
+  [ "${#result}" -eq 44 ]
 }
 
 @test "rand_hex is non-deterministic" {
@@ -57,13 +60,11 @@ teardown() {
 # ─── determine_install_mode ──────────────────────────────────────────────────
 
 @test "determine_install_mode: fresh when no .env" {
-  APPSTRATE_VERSION="v1.0.0"
   determine_install_mode
   [ "$INSTALL_MODE" = "fresh" ]
 }
 
 @test "determine_install_mode: noop when .version matches target" {
-  APPSTRATE_VERSION="v1.0.0"
   echo "x" > "$APPSTRATE_DIR/.env"
   echo "v1.0.0" > "$APPSTRATE_DIR/.version"
   determine_install_mode
@@ -80,7 +81,6 @@ teardown() {
 }
 
 @test "determine_install_mode: upgrade when .env exists but .version missing" {
-  APPSTRATE_VERSION="v1.0.0"
   echo "x" > "$APPSTRATE_DIR/.env"
   determine_install_mode
   [ "$INSTALL_MODE" = "upgrade" ]
@@ -89,8 +89,6 @@ teardown() {
 # ─── generate_fresh_env ──────────────────────────────────────────────────────
 
 @test "generate_fresh_env writes all required keys" {
-  APPSTRATE_VERSION="v1.0.0"
-  APPSTRATE_PORT=3000
   generate_fresh_env
   for k in APPSTRATE_VERSION POSTGRES_PASSWORD BETTER_AUTH_SECRET \
            RUN_TOKEN_SECRET UPLOAD_SIGNING_SECRET CONNECTION_ENCRYPTION_KEY \
@@ -102,8 +100,6 @@ teardown() {
 }
 
 @test "generate_fresh_env permissions are 600" {
-  APPSTRATE_VERSION="v1.0.0"
-  APPSTRATE_PORT=3000
   generate_fresh_env
   perms=$(stat -f '%Lp' "$APPSTRATE_DIR/.env" 2>/dev/null \
        || stat -c '%a' "$APPSTRATE_DIR/.env")
@@ -111,8 +107,6 @@ teardown() {
 }
 
 @test "generate_fresh_env produces unique secrets per invocation" {
-  APPSTRATE_VERSION="v1.0.0"
-  APPSTRATE_PORT=3000
   generate_fresh_env
   s1=$(grep '^BETTER_AUTH_SECRET=' "$APPSTRATE_DIR/.env" | cut -d= -f2)
   rm "$APPSTRATE_DIR/.env"
@@ -122,11 +116,17 @@ teardown() {
 }
 
 @test "generate_fresh_env honors APPSTRATE_PORT" {
-  APPSTRATE_VERSION="v1.0.0"
   APPSTRATE_PORT=4242
   generate_fresh_env
   grep -q '^PORT=4242$' "$APPSTRATE_DIR/.env"
   grep -q '^APP_URL=http://localhost:4242$' "$APPSTRATE_DIR/.env"
+}
+
+@test "generate_fresh_env writes atomically via temp file" {
+  generate_fresh_env
+  # .env should exist, .env.tmp should not (it was moved)
+  [ -f "$APPSTRATE_DIR/.env" ]
+  [ ! -f "$APPSTRATE_DIR/.env.tmp" ]
 }
 
 # ─── merge_env (upgrade path) ────────────────────────────────────────────────
@@ -148,11 +148,13 @@ teardown() {
   cp "$FIXTURES/.env.existing" "$APPSTRATE_DIR/.env"
   cp "$FIXTURES/.env.example"  "$APPSTRATE_DIR/.env.example"
   merge_env
-  grep -q '^NEW_FEATURE_FLAG=' "$APPSTRATE_DIR/.env"
+  # NEW_FEATURE_FLAG exists in fixture .env.example but not .env.existing
+  grep -q '^NEW_FEATURE_FLAG=false$' "$APPSTRATE_DIR/.env"
 }
 
 @test "merge_env updates APPSTRATE_VERSION pin" {
   APPSTRATE_VERSION="v1.1.0"
+  APPSTRATE_IMAGE_TAG="1.1.0"
   cp "$FIXTURES/.env.existing" "$APPSTRATE_DIR/.env"
   cp "$FIXTURES/.env.example"  "$APPSTRATE_DIR/.env.example"
   merge_env
@@ -162,7 +164,7 @@ teardown() {
 
 @test "merge_env generates secret values for newly-added secret keys" {
   APPSTRATE_VERSION="v1.1.0"
-  # .env without RUN_TOKEN_SECRET, but .env.example has it
+  # .env without RUN_TOKEN_SECRET or UPLOAD_SIGNING_SECRET, but .env.example has them
   cat > "$APPSTRATE_DIR/.env" <<EOF
 APPSTRATE_VERSION=v1.0.0
 POSTGRES_PASSWORD=existing
@@ -172,9 +174,16 @@ MINIO_ROOT_PASSWORD=existing
 EOF
   cp "$FIXTURES/.env.example" "$APPSTRATE_DIR/.env.example"
   merge_env
+
+  # RUN_TOKEN_SECRET should be auto-generated (not CHANGE_ME)
   val=$(grep '^RUN_TOKEN_SECRET=' "$APPSTRATE_DIR/.env" | cut -d= -f2)
-  [ "$val" != "CHANGE_ME" ]            # not the placeholder
+  [ "$val" != "CHANGE_ME" ]
   [ "${#val}" -eq 64 ]                  # rand_hex 32 → 64 hex chars
+
+  # UPLOAD_SIGNING_SECRET should also be auto-generated
+  val2=$(grep '^UPLOAD_SIGNING_SECRET=' "$APPSTRATE_DIR/.env" | cut -d= -f2)
+  [ "$val2" != "CHANGE_ME" ]
+  [ "${#val2}" -eq 64 ]
 }
 
 # ─── port_in_use ─────────────────────────────────────────────────────────────
@@ -204,7 +213,6 @@ EOF
 
 @test "download_assets: copies from APPSTRATE_ASSETS_DIR when set" {
   INSTALL_MODE="fresh"
-  APPSTRATE_ASSETS_DIR="$FIXTURES"
   # Fixture is .env.example only — fake a docker-compose.yml in a temp dir
   src=$(mktemp -d)
   echo "fake-compose" > "$src/docker-compose.yml"
@@ -239,4 +247,29 @@ EOF
   # Re-run the constant-init logic in a subshell to avoid polluting the test env
   result=$(APPSTRATE_VERSION="v1.2.3" bash -c 'V="${APPSTRATE_VERSION#v}"; echo "$V"')
   [ "$result" = "1.2.3" ]
+}
+
+# ─── acquire_lock ────────────────────────────────────────────────────────────
+
+@test "acquire_lock creates lock dir and fails on second call" {
+  mkdir -p "$APPSTRATE_DIR"
+  acquire_lock
+  [ -d "$APPSTRATE_DIR/.install.lock" ]
+  # Second call should fail
+  run acquire_lock
+  [ "$status" -ne 0 ]
+  # Cleanup
+  rmdir "$APPSTRATE_DIR/.install.lock" 2>/dev/null || true
+}
+
+# ─── prepare_workdir ─────────────────────────────────────────────────────────
+
+@test "prepare_workdir creates dir and log with 600 permissions" {
+  prepare_workdir
+  [ -d "$APPSTRATE_DIR" ]
+  [ -n "$LOG_FILE" ]
+  [ -f "$LOG_FILE" ]
+  perms=$(stat -f '%Lp' "$LOG_FILE" 2>/dev/null \
+       || stat -c '%a' "$LOG_FILE")
+  [ "$perms" = "600" ]
 }

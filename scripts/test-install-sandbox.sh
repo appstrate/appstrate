@@ -17,19 +17,32 @@ SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/install.sh"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --shared)  MODE=shared ;;
-    --dind)    MODE=dind ;;
-    --version) VERSION="$2"; shift ;;
-    --port)    PORT="$2"; shift ;;
-    -h|--help)
+    --shared) MODE=shared ;;
+    --dind) MODE=dind ;;
+    --version)
+      VERSION="$2"
+      shift
+      ;;
+    --port)
+      PORT="$2"
+      shift
+      ;;
+    -h | --help)
       sed -n '2,11p' "$0" | sed 's|^# \?||'
-      exit 0 ;;
-    *) echo "unknown arg: $1" >&2; exit 1 ;;
+      exit 0
+      ;;
+    *)
+      echo "unknown arg: $1" >&2
+      exit 1
+      ;;
   esac
   shift
 done
 
-[ -f "$SCRIPT_PATH" ] || { echo "install.sh not found at $SCRIPT_PATH" >&2; exit 1; }
+[ -f "$SCRIPT_PATH" ] || {
+  echo "install.sh not found at $SCRIPT_PATH" >&2
+  exit 1
+}
 
 # Validate version format — $VERSION is interpolated into sed replacement strings
 if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$ ]] &&
