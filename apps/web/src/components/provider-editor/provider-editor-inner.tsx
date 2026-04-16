@@ -26,11 +26,11 @@ import { MetadataSection, type MetadataState } from "../agent-editor/metadata-se
 import { SchemaSection, type SchemaField } from "../agent-editor/schema-section";
 import {
   schemaToFields,
-  fieldsToSchema,
   manifestToMetadata,
   metadataToManifestPatch,
   getManifestName,
 } from "../agent-editor/utils";
+import { writeCredentialsToDef, patchCredentialsInDef, migrateLegacyFieldName } from "./utils";
 import { SectionCard } from "../section-card";
 import { EditorShell } from "../editor-shell";
 import { ContentEditor } from "../package-editor/content-editor";
@@ -102,50 +102,6 @@ function makeDefaultCredentialFields(mode: CredentialMode): SchemaField[] {
     case "custom":
       return [];
   }
-}
-
-/** Return a new definition with `credentials` written from fields, or removed if empty. */
-function writeCredentialsToDef(
-  def: Record<string, unknown>,
-  fields: SchemaField[],
-): Record<string, unknown> {
-  const next: Record<string, unknown> = { ...def };
-  const wrapper = fieldsToSchema(fields, "credentials");
-  if (wrapper) {
-    const existing = (def.credentials ?? {}) as Record<string, unknown>;
-    next.credentials = { ...existing, schema: wrapper.schema };
-  } else {
-    delete next.credentials;
-  }
-  return next;
-}
-
-/** Patch `definition.credentials` (canonical nested shape). */
-function patchCredentialsInDef(
-  def: Record<string, unknown>,
-  patch: Record<string, unknown>,
-): Record<string, unknown> {
-  const existing = (def.credentials ?? {}) as Record<string, unknown>;
-  return { ...def, credentials: { ...existing, ...patch } };
-}
-
-/**
- * Migrate legacy flat `definition.credentialFieldName` to canonical nested
- * `definition.credentials.fieldName` on load. Produces a manifest in the
- * canonical shape so saves don't re-introduce the flat form.
- */
-function migrateLegacyFieldName(def: Record<string, unknown>): Record<string, unknown> {
-  if (!("credentialFieldName" in def)) return def;
-  const flat = def.credentialFieldName as string | undefined;
-  const next: Record<string, unknown> = { ...def };
-  delete next.credentialFieldName;
-  if (flat) {
-    const existing = (next.credentials ?? {}) as Record<string, unknown>;
-    if (existing.fieldName === undefined) {
-      next.credentials = { ...existing, fieldName: flat };
-    }
-  }
-  return next;
 }
 
 /**

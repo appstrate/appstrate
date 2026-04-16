@@ -314,8 +314,8 @@ export function buildProviderDefinitionFromManifest(
     credentialSchema: credentials?.schema as Record<string, unknown> | undefined,
     // Canonical shape: definition.credentials.fieldName.
     // Back-compat fallback: a flat `definition.credentialFieldName` was briefly
-    // produced by the provider editor UI. Remove once the migration script has
-    // landed in every deployed environment.
+    // produced by the provider editor UI. Drop in @appstrate/core@2.12.0 once
+    // every deployed environment has run scripts/migrations/migrate-credential-field-name.ts.
     credentialFieldName:
       (credentials?.fieldName as string | undefined) ??
       (rawDef.credentialFieldName as string | undefined),
