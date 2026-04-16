@@ -103,6 +103,21 @@ describe("connection-manager", () => {
         id: "@system/test-provider",
         type: "provider",
         source: "system",
+        draftManifest: {
+          name: "@system/test-provider",
+          version: "1.0.0",
+          type: "provider",
+          definition: {
+            authMode: "api_key",
+            credentials: {
+              schema: {
+                type: "object",
+                properties: { api_key: { type: "string" } },
+              },
+              fieldName: "api_key",
+            },
+          },
+        },
       });
       await seedProviderCredentials({ applicationId, providerId: "@system/test-provider" });
       await saveApiKeyConnection(
@@ -136,6 +151,21 @@ describe("connection-manager", () => {
         id: "@system/test-provider",
         type: "provider",
         source: "system",
+        draftManifest: {
+          name: "@system/test-provider",
+          version: "1.0.0",
+          type: "provider",
+          definition: {
+            authMode: "api_key",
+            credentials: {
+              schema: {
+                type: "object",
+                properties: { api_key: { type: "string" } },
+              },
+              fieldName: "api_key",
+            },
+          },
+        },
       });
       await seedProviderCredentials({ applicationId, providerId: "@system/test-provider" });
       await saveApiKeyConnection(

@@ -7,6 +7,9 @@ import {
   validateToolSource,
   extractManifestMetadata,
   getDefaultAdminCredentialSchema,
+  validateProviderCredentialKeys,
+  CREDENTIAL_KEY_RE,
+  buildProviderDefinitionFromManifest,
 } from "../src/validation.ts";
 import type { Manifest } from "../src/validation.ts";
 
@@ -529,9 +532,10 @@ describe("validateManifest", () => {
         credentials: {
           schema: {
             type: "object",
-            properties: { apiKey: { type: "string", description: "API Key" } },
-            required: ["apiKey"],
+            properties: { api_key: { type: "string", description: "API Key" } },
+            required: ["api_key"],
           },
+          fieldName: "api_key",
         },
         credentialHeaderName: "Authorization",
         credentialHeaderPrefix: "Bearer ",
@@ -573,6 +577,177 @@ describe("validateManifest", () => {
 
     const cfg = m.providersConfiguration as Record<string, Record<string, unknown>>;
     expect(cfg["@test/google"]!.customConfigField).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// validateProviderCredentialKeys
+// ─────────────────────────────────────────────
+
+describe("validateProviderCredentialKeys", () => {
+  test("oauth2 / oauth1 are not constrained (no credentials block)", () => {
+    expect(validateProviderCredentialKeys({ definition: { authMode: "oauth2" } })).toEqual([]);
+    expect(validateProviderCredentialKeys({ definition: { authMode: "oauth1" } })).toEqual([]);
+  });
+
+  test("canonical api_key manifest passes", () => {
+    const errors = validateProviderCredentialKeys({
+      definition: {
+        authMode: "api_key",
+        credentials: {
+          schema: { type: "object", properties: { api_key: { type: "string" } } },
+          fieldName: "api_key",
+        },
+      },
+    });
+    expect(errors).toEqual([]);
+  });
+
+  test("hyphen in schema property key is rejected", () => {
+    const errors = validateProviderCredentialKeys({
+      definition: {
+        authMode: "api_key",
+        credentials: {
+          schema: { type: "object", properties: { "api-key": { type: "string" } } },
+          fieldName: "api-key",
+        },
+      },
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    const schemaErr = errors.find((e) => e.field === "schemaKey");
+    expect(schemaErr?.key).toBe("api-key");
+    expect(schemaErr?.message).toContain("api-key");
+  });
+
+  test("fieldName not matching schema properties is rejected", () => {
+    const errors = validateProviderCredentialKeys({
+      definition: {
+        authMode: "api_key",
+        credentials: {
+          schema: { type: "object", properties: { api_key: { type: "string" } } },
+          fieldName: "token",
+        },
+      },
+    });
+    const fieldErr = errors.find((e) => e.field === "fieldName");
+    expect(fieldErr?.message).toContain("not declared");
+  });
+
+  test("fieldName with illegal characters is rejected", () => {
+    const errors = validateProviderCredentialKeys({
+      definition: {
+        authMode: "api_key",
+        credentials: {
+          schema: { type: "object", properties: {} },
+          fieldName: "Api-Key",
+        },
+      },
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]?.field).toBe("fieldName");
+  });
+
+  test("custom authMode with no credentials block passes (no schema to validate)", () => {
+    expect(validateProviderCredentialKeys({ definition: { authMode: "custom" } })).toEqual([]);
+  });
+
+  test("custom authMode with empty schema.properties and no fieldName passes", () => {
+    const errors = validateProviderCredentialKeys({
+      definition: {
+        authMode: "custom",
+        credentials: { schema: { type: "object", properties: {} } },
+      },
+    });
+    expect(errors).toEqual([]);
+  });
+
+  test("custom authMode with empty schema.properties accepts any canonical fieldName", () => {
+    // When no properties are declared, membership check is skipped — the
+    // fieldName only needs to satisfy the pattern. Pins intentional leniency.
+    const errors = validateProviderCredentialKeys({
+      definition: {
+        authMode: "custom",
+        credentials: {
+          schema: { type: "object", properties: {} },
+          fieldName: "any_key",
+        },
+      },
+    });
+    expect(errors).toEqual([]);
+  });
+
+  test("custom authMode still rejects non-canonical fieldName even with empty schema", () => {
+    const errors = validateProviderCredentialKeys({
+      definition: {
+        authMode: "custom",
+        credentials: {
+          schema: { type: "object", properties: {} },
+          fieldName: "Api-Key",
+        },
+      },
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]?.field).toBe("fieldName");
+  });
+
+  test("validateManifest propagates credential errors for provider manifests", () => {
+    const result = validateManifest(
+      validProviderManifest({
+        definition: {
+          authMode: "api_key",
+          credentials: {
+            schema: { type: "object", properties: { "api-key": { type: "string" } } },
+          },
+        },
+      }),
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  test("CREDENTIAL_KEY_RE sanity", () => {
+    expect(CREDENTIAL_KEY_RE.test("api_key")).toBe(true);
+    expect(CREDENTIAL_KEY_RE.test("token")).toBe(true);
+    expect(CREDENTIAL_KEY_RE.test("api-key")).toBe(false);
+    expect(CREDENTIAL_KEY_RE.test("Api_Key")).toBe(false);
+    expect(CREDENTIAL_KEY_RE.test("_leading")).toBe(false);
+    expect(CREDENTIAL_KEY_RE.test("1leading")).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────
+// buildProviderDefinitionFromManifest — compat read path
+// ─────────────────────────────────────────────
+
+describe("buildProviderDefinitionFromManifest", () => {
+  test("reads nested credentials.fieldName (canonical)", () => {
+    const resolved = buildProviderDefinitionFromManifest("@test/p", {
+      definition: {
+        authMode: "api_key",
+        credentials: { fieldName: "token" },
+      },
+    });
+    expect(resolved.credentialFieldName).toBe("token");
+  });
+
+  test("falls back to legacy flat definition.credentialFieldName", () => {
+    const resolved = buildProviderDefinitionFromManifest("@test/p", {
+      definition: {
+        authMode: "api_key",
+        credentialFieldName: "legacy_key",
+      },
+    });
+    expect(resolved.credentialFieldName).toBe("legacy_key");
+  });
+
+  test("nested canonical wins over legacy flat when both present", () => {
+    const resolved = buildProviderDefinitionFromManifest("@test/p", {
+      definition: {
+        authMode: "api_key",
+        credentials: { fieldName: "canonical" },
+        credentialFieldName: "legacy",
+      },
+    });
+    expect(resolved.credentialFieldName).toBe("canonical");
   });
 });
 

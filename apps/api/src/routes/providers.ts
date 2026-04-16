@@ -19,7 +19,10 @@ import {
   parseBody,
   systemEntityForbidden,
 } from "../lib/errors.ts";
-import { getDefaultAdminCredentialSchema } from "@appstrate/core/validation";
+import {
+  getDefaultAdminCredentialSchema,
+  validateProviderCredentialKeys,
+} from "@appstrate/core/validation";
 import { getProviderCredentialId } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import { packageToProviderConfig } from "../lib/provider-config.ts";
@@ -111,7 +114,7 @@ function buildProviderDefinition(data: {
   return definition;
 }
 
-export const createProviderSchema = z.object({
+const baseProviderSchema = z.object({
   id: z.string().min(1, "id is required"),
   displayName: z.string().min(1, "displayName is required"),
   version: z.string().optional(),
@@ -157,7 +160,44 @@ export const createProviderSchema = z.object({
     .optional(),
 });
 
-export const updateProviderSchema = createProviderSchema.omit({ id: true });
+/**
+ * Cross-field refinement: credential schema keys and fieldName must match the
+ * canonical {@link CREDENTIAL_KEY_RE} pattern and fieldName must reference an
+ * existing property. Rule is shared with {@link validateManifest} so ZIP
+ * imports and direct API writes enforce the exact same contract.
+ */
+interface CredentialRefinementInput {
+  authMode: string;
+  credentialSchema?: Record<string, unknown>;
+  credentialFieldName?: string;
+}
+
+const credentialRefinement = (data: CredentialRefinementInput, ctx: z.RefinementCtx) => {
+  const errors = validateProviderCredentialKeys({
+    definition: {
+      authMode: data.authMode,
+      credentials: {
+        schema: data.credentialSchema,
+        fieldName: data.credentialFieldName,
+      },
+    },
+  });
+  for (const err of errors) {
+    const path: (string | number)[] =
+      err.field === "fieldName"
+        ? ["credentialFieldName"]
+        : err.key !== undefined
+          ? ["credentialSchema", "properties", err.key]
+          : ["credentialSchema"];
+    ctx.addIssue({ code: "custom", path, message: err.message });
+  }
+};
+
+export const createProviderSchema = baseProviderSchema.superRefine(credentialRefinement);
+
+export const updateProviderSchema = baseProviderSchema
+  .omit({ id: true })
+  .superRefine(credentialRefinement);
 
 export const configureCredentialsSchema = z.object({
   credentials: z.record(z.string(), z.string().min(1)).optional(),

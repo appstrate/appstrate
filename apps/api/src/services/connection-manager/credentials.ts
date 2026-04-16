@@ -2,7 +2,7 @@
 
 import { db } from "@appstrate/db/client";
 import { logger } from "../../lib/logger.ts";
-import { saveConnection } from "@appstrate/connect";
+import { getCredentialFieldName, getProviderOrThrow, saveConnection } from "@appstrate/connect";
 import { resolveProviderCredentialId } from "./helpers.ts";
 
 export async function saveApiKeyConnection(
@@ -12,18 +12,30 @@ export async function saveApiKeyConnection(
   orgId: string,
   applicationId: string,
 ): Promise<void> {
-  const providerCredentialId = await resolveProviderCredentialId(applicationId, provider);
+  // Fire both lookups concurrently — they hit independent tables
+  // (applicationProviderCredentials vs packages) and neither depends on the
+  // other. Avoids adding a sequential round-trip on the connect hot path.
+  const [providerCredentialId, providerDef] = await Promise.all([
+    resolveProviderCredentialId(applicationId, provider),
+    getProviderOrThrow(db, orgId, provider),
+  ]);
+
+  // Store the key under the field name declared by the provider (defaults to
+  // "api_key" for api_key mode). This must match the key the sidecar resolves
+  // at request time via buildSidecarCredentials — otherwise {{field}} stays
+  // unsubstituted in outbound headers.
+  const fieldName = getCredentialFieldName(providerDef);
 
   await saveConnection(
     db,
     profileId,
     provider,
     orgId,
-    { api_key: apiKey },
+    { [fieldName]: apiKey },
     { providerCredentialId },
   );
 
-  logger.info("API key connection saved", { provider, profileId, orgId });
+  logger.info("API key connection saved", { provider, profileId, orgId, fieldName });
 }
 
 export async function saveCredentialsConnection(

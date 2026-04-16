@@ -18,3 +18,35 @@ export function toLiveSlug(value: string): string {
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/^-+/, "");
 }
+
+/**
+ * Canonicalize a provider credential schema key — matches the contract in
+ * `@appstrate/core/validation#CREDENTIAL_KEY_RE` (`^[a-z][a-z0-9_]*$`).
+ *
+ * Underscores are preserved (unlike {@link toSlug}) because the sidecar
+ * substitution regex (`\w+`) does not match hyphens. Use in credentials mode
+ * of `SchemaSection` and in the provider editor field-name input.
+ *
+ * Guarantees the output is either empty or matches `CREDENTIAL_KEY_RE` — in
+ * particular, strips any leading non-letter characters (digits, underscores)
+ * so the pattern's `^[a-z]` anchor is never violated.
+ */
+export function toCredentialKey(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^[^a-z]+/, "")
+    .replace(/_+$/, "");
+}
+
+/** Like toCredentialKey but keeps trailing underscores — use during typing. */
+export function toLiveCredentialKey(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^[^a-z]+/, "");
+}

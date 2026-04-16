@@ -485,6 +485,95 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     expect(prompt).toContain("API Key");
     expect(prompt).toContain("Secret Token");
   });
+
+  it("emits the Auth line alongside extra vars for api_key providers with a credentialSchema", () => {
+    // Regression: previously the `if (credentialSchema)` branch omitted the
+    // Auth line entirely for api_key providers that declared a schema (which
+    // the provider editor does by default), leaving the agent without any
+    // header/prefix hint.
+    const ctx = baseContext({
+      tokens: { "@test/fathom": "tok" },
+      providers: [
+        {
+          id: "@test/fathom",
+          displayName: "Fathom",
+          authMode: "api_key",
+          credentialFieldName: "api_key",
+          credentialHeaderName: "X-Api-Key",
+          credentialHeaderPrefix: "",
+          credentialSchema: {
+            properties: { api_key: { description: "API key" } },
+          },
+          authorizedUris: ["https://api.fathom.ai/*"],
+        },
+      ],
+    });
+
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("X-Api-Key: {{api_key}}");
+    // The primary var does NOT appear in `Other credential vars` (deduplicated)
+    expect(prompt).not.toContain("Other credential vars");
+  });
+
+  it("emits the Auth line for custom providers with an explicit credentialFieldName", () => {
+    // `custom` authMode has no default primary field, but the Auth header is
+    // still meaningful when the manifest explicitly declares one. Extra schema
+    // vars are listed separately for the agent to reference.
+    const ctx = baseContext({
+      tokens: { "@test/multi": "tok" },
+      providers: [
+        {
+          id: "@test/multi",
+          displayName: "Multi-Cred",
+          authMode: "custom",
+          credentialFieldName: "token",
+          credentialHeaderName: "X-Foo",
+          credentialHeaderPrefix: "Bearer ",
+          credentialSchema: {
+            properties: {
+              token: { description: "Primary bearer token" },
+              region: { description: "Region code" },
+            },
+          },
+          authorizedUris: ["https://api.multi.example/*"],
+        },
+      ],
+    });
+
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("X-Foo: Bearer {{token}}");
+    expect(prompt).toContain("Other credential vars");
+    expect(prompt).toContain("{{region}}");
+    expect(prompt).toContain("Region code");
+  });
+
+  it("lists all schema vars (no Auth line) for custom providers with no credentialFieldName", () => {
+    // Fallback branch: custom provider with a schema but no primary field —
+    // the agent sees every declared variable, no Auth hint.
+    const ctx = baseContext({
+      tokens: { "@test/bare": "tok" },
+      providers: [
+        {
+          id: "@test/bare",
+          displayName: "Bare Custom",
+          authMode: "custom",
+          credentialSchema: {
+            properties: {
+              user: { description: "Username" },
+              pass: { description: "Password" },
+            },
+          },
+          authorizedUris: ["https://api.bare.example/*"],
+        },
+      ],
+    });
+
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).not.toContain("Auth:");
+    expect(prompt).toContain("Credentials:");
+    expect(prompt).toContain("{{user}}");
+    expect(prompt).toContain("{{pass}}");
+  });
 });
 
 // ─── Documents/files ────────────────────────────────────────
