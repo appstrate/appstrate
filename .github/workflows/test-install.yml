@@ -84,7 +84,7 @@ jobs:
                 sleep 1
               done
               docker info >/dev/null || { tail -50 /var/log/dockerd.log; exit 1; }
-              apk add --no-cache bash curl openssl >/dev/null
+              apk add --no-cache bash curl openssl lsof >/dev/null
 
               echo "── 1. First install (fresh) ──"
               bash /install.sh

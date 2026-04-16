@@ -170,9 +170,9 @@ port_in_use() {
     lsof -iTCP:"$p" -sTCP:LISTEN -Pn >/dev/null 2>&1
   elif command_exists ss; then
     ss -lnt "sport = :$p" 2>/dev/null | grep -q LISTEN
-  elif command_exists nc; then
-    nc -z 127.0.0.1 "$p" >/dev/null 2>&1
   else
+    # Busybox nc -z is unreliable — skip nc entirely.
+    # If neither lsof nor ss are available, assume port is free.
     return 1
   fi
 }
