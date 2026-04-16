@@ -353,31 +353,53 @@ jobs:
           cp ${{ github.workspace }}/examples/self-hosting/.env.example /tmp/broken-assets/.env.example
 
           # Trigger an upgrade by pinning to a new version (any non-"local" value).
+          # `set -o pipefail` ensures exit_code picks up install.sh's status
+          # rather than tee's (which always succeeds). PIPESTATUS[0] is also
+          # captured as a belt-and-suspenders check.
           set +e
+          set -o pipefail
           APPSTRATE_DIR=/tmp/appstrate-e2e \
           APPSTRATE_PORT=3000 \
           APPSTRATE_QUIET=1 \
           APPSTRATE_VERSION=v9.9.9 \
           APPSTRATE_ASSETS_DIR=/tmp/broken-assets \
             bash /tmp/install.sh 2>&1 | tee /tmp/run3.log
-          exit_code=$?
+          exit_code=${PIPESTATUS[0]}
+          set +o pipefail
           set -e
+
+          # Dump install log on any failure to help diagnose rollback issues.
+          dump_install_log() {
+            echo "── /tmp/run3.log ──"
+            cat /tmp/run3.log || true
+            echo "── install.sh log files ──"
+            for f in /tmp/appstrate-e2e/install-*.log; do
+              [ -f "$f" ] || continue
+              echo "── $f ──"
+              cat "$f"
+            done
+            echo "── docker ps -a ──"
+            docker ps -a || true
+            echo "── backup files ──"
+            ls -la /tmp/appstrate-e2e/ || true
+          }
 
           # Installer must exit non-zero on the botched upgrade
           if [ "$exit_code" -eq 0 ]; then
             echo "✗ installer exited 0, expected non-zero"
+            dump_install_log
             exit 1
           fi
 
           # Rollback path must have executed
           if ! grep -q "Rolling back to" /tmp/run3.log; then
             echo "✗ rollback did not trigger"
-            cat /tmp/run3.log
+            dump_install_log
             exit 1
           fi
           if ! grep -q "rolled back to" /tmp/run3.log; then
             echo "✗ rollback did not complete"
-            cat /tmp/run3.log
+            dump_install_log
             exit 1
           fi
           echo "✓ rollback executed"
