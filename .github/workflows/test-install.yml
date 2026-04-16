@@ -65,13 +65,15 @@ jobs:
             scripts/install.sh > /tmp/install.sh
           chmod +x /tmp/install.sh
 
+      # This script tests things that REQUIRE Docker (can't be covered by BATS):
+      # prereq detection, GID probe, compose config validation, env generation
+      # with real Docker socket. Mode detection + secret logic are in BATS.
       - name: Write validation script
         run: |
           cat > /tmp/dind-test.sh <<'SCRIPT'
           #!/usr/bin/env bash
           set -euo pipefail
 
-          echo "── 1. Prereq detection ──"
           export APPSTRATE_DIR=/root/.appstrate
           export APPSTRATE_QUIET=1
           export APPSTRATE_PORT=3000
@@ -83,53 +85,26 @@ jobs:
           set +e
           trap - ERR
 
+          echo "── 1. Prereq detection (Docker, Compose, arch) ──"
           detect_environment
           echo "✓ prereqs detected"
 
-          echo "── 2. Workdir + env generation ──"
+          echo "── 2. Docker GID probe ──"
+          gid=$(detect_docker_gid)
+          [ -n "$gid" ] || { echo "✗ empty GID"; exit 1; }
+          echo "✓ Docker socket GID: $gid"
+
+          echo "── 3. Full env generation ──"
           prepare_workdir
           determine_install_mode
-          [ "$INSTALL_MODE" = "fresh" ] || { echo "✗ expected fresh, got $INSTALL_MODE"; exit 1; }
           download_assets
           handle_env_file
-          echo "✓ env generated"
-
-          echo "── 3. Validate generated .env ──"
-          for key in POSTGRES_PASSWORD BETTER_AUTH_SECRET RUN_TOKEN_SECRET \
-                     CONNECTION_ENCRYPTION_KEY MINIO_ROOT_PASSWORD UPLOAD_SIGNING_SECRET \
-                     APP_URL PORT DOCKER_GID APPSTRATE_VERSION; do
-            grep -q "^${key}=" /root/.appstrate/.env || { echo "✗ missing $key"; exit 1; }
-          done
-          for key in POSTGRES_PASSWORD BETTER_AUTH_SECRET MINIO_ROOT_PASSWORD; do
-            val=$(grep "^${key}=" /root/.appstrate/.env | cut -d= -f2)
-            [ "$val" != "CHANGE_ME" ] || { echo "✗ $key still CHANGE_ME"; exit 1; }
-          done
-          perms=$(stat -c "%a" /root/.appstrate/.env)
-          [ "$perms" = "600" ] || { echo "✗ .env perms: $perms (expected 600)"; exit 1; }
-          echo "✓ all secrets generated, correct perms"
+          echo "✓ env + assets generated"
 
           echo "── 4. Compose config validation ──"
           docker compose -f /root/.appstrate/docker-compose.yml \
             --env-file /root/.appstrate/.env config --quiet
-          echo "✓ compose config valid"
-
-          echo "── 5. Noop detection ──"
-          echo "latest" > /root/.appstrate/.version
-          determine_install_mode
-          [ "$INSTALL_MODE" = "noop" ] || { echo "✗ expected noop, got $INSTALL_MODE"; exit 1; }
-          echo "✓ noop mode detected"
-
-          echo "── 6. Upgrade detection ──"
-          echo "v0.1.0" > /root/.appstrate/.version
-          APPSTRATE_VERSION=latest
-          determine_install_mode
-          [ "$INSTALL_MODE" = "upgrade" ] || { echo "✗ expected upgrade, got $INSTALL_MODE"; exit 1; }
-          echo "✓ upgrade mode detected"
-
-          echo "── 7. Docker GID probe ──"
-          gid=$(detect_docker_gid)
-          [ -n "$gid" ] || { echo "✗ empty GID"; exit 1; }
-          echo "✓ Docker socket GID: $gid"
+          echo "✓ compose config valid (all vars resolved)"
 
           echo "── All checks passed ──"
           SCRIPT

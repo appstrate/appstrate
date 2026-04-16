@@ -10,6 +10,7 @@ setup() {
   FIXTURES="$REPO_ROOT/test/install/fixtures"
   TMPDIR_TEST="$(mktemp -d)"
   export APPSTRATE_DIR="$TMPDIR_TEST"
+  export APPSTRATE_VERSION="v1.0.0-test"
   export NO_COLOR=1
   # Source script — guarded do_install will not auto-execute
   set +e
@@ -90,8 +91,8 @@ teardown() {
   APPSTRATE_PORT=3000
   generate_fresh_env
   for k in APPSTRATE_VERSION POSTGRES_PASSWORD BETTER_AUTH_SECRET \
-           RUN_TOKEN_SECRET CONNECTION_ENCRYPTION_KEY MINIO_ROOT_PASSWORD \
-           S3_BUCKET APP_URL PORT; do
+           RUN_TOKEN_SECRET UPLOAD_SIGNING_SECRET CONNECTION_ENCRYPTION_KEY \
+           MINIO_ROOT_PASSWORD S3_BUCKET APP_URL PORT DOCKER_GID; do
     grep -q "^${k}=" "$APPSTRATE_DIR/.env" || {
       echo "missing key: $k" >&2; cat "$APPSTRATE_DIR/.env" >&2; return 1
     }

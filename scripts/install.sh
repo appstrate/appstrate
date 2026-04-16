@@ -2,7 +2,7 @@
 #
 # Appstrate installer — get.appstrate.dev
 #
-#   curl -fsSL https://get.appstrate.dev | sh
+#   curl -fsSL https://get.appstrate.dev | bash
 #
 # Env overrides:
 #   APPSTRATE_VERSION       Pin a version (default: bundled stable)
@@ -13,6 +13,11 @@ set -euo pipefail
 
 # ─── Constants (APPSTRATE_VERSION rewritten by publish-installer.yml) ─────────
 APPSTRATE_VERSION="${APPSTRATE_VERSION:-__APPSTRATE_VERSION__}"
+if [[ "$APPSTRATE_VERSION" == __* ]]; then
+  echo "Error: APPSTRATE_VERSION was not set by the publish pipeline." >&2
+  echo "Use: APPSTRATE_VERSION=v1.0.0 bash install.sh" >&2
+  exit 1
+fi
 # Docker image tags are published without the 'v' prefix (semver pattern in
 # release workflow), but git refs / asset URLs use 'v'. Keep both forms.
 APPSTRATE_GIT_REF="$APPSTRATE_VERSION"
@@ -73,6 +78,11 @@ on_error() {
   exit 1
 }
 trap 'on_error $LINENO' ERR
+
+cleanup_tmp() {
+  [ -n "${APPSTRATE_DIR:-}" ] && rm -rf "$APPSTRATE_DIR/.tmp" 2>/dev/null || true
+}
+trap cleanup_tmp EXIT
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
@@ -181,6 +191,7 @@ prepare_workdir() {
   mkdir -p "$APPSTRATE_DIR"
   LOG_FILE="$APPSTRATE_DIR/install-$(date +%Y%m%d-%H%M%S).log"
   : >"$LOG_FILE"
+  chmod 600 "$LOG_FILE"
   log "Working directory: $APPSTRATE_DIR"
 }
 
@@ -223,7 +234,7 @@ download_assets() {
   fi
   mv "$tmpdir/docker-compose.yml" "$APPSTRATE_DIR/docker-compose.yml"
   mv "$tmpdir/.env.example" "$APPSTRATE_DIR/.env.example"
-  rmdir "$tmpdir" 2>/dev/null || true
+  rm -rf "$tmpdir" 2>/dev/null || true
 }
 
 curl_fetch() {
@@ -241,10 +252,11 @@ handle_env_file() {
       ;;
     upgrade)
       log "Merging new .env keys (preserving existing values)"
-      merge_env
       local ts
       ts=$(date +%Y%m%d-%H%M%S)
       cp "$APPSTRATE_DIR/.env" "$APPSTRATE_DIR/.env.bak-$ts"
+      merge_env
+      chmod 600 "$APPSTRATE_DIR/.env"
       ;;
     noop) : ;;
   esac
@@ -398,7 +410,7 @@ Manage:
   docker compose logs -f         # follow logs
   docker compose down            # stop (keeps data)
   docker compose down -v         # stop + delete all data
-  curl -fsSL get.appstrate.dev | sh   # upgrade (re-run installer)
+  curl -fsSL get.appstrate.dev | bash   # upgrade (re-run installer)
 
 Docs: https://appstrate.dev/docs
 Logs: $LOG_FILE
