@@ -67,8 +67,19 @@ jobs:
         run: |
           mkdir -p pages
           cd pages
-          git init -b installer-pages
-          git remote add origin "https://github.com/${{ github.repository }}.git"
+          # actions/checkout may have partially initialized .git and origin
+          # before failing — make both steps idempotent.
+          if [ ! -d .git ]; then
+            git init -b installer-pages
+          else
+            git checkout -B installer-pages 2>/dev/null || true
+          fi
+          REPO_URL="https://github.com/${{ github.repository }}.git"
+          if git remote get-url origin >/dev/null 2>&1; then
+            git remote set-url origin "$REPO_URL"
+          else
+            git remote add origin "$REPO_URL"
+          fi
 
       - name: Sync rendered files
         run: |
