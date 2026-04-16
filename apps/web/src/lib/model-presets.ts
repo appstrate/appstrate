@@ -152,8 +152,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "mistral",
     label: "Mistral",
-    api: "openai-completions",
-    baseUrl: "https://api.mistral.ai/v1",
+    api: "mistral-conversations",
+    baseUrl: "https://api.mistral.ai",
     models: [
       {
         modelId: "codestral-latest",
@@ -196,7 +196,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: "openai",
     label: "OpenAI",
-    api: "openai-completions",
+    api: "openai-responses",
     baseUrl: "https://api.openai.com/v1",
     models: [
       {
@@ -279,6 +279,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 export const API_TYPES = [
   { value: "openai-completions", label: "OpenAI / Compatible" },
   { value: "openai-responses", label: "OpenAI Responses" },
+  { value: "mistral-conversations", label: "Mistral" },
   { value: "anthropic-messages", label: "Anthropic" },
   { value: "google-generative-ai", label: "Google AI" },
   { value: "google-vertex", label: "Google Vertex AI" },
