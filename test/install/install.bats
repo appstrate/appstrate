@@ -13,11 +13,13 @@ setup() {
   export APPSTRATE_VERSION="v1.0.0-test"
   export NO_COLOR=1
   # Source script — guarded do_install will not auto-execute.
-  # set +e so the sourced script's `set -euo pipefail` doesn't propagate failures.
+  # set +e before source so the import itself doesn't abort on non-fatal errors.
   set +e
   # shellcheck disable=SC1091
   source "$REPO_ROOT/scripts/install.sh"
-  # Disable script's exit-on-error trap — we test functions in isolation
+  # The sourced script runs `set -euo pipefail` which re-enables -e in this shell.
+  # Disable it again + clear the ERR trap so tests can assert on failures.
+  set +eo pipefail
   trap - ERR
 }
 

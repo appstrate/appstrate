@@ -82,6 +82,7 @@ jobs:
 
           set +e
           source /install.sh
+          set +eo pipefail
           trap - ERR
 
           echo "── 1. Prereq detection (Docker, Compose, arch) ──"
