@@ -41,6 +41,13 @@ No key management required — trust is anchored in GitHub's identity system.
 
 ### Option 2 — Minisign offline signature
 
+Current signing key:
+
+- Fingerprint: `1EF2FF084226C4FA`
+- Public key: `RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e`
+
+The pubkey is committed at [`scripts/appstrate.pub`](../../scripts/appstrate.pub) for cross-channel verification — if you don't trust `get.appstrate.dev`, fetch it from the repo instead.
+
 Verified one-liner (wraps download → verify → run):
 
 ```bash
@@ -59,34 +66,26 @@ less install.sh                # optional: read before running
 bash install.sh
 ```
 
-`verify.sh` and `appstrate.pub` only appear on `get.appstrate.dev` once the signing keypair is provisioned (see **Maintainer: signing setup** below). Until then, use SLSA provenance or rely on TLS.
+### Maintainer: key rotation
 
-### Maintainer: signing setup
+The signing keypair for `1EF2FF084226C4FA` is already provisioned. Rotate only if the private key is compromised or as a periodic hygiene measure. Procedure:
 
-One-time bootstrap to enable minisign signatures on releases:
-
-1. **Generate a keypair** (offline, on a trusted machine):
+1. **Generate a new keypair** (offline, on a trusted machine):
 
    ```bash
    minisign -G -p appstrate.pub -s appstrate.key
    ```
 
-   Choose a strong passphrase. Back up `appstrate.key` in a password manager or hardware token — losing it forces a key rotation.
+   Choose a strong passphrase. Back up `appstrate.key` in a password manager or hardware token.
 
-2. **Commit the public key** to the repo:
+2. **Single atomic PR** — updating the pubkey and the GitHub secrets non-atomically breaks signature verification between the two actions:
+   - Commit `appstrate.pub` to `scripts/appstrate.pub` (replacing the previous content)
+   - Update the `MINISIGN_SECRET_KEY` and `MINISIGN_PASSWORD` repository secrets in the `appstrate/appstrate` repo settings
+   - Update the fingerprint and public key value in this document
 
-   ```bash
-   cp appstrate.pub appstrate/scripts/appstrate.pub
-   git add scripts/appstrate.pub && git commit -m "chore: add installer signing pubkey"
-   ```
+3. **Cut a new tag** — `publish-installer.yml` re-signs `install.sh` with the new key and publishes `install.sh.minisig` + `appstrate.pub`.
 
-3. **Store the private key + passphrase** as GitHub Actions secrets on the `appstrate/appstrate` repo:
-   - `MINISIGN_SECRET_KEY` — full contents of `appstrate.key`
-   - `MINISIGN_PASSWORD` — the passphrase
-
-4. **Re-run the publish workflow** on an existing tag (or cut a new one). `publish-installer.yml` will detect the secret, sign `install.sh`, and publish `install.sh.minisig` + `appstrate.pub` to the `get.appstrate.dev` branch.
-
-**Rotation**: generate a new keypair, update `scripts/appstrate.pub` and the GitHub secrets in the same PR, announce the old key as retired in the release notes, and bump the installer with the new pubkey.
+4. **Announce the rotation** in the release notes. Previously-released installer versions remain verifiable against the retired pubkey via their versioned URL (`https://get.appstrate.dev/vX.Y.Z/install.sh.minisig`) — users pinned to older versions need to fetch the old pubkey or upgrade.
 
 ## Prerequisites
 
