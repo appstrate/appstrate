@@ -22,7 +22,7 @@ set -euo pipefail
 PORT=3999
 KEEP=0
 BUILD=1
-RUNTIME_TAG="1.0.0-alpha.45"
+RUNTIME_TAG="${APPSTRATE_RUNTIME_TAG:-latest}"
 
 while [ $# -gt 0 ]; do
   case "$1" in

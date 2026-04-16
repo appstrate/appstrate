@@ -76,16 +76,13 @@ jobs:
           cp "out/${{ steps.ver.outputs.version }}/install.sh.sha256" "pages/${{ steps.ver.outputs.version }}/install.sh.sha256"
 
           # Static landing for browsers hitting get.appstrate.dev directly
-          cat > pages/index.html <<HTML
-          <!doctype html><meta charset=utf-8><title>get.appstrate.dev</title>
-          <body style="font-family:system-ui;max-width:640px;margin:4rem auto;padding:0 1rem">
-          <h1>Appstrate Installer</h1>
-          <pre style="background:#111;color:#eee;padding:1rem;border-radius:6px">curl -fsSL https://get.appstrate.dev | sh</pre>
-          <p>Latest: <code>${{ steps.ver.outputs.version }}</code> · <a href="install.sh">install.sh</a> · <a href="install.sh.sha256">sha256</a></p>
-          <p>Pin a version: <code>https://get.appstrate.dev/${{ steps.ver.outputs.version }}/install.sh</code></p>
-          <p><a href="https://github.com/${{ github.repository }}">Source</a></p>
-          </body>
-          HTML
+          printf '%s\n' \
+            '<!doctype html><meta charset=utf-8><title>get.appstrate.dev</title>' \
+            '<body style="font-family:system-ui;max-width:640px;margin:4rem auto;padding:0 1rem">' \
+            '<h1>Appstrate Installer</h1>' \
+            '<pre style="background:#111;color:#eee;padding:1rem;border-radius:6px">curl -fsSL https://get.appstrate.dev | sh</pre>' \
+            '<p><a href="https://github.com/appstrate/appstrate">Source</a> &middot; <a href="install.sh">install.sh</a> &middot; <a href="install.sh.sha256">sha256</a></p>' \
+            '</body>' > pages/index.html
 
       - name: Commit & push
         working-directory: pages

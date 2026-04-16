@@ -8,7 +8,6 @@
 #   APPSTRATE_VERSION       Pin a version (default: bundled stable)
 #   APPSTRATE_DIR           Install dir (default: $HOME/.appstrate)
 #   APPSTRATE_PORT          HTTP port (default: 3000, auto-fallback if busy)
-#   APPSTRATE_CHANNEL       stable | edge (default: stable)
 
 set -euo pipefail
 
@@ -22,7 +21,6 @@ APPSTRATE_IMAGE_TAG="${APPSTRATE_VERSION#v}"
 APPSTRATE_ASSETS_DIR="${APPSTRATE_ASSETS_DIR:-}"
 APPSTRATE_DIR="${APPSTRATE_DIR:-$HOME/.appstrate}"
 APPSTRATE_PORT="${APPSTRATE_PORT:-3000}"
-APPSTRATE_CHANNEL="${APPSTRATE_CHANNEL:-stable}"
 # When 1, suppress the banner and the "Next steps" trailer (used by test harness).
 APPSTRATE_QUIET="${APPSTRATE_QUIET:-0}"
 

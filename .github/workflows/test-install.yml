@@ -71,8 +71,12 @@ jobs:
           docker run --rm --privileged \
             -v /tmp/install.sh:/install.sh:ro \
             -e APPSTRATE_PORT=3000 \
+            -e DOCKER_TLS_CERTDIR= \
             docker:27-dind sh -c '
               set -e
+              # Standalone DinD: force client to use local socket (no DNS "docker" service)
+              export DOCKER_HOST=unix:///var/run/docker.sock
+
               dockerd-entrypoint.sh > /var/log/dockerd.log 2>&1 &
               echo "Waiting for inner dockerd..."
               for i in $(seq 1 60); do
@@ -94,16 +98,18 @@ jobs:
               echo "✓ API ok"
 
               echo "── 4. Container fleet ──"
-              docker compose -f /root/.appstrate/docker-compose.yml ps
-              expected="appstrate postgres redis minio"
-              for svc in $expected; do
-                docker compose -f /root/.appstrate/docker-compose.yml ps "$svc" | grep -q "Up\|running" \
+              CF=/root/.appstrate/docker-compose.yml
+              EF=/root/.appstrate/.env
+              for svc in appstrate postgres redis minio; do
+                status=$(docker compose -f "$CF" --env-file "$EF" ps --format json "$svc" | head -1)
+                echo "$svc: $status"
+                echo "$status" | grep -qi "running" \
                   || { echo "✗ $svc not running"; exit 1; }
               done
               echo "✓ all services running"
 
               echo "── 5. Docker socket access from inside platform ──"
-              docker compose -f /root/.appstrate/docker-compose.yml exec -T appstrate \
+              docker compose -f "$CF" --env-file "$EF" exec -T appstrate \
                 sh -c "ls -la /var/run/docker.sock && id" || {
                   echo "✗ socket not accessible"; exit 1; }
               echo "✓ socket access ok"
@@ -113,7 +119,7 @@ jobs:
               grep -q "Already at" /tmp/run2.log
 
               echo "── 7. Teardown ──"
-              docker compose -f /root/.appstrate/docker-compose.yml --env-file /root/.appstrate/.env down -v
+              docker compose -f "$CF" --env-file "$EF" down -v
               rm -rf /root/.appstrate
               echo "✓ clean teardown"
             '
