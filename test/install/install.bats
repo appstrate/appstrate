@@ -238,8 +238,14 @@ except Exception:
 }
 
 @test "port_in_use: lsof branch detects listener with clean exit=0 + match on stdout" {
-  # Happy path for the lsof branch: exit 0, output contains a match.
+  # Happy path for the lsof branch: exit 0, output contains a (LISTEN) row.
   lsof() {
+    case "$1" in
+      -v)
+        echo "lsof version information: revision: 4.99" >&2
+        return 0
+        ;;
+    esac
     printf 'COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n'
     printf 'appstrat 1234 user 3u IPv4 0x1 0t0 TCP *:3000 (LISTEN)\n'
     return 0
@@ -253,12 +259,18 @@ except Exception:
   [ "$status" -eq 0 ]
 }
 
-@test "port_in_use: lsof branch still detects listener when exit=1 with match on stdout" {
+@test "port_in_use: lsof branch still detects listener when exit=1 with (LISTEN) row on stdout" {
   # BUG REPRO: on macOS + Docker Desktop (and other envs), lsof regularly
   # prints a valid listener on stdout AND exits non-zero because it hit
   # permission-denied errors while scanning unrelated sockets/processes.
   # port_in_use must rely on output, not on lsof's exit code.
   lsof() {
+    case "$1" in
+      -v)
+        echo "lsof version information: revision: 4.99" >&2
+        return 0
+        ;;
+    esac
     printf 'COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n'
     printf 'com.docke 999 root 42u IPv6 0x1 0t0 TCP *:3000 (LISTEN)\n'
     return 1
@@ -271,17 +283,80 @@ except Exception:
   [ "$status" -eq 0 ]
 }
 
-@test "port_in_use: lsof branch returns free when no output (regardless of exit code)" {
-  # No listener → no output. Exit code alone is ambiguous (1 on both
+@test "port_in_use: lsof branch returns free when no (LISTEN) row (regardless of exit code)" {
+  # No listener → no (LISTEN) row. Exit code alone is ambiguous (1 on both
   # "no match" and "match + permission noise"), so the correct signal is
-  # empty stdout.
-  lsof() { return 1; }
+  # the literal "(LISTEN)" substring GNU/BSD lsof prints for listeners.
+  lsof() {
+    case "$1" in
+      -v)
+        echo "lsof version information: revision: 4.99" >&2
+        return 0
+        ;;
+    esac
+    return 1
+  }
   export -f lsof
   command_exists() { case "$1" in lsof) return 0 ;; *) return 1 ;; esac; }
   export -f command_exists
 
   run port_in_use 3000
   [ "$status" -eq 1 ]
+}
+
+@test "lsof_usable: returns 0 when lsof prints GNU-style version banner" {
+  lsof() { echo "lsof version information: revision: 4.99" >&2; return 0; }
+  export -f lsof
+  command_exists() { case "$1" in lsof) return 0 ;; *) return 1 ;; esac; }
+  export -f command_exists
+  lsof_usable
+}
+
+@test "lsof_usable: returns 1 for busybox applet (no version banner, dumps files)" {
+  # Busybox's lsof ignores `-v` and dumps open-file lines like:
+  #   1	/bin/busybox	0	/dev/null
+  # None of them contain "lsof version".
+  lsof() {
+    echo "1	/bin/busybox	0	/dev/null"
+    echo "1	/bin/busybox	1	pipe:[12345]"
+    return 0
+  }
+  export -f lsof
+  command_exists() { case "$1" in lsof) return 0 ;; *) return 1 ;; esac; }
+  export -f command_exists
+  ! lsof_usable
+}
+
+@test "lsof_usable: returns 1 when lsof is absent" {
+  command_exists() { return 1; }
+  export -f command_exists
+  ! lsof_usable
+}
+
+@test "port_in_use: skips busybox lsof and falls through to ss" {
+  # When lsof is busybox's applet, port_in_use must NOT invoke it (would
+  # false-positive on the file dump). It should fall through to the next
+  # available detector — here, a stubbed ss reporting a LISTEN row.
+  lsof() {
+    # If this is ever called by port_in_use, fail loudly.
+    echo "BUSYBOX_LSOF_INVOKED" >&2
+    echo "1	/bin/busybox	0	/dev/null"
+    return 0
+  }
+  export -f lsof
+  ss() {
+    printf 'State Recv-Q Send-Q Local Address:Port Peer Address:Port\n'
+    printf 'LISTEN 0 128 0.0.0.0:3000 0.0.0.0:*\n'
+  }
+  export -f ss
+  command_exists() { case "$1" in lsof | ss) return 0 ;; *) return 1 ;; esac; }
+  export -f command_exists
+
+  run port_in_use 3000
+  [ "$status" -eq 0 ]
+  # Busybox lsof should never have been invoked (lsof_usable gates it out).
+  # Check its sentinel didn't leak into stderr.
+  [[ "$output" != *"BUSYBOX_LSOF_INVOKED"* ]]
 }
 
 # ─── resolve_docker_gid (pure helper, no Docker/FS access) ───────────────────

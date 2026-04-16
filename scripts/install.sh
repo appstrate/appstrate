@@ -187,35 +187,53 @@ detect_environment() {
   fi
 }
 
+lsof_usable() {
+  # Busybox's lsof applet (Alpine, minimal containers) ignores all filter
+  # flags (-iTCP:PORT, -sTCP:LISTEN) and dumps every open file instead —
+  # useless for port detection and would false-positive any match on the
+  # output. Distinguish via `lsof -v`: real GNU/BSD lsof prints a version
+  # banner, busybox ignores the flag and dumps files.
+  command_exists lsof || return 1
+  case "$(LC_ALL=C lsof -v 2>&1)" in
+    *"lsof version"*) return 0 ;;
+  esac
+  return 1
+}
+
 port_in_use() {
   local p=$1 out
-  if command_exists lsof; then
+  if lsof_usable; then
     # lsof's exit code is unreliable as a "match found" signal: on macOS +
     # Docker Desktop (and other envs), it regularly exits non-zero because
     # it hit permission-denied errors while scanning unrelated sockets —
-    # even when it successfully printed the listener we care about. Check
-    # stdout instead, which is the only thing we actually care about.
+    # even when it successfully printed the listener we care about. Match
+    # the "(LISTEN)" tag GNU/BSD lsof prints for listening sockets instead
+    # of relying on exit code or stdout non-emptiness.
     out=$(lsof -iTCP:"$p" -sTCP:LISTEN -Pn 2>/dev/null || true)
-    [ -n "$out" ]
-  elif command_exists ss; then
+    [[ "$out" == *"(LISTEN)"* ]]
+    return
+  fi
+  if command_exists ss; then
     # Capture output first to decouple ss's exit code from grep's — with
     # pipefail enabled, an ss failure (old syntax, missing caps) would
     # mask a legitimate grep match and report the port as free.
     out=$(ss -lnt "sport = :$p" 2>/dev/null || true)
     [[ "$out" == *LISTEN* ]]
-  elif command_exists netstat; then
+    return
+  fi
+  if command_exists netstat; then
     out=$(netstat -lnt 2>/dev/null || true)
     echo "$out" | awk '{print $4}' | grep -qE "[:.]${p}$"
-  else
-    # Bash builtin: /dev/tcp is a pseudo-device, no external dependency.
-    # Only probes 127.0.0.1 — services bound to other interfaces are not
-    # detected, but that matches the installer's intent (localhost:PORT).
-    (exec 3<>/dev/tcp/127.0.0.1/"$p") 2>/dev/null && {
-      exec 3<&- 3>&-
-      return 0
-    }
-    return 1
+    return
   fi
+  # Bash builtin: /dev/tcp is a pseudo-device, no external dependency.
+  # Only probes 127.0.0.1 — services bound to other interfaces are not
+  # detected, but that matches the installer's intent (localhost:PORT).
+  (exec 3<>/dev/tcp/127.0.0.1/"$p") 2>/dev/null && {
+    exec 3<&- 3>&-
+    return 0
+  }
+  return 1
 }
 
 acquire_lock() {
