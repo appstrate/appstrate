@@ -70,7 +70,9 @@ jobs:
         run: |
           docker run --rm --privileged \
             -v /tmp/install.sh:/install.sh:ro \
+            -v "${{ github.workspace }}/examples/self-hosting:/assets:ro" \
             -e APPSTRATE_PORT=3000 \
+            -e APPSTRATE_ASSETS_DIR=/assets \
             -e DOCKER_TLS_CERTDIR= \
             docker:27-dind sh -c '
               set -e
