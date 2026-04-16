@@ -4,6 +4,8 @@ Appstrate is an open-source platform for running autonomous AI agents in sandbox
 
 ## Quick Start
 
+> **Self-hosting (production)?** Use the one-liner installer: `curl -fsSL https://get.appstrate.dev | bash`. See `examples/self-hosting/README.md`. The instructions below are for **development**.
+
 **Tier 0 (zero-install — recommended for development):**
 
 ```sh

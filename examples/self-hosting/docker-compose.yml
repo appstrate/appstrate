@@ -1,12 +1,13 @@
-# Appstrate — Minimal Self-Hosting Docker Compose
+# Appstrate — Self-Hosting Docker Compose
 #
-# Usage:
+# Recommended:
+#   curl -fsSL https://get.appstrate.dev | bash
+#
+# Manual:
 #   cp .env.example .env   # edit secrets
 #   docker compose up -d
 #
-# This is a simplified version of the root docker-compose.yml for quick
-# self-hosting. For the full production setup with all options, see the
-# docker-compose.yml at the repository root.
+# See README.md in this directory for full documentation.
 
 name: appstrate
 
