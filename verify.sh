@@ -19,7 +19,7 @@ umask 077
 #
 # Placeholder — replaced once the signing keypair is generated and stored in
 # GitHub Actions secrets (see docs: examples/self-hosting/README.md#verifying).
-APPSTRATE_PUBKEY="__APPSTRATE_MINISIGN_PUBKEY__"
+APPSTRATE_PUBKEY="RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e"
 
 BASE_URL="${APPSTRATE_BASE_URL:-https://get.appstrate.dev}"
 
