@@ -13,7 +13,6 @@ import {
   Webhook,
   Loader2,
   Users,
-  KeyRound,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
@@ -57,7 +56,6 @@ export function NavOrg() {
       ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
       : []),
     ...(isAdmin ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }] : []),
-    ...(isAdmin ? [{ path: "/api-keys", label: t("nav.apiKeys"), icon: KeyRound }] : []),
   ];
 
   const renderItems = (items: typeof automationItems) =>

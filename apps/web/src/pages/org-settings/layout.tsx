@@ -89,6 +89,11 @@ export function OrgSettingsLayout() {
                 label: t("appSettings.tabProfiles"),
               },
               {
+                to: "/org-settings/app/api-keys",
+                icon: KeyRound,
+                label: t("orgSettings.tabApiKeys"),
+              },
+              {
                 to: "/org-settings/app/auth",
                 icon: Shield,
                 label: t("appSettings.tabAuth"),
@@ -131,6 +136,7 @@ export function OrgSettingsLayout() {
         proxies: "/org-settings/proxies",
         oauth: "/org-settings/oauth",
         billing: "/org-settings/billing",
+        "api-keys": "/org-settings/app/api-keys",
       }}
       sections={sections}
     />

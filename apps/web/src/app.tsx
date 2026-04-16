@@ -355,7 +355,10 @@ export function App() {
             )}
             {/* App-scoped routes (read applicationId from store, like orgId) */}
             <Route path="/end-users" element={<EndUsersPage />} />
-            <Route path="/api-keys" element={<ApiKeysPage />} />
+            <Route
+              path="/api-keys"
+              element={<Navigate to="/org-settings/app/api-keys" replace />}
+            />
             <Route
               path="/app-settings"
               element={<Navigate to="/org-settings/app/general" replace />}
@@ -371,6 +374,7 @@ export function App() {
               <Route path="billing" element={<OrgSettingsBillingPage />} />
               <Route path="app/general" element={<OrgSettingsAppGeneralPage />} />
               <Route path="app/profiles" element={<OrgSettingsAppProfilesPage />} />
+              <Route path="app/api-keys" element={<ApiKeysPage />} />
               <Route path="app/auth" element={<OrgSettingsAppAuthPage />} />
               <Route path="app/oauth" element={<OrgSettingsAppOauthPage />} />
             </Route>
