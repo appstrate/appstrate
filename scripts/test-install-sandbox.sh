@@ -32,10 +32,10 @@ done
 [ -f "$SCRIPT_PATH" ] || { echo "install.sh not found at $SCRIPT_PATH" >&2; exit 1; }
 
 # Validate version format — $VERSION is interpolated into sed replacement strings
-if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$ ]] \
-  && [[ "$VERSION" != "main" ]] \
-  && [[ "$VERSION" != "local" ]] \
-  && [[ "$VERSION" != "latest" ]]; then
+if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$ ]] &&
+  [[ "$VERSION" != "main" ]] &&
+  [[ "$VERSION" != "local" ]] &&
+  [[ "$VERSION" != "latest" ]]; then
   echo "Invalid version format: $VERSION" >&2
   echo "Expected: vMAJOR.MINOR.PATCH[-prerelease], 'main', 'local', or 'latest'" >&2
   exit 1

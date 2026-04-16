@@ -20,9 +20,9 @@ if [[ "$APPSTRATE_VERSION" == __* ]]; then
 fi
 # Validate version format to prevent sed injection and ensure safe interpolation.
 # Accepts: v1.0.0, v1.0.0-beta.1, v1.0.0-rc1, "local", "latest" (for CI/dev).
-if [[ ! "$APPSTRATE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$ ]] \
-  && [[ "$APPSTRATE_VERSION" != "local" ]] \
-  && [[ "$APPSTRATE_VERSION" != "latest" ]]; then
+if [[ ! "$APPSTRATE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$ ]] &&
+  [[ "$APPSTRATE_VERSION" != "local" ]] &&
+  [[ "$APPSTRATE_VERSION" != "latest" ]]; then
   echo "Error: Invalid APPSTRATE_VERSION format: $APPSTRATE_VERSION" >&2
   echo "Expected: vMAJOR.MINOR.PATCH[-prerelease] (e.g. v1.0.0, v1.2.3-beta.1)" >&2
   exit 1
