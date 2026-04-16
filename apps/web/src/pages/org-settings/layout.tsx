@@ -89,6 +89,11 @@ export function OrgSettingsLayout() {
                 label: t("appSettings.tabProfiles"),
               },
               {
+                to: "/org-settings/app/api-keys",
+                icon: KeyRound,
+                label: t("orgSettings.tabApiKeys"),
+              },
+              {
                 to: "/org-settings/app/auth",
                 icon: Shield,
                 label: t("appSettings.tabAuth"),
