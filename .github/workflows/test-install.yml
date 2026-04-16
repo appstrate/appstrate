@@ -82,7 +82,6 @@ jobs:
 
           set +e
           source /install.sh
-          set +e
           trap - ERR
 
           echo "── 1. Prereq detection (Docker, Compose, arch) ──"

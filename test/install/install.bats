@@ -12,11 +12,11 @@ setup() {
   export APPSTRATE_DIR="$TMPDIR_TEST"
   export APPSTRATE_VERSION="v1.0.0-test"
   export NO_COLOR=1
-  # Source script — guarded do_install will not auto-execute
+  # Source script — guarded do_install will not auto-execute.
+  # set +e so the sourced script's `set -euo pipefail` doesn't propagate failures.
   set +e
   # shellcheck disable=SC1091
   source "$REPO_ROOT/scripts/install.sh"
-  set +e
   # Disable script's exit-on-error trap — we test functions in isolation
   trap - ERR
 }
@@ -213,6 +213,22 @@ EOF
   [ -f "$APPSTRATE_DIR/.env.example" ]
   grep -q "fake-compose" "$APPSTRATE_DIR/docker-compose.yml"
   rm -rf "$src"
+}
+
+# ─── version validation ──────────────────────────────────────────────────────
+
+@test "version validation rejects malformed versions" {
+  for bad in "evil|injection" "v1" "1.0.0" "../traversal" "v1.0.0;rm -rf /"; do
+    run bash -c "APPSTRATE_VERSION='$bad' source '$REPO_ROOT/scripts/install.sh' 2>&1"
+    [ "$status" -ne 0 ]
+  done
+}
+
+@test "version validation accepts valid semver and dev values" {
+  for good in "v1.0.0" "v0.5.2-beta.1" "v1.2.3-rc1" "local" "latest"; do
+    run bash -c "APPSTRATE_VERSION='$good' source '$REPO_ROOT/scripts/install.sh' 2>&1"
+    [ "$status" -eq 0 ]
+  done
 }
 
 # ─── version tag stripping ───────────────────────────────────────────────────
