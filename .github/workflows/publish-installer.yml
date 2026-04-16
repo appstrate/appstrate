@@ -78,15 +78,15 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq minisign
           umask 077
           printf '%s' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
-          # Passphrase is read from stdin (no TTY); -t = signed trusted comment.
-          printf '%s\n' "$MINISIGN_PASSWORD" | \
-            minisign -S -s /tmp/minisign.key \
-              -t "appstrate $VERSION (latest)" \
-              -m out/install.sh
+          # Sign once — the two rendered copies (out/install.sh and
+          # out/${VERSION}/install.sh) contain identical bytes (same sed
+          # output) so one signature verifies both. Sync step copies it to
+          # both publish locations. Passphrase via stdin (no TTY),
+          # -t = signed trusted comment.
           printf '%s\n' "$MINISIGN_PASSWORD" | \
             minisign -S -s /tmp/minisign.key \
               -t "appstrate $VERSION" \
-              -m "out/${VERSION}/install.sh"
+              -m out/install.sh
           rm -f /tmp/minisign.key
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
@@ -135,10 +135,12 @@ jobs:
           cp "out/${VERSION}/install.sh"        "pages/${VERSION}/install.sh"
           cp "out/${VERSION}/install.sh.sha256" "pages/${VERSION}/install.sh.sha256"
 
-          # Minisign signatures (if step ran — controlled by presence of MINISIGN_SECRET_KEY secret).
+          # Minisign signature (if step ran — controlled by presence of MINISIGN_SECRET_KEY secret).
+          # Only one signature is produced (both installer copies are byte-identical);
+          # fan it out to both publish locations here.
           if [ "$SIGNED" = "true" ]; then
-            cp out/install.sh.minisig          pages/install.sh.minisig
-            cp "out/${VERSION}/install.sh.minisig" "pages/${VERSION}/install.sh.minisig"
+            cp out/install.sh.minisig pages/install.sh.minisig
+            cp out/install.sh.minisig "pages/${VERSION}/install.sh.minisig"
           fi
 
           # Publish verify.sh wrapper. If the public key is committed under

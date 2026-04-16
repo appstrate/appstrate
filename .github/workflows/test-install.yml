@@ -55,9 +55,16 @@ jobs:
 
       - name: actionlint (all workflows)
         # Pinned installer — runs actionlint against every YAML in .github/workflows/.
+        # SHA256 of the download script is verified before exec to prevent supply-
+        # chain injection via a compromised rhysd/actionlint tag.
         # -ignore SC2129: pre-existing style warning in release.yml, not blocking.
+        env:
+          DOWNLOAD_SCRIPT_SHA256: "72fa3e45ac20f3c3a512d6747b4fcf719e21f890e8c43e78d48a41fdfb900c4e"
         run: |
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          curl -fsSL -o /tmp/download-actionlint.bash \
+            https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash
+          echo "${DOWNLOAD_SCRIPT_SHA256}  /tmp/download-actionlint.bash" | sha256sum --check --strict
+          bash /tmp/download-actionlint.bash 1.7.12
           ./actionlint -color -ignore 'SC2129' .github/workflows/*.yml
 
   unit-bats:

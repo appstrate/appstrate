@@ -478,16 +478,21 @@ rollback_upgrade() {
     return 1
   fi
 
-  warn "Rolling back to $PREVIOUS_VERSION"
+  warn "Rolling back to ${PREVIOUS_VERSION:-previous version}"
   cp "$latest_compose" "$APPSTRATE_DIR/docker-compose.yml"
   cp "$latest_env" "$APPSTRATE_DIR/.env"
 
   # --remove-orphans prunes any service the failed upgrade introduced that
   # no longer exists in the restored compose file.
-  if ! compose up -d --remove-orphans >>"$LOG_FILE" 2>&1; then
+  # --pull never avoids a registry round-trip during a crisis: the restored
+  # images were already on disk before the upgrade attempt, so hitting GHCR
+  # just adds a failure mode (network blip, outage, rate-limit) where none
+  # is warranted. If an image is truly missing, failing fast is better than
+  # a confusing "manifest unknown" buried in a pull log.
+  if ! compose up -d --remove-orphans --pull never >>"$LOG_FILE" 2>&1; then
     return 1
   fi
-  ok "Rollback successful — active version: $PREVIOUS_VERSION"
+  ok "Rollback successful — active version: ${PREVIOUS_VERSION:-previous version}"
   return 0
 }
 
@@ -509,7 +514,7 @@ start_services() {
   # Validate compose config before starting (catches bad downloads or env mismatches)
   if ! compose config --quiet >>"$LOG_FILE" 2>&1; then
     if rollback_upgrade; then
-      err "docker-compose.yml validation failed — rolled back to $PREVIOUS_VERSION"
+      err "docker-compose.yml validation failed — rolled back to ${PREVIOUS_VERSION:-previous version}"
       err "  → Logs: $LOG_FILE"
       exit 1
     fi
@@ -519,7 +524,7 @@ start_services() {
   log "Starting services"
   if ! compose up -d >>"$LOG_FILE" 2>&1; then
     if rollback_upgrade; then
-      err "Failed to start services — rolled back to $PREVIOUS_VERSION"
+      err "Failed to start services — rolled back to ${PREVIOUS_VERSION:-previous version}"
       err "  → Logs: $LOG_FILE"
       exit 1
     fi
@@ -543,7 +548,7 @@ wait_for_health() {
   done
   err "appstrate did not become healthy within 120s"
   if rollback_upgrade; then
-    err "  → Rolled back to $PREVIOUS_VERSION (new version failed to start)"
+    err "  → Rolled back to ${PREVIOUS_VERSION:-previous version} (new version failed to start)"
     err "  → Logs: $LOG_FILE"
     err "  → Please report: https://github.com/${GITHUB_REPO}/issues"
     exit 1
