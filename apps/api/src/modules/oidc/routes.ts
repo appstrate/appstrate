@@ -27,6 +27,7 @@ import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
 import { db } from "@appstrate/db/client";
 import { user, applications } from "@appstrate/db/schema";
+import { getOrgSettings } from "../../services/organizations.ts";
 import {
   createClient,
   deleteClient,
@@ -248,6 +249,23 @@ async function loadPageContext(
       404,
     );
   }
+  // Dashboard SSO gate: org-level clients only work when the owning org has
+  // explicitly opted in via orgSettings.dashboardSsoEnabled. This blocks the
+  // interactive login/consent flow before any credential is collected —
+  // defense in depth also exists at token mint in auth/plugins.ts.
+  if (record.level === "org" && record.referencedOrgId) {
+    const settings = await getOrgSettings(record.referencedOrgId);
+    if (settings.dashboardSsoEnabled !== true) {
+      return c.html(
+        renderErrorPage({
+          title: "SSO désactivé",
+          message:
+            "L'authentification SSO pour cette organisation est désactivée. Contactez l'administrateur.",
+        }).value,
+        404,
+      );
+    }
+  }
   // Resolve SMTP per-client: `level=application` reads `application_smtp_configs`,
   // `level=org`/`level=instance` falls back to env SMTP. Null → email features
   // disabled for this flow (no instance fallback for app-level clients).
@@ -427,6 +445,10 @@ export function createOidcRouter() {
         if (data.referencedOrgId !== orgId) {
           throw forbidden("referencedOrgId must match the current organization");
         }
+        const settings = await getOrgSettings(orgId);
+        if (settings.dashboardSsoEnabled !== true) {
+          throw forbidden("Dashboard SSO is disabled for this organization");
+        }
       } else {
         // application-level: the application must belong to the caller's org.
         const [app] = await db
@@ -504,6 +526,17 @@ export function createOidcRouter() {
       const owning = await getClientOwningOrg(clientId);
       if (!owning || owning !== orgId) throw notFound("OAuth client not found");
 
+      // Block configuration changes on org-level clients when dashboard SSO is
+      // off — admins must explicitly re-enable to manage a dormant client.
+      // DELETE stays permissive so cleanup is always possible.
+      const existing = await getClient(clientId);
+      if (existing?.level === "org") {
+        const settings = await getOrgSettings(orgId);
+        if (settings.dashboardSsoEnabled !== true) {
+          throw forbidden("Dashboard SSO is disabled for this organization");
+        }
+      }
+
       requireAdminForFirstParty(c, data.isFirstParty);
 
       try {
@@ -543,6 +576,15 @@ export function createOidcRouter() {
       const clientId = c.req.param("clientId")!;
       const owning = await getClientOwningOrg(clientId);
       if (!owning || owning !== orgId) throw notFound("OAuth client not found");
+
+      const existing = await getClient(clientId);
+      if (existing?.level === "org") {
+        const settings = await getOrgSettings(orgId);
+        if (settings.dashboardSsoEnabled !== true) {
+          throw forbidden("Dashboard SSO is disabled for this organization");
+        }
+      }
+
       const rotated = await rotateClientSecret(clientId);
       if (!rotated) throw notFound("OAuth client not found");
       return c.json(rotated);

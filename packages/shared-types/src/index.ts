@@ -92,6 +92,11 @@ export type EnrichedSchedule = Schedule & {
 import { orgRoleEnum } from "@appstrate/db/schema";
 export type OrgRole = (typeof orgRoleEnum.enumValues)[number];
 
+export interface OrgSettings {
+  apiVersion?: string;
+  dashboardSsoEnabled?: boolean;
+}
+
 export interface OrganizationMember {
   orgId: string;
   userId: string;

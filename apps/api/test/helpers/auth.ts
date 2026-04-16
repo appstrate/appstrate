@@ -6,6 +6,7 @@
  * Uses Better Auth's actual sign-up API to create real users with valid signed session cookies.
  * Organizations, memberships, and applications are seeded directly in the DB.
  */
+import { eq, sql } from "drizzle-orm";
 import { db } from "./db.ts";
 import { organizations, organizationMembers, applications } from "@appstrate/db/schema";
 import type { OrgRole } from "@appstrate/shared-types";
@@ -180,6 +181,20 @@ export function orgOnlyHeaders(
   extra?: Record<string, string>,
 ): Record<string, string> {
   return { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId, ...extra };
+}
+
+/**
+ * Opt the org into dashboard-level OAuth SSO. Required for tests that
+ * create/use `level: "org"` OAuth clients — without this, the admin routes
+ * and token-mint path reject with 403 by design.
+ */
+export async function enableDashboardSso(orgId: string): Promise<void> {
+  await db
+    .update(organizations)
+    .set({
+      orgSettings: sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || '{"dashboardSsoEnabled":true}'::jsonb`,
+    })
+    .where(eq(organizations.id, orgId));
 }
 
 /**

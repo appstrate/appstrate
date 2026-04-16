@@ -18,6 +18,7 @@ import {
   createTestContext,
   createTestUser,
   authHeaders,
+  enableDashboardSso,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
@@ -420,6 +421,9 @@ describe("Public end-user pages — /api/oauth/*", () => {
       c: TestContext,
       overrides: { allowSignup?: boolean; signupRole?: "admin" | "member" | "viewer" } = {},
     ): Promise<{ clientId: string }> {
+      // Gate org-level client creation behind dashboardSsoEnabled — tests
+      // in this block focus on signup policy, not the SSO gate.
+      await enableDashboardSso(c.orgId);
       const body = {
         level: "org" as const,
         name: "Org Portal",

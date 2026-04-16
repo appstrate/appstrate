@@ -21,6 +21,7 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useCurrentApplicationId } from "../../hooks/use-current-application";
 import { useApplication } from "../../hooks/use-applications";
+import { useOrgSettings } from "../../hooks/use-org-settings";
 
 export function OrgSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
@@ -31,6 +32,8 @@ export function OrgSettingsLayout() {
   const location = useLocation();
 
   const oidcEnabled = !!features.oidc;
+  const { data: orgSettings } = useOrgSettings();
+  const dashboardSsoEnabled = !!orgSettings?.dashboardSsoEnabled;
 
   const sections: SettingsSection[] = [
     {
@@ -62,8 +65,8 @@ export function OrgSettingsLayout() {
         {
           to: "/org-settings/oauth",
           icon: KeyRound,
-          label: "OAuth",
-          show: isAdmin && oidcEnabled,
+          label: t("orgSettings.tabOauth"),
+          show: isAdmin && oidcEnabled && dashboardSsoEnabled,
         },
         {
           to: "/org-settings/billing",

@@ -38,6 +38,7 @@ import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
+import { getOrgSettings } from "../../../services/organizations.ts";
 import {
   resolveOrCreateEndUser,
   UnverifiedEmailConflictError,
@@ -295,6 +296,23 @@ async function buildOrgLevelClaims(
     });
     throw new APIError("BAD_REQUEST", {
       message: "Invalid OAuth client configuration",
+    });
+  }
+
+  // Dashboard SSO gate: org must have opted in via
+  // orgSettings.dashboardSsoEnabled. Mirrors the interactive-flow gate in
+  // routes.ts/loadPageContext — this is the authoritative token-mint check
+  // that also catches non-interactive flows (refresh, client_credentials).
+  const orgSettings = await getOrgSettings(orgId);
+  if (orgSettings.dashboardSsoEnabled !== true) {
+    logger.warn("oidc: dashboard SSO disabled for org — rejecting token", {
+      module: "oidc",
+      userId: user.id,
+      orgId,
+    });
+    throw new APIError("FORBIDDEN", {
+      error: "access_denied",
+      error_description: "Dashboard SSO is disabled for this organization.",
     });
   }
 

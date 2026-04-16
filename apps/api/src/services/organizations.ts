@@ -13,7 +13,7 @@ import {
   packages,
   orgInvitations,
 } from "@appstrate/db/schema";
-import { eq, inArray, count } from "drizzle-orm";
+import { eq, inArray, count, sql } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 
@@ -106,6 +106,7 @@ import { z } from "zod";
 
 export const orgSettingsSchema = z.object({
   apiVersion: z.string().optional(),
+  dashboardSsoEnabled: z.boolean().optional(),
 });
 
 export type OrgSettings = z.infer<typeof orgSettingsSchema>;
@@ -124,12 +125,14 @@ export async function updateOrgSettings(
   orgId: string,
   updates: Partial<OrgSettings>,
 ): Promise<OrgSettings> {
-  const current = await getOrgSettings(orgId);
-  const merged = { ...current, ...updates };
-
+  // Merge server-side via JSONB concatenation so concurrent admins toggling
+  // different keys don't clobber each other (read-modify-write would race).
   const [row] = await db
     .update(organizations)
-    .set({ orgSettings: merged, updatedAt: new Date() })
+    .set({
+      orgSettings: sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || ${JSON.stringify(updates)}::jsonb`,
+      updatedAt: new Date(),
+    })
     .where(eq(organizations.id, orgId))
     .returning({ orgSettings: organizations.orgSettings });
 
