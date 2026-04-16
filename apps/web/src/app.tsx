@@ -356,10 +356,6 @@ export function App() {
             {/* App-scoped routes (read applicationId from store, like orgId) */}
             <Route path="/end-users" element={<EndUsersPage />} />
             <Route
-              path="/api-keys"
-              element={<Navigate to="/org-settings/app/api-keys" replace />}
-            />
-            <Route
               path="/app-settings"
               element={<Navigate to="/org-settings/app/general" replace />}
             />

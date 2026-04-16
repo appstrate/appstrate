@@ -407,7 +407,6 @@
   "oauthClients.signupRoleOption.admin": "Admin",
   "oauthClients.signupRoleOption.viewer": "Viewer",
   "orgSettings.tabApiKeys": "API Keys",
-  "apiKeys.pageTitle": "API Keys",
   "apiKeys.createTitle": "Create API Key",
   "apiKeys.createBtn": "New API key",
   "apiKeys.created": "API Key Created",

@@ -136,7 +136,6 @@ export function OrgSettingsLayout() {
         proxies: "/org-settings/proxies",
         oauth: "/org-settings/oauth",
         billing: "/org-settings/billing",
-        "api-keys": "/org-settings/app/api-keys",
       }}
       sections={sections}
     />
