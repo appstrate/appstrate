@@ -95,14 +95,13 @@ jobs:
           cp "out/${{ steps.ver.outputs.version }}/install.sh"        "pages/${{ steps.ver.outputs.version }}/install.sh"
           cp "out/${{ steps.ver.outputs.version }}/install.sh.sha256" "pages/${{ steps.ver.outputs.version }}/install.sh.sha256"
 
-          # Static landing for browsers hitting get.appstrate.dev directly
-          printf '%s\n' \
-            '<!doctype html><meta charset=utf-8><title>get.appstrate.dev</title>' \
-            '<body style="font-family:system-ui;max-width:640px;margin:4rem auto;padding:0 1rem">' \
-            '<h1>Appstrate Installer</h1>' \
-            '<pre style="background:#111;color:#eee;padding:1rem;border-radius:6px">curl -fsSL https://get.appstrate.dev | bash</pre>' \
-            '<p><a href="https://github.com/appstrate/appstrate">Source</a> &middot; <a href="install.sh">install.sh</a> &middot; <a href="install.sh.sha256">sha256</a></p>' \
-            '</body>' > pages/index.html
+          # Serve the installer at the root (curl -fsSL https://get.appstrate.dev | bash).
+          # GitHub Pages serves index.html at /, so we point it at the script content.
+          # Browsers see the script in plain text, same pattern as get.docker.com / sh.rustup.rs.
+          cp out/install.sh pages/index.html
+
+          # Custom domain for GitHub Pages
+          echo "get.appstrate.dev" > pages/CNAME
 
       - name: Commit & push
         working-directory: pages
