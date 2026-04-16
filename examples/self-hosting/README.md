@@ -1,14 +1,36 @@
-# Self-Hosting Example
+# Self-Hosting
 
-Minimal Docker Compose setup for self-hosting Appstrate with PostgreSQL, Redis, and MinIO.
+Deploy Appstrate with PostgreSQL, Redis, and MinIO using Docker Compose.
+
+## One-Liner Install (Recommended)
+
+```bash
+curl -fsSL https://get.appstrate.dev | bash
+```
+
+The installer handles everything automatically:
+
+- Checks prerequisites (Docker 20+, Compose V2, curl, openssl)
+- Generates cryptographic secrets (auth, encryption, DB passwords)
+- Detects the Docker socket GID for container access
+- Downloads and starts the full stack
+- Waits for the platform to become healthy
+
+Open [http://localhost:3000](http://localhost:3000) and sign up.
+
+Overrides: `APPSTRATE_VERSION=v1.2.3`, `APPSTRATE_DIR=~/.appstrate`, `APPSTRATE_PORT=8080`.
+
+To upgrade, re-run the same command — existing secrets are preserved and new config keys are merged automatically.
 
 ## Prerequisites
 
-- Docker Engine 24+ with Compose V2
+- Docker Engine 20+ with Compose V2
 - At least 4 GB of available RAM
 - Docker socket accessible at `/var/run/docker.sock` (required for agent runs)
 
-## Quick Start
+## Manual Setup
+
+If you prefer to set up manually (or can't use the one-liner):
 
 1. **Create the environment file**
 
@@ -40,7 +62,7 @@ Minimal Docker Compose setup for self-hosting Appstrate with PostgreSQL, Redis, 
 
 3. **Access the dashboard**
 
-   Open [http://localhost:3000](http://localhost:3000) in your browser. The first signup creates an organization automatically.
+   Open [http://localhost:3000](http://localhost:3000) in your browser. After signup, the onboarding flow guides you to create your first organization.
 
 ## Architecture
 

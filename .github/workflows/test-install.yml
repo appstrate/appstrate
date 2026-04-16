@@ -1,0 +1,223 @@
+name: Test Installer
+
+on:
+  pull_request:
+    paths:
+      - "scripts/install.sh"
+      - "test/install/**"
+      - "examples/self-hosting/**"
+      - ".github/workflows/test-install.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/install.sh"
+      - "test/install/**"
+      - ".github/workflows/test-install.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: shellcheck
+        uses: ludeeus/action-shellcheck@00b27aa7cb85167568cb48a3838b75f4265f2bca # 2.0.0
+        with:
+          scandir: ./scripts
+          severity: warning
+
+      - name: shfmt (format check)
+        env:
+          SHFMT_VERSION: "3.10.0"
+          SHFMT_SHA256: "1f57a384d59542f8fac5f503da1f3ea44242f46dff969569e80b524d64b71dbc"
+        run: |
+          curl -fsSL -o /tmp/shfmt \
+            "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
+          echo "${SHFMT_SHA256}  /tmp/shfmt" | sha256sum --check --strict
+          chmod +x /tmp/shfmt
+          /tmp/shfmt -d -i 2 -ci scripts/install.sh
+
+  unit-bats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run BATS unit tests
+        run: |
+          docker run --rm -v "$PWD:/code" -w /code --entrypoint sh \
+            bats/bats:1.11.0 -c '
+              apk add --no-cache openssl >/dev/null
+              bats test/install/install.bats
+            '
+
+  # Validates installer logic in a minimal Linux container (DinD):
+  # prereq detection, env generation, compose config validity, mode detection.
+  validate-dind:
+    runs-on: ubuntu-latest
+    needs: [static, unit-bats]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Render install.sh
+        run: |
+          sed "s|__APPSTRATE_VERSION__|latest|g" \
+            scripts/install.sh > /tmp/install.sh
+          chmod +x /tmp/install.sh
+
+      # This script tests things that REQUIRE Docker (can't be covered by BATS):
+      # prereq detection, GID probe, compose config validation, env generation
+      # with real Docker socket. Mode detection + secret logic are in BATS.
+      - name: Write validation script
+        run: |
+          cat > /tmp/dind-test.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          export APPSTRATE_DIR=/root/.appstrate
+          export APPSTRATE_QUIET=1
+          export APPSTRATE_PORT=3000
+          export APPSTRATE_ASSETS_DIR=/assets
+          export NO_COLOR=1
+
+          set +e
+          source /install.sh
+          set +eo pipefail
+          trap - ERR
+
+          echo "── 1. Prereq detection (Docker, Compose, arch) ──"
+          detect_environment
+          echo "✓ prereqs detected"
+
+          echo "── 2. Docker GID probe ──"
+          gid=$(detect_docker_gid)
+          [ -n "$gid" ] || { echo "✗ empty GID"; exit 1; }
+          echo "✓ Docker socket GID: $gid"
+
+          echo "── 3. Full env generation ──"
+          prepare_workdir
+          determine_install_mode
+          download_assets
+          handle_env_file
+          echo "✓ env + assets generated"
+
+          echo "── 4. Compose config validation ──"
+          docker compose -f /root/.appstrate/docker-compose.yml \
+            --env-file /root/.appstrate/.env config --quiet
+          echo "✓ compose config valid (all vars resolved)"
+
+          echo "── All checks passed ──"
+          SCRIPT
+          chmod +x /tmp/dind-test.sh
+
+      - name: Run in DinD
+        run: |
+          docker run --rm --privileged \
+            -v /tmp/install.sh:/install.sh:ro \
+            -v /tmp/dind-test.sh:/dind-test.sh:ro \
+            -v "${{ github.workspace }}/examples/self-hosting:/assets:ro" \
+            -e DOCKER_TLS_CERTDIR= \
+            docker:27-dind sh -c '
+              set -e
+              export DOCKER_HOST=unix:///var/run/docker.sock
+              dockerd-entrypoint.sh > /var/log/dockerd.log 2>&1 &
+              for i in $(seq 1 60); do
+                docker info >/dev/null 2>&1 && break
+                sleep 1
+              done
+              docker info >/dev/null || { tail -50 /var/log/dockerd.log; exit 1; }
+              apk add --no-cache bash curl openssl lsof >/dev/null
+              bash /dind-test.sh
+            '
+
+  # Full E2E: build image from source, run installer, verify stack is healthy.
+  # Runs on the ubuntu runner directly (has Docker + Compose pre-installed).
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [static, unit-bats]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Build appstrate image
+        run: docker build -t ghcr.io/appstrate/appstrate:local .
+
+      - name: Create dummy runtime images
+        run: |
+          docker pull alpine:3
+          docker tag alpine:3 ghcr.io/appstrate/appstrate-pi:local
+          docker tag alpine:3 ghcr.io/appstrate/appstrate-sidecar:local
+
+      - name: Render install.sh
+        run: |
+          sed "s|__APPSTRATE_VERSION__|local|g" \
+            scripts/install.sh > /tmp/install.sh
+          chmod +x /tmp/install.sh
+
+      - name: Run installer
+        run: |
+          APPSTRATE_DIR=/tmp/appstrate-e2e \
+          APPSTRATE_PORT=3000 \
+          APPSTRATE_QUIET=1 \
+          APPSTRATE_VERSION=local \
+          APPSTRATE_ASSETS_DIR=${{ github.workspace }}/examples/self-hosting \
+            bash /tmp/install.sh
+
+      - name: Health check
+        run: |
+          echo "── Probing http://localhost:3000 (max 120s) ──"
+          deadline=$((SECONDS + 120))
+          while [ $SECONDS -lt $deadline ]; do
+            if curl -fsS --max-time 3 http://localhost:3000/ >/dev/null 2>&1; then
+              echo "✓ healthy"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "✗ Not responding after 120s"
+          docker compose -f /tmp/appstrate-e2e/docker-compose.yml \
+            --env-file /tmp/appstrate-e2e/.env logs --tail 50
+          exit 1
+
+      - name: Verify API
+        run: |
+          curl -fsS --max-time 10 http://localhost:3000/api/openapi.json | head -c 100
+          echo ""
+          echo "✓ API responding"
+
+      - name: Verify services
+        run: |
+          CF=/tmp/appstrate-e2e/docker-compose.yml
+          EF=/tmp/appstrate-e2e/.env
+          for svc in appstrate postgres redis minio; do
+            status=$(docker compose -f "$CF" --env-file "$EF" ps --format json "$svc" | head -1)
+            state=$(echo "$status" | jq -r '.State // empty' 2>/dev/null || echo "$status")
+            echo "$svc: $state"
+            echo "$status" | jq -e '.State == "running"' >/dev/null 2>&1 \
+              || { echo "✗ $svc not running"; docker compose -f "$CF" --env-file "$EF" logs "$svc" --tail 20; exit 1; }
+          done
+          echo "✓ all services running"
+
+      - name: Noop re-run
+        run: |
+          APPSTRATE_DIR=/tmp/appstrate-e2e \
+          APPSTRATE_PORT=3000 \
+          APPSTRATE_QUIET=1 \
+          APPSTRATE_VERSION=local \
+          APPSTRATE_ASSETS_DIR=${{ github.workspace }}/examples/self-hosting \
+            bash /tmp/install.sh 2>&1 | tee /tmp/run2.log
+          grep -q "Already at" /tmp/run2.log
+          echo "✓ noop confirmed"
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f /tmp/appstrate-e2e/docker-compose.yml \
+            --env-file /tmp/appstrate-e2e/.env down -v 2>/dev/null || true
+          rm -rf /tmp/appstrate-e2e

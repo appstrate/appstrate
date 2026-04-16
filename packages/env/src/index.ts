@@ -127,10 +127,16 @@ const envSchema = z
     message: "S3_REGION is required when S3_BUCKET is set",
     path: ["S3_REGION"],
   })
-  .refine((env) => env.NODE_ENV !== "production" || env.APP_URL.startsWith("https://"), {
-    message: "APP_URL must use https:// when NODE_ENV=production",
-    path: ["APP_URL"],
-  });
+  .refine(
+    (env) =>
+      env.NODE_ENV !== "production" ||
+      env.APP_URL.startsWith("https://") ||
+      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(env.APP_URL),
+    {
+      message: "APP_URL must use https:// when NODE_ENV=production (http://localhost is allowed)",
+      path: ["APP_URL"],
+    },
+  );
 
 // ─── Getter ──────────────────────────────────────────────────
 

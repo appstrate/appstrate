@@ -1,12 +1,13 @@
-# Appstrate — Minimal Self-Hosting Docker Compose
+# Appstrate — Self-Hosting Docker Compose
 #
-# Usage:
+# Recommended:
+#   curl -fsSL https://get.appstrate.dev | bash
+#
+# Manual:
 #   cp .env.example .env   # edit secrets
 #   docker compose up -d
 #
-# This is a simplified version of the root docker-compose.yml for quick
-# self-hosting. For the full production setup with all options, see the
-# docker-compose.yml at the repository root.
+# See README.md in this directory for full documentation.
 
 name: appstrate
 
@@ -124,11 +125,21 @@ services:
     ports:
       - "${PORT:-3000}:3000"
     restart: unless-stopped
+    # Docker socket access — DOCKER_GID is the GID owning /var/run/docker.sock on
+    # the host. Set automatically by the installer (default 0 = root, fits macOS
+    # Docker Desktop and root-owned sockets on Linux).
+    group_add:
+      - "${DOCKER_GID:-0}"
+    # Reach host-mapped ports (sidecar pool /health, /configure) when the platform
+    # itself runs inside a container. host-gateway is mapped by Docker.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - PORT=3000
       - DATABASE_URL=postgresql://${POSTGRES_USER:-appstrate}:${POSTGRES_PASSWORD}@postgres:5432/appstrate
       - APP_URL=${APP_URL:-http://localhost:3000}
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env}
+      - UPLOAD_SIGNING_SECRET=${UPLOAD_SIGNING_SECRET:?Set UPLOAD_SIGNING_SECRET in .env}
       - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
       - SYSTEM_PROVIDER_KEYS=${SYSTEM_PROVIDER_KEYS:-[]}
       - CONNECTION_ENCRYPTION_KEY=${CONNECTION_ENCRYPTION_KEY:?Set CONNECTION_ENCRYPTION_KEY in .env}

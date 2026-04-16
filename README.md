@@ -52,7 +52,17 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 - **Connection profiles** — Share connection sets across agents
 - **Proxy system** — Org-level and agent-level outbound HTTP proxy support
 
-## Quick Start
+## Self-Hosting
+
+Deploy Appstrate with a single command. Docker 20+ with Compose V2 required.
+
+```sh
+curl -fsSL https://get.appstrate.dev | bash
+```
+
+This generates secrets, pulls images from GHCR, and starts the full stack (PostgreSQL, Redis, MinIO). Open [http://localhost:3000](http://localhost:3000) and sign up. See [`examples/self-hosting/`](./examples/self-hosting/) for manual setup and configuration options.
+
+## Quick Start (Development)
 
 Prerequisites: [Bun](https://bun.sh/) (v1.3+). Docker is optional.
 
@@ -66,7 +76,7 @@ bun run dev       # → http://localhost:3000
 
 No Docker, no PostgreSQL, no Redis — just Bun. Appstrate uses **progressive infrastructure**: it starts with an embedded database (PGlite) and local storage, then scales up to PostgreSQL, Redis, and S3 as you need them.
 
-First signup creates an organization automatically. See [Contributing](./CONTRIBUTING.md) for the full development guide.
+After signup, the onboarding flow guides you to create your first organization. See [Contributing](./CONTRIBUTING.md) for the full development guide.
 
 ### Progressive Infrastructure
 
@@ -288,7 +298,7 @@ Test infrastructure (PostgreSQL, Redis, MinIO, DinD) is started automatically by
 ## FAQ
 
 **Can I self-host Appstrate?**
-Yes. `docker compose up -d` with the provided `docker-compose.yml` pulls images from GHCR and starts everything. See [Environment Variables](#environment-variables) for configuration.
+Yes. Run `curl -fsSL https://get.appstrate.dev | bash` to install with automatic secret generation and Docker Compose setup. See [Self-Hosting](#self-hosting) and [`examples/self-hosting/`](./examples/self-hosting/) for configuration.
 
 **What LLM providers are supported?**
 Any provider compatible with the Pi Coding Agent SDK. Configure via `SYSTEM_PROVIDER_KEYS` or the org-level model settings UI.
