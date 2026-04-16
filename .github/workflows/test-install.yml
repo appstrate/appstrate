@@ -50,7 +50,9 @@ jobs:
               bats test/install/install.bats
             '
 
-  smoke-dind:
+  # Validates installer logic in a minimal Linux container (DinD):
+  # prereq detection, env generation, compose config validity, mode detection.
+  validate-dind:
     runs-on: ubuntu-latest
     needs: [static, unit-bats]
     timeout-minutes: 10
@@ -63,7 +65,7 @@ jobs:
             scripts/install.sh > /tmp/install.sh
           chmod +x /tmp/install.sh
 
-      - name: Write DinD test script
+      - name: Write validation script
         run: |
           cat > /tmp/dind-test.sh <<'SCRIPT'
           #!/usr/bin/env bash
@@ -133,11 +135,7 @@ jobs:
           SCRIPT
           chmod +x /tmp/dind-test.sh
 
-      # Validates the full installer flow in a clean Linux DinD container:
-      # prereq detection, env generation, secret uniqueness, compose config
-      # validity. Does NOT start services (GHCR images unavailable pre-release).
-      # Full stack E2E is covered by scripts/test-install-local.sh.
-      - name: Validate installer in DinD (Linux)
+      - name: Run in DinD
         run: |
           docker run --rm --privileged \
             -v /tmp/install.sh:/install.sh:ro \
@@ -156,3 +154,88 @@ jobs:
               apk add --no-cache bash curl openssl lsof >/dev/null
               bash /dind-test.sh
             '
+
+  # Full E2E: build image from source, run installer, verify stack is healthy.
+  # Runs on the ubuntu runner directly (has Docker + Compose pre-installed).
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [static, unit-bats]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Build appstrate image
+        run: docker build -t ghcr.io/appstrate/appstrate:local .
+
+      - name: Create dummy runtime images
+        run: |
+          docker pull alpine:3
+          docker tag alpine:3 ghcr.io/appstrate/appstrate-pi:local
+          docker tag alpine:3 ghcr.io/appstrate/appstrate-sidecar:local
+
+      - name: Render install.sh
+        run: |
+          sed "s|__APPSTRATE_VERSION__|local|g" \
+            scripts/install.sh > /tmp/install.sh
+          chmod +x /tmp/install.sh
+
+      - name: Run installer
+        run: |
+          APPSTRATE_DIR=/tmp/appstrate-e2e \
+          APPSTRATE_PORT=3000 \
+          APPSTRATE_QUIET=1 \
+          APPSTRATE_VERSION=local \
+          APPSTRATE_ASSETS_DIR=${{ github.workspace }}/examples/self-hosting \
+            bash /tmp/install.sh
+
+      - name: Health check
+        run: |
+          echo "── Probing http://localhost:3000 (max 120s) ──"
+          deadline=$((SECONDS + 120))
+          while [ $SECONDS -lt $deadline ]; do
+            if curl -fsS --max-time 3 http://localhost:3000/ >/dev/null 2>&1; then
+              echo "✓ healthy"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "✗ Not responding after 120s"
+          docker compose -f /tmp/appstrate-e2e/docker-compose.yml \
+            --env-file /tmp/appstrate-e2e/.env logs --tail 50
+          exit 1
+
+      - name: Verify API
+        run: |
+          curl -fsS --max-time 10 http://localhost:3000/api/openapi.json | head -c 100
+          echo ""
+          echo "✓ API responding"
+
+      - name: Verify services
+        run: |
+          CF=/tmp/appstrate-e2e/docker-compose.yml
+          EF=/tmp/appstrate-e2e/.env
+          for svc in appstrate postgres redis minio; do
+            status=$(docker compose -f "$CF" --env-file "$EF" ps --format json "$svc" | head -1)
+            echo "$svc: $(echo "$status" | grep -oP '"State":"\K[^"]*' || echo "$status")"
+            echo "$status" | grep -qi "running" \
+              || { echo "✗ $svc not running"; docker compose -f "$CF" --env-file "$EF" logs "$svc" --tail 20; exit 1; }
+          done
+          echo "✓ all services running"
+
+      - name: Noop re-run
+        run: |
+          APPSTRATE_DIR=/tmp/appstrate-e2e \
+          APPSTRATE_PORT=3000 \
+          APPSTRATE_QUIET=1 \
+          APPSTRATE_VERSION=local \
+          APPSTRATE_ASSETS_DIR=${{ github.workspace }}/examples/self-hosting \
+            bash /tmp/install.sh 2>&1 | tee /tmp/run2.log
+          grep -q "Already at" /tmp/run2.log
+          echo "✓ noop confirmed"
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f /tmp/appstrate-e2e/docker-compose.yml \
+            --env-file /tmp/appstrate-e2e/.env down -v 2>/dev/null || true
+          rm -rf /tmp/appstrate-e2e
