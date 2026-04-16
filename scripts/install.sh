@@ -450,6 +450,17 @@ sed_inplace() {
 rand_hex() { openssl rand -hex "$1"; }
 rand_b64() { openssl rand -base64 "$1" | tr -d '\n'; }
 
+compose() {
+  # Run `docker compose` from APPSTRATE_DIR with APPSTRATE_VERSION unset.
+  # Reason: the user-facing env var uses the 'v'-prefixed git-ref form
+  # (e.g. v1.2.3), but Docker image tags are published without the prefix
+  # (e.g. 1.2.3) and we pin the image form in .env via APPSTRATE_IMAGE_TAG.
+  # Docker compose gives shell env precedence over .env, so leaving the
+  # v-prefixed value in scope would make compose try to pull a non-existent
+  # tag — fatal on rollback (restored .env becomes useless).
+  (cd "$APPSTRATE_DIR" && unset APPSTRATE_VERSION && docker compose "$@")
+}
+
 rollback_upgrade() {
   # Restore the most recent backup of docker-compose.yml and .env, then restart.
   # Returns 0 on successful restore, 1 otherwise. No-op outside upgrade mode.
@@ -473,7 +484,7 @@ rollback_upgrade() {
 
   # --remove-orphans prunes any service the failed upgrade introduced that
   # no longer exists in the restored compose file.
-  if ! (cd "$APPSTRATE_DIR" && docker compose up -d --remove-orphans) >>"$LOG_FILE" 2>&1; then
+  if ! compose up -d --remove-orphans >>"$LOG_FILE" 2>&1; then
     return 1
   fi
   ok "Rollback successful — active version: $PREVIOUS_VERSION"
@@ -487,7 +498,7 @@ pull_images() {
     return
   fi
   log "Pulling images (this may take a minute)"
-  (cd "$APPSTRATE_DIR" && COMPOSE_PROGRESS=plain docker compose pull) >>"$LOG_FILE" 2>&1
+  COMPOSE_PROGRESS=plain compose pull >>"$LOG_FILE" 2>&1
 }
 
 start_services() {
@@ -496,7 +507,7 @@ start_services() {
   fi
 
   # Validate compose config before starting (catches bad downloads or env mismatches)
-  if ! (cd "$APPSTRATE_DIR" && docker compose config --quiet) >>"$LOG_FILE" 2>&1; then
+  if ! compose config --quiet >>"$LOG_FILE" 2>&1; then
     if rollback_upgrade; then
       err "docker-compose.yml validation failed — rolled back to $PREVIOUS_VERSION"
       err "  → Logs: $LOG_FILE"
@@ -506,7 +517,7 @@ start_services() {
   fi
 
   log "Starting services"
-  if ! (cd "$APPSTRATE_DIR" && docker compose up -d) >>"$LOG_FILE" 2>&1; then
+  if ! compose up -d >>"$LOG_FILE" 2>&1; then
     if rollback_upgrade; then
       err "Failed to start services — rolled back to $PREVIOUS_VERSION"
       err "  → Logs: $LOG_FILE"
