@@ -16,6 +16,9 @@ concurrency:
 
 permissions:
   contents: write
+  # SLSA provenance via Sigstore / GitHub OIDC (attest-build-provenance@v2).
+  id-token: write
+  attestations: write
 
 jobs:
   publish:
@@ -53,6 +56,40 @@ jobs:
           ( cd out && sha256sum install.sh > install.sh.sha256 )
           ( cd out/${{ steps.ver.outputs.version }} && sha256sum install.sh > install.sh.sha256 )
 
+      - name: Generate SLSA build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            out/install.sh
+            out/${{ steps.ver.outputs.version }}/install.sh
+
+      - name: Sign installer with minisign
+        id: minisign
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
+            echo "MINISIGN_SECRET_KEY secret not set — skipping minisign signature"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          umask 077
+          printf '%s' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
+          # Passphrase is read from stdin (no TTY); -t = signed trusted comment.
+          printf '%s\n' "$MINISIGN_PASSWORD" | \
+            minisign -S -s /tmp/minisign.key \
+              -t "appstrate $VERSION (latest)" \
+              -m out/install.sh
+          printf '%s\n' "$MINISIGN_PASSWORD" | \
+            minisign -S -s /tmp/minisign.key \
+              -t "appstrate $VERSION" \
+              -m "out/${VERSION}/install.sh"
+          rm -f /tmp/minisign.key
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
       - name: Checkout installer-pages branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -82,18 +119,39 @@ jobs:
           fi
 
       - name: Sync rendered files
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          SIGNED: ${{ steps.minisign.outputs.signed }}
         run: |
           # Latest (overwrite)
           cp out/install.sh        pages/install.sh
           cp out/install.sh.sha256 pages/install.sh.sha256
           # Versioned (immutable — refuse overwrite)
-          if [ -e "pages/${{ steps.ver.outputs.version }}/install.sh" ]; then
-            echo "::error::Version ${{ steps.ver.outputs.version }} already published — refusing to overwrite"
+          if [ -e "pages/${VERSION}/install.sh" ]; then
+            echo "::error::Version ${VERSION} already published — refusing to overwrite"
             exit 1
           fi
-          mkdir -p "pages/${{ steps.ver.outputs.version }}"
-          cp "out/${{ steps.ver.outputs.version }}/install.sh"        "pages/${{ steps.ver.outputs.version }}/install.sh"
-          cp "out/${{ steps.ver.outputs.version }}/install.sh.sha256" "pages/${{ steps.ver.outputs.version }}/install.sh.sha256"
+          mkdir -p "pages/${VERSION}"
+          cp "out/${VERSION}/install.sh"        "pages/${VERSION}/install.sh"
+          cp "out/${VERSION}/install.sh.sha256" "pages/${VERSION}/install.sh.sha256"
+
+          # Minisign signatures (if step ran — controlled by presence of MINISIGN_SECRET_KEY secret).
+          if [ "$SIGNED" = "true" ]; then
+            cp out/install.sh.minisig          pages/install.sh.minisig
+            cp "out/${VERSION}/install.sh.minisig" "pages/${VERSION}/install.sh.minisig"
+          fi
+
+          # Publish verify.sh wrapper. If the public key is committed under
+          # scripts/appstrate.pub, substitute its value into verify.sh so users
+          # don't need a second round-trip. Minisign public keys contain a
+          # comment line + a single base64 line — extract the base64 line.
+          if [ -f scripts/appstrate.pub ]; then
+            PUBKEY=$(grep -v '^untrusted' scripts/appstrate.pub | head -1 | tr -d '\n')
+            sed "s|__APPSTRATE_MINISIGN_PUBKEY__|${PUBKEY}|" scripts/verify.sh > pages/verify.sh
+            cp scripts/appstrate.pub pages/appstrate.pub
+          else
+            cp scripts/verify.sh pages/verify.sh
+          fi
 
           # Serve the installer at the root (curl -fsSL https://get.appstrate.dev | bash).
           # GitHub Pages serves index.html at /, so we point it at the script content.

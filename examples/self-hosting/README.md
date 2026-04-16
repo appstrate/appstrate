@@ -15,12 +15,78 @@ The installer handles everything automatically:
 - Detects the Docker socket GID for container access
 - Downloads and starts the full stack
 - Waits for the platform to become healthy
+- Rolls back automatically to the previous version on upgrade failure
 
 Open [http://localhost:3000](http://localhost:3000) and sign up.
 
 Overrides: `APPSTRATE_VERSION=v1.2.3`, `APPSTRATE_DIR=~/.appstrate`, `APPSTRATE_PORT=8080`.
 
 To upgrade, re-run the same command — existing secrets are preserved and new config keys are merged automatically.
+
+## Verifying the Installer
+
+The one-liner above relies on TLS + GitHub Pages. For stronger guarantees, two supply-chain mechanisms are available:
+
+### Option 1 — SLSA build provenance (GitHub OIDC + Sigstore)
+
+Every published `install.sh` is signed via GitHub's OIDC token and attested through Sigstore's transparency log. Verify with the GitHub CLI:
+
+```bash
+curl -fsSLo install.sh https://get.appstrate.dev/install.sh
+gh attestation verify install.sh --owner appstrate
+bash install.sh
+```
+
+No key management required — trust is anchored in GitHub's identity system.
+
+### Option 2 — Minisign offline signature
+
+Verified one-liner (wraps download → verify → run):
+
+```bash
+curl -fsSL https://get.appstrate.dev/verify.sh | bash
+```
+
+Or manually:
+
+```bash
+curl -fsSLo install.sh         https://get.appstrate.dev/install.sh
+curl -fsSLo install.sh.minisig https://get.appstrate.dev/install.sh.minisig
+curl -fsSLo appstrate.pub      https://get.appstrate.dev/appstrate.pub
+
+minisign -Vm install.sh -p appstrate.pub
+less install.sh                # optional: read before running
+bash install.sh
+```
+
+`verify.sh` and `appstrate.pub` only appear on `get.appstrate.dev` once the signing keypair is provisioned (see **Maintainer: signing setup** below). Until then, use SLSA provenance or rely on TLS.
+
+### Maintainer: signing setup
+
+One-time bootstrap to enable minisign signatures on releases:
+
+1. **Generate a keypair** (offline, on a trusted machine):
+
+   ```bash
+   minisign -G -p appstrate.pub -s appstrate.key
+   ```
+
+   Choose a strong passphrase. Back up `appstrate.key` in a password manager or hardware token — losing it forces a key rotation.
+
+2. **Commit the public key** to the repo:
+
+   ```bash
+   cp appstrate.pub appstrate/scripts/appstrate.pub
+   git add scripts/appstrate.pub && git commit -m "chore: add installer signing pubkey"
+   ```
+
+3. **Store the private key + passphrase** as GitHub Actions secrets on the `appstrate/appstrate` repo:
+   - `MINISIGN_SECRET_KEY` — full contents of `appstrate.key`
+   - `MINISIGN_PASSWORD` — the passphrase
+
+4. **Re-run the publish workflow** on an existing tag (or cut a new one). `publish-installer.yml` will detect the secret, sign `install.sh`, and publish `install.sh.minisig` + `appstrate.pub` to the `get.appstrate.dev` branch.
+
+**Rotation**: generate a new keypair, update `scripts/appstrate.pub` and the GitHub secrets in the same PR, announce the old key as retired in the release notes, and bump the installer with the new pubkey.
 
 ## Prerequisites
 

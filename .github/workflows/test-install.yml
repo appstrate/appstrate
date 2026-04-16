@@ -4,15 +4,20 @@ on:
   pull_request:
     paths:
       - "scripts/install.sh"
+      - "scripts/verify.sh"
+      - "scripts/appstrate.pub"
       - "test/install/**"
       - "examples/self-hosting/**"
       - ".github/workflows/test-install.yml"
+      - ".github/workflows/publish-installer.yml"
   push:
     branches: [main]
     paths:
       - "scripts/install.sh"
+      - "scripts/verify.sh"
       - "test/install/**"
       - ".github/workflows/test-install.yml"
+      - ".github/workflows/publish-installer.yml"
   workflow_dispatch:
 
 permissions:
@@ -42,6 +47,19 @@ jobs:
           chmod +x /tmp/shfmt
           /tmp/shfmt -d -i 2 -ci scripts/install.sh
 
+  workflow-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: actionlint (all workflows)
+        # Pinned installer — runs actionlint against every YAML in .github/workflows/.
+        # -ignore SC2129: pre-existing style warning in release.yml, not blocking.
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color -ignore 'SC2129' .github/workflows/*.yml
+
   unit-bats:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -52,9 +70,105 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/code" -w /code --entrypoint sh \
             bats/bats:1.11.0 -c '
-              apk add --no-cache openssl >/dev/null
+              apk add --no-cache openssl python3 >/dev/null
               bats test/install/install.bats
             '
+
+  # End-to-end dry-run of the publish pipeline (render + SLSA-less sign +
+  # verify.sh flow) using a throwaway keypair. Catches sed substitution bugs,
+  # minisign invocation syntax, and verify.sh integration issues before a real
+  # tag push exercises publish-installer.yml in anger.
+  publish-dry-run:
+    runs-on: ubuntu-latest
+    needs: [static, workflow-lint]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install minisign
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+
+      - name: Simulate publish-installer.yml render + sign
+        run: |
+          set -euo pipefail
+          mkdir -p out pages
+
+          # --- Render install.sh (mirrors publish-installer.yml "Render" step) ---
+          sed "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" scripts/install.sh > out/install.sh
+          if grep -q "__APPSTRATE_VERSION__" out/install.sh; then
+            echo "::error::version placeholder not replaced"; exit 1
+          fi
+          bash -n out/install.sh
+
+          # --- Throwaway keypair (-W = unencrypted, CI-friendly) ---
+          umask 077
+          minisign -G -W -f -p scripts/appstrate.pub -s /tmp/dry.key
+
+          # --- Sign (mirrors publish-installer.yml minisign step) ---
+          minisign -S -s /tmp/dry.key \
+            -t "appstrate v1.0.0-dry (latest)" \
+            -m out/install.sh
+
+          # --- Substitute pubkey into verify.sh (mirrors sync step) ---
+          PUBKEY=$(grep -v '^untrusted' scripts/appstrate.pub | head -1 | tr -d '\n')
+          if [ -z "$PUBKEY" ]; then
+            echo "::error::pubkey extraction failed"; cat scripts/appstrate.pub; exit 1
+          fi
+          sed "s|__APPSTRATE_MINISIGN_PUBKEY__|${PUBKEY}|" scripts/verify.sh > pages/verify.sh
+          if grep -q "__APPSTRATE_MINISIGN_PUBKEY__" pages/verify.sh; then
+            echo "::error::pubkey placeholder not substituted"; exit 1
+          fi
+          grep -q "APPSTRATE_PUBKEY=\"${PUBKEY}\"" pages/verify.sh
+
+          # --- Independent signature check (proves the render+sign pipeline) ---
+          cp out/install.sh pages/install.sh
+          cp out/install.sh.minisig pages/install.sh.minisig
+          minisign -V -p scripts/appstrate.pub -m pages/install.sh
+          echo "✓ render + sign pipeline OK"
+
+      - name: Simulate verify.sh end-to-end (happy + tampered)
+        run: |
+          set -euo pipefail
+
+          # Swap real install.sh for a stub (avoid actually installing Docker).
+          # Re-sign the stub with the same key so verify.sh accepts it.
+          cat > pages/install.sh <<'STUB'
+          #!/usr/bin/env bash
+          echo "STUB_INSTALLER_RAN"
+          exit 0
+          STUB
+          minisign -S -s /tmp/dry.key -t "dry-run stub" -m pages/install.sh
+          rm -f /tmp/dry.key
+
+          # Serve pages/ locally for verify.sh to fetch from.
+          cd pages
+          python3 -m http.server 8765 >/dev/null 2>&1 &
+          SERVER=$!
+          trap 'kill $SERVER 2>/dev/null || true' EXIT
+          sleep 1
+
+          # --- Happy path ---
+          OUT=$(APPSTRATE_BASE_URL=http://localhost:8765 bash verify.sh 2>&1)
+          echo "$OUT"
+          echo "$OUT" | grep -q "Signature valid" \
+            || { echo "::error::verify.sh did not emit 'Signature valid'"; exit 1; }
+          echo "$OUT" | grep -q "STUB_INSTALLER_RAN" \
+            || { echo "::error::verify.sh did not exec install.sh"; exit 1; }
+          echo "✓ happy path OK"
+
+          # --- Tamper path: corrupt install.sh after signing ---
+          echo "echo TAMPERED" >> install.sh
+          set +e
+          TAMPER_OUT=$(APPSTRATE_BASE_URL=http://localhost:8765 bash verify.sh 2>&1)
+          tamper_exit=$?
+          set -e
+          echo "$TAMPER_OUT"
+          if [ "$tamper_exit" -eq 0 ]; then
+            echo "::error::verify.sh accepted a tampered install.sh"; exit 1
+          fi
+          echo "$TAMPER_OUT" | grep -qE "(Signature verification FAILED|tampered)" \
+            || { echo "::error::verify.sh did not report tampering"; exit 1; }
+          echo "✓ tamper path OK"
 
   # Validates installer logic in a minimal Linux container (DinD):
   # prereq detection, env generation, compose config validity, mode detection.
@@ -214,6 +328,76 @@ jobs:
             bash /tmp/install.sh 2>&1 | tee /tmp/run2.log
           grep -q "Already at" /tmp/run2.log
           echo "✓ noop confirmed"
+
+      # Force an upgrade failure and verify rollback restores the previous state.
+      # Strategy: ship a broken docker-compose.yml via APPSTRATE_ASSETS_DIR. The
+      # installer will backup the good compose/env, copy the broken one in, fail
+      # `docker compose config --quiet`, and roll back automatically.
+      - name: Upgrade rollback
+        run: |
+          mkdir -p /tmp/broken-assets
+          # Compose referencing a required var with no default → `docker compose
+          # config` exits non-zero, which is exactly where rollback_upgrade triggers.
+          cat > /tmp/broken-assets/docker-compose.yml <<'YAML'
+          name: appstrate
+          services:
+            sabotaged:
+              image: alpine:3
+              command: ["true"]
+              environment:
+                - REQUIRED=${ROLLBACK_SABOTAGE:?this variable is intentionally missing to force config failure}
+          YAML
+          cp ${{ github.workspace }}/examples/self-hosting/.env.example /tmp/broken-assets/.env.example
+
+          # Trigger an upgrade by pinning to a new version (any non-"local" value).
+          set +e
+          APPSTRATE_DIR=/tmp/appstrate-e2e \
+          APPSTRATE_PORT=3000 \
+          APPSTRATE_QUIET=1 \
+          APPSTRATE_VERSION=v9.9.9 \
+          APPSTRATE_ASSETS_DIR=/tmp/broken-assets \
+            bash /tmp/install.sh 2>&1 | tee /tmp/run3.log
+          exit_code=$?
+          set -e
+
+          # Installer must exit non-zero on the botched upgrade
+          if [ "$exit_code" -eq 0 ]; then
+            echo "✗ installer exited 0, expected non-zero"
+            exit 1
+          fi
+
+          # Rollback path must have executed
+          if ! grep -q "Rolling back to" /tmp/run3.log; then
+            echo "✗ rollback did not trigger"
+            cat /tmp/run3.log
+            exit 1
+          fi
+          if ! grep -q "rolled back to" /tmp/run3.log; then
+            echo "✗ rollback did not complete"
+            cat /tmp/run3.log
+            exit 1
+          fi
+          echo "✓ rollback executed"
+
+          # .env + compose.yml must be restored (no REQUIRED_VAR reference)
+          if grep -q "ROLLBACK_SABOTAGE" /tmp/appstrate-e2e/docker-compose.yml; then
+            echo "✗ compose.yml not restored"
+            exit 1
+          fi
+          echo "✓ compose.yml restored to previous version"
+
+          # Stack must still be serving on port 3000 (rollback restarted old stack)
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS --max-time 3 http://localhost:3000/ >/dev/null 2>&1; then
+              echo "✓ old stack responding after rollback"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "✗ old stack not responding after rollback"
+          docker compose -f /tmp/appstrate-e2e/docker-compose.yml \
+            --env-file /tmp/appstrate-e2e/.env logs --tail 30
+          exit 1
 
       - name: Teardown
         if: always()

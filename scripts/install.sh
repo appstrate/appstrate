@@ -193,9 +193,15 @@ port_in_use() {
     lsof -iTCP:"$p" -sTCP:LISTEN -Pn >/dev/null 2>&1
   elif command_exists ss; then
     ss -lnt "sport = :$p" 2>/dev/null | grep -q LISTEN
+  elif command_exists netstat; then
+    netstat -lnt 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${p}$"
   else
-    # Neither lsof nor ss available — cannot check, assume port is free.
-    warn "Cannot check port availability (install lsof or ss for port detection)"
+    # Bash builtin: /dev/tcp is a pseudo-device, no external dependency.
+    # Succeeds iff something is listening on the port.
+    (exec 3<>/dev/tcp/127.0.0.1/"$p") 2>/dev/null && {
+      exec 3<&- 3>&-
+      return 0
+    }
     return 1
   fi
 }
@@ -340,26 +346,49 @@ EOF
   mv "$APPSTRATE_DIR/.env.tmp" "$APPSTRATE_DIR/.env"
 }
 
+resolve_docker_gid() {
+  # Pure decision helper (no filesystem/docker access) — easy to unit-test.
+  # On Linux, a root-owned (GID 0) socket typically means the 'docker' group
+  # owns the real socket; Docker Desktop / OrbStack handle this via socket
+  # rewriting, native Linux doesn't. Prefer the 'docker' group GID when found.
+  local observed=$1 os=$2
+  if [ "$os" = "Linux" ] && [ "$observed" = "0" ]; then
+    local docker_gid
+    docker_gid=$(getent group docker 2>/dev/null | cut -d: -f3)
+    if [ -n "$docker_gid" ]; then
+      echo "$docker_gid"
+      return 0
+    fi
+  fi
+  echo "$observed"
+}
+
 detect_docker_gid() {
   # Return the GID owning /var/run/docker.sock.
   # Try host-side stat first (fast, no image pull). Falls back to a throwaway
   # container probe because Docker Desktop / OrbStack rewrite socket ownership
   # when mounting. Container probe sees the real GID.
-  local gid=""
+  local gid="" os
+  os=$(uname -s 2>/dev/null || echo unknown)
   if [ -S /var/run/docker.sock ]; then
     gid=$(stat -c '%g' /var/run/docker.sock 2>/dev/null ||
       stat -f '%g' /var/run/docker.sock 2>/dev/null ||
       echo "")
   fi
-  if [ -z "$gid" ]; then
-    if ! gid=$(docker run --rm \
-      -v /var/run/docker.sock:/var/run/docker.sock:ro \
-      alpine:3 stat -c '%g' /var/run/docker.sock 2>/dev/null); then
-      warn "Could not probe Docker socket GID — defaulting to 0 (override DOCKER_GID in .env if needed)"
-      gid=0
-    fi
+  if [ -n "$gid" ]; then
+    resolve_docker_gid "$gid" "$os"
+    return
   fi
-  echo "${gid:-0}"
+  if ! gid=$(docker run --rm \
+    -v /var/run/docker.sock:/var/run/docker.sock:ro \
+    alpine:3 stat -c '%g' /var/run/docker.sock 2>/dev/null); then
+    warn "Could not probe Docker socket GID — defaulting to 0"
+    warn "  → On native Linux: sudo groupadd docker && sudo usermod -aG docker \$USER"
+    warn "  → Or set DOCKER_GID manually in .env"
+    echo "0"
+    return
+  fi
+  resolve_docker_gid "$gid" "$os"
 }
 
 merge_env() {
@@ -388,6 +417,26 @@ merge_env() {
   else
     echo "APPSTRATE_VERSION=$APPSTRATE_IMAGE_TAG" >>"$APPSTRATE_DIR/.env"
   fi
+
+  # Flag keys present in .env but absent from .env.example — likely obsolete.
+  # Don't auto-remove (could be legitimate user-added vars).
+  local obsolete_keys=() k
+  while IFS= read -r line; do
+    case "$line" in '' | \#*) continue ;; esac
+    k=${line%%=*}
+    [ -z "$k" ] && continue
+    # Keys the installer manages internally, never shipped in .env.example.
+    case "$k" in APPSTRATE_VERSION | DOCKER_GID) continue ;; esac
+    if ! grep -qE "^${k}=" "$APPSTRATE_DIR/.env.example" 2>/dev/null; then
+      obsolete_keys+=("$k")
+    fi
+  done <"$APPSTRATE_DIR/.env"
+
+  if [ ${#obsolete_keys[@]} -gt 0 ]; then
+    warn "Keys present in .env but absent from .env.example (possibly obsolete):"
+    for k in "${obsolete_keys[@]}"; do warn "  - $k"; done
+    warn "Review and remove them manually if no longer needed: $APPSTRATE_DIR/.env"
+  fi
 }
 
 sed_inplace() {
@@ -399,6 +448,32 @@ sed_inplace() {
 
 rand_hex() { openssl rand -hex "$1"; }
 rand_b64() { openssl rand -base64 "$1" | tr -d '\n'; }
+
+rollback_upgrade() {
+  # Restore the most recent backup of docker-compose.yml and .env, then restart.
+  # Returns 0 on successful restore, 1 otherwise. No-op outside upgrade mode.
+  [ "$INSTALL_MODE" != "upgrade" ] && return 1
+
+  local latest_compose latest_env
+  # shellcheck disable=SC2012
+  latest_compose=$(ls -t "$APPSTRATE_DIR"/docker-compose.yml.bak-* 2>/dev/null | head -1)
+  # shellcheck disable=SC2012
+  latest_env=$(ls -t "$APPSTRATE_DIR"/.env.bak-* 2>/dev/null | head -1)
+
+  if [ -z "$latest_compose" ] && [ -z "$latest_env" ]; then
+    return 1
+  fi
+
+  warn "Rolling back to $PREVIOUS_VERSION"
+  [ -n "$latest_compose" ] && cp "$latest_compose" "$APPSTRATE_DIR/docker-compose.yml"
+  [ -n "$latest_env" ] && cp "$latest_env" "$APPSTRATE_DIR/.env"
+
+  if ! (cd "$APPSTRATE_DIR" && docker compose up -d) >>"$LOG_FILE" 2>&1; then
+    return 1
+  fi
+  ok "Rollback successful — active version: $PREVIOUS_VERSION"
+  return 0
+}
 
 pull_images() {
   if [ "$INSTALL_MODE" = "noop" ]; then return; fi
@@ -417,11 +492,23 @@ start_services() {
 
   # Validate compose config before starting (catches bad downloads or env mismatches)
   if ! (cd "$APPSTRATE_DIR" && docker compose config --quiet) >>"$LOG_FILE" 2>&1; then
+    if rollback_upgrade; then
+      err "docker-compose.yml validation failed — rolled back to $PREVIOUS_VERSION"
+      err "  → Logs: $LOG_FILE"
+      exit 1
+    fi
     fatal "docker-compose.yml validation failed — see $LOG_FILE"
   fi
 
   log "Starting services"
-  (cd "$APPSTRATE_DIR" && docker compose up -d) >>"$LOG_FILE" 2>&1
+  if ! (cd "$APPSTRATE_DIR" && docker compose up -d) >>"$LOG_FILE" 2>&1; then
+    if rollback_upgrade; then
+      err "Failed to start services — rolled back to $PREVIOUS_VERSION"
+      err "  → Logs: $LOG_FILE"
+      exit 1
+    fi
+    fatal "Failed to start services — see $LOG_FILE"
+  fi
 }
 
 wait_for_health() {
@@ -439,6 +526,12 @@ wait_for_health() {
     sleep 2
   done
   err "appstrate did not become healthy within 120s"
+  if rollback_upgrade; then
+    err "  → Rolled back to $PREVIOUS_VERSION (new version failed to start)"
+    err "  → Logs: $LOG_FILE"
+    err "  → Please report: https://github.com/${GITHUB_REPO}/issues"
+    exit 1
+  fi
   err "  → cd $APPSTRATE_DIR && docker compose logs -f"
   err "  → Logs: $LOG_FILE"
   exit 1
