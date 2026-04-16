@@ -60,7 +60,7 @@ Deploy Appstrate with a single command. Docker 20+ with Compose V2 required.
 curl -fsSL https://get.appstrate.dev | bash
 ```
 
-This generates secrets, pulls images from GHCR, and starts the full stack (PostgreSQL, Redis, MinIO). Open [http://localhost:3000](http://localhost:3000) — the first signup becomes admin. See [`examples/self-hosting/`](./examples/self-hosting/) for manual setup and configuration options.
+This generates secrets, pulls images from GHCR, and starts the full stack (PostgreSQL, Redis, MinIO). Open [http://localhost:3000](http://localhost:3000) and sign up. See [`examples/self-hosting/`](./examples/self-hosting/) for manual setup and configuration options.
 
 ## Quick Start (Development)
 
@@ -76,7 +76,7 @@ bun run dev       # → http://localhost:3000
 
 No Docker, no PostgreSQL, no Redis — just Bun. Appstrate uses **progressive infrastructure**: it starts with an embedded database (PGlite) and local storage, then scales up to PostgreSQL, Redis, and S3 as you need them.
 
-First signup creates an organization automatically. See [Contributing](./CONTRIBUTING.md) for the full development guide.
+After signup, the onboarding flow guides you to create your first organization. See [Contributing](./CONTRIBUTING.md) for the full development guide.
 
 ### Progressive Infrastructure
 

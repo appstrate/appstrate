@@ -16,7 +16,7 @@ The installer handles everything automatically:
 - Downloads and starts the full stack
 - Waits for the platform to become healthy
 
-Open [http://localhost:3000](http://localhost:3000) — the first signup becomes admin.
+Open [http://localhost:3000](http://localhost:3000) and sign up.
 
 Overrides: `APPSTRATE_VERSION=v1.2.3`, `APPSTRATE_DIR=~/.appstrate`, `APPSTRATE_PORT=8080`.
 
@@ -62,7 +62,7 @@ If you prefer to set up manually (or can't use the one-liner):
 
 3. **Access the dashboard**
 
-   Open [http://localhost:3000](http://localhost:3000) in your browser. The first signup creates an organization automatically.
+   Open [http://localhost:3000](http://localhost:3000) in your browser. After signup, the onboarding flow guides you to create your first organization.
 
 ## Architecture
 

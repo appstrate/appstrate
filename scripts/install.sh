@@ -458,7 +458,7 @@ print_next_steps() {
 
 Next:
   → Open http://localhost:$APPSTRATE_PORT
-  → Sign up (first user becomes admin)
+  → Sign up and create your organization
   → Settings → Models → add Claude / OpenAI key
 
 Manage:
