@@ -37,6 +37,7 @@ import { ContentEditor } from "../package-editor/content-editor";
 import { AFPS_SCHEMA_URLS, type AvailableScope } from "@appstrate/core/validation";
 import { providerSchema } from "@appstrate/core/schemas";
 import type { JSONSchemaObject } from "@appstrate/core/form";
+import { toCredentialKey } from "../../lib/strings";
 
 type ProviderEditorTab = "general" | "auth" | "uris" | "content" | "json";
 
@@ -111,9 +112,38 @@ function writeCredentialsToDef(
   const next: Record<string, unknown> = { ...def };
   const wrapper = fieldsToSchema(fields, "credentials");
   if (wrapper) {
-    next.credentials = { schema: wrapper.schema };
+    const existing = (def.credentials ?? {}) as Record<string, unknown>;
+    next.credentials = { ...existing, schema: wrapper.schema };
   } else {
     delete next.credentials;
+  }
+  return next;
+}
+
+/** Patch `definition.credentials` (canonical nested shape). */
+function patchCredentialsInDef(
+  def: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const existing = (def.credentials ?? {}) as Record<string, unknown>;
+  return { ...def, credentials: { ...existing, ...patch } };
+}
+
+/**
+ * Migrate legacy flat `definition.credentialFieldName` to canonical nested
+ * `definition.credentials.fieldName` on load. Produces a manifest in the
+ * canonical shape so saves don't re-introduce the flat form.
+ */
+function migrateLegacyFieldName(def: Record<string, unknown>): Record<string, unknown> {
+  if (!("credentialFieldName" in def)) return def;
+  const flat = def.credentialFieldName as string | undefined;
+  const next: Record<string, unknown> = { ...def };
+  delete next.credentialFieldName;
+  if (flat) {
+    const existing = (next.credentials ?? {}) as Record<string, unknown>;
+    if (existing.fieldName === undefined) {
+      next.credentials = { ...existing, fieldName: flat };
+    }
   }
   return next;
 }
@@ -127,30 +157,40 @@ function normalizeProviderInitialState(initial: ProviderEditorState): {
   state: ProviderEditorState;
   credentialFields: SchemaField[];
 } {
-  const def = getDef(initial.manifest);
+  // Migrate any legacy flat credentialFieldName into the canonical nested shape
+  // on load. Subsequent writes use patchCredentialsInDef.
+  const migratedDef = migrateLegacyFieldName(getDef(initial.manifest));
+  const migratedManifest = { ...initial.manifest, definition: migratedDef };
+  const migratedState: ProviderEditorState =
+    migratedDef === getDef(initial.manifest) ? initial : { ...initial, manifest: migratedManifest };
+
+  const def = migratedDef;
   const authMode = (def.authMode as string) || "oauth2";
   const creds = def.credentials as { schema?: JSONSchemaObject } | undefined;
 
   if (!isCredentialMode(authMode)) {
-    return { state: initial, credentialFields: [] };
+    return { state: migratedState, credentialFields: [] };
   }
 
   if (creds?.schema) {
     return {
-      state: initial,
+      state: migratedState,
       credentialFields: schemaToFields(creds.schema, "credentials"),
     };
   }
 
   const seeded = makeDefaultCredentialFields(authMode);
   if (seeded.length === 0) {
-    return { state: initial, credentialFields: [] };
+    return { state: migratedState, credentialFields: [] };
   }
 
   return {
     state: {
-      ...initial,
-      manifest: { ...initial.manifest, definition: writeCredentialsToDef(def, seeded) },
+      ...migratedState,
+      manifest: {
+        ...migratedState.manifest,
+        definition: writeCredentialsToDef(def, seeded),
+      },
     },
     credentialFields: seeded,
   };
@@ -712,8 +752,22 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
                 <Input
                   id="pe-credFieldName"
                   type="text"
-                  value={(def.credentialFieldName as string) ?? ""}
-                  onChange={(e) => patchDef({ credentialFieldName: e.target.value })}
+                  value={
+                    ((def.credentials as Record<string, unknown> | undefined)?.fieldName as
+                      | string
+                      | undefined) ?? ""
+                  }
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      manifest: {
+                        ...s.manifest,
+                        definition: patchCredentialsInDef(getDef(s.manifest), {
+                          fieldName: toCredentialKey(e.target.value),
+                        }),
+                      },
+                    }))
+                  }
                   placeholder={credentialFields[0]?.key || "api_key"}
                 />
               </div>
@@ -904,9 +958,11 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
           key={jsonEditorKey}
           value={state.manifest}
           onApply={(manifest) => {
-            setState((s) => ({ ...s, manifest }));
-            // Sync credential fields from manifest
-            const creds = getDef(manifest).credentials as { schema?: JSONSchemaObject } | undefined;
+            const migratedDef = migrateLegacyFieldName(getDef(manifest));
+            const canonical = { ...manifest, definition: migratedDef };
+            setState((s) => ({ ...s, manifest: canonical }));
+            // Sync credential fields from the migrated definition
+            const creds = migratedDef.credentials as { schema?: JSONSchemaObject } | undefined;
             setCredentialFields(creds?.schema ? schemaToFields(creds.schema, "credentials") : []);
             setActiveTab("general");
           }}

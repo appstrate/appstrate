@@ -142,6 +142,69 @@ export const providerManifestSchema = afpsProviderManifestSchema.safeExtend({
 export type ProviderManifest = z.infer<typeof providerManifestSchema>;
 
 /**
+ * Canonical credential key pattern — shared by the provider schema editor,
+ * the AFPS validation, the Zod route schemas and the migration script.
+ *
+ * Matches the `\w+` regex used by the sidecar substitution engine
+ * (`runtime-pi/sidecar/helpers.ts`) and by `buildSidecarCredentials` /
+ * `evaluateCredentialTransform` in `@appstrate/connect`. Keys produced by
+ * the UI must round-trip through those engines without escaping.
+ */
+export const CREDENTIAL_KEY_RE = /^[a-z][a-z0-9_]*$/;
+
+/**
+ * Validate credential-related fields on a provider manifest definition.
+ * Pure function — returns human-readable error messages (empty array = valid).
+ *
+ * Rules (api_key / basic / custom only — OAuth modes don't declare credentials):
+ *  - `definition.credentials.schema.properties` keys match {@link CREDENTIAL_KEY_RE}
+ *  - `definition.credentials.fieldName` (when present) matches the pattern
+ *  - `fieldName` references an existing property in the schema
+ *
+ * Called from:
+ *  - {@link validateManifest} (ZIP import + package update)
+ *  - `routes/providers.ts` Zod schemas (POST / PUT)
+ *  - migration script
+ */
+export function validateProviderCredentialKeys(manifest: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const def = (manifest.definition ?? {}) as Record<string, unknown>;
+  const authMode = def.authMode as string | undefined;
+
+  if (authMode !== "api_key" && authMode !== "basic" && authMode !== "custom") {
+    return errors;
+  }
+
+  const credentials = def.credentials as Record<string, unknown> | undefined;
+  const schema = credentials?.schema as Record<string, unknown> | undefined;
+  const properties = (schema?.properties ?? {}) as Record<string, unknown>;
+  const propertyKeys = Object.keys(properties);
+
+  for (const key of propertyKeys) {
+    if (!CREDENTIAL_KEY_RE.test(key)) {
+      errors.push(
+        `definition.credentials.schema.properties: key "${key}" must match ${CREDENTIAL_KEY_RE} (lowercase letters, digits and underscores; must start with a letter)`,
+      );
+    }
+  }
+
+  const fieldName = credentials?.fieldName as string | undefined;
+  if (fieldName !== undefined) {
+    if (!CREDENTIAL_KEY_RE.test(fieldName)) {
+      errors.push(
+        `definition.credentials.fieldName: "${fieldName}" must match ${CREDENTIAL_KEY_RE}`,
+      );
+    } else if (propertyKeys.length > 0 && !propertyKeys.includes(fieldName)) {
+      errors.push(
+        `definition.credentials.fieldName: "${fieldName}" is not declared in definition.credentials.schema.properties`,
+      );
+    }
+  }
+
+  return errors;
+}
+
+/**
  * OAuth2 token-endpoint auth method, `tokenContentType` and
  * `credentialTransform` are part of AFPS v1 (§7.2 and §7.4). Types are
  * derived from the canonical Zod enums so appstrate cannot drift.
@@ -249,7 +312,13 @@ export function buildProviderDefinitionFromManifest(
       : {}),
     // Credential fields (from definition.credentials)
     credentialSchema: credentials?.schema as Record<string, unknown> | undefined,
-    credentialFieldName: credentials?.fieldName as string | undefined,
+    // Canonical shape: definition.credentials.fieldName.
+    // Back-compat fallback: a flat `definition.credentialFieldName` was briefly
+    // produced by the provider editor UI. Remove once the migration script has
+    // landed in every deployed environment.
+    credentialFieldName:
+      (credentials?.fieldName as string | undefined) ??
+      (rawDef.credentialFieldName as string | undefined),
     // Transport fields (from definition level — cross-cutting, implementation-specific)
     credentialHeaderName: rawDef.credentialHeaderName as string | undefined,
     credentialHeaderPrefix: rawDef.credentialHeaderPrefix as string | undefined,
@@ -328,11 +397,19 @@ function parseWithSchema(
   raw: unknown,
 ): ValidateManifestResult {
   const result = schema.safeParse(raw);
-  if (result.success) {
-    return { valid: true, errors: [], manifest: result.data };
+  if (!result.success) {
+    const errors = result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
+    return { valid: false, errors };
   }
-  const errors = result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
-  return { valid: false, errors };
+
+  if (schema === providerManifestSchema) {
+    const credentialErrors = validateProviderCredentialKeys(result.data as Record<string, unknown>);
+    if (credentialErrors.length > 0) {
+      return { valid: false, errors: credentialErrors };
+    }
+  }
+
+  return { valid: true, errors: [], manifest: result.data };
 }
 
 /**

@@ -485,6 +485,35 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     expect(prompt).toContain("API Key");
     expect(prompt).toContain("Secret Token");
   });
+
+  it("emits the Auth line alongside extra vars for api_key providers with a credentialSchema", () => {
+    // Regression: previously the `if (credentialSchema)` branch omitted the
+    // Auth line entirely for api_key providers that declared a schema (which
+    // the provider editor does by default), leaving the agent without any
+    // header/prefix hint.
+    const ctx = baseContext({
+      tokens: { "@test/fathom": "tok" },
+      providers: [
+        {
+          id: "@test/fathom",
+          displayName: "Fathom",
+          authMode: "api_key",
+          credentialFieldName: "api_key",
+          credentialHeaderName: "X-Api-Key",
+          credentialHeaderPrefix: "",
+          credentialSchema: {
+            properties: { api_key: { description: "API key" } },
+          },
+          authorizedUris: ["https://api.fathom.ai/*"],
+        },
+      ],
+    });
+
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("X-Api-Key: {{api_key}}");
+    // The primary var does NOT appear in `Other credential vars` (deduplicated)
+    expect(prompt).not.toContain("Other credential vars");
+  });
 });
 
 // ─── Documents/files ────────────────────────────────────────

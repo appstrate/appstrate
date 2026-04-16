@@ -140,24 +140,41 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
 
       sections.push(`- **${displayName}** (provider ID: \`${provider.id}\`)`);
 
-      // For providers with credentialSchema, show all credential variables
-      if (provider.credentialSchema) {
-        const props =
-          (provider.credentialSchema.properties as Record<string, { description?: string }>) ?? {};
-        const varNames = Object.keys(props);
-        const varDescriptions = varNames.map((name) => {
-          const desc = props[name]?.description ?? name;
-          return `\`{{${name}}}\` — ${desc}`;
-        });
-        if (varDescriptions.length > 0) {
-          sections.push(`  Credentials: ${varDescriptions.join(", ")}`);
-        }
-      } else {
-        // OAuth2 / API key — single credential field with header info
-        const fieldName = getCredentialFieldName(provider as ProviderDefinition);
+      const props =
+        (provider.credentialSchema?.properties as
+          | Record<string, { description?: string }>
+          | undefined) ?? {};
+      const varEntries = Object.entries(props);
+
+      // OAuth2/oauth1/api_key and basic all have a well-defined primary field
+      // (resolved by getCredentialFieldName). `custom` providers with no
+      // explicit fieldName don't — fall back to listing all schema variables.
+      const explicitFieldName = provider.credentialFieldName;
+      const resolvedFieldName =
+        explicitFieldName ??
+        (provider.authMode === "api_key" || provider.authMode === "basic"
+          ? getCredentialFieldName(provider as ProviderDefinition)
+          : provider.authMode !== "custom"
+            ? getCredentialFieldName(provider as ProviderDefinition)
+            : undefined);
+
+      if (resolvedFieldName) {
         const headerName = provider.credentialHeaderName ?? "Authorization";
         const headerPrefix = provider.credentialHeaderPrefix ?? "Bearer ";
-        sections.push(`  Auth: \`${headerName}: ${headerPrefix}{{${fieldName}}}\``);
+        sections.push(`  Auth: \`${headerName}: ${headerPrefix}{{${resolvedFieldName}}}\``);
+
+        const extraVars = varEntries
+          .filter(([name]) => name !== resolvedFieldName)
+          .map(([name, prop]) => `\`{{${name}}}\` — ${prop?.description ?? name}`);
+        if (extraVars.length > 0) {
+          sections.push(`  Other credential vars: ${extraVars.join(", ")}`);
+        }
+      } else if (varEntries.length > 0) {
+        // Custom provider with no primary field — list all declared credentials.
+        const varDescriptions = varEntries.map(
+          ([name, prop]) => `\`{{${name}}}\` — ${prop?.description ?? name}`,
+        );
+        sections.push(`  Credentials: ${varDescriptions.join(", ")}`);
       }
 
       if (provider.hasProviderDoc) {
