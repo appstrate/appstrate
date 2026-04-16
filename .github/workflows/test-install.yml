@@ -101,8 +101,11 @@ jobs:
           bash -n out/install.sh
 
           # --- Throwaway keypair (-W = unencrypted, CI-friendly) ---
+          # Written to /tmp to avoid clobbering a real scripts/appstrate.pub
+          # if one is ever committed — the dry-run must verify its OWN key,
+          # not the committed one.
           umask 077
-          minisign -G -W -f -p scripts/appstrate.pub -s /tmp/dry.key
+          minisign -G -W -f -p /tmp/dry.pub -s /tmp/dry.key
 
           # --- Sign (mirrors publish-installer.yml minisign step) ---
           minisign -S -s /tmp/dry.key \
@@ -110,9 +113,9 @@ jobs:
             -m out/install.sh
 
           # --- Substitute pubkey into verify.sh (mirrors sync step) ---
-          PUBKEY=$(grep -v '^untrusted' scripts/appstrate.pub | head -1 | tr -d '\n')
+          PUBKEY=$(grep -v '^untrusted' /tmp/dry.pub | head -1 | tr -d '\n')
           if [ -z "$PUBKEY" ]; then
-            echo "::error::pubkey extraction failed"; cat scripts/appstrate.pub; exit 1
+            echo "::error::pubkey extraction failed"; cat /tmp/dry.pub; exit 1
           fi
           sed "s|__APPSTRATE_MINISIGN_PUBKEY__|${PUBKEY}|" scripts/verify.sh > pages/verify.sh
           if grep -q "__APPSTRATE_MINISIGN_PUBKEY__" pages/verify.sh; then
@@ -123,7 +126,7 @@ jobs:
           # --- Independent signature check (proves the render+sign pipeline) ---
           cp out/install.sh pages/install.sh
           cp out/install.sh.minisig pages/install.sh.minisig
-          minisign -V -p scripts/appstrate.pub -m pages/install.sh
+          minisign -V -p /tmp/dry.pub -m pages/install.sh
           echo "✓ render + sign pipeline OK"
 
       - name: Simulate verify.sh end-to-end (happy + tampered)

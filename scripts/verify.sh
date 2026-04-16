@@ -65,4 +65,6 @@ fi
 ok "Signature valid"
 
 log "Running installer"
-exec bash "$TMPDIR/install.sh" "$@"
+# Don't `exec` — the TMPDIR cleanup trap must fire after the installer exits.
+bash "$TMPDIR/install.sh" "$@"
+exit $?

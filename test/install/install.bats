@@ -357,6 +357,27 @@ EOF
   grep -q 'LATEST_ENV' "$APPSTRATE_DIR/.env"
 }
 
+@test "rollback_upgrade: returns 1 when only compose backup is present" {
+  # Partial backup = mismatched restore. Require BOTH files or abort.
+  INSTALL_MODE="upgrade"
+  PREVIOUS_VERSION="v1.0.0"
+  LOG_FILE="$APPSTRATE_DIR/log"
+  : >"$LOG_FILE"
+  echo "X" >"$APPSTRATE_DIR/docker-compose.yml.bak-1"
+  run rollback_upgrade
+  [ "$status" -eq 1 ]
+}
+
+@test "rollback_upgrade: returns 1 when only env backup is present" {
+  INSTALL_MODE="upgrade"
+  PREVIOUS_VERSION="v1.0.0"
+  LOG_FILE="$APPSTRATE_DIR/log"
+  : >"$LOG_FILE"
+  echo "Y" >"$APPSTRATE_DIR/.env.bak-1"
+  run rollback_upgrade
+  [ "$status" -eq 1 ]
+}
+
 @test "rollback_upgrade: returns 1 when docker compose up fails" {
   INSTALL_MODE="upgrade"
   PREVIOUS_VERSION="v1.0.0"

@@ -197,7 +197,8 @@ port_in_use() {
     netstat -lnt 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${p}$"
   else
     # Bash builtin: /dev/tcp is a pseudo-device, no external dependency.
-    # Succeeds iff something is listening on the port.
+    # Only probes 127.0.0.1 — services bound to other interfaces are not
+    # detected, but that matches the installer's intent (localhost:PORT).
     (exec 3<>/dev/tcp/127.0.0.1/"$p") 2>/dev/null && {
       exec 3<&- 3>&-
       return 0
@@ -452,6 +453,8 @@ rand_b64() { openssl rand -base64 "$1" | tr -d '\n'; }
 rollback_upgrade() {
   # Restore the most recent backup of docker-compose.yml and .env, then restart.
   # Returns 0 on successful restore, 1 otherwise. No-op outside upgrade mode.
+  # Requires BOTH backups — restoring only one would leave compose + env
+  # mismatched (newer .env keys against older compose, or vice versa).
   [ "$INSTALL_MODE" != "upgrade" ] && return 1
 
   local latest_compose latest_env
@@ -460,15 +463,17 @@ rollback_upgrade() {
   # shellcheck disable=SC2012
   latest_env=$(ls -t "$APPSTRATE_DIR"/.env.bak-* 2>/dev/null | head -1)
 
-  if [ -z "$latest_compose" ] && [ -z "$latest_env" ]; then
+  if [ -z "$latest_compose" ] || [ -z "$latest_env" ]; then
     return 1
   fi
 
   warn "Rolling back to $PREVIOUS_VERSION"
-  [ -n "$latest_compose" ] && cp "$latest_compose" "$APPSTRATE_DIR/docker-compose.yml"
-  [ -n "$latest_env" ] && cp "$latest_env" "$APPSTRATE_DIR/.env"
+  cp "$latest_compose" "$APPSTRATE_DIR/docker-compose.yml"
+  cp "$latest_env" "$APPSTRATE_DIR/.env"
 
-  if ! (cd "$APPSTRATE_DIR" && docker compose up -d) >>"$LOG_FILE" 2>&1; then
+  # --remove-orphans prunes any service the failed upgrade introduced that
+  # no longer exists in the restored compose file.
+  if ! (cd "$APPSTRATE_DIR" && docker compose up -d --remove-orphans) >>"$LOG_FILE" 2>&1; then
     return 1
   fi
   ok "Rollback successful — active version: $PREVIOUS_VERSION"
