@@ -11,6 +11,7 @@ import {
   stopCancelSubscriber,
 } from "../services/run-tracker.ts";
 import { shutdownScheduleWorker } from "../services/scheduler.ts";
+import { shutdownInlineCompactionWorker } from "../services/inline-compaction.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { stopUploadGc } from "../services/uploads.ts";
 
@@ -48,6 +49,9 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
 
     logger.info("Shutting down schedule worker...");
     await shutdownScheduleWorker();
+
+    logger.info("Shutting down inline compaction worker...");
+    await shutdownInlineCompactionWorker();
 
     logger.info("Shutting down modules...");
     await shutdownModules();
