@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Coins } from "lucide-react";
+import { Coins, FileCode2 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { JsonView } from "./json-view";
 import { SectionCard } from "./section-card";
@@ -143,6 +143,27 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
         <SectionCard title="Metadata">
           <JsonView data={metadata} />
         </SectionCard>
+      )}
+
+      {/* Inline run — prompt + manifest snapshot (null after compaction) */}
+      {run.packageEphemeral && (
+        <>
+          {run.inlinePrompt ? (
+            <SectionCard title={t("exec.tabPrompt")}>
+              <pre className="bg-muted/30 overflow-x-auto rounded-md p-4 font-mono text-xs whitespace-pre-wrap">
+                {run.inlinePrompt}
+              </pre>
+            </SectionCard>
+          ) : null}
+          {run.inlineManifest ? (
+            <SectionCard title={t("exec.tabManifest")}>
+              <JsonView data={run.inlineManifest} />
+            </SectionCard>
+          ) : null}
+          {!run.inlinePrompt && !run.inlineManifest && (
+            <EmptyState message={t("runs.detailsExpired")} icon={FileCode2} compact />
+          )}
+        </>
       )}
     </div>
   );

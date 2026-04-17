@@ -110,7 +110,7 @@ export function RunDetailPage() {
   // useTabWithHash respects the URL hash if present, so this only affects first load without hash.
   const defaultTab = hasResult ? "result" : "logs";
   const [activeTab, setActiveTab] = useTabWithHash(
-    ["result", "logs", "state", "info", "manifest"] as const,
+    ["result", "logs", "state", "info"] as const,
     defaultTab,
   );
 
@@ -150,9 +150,6 @@ export function RunDetailPage() {
   const enrichedRun = run as EnrichedRun;
   const date = run.startedAt ? formatDateField(run.startedAt) : "";
   const isInline = enrichedRun.packageEphemeral === true;
-  const inlineManifest = enrichedRun.inlineManifest ?? null;
-  const inlinePrompt = enrichedRun.inlinePrompt ?? null;
-  const inlineDetailsExpired = isInline && !inlineManifest && !inlinePrompt;
 
   const agentCrumb = isInline
     ? { label: t("runs.inlineBadge"), href: "/runs" }
@@ -203,9 +200,7 @@ export function RunDetailPage() {
       <div className="mb-4 flex items-center justify-between gap-4">
         <Tabs
           value={activeTab}
-          onValueChange={(v) =>
-            setActiveTab(v as "logs" | "result" | "state" | "info" | "manifest")
-          }
+          onValueChange={(v) => setActiveTab(v as "logs" | "result" | "state" | "info")}
         >
           <TabsList>
             {hasResult && <TabsTrigger value="result">{t("exec.tabResultGroup")}</TabsTrigger>}
@@ -218,7 +213,6 @@ export function RunDetailPage() {
               )}
             </TabsTrigger>
             {stateData && <TabsTrigger value="state">{t("exec.tabState")}</TabsTrigger>}
-            {isInline && <TabsTrigger value="manifest">{t("exec.tabManifest")}</TabsTrigger>}
             <TabsTrigger value="info">{t("exec.tabInfo")}</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -266,37 +260,6 @@ export function RunDetailPage() {
       {activeTab === "state" && stateData && <JsonView data={stateData} />}
 
       {activeTab === "info" && <RunInfoTab run={enrichedRun} />}
-
-      {activeTab === "manifest" && isInline && (
-        <div className="space-y-6">
-          {inlineDetailsExpired ? (
-            <div className="border-border text-muted-foreground rounded-md border p-8 text-center text-sm">
-              {t("runs.detailsExpired")}
-            </div>
-          ) : (
-            <>
-              {inlinePrompt && (
-                <section>
-                  <h3 className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase">
-                    {t("exec.tabPrompt")}
-                  </h3>
-                  <pre className="border-border bg-muted/30 overflow-x-auto rounded-md border p-4 font-mono text-xs whitespace-pre-wrap">
-                    {inlinePrompt}
-                  </pre>
-                </section>
-              )}
-              {inlineManifest && (
-                <section>
-                  <h3 className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase">
-                    {t("exec.tabManifest")}
-                  </h3>
-                  <JsonView data={inlineManifest} />
-                </section>
-              )}
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }
