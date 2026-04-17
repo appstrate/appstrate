@@ -120,14 +120,6 @@ export async function getUnreadCountsByAgent(
   return result;
 }
 
-export async function listOrgRuns(
-  orgId: string,
-  options: { limit?: number; offset?: number; applicationId: string },
-) {
-  const { limit = 20, offset = 0, applicationId } = options;
-  return listRunsWithFilter(scopedWhere(runs, { orgId, applicationId })!, limit, offset);
-}
-
 export async function listUserRuns(
   actorId: string,
   orgId: string,
