@@ -28,7 +28,7 @@
  */
 import { z } from "zod";
 import type { Actor } from "../lib/actor.ts";
-import type { AgentManifest, ProviderProfileMap } from "../types/index.ts";
+import type { AgentManifest, LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import {
   ApiError,
   internalError,
@@ -45,6 +45,7 @@ import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.
 import { getInlineRunLimits } from "./run-limits.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-readiness.ts";
+import { resolveManifestCatalogDeps } from "./agent-service.ts";
 import { resolveActorProfileContext, resolveProviderProfiles } from "./connection-profiles.ts";
 
 export interface InlineRunBody {
@@ -66,6 +67,7 @@ export interface InlineRunPreflightResult {
   providerProfilesOverride: Record<string, string> | undefined;
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
+  resolvedDeps: Pick<LoadedPackage, "skills" | "tools">;
 }
 
 const providerProfilesSchema = z.record(z.string(), z.uuid()).optional();
@@ -176,8 +178,19 @@ export async function runInlinePreflight(params: {
   // when structural validation failed — the manifest-shape errors already
   // explain why. Fail-fast has thrown long before reaching here.
   let providerProfiles: ProviderProfileMap = {};
+  let resolvedDeps: Pick<LoadedPackage, "skills" | "tools"> = { skills: [], tools: [] };
   if (manifest) {
-    const probeAgent = buildShadowLoadedPackage(generateShadowPackageId(), manifest, prompt);
+    // Inline manifests only embed registry ID refs for skills/tools; resolve
+    // them against the org/system catalog up-front so both the readiness
+    // probe here AND the downstream run pipeline (env-builder reads
+    // agent.skills / agent.tools) see the same resolved list.
+    resolvedDeps = await resolveManifestCatalogDeps(manifest, orgId);
+    const probeAgent = buildShadowLoadedPackage(
+      generateShadowPackageId(),
+      manifest,
+      prompt,
+      resolvedDeps,
+    );
     const { defaultUserProfileId } = await resolveActorProfileContext(actor, probeAgent.id);
 
     try {
@@ -253,6 +266,7 @@ export async function runInlinePreflight(params: {
     providerProfilesOverride,
     modelIdOverride,
     proxyIdOverride,
+    resolvedDeps,
   };
 }
 

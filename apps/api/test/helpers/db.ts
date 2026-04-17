@@ -69,15 +69,29 @@ export function registerTruncationTables(tables: readonly string[]): void {
 
 /**
  * Delete all rows from all tables in the test database.
- * Uses DELETE FROM in FK-safe order (children → parents) to avoid deadlocks.
- * Module-registered tables are truncated first (they reference core tables).
+ *
+ * Runs inside a single transaction so every DELETE observes the same
+ * snapshot. This closes the window in which a previous test's fire-and-
+ * forget async work (e.g. `executeAgentInBackground` from the inline-run
+ * route writing to `runs`/`run_logs`) could insert a new row between two
+ * DELETEs and trigger a FK violation — a concrete source of flaky
+ * "organizations_created_by_user_id_fk" / "profiles_pkey" errors we've
+ * seen when the harness is under load.
+ *
+ * Uses DELETE (not TRUNCATE) to avoid AccessExclusiveLock deadlocks with
+ * fire-and-forget queries from middleware (e.g., ensureDefaultProfile).
+ * Order is children → parents (module tables first, since they reference
+ * core tables).
+ *
  * Call this in beforeEach() for full test isolation.
  */
 export async function truncateAll(): Promise<void> {
-  for (const table of extraTables) {
-    await db.execute(sql.raw(`DELETE FROM ${table}`));
-  }
-  for (const table of CORE_TABLES) {
-    await db.execute(sql.raw(`DELETE FROM ${table}`));
-  }
+  await db.transaction(async (tx) => {
+    for (const table of extraTables) {
+      await tx.execute(sql.raw(`DELETE FROM ${table}`));
+    }
+    for (const table of CORE_TABLES) {
+      await tx.execute(sql.raw(`DELETE FROM ${table}`));
+    }
+  });
 }

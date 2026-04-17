@@ -87,23 +87,26 @@ export async function insertShadowPackage(params: InsertShadowPackageParams): Pr
 }
 
 /**
- * Build a `LoadedPackage` from an already-inserted shadow row. Skips
- * dependency resolution because inline manifests CANNOT embed transitive
- * dependencies — deps in an inline manifest are **ID references only** and
- * resolved from the org/system catalog at run time via the standard
- * provider/skill/tool resolution path. No additional DB read is needed.
+ * Build a `LoadedPackage` from an already-inserted shadow row. Inline
+ * manifests only embed ID refs, so callers must pass the resolved
+ * skills/tools (via `resolveManifestCatalogDeps`) when the returned
+ * package will flow into the run pipeline — otherwise `env-builder`
+ * will see empty arrays and skip skill/tool injection into the
+ * container. Defaults to empty arrays for callers that only need the
+ * shape (e.g. deserialization, tests).
  */
 export function buildShadowLoadedPackage(
   id: string,
   manifest: AgentManifest,
   prompt: string,
+  deps: Pick<LoadedPackage, "skills" | "tools"> = { skills: [], tools: [] },
 ): LoadedPackage {
   return {
     id,
     manifest,
     prompt,
-    skills: [],
-    tools: [],
+    skills: deps.skills,
+    tools: deps.tools,
     source: "local",
   };
 }

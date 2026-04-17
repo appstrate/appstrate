@@ -32,10 +32,26 @@ function validManifest() {
     version: "0.0.0",
     type: "agent",
     description: "Inline run",
-    schemaVersion: "1.0.0",
+    schemaVersion: "1.0",
     dependencies: {
       skills: {},
       tools: {},
+      providers: {},
+    },
+  };
+}
+
+function manifestWithDeps(
+  deps: {
+    tools?: Record<string, string>;
+    skills?: Record<string, string>;
+  } = {},
+) {
+  return {
+    ...validManifest(),
+    dependencies: {
+      skills: deps.skills ?? {},
+      tools: deps.tools ?? {},
       providers: {},
     },
   };
@@ -139,6 +155,40 @@ describe("POST /api/runs/inline — validation", () => {
 
     const countAfter = await db.select().from(packages).where(eq(packages.ephemeral, true));
     expect(countAfter).toHaveLength(0);
+  });
+});
+
+describe("POST /api/runs/inline — dependency resolution", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "inlineorg" });
+  });
+
+  async function post(body: unknown) {
+    return app.request("/api/runs/inline", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  // Success path of dep resolution is covered in inline-run-validate.test.ts
+  // (same preflight function), and asserting 202 here would fire
+  // `executeAgentInBackground()` whose async tail would keep writing to the
+  // runs/run_logs tables past the end of the test — a source of flakiness
+  // when the next test's `truncateAll()` races the background work.
+  // The bogus-tool case below is enough to prove the /inline route wires
+  // the preflight correctly; readiness rejects BEFORE the shadow row is
+  // inserted, so no pipeline fires.
+
+  it("returns 400 missing_tool when tool dep is bogus", async () => {
+    const manifest = manifestWithDeps({ tools: { "@fake/nope": "^1.0.0" } });
+    const res = await post({ manifest, prompt: "do something" });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe("missing_tool");
   });
 });
 

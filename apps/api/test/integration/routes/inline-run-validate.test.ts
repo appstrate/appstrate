@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -28,6 +29,22 @@ function validManifest() {
     description: "Inline run",
     schemaVersion: "1.0",
     dependencies: { skills: {}, tools: {}, providers: {} },
+  };
+}
+
+function manifestWithDeps(
+  deps: {
+    tools?: Record<string, string>;
+    skills?: Record<string, string>;
+  } = {},
+) {
+  return {
+    ...validManifest(),
+    dependencies: {
+      skills: deps.skills ?? {},
+      tools: deps.tools ?? {},
+      providers: {},
+    },
   };
 }
 
@@ -247,5 +264,87 @@ describe("POST /api/runs/inline/validate", () => {
       body: JSON.stringify({ manifest: validManifest(), prompt: "hi" }),
     });
     expect(res.status).toBe(401);
+  });
+
+  describe("dependency resolution", () => {
+    it("accepts a manifest referencing a seeded system tool", async () => {
+      await seedPackage({
+        id: "@appstrate/output",
+        type: "tool",
+        source: "system",
+        orgId: null,
+      });
+      const manifest = manifestWithDeps({ tools: { "@appstrate/output": "^1.0.0" } });
+      const res = await post({ manifest, prompt: "do something" });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean };
+      expect(body.ok).toBe(true);
+    });
+
+    it("accepts a manifest referencing a seeded org-scoped tool", async () => {
+      await seedPackage({
+        id: "@inlineorg/mytool",
+        type: "tool",
+        source: "local",
+        orgId: ctx.orgId,
+      });
+      const manifest = manifestWithDeps({ tools: { "@inlineorg/mytool": "^1.0.0" } });
+      const res = await post({ manifest, prompt: "do something" });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean };
+      expect(body.ok).toBe(true);
+    });
+
+    it("returns 400 missing_tool when tool dep is not seeded", async () => {
+      const manifest = manifestWithDeps({ tools: { "@fake/nope": "^1.0.0" } });
+      const res = await post({ manifest, prompt: "do something" });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as {
+        code?: string;
+        errors?: { field: string; code: string }[];
+      };
+      expect(body.code).toBe("validation_failed");
+      expect(body.errors?.some((e) => e.code === "missing_tool")).toBe(true);
+    });
+
+    it("accepts a manifest referencing a seeded org-scoped skill", async () => {
+      await seedPackage({
+        id: "@inlineorg/helper",
+        type: "skill",
+        source: "local",
+        orgId: ctx.orgId,
+      });
+      const manifest = manifestWithDeps({ skills: { "@inlineorg/helper": "^1.0.0" } });
+      const res = await post({ manifest, prompt: "do something" });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean };
+      expect(body.ok).toBe(true);
+    });
+
+    it("returns 400 missing_skill when skill dep is not seeded", async () => {
+      const manifest = manifestWithDeps({ skills: { "@fake/no-skill": "^1.0.0" } });
+      const res = await post({ manifest, prompt: "do something" });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as {
+        code?: string;
+        errors?: { field: string; code: string }[];
+      };
+      expect(body.code).toBe("validation_failed");
+      expect(body.errors?.some((e) => e.code === "missing_skill")).toBe(true);
+    });
+
+    it("does NOT insert a shadow row after successful dep resolution", async () => {
+      await seedPackage({
+        id: "@appstrate/output",
+        type: "tool",
+        source: "system",
+        orgId: null,
+      });
+      const manifest = manifestWithDeps({ tools: { "@appstrate/output": "^1.0.0" } });
+      expect(await shadowCount()).toBe(0);
+      const res = await post({ manifest, prompt: "do something" });
+      expect(res.status).toBe(200);
+      expect(await shadowCount()).toBe(0);
+    });
   });
 });

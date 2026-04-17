@@ -42,24 +42,24 @@ function mapDependencies(
     });
 }
 
+function pickSkillsAndTools(
+  depRefs: NonNullable<DbPackageRow["depRefs"]>,
+  manifest: AgentManifest,
+): Pick<LoadedPackage, "skills" | "tools"> {
+  const deps = manifest.dependencies ?? {};
+  return {
+    skills: mapDependencies(depRefs, "skill", (deps.skills ?? {}) as Record<string, string>),
+    tools: mapDependencies(depRefs, "tool", (deps.tools ?? {}) as Record<string, string>),
+  };
+}
+
 function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
   const manifest = asRecord(row.draftManifest) as AgentManifest;
-  const deps = row.depRefs ?? [];
-
   return {
     id: row.id,
     manifest,
     prompt: row.draftContent,
-    skills: mapDependencies(
-      deps,
-      "skill",
-      (manifest.dependencies?.skills ?? {}) as Record<string, string>,
-    ),
-    tools: mapDependencies(
-      deps,
-      "tool",
-      (manifest.dependencies?.tools ?? {}) as Record<string, string>,
-    ),
+    ...pickSkillsAndTools(row.depRefs ?? [], manifest),
     source: (row.source as "system" | "local") ?? "local",
     updatedAt: row.updatedAt,
   };
@@ -91,6 +91,22 @@ async function resolveDepRefs(
     type: r.type,
     draftManifest: r.draftManifest,
   }));
+}
+
+/**
+ * Resolve the skills + tools declared in an inline manifest's `dependencies`
+ * against the org/system catalog. Inline manifests only embed ID refs
+ * (`"@scope/name": "^1.0.0"`), so the shadow LoadedPackage needs the same
+ * mapped-dep shape as a persisted package before it reaches
+ * `validateAgentReadiness`. Returns empty arrays when the manifest declares
+ * no skill/tool deps — no DB read happens in that case.
+ */
+export async function resolveManifestCatalogDeps(
+  manifest: AgentManifest,
+  orgId: string,
+): Promise<Pick<LoadedPackage, "skills" | "tools">> {
+  const depRefs = await resolveDepRefs(manifest, orgId);
+  return pickSkillsAndTools(depRefs, manifest);
 }
 
 /**
