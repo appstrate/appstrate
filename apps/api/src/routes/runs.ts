@@ -794,7 +794,7 @@ export function createRunsRouter() {
       const actor = getActor(c);
       const body = await c.req.json<InlineRunBody>();
 
-      await runInlinePreflight({ orgId, applicationId, actor, body });
+      await runInlinePreflight({ orgId, applicationId, actor, body, mode: "accumulate" });
 
       return c.json({ ok: true });
     },

@@ -107,11 +107,26 @@ describe("validateManifest", () => {
     expect(result.errors.length).toBeGreaterThan(0);
   });
 
-  test("missing type field returns explicit error", () => {
+  test("missing type field surfaces all base-schema errors", () => {
+    // Without a `type`, validateManifest falls through to the base schema and
+    // lets Zod aggregate every missing/invalid field in one pass, instead of
+    // short-circuiting on `type` alone.
     const { type: _, ...noType } = validAgentManifest();
     const result = validateManifest(noType);
     expect(result.valid).toBe(false);
-    expect(result.errors).toEqual(["type: Required field is missing"]);
+    expect(result.errors.some((e) => e.startsWith("type:"))).toBe(true);
+  });
+
+  test("empty manifest surfaces every missing base field at once", () => {
+    // The base `manifestSchema` requires name/version/type. Without `type`,
+    // dispatch falls through to the base schema and Zod emits all three
+    // missing-field errors together instead of stopping on `type`.
+    const result = validateManifest({});
+    expect(result.valid).toBe(false);
+    const fields = result.errors.map((e) => e.split(":")[0]);
+    expect(fields).toContain("type");
+    expect(fields).toContain("name");
+    expect(fields).toContain("version");
   });
 
   test("invalid scoped name format", () => {
