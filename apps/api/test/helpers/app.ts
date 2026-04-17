@@ -29,6 +29,7 @@ import { requireAppContext } from "../../src/middleware/app-context.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
+import { initRunLimits } from "../../src/services/run-limits.ts";
 import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
 import { initAppConfig } from "../../src/lib/app-config.ts";
 
@@ -78,6 +79,7 @@ let cachedApp: Hono<AppEnv> | null = null;
 // Initialize boot-time singletons that core routes depend on.
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
 initSystemProviderKeys(); // initializes from SYSTEM_PROVIDER_KEYS env var (empty array in test)
+initRunLimits(); // PLATFORM_RUN_LIMITS / INLINE_RUN_LIMITS — defaults when unset
 await initAppConfig(); // initializes app config (routes like organizations.ts call getAppConfig())
 
 /**
