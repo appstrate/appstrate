@@ -121,7 +121,7 @@ export async function runInlinePreflight(params: {
   // `resolveActorProfileContext` looks up per-agent overrides by id and
   // will simply miss (no such package exists yet) — intended for preflight.
   const probeAgent = buildShadowLoadedPackage(generateShadowPackageId(), manifest, prompt);
-  // deps are registry-only refs for inline manifests; resolve against org/system catalog before readiness (#155)
+  // deps are registry-only refs for inline manifests; resolve against org/system catalog before readiness
   const resolvedDeps = await resolveManifestCatalogDeps(manifest, orgId);
   probeAgent.skills = resolvedDeps.skills;
   probeAgent.tools = resolvedDeps.tools;

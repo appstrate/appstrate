@@ -33,7 +33,7 @@ function validManifest() {
     version: "0.0.0",
     type: "agent",
     description: "Inline run",
-    schemaVersion: "1.0.0",
+    schemaVersion: "1.0",
     dependencies: {
       skills: {},
       tools: {},
@@ -48,14 +48,8 @@ function manifestWithDeps(
     skills?: Record<string, string>;
   } = {},
 ) {
-  // schemaVersion MUST be MAJOR.MINOR (e.g. "1.0"). The existing
-  // validManifest() in this file uses "1.0.0" which silently fails the
-  // AFPS structural validator — that's fine for the 400-path tests above
-  // (they only assert invalid_inline_manifest), but readiness tests need
-  // the manifest to actually clear structural validation.
   return {
     ...validManifest(),
-    schemaVersion: "1.0",
     dependencies: {
       skills: deps.skills ?? {},
       tools: deps.tools ?? {},
@@ -190,14 +184,14 @@ describe("POST /api/runs/inline — dependency resolution", () => {
     });
     const manifest = manifestWithDeps({ tools: { "@appstrate/output": "^1.0.0" } });
     const res = await post({ manifest, prompt: "do something" });
-    // Readiness must not reject with missing_tool. The next guard (model
-    // resolution) may still trip in a vanilla test harness with no LLM
-    // configured — we don't assert on that here, only that the catalog
-    // dep resolution cleared.
-    if (res.status === 400) {
-      const body = (await res.json()) as { code?: string };
-      expect(body.code).not.toBe("missing_tool");
-    }
+    // Readiness cleared → the route accepts the run and returns 202 with a
+    // { runId, packageId } payload. Asserting the full success shape
+    // (rather than a loose "not missing_tool") locks in the fix end-to-end
+    // and catches any regression that would reintroduce a rejection.
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { runId?: string; packageId?: string };
+    expect(body.runId).toMatch(/^run_/);
+    expect(body.packageId).toMatch(/^@inline\//);
   });
 
   it("returns 400 missing_tool when tool dep is bogus", async () => {
