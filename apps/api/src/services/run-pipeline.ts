@@ -310,6 +310,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     apiKeyId,
     agentScope: agentDenorm.scope,
     agentName: agentDenorm.name,
+    config,
   });
 
   // --- Step 6: Fire-and-forget execution ---

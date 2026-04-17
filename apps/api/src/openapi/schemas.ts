@@ -405,6 +405,11 @@ export const schemas = {
         description: "Additional metadata (e.g. creditsUsed in cloud mode)",
         additionalProperties: true,
       },
+      config: {
+        type: ["object", "null"],
+        description: "Snapshot of the effective agent config (merged overrides) at run creation",
+        additionalProperties: true,
+      },
       dashboardUserName: {
         type: ["string", "null"],
         description:

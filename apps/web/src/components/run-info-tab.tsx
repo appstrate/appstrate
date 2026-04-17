@@ -29,6 +29,7 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
   const { data: providersData } = useProviders();
   const providerStatuses = run.providerStatuses as RunProviderSnapshot[] | null;
   const input = run.input as Record<string, unknown> | null;
+  const config = run.config as Record<string, unknown> | null;
   const usage = run.tokenUsage as {
     input_tokens?: number;
     output_tokens?: number;
@@ -84,6 +85,13 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
       {input && Object.keys(input).length > 0 && (
         <SectionCard title={t("exec.infoInput")}>
           <JsonView data={input} />
+        </SectionCard>
+      )}
+
+      {/* Config */}
+      {config && Object.keys(config).length > 0 && (
+        <SectionCard title={t("exec.infoConfig")}>
+          <JsonView data={config} />
         </SectionCard>
       )}
 

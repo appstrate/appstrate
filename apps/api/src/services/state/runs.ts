@@ -84,6 +84,8 @@ interface CreateRunParams {
   agentScope?: string | null;
   /** Snapshot of the agent's display name (manifest.displayName ?? name). */
   agentName?: string | null;
+  /** Snapshot of the effective agent config (merged overrides) at run creation. */
+  config?: Record<string, unknown> | null;
 }
 
 export async function createRun(params: CreateRunParams): Promise<void> {
@@ -112,6 +114,7 @@ export async function createRun(params: CreateRunParams): Promise<void> {
     runNumber,
     agentScope: params.agentScope ?? null,
     agentName: params.agentName ?? null,
+    config: params.config ?? null,
   });
 }
 
