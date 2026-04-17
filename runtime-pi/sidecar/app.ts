@@ -410,14 +410,17 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     // 9. Forward upstream response transparently (pass-through proxy)
-    const responseText = await targetRes.text();
+    // Read as ArrayBuffer (not text) so non-UTF-8 bytes in binary bodies
+    // (PDF, images, archives) are preserved byte-for-byte. Truncation is
+    // applied by byte length to match the actual payload size.
+    const responseBytes = await targetRes.arrayBuffer();
     const requestedMaxSize = parseInt(c.req.header("x-max-response-size") || "0", 10);
     const maxSize =
       requestedMaxSize > 0
         ? Math.min(requestedMaxSize, ABSOLUTE_MAX_RESPONSE_SIZE)
         : MAX_RESPONSE_SIZE;
-    const truncated = responseText.length > maxSize;
-    const text = truncated ? responseText.slice(0, maxSize) : responseText;
+    const truncated = responseBytes.byteLength > maxSize;
+    const body = truncated ? responseBytes.slice(0, maxSize) : responseBytes;
 
     const contentType = targetRes.headers.get("content-type") || "application/octet-stream";
     const responseHeaders: Record<string, string> = { "Content-Type": contentType };
@@ -443,7 +446,7 @@ export function createApp(deps: AppDeps): Hono {
       }).catch(() => {});
     }
 
-    return c.body(text, targetRes.status, responseHeaders);
+    return c.body(body, targetRes.status, responseHeaders);
   });
 
   return app;

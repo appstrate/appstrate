@@ -854,6 +854,91 @@ describe("ALL /proxy — binary body integrity", () => {
     expect(res.status).toBe(200);
     expect(bodyIsArrayBuffer).toBe(true);
   });
+
+  it("preserves binary response bytes (PDF-like payload) byte-for-byte", async () => {
+    // PDF header + bytes that are invalid UTF-8. If the sidecar decodes the
+    // upstream response via .text(), these bytes become U+FFFD (0xEF 0xBF 0xBD)
+    // and the resulting buffer grows, breaking binary file downloads.
+    const pdfLike = new Uint8Array([
+      0x25,
+      0x50,
+      0x44,
+      0x46,
+      0x2d,
+      0x31,
+      0x2e,
+      0x34, // "%PDF-1.4"
+      0x0a, // LF
+      0xff,
+      0xfe,
+      0x80,
+      0xc0,
+      0xc1, // invalid UTF-8 sequences
+      0x00,
+      0x01,
+      0x02, // null bytes
+      0x25,
+      0x25,
+      0x45,
+      0x4f,
+      0x46, // "%%EOF"
+    ]);
+
+    const fetchFn = mock(
+      async () =>
+        new Response(pdfLike, {
+          status: 200,
+          headers: { "Content-Type": "application/pdf" },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/files/abc/download",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/pdf");
+    const received = new Uint8Array(await res.arrayBuffer());
+    expect(received.byteLength).toBe(pdfLike.byteLength);
+    expect(received).toEqual(pdfLike);
+  });
+
+  it("does not corrupt binary response even when truncation is triggered", async () => {
+    // 60KB binary payload beyond MAX_RESPONSE_SIZE; first 50KB must survive byte-for-byte.
+    const total = 60_000;
+    const payload = new Uint8Array(total);
+    for (let i = 0; i < total; i++) {
+      payload[i] = i % 256; // includes all byte values 0x00–0xff
+    }
+
+    const fetchFn = mock(
+      async () =>
+        new Response(payload, {
+          status: 200,
+          headers: { "Content-Type": "application/octet-stream" },
+        }),
+    );
+    const app = createApp(makeDeps({ fetchFn }));
+    const res = await app.request("/proxy", {
+      method: "GET",
+      headers: {
+        "X-Provider": "gmail",
+        "X-Target": "https://api.example.com/blob",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Truncated")).toBe("true");
+    const received = new Uint8Array(await res.arrayBuffer());
+    expect(received.byteLength).toBe(50_000);
+    expect(received[0]).toBe(0x00);
+    expect(received[0xff]).toBe(0xff);
+    expect(received[49_999]).toBe(49_999 % 256);
+  });
 });
 
 // --- ALL /llm/* — LLM reverse proxy ---
