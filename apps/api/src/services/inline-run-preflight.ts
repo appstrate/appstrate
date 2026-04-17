@@ -52,6 +52,8 @@ export interface InlineRunPreflightResult {
   proxyIdOverride: string | null;
 }
 
+const providerProfilesSchema = z.record(z.string(), z.uuid()).optional();
+
 export async function runInlinePreflight(params: {
   orgId: string;
   applicationId: string;
@@ -78,7 +80,6 @@ export async function runInlinePreflight(params: {
   const prompt = body.prompt as string;
 
   // ----- 2. Body-field validation -----
-  const providerProfilesSchema = z.record(z.string(), z.uuid()).optional();
   const providerProfilesOverride = providerProfilesSchema.safeParse(body.providerProfiles);
   if (!providerProfilesOverride.success) {
     throw invalidRequest("providerProfiles must map providerId → profileUUID", "providerProfiles");
