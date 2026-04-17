@@ -77,10 +77,18 @@ import {
 function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
   return errors.map((raw) => {
     const idx = raw.indexOf(": ");
-    if (idx === -1) return { field: "manifest", code: "invalid_manifest", message: raw };
+    if (idx === -1) {
+      return {
+        field: "manifest",
+        code: "invalid_manifest",
+        title: "Invalid Manifest",
+        message: raw,
+      };
+    }
     return {
       field: `manifest.${raw.slice(0, idx)}`,
       code: "invalid_manifest",
+      title: "Invalid Manifest",
       message: raw.slice(idx + 2),
     };
   });
@@ -426,6 +434,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
             validation.errors.map((message) => ({
               field: "content",
               code: "invalid_content",
+              title: "Invalid Content",
               message,
             })),
           );
@@ -443,6 +452,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
             validation.errors.map((message) => ({
               field: "sourceCode",
               code: "invalid_source",
+              title: "Invalid Source",
               message,
             })),
           );
@@ -543,6 +553,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
           validation.errors.map((message) => ({
             field: "content",
             code: "invalid_content",
+            title: "Invalid Content",
             message,
           })),
         );
@@ -734,6 +745,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
           validation.errors.map((message) => ({
             field: "content",
             code: "invalid_content",
+            title: "Invalid Content",
             message,
           })),
         );
@@ -753,6 +765,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
             validation.errors.map((message) => ({
               field: "sourceCode",
               code: "invalid_source",
+              title: "Invalid Source",
               message,
             })),
           );

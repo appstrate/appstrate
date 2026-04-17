@@ -191,6 +191,48 @@ describe("POST /api/runs/inline/validate", () => {
     expect(messages).toMatch(/providers.*too many|dependencies\.providers/i);
   });
 
+  it("does not duplicate config errors across preflight stages", async () => {
+    // Regression guard: stage 3 (AJV against manifest.config.schema) and
+    // stage 4 (agent-readiness) used to both validate config in accumulate
+    // mode, producing two entries for the same field under different codes.
+    // Readiness now receives { skip: { config: true } }, so a single config
+    // violation must appear exactly once in errors[].
+    const manifest = validManifest() as Record<string, unknown>;
+    manifest.config = {
+      schema: {
+        type: "object",
+        properties: { maxBullets: { type: "integer", minimum: 1 } },
+        required: ["maxBullets"],
+      },
+    };
+
+    const res = await post({ manifest, prompt: "hi", config: {} });
+    expect(res.status).toBe(400);
+
+    const body = (await res.json()) as {
+      errors?: { field: string; code: string; message: string }[];
+    };
+    const configEntries = (body.errors ?? []).filter((e) => e.field.startsWith("config"));
+    expect(configEntries.length).toBe(1);
+    // And the remaining code must be the stage-3 one, not the legacy
+    // readiness code (`config_incomplete` has been retired in favour of
+    // `invalid_config`).
+    expect(configEntries[0]!.code).toBe("invalid_config");
+  });
+
+  it("does not duplicate prompt errors across preflight stages", async () => {
+    // Same regression guard for prompt: stage 1 (manifest structural) flags
+    // an empty prompt, readiness used to re-flag it. Now skipped in
+    // accumulate mode; only one `prompt`-scoped entry must surface.
+    const res = await post({ manifest: validManifest(), prompt: "" });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      errors?: { field: string; code: string; message: string }[];
+    };
+    const promptEntries = (body.errors ?? []).filter((e) => e.field === "prompt");
+    expect(promptEntries.length).toBe(1);
+  });
+
   it("rejects unauthenticated requests with 401", async () => {
     const res = await app.request("/api/runs/inline/validate", {
       method: "POST",

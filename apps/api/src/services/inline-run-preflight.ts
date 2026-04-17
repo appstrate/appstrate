@@ -80,22 +80,12 @@ export async function runInlinePreflight(params: {
   const { orgId, applicationId, actor, body, mode = "fail-fast" } = params;
 
   // In accumulate mode we gather problems from every independent stage and
-  // throw once at the end. The shape of individual entries matches every
-  // other `validation_failed` response emitted by the platform.
+  // throw once at the end. In fail-fast mode stages throw as soon as they
+  // detect a problem. `push` is a pure accumulator; every throw site is
+  // explicit so the caller sees which stage raised and with which code/title.
   const accumulated: ValidationFieldError[] = [];
-  const collect = (errs: ValidationFieldError[], throwCode?: string): void => {
-    if (errs.length === 0) return;
-    if (mode === "fail-fast") {
-      const code = throwCode ?? "validation_failed";
-      throw new ApiError({
-        status: 400,
-        code,
-        title: code,
-        detail: `${errs[0]!.field}: ${errs[0]!.message}`,
-        errors: errs,
-      });
-    }
-    accumulated.push(...errs);
+  const push = (errs: ValidationFieldError[]): void => {
+    if (errs.length > 0) accumulated.push(...errs);
   };
 
   // ----- 1. Manifest shape -----
@@ -105,10 +95,17 @@ export async function runInlinePreflight(params: {
     limits: getInlineRunLimits(),
   });
   if (!validated.valid) {
-    collect(
-      validated.errors.map((e) => toFieldError(e, "invalid_inline_manifest")),
-      "invalid_inline_manifest",
-    );
+    const entries = validated.errors.map((e) => toFieldError(e, "invalid_inline_manifest"));
+    if (mode === "fail-fast") {
+      throw new ApiError({
+        status: 400,
+        code: "invalid_inline_manifest",
+        title: "Invalid Inline Manifest",
+        detail: validated.errors.join("; "),
+        errors: entries,
+      });
+    }
+    push(entries);
   }
 
   // A parsed manifest is only available when structural validation passed.
@@ -120,7 +117,9 @@ export async function runInlinePreflight(params: {
   // ----- 2. Body-field validation -----
   const providerProfilesParsed = providerProfilesSchema.safeParse(body.providerProfiles);
   if (!providerProfilesParsed.success) {
-    collect(zodIssuesToFieldErrors(providerProfilesParsed.error.issues, "providerProfiles"));
+    const entries = zodIssuesToFieldErrors(providerProfilesParsed.error.issues, "providerProfiles");
+    if (mode === "fail-fast") throw validationFailed(entries);
+    push(entries);
   }
   const providerProfilesOverride = providerProfilesParsed.success
     ? providerProfilesParsed.data
@@ -143,13 +142,14 @@ export async function runInlinePreflight(params: {
     if (configSchema) {
       const cv = validateConfig(effectiveConfig, asJSONSchemaObject(configSchema));
       if (!cv.valid) {
-        collect(
-          cv.errors.map((e) => ({
-            field: e.field ? `config.${e.field}` : "config",
-            code: "invalid_config",
-            message: e.message,
-          })),
-        );
+        const entries: ValidationFieldError[] = cv.errors.map((e) => ({
+          field: e.field ? `config.${e.field}` : "config",
+          code: "invalid_config",
+          title: "Invalid Config",
+          message: e.message,
+        }));
+        if (mode === "fail-fast") throw validationFailed(entries);
+        push(entries);
       }
     }
 
@@ -157,13 +157,14 @@ export async function runInlinePreflight(params: {
     if (inputSchema) {
       const iv = validateInput(effectiveInput ?? undefined, asJSONSchemaObject(inputSchema));
       if (!iv.valid) {
-        collect(
-          iv.errors.map((e) => ({
-            field: e.field ? `input.${e.field}` : "input",
-            code: "invalid_input",
-            message: e.message,
-          })),
-        );
+        const entries: ValidationFieldError[] = iv.errors.map((e) => ({
+          field: e.field ? `input.${e.field}` : "input",
+          code: "invalid_input",
+          title: "Invalid Input",
+          message: e.message,
+        }));
+        if (mode === "fail-fast") throw validationFailed(entries);
+        push(entries);
       }
     }
   }
@@ -190,10 +191,13 @@ export async function runInlinePreflight(params: {
       // network timeout, programmer error) must bubble as-is so the error
       // handler emits a 5xx and alerting fires.
       if (mode === "fail-fast" || !(err instanceof ApiError)) throw err;
-      accumulated.push(apiErrorToField(err, "providers"));
+      push([apiErrorToField(err, "providers")]);
       providerProfiles = {};
     }
 
+    // In accumulate mode, stages 1–3 already covered prompt (via the manifest
+    // structural check) and config (via AJV at stage 3). Tell readiness to
+    // skip those so the same field never appears twice in `errors[]`.
     if (mode === "fail-fast") {
       await validateAgentReadiness({
         agent: probeAgent,
@@ -203,14 +207,15 @@ export async function runInlinePreflight(params: {
         applicationId,
       });
     } else {
-      accumulated.push(
-        ...(await collectAgentReadinessErrors({
+      push(
+        await collectAgentReadinessErrors({
           agent: probeAgent,
           providerProfiles,
           orgId,
           config: effectiveConfig,
           applicationId,
-        })),
+          skip: { prompt: true, config: true },
+        }),
       );
     }
   }
@@ -242,8 +247,14 @@ export async function runInlinePreflight(params: {
 /** Parse an inline-manifest error string (`"path: message"`) into a field entry. */
 function toFieldError(raw: string, code: string): ValidationFieldError {
   const idx = raw.indexOf(": ");
-  if (idx === -1) return { field: "manifest", code, message: raw };
-  return { field: raw.slice(0, idx), code, message: raw.slice(idx + 2) };
+  if (idx === -1)
+    return { field: "manifest", code, title: "Invalid Inline Manifest", message: raw };
+  return {
+    field: raw.slice(0, idx),
+    code,
+    title: "Invalid Inline Manifest",
+    message: raw.slice(idx + 2),
+  };
 }
 
 /**
@@ -256,6 +267,7 @@ function apiErrorToField(err: ApiError, fallbackField: string): ValidationFieldE
   return {
     field: err.param ?? fallbackField,
     code: err.code,
+    title: err.title,
     message: err.message,
   };
 }

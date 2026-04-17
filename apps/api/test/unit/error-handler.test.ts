@@ -48,6 +48,50 @@ describe("errorHandler middleware", () => {
     expect((body.instance as string).startsWith("urn:appstrate:request:req_")).toBe(true);
   });
 
+  it("parseBody does not double-prefix the field when Zod has a resolved path", async () => {
+    // Regression guard: the `param` argument is a FALLBACK for empty paths,
+    // not a prefix. Historically callers passed e.g. `parseBody(schema, body,
+    // "apiKey")` expecting `body.param === "apiKey"`. Concatenating the arg
+    // onto the Zod path would yield `"apiKey.apiKey"` for every such call.
+    const app = createApp();
+    const schema = z.object({ apiKey: z.string().min(1) });
+    app.post("/test", async (c) => {
+      parseBody(schema, await c.req.json(), "apiKey");
+      return c.json({ ok: true });
+    });
+    const res = await app.request("/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    const fields = (body.errors as { field: string }[]).map((e) => e.field);
+    expect(fields).toContain("apiKey");
+    expect(fields).not.toContain("apiKey.apiKey");
+  });
+
+  it("parseBody uses the fallback field when Zod reports an empty path", async () => {
+    // When the whole body fails to parse (e.g. not an object), Zod's path
+    // is empty — the caller-provided `param` acts as the field name so the
+    // error still points somewhere meaningful.
+    const app = createApp();
+    const schema = z.string().min(1);
+    app.post("/test", async (c) => {
+      parseBody(schema, await c.req.json(), "name");
+      return c.json({ ok: true });
+    });
+    const res = await app.request("/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(123),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    const fields = (body.errors as { field: string }[]).map((e) => e.field);
+    expect(fields).toContain("name");
+  });
+
   it("parseBody surfaces every Zod issue in errors[]", async () => {
     const app = createApp();
     const schema = z.object({

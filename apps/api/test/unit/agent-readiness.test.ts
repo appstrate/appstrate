@@ -166,4 +166,56 @@ describe("validateAgentReadiness (throwing)", () => {
       expect(apiErr.message).toContain("@test/skill-a");
     }
   });
+
+  it("preserves the human-readable title on the thrown ApiError", async () => {
+    // Regression guard: the throwing wrapper must surface the historical
+    // title ("Empty Prompt") instead of the machine code — UI clients display
+    // `Problem.title` and would otherwise render "empty_prompt".
+    try {
+      await validateAgentReadiness({
+        agent: buildAgent({ prompt: "" }),
+        providerProfiles: {},
+        orgId: "org-1",
+        applicationId: "app-1",
+      });
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).title).toBe("Empty Prompt");
+    }
+  });
+});
+
+describe("collectAgentReadinessErrors — skip option", () => {
+  it("skips the prompt check when skip.prompt is true", async () => {
+    const errors = await collectAgentReadinessErrors({
+      agent: buildAgent({ prompt: "" }),
+      providerProfiles: {},
+      orgId: "org-1",
+      applicationId: "app-1",
+      skip: { prompt: true },
+    });
+    expect(errors.some((e) => e.code === "empty_prompt")).toBe(false);
+  });
+
+  it("skips the config check when skip.config is true", async () => {
+    const manifest = buildManifest({
+      config: {
+        schema: {
+          type: "object",
+          properties: { maxBullets: { type: "integer", minimum: 1 } },
+          required: ["maxBullets"],
+        },
+      },
+    } as Partial<AgentManifest>);
+    const errors = await collectAgentReadinessErrors({
+      agent: buildAgent({ manifest }),
+      providerProfiles: {},
+      orgId: "org-1",
+      applicationId: "app-1",
+      config: {},
+      skip: { config: true },
+    });
+    expect(errors.some((e) => e.code === "invalid_config")).toBe(false);
+  });
 });

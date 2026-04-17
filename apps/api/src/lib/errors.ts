@@ -31,6 +31,12 @@ export interface ValidationFieldError {
   field: string;
   code: string;
   message: string;
+  /**
+   * Human-readable title. Preserved so throwing wrappers can surface the
+   * historical title (e.g. "Empty Prompt") in fail-fast mode instead of the
+   * machine code. Optional — Zod-originated entries don't carry one.
+   */
+  title?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,14 +207,23 @@ export function systemEntityForbidden(type: string, id: string, verb = "modify")
 
 import type { z } from "zod";
 
-/** Convert Zod issues to the RFC 9457 `errors[]` entries we expose to clients. */
+/**
+ * Convert Zod issues to the RFC 9457 `errors[]` entries we expose to clients.
+ *
+ * The Zod issue path fully identifies the offending field. `fallbackField` is
+ * only used when Zod reports an empty path (i.e. the root body failed before
+ * any key could be inspected) — it matches the historical semantic of
+ * `parseBody`'s third argument, which named the primary field being parsed.
+ * Concatenating the fallback with the Zod path would double-up names
+ * (`"apiKey.apiKey"`) for every parseBody caller, so we deliberately don't.
+ */
 export function zodIssuesToFieldErrors(
   issues: readonly z.core.$ZodIssue[],
-  pathPrefix?: string,
+  fallbackField?: string,
 ): ValidationFieldError[] {
   return issues.map((issue) => {
     const path = issue.path.map(String).join(".");
-    const field = pathPrefix ? (path ? `${pathPrefix}.${path}` : pathPrefix) : path;
+    const field = path || fallbackField || "";
     return { field, code: issue.code, message: issue.message };
   });
 }
@@ -216,7 +231,8 @@ export function zodIssuesToFieldErrors(
 /**
  * Parse a request body with a Zod schema. On failure throws a 400 with every
  * issue populated in `errors[]` so clients receive all problems in one call.
- * The optional `param` is used as a path prefix for nested schema context.
+ * The optional `param` is a fallback used when Zod reports an empty path —
+ * never as a prefix on top of a resolved path.
  */
 export function parseBody<T extends z.ZodType>(
   schema: T,

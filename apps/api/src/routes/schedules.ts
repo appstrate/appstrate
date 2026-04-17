@@ -99,6 +99,7 @@ export function createSchedulesRouter() {
             inputValidation.errors.map((e) => ({
               field: e.field ? `input.${e.field}` : "input",
               code: "invalid_input",
+              title: "Invalid Input",
               message: e.message,
             })),
           );
