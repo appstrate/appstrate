@@ -43,6 +43,7 @@ import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
 import { oauthClient } from "../schema.ts";
 import { prefixedId } from "../../../lib/ids.ts";
+import { logger } from "../../../lib/logger.ts";
 import { APPSTRATE_SCOPES } from "../auth/scopes.ts";
 import { isValidRedirectUri } from "./redirect-uri.ts";
 
@@ -557,14 +558,101 @@ export async function getInstanceClientId(): Promise<string | null> {
   return row?.clientId ?? null;
 }
 
+function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  for (const v of b) {
+    if (!set.has(v)) return false;
+  }
+  return true;
+}
+
 /**
  * Auto-provision the instance-level OIDC client for the platform SPA.
- * Idempotent — returns the existing clientId if one already exists.
+ *
+ * Idempotent on presence AND reconciles `redirectUris` /
+ * `postLogoutRedirectUris` against the current `APP_URL` on every boot.
+ * When the operator changes `APP_URL` (domain move, placeholder → real
+ * URL on first setup), the existing row is updated in place — same
+ * `client_id`, so outstanding tokens and live sessions remain valid.
+ *
+ * Without this reconciliation the dashboard SPA would loop on
+ * `/api/auth/oauth2/authorize` after a URL change and eventually hit
+ * the per-IP rate limit (see `auth/guards.ts` `AUTHORIZE_RL_POINTS`),
+ * forcing operators to wipe the DB to recover.
+ *
+ * ## Concurrency
+ *
+ * The SELECT+UPDATE is not transactional. Under multi-replica boot, both
+ * replicas may detect drift and both issue the UPDATE — benign, since
+ * both compute the exact same `expectedRedirectUris` from the same
+ * `APP_URL` env var (last-write-wins with identical payloads). No
+ * coordination primitive required.
+ *
+ * ## Cache propagation across replicas
+ *
+ * `cacheInvalidate()` only clears the local per-process cache (see
+ * `CLIENT_CACHE_TTL_MS`). Other replicas may serve stale URIs from
+ * their local cache for up to one TTL window (~30s). Acceptable in
+ * practice because reconciliation only happens at boot, and all
+ * replicas boot with the same `APP_URL` and therefore reconcile
+ * independently — the old cached value never gets exercised.
+ *
  * Called from `oidcModule.init()` at boot.
  */
 export async function ensureInstanceClient(appUrl: string): Promise<string> {
-  const existing = await getInstanceClientId();
-  if (existing) return existing;
+  // Normalize: strip trailing slash(es) so `APP_URL=https://x.com/` does
+  // not produce `https://x.com//auth/callback`. Reconciliation on an
+  // already-created-with-trailing-slash row will also now converge to
+  // the normalized form.
+  const normalizedAppUrl = appUrl.replace(/\/+$/, "");
+  const expectedRedirectUris = [`${normalizedAppUrl}/auth/callback`];
+  const expectedPostLogoutRedirectUris = [normalizedAppUrl, `${normalizedAppUrl}/login`];
+
+  // Same validation policy as the create path below (and as every other
+  // callsite of `assertValidRedirectUris`): reject loopback-in-prod,
+  // bad schemes, etc. Keeps the update path from silently writing a
+  // value the create path would refuse, should `isValidRedirectUri`
+  // ever tighten its rules.
+  assertValidRedirectUris(expectedRedirectUris);
+
+  const [existing] = await db
+    .select({
+      clientId: oauthClient.clientId,
+      redirectUris: oauthClient.redirectUris,
+      postLogoutRedirectUris: oauthClient.postLogoutRedirectUris,
+    })
+    .from(oauthClient)
+    .where(eq(oauthClient.level, "instance"))
+    .orderBy(asc(oauthClient.createdAt))
+    .limit(1);
+
+  if (existing) {
+    const storedPostLogout = existing.postLogoutRedirectUris ?? [];
+    const redirectDrift = !sameStringSet(existing.redirectUris, expectedRedirectUris);
+    const postLogoutDrift = !sameStringSet(storedPostLogout, expectedPostLogoutRedirectUris);
+    if (redirectDrift || postLogoutDrift) {
+      await db
+        .update(oauthClient)
+        .set({
+          redirectUris: expectedRedirectUris,
+          postLogoutRedirectUris: expectedPostLogoutRedirectUris,
+          updatedAt: new Date(),
+        })
+        .where(eq(oauthClient.clientId, existing.clientId));
+      cacheInvalidate(existing.clientId);
+      logger.warn("OIDC platform client redirect URIs updated to match APP_URL", {
+        module: "oidc",
+        clientId: existing.clientId,
+        appUrl: normalizedAppUrl,
+        redirectUrisFrom: existing.redirectUris,
+        redirectUrisTo: expectedRedirectUris,
+        postLogoutRedirectUrisFrom: storedPostLogout,
+        postLogoutRedirectUrisTo: expectedPostLogoutRedirectUris,
+      });
+    }
+    return existing.clientId;
+  }
 
   // The platform auto-provisioned instance client opts into open signup at
   // boot so a fresh Appstrate install can register its first user. Every
@@ -574,8 +662,8 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
   const created = await createClient({
     level: "instance",
     name: "Appstrate Platform",
-    redirectUris: [`${appUrl}/auth/callback`],
-    postLogoutRedirectUris: [appUrl, `${appUrl}/login`],
+    redirectUris: expectedRedirectUris,
+    postLogoutRedirectUris: expectedPostLogoutRedirectUris,
     scopes: ["openid", "profile", "email", "offline_access"],
     isFirstParty: true,
     allowSignup: true,
