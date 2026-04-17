@@ -24,6 +24,15 @@ import { logger } from "../lib/logger.ts";
 export const INLINE_SHADOW_SCOPE = "inline";
 
 /**
+ * Return true when the package id belongs to the reserved inline scope.
+ * Cheap string test — no DB. Use this to decorate run events (e.g. webhook
+ * `packageEphemeral`) without a `packages` lookup.
+ */
+export function isInlineShadowPackageId(packageId: string): boolean {
+  return packageId.startsWith(`@${INLINE_SHADOW_SCOPE}/`);
+}
+
+/**
  * Generate a unique shadow package ID. The `r-` prefix keeps the slug
  * component starting with a letter (defensive against any future tightening
  * of `SLUG_PATTERN`) while the UUID payload makes collisions negligible.

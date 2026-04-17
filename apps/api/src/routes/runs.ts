@@ -46,6 +46,7 @@ import {
   insertShadowPackage,
   buildShadowLoadedPackage,
   deleteOrphanShadowPackage,
+  isInlineShadowPackageId,
 } from "../services/inline-run.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
@@ -88,6 +89,8 @@ export async function executeAgentInBackground(
   const startTime = Date.now();
   const controller = trackRun(runId);
   const { signal } = controller;
+  // Derived once — cheap string test used to decorate every lifecycle event.
+  const packageEphemeral = isInlineShadowPackageId(agent.id);
 
   let accumulatedCost = 0;
 
@@ -100,6 +103,7 @@ export async function executeAgentInBackground(
       packageId: agent.id,
       applicationId,
       status: "started",
+      packageEphemeral,
     });
 
     // Execute via adapter
@@ -232,6 +236,7 @@ export async function executeAgentInBackground(
           cost: accumulatedCost,
           duration,
           modelSource: modelSource ?? null,
+          packageEphemeral,
         });
         return;
       }
@@ -290,6 +295,7 @@ export async function executeAgentInBackground(
         cost: accumulatedCost,
         duration,
         modelSource: modelSource ?? null,
+        packageEphemeral,
         extra: { error },
       });
     } else {
@@ -376,6 +382,7 @@ export async function executeAgentInBackground(
         cost: accumulatedCost,
         duration,
         modelSource: modelSource ?? null,
+        packageEphemeral,
         extra: { result },
       });
     }
@@ -425,6 +432,7 @@ export async function executeAgentInBackground(
       cost: accumulatedCost,
       duration,
       modelSource: modelSource ?? null,
+      packageEphemeral,
       extra: { error: errorMessage },
     });
   } finally {
@@ -720,6 +728,7 @@ export function createRunsRouter() {
       packageId: run.packageId,
       applicationId: c.get("applicationId"),
       status: "cancelled",
+      packageEphemeral: isInlineShadowPackageId(run.packageId),
     });
 
     return c.json({ ok: true });
