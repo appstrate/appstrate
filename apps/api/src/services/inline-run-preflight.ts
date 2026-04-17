@@ -37,6 +37,7 @@ import {
   type ValidationFieldError,
 } from "../lib/errors.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
+import { logger } from "../lib/logger.ts";
 import { validateConfig, validateInput } from "./schema.ts";
 import { validateInlineManifest } from "./inline-manifest-validation.ts";
 import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.ts";
@@ -191,13 +192,16 @@ export async function runInlinePreflight(params: {
       // network timeout, programmer error) must bubble as-is so the error
       // handler emits a 5xx and alerting fires.
       if (mode === "fail-fast" || !(err instanceof ApiError)) throw err;
-      push([apiErrorToField(err, "providers")]);
+      push(apiErrorToFields(err, "providers"));
       providerProfiles = {};
     }
 
-    // In accumulate mode, stages 1–3 already covered prompt (via the manifest
-    // structural check) and config (via AJV at stage 3). Tell readiness to
-    // skip those so the same field never appears twice in `errors[]`.
+    // In accumulate mode, stage 3 already validated config via AJV against
+    // the manifest schema — tell readiness to skip its config check so the
+    // same field never appears twice in `errors[]`. Prompt is NOT skipped:
+    // stage 1's structural check only validates prompt type and byte size,
+    // not emptiness, so readiness remains the single source for the
+    // `empty_prompt` signal.
     if (mode === "fail-fast") {
       await validateAgentReadiness({
         agent: probeAgent,
@@ -214,7 +218,7 @@ export async function runInlinePreflight(params: {
           orgId,
           config: effectiveConfig,
           applicationId,
-          skip: { prompt: true, config: true },
+          skip: { config: true },
         }),
       );
     }
@@ -226,9 +230,16 @@ export async function runInlinePreflight(params: {
 
   // Guaranteed non-null: accumulate mode throws above when manifest is
   // missing (structural errors were collected), and fail-fast throws at
-  // stage 1 before reaching this point. The internalError() serialises as
-  // a proper 500 RFC 9457 response if the invariant ever breaks.
+  // stage 1 before reaching this point. If we ever land here it means a
+  // structural failure produced zero error messages — a real bug. Log it
+  // so the regression is diagnosable rather than masked behind a 500.
   if (!manifest) {
+    logger.error("preflight invariant broken: reached return without a parsed manifest", {
+      orgId,
+      applicationId,
+      mode,
+      accumulated: accumulated.length,
+    });
     throw internalError();
   }
 
@@ -244,30 +255,40 @@ export async function runInlinePreflight(params: {
   };
 }
 
-/** Parse an inline-manifest error string (`"path: message"`) into a field entry. */
+/**
+ * Parse an inline-manifest error string (`"path: message"`) into a field entry.
+ *
+ * `validateManifest` returns flat strings, so we reconstruct the structured
+ * shape here. The split is anchored on a strict path-like prefix
+ * (alphanumeric, dots, brackets) so messages that themselves contain `": "`
+ * (e.g. quoted regex patterns) don't truncate the human-readable part.
+ */
+const PATH_PREFIX_RE = /^([A-Za-z_][A-Za-z0-9_.[\]]*): (.+)$/s;
 function toFieldError(raw: string, code: string): ValidationFieldError {
-  const idx = raw.indexOf(": ");
-  if (idx === -1)
-    return { field: "manifest", code, title: "Invalid Inline Manifest", message: raw };
-  return {
-    field: raw.slice(0, idx),
-    code,
-    title: "Invalid Inline Manifest",
-    message: raw.slice(idx + 2),
-  };
+  const m = PATH_PREFIX_RE.exec(raw);
+  if (!m) return { field: "manifest", code, title: "Invalid Inline Manifest", message: raw };
+  return { field: m[1]!, code, title: "Invalid Inline Manifest", message: m[2]! };
 }
 
 /**
- * Fold a caught ApiError into a ValidationFieldError.
+ * Fold a caught ApiError into one or more ValidationFieldError entries.
+ *
+ * If the caught error already carries a populated `errors[]` (e.g. a nested
+ * helper that aggregates multiple problems), we forward those entries as-is
+ * so we don't collapse rich detail into a single line. Otherwise we synth a
+ * single entry from `param` / `code` / `title` / `message`.
  *
  * Callers MUST have already verified `err instanceof ApiError` — non-ApiError
  * instances represent infrastructure failures and should never reach here.
  */
-function apiErrorToField(err: ApiError, fallbackField: string): ValidationFieldError {
-  return {
-    field: err.param ?? fallbackField,
-    code: err.code,
-    title: err.title,
-    message: err.message,
-  };
+function apiErrorToFields(err: ApiError, fallbackField: string): ValidationFieldError[] {
+  if (err.fieldErrors && err.fieldErrors.length > 0) return err.fieldErrors;
+  return [
+    {
+      field: err.param ?? fallbackField,
+      code: err.code,
+      title: err.title,
+      message: err.message,
+    },
+  ];
 }

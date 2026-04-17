@@ -82,12 +82,22 @@ export function validateInlineManifest(
   const manifest = structural.valid ? (structural.manifest as Manifest) : undefined;
 
   // --- 5. Dependency count caps ---
-  // `extractDepsFromManifest` walks the typed shape. For unparsed manifests we
-  // fall back to a best-effort view of `input.manifest` so dep-count and
-  // URI-cap violations still surface when structural validation fails.
-  const { skillIds, toolIds, providerIds } = extractDepsFromManifest(
-    (manifest ?? input.manifest) as Partial<Manifest>,
-  );
+  // `extractDepsFromManifest` is defensive (it routes every read through
+  // `asRecord`) so this call should never throw on malformed input. The
+  // try/catch is belt-and-suspenders: if a future refactor relaxes the
+  // helper's tolerance, a malformed `dependencies` payload still surfaces a
+  // structured error instead of bubbling a TypeError to the request handler.
+  let skillIds: string[] = [];
+  let toolIds: string[] = [];
+  let providerIds: string[] = [];
+  try {
+    const deps = extractDepsFromManifest((manifest ?? input.manifest) as Partial<Manifest>);
+    skillIds = deps.skillIds;
+    toolIds = deps.toolIds;
+    providerIds = deps.providerIds;
+  } catch {
+    errors.push("manifest.dependencies: malformed shape");
+  }
   if (skillIds.length > limits.max_skills) {
     errors.push(
       `manifest.dependencies.skills: too many (${skillIds.length} > ${limits.max_skills})`,

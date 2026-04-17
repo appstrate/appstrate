@@ -73,11 +73,17 @@ import {
   type ValidationFieldError,
 } from "../lib/errors.ts";
 
-/** Convert `@appstrate/core/validation` "path: message" strings to field entries. */
+/**
+ * Convert `@appstrate/core/validation` "path: message" strings to field
+ * entries. The split is anchored on a strict path-like prefix
+ * (alphanumeric, dots, brackets) so messages containing `": "` (e.g. quoted
+ * regex patterns or nested examples) are not truncated.
+ */
+const MANIFEST_PATH_PREFIX_RE = /^([A-Za-z_][A-Za-z0-9_.[\]]*): (.+)$/s;
 function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
   return errors.map((raw) => {
-    const idx = raw.indexOf(": ");
-    if (idx === -1) {
+    const m = MANIFEST_PATH_PREFIX_RE.exec(raw);
+    if (!m) {
       return {
         field: "manifest",
         code: "invalid_manifest",
@@ -86,10 +92,10 @@ function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
       };
     }
     return {
-      field: `manifest.${raw.slice(0, idx)}`,
+      field: `manifest.${m[1]!}`,
       code: "invalid_manifest",
       title: "Invalid Manifest",
-      message: raw.slice(idx + 2),
+      message: m[2]!,
     };
   });
 }

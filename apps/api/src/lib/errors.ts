@@ -208,6 +208,74 @@ export function systemEntityForbidden(type: string, id: string, verb = "modify")
 import type { z } from "zod";
 
 /**
+ * Closed set of public field-error codes. We deliberately do NOT propagate
+ * raw Zod codes (which are internal to the validation library and may change
+ * between major versions) — instead every Zod issue is mapped to one of
+ * these stable codes. Clients can safely branch on them.
+ */
+export type FieldErrorCode =
+  | "required"
+  | "invalid_type"
+  | "invalid_format"
+  | "out_of_range"
+  | "unknown_field"
+  | "invalid_value"
+  | "invalid_union"
+  | "invalid_key"
+  | "invalid_element"
+  | "invalid_request";
+
+function mapZodCode(issue: z.core.$ZodIssue): FieldErrorCode {
+  // `invalid_type` with `received: undefined` is the Zod way of saying
+  // "missing required field" — surface a dedicated `required` code so
+  // clients don't have to inspect the `received` property to tell the two
+  // cases apart.
+  if (issue.code === "invalid_type" && (issue as { received?: unknown }).received === "undefined") {
+    return "required";
+  }
+  switch (issue.code) {
+    case "invalid_type":
+      return "invalid_type";
+    case "too_big":
+    case "too_small":
+    case "not_multiple_of":
+      return "out_of_range";
+    case "invalid_format":
+      return "invalid_format";
+    case "unrecognized_keys":
+      return "unknown_field";
+    case "invalid_union":
+      return "invalid_union";
+    case "invalid_key":
+      return "invalid_key";
+    case "invalid_element":
+      return "invalid_element";
+    case "invalid_value":
+    case "custom":
+      return "invalid_value";
+    default:
+      return "invalid_request";
+  }
+}
+
+/**
+ * Render a path segment array using bracket notation for numeric indices
+ * (`items[0].name`) so consumers can disambiguate array indices from string
+ * keys that happen to be all-digits. Mirrors Stripe's `param` convention.
+ */
+function renderFieldPath(path: readonly PropertyKey[]): string {
+  let out = "";
+  for (const seg of path) {
+    if (typeof seg === "number" || (typeof seg === "string" && /^\d+$/.test(seg))) {
+      out += `[${seg}]`;
+    } else {
+      out += out === "" ? String(seg) : `.${String(seg)}`;
+    }
+  }
+  return out;
+}
+
+/**
  * Convert Zod issues to the RFC 9457 `errors[]` entries we expose to clients.
  *
  * The Zod issue path fully identifies the offending field. `fallbackField` is
@@ -216,15 +284,19 @@ import type { z } from "zod";
  * `parseBody`'s third argument, which named the primary field being parsed.
  * Concatenating the fallback with the Zod path would double-up names
  * (`"apiKey.apiKey"`) for every parseBody caller, so we deliberately don't.
+ *
+ * When neither a path nor a fallback is available the field defaults to
+ * `"body"` rather than the empty string, so clients always receive a usable
+ * pointer.
  */
 export function zodIssuesToFieldErrors(
   issues: readonly z.core.$ZodIssue[],
   fallbackField?: string,
 ): ValidationFieldError[] {
   return issues.map((issue) => {
-    const path = issue.path.map(String).join(".");
-    const field = path || fallbackField || "";
-    return { field, code: issue.code, message: issue.message };
+    const path = renderFieldPath(issue.path);
+    const field = path || fallbackField || "body";
+    return { field, code: mapZodCode(issue), message: issue.message };
   });
 }
 

@@ -74,10 +74,17 @@ describe("POST /api/runs/inline/validate", () => {
   });
 
   it("returns 400 with invalid_inline_manifest on a malformed manifest", async () => {
+    // Accumulate mode wraps every per-stage code under the top-level
+    // `validation_failed`. The structural-stage code is preserved on each
+    // entry so clients can still branch on it.
     const res = await post({ manifest: { type: "agent" }, prompt: "hi" });
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { code?: string; detail?: string };
-    expect(body.code).toBe("invalid_inline_manifest");
+    const body = (await res.json()) as {
+      code?: string;
+      errors?: { code: string }[];
+    };
+    expect(body.code).toBe("validation_failed");
+    expect((body.errors ?? []).some((e) => e.code === "invalid_inline_manifest")).toBe(true);
   });
 
   it("returns 400 when config fails the manifest's config schema", async () => {
