@@ -53,17 +53,43 @@ export const responses = {
     },
   },
   ValidationError: {
-    description: "Validation error",
+    description:
+      'Validation error. Body-level failures emit `code: "validation_failed"` ' +
+      "with a populated `errors[]` array listing every offending field in one " +
+      "response. Single-field failures outside the body (query params, headers) " +
+      'still use `code: "invalid_request"` with the `param` pointer.',
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },
-        example: {
-          type: "https://docs.appstrate.dev/errors/invalid-request",
-          title: "Invalid Request",
-          status: 400,
-          detail: "Field is required",
-          code: "invalid_request",
-          requestId: "req_abc123",
+        examples: {
+          aggregated: {
+            summary: "Multiple body fields failed validation",
+            value: {
+              type: "https://docs.appstrate.dev/errors/validation-failed",
+              title: "Validation Failed",
+              status: 400,
+              detail: "name: Required (+2 more)",
+              code: "validation_failed",
+              requestId: "req_abc123",
+              errors: [
+                { field: "name", code: "invalid_type", message: "Required" },
+                { field: "email", code: "invalid_format", message: "Invalid email" },
+                { field: "age", code: "invalid_type", message: "Expected number" },
+              ],
+            },
+          },
+          singleField: {
+            summary: "Single non-body field failed validation",
+            value: {
+              type: "https://docs.appstrate.dev/errors/invalid-request",
+              title: "Invalid Request",
+              status: 400,
+              detail: "Field is required",
+              code: "invalid_request",
+              param: "limit",
+              requestId: "req_abc123",
+            },
+          },
         },
       },
     },

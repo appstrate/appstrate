@@ -123,10 +123,9 @@ describe("validateAgentReadiness (throwing)", () => {
     });
   });
 
-  it("throws the first collected error with the matching ApiError code + title", async () => {
+  it("throws the first collected error with the matching ApiError code", async () => {
     // Empty prompt → collector's first entry is { code: "empty_prompt" }.
-    // The throwing variant MUST preserve that code (backward compat) and
-    // look up the human-readable title from the CODE_TITLES table.
+    // The throwing variant MUST preserve that code (backward compat).
     try {
       await validateAgentReadiness({
         agent: buildAgent({ prompt: "" }),
@@ -140,11 +139,10 @@ describe("validateAgentReadiness (throwing)", () => {
       const apiErr = err as ApiError;
       expect(apiErr.status).toBe(400);
       expect(apiErr.code).toBe("empty_prompt");
-      expect(apiErr.title).toBe("Empty Prompt");
     }
   });
 
-  it("maps missing_skill code to Missing Skill title", async () => {
+  it("propagates missing_skill code with the skill id in the message", async () => {
     const manifest = buildManifest({
       dependencies: {
         skills: { "@test/skill-a": "1.0.0" },
@@ -165,7 +163,6 @@ describe("validateAgentReadiness (throwing)", () => {
       expect(err).toBeInstanceOf(ApiError);
       const apiErr = err as ApiError;
       expect(apiErr.code).toBe("missing_skill");
-      expect(apiErr.title).toBe("Missing Skill");
       expect(apiErr.message).toContain("@test/skill-a");
     }
   });

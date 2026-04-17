@@ -31,6 +31,7 @@ import type { Actor } from "../lib/actor.ts";
 import type { AgentManifest, ProviderProfileMap } from "../types/index.ts";
 import {
   ApiError,
+  internalError,
   validationFailed,
   zodIssuesToFieldErrors,
   type ValidationFieldError,
@@ -85,10 +86,11 @@ export async function runInlinePreflight(params: {
   const collect = (errs: ValidationFieldError[], throwCode?: string): void => {
     if (errs.length === 0) return;
     if (mode === "fail-fast") {
+      const code = throwCode ?? "validation_failed";
       throw new ApiError({
         status: 400,
-        code: throwCode ?? "validation_failed",
-        title: throwCode ? codeToTitle(throwCode) : "Validation Failed",
+        code,
+        title: code,
         detail: `${errs[0]!.field}: ${errs[0]!.message}`,
         errors: errs,
       });
@@ -219,9 +221,10 @@ export async function runInlinePreflight(params: {
 
   // Guaranteed non-null: accumulate mode throws above when manifest is
   // missing (structural errors were collected), and fail-fast throws at
-  // stage 1 before reaching this point.
+  // stage 1 before reaching this point. The internalError() serialises as
+  // a proper 500 RFC 9457 response if the invariant ever breaks.
   if (!manifest) {
-    throw new Error("runInlinePreflight: reached success path without a manifest");
+    throw internalError();
   }
 
   return {
@@ -255,11 +258,4 @@ function apiErrorToField(err: ApiError, fallbackField: string): ValidationFieldE
     code: err.code,
     message: err.message,
   };
-}
-
-function codeToTitle(code: string): string {
-  return code
-    .split("_")
-    .map((w) => (w.length === 0 ? w : w[0]!.toUpperCase() + w.slice(1)))
-    .join(" ");
 }

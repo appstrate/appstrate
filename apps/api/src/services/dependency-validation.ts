@@ -174,23 +174,7 @@ export async function validateAgentDependencies(
   throw new ApiError({
     status: 400,
     code: first.code,
-    title: codeToTitle(first.code),
+    title: first.code,
     detail: first.message,
   });
-}
-
-function codeToTitle(code: string): string {
-  switch (code) {
-    case "provider_not_enabled":
-      return "Provider Not Enabled";
-    case "provider_not_configured":
-      return "Provider Not Configured";
-    case "needs_reconnection":
-      return "Needs Reconnection";
-    case "scope_insufficient":
-      return "Scope Insufficient";
-    case "dependency_not_satisfied":
-    default:
-      return "Dependency Not Satisfied";
-  }
 }

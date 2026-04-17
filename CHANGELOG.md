@@ -27,8 +27,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ESLint `no-unused-vars` upgraded from `warn` to `error`
 - All workspace packages extend shared `tsconfig.base.json`
 - Enabled TypeScript type-checking on `runtime-pi` (previously disabled via `noCheck: true`)
-- **BREAKING (API contract)**: `parseBody` helper — used by ~84 call sites
-  across 21 routes — now emits `code: "validation_failed"` instead of
+- **BREAKING (API contract)**: `parseBody` helper — used by ~64 call sites
+  across ~20 route files (including modules) — now emits
+  `code: "validation_failed"` instead of
   `code: "invalid_request"` on body-validation failures, and populates
   `errors[]` with every Zod issue instead of setting the top-level `param`
   field on the first one. Clients that branch on `code === "invalid_request"`
@@ -38,12 +39,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   use their existing codes unchanged.
 - `validateAgentDependencies` parallelises provider checks via `Promise.all`
   across `isProviderEnabled`, `getProviderCredentialId`, and
-  `getConnectionStatus`. Error ordering within each check type follows
-  `providers` iteration order; when a run has failures across different
-  check types (e.g. one provider disabled, another missing a profile), the
-  thrown error now matches the fixed check-type precedence (enabled →
-  profile → credential → status → scope) rather than the provider the
-  sequential loop happened to reach first. Happy-path latency is reduced.
+  `getConnectionStatus`. The pre-existing check-type precedence (enabled →
+  profile → credential → status → scope) is preserved; within each check
+  type, the thrown error still follows `providers` iteration order. Happy-
+  path latency is reduced.
 
 ### Removed
 

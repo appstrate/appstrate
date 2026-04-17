@@ -160,6 +160,37 @@ describe("POST /api/runs/inline/validate", () => {
     expect(fields.some((f) => f.startsWith("input"))).toBe(true);
   });
 
+  it("aggregates structural manifest errors with dep-cap violations", async () => {
+    // The manifest is missing `type`, which breaks AFPS dispatch and emits
+    // base-schema issues (name/version/type). At the same time the provider
+    // deps exceed `max_authorized_uris` — a cap that reads the raw manifest
+    // shape and must surface alongside structural errors, not after a short-
+    // circuit. This is the regression guard for the fall-through change in
+    // `inline-manifest-validation.ts` and `packages/core/validation.ts`.
+    const providers: Record<string, string> = {};
+    for (let i = 0; i < 200; i++) providers[`@test/provider-${i}`] = "1.0.0";
+    const manifest = {
+      // `type` intentionally omitted to trigger base-schema aggregation
+      name: "@inline/broken",
+      version: "0.0.0",
+      schemaVersion: "1.0",
+      dependencies: { skills: {}, tools: {}, providers },
+    };
+
+    const res = await post({ manifest, prompt: "hi" });
+    expect(res.status).toBe(400);
+
+    const body = (await res.json()) as {
+      code?: string;
+      errors?: { field: string; code: string; message: string }[];
+    };
+    expect(body.code).toBe("validation_failed");
+    const messages = (body.errors ?? []).map((e) => `${e.field}: ${e.message}`).join("\n");
+    // Structural failure surfaces (missing type) AND the dep-cap still fires.
+    expect(messages).toMatch(/manifest\.type/i);
+    expect(messages).toMatch(/providers.*too many|dependencies\.providers/i);
+  });
+
   it("rejects unauthenticated requests with 401", async () => {
     const res = await app.request("/api/runs/inline/validate", {
       method: "POST",

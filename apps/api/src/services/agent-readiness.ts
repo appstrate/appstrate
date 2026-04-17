@@ -89,18 +89,6 @@ export async function collectAgentReadinessErrors(
   return errors;
 }
 
-const CODE_TITLES: Record<string, string> = {
-  empty_prompt: "Empty Prompt",
-  missing_skill: "Missing Skill",
-  missing_tool: "Missing Tool",
-  provider_not_enabled: "Provider Not Enabled",
-  provider_not_configured: "Provider Not Configured",
-  needs_reconnection: "Needs Reconnection",
-  scope_insufficient: "Scope Insufficient",
-  dependency_not_satisfied: "Dependency Not Satisfied",
-  config_incomplete: "Config Incomplete",
-};
-
 /**
  * Validate that an agent is ready for a run. Delegates to
  * `collectAgentReadinessErrors` and throws the first error, preserving the
@@ -113,7 +101,7 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
   throw new ApiError({
     status: 400,
     code: first.code,
-    title: CODE_TITLES[first.code] ?? "Validation Failed",
+    title: first.code,
     detail: first.message,
   });
 }
