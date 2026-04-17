@@ -71,16 +71,33 @@ export function validateInlineManifest(
   }
 
   // --- 4. Structural AFPS validation (dispatches by `type` field) ---
+  // On failure we record the errors but continue — dep-count and URI caps
+  // read the raw manifest shape and don't need the parsed result, so surfacing
+  // them alongside structural errors gives callers a single-round-trip view.
   const structural = validateManifest(input.manifest);
   if (!structural.valid) {
     for (const e of structural.errors) errors.push(`manifest.${e}`);
-    return { valid: false, errors };
   }
 
-  const manifest = structural.manifest as Manifest;
+  const manifest = structural.valid ? (structural.manifest as Manifest) : undefined;
 
   // --- 5. Dependency count caps ---
-  const { skillIds, toolIds, providerIds } = extractDepsFromManifest(manifest);
+  // `extractDepsFromManifest` is defensive (it routes every read through
+  // `asRecord`) so this call should never throw on malformed input. The
+  // try/catch is belt-and-suspenders: if a future refactor relaxes the
+  // helper's tolerance, a malformed `dependencies` payload still surfaces a
+  // structured error instead of bubbling a TypeError to the request handler.
+  let skillIds: string[] = [];
+  let toolIds: string[] = [];
+  let providerIds: string[] = [];
+  try {
+    const deps = extractDepsFromManifest((manifest ?? input.manifest) as Partial<Manifest>);
+    skillIds = deps.skillIds;
+    toolIds = deps.toolIds;
+    providerIds = deps.providerIds;
+  } catch {
+    errors.push("manifest.dependencies: malformed shape");
+  }
   if (skillIds.length > limits.max_skills) {
     errors.push(
       `manifest.dependencies.skills: too many (${skillIds.length} > ${limits.max_skills})`,
@@ -127,7 +144,7 @@ export function validateInlineManifest(
     );
   }
 
-  if (errors.length > 0) {
+  if (errors.length > 0 || !manifest) {
     return { valid: false, errors };
   }
 

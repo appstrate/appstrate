@@ -171,6 +171,25 @@ describe("validateInlineManifest — structural", () => {
     expect(result.valid).toBe(false);
     expect(result.errors.join(" ")).toContain("@scope/name");
   });
+
+  it("aggregates structural and cap errors in one pass", () => {
+    // Structural failure (bad name) must NOT short-circuit cap checks — we
+    // want every problem surfaced so the caller can fix them together.
+    const tight = { ...defaults, max_skills: 1 };
+    const skills: Record<string, string> = {
+      "@sys/skill-a": "1.0.0",
+      "@sys/skill-b": "1.0.0",
+    };
+    const result = validateInlineManifest({
+      manifest: baseManifest({ name: "bad-name-no-scope", dependencies: { skills } }),
+      prompt: "ok",
+      limits: tight,
+    });
+    expect(result.valid).toBe(false);
+    const joined = result.errors.join(" | ");
+    expect(joined).toContain("name");
+    expect(joined).toContain("skills: too many");
+  });
 });
 
 // ---------------------------------------------------------------------------
