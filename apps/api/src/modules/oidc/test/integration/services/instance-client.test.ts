@@ -122,6 +122,51 @@ describe("ensureInstanceClient", () => {
     const rows = await db.select().from(oauthClient).where(eq(oauthClient.level, "instance"));
     expect(rows).toHaveLength(1);
   });
+
+  it("reconciles redirect URIs when APP_URL changes between boots", async () => {
+    const { ensureInstanceClient } = await import("../../../services/oauth-admin.ts");
+    const original = await ensureInstanceClient("https://old.example.com");
+
+    const reconciled = await ensureInstanceClient("https://new.example.com");
+    expect(reconciled).toBe(original); // Same clientId — tokens stay valid
+
+    const [row] = await db
+      .select()
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, original))
+      .limit(1);
+    expect(row!.redirectUris).toEqual(["https://new.example.com/auth/callback"]);
+    expect(row!.postLogoutRedirectUris).toEqual([
+      "https://new.example.com",
+      "https://new.example.com/login",
+    ]);
+
+    // Still only one instance client
+    const rows = await db.select().from(oauthClient).where(eq(oauthClient.level, "instance"));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("does not touch unchanged rows when APP_URL is unchanged", async () => {
+    const { ensureInstanceClient } = await import("../../../services/oauth-admin.ts");
+    await ensureInstanceClient("http://localhost:3000");
+
+    const [before] = await db
+      .select()
+      .from(oauthClient)
+      .where(eq(oauthClient.level, "instance"))
+      .limit(1);
+    expect(before!.updatedAt).not.toBeNull();
+    const originalUpdatedAt = before!.updatedAt!.getTime();
+
+    await ensureInstanceClient("http://localhost:3000");
+
+    const [after] = await db
+      .select()
+      .from(oauthClient)
+      .where(eq(oauthClient.level, "instance"))
+      .limit(1);
+    expect(after!.updatedAt!.getTime()).toBe(originalUpdatedAt);
+  });
 });
 
 // ─── cachedTrustedClients snapshot ────────────────────────────────────────────
