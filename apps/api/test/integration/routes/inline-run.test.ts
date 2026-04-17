@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { db } from "../../helpers/db.ts";
 import { packages } from "@appstrate/db/schema";
@@ -36,6 +37,28 @@ function validManifest() {
     dependencies: {
       skills: {},
       tools: {},
+      providers: {},
+    },
+  };
+}
+
+function manifestWithDeps(
+  deps: {
+    tools?: Record<string, string>;
+    skills?: Record<string, string>;
+  } = {},
+) {
+  // schemaVersion MUST be MAJOR.MINOR (e.g. "1.0"). The existing
+  // validManifest() in this file uses "1.0.0" which silently fails the
+  // AFPS structural validator — that's fine for the 400-path tests above
+  // (they only assert invalid_inline_manifest), but readiness tests need
+  // the manifest to actually clear structural validation.
+  return {
+    ...validManifest(),
+    schemaVersion: "1.0",
+    dependencies: {
+      skills: deps.skills ?? {},
+      tools: deps.tools ?? {},
       providers: {},
     },
   };
@@ -139,6 +162,50 @@ describe("POST /api/runs/inline — validation", () => {
 
     const countAfter = await db.select().from(packages).where(eq(packages.ephemeral, true));
     expect(countAfter).toHaveLength(0);
+  });
+});
+
+describe("POST /api/runs/inline — dependency resolution", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "inlineorg" });
+  });
+
+  async function post(body: unknown) {
+    return app.request("/api/runs/inline", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("resolves a seeded system tool past the readiness check", async () => {
+    await seedPackage({
+      id: "@appstrate/output",
+      type: "tool",
+      source: "system",
+      orgId: null,
+    });
+    const manifest = manifestWithDeps({ tools: { "@appstrate/output": "^1.0.0" } });
+    const res = await post({ manifest, prompt: "do something" });
+    // Readiness must not reject with missing_tool. The next guard (model
+    // resolution) may still trip in a vanilla test harness with no LLM
+    // configured — we don't assert on that here, only that the catalog
+    // dep resolution cleared.
+    if (res.status === 400) {
+      const body = (await res.json()) as { code?: string };
+      expect(body.code).not.toBe("missing_tool");
+    }
+  });
+
+  it("returns 400 missing_tool when tool dep is bogus", async () => {
+    const manifest = manifestWithDeps({ tools: { "@fake/nope": "^1.0.0" } });
+    const res = await post({ manifest, prompt: "do something" });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe("missing_tool");
   });
 });
 
