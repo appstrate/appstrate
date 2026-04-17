@@ -11,10 +11,13 @@ interface PaginatedResult {
   total: number;
 }
 
+export type RunKindFilter = "all" | "package" | "inline";
+
 interface UsePaginatedRunsOptions {
   packageId?: string;
   scheduleId?: string;
   user?: "me";
+  kind?: RunKindFilter;
   limit: number;
   offset: number;
 }
@@ -23,6 +26,7 @@ export function usePaginatedRuns({
   packageId,
   scheduleId,
   user,
+  kind,
   limit,
   offset,
 }: UsePaginatedRunsOptions) {
@@ -39,9 +43,10 @@ export function usePaginatedRuns({
   params.set("limit", String(limit));
   params.set("offset", String(offset));
   if (user) params.set("user", user);
+  if (kind && kind !== "all") params.set("kind", kind);
 
   return useQuery({
-    queryKey: ["paginated-runs", orgId, appId, endpoint, user, limit, offset],
+    queryKey: ["paginated-runs", orgId, appId, endpoint, user, kind, limit, offset],
     queryFn: async () => {
       return api<PaginatedResult>(`${endpoint}?${params.toString()}`);
     },

@@ -457,12 +457,14 @@ export async function listRunsWithFilter(
       endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
       apiKeyName: apiKeys.name,
       scheduleName: schedules.name,
+      packageEphemeral: packages.ephemeral,
     })
     .from(runs)
     .leftJoin(profiles, eq(runs.dashboardUserId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
     .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
     .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
+    .leftJoin(packages, eq(packages.id, runs.packageId))
     .where(filter)
     .orderBy(desc(runs.startedAt))
     .limit(limit)
@@ -475,6 +477,7 @@ export async function listRunsWithFilter(
       endUserName: r.endUserName ?? null,
       apiKeyName: r.apiKeyName ?? null,
       scheduleName: r.scheduleName ?? null,
+      packageEphemeral: r.packageEphemeral ?? false,
     })) as unknown as Record<string, unknown>[],
     total: countRow?.count ?? 0,
   };

@@ -20,6 +20,8 @@ export type EnrichedRun = Run & {
   endUserName: string | null;
   apiKeyName: string | null;
   scheduleName: string | null;
+  /** True if the run's source package is an inline/ephemeral shadow (POST /api/runs/inline). */
+  packageEphemeral?: boolean;
 };
 
 // --- App Config Types ---

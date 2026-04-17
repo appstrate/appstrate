@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Shield } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
 import { cn } from "@/lib/utils";
@@ -19,9 +20,11 @@ export function RunRow({
   /** Render as a static div instead of a Link (e.g. on run detail page). */
   disableLink?: boolean;
 }) {
+  const { t } = useTranslation(["agents"]);
   const isRunning = run.status === "running" || run.status === "pending";
   const isUnread = run.notifiedAt != null && run.readAt == null;
   const date = run.startedAt ? formatDateField(run.startedAt) : "";
+  const isInline = run.packageEphemeral === true;
 
   // Live elapsed timer while running
   const [elapsed, setElapsed] = useState(0);
@@ -44,6 +47,11 @@ export function RunRow({
       )}
       {agentName && <span className="truncate font-medium">{agentName}</span>}
       <Badge status={run.status} compact unread={isUnread} />
+      {isInline && (
+        <span className="border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase">
+          {t("runs.inlineBadge")}
+        </span>
+      )}
 
       <RunTrigger run={run} />
 
@@ -61,12 +69,14 @@ export function RunRow({
     </div>
   );
 
+  // Inline runs have no owning package detail page — render static.
+  const staticRow = disableLink || isInline;
   const className = cn(
     "flex items-center gap-2 px-3 py-3 text-sm transition-colors sm:py-2",
-    !disableLink && "hover:bg-muted/50",
+    !staticRow && "hover:bg-muted/50",
   );
 
-  if (disableLink) {
+  if (staticRow) {
     return <div className={className}>{content}</div>;
   }
 
