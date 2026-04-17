@@ -76,13 +76,13 @@ describe("POST /api/runs/inline — validation", () => {
     expect(res.status).toBe(400);
   });
 
-  it("rejects a prompt exceeding the configured char cap with 400", async () => {
-    // Default cap is 200_000 chars. Send 200_001.
+  it("rejects a prompt exceeding the configured byte cap with 400", async () => {
+    // Default cap is 200_000 bytes. ASCII: 200_001 bytes = 200_001 chars.
     const huge = "a".repeat(200_001);
     const res = await post({ manifest: validManifest(), prompt: huge });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { detail?: string };
-    expect(body.detail ?? "").toMatch(/prompt|chars/i);
+    expect(body.detail ?? "").toMatch(/prompt|bytes/i);
   });
 
   it("rejects a manifest larger than manifest_bytes with 400", async () => {
@@ -96,13 +96,30 @@ describe("POST /api/runs/inline — validation", () => {
   });
 
   it("rejects a manifest with wildcard authorizedUris when wildcard_uri_allowed=false", async () => {
-    const manifest = validManifest() as Record<string, unknown>;
-    manifest.providers = {
-      // A provider entry with a wildcard URI — the default policy forbids this.
-      http: { authorizedUris: ["*"] },
+    // Wildcard rejection targets embedded provider definitions
+    // (manifest.definition), not the providers dependency map. Use a
+    // provider-type inline manifest to exercise the branch.
+    const manifest = {
+      name: "@inline/r-provider",
+      displayName: "Inline Provider",
+      version: "0.0.0",
+      type: "provider",
+      description: "Inline",
+      schemaVersion: "1.0",
+      definition: {
+        authMode: "api_key",
+        authorizedUris: ["https://api.example.com", "*"],
+        credentials: {
+          schema: { type: "object", properties: { apikey: { type: "string" } } },
+          fieldName: "apikey",
+        },
+        credentialHeaderName: "X-Api-Key",
+      },
     };
     const res = await post({ manifest, prompt: "hi" });
     expect(res.status).toBe(400);
+    const body = (await res.json()) as { detail?: string };
+    expect(body.detail ?? "").toMatch(/wildcard/i);
   });
 
   it("rejects unauthenticated requests with 401", async () => {

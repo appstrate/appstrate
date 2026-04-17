@@ -4,7 +4,7 @@
  * Inline-manifest validation — applied BEFORE inserting a shadow package row.
  *
  * Layers:
- *   1. Cheap byte/char caps on the raw payload (manifest JSON + prompt).
+ *   1. Cheap UTF-8 byte caps on the raw payload (manifest JSON + prompt).
  *   2. `validateManifest()` from `@appstrate/core/validation` — full AFPS
  *      structural validation, dispatched by `type` field.
  *   3. Inline-specific caps: deps.skills/tools/providers count + per-provider
@@ -47,13 +47,14 @@ export function validateInlineManifest(
   const { limits } = input;
   const errors: string[] = [];
 
-  // --- 1. Prompt type + length ---
+  // --- 1. Prompt type + size (UTF-8 bytes, matches manifest_bytes) ---
   if (typeof input.prompt !== "string") {
     errors.push("prompt: must be a string");
-  } else if (input.prompt.length > limits.prompt_chars) {
-    errors.push(
-      `prompt: exceeds max length (${input.prompt.length} > ${limits.prompt_chars} chars)`,
-    );
+  } else {
+    const promptByteLength = Buffer.byteLength(input.prompt, "utf8");
+    if (promptByteLength > limits.prompt_bytes) {
+      errors.push(`prompt: exceeds max size (${promptByteLength} > ${limits.prompt_bytes} bytes)`);
+    }
   }
 
   // --- 2. Manifest must be a plain object ---

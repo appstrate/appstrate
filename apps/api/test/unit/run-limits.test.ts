@@ -29,7 +29,7 @@ describe("run-limits registry", () => {
 
     expect(inline.rate_per_min).toBe(60);
     expect(inline.manifest_bytes).toBe(65536);
-    expect(inline.prompt_chars).toBe(200_000);
+    expect(inline.prompt_bytes).toBe(200_000);
     expect(inline.max_skills).toBe(20);
     expect(inline.max_tools).toBe(20);
     expect(inline.max_authorized_uris).toBe(50);

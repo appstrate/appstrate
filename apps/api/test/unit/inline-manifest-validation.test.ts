@@ -11,7 +11,7 @@ import type { InlineRunLimits } from "../../src/services/run-limits.ts";
 const defaults: InlineRunLimits = {
   rate_per_min: 60,
   manifest_bytes: 65536,
-  prompt_chars: 200_000,
+  prompt_bytes: 200_000,
   max_skills: 20,
   max_tools: 20,
   max_authorized_uris: 50,
@@ -63,19 +63,31 @@ describe("validateInlineManifest — happy path", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Byte / char caps
+// Byte caps
 // ---------------------------------------------------------------------------
 
 describe("validateInlineManifest — size caps", () => {
-  it("rejects prompts longer than prompt_chars", () => {
-    const tight = { ...defaults, prompt_chars: 10 };
+  it("rejects prompts larger than prompt_bytes (ASCII)", () => {
+    const tight = { ...defaults, prompt_bytes: 10 };
     const result = validateInlineManifest({
       manifest: baseManifest(),
       prompt: "x".repeat(11),
       limits: tight,
     });
     expect(result.valid).toBe(false);
-    expect(result.errors.join(" ")).toContain("prompt: exceeds max length");
+    expect(result.errors.join(" ")).toContain("prompt: exceeds max size");
+  });
+
+  it("counts prompt bytes in utf-8 (emoji = 4 bytes each)", () => {
+    // 4 bytes per emoji × 10 = 40 bytes, cap is 20 → reject.
+    const tight = { ...defaults, prompt_bytes: 20 };
+    const result = validateInlineManifest({
+      manifest: baseManifest(),
+      prompt: "😀".repeat(10),
+      limits: tight,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(" ")).toContain("prompt: exceeds max size");
   });
 
   it("rejects non-string prompts", () => {
@@ -334,7 +346,7 @@ describe("validateInlineManifest — error aggregation", () => {
     });
     const result = validateInlineManifest({
       manifest,
-      prompt: "x".repeat(tight.prompt_chars + 1),
+      prompt: "x".repeat(tight.prompt_bytes + 1),
       limits: tight,
     });
     expect(result.valid).toBe(false);

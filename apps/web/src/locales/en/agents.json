@@ -90,7 +90,7 @@
   "exec.infoConnections": "Connections",
   "exec.infoInput": "Input",
   "exec.infoConfig": "Configuration",
-  "exec.infoConfiguration": "Execution",
+  "exec.infoExecution": "Execution",
   "exec.infoProxy": "Proxy",
   "exec.infoUsage": "Usage",
   "exec.usageModel": "Model",

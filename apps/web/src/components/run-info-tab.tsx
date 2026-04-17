@@ -95,9 +95,9 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
         </SectionCard>
       )}
 
-      {/* Configuration */}
+      {/* Execution — model / proxy / provider bindings actually used at run time */}
       {hasConfig && (
-        <SectionCard title={t("exec.infoConfiguration")}>
+        <SectionCard title={t("exec.infoExecution")}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {run.modelLabel != null && (
               <InfoCard label={t("exec.usageModel")} value={run.modelLabel} />

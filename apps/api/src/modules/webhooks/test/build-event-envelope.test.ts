@@ -38,4 +38,34 @@ describe("buildEventEnvelope", () => {
     expect(data.object.input).toBeUndefined();
     expect(data.object.status).toBe("success");
   });
+
+  it("surfaces inline-run marker as package: { ephemeral: true } in the envelope", () => {
+    // Mirrors the payload the webhooks module constructs from
+    // RunStatusChangeParams.packageEphemeral — downstream consumers
+    // must be able to branch on package.ephemeral without an extra DB call.
+    const { payload } = buildEventEnvelope({
+      eventType: "run.success",
+      run: {
+        id: "run_123",
+        status: "success",
+        packageId: "@inline/r-abc",
+        package: { ephemeral: true },
+      },
+      payloadMode: "full",
+    });
+
+    const data = payload.data as { object: Record<string, unknown> };
+    expect(data.object.package).toEqual({ ephemeral: true });
+  });
+
+  it("omits the package marker for classic (non-inline) runs", () => {
+    const { payload } = buildEventEnvelope({
+      eventType: "run.success",
+      run: { id: "run_123", status: "success", packageId: "@acme/agent" },
+      payloadMode: "full",
+    });
+
+    const data = payload.data as { object: Record<string, unknown> };
+    expect(data.object.package).toBeUndefined();
+  });
 });

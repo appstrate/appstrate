@@ -32,7 +32,7 @@ const inlineRunLimitsSchema = z
   .object({
     rate_per_min: z.number().int().positive().default(60),
     manifest_bytes: z.number().int().positive().default(65536),
-    prompt_chars: z.number().int().positive().default(200_000),
+    prompt_bytes: z.number().int().positive().default(200_000),
     max_skills: z.number().int().nonnegative().default(20),
     max_tools: z.number().int().nonnegative().default(20),
     max_authorized_uris: z.number().int().nonnegative().default(50),

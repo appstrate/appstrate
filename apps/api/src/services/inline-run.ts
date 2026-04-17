@@ -53,8 +53,9 @@ export interface InsertShadowPackageParams {
  * Insert a shadow package row with `ephemeral = true`. Returns the row id.
  *
  * The ID is generated here (not by the caller) so the caller can focus on
- * validation + pipeline dispatch. Retry on the vanishingly rare UUID
- * collision — at 128 bits, one collision per ~2^64 inserts.
+ * validation + pipeline dispatch. On the vanishingly rare UUID collision
+ * (~1 per 2^64 inserts at 128 bits) we surface a clean error and leave the
+ * retry decision to the client — no in-process retry loop.
  */
 export async function insertShadowPackage(params: InsertShadowPackageParams): Promise<string> {
   const { orgId, createdBy, manifest, prompt } = params;
@@ -108,10 +109,14 @@ export function buildShadowLoadedPackage(
 }
 
 /**
- * Purge-on-failure. Called when preflight/pipeline rejects BEFORE creating
- * the `runs` row — the shadow row would otherwise leak forever. Once a
- * `runs` row exists the FK prevents deletion (cascade would wipe the run),
- * so the compaction job is the only legitimate cleanup path.
+ * Purge-on-failure. Called when the pipeline rejects BEFORE creating the
+ * `runs` row — the shadow row would otherwise leak forever.
+ *
+ * ⚠️ Do NOT call this once a `runs` row references the shadow:
+ * `runs.package_id` has `ON DELETE CASCADE`, so deleting the shadow would
+ * cascade-wipe the run history. After the run record is created, the
+ * compaction worker (manifest/prompt NULL-out, row preserved) is the only
+ * legitimate cleanup path.
  */
 export async function deleteOrphanShadowPackage(id: string): Promise<void> {
   try {

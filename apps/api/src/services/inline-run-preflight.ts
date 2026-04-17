@@ -20,7 +20,7 @@
  */
 import { z } from "zod";
 import type { Actor } from "../lib/actor.ts";
-import type { AgentManifest, LoadedPackage, ProviderProfileMap } from "../types/index.ts";
+import type { AgentManifest, ProviderProfileMap } from "../types/index.ts";
 import { ApiError, invalidRequest } from "../lib/errors.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { validateConfig, validateInput } from "./schema.ts";
@@ -50,7 +50,6 @@ export interface InlineRunPreflightResult {
   providerProfilesOverride: Record<string, string> | undefined;
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
-  shadowAgent: LoadedPackage;
 }
 
 export async function runInlinePreflight(params: {
@@ -113,12 +112,15 @@ export async function runInlinePreflight(params: {
   }
 
   // ----- 4. Provider profile resolution + readiness -----
-  // Use the same id scheme as real shadows. `resolveActorProfileContext`
-  // looks up per-agent overrides by id and will simply miss (no such
-  // package exists yet) — that's the intended behavior for preflight.
-  const shadowAgent = buildShadowLoadedPackage(generateShadowPackageId(), manifest, prompt);
+  // Internal-only shadow (throwaway id, never persisted): we need a
+  // LoadedPackage shape to call resolveActorProfileContext +
+  // validateAgentReadiness, but nothing below leaks this id back to the
+  // caller — they build the real LoadedPackage from the inserted shadowId.
+  // `resolveActorProfileContext` looks up per-agent overrides by id and
+  // will simply miss (no such package exists yet) — intended for preflight.
+  const probeAgent = buildShadowLoadedPackage(generateShadowPackageId(), manifest, prompt);
 
-  const { defaultUserProfileId } = await resolveActorProfileContext(actor, shadowAgent.id);
+  const { defaultUserProfileId } = await resolveActorProfileContext(actor, probeAgent.id);
   const providerProfiles = await resolveProviderProfiles(
     resolveManifestProviders(manifest),
     defaultUserProfileId,
@@ -127,7 +129,7 @@ export async function runInlinePreflight(params: {
     applicationId,
   );
   await validateAgentReadiness({
-    agent: shadowAgent,
+    agent: probeAgent,
     providerProfiles,
     orgId,
     config: effectiveConfig,
@@ -143,6 +145,5 @@ export async function runInlinePreflight(params: {
     providerProfilesOverride: providerProfilesOverride.data,
     modelIdOverride,
     proxyIdOverride,
-    shadowAgent,
   };
 }
