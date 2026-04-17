@@ -29,6 +29,7 @@ import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.
 import { getInlineRunLimits } from "./run-limits.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
+import { resolveManifestCatalogDeps } from "./agent-service.ts";
 import { resolveActorProfileContext, resolveProviderProfiles } from "./connection-profiles.ts";
 
 export interface InlineRunBody {
@@ -120,6 +121,10 @@ export async function runInlinePreflight(params: {
   // `resolveActorProfileContext` looks up per-agent overrides by id and
   // will simply miss (no such package exists yet) — intended for preflight.
   const probeAgent = buildShadowLoadedPackage(generateShadowPackageId(), manifest, prompt);
+  // deps are registry-only refs for inline manifests; resolve against org/system catalog before readiness (#155)
+  const resolvedDeps = await resolveManifestCatalogDeps(manifest, orgId);
+  probeAgent.skills = resolvedDeps.skills;
+  probeAgent.tools = resolvedDeps.tools;
 
   const { defaultUserProfileId } = await resolveActorProfileContext(actor, probeAgent.id);
   const providerProfiles = await resolveProviderProfiles(

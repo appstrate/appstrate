@@ -87,11 +87,12 @@ export async function insertShadowPackage(params: InsertShadowPackageParams): Pr
 }
 
 /**
- * Build a `LoadedPackage` from an already-inserted shadow row. Skips
- * dependency resolution because inline manifests CANNOT embed transitive
- * dependencies — deps in an inline manifest are **ID references only** and
- * resolved from the org/system catalog at run time via the standard
- * provider/skill/tool resolution path. No additional DB read is needed.
+ * Build a `LoadedPackage` from an already-inserted shadow row. Returns
+ * empty skills/tools arrays — inline manifests only embed ID refs, so
+ * `runInlinePreflight` is responsible for resolving them against the
+ * org/system catalog (via `resolveManifestCatalogDeps`) before calling
+ * `validateAgentReadiness`. Callers downstream of preflight already have
+ * the resolved shadow agent and never re-invoke this builder.
  */
 export function buildShadowLoadedPackage(
   id: string,

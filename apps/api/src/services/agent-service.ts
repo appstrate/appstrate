@@ -94,6 +94,33 @@ async function resolveDepRefs(
 }
 
 /**
+ * Resolve the skills + tools declared in an inline manifest's `dependencies`
+ * against the org/system catalog. Inline manifests only embed ID refs
+ * (`"@scope/name": "^1.0.0"`), so the shadow LoadedPackage needs the same
+ * mapped-dep shape as a persisted package before it reaches
+ * `validateAgentReadiness`. Returns empty arrays when the manifest declares
+ * no skill/tool deps — no DB read happens in that case.
+ */
+export async function resolveManifestCatalogDeps(
+  manifest: AgentManifest,
+  orgId: string,
+): Promise<Pick<LoadedPackage, "skills" | "tools">> {
+  const depRefs = await resolveDepRefs(manifest, orgId);
+  return {
+    skills: mapDependencies(
+      depRefs,
+      "skill",
+      (manifest.dependencies?.skills ?? {}) as Record<string, string>,
+    ),
+    tools: mapDependencies(
+      depRefs,
+      "tool",
+      (manifest.dependencies?.tools ?? {}) as Record<string, string>,
+    ),
+  };
+}
+
+/**
  * Get a single package by ID. Filters orgId (includes system packages via
  * orgId: null) AND excludes ephemeral shadow packages by default.
  *
