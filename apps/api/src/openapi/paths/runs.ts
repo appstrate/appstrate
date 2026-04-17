@@ -205,6 +205,192 @@ export const runsPaths = {
       },
     },
   },
+  "/api/runs/inline": {
+    post: {
+      operationId: "runInline",
+      tags: ["Runs"],
+      summary: "Execute an inline agent (no persisted package)",
+      description:
+        "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `202 { runId, packageId }`. Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/AppstrateUser" },
+        { $ref: "#/components/parameters/AppstrateVersion" },
+        { $ref: "#/components/parameters/IdempotencyKey" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["manifest", "prompt"],
+              properties: {
+                manifest: {
+                  type: "object",
+                  description:
+                    "Full AFPS manifest (agent type). All referenced skills/tools/providers must already exist in the org or system catalog — registry-only dependencies.",
+                },
+                prompt: {
+                  type: "string",
+                  description: "Contents of prompt.md — the agent's system prompt.",
+                },
+                input: {
+                  type: "object",
+                  description: "Run input validated against manifest.input.schema (AJV).",
+                },
+                config: {
+                  type: "object",
+                  description:
+                    "Per-run config overrides validated against manifest.config.schema (AJV).",
+                },
+                providerProfiles: {
+                  type: "object",
+                  additionalProperties: { type: "string", format: "uuid" },
+                  description:
+                    "Map of providerId → connection-profile UUID. Per-provider override layered over the caller's default profile.",
+                },
+                modelId: { type: ["string", "null"] },
+                proxyId: { type: ["string", "null"] },
+              },
+            },
+            example: {
+              manifest: {
+                $schema: "https://afps.appstrate.dev/schema/v1/agent.schema.json",
+                name: "@inline/one-shot",
+                displayName: "One-shot summary",
+                version: "0.0.0",
+                type: "agent",
+                schemaVersion: "1.0",
+                dependencies: {},
+              },
+              prompt: "Summarize the attached document in three bullet points.",
+              input: { docId: "doc_123" },
+            },
+          },
+        },
+      },
+      responses: {
+        "202": {
+          description: "Inline run accepted — stream via SSE",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            "Idempotent-Replayed": { $ref: "#/components/headers/IdempotentReplayed" },
+            RateLimit: { $ref: "#/components/headers/RateLimit" },
+            "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["runId", "packageId"],
+                properties: {
+                  runId: { type: "string" },
+                  packageId: {
+                    type: "string",
+                    description:
+                      "Shadow package id (reserved `@inline/r-<uuid>` scope). Hidden from catalog queries.",
+                  },
+                },
+              },
+              example: { runId: "run_cm1abc123", packageId: "@inline/r-abc12345-..." },
+            },
+          },
+        },
+        "400": {
+          description:
+            "Invalid manifest, oversized payload, wildcard URI when disallowed, or schema validation failure",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "409": { $ref: "#/components/responses/IdempotencyInProgress" },
+        "422": { $ref: "#/components/responses/IdempotencyConflict" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "500": { $ref: "#/components/responses/InternalServerError" },
+      },
+    },
+  },
+  "/api/runs": {
+    get: {
+      operationId: "listRuns",
+      tags: ["Runs"],
+      summary: "List runs across the application (global view)",
+      description:
+        "Org + application scoped paginated list. Supports filtering by `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `packageEphemeral: true` on each row.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/AppstrateUser" },
+        {
+          name: "limit",
+          in: "query",
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+        },
+        { name: "offset", in: "query", schema: { type: "integer", minimum: 0, default: 0 } },
+        {
+          name: "kind",
+          in: "query",
+          schema: { type: "string", enum: ["all", "package", "inline"] },
+        },
+        { name: "status", in: "query", schema: { type: "string" } },
+        { name: "startDate", in: "query", schema: { type: "string", format: "date-time" } },
+        { name: "endDate", in: "query", schema: { type: "string", format: "date-time" } },
+      ],
+      responses: {
+        "200": {
+          description: "Paginated run list",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["runs", "total"],
+                properties: {
+                  runs: {
+                    type: "array",
+                    items: {
+                      allOf: [
+                        { $ref: "#/components/schemas/Run" },
+                        {
+                          type: "object",
+                          properties: {
+                            packageEphemeral: {
+                              type: "boolean",
+                              description:
+                                "True when the underlying package is an inline-run shadow.",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  },
+                  total: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "400": {
+          description: "Invalid query parameter (e.g. malformed date)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
   "/api/runs/{id}": {
     get: {
       operationId: "getRun",

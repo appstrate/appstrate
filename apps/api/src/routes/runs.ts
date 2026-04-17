@@ -12,10 +12,8 @@ import {
   getRunningRunsForPackage,
   deletePackageRuns,
   listPackageRuns,
-  listGlobalRuns,
   listRunLogs,
   addPackageMemories,
-  type GlobalRunKind,
 } from "../services/state/index.ts";
 import {
   resolveActorProfileContext,
@@ -593,58 +591,9 @@ export function createRunsRouter() {
     return c.json(result);
   });
 
-  // GET /api/runs — org-scoped paginated global list with kind filter.
-  // Always registered BEFORE /api/runs/:id so the collection path wins.
-  router.get("/runs", async (c) => {
-    const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
-    const endUser = c.get("endUser");
-
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .catch(50)
-      .parse(c.req.query("limit") ?? 50);
-    const offset = z.coerce
-      .number()
-      .int()
-      .min(0)
-      .catch(0)
-      .parse(c.req.query("offset") ?? 0);
-
-    const rawKind = c.req.query("kind");
-    const kind: GlobalRunKind | undefined =
-      rawKind === "inline" || rawKind === "package" || rawKind === "all"
-        ? (rawKind as GlobalRunKind)
-        : undefined;
-    const status = c.req.query("status");
-    const startDateRaw = c.req.query("startDate");
-    const endDateRaw = c.req.query("endDate");
-    const startDate = startDateRaw ? new Date(startDateRaw) : undefined;
-    const endDate = endDateRaw ? new Date(endDateRaw) : undefined;
-    if (startDate && Number.isNaN(startDate.getTime())) {
-      throw invalidRequest("startDate is not a valid ISO date", "startDate");
-    }
-    if (endDate && Number.isNaN(endDate.getTime())) {
-      throw invalidRequest("endDate is not a valid ISO date", "endDate");
-    }
-
-    const result = await listGlobalRuns(orgId, {
-      applicationId,
-      limit,
-      offset,
-      kind,
-      status,
-      startDate,
-      endDate,
-      // End-user auth → isolate to own runs. Same rule as per-agent list.
-      endUserId: endUser?.id,
-    });
-
-    return c.json(result);
-  });
+  // GET /api/runs — served by the notifications router (registered first
+  // in index.ts so `/runs` matches the collection, not the {id} detail).
+  // See apps/api/src/routes/notifications.ts.
 
   // GET /api/runs/:id — get a single run
   router.get("/runs/:id", async (c) => {
