@@ -84,6 +84,12 @@ export function RunList({
   const resolveAgentName = (run: EnrichedRun) => {
     if (hideAgentName) return undefined;
     if (fixedAgentName) return fixedAgentName;
+    // Inline runs: use the manifest displayName snapshot (run.agentName) — the
+    // raw shadow packageId (`@inline/r-…`) is never meaningful to users, and
+    // the ephemeral row isn't in `agents` so the map lookup would miss anyway.
+    if (run.packageEphemeral === true) {
+      return run.agentName || t("runs.inlineBadge");
+    }
     return agentNameMap.get(run.packageId ?? "") ?? run.packageId ?? "\u2014";
   };
 

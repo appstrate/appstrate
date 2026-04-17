@@ -42,18 +42,21 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
 
   return (
     <div className="space-y-4">
-      {/* Version + Trigger */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <InfoCard
-          label="Version"
-          value={
-            <span className={cn("font-mono", !run.versionLabel && "italic")}>
-              {run.versionLabel
-                ? `v${run.versionLabel}${run.versionDirty ? ` ${t("exec.versionDirty")}` : ""}`
-                : t("exec.draft")}
-            </span>
-          }
-        />
+      {/* Version + Trigger — inline runs are not versioned, so the grid
+          collapses to a single column when the Version card is hidden. */}
+      <div className={cn("grid gap-4", !run.packageEphemeral && "sm:grid-cols-2")}>
+        {!run.packageEphemeral && (
+          <InfoCard
+            label="Version"
+            value={
+              <span className={cn("font-mono", !run.versionLabel && "italic")}>
+                {run.versionLabel
+                  ? `v${run.versionLabel}${run.versionDirty ? ` ${t("exec.versionDirty")}` : ""}`
+                  : t("exec.draft")}
+              </span>
+            }
+          />
+        )}
         <InfoCard label={t("exec.infoTrigger")} value={<RunTrigger run={run} />} />
       </div>
 
