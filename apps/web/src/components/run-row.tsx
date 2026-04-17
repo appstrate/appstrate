@@ -69,14 +69,12 @@ export function RunRow({
     </div>
   );
 
-  // Inline runs have no owning package detail page — render static.
-  const staticRow = disableLink || isInline;
   const className = cn(
     "flex items-center gap-2 px-3 py-3 text-sm transition-colors sm:py-2",
-    !staticRow && "hover:bg-muted/50",
+    !disableLink && "hover:bg-muted/50",
   );
 
-  if (staticRow) {
+  if (disableLink) {
     return <div className={className}>{content}</div>;
   }
 

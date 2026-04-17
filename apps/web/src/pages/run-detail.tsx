@@ -31,11 +31,14 @@ export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { scope, name, runId } = useParams<{ scope: string; name: string; runId: string }>();
   const packageId = `${scope}/${name}`;
+  // Skip the agent detail fetch for inline shadow packages — the shadow is
+  // filtered from catalog endpoints so the query would 404 on every view.
+  const isInlinePath = packageId.startsWith("@inline/");
   const location = useLocation();
   const stateNumber = (location.state as { runNumber?: number } | null)?.runNumber;
   const orgId = useCurrentOrgId();
   const appId = useCurrentApplicationId();
-  const { data: agent } = usePackageDetail("agent", packageId);
+  const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
   const [liveStatus, setLiveStatus] = useState<RunStatus | null>(null);
@@ -146,6 +149,11 @@ export function RunDetailPage() {
 
   const enrichedRun = run as EnrichedRun;
   const date = run.startedAt ? formatDateField(run.startedAt) : "";
+  const isInline = enrichedRun.packageEphemeral === true;
+
+  const agentCrumb = isInline
+    ? { label: t("runs.inlineBadge"), href: "/runs" }
+    : { label: agent?.displayName || packageId || "", href: `/agents/${packageId}` };
 
   return (
     <div className="p-6">
@@ -157,7 +165,7 @@ export function RunDetailPage() {
         breadcrumbs={[
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("detail.breadcrumb"), href: "/agents" },
-          { label: agent?.displayName || packageId || "", href: `/agents/${packageId}` },
+          agentCrumb,
           {
             label: runNumber
               ? t("exec.breadcrumb", { number: runNumber })

@@ -637,12 +637,14 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
       endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
       apiKeyName: apiKeys.name,
       scheduleName: schedules.name,
+      packageEphemeral: packages.ephemeral,
     })
     .from(runs)
     .leftJoin(profiles, eq(runs.dashboardUserId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
     .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
     .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
+    .leftJoin(packages, eq(packages.id, runs.packageId))
     .where(and(...conditions))
     .limit(1);
 
@@ -653,6 +655,7 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
     endUserName: row.endUserName ?? null,
     apiKeyName: row.apiKeyName ?? null,
     scheduleName: row.scheduleName ?? null,
+    packageEphemeral: row.packageEphemeral ?? false,
   };
 }
 
