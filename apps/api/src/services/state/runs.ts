@@ -638,6 +638,8 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
       apiKeyName: apiKeys.name,
       scheduleName: schedules.name,
       packageEphemeral: packages.ephemeral,
+      packageManifest: packages.draftManifest,
+      packagePrompt: packages.draftContent,
     })
     .from(runs)
     .leftJoin(profiles, eq(runs.dashboardUserId, profiles.id))
@@ -649,6 +651,16 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
     .limit(1);
 
   if (!row) return null;
+
+  // For inline runs, expose manifest + prompt directly (shadow package is
+  // filtered from catalog endpoints so the UI can't fetch them separately).
+  // After compaction, draftManifest is `{}` and draftContent is `""` — we
+  // normalize both to null so the frontend can show "Details expired".
+  const isInline = row.packageEphemeral === true;
+  const manifest = row.packageManifest as Record<string, unknown> | null;
+  const inlineManifest = isInline && manifest && Object.keys(manifest).length > 0 ? manifest : null;
+  const inlinePrompt = isInline && row.packagePrompt ? row.packagePrompt : null;
+
   return {
     ...row.run,
     dashboardUserName: row.dashboardUserName ?? null,
@@ -656,6 +668,8 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
     apiKeyName: row.apiKeyName ?? null,
     scheduleName: row.scheduleName ?? null,
     packageEphemeral: row.packageEphemeral ?? false,
+    inlineManifest,
+    inlinePrompt,
   };
 }
 

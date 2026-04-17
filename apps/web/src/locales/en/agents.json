@@ -83,6 +83,8 @@
   "exec.draft": "draft",
   "exec.versionDirty": "+ modifications",
   "exec.tabInfo": "Information",
+  "exec.tabManifest": "Manifest",
+  "exec.tabPrompt": "Prompt",
   "exec.emptyUsage": "No usage data",
   "exec.infoTrigger": "Triggered by",
   "exec.infoConnections": "Connections",
