@@ -392,15 +392,22 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "List runs across the application (global view)",
       description:
-        "Org + application scoped paginated list. Supports filtering by `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `packageEphemeral: true` on each row.",
+        "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `packageEphemeral: true` on each row. Note: `kind`, `status`, and date filters are ignored when `user=me` (self-view uses a simpler path).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
         { $ref: "#/components/parameters/AppstrateUser" },
         {
+          name: "user",
+          in: "query",
+          schema: { type: "string", enum: ["me"] },
+          description:
+            "Filter runs by user. `me` returns only the current user's runs. Omit for all org runs.",
+        },
+        {
           name: "limit",
           in: "query",
-          schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
         { name: "offset", in: "query", schema: { type: "integer", minimum: 0, default: 0 } },
         {

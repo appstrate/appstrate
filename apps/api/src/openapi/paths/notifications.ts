@@ -145,61 +145,10 @@ export const notificationsPaths = {
       },
     },
   },
-  "/api/runs": {
-    get: {
-      operationId: "listRuns",
-      tags: ["Notifications"],
-      summary: "List runs",
-      description:
-        "Lists all runs for the organization across all agents, ordered by most recent. Use `?user=me` to filter to the current user's runs only.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "user",
-          in: "query",
-          schema: { type: "string", enum: ["me"] },
-          description:
-            "Filter runs by user. `me` returns only the current user's runs. Omit for all org runs.",
-        },
-        {
-          name: "limit",
-          in: "query",
-          schema: { type: "integer", default: 20, maximum: 100 },
-          description: "Maximum number of runs to return",
-        },
-        {
-          name: "offset",
-          in: "query",
-          schema: { type: "integer", default: 0 },
-          description: "Number of runs to skip",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Paginated run list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  runs: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/Run" },
-                  },
-                  total: { type: "integer", description: "Total number of runs" },
-                },
-                required: ["runs", "total"],
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-      },
-    },
-  },
+  // NOTE: GET /api/runs is documented in paths/runs.ts — the handler lives
+  // under the notifications router for historical reasons (shared unread-
+  // count query helpers), but the path belongs with the rest of the Runs
+  // surface. Keep the OpenAPI definition there to avoid a duplicate-key
+  // collision during spec assembly (object spread = last-wins, which would
+  // silently shadow new query params added to paths/runs.ts).
 };
