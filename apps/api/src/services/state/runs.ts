@@ -59,6 +59,10 @@ interface CreateRunParams {
   providerProfileIds?: Record<string, string>;
   providerStatuses?: RunProviderSnapshot[];
   apiKeyId?: string;
+  /** Snapshot of the agent's @scope (e.g. "@acme") at run creation. */
+  agentScope?: string | null;
+  /** Snapshot of the agent's display name (manifest.displayName ?? name). */
+  agentName?: string | null;
 }
 
 export async function createRun(params: CreateRunParams): Promise<void> {
@@ -85,6 +89,8 @@ export async function createRun(params: CreateRunParams): Promise<void> {
     providerStatuses: params.providerStatuses,
     apiKeyId: params.apiKeyId,
     runNumber,
+    agentScope: params.agentScope ?? null,
+    agentName: params.agentName ?? null,
   });
 }
 
@@ -101,6 +107,7 @@ export async function createFailedRun(
   error: string,
   scheduleId?: string,
   connectionProfileId?: string,
+  agentDenorm?: { scope?: string | null; name?: string | null },
 ): Promise<void> {
   const runNumber = await nextRunNumber(packageId, orgId, applicationId);
   const now = new Date();
@@ -121,6 +128,8 @@ export async function createFailedRun(
     connectionProfileId,
     scheduleId,
     runNumber,
+    agentScope: agentDenorm?.scope ?? null,
+    agentName: agentDenorm?.name ?? null,
   });
 }
 

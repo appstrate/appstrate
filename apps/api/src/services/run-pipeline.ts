@@ -15,10 +15,34 @@ import { resolveProviderProfiles } from "./connection-profiles.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { resolveProviderStatuses } from "./connection-manager/index.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
+import { parseScopedName } from "@appstrate/core/naming";
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { UploadedFile, FileReference } from "./adapters/types.ts";
 import type { RunProviderSnapshot } from "@appstrate/shared-types";
+
+/**
+ * Extract the denormalized @scope and display-name snapshot for a loaded
+ * package. Stored on `runs.agent_scope` / `runs.agent_name` so the global
+ * /runs view survives rename, delete, and inline-run compaction (after
+ * which the manifest is NULLed).
+ */
+export function extractRunAgentDenorm(pkg: LoadedPackage): {
+  scope: string | null;
+  name: string | null;
+} {
+  const parsed = parseScopedName(pkg.id);
+  const manifestName =
+    typeof pkg.manifest.displayName === "string"
+      ? pkg.manifest.displayName
+      : typeof pkg.manifest.name === "string"
+        ? pkg.manifest.name
+        : null;
+  return {
+    scope: parsed?.scope ?? null,
+    name: manifestName,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -221,6 +245,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   );
 
   // --- Step 5: Create run record ---
+  const agentDenorm = extractRunAgentDenorm(agent);
   await createRun({
     id: runId,
     packageId: agent.id,
@@ -238,6 +263,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     providerProfileIds: profileIdMap,
     providerStatuses: providerStatusSnapshots,
     apiKeyId,
+    agentScope: agentDenorm.scope,
+    agentName: agentDenorm.name,
   });
 
   // --- Step 6: Fire-and-forget execution ---
