@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { Hono } from "hono";
 import { logger } from "../lib/logger.ts";
-import type { LoadedPackage, AppEnv, AgentManifest } from "../types/index.ts";
+import type { LoadedPackage, AppEnv } from "../types/index.ts";
 import {
   updateRun,
   appendRunLog,
@@ -15,22 +15,18 @@ import {
   listRunLogs,
   addPackageMemories,
 } from "../services/state/index.ts";
-import {
-  resolveActorProfileContext,
-  getAgentAppProfile,
-  resolveProviderProfiles,
-} from "../services/connection-profiles.ts";
+import { resolveActorProfileContext, getAgentAppProfile } from "../services/connection-profiles.ts";
 import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
-import { validateOutput, validateInput, validateConfig } from "../services/schema.ts";
+import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { trackRun, untrackRun, abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { ApiError, notFound, conflict, invalidRequest } from "../lib/errors.ts";
+import { ApiError, notFound, conflict } from "../lib/errors.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -38,7 +34,6 @@ import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
-import { validateInlineManifest } from "../services/inline-manifest-validation.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
 import {
   insertShadowPackage,
@@ -46,8 +41,7 @@ import {
   deleteOrphanShadowPackage,
   isInlineShadowPackageId,
 } from "../services/inline-run.ts";
-import { resolveManifestProviders } from "../lib/manifest-utils.ts";
-import { validateAgentReadiness } from "../services/agent-readiness.ts";
+import { runInlinePreflight, type InlineRunBody } from "../services/inline-run-preflight.ts";
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens;
   total.output_tokens += addition.output_tokens;
@@ -702,108 +696,28 @@ export function createRunsRouter() {
       const applicationId = c.get("applicationId");
       const actor = getActor(c);
 
-      const body = await c.req.json<{
-        manifest?: unknown;
-        prompt?: unknown;
-        input?: Record<string, unknown>;
-        config?: Record<string, unknown>;
-        providerProfiles?: Record<string, string>;
-        modelId?: string | null;
-        proxyId?: string | null;
-      }>();
+      const body = await c.req.json<InlineRunBody>();
 
-      // ----- 1. Shape validation (cheap, does not touch DB) -----
-      const limits = getInlineRunLimits();
-      const validated = validateInlineManifest({
-        manifest: body.manifest,
-        prompt: body.prompt,
-        limits,
-      });
-      if (!validated.valid) {
-        throw new ApiError({
-          status: 400,
-          code: "invalid_inline_manifest",
-          title: "Invalid Inline Manifest",
-          detail: validated.errors.join("; "),
-        });
-      }
-
-      // ----- 2. Body-field validation -----
-      const providerProfilesSchema = z.record(z.string(), z.uuid()).optional();
-      const providerProfilesOverride = providerProfilesSchema.safeParse(body.providerProfiles);
-      if (!providerProfilesOverride.success) {
-        throw invalidRequest(
-          "providerProfiles must map providerId → profileUUID",
-          "providerProfiles",
-        );
-      }
-      const modelIdOverride = body.modelId ?? null;
-      const proxyIdOverride = body.proxyId ?? null;
-
-      // Validate config + input against the manifest's own schemas (AJV).
-      const manifest = validated.manifest as AgentManifest;
-      const configSchema = manifest.config?.schema;
-      const effectiveConfig =
-        body.config && typeof body.config === "object" && !Array.isArray(body.config)
-          ? (body.config as Record<string, unknown>)
-          : {};
-      if (configSchema) {
-        const cv = validateConfig(effectiveConfig, asJSONSchemaObject(configSchema));
-        if (!cv.valid) {
-          throw invalidRequest(`config: ${cv.errors?.[0]?.message ?? "invalid"}`, "config");
-        }
-      }
-
-      const inputSchema = manifest.input?.schema;
-      const effectiveInput =
-        body.input && typeof body.input === "object" && !Array.isArray(body.input)
-          ? (body.input as Record<string, unknown>)
-          : null;
-      if (inputSchema) {
-        const iv = validateInput(effectiveInput ?? undefined, asJSONSchemaObject(inputSchema));
-        if (!iv.valid) {
-          throw invalidRequest(`input: ${iv.errors?.[0]?.message ?? "invalid"}`, "input");
-        }
-      }
-
-      // ----- 3. Insert shadow row -----
-      const createdBy = actor?.type === "member" ? actor.id : null;
-      const shadowId = await insertShadowPackage({
-        orgId,
-        createdBy,
+      // ----- 1. Preflight — shape + providers + readiness (no side effects). -----
+      // Running this BEFORE insertShadowPackage means invalid manifests no
+      // longer leave orphan shadow rows that we'd have to clean up.
+      const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
+      const {
         manifest,
-        prompt: validated.canonicalManifestJson ? (body.prompt as string) : (body.prompt as string),
-      });
+        prompt,
+        effectiveConfig,
+        effectiveInput,
+        providerProfiles,
+        modelIdOverride,
+        proxyIdOverride,
+      } = preflight;
 
-      // ----- 4. Build agent + preflight -----
-      const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, body.prompt as string);
+      // ----- 2. Insert shadow row (now that we know the manifest is valid). -----
+      const createdBy = actor?.type === "member" ? actor.id : null;
+      const shadowId = await insertShadowPackage({ orgId, createdBy, manifest, prompt });
+      const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, prompt);
 
-      let providerProfiles;
-      try {
-        // Actor default profile + body overrides. Shadow packages have no
-        // application_packages row, so no app-level profile binding applies.
-        const { defaultUserProfileId } = await resolveActorProfileContext(actor, shadowId);
-        providerProfiles = await resolveProviderProfiles(
-          resolveManifestProviders(manifest),
-          defaultUserProfileId,
-          providerProfilesOverride.data,
-          null,
-          applicationId,
-        );
-        await validateAgentReadiness({
-          agent: shadowAgent,
-          providerProfiles,
-          orgId,
-          config: effectiveConfig,
-          applicationId,
-        });
-      } catch (err) {
-        await deleteOrphanShadowPackage(shadowId);
-        if (err instanceof ApiError) throw err;
-        throw err;
-      }
-
-      // ----- 5. Fire the pipeline -----
+      // ----- 3. Fire the pipeline. -----
       const runId = `run_${crypto.randomUUID()}`;
       let pipelineResult;
       try {
@@ -854,6 +768,28 @@ export function createRunsRouter() {
 
       c.status(202);
       return c.json({ runId, packageId: shadowId });
+    },
+  );
+
+  // POST /api/runs/inline/validate — dry-run validator for inline manifests.
+  // Runs the full preflight (manifest + config + input + provider readiness)
+  // WITHOUT inserting a shadow package or firing a pipeline. Lets developers
+  // iterate on a manifest without creating phantom runs or burning credits.
+  // Shares 100% of its validation with POST /api/runs/inline via
+  // runInlinePreflight().
+  router.post(
+    "/runs/inline/validate",
+    rateLimit(getInlineRunLimits().rate_per_min),
+    requirePermission("agents", "run"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const applicationId = c.get("applicationId");
+      const actor = getActor(c);
+      const body = await c.req.json<InlineRunBody>();
+
+      await runInlinePreflight({ orgId, applicationId, actor, body });
+
+      return c.json({ ok: true });
     },
   );
 

@@ -316,6 +316,76 @@ export const runsPaths = {
       },
     },
   },
+  "/api/runs/inline/validate": {
+    post: {
+      operationId: "validateInlineRun",
+      tags: ["Runs"],
+      summary: "Validate an inline manifest without firing a run",
+      description:
+        "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and provider readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { ok: true }` on success, `400` problem+json otherwise. Lets developers iterate on a manifest without leaving run history behind.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/AppstrateUser" },
+        { $ref: "#/components/parameters/AppstrateVersion" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["manifest", "prompt"],
+              properties: {
+                manifest: { type: "object" },
+                prompt: { type: "string" },
+                input: { type: "object" },
+                config: { type: "object" },
+                providerProfiles: {
+                  type: "object",
+                  additionalProperties: { type: "string", format: "uuid" },
+                },
+                modelId: { type: ["string", "null"] },
+                proxyId: { type: ["string", "null"] },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Manifest + inputs + provider readiness all pass",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            RateLimit: { $ref: "#/components/headers/RateLimit" },
+            "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["ok"],
+                properties: { ok: { type: "boolean", enum: [true] } },
+              },
+              example: { ok: true },
+            },
+          },
+        },
+        "400": {
+          description: "Invalid manifest, schema mismatch, or missing provider readiness",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "500": { $ref: "#/components/responses/InternalServerError" },
+      },
+    },
+  },
   "/api/runs": {
     get: {
       operationId: "listRuns",

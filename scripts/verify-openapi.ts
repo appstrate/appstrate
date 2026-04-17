@@ -280,6 +280,7 @@ const expectedEndpoints = [
   "PUT /api/notifications/read-all",
   "GET /api/runs",
   "POST /api/runs/inline",
+  "POST /api/runs/inline/validate",
 
   // Packages
   "POST /api/packages/import",
