@@ -25,7 +25,7 @@ import { ApiError, invalidRequest } from "../lib/errors.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { validateConfig, validateInput } from "./schema.ts";
 import { validateInlineManifest } from "./inline-manifest-validation.ts";
-import { buildShadowLoadedPackage } from "./inline-run.ts";
+import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.ts";
 import { getInlineRunLimits } from "./run-limits.ts";
 import { resolveManifestProviders } from "../lib/manifest-utils.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -51,15 +51,6 @@ export interface InlineRunPreflightResult {
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
   shadowAgent: LoadedPackage;
-}
-
-/**
- * Synthetic package ID used during preflight so `resolveActorProfileContext`
- * can fetch per-agent overrides (it won't find any — no such package exists).
- * Not inserted anywhere; discarded after this function returns.
- */
-function syntheticShadowId(): string {
-  return `@inline/preflight-${crypto.randomUUID()}`;
 }
 
 export async function runInlinePreflight(params: {
@@ -122,7 +113,10 @@ export async function runInlinePreflight(params: {
   }
 
   // ----- 4. Provider profile resolution + readiness -----
-  const shadowAgent = buildShadowLoadedPackage(syntheticShadowId(), manifest, prompt);
+  // Use the same id scheme as real shadows. `resolveActorProfileContext`
+  // looks up per-agent overrides by id and will simply miss (no such
+  // package exists yet) — that's the intended behavior for preflight.
+  const shadowAgent = buildShadowLoadedPackage(generateShadowPackageId(), manifest, prompt);
 
   const { defaultUserProfileId } = await resolveActorProfileContext(actor, shadowAgent.id);
   const providerProfiles = await resolveProviderProfiles(

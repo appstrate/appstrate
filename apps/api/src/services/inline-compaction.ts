@@ -12,7 +12,7 @@
  * See docs/specs/INLINE_RUNS.md §8.
  */
 
-import { and, eq, lt, sql, inArray } from "drizzle-orm";
+import { and, eq, lt, notInArray, sql, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, runs, runLogs } from "@appstrate/db/schema";
 import { createQueue } from "../infra/queue/index.ts";
@@ -39,6 +39,12 @@ export async function compactInlineRuns(retentionDays: number): Promise<Compacti
 
   // 1. Find candidate shadow ids (needed BEFORE the UPDATE so we can scope
   //    the log-deletion join; also lets tests assert on which rows moved).
+  //
+  //    Exclude shadows that still have an active run — compacting under a
+  //    running job would truncate its logs mid-flight. Operators who lower
+  //    retention_days near the timeout ceiling (or hung jobs that outlive it)
+  //    would otherwise lose in-progress logs. Active shadows are picked up
+  //    on the next daily pass once their runs terminate.
   const candidates = await db
     .select({ id: packages.id })
     .from(packages)
@@ -49,6 +55,12 @@ export async function compactInlineRuns(retentionDays: number): Promise<Compacti
         // Filter out already-compacted rows. draft_manifest becomes '{}'
         // after compaction — retest with jsonb equality.
         sql`${packages.draftManifest} <> '{}'::jsonb`,
+        // No active run referencing this shadow.
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${runs}
+          WHERE ${runs.packageId} = ${packages.id}
+            AND ${runs.status} IN ('pending', 'running')
+        )`,
       ),
     );
 
@@ -66,11 +78,16 @@ export async function compactInlineRuns(retentionDays: number): Promise<Compacti
     })
     .where(inArray(packages.id, candidateIds));
 
-  // 3. Delete run_logs for their runs. Keep the `runs` rows intact.
+  // 3. Delete run_logs for their terminal runs. Keep the `runs` rows intact.
+  //    Belt-and-braces: the candidate query already rejects shadows with
+  //    active runs, but filtering again here ensures a run that just flipped
+  //    to running between the two selects still keeps its logs.
   const affectedRuns = await db
     .select({ id: runs.id })
     .from(runs)
-    .where(inArray(runs.packageId, candidateIds));
+    .where(
+      and(inArray(runs.packageId, candidateIds), notInArray(runs.status, ["pending", "running"])),
+    );
 
   let deletedRunLogs = 0;
   if (affectedRuns.length > 0) {

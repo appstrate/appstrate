@@ -9,13 +9,19 @@
  * runtime, and is covered by the existing classic-run integration tests.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { flushRedis } from "../../helpers/redis.ts";
 import { db } from "../../helpers/db.ts";
 import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { resetRateLimiters } from "../../../src/middleware/rate-limit.ts";
+import {
+  _setRunLimitsForTesting,
+  _resetRunLimitsForTesting,
+} from "../../../src/services/run-limits.ts";
 
 const app = getTestApp();
 
@@ -116,5 +122,48 @@ describe("POST /api/runs/inline — validation", () => {
 
     const countAfter = await db.select().from(packages).where(eq(packages.ephemeral, true));
     expect(countAfter).toHaveLength(0);
+  });
+});
+
+describe("POST /api/runs/inline — rate limiting", () => {
+  // rate_per_min is captured at route-build time (closure over
+  // getInlineRunLimits()). We install a low cap BEFORE building an explicit
+  // app instance so this suite exercises 429 without affecting the default
+  // cached app used by other suites.
+  let ctx: TestContext;
+  let limitedApp: ReturnType<typeof getTestApp>;
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    resetRateLimiters();
+    _resetRunLimitsForTesting();
+    _setRunLimitsForTesting({}, { rate_per_min: 2 });
+    limitedApp = getTestApp({ modules: [] });
+    ctx = await createTestContext({ orgSlug: "inlineratelimit" });
+  });
+
+  afterAll(() => {
+    resetRateLimiters();
+    // Restore defaults so other test files relying on getInlineRunLimits()
+    // at request time (e.g. compaction worker, run-pipeline) don't see null.
+    _setRunLimitsForTesting({}, {});
+  });
+
+  it("returns 429 once rate_per_min is exceeded", async () => {
+    const body = JSON.stringify({ manifest: validManifest(), prompt: "hi" });
+    const headers = { ...authHeaders(ctx), "Content-Type": "application/json" };
+
+    // First two requests consume the quota. Status doesn't matter here —
+    // whatever the outcome (validation pass or fail, 202 or 500), the
+    // rate-limit middleware has already decremented the bucket.
+    await limitedApp.request("/api/runs/inline", { method: "POST", headers, body });
+    await limitedApp.request("/api/runs/inline", { method: "POST", headers, body });
+
+    // Third call must be rejected before reaching the handler.
+    const res = await limitedApp.request("/api/runs/inline", { method: "POST", headers, body });
+    expect(res.status).toBe(429);
+    expect(res.headers.get("RateLimit")).toMatch(/remaining=0/);
+    expect(res.headers.get("Retry-After")).toBeTruthy();
   });
 });

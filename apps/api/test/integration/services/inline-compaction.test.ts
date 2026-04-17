@@ -127,6 +127,90 @@ describe("compactInlineRuns", () => {
     expect(second.deletedRunLogs).toBe(0);
   });
 
+  it("skips shadows with active runs (running/pending) and preserves their logs", async () => {
+    // Operator lowers retention near the timeout ceiling — a still-running run
+    // on an old shadow must NOT see its logs wiped mid-flight.
+    const runningShadow = await insertShadowPackage({
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      manifest,
+      prompt: "still running",
+    });
+    await backdatePackage(runningShadow, 60);
+
+    const pendingShadow = await insertShadowPackage({
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      manifest,
+      prompt: "still pending",
+    });
+    await backdatePackage(pendingShadow, 60);
+
+    const runningRun = await seedRun({
+      packageId: runningShadow,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "running",
+    });
+    await seedRunLog({ runId: runningRun.id, orgId: ctx.orgId, message: "live log" });
+
+    const pendingRun = await seedRun({
+      packageId: pendingShadow,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "pending",
+    });
+    await seedRunLog({ runId: pendingRun.id, orgId: ctx.orgId, message: "queued log" });
+
+    const result = await compactInlineRuns(30);
+    expect(result.compactedPackages).toBe(0);
+    expect(result.deletedRunLogs).toBe(0);
+
+    // Manifest + prompt + logs preserved on both shadows.
+    const [runningPkg] = await db.select().from(packages).where(eq(packages.id, runningShadow));
+    expect(runningPkg?.draftManifest).not.toEqual({});
+    expect(runningPkg?.draftContent).toBe("still running");
+
+    const runningLogs = await db.select().from(runLogs).where(eq(runLogs.runId, runningRun.id));
+    expect(runningLogs).toHaveLength(1);
+
+    const [pendingPkg] = await db.select().from(packages).where(eq(packages.id, pendingShadow));
+    expect(pendingPkg?.draftManifest).not.toEqual({});
+
+    const pendingLogs = await db.select().from(runLogs).where(eq(runLogs.runId, pendingRun.id));
+    expect(pendingLogs).toHaveLength(1);
+  });
+
+  it("compacts a shadow once its active run terminates", async () => {
+    // Re-running compaction after status flips from running → success must
+    // now clean up the shadow. Confirms the guard doesn't permanently
+    // block compaction.
+    const shadowId = await insertShadowPackage({
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      manifest,
+      prompt: "compact later",
+    });
+    await backdatePackage(shadowId, 60);
+
+    const run = await seedRun({
+      packageId: shadowId,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      status: "running",
+    });
+    await seedRunLog({ runId: run.id, orgId: ctx.orgId, message: "log" });
+
+    const first = await compactInlineRuns(30);
+    expect(first.compactedPackages).toBe(0);
+
+    await db.update(runs).set({ status: "success" }).where(eq(runs.id, run.id));
+
+    const second = await compactInlineRuns(30);
+    expect(second.compactedPackages).toBe(1);
+    expect(second.deletedRunLogs).toBe(1);
+  });
+
   it("honors the retentionDays parameter (shorter window compacts more)", async () => {
     const shadow1 = await insertShadowPackage({
       orgId: ctx.orgId,

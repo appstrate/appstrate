@@ -322,7 +322,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Validate an inline manifest without firing a run",
       description:
-        "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and provider readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { ok: true }` on success, `400` problem+json otherwise. Lets developers iterate on a manifest without leaving run history behind.",
+        "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and provider readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { ok: true }` on success, `400` problem+json otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
