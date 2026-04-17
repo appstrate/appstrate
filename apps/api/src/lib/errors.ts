@@ -109,6 +109,29 @@ export function invalidRequest(detail: string, param?: string): ApiError {
   });
 }
 
+/**
+ * Aggregate multiple validation errors into a single 400 response.
+ * Sets `code: "validation_failed"` and populates the RFC 9457 `errors[]` array,
+ * so clients can surface every problem in one round-trip. `detail` defaults to
+ * a human-readable summary derived from the first entry plus a count.
+ */
+export function validationFailed(errors: ValidationFieldError[], detail?: string): ApiError {
+  const summary =
+    detail ??
+    (errors.length === 0
+      ? "Validation failed"
+      : errors.length === 1
+        ? `${errors[0]!.field}: ${errors[0]!.message}`
+        : `${errors[0]!.field}: ${errors[0]!.message} (+${errors.length - 1} more)`);
+  return new ApiError({
+    status: 400,
+    code: "validation_failed",
+    title: "Validation Failed",
+    detail: summary,
+    errors,
+  });
+}
+
 export function unauthorized(detail: string): ApiError {
   return new ApiError({
     status: 401,
@@ -178,7 +201,23 @@ export function systemEntityForbidden(type: string, id: string, verb = "modify")
 
 import type { z } from "zod";
 
-/** Parse a request body with a Zod schema, throwing invalidRequest on failure. */
+/** Convert Zod issues to the RFC 9457 `errors[]` entries we expose to clients. */
+export function zodIssuesToFieldErrors(
+  issues: readonly z.core.$ZodIssue[],
+  pathPrefix?: string,
+): ValidationFieldError[] {
+  return issues.map((issue) => {
+    const path = issue.path.map(String).join(".");
+    const field = pathPrefix ? (path ? `${pathPrefix}.${path}` : pathPrefix) : path;
+    return { field, code: issue.code, message: issue.message };
+  });
+}
+
+/**
+ * Parse a request body with a Zod schema. On failure throws a 400 with every
+ * issue populated in `errors[]` so clients receive all problems in one call.
+ * The optional `param` is used as a path prefix for nested schema context.
+ */
 export function parseBody<T extends z.ZodType>(
   schema: T,
   body: unknown,
@@ -186,7 +225,7 @@ export function parseBody<T extends z.ZodType>(
 ): z.output<T> {
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    throw invalidRequest(parsed.error.issues[0]!.message, param);
+    throw validationFailed(zodIssuesToFieldErrors(parsed.error.issues, param));
   }
   return parsed.data;
 }

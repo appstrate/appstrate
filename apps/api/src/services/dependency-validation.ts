@@ -10,7 +10,7 @@ import type { ConnectionStatus } from "./connection-manager/index.ts";
 import { isProviderEnabled, getProviderCredentialId } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
-import { ApiError } from "../lib/errors.ts";
+import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 
 export interface DependencyValidationDeps {
   isProviderEnabled: (providerId: string, applicationId: string) => Promise<boolean>;
@@ -37,6 +37,120 @@ const defaultDeps: DependencyValidationDeps = {
 };
 
 /**
+ * Collect every unsatisfied-dependency error as structured field entries.
+ * Used by accumulate-mode preflight to surface multiple providers' issues in
+ * one response. The throwing variant below delegates here and raises the first.
+ */
+export async function collectDependencyErrors(
+  providers: AgentProviderRequirement[],
+  providerProfiles: ProviderProfileMap,
+  orgId: string,
+  applicationId: string,
+  deps: DependencyValidationDeps = defaultDeps,
+): Promise<ValidationFieldError[]> {
+  const errors: ValidationFieldError[] = [];
+
+  // Check provider enabled status
+  const uniqueProviders = [...new Set(providers.map((s) => s.id))];
+  const enabledChecks = await Promise.all(
+    uniqueProviders.map((id) => deps.isProviderEnabled(id, applicationId)),
+  );
+  const disabled = new Set<string>();
+  for (let i = 0; i < uniqueProviders.length; i++) {
+    if (!enabledChecks[i]) {
+      const id = uniqueProviders[i]!;
+      disabled.add(id);
+      errors.push({
+        field: `providers.${id}`,
+        code: "provider_not_enabled",
+        message: `Provider '${id}' is not configured`,
+      });
+    }
+  }
+
+  // Missing profiles
+  const missingProfile = new Set<string>();
+  for (const provider of providers) {
+    if (disabled.has(provider.id)) continue;
+    if (!providerProfiles[provider.id]) {
+      missingProfile.add(provider.id);
+      errors.push({
+        field: `providers.${provider.id}`,
+        code: "dependency_not_satisfied",
+        message: `Provider '${provider.id}' is not connected`,
+      });
+    }
+  }
+
+  // Credential ids — only for providers that passed the two checks above
+  const checkable = providers.filter((p) => !disabled.has(p.id) && !missingProfile.has(p.id));
+  const credentialIds = await Promise.all(
+    checkable.map((p) => deps.getProviderCredentialId(applicationId, p.id)),
+  );
+  const withCredentials: Array<{ provider: AgentProviderRequirement; credentialId: string }> = [];
+  for (let i = 0; i < checkable.length; i++) {
+    const provider = checkable[i]!;
+    const credentialId = credentialIds[i];
+    if (!credentialId) {
+      errors.push({
+        field: `providers.${provider.id}`,
+        code: "provider_not_configured",
+        message: `Provider '${provider.id}' is no longer configured for this application`,
+      });
+    } else {
+      withCredentials.push({ provider, credentialId });
+    }
+  }
+
+  const statuses = await Promise.all(
+    withCredentials.map(({ provider, credentialId }) =>
+      deps.getConnectionStatus(
+        provider.id,
+        providerProfiles[provider.id]!.profileId,
+        orgId,
+        credentialId,
+      ),
+    ),
+  );
+
+  for (let i = 0; i < withCredentials.length; i++) {
+    const provider = withCredentials[i]!.provider;
+    const conn = statuses[i]!;
+
+    if (conn.status === "not_connected") {
+      errors.push({
+        field: `providers.${provider.id}`,
+        code: "dependency_not_satisfied",
+        message: `Provider '${provider.id}' is not connected`,
+      });
+      continue;
+    }
+
+    if (conn.status === "needs_reconnection") {
+      errors.push({
+        field: `providers.${provider.id}`,
+        code: "needs_reconnection",
+        message: `Provider '${provider.id}' needs to be reconnected (provider configuration changed)`,
+      });
+      continue;
+    }
+
+    if (provider.scopes && provider.scopes.length > 0 && conn.scopesGranted) {
+      const scopeResult = deps.validateScopes(conn.scopesGranted, provider.scopes);
+      if (!scopeResult.sufficient) {
+        errors.push({
+          field: `providers.${provider.id}`,
+          code: "scope_insufficient",
+          message: `Provider '${provider.id}' requires additional permissions: ${scopeResult.missing.join(", ")}`,
+        });
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Validate that all required provider dependencies are satisfied.
  * providerProfiles maps providerId → connectionProfileId.
  * Throws ApiError on first unsatisfied dependency.
@@ -48,88 +162,35 @@ export async function validateAgentDependencies(
   applicationId: string,
   deps: DependencyValidationDeps = defaultDeps,
 ): Promise<void> {
-  // Check provider enabled status
-  const uniqueProviders = [...new Set(providers.map((s) => s.id))];
-  for (const providerId of uniqueProviders) {
-    const enabled = await deps.isProviderEnabled(providerId, applicationId);
-    if (!enabled) {
-      throw new ApiError({
-        status: 400,
-        code: "provider_not_enabled",
-        title: "Provider Not Enabled",
-        detail: `Provider '${providerId}' is not configured`,
-      });
-    }
-  }
-
-  // Check for missing profiles first (no async needed)
-  for (const provider of providers) {
-    const entry = providerProfiles[provider.id];
-    if (!entry) {
-      throw new ApiError({
-        status: 400,
-        code: "dependency_not_satisfied",
-        title: "Dependency Not Satisfied",
-        detail: `Provider '${provider.id}' is not connected`,
-      });
-    }
-  }
-
-  // Resolve providerCredentialIds and fetch connection statuses in parallel
-  const credentialIds = await Promise.all(
-    providers.map((p) => deps.getProviderCredentialId(applicationId, p.id)),
+  const errors = await collectDependencyErrors(
+    providers,
+    providerProfiles,
+    orgId,
+    applicationId,
+    deps,
   );
+  if (errors.length === 0) return;
+  const first = errors[0]!;
+  throw new ApiError({
+    status: 400,
+    code: first.code,
+    title: codeToTitle(first.code),
+    detail: first.message,
+  });
+}
 
-  // Fail fast if any provider credential is missing from this application
-  for (let i = 0; i < providers.length; i++) {
-    if (!credentialIds[i]) {
-      throw new ApiError({
-        status: 400,
-        code: "provider_not_configured",
-        title: "Provider Not Configured",
-        detail: `Provider '${providers[i]!.id}' is no longer configured for this application`,
-      });
-    }
-  }
-
-  const statuses = await Promise.all(
-    providers.map((p, i) =>
-      deps.getConnectionStatus(p.id, providerProfiles[p.id]!.profileId, orgId, credentialIds[i]!),
-    ),
-  );
-
-  for (let i = 0; i < providers.length; i++) {
-    const provider = providers[i]!;
-    const conn = statuses[i]!;
-
-    if (conn.status === "not_connected") {
-      throw new ApiError({
-        status: 400,
-        code: "dependency_not_satisfied",
-        title: "Dependency Not Satisfied",
-        detail: `Provider '${provider.id}' is not connected`,
-      });
-    }
-
-    if (conn.status === "needs_reconnection") {
-      throw new ApiError({
-        status: 400,
-        code: "needs_reconnection",
-        title: "Needs Reconnection",
-        detail: `Provider '${provider.id}' needs to be reconnected (provider configuration changed)`,
-      });
-    }
-
-    if (provider.scopes && provider.scopes.length > 0 && conn.scopesGranted) {
-      const scopeResult = deps.validateScopes(conn.scopesGranted, provider.scopes);
-      if (!scopeResult.sufficient) {
-        throw new ApiError({
-          status: 400,
-          code: "scope_insufficient",
-          title: "Scope Insufficient",
-          detail: `Provider '${provider.id}' requires additional permissions: ${scopeResult.missing.join(", ")}`,
-        });
-      }
-    }
+function codeToTitle(code: string): string {
+  switch (code) {
+    case "provider_not_enabled":
+      return "Provider Not Enabled";
+    case "provider_not_configured":
+      return "Provider Not Configured";
+    case "needs_reconnection":
+      return "Needs Reconnection";
+    case "scope_insufficient":
+      return "Scope Insufficient";
+    case "dependency_not_satisfied":
+    default:
+      return "Dependency Not Satisfied";
   }
 }

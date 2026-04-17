@@ -15,7 +15,7 @@ import { isValidCron } from "../lib/cron.ts";
 import { validateInput, schemaHasFileFields } from "../services/schema.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { forbidden, invalidRequest, notFound, parseBody, validationFailed } from "../lib/errors.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
@@ -95,8 +95,13 @@ export function createSchedulesRouter() {
       if (inputSchema) {
         const inputValidation = validateInput(data.input, asJSONSchemaObject(inputSchema));
         if (!inputValidation.valid) {
-          const first = inputValidation.errors[0]!;
-          throw invalidRequest(first.message, first.field);
+          throw validationFailed(
+            inputValidation.errors.map((e) => ({
+              field: e.field ? `input.${e.field}` : "input",
+              code: "invalid_input",
+              message: e.message,
+            })),
+          );
         }
       }
 

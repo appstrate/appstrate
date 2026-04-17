@@ -13,7 +13,7 @@ import type { Context } from "hono";
 import type { UploadedFile } from "./adapters/types.ts";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { validateInput } from "./schema.ts";
-import { invalidRequest } from "../lib/errors.ts";
+import { invalidRequest, validationFailed } from "../lib/errors.ts";
 import { consumeUpload, isUploadUri, parseUploadUri } from "./uploads.ts";
 
 export interface ParsedInput {
@@ -116,8 +116,13 @@ export async function parseRequestInput(
 
     const inputValidation = validateInput(input, inputSchema);
     if (!inputValidation.valid) {
-      const first = inputValidation.errors[0]!;
-      throw invalidRequest(first.message, first.field);
+      throw validationFailed(
+        inputValidation.errors.map((e) => ({
+          field: e.field ? `input.${e.field}` : "input",
+          code: "invalid_input",
+          message: e.message,
+        })),
+      );
     }
   }
 

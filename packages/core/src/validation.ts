@@ -464,7 +464,9 @@ export function validateManifest(raw: unknown): ValidateManifestResult {
               : manifestSchema;
     return parseWithSchema(schema, raw);
   }
-  return { valid: false, errors: ["type: Required field is missing"] };
+  // No `type` field — run the base schema so every missing-field error is
+  // surfaced in a single pass (instead of short-circuiting on `type` alone).
+  return parseWithSchema(manifestSchema, raw);
 }
 
 function stripQuotes(value: string): string {

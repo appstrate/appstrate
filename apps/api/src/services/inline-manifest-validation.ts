@@ -71,16 +71,23 @@ export function validateInlineManifest(
   }
 
   // --- 4. Structural AFPS validation (dispatches by `type` field) ---
+  // On failure we record the errors but continue — dep-count and URI caps
+  // read the raw manifest shape and don't need the parsed result, so surfacing
+  // them alongside structural errors gives callers a single-round-trip view.
   const structural = validateManifest(input.manifest);
   if (!structural.valid) {
     for (const e of structural.errors) errors.push(`manifest.${e}`);
-    return { valid: false, errors };
   }
 
-  const manifest = structural.manifest as Manifest;
+  const manifest = structural.valid ? (structural.manifest as Manifest) : undefined;
 
   // --- 5. Dependency count caps ---
-  const { skillIds, toolIds, providerIds } = extractDepsFromManifest(manifest);
+  // `extractDepsFromManifest` walks the typed shape. For unparsed manifests we
+  // fall back to a best-effort view of `input.manifest` so dep-count and
+  // URI-cap violations still surface when structural validation fails.
+  const { skillIds, toolIds, providerIds } = extractDepsFromManifest(
+    (manifest ?? input.manifest) as Partial<Manifest>,
+  );
   if (skillIds.length > limits.max_skills) {
     errors.push(
       `manifest.dependencies.skills: too many (${skillIds.length} > ${limits.max_skills})`,
@@ -131,5 +138,5 @@ export function validateInlineManifest(
     return { valid: false, errors };
   }
 
-  return { valid: true, errors: [], manifest, canonicalManifestJson: canonical };
+  return { valid: true, errors: [], manifest: manifest!, canonicalManifestJson: canonical };
 }

@@ -69,7 +69,22 @@ import {
   conflict,
   internalError,
   parseBody,
+  validationFailed,
+  type ValidationFieldError,
 } from "../lib/errors.ts";
+
+/** Convert `@appstrate/core/validation` "path: message" strings to field entries. */
+function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
+  return errors.map((raw) => {
+    const idx = raw.indexOf(": ");
+    if (idx === -1) return { field: "manifest", code: "invalid_manifest", message: raw };
+    return {
+      field: `manifest.${raw.slice(0, idx)}`,
+      code: "invalid_manifest",
+      message: raw.slice(idx + 2),
+    };
+  });
+}
 
 // ═══════════════════════════════════════════════
 // Shared helpers for package CRUD routes
@@ -396,12 +411,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       // Validate manifest
       const manifestResult = validateManifest(manifest);
       if (!manifestResult.valid) {
-        throw new ApiError({
-          status: 400,
-          code: "invalid_manifest",
-          title: "Invalid Manifest",
-          detail: manifestResult.errors[0] ?? "Invalid manifest",
-        });
+        throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
       }
       const validatedManifest = manifestResult.manifest;
 
@@ -412,7 +422,13 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       if (rcfg.validateContent) {
         const validation = rcfg.validateContent(content);
         if (!validation.valid) {
-          throw invalidRequest(validation.errors[0] ?? "Validation failed");
+          throw validationFailed(
+            validation.errors.map((message) => ({
+              field: "content",
+              code: "invalid_content",
+              message,
+            })),
+          );
         }
       }
 
@@ -423,7 +439,13 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       if (rcfg.validateSource && sourceCode) {
         const validation = rcfg.validateSource(sourceCode);
         if (!validation.valid) {
-          throw invalidRequest(validation.errors[0] ?? "Validation failed");
+          throw validationFailed(
+            validation.errors.map((message) => ({
+              field: "sourceCode",
+              code: "invalid_source",
+              message,
+            })),
+          );
         }
       }
 
@@ -509,12 +531,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     if (parsed.manifest) {
       const manifestResult = validateManifest(parsed.manifest);
       if (!manifestResult.valid) {
-        throw new ApiError({
-          status: 400,
-          code: "invalid_manifest",
-          title: "Invalid Manifest",
-          detail: manifestResult.errors[0] ?? "Invalid manifest",
-        });
+        throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
       }
     }
 
@@ -522,7 +539,13 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     if (rcfg.validateContent) {
       const validation = rcfg.validateContent(parsed.content);
       if (!validation.valid) {
-        throw invalidRequest(validation.errors[0] ?? "Validation failed");
+        throw validationFailed(
+          validation.errors.map((message) => ({
+            field: "content",
+            code: "invalid_content",
+            message,
+          })),
+        );
       }
       warnings = validation.warnings;
     }
@@ -688,12 +711,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // Validate manifest
     const manifestResult = validateManifest(manifest);
     if (!manifestResult.valid) {
-      throw new ApiError({
-        status: 400,
-        code: "invalid_manifest",
-        title: "Invalid Manifest",
-        detail: manifestResult.errors[0] ?? "Invalid manifest",
-      });
+      throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
     }
 
     // Ensure ID immutability (all types)
@@ -712,7 +730,13 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     if (rcfg.validateContent && content) {
       const validation = rcfg.validateContent(content);
       if (!validation.valid) {
-        throw invalidRequest(validation.errors[0] ?? "Validation failed");
+        throw validationFailed(
+          validation.errors.map((message) => ({
+            field: "content",
+            code: "invalid_content",
+            message,
+          })),
+        );
       }
       warnings = validation.warnings;
     }
@@ -725,7 +749,13 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       if (rcfg.validateSource) {
         const validation = rcfg.validateSource(sourceCode);
         if (!validation.valid) {
-          throw invalidRequest(validation.errors[0] ?? "Validation failed");
+          throw validationFailed(
+            validation.errors.map((message) => ({
+              field: "sourceCode",
+              code: "invalid_source",
+              message,
+            })),
+          );
         }
       }
     }

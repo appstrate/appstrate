@@ -6,11 +6,82 @@
  */
 
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
-import { validateAgentDependencies } from "./dependency-validation.ts";
+import { validateAgentDependencies, collectDependencyErrors } from "./dependency-validation.ts";
 import { validateConfig } from "./schema.ts";
 import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
-import { ApiError } from "../lib/errors.ts";
+import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
+
+/**
+ * Collect every readiness error as structured field entries (non-throwing).
+ * Used by accumulate-mode preflight. The throwing wrapper below raises the
+ * first error with the original code, preserving backwards compatibility.
+ */
+export async function collectAgentReadinessErrors(params: {
+  agent: LoadedPackage;
+  providerProfiles: ProviderProfileMap;
+  orgId: string;
+  config?: Record<string, unknown>;
+  applicationId: string;
+}): Promise<ValidationFieldError[]> {
+  const { agent, providerProfiles, orgId, config, applicationId } = params;
+  const { manifest } = agent;
+  const errors: ValidationFieldError[] = [];
+
+  if (isPromptEmpty(agent.prompt)) {
+    errors.push({
+      field: "prompt",
+      code: "empty_prompt",
+      message: "Agent prompt is empty",
+    });
+  }
+
+  const missingSkills = findMissingDependencies(
+    manifest.dependencies?.skills ?? {},
+    agent.skills.map((s) => s.id),
+  );
+  for (const skillId of missingSkills) {
+    errors.push({
+      field: `dependencies.skills.${skillId}`,
+      code: "missing_skill",
+      message: `Required skill '${skillId}' is not installed`,
+    });
+  }
+
+  const missingTools = findMissingDependencies(
+    (manifest.dependencies?.tools ?? {}) as Record<string, string>,
+    agent.tools.map((e) => e.id),
+  );
+  for (const toolId of missingTools) {
+    errors.push({
+      field: `dependencies.tools.${toolId}`,
+      code: "missing_tool",
+      message: `Required tool '${toolId}' is not installed`,
+    });
+  }
+
+  const manifestProviders = resolveManifestProviders(manifest);
+  errors.push(
+    ...(await collectDependencyErrors(manifestProviders, providerProfiles, orgId, applicationId)),
+  );
+
+  if (config) {
+    const { config: configSchema } = extractManifestSchemas(manifest);
+    const effectiveSchema = configSchema ?? { type: "object" as const, properties: {} };
+    const configValidation = validateConfig(config, effectiveSchema);
+    if (!configValidation.valid) {
+      for (const e of configValidation.errors) {
+        errors.push({
+          field: e.field ? `config.${e.field}` : "config",
+          code: "config_incomplete",
+          message: e.message,
+        });
+      }
+    }
+  }
+
+  return errors;
+}
 
 /**
  * Validate that an agent is ready for a run.
