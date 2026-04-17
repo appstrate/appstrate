@@ -50,6 +50,7 @@ import {
   OAuthAdminValidationError,
   type CreateInstanceClientFromEnvInput,
 } from "./oauth-admin.ts";
+import { APPSTRATE_CLI_CLIENT_ID } from "./ensure-cli-client.ts";
 
 /**
  * Strict Zod schema for a single declared entry.
@@ -229,12 +230,17 @@ export async function syncInstanceClientsFromEnv(): Promise<void> {
   }
 
   // Step 4 — orphan warning for instance rows absent from the declaration.
-  // Whitelist the auto-provisioned platform client (`oauth_`-prefixed) so
-  // it never raises a warning — the prefix is reserved by the strict Zod
-  // schema above, so no env-declared entry can ever start with it.
+  // Whitelist the auto-provisioned platform client (`oauth_`-prefixed) and
+  // the auto-provisioned CLI client (`appstrate-cli`) so neither raises a
+  // warning — the `oauth_` prefix is reserved by the strict Zod schema
+  // above, and `appstrate-cli` is a fixed literal used across every
+  // install. Both are provisioned from code (see `ensureInstanceClient`
+  // and `ensureCliClient`), not from `OIDC_INSTANCE_CLIENTS`.
   const storedIds = await listInstanceClientIds();
   const declaredIds = new Set(declared.map((d) => d.clientId));
-  const orphans = storedIds.filter((id) => !declaredIds.has(id) && !id.startsWith("oauth_"));
+  const orphans = storedIds.filter(
+    (id) => !declaredIds.has(id) && !id.startsWith("oauth_") && id !== APPSTRATE_CLI_CLIENT_ID,
+  );
   for (const orphanId of orphans) {
     logger.warn(
       "OIDC instance client exists in DB but is absent from OIDC_INSTANCE_CLIENTS — ignoring (no automatic deletion)",

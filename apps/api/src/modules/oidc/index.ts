@@ -44,12 +44,20 @@ import {
 } from "./routes.ts";
 import { oidcPaths } from "./openapi/paths.ts";
 import { oidcSchemas } from "./openapi/schemas.ts";
-import { jwks, oauthClient, oauthAccessToken, oauthRefreshToken, oauthConsent } from "./schema.ts";
+import {
+  deviceCode,
+  jwks,
+  oauthClient,
+  oauthAccessToken,
+  oauthRefreshToken,
+  oauthConsent,
+} from "./schema.ts";
 import {
   ensureInstanceClient,
   getInstanceClientId,
   listFirstPartyClientIds,
 } from "./services/oauth-admin.ts";
+import { ensureCliClient } from "./services/ensure-cli-client.ts";
 import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
 import { oidcRealmResolver } from "./services/oidc-realm-resolver.ts";
 import { setRealmResolver } from "@appstrate/db/auth";
@@ -78,6 +86,13 @@ const oidcModule: AppstrateModule = {
     const env = getEnv();
     const clientId = await ensureInstanceClient(env.APP_URL);
     logger.info("OIDC platform client ready", { module: "oidc", clientId });
+    // Auto-provision the instance-level OAuth client for the official
+    // `appstrate` CLI (device-flow login). Deterministic clientId
+    // (`appstrate-cli`) so the distributed binary is zero-config per
+    // install. Idempotent. Runs before env-declared satellites for the
+    // same `created_at`-ordering rationale as the platform client.
+    const cliClientId = await ensureCliClient();
+    logger.info("OIDC CLI client ready", { module: "oidc", clientId: cliClientId });
     // Reconcile env-declared satellite instance clients (admin dashboards,
     // second-party web apps). Runs AFTER `ensureInstanceClient` so the
     // platform client always has the earliest `created_at` — see
@@ -115,6 +130,13 @@ const oidcModule: AppstrateModule = {
     "/api/oauth/forgot-password",
     "/api/oauth/reset-password",
     "/api/oauth/assets/social-sign-in.js",
+    // Device-flow verification pages. `GET /activate` must be publicly
+    // reachable so an unauthenticated user lands on the entry form and
+    // gets redirected to `/auth/login?returnTo=...` with the user_code
+    // preserved. `POST /activate*` are CSRF-gated internally.
+    "/activate",
+    "/activate/approve",
+    "/activate/deny",
     "/.well-known/openid-configuration",
     "/.well-known/oauth-authorization-server",
   ],
@@ -128,15 +150,17 @@ const oidcModule: AppstrateModule = {
   },
 
   drizzleSchemas() {
-    // Names must match the camelCase model ids Better Auth's oauth-provider
-    // and jwt plugins use internally (see `@better-auth/oauth-provider`
-    // `schema` + `better-auth/plugins/jwt/schema`).
+    // Names must match the camelCase model ids Better Auth's oauth-provider,
+    // jwt, and device-authorization plugins use internally (see
+    // `@better-auth/oauth-provider` `schema`, `better-auth/plugins/jwt/schema`,
+    // and `better-auth/plugins/device-authorization/schema`).
     return {
       jwks,
       oauthClient,
       oauthAccessToken,
       oauthRefreshToken,
       oauthConsent,
+      deviceCode,
     };
   },
 
@@ -155,6 +179,10 @@ const oidcModule: AppstrateModule = {
         name: "Application Auth Config",
         description:
           "Per-application SMTP + social OAuth App configuration for `level: application` OIDC clients",
+      },
+      {
+        name: "Device Authorization",
+        description: "RFC 8628 device-authorization grant for CLI and other browserless clients",
       },
     ];
   },

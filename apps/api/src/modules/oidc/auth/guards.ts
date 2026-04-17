@@ -32,17 +32,33 @@
  * Auth surfaces as the appropriate HTTP status with an OAuth2-style body.
  */
 
-import { createAuthMiddleware, APIError } from "better-auth/api";
+import { createAuthMiddleware, APIError, getSessionFromCtx } from "better-auth/api";
+import { eq } from "drizzle-orm";
 import type { RateLimiterAbstract } from "rate-limiter-flexible";
+import { db } from "@appstrate/db/client";
 import { getRateLimiterFactory } from "../../../infra/index.ts";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
+import { oauthClient } from "../schema.ts";
 import { loadClientSignupPolicy } from "../services/orgmember-mapping.ts";
 import { readPendingClientCookieFromHeaders } from "../services/pending-client-cookie.ts";
+import {
+  assertUserRealm,
+  expectedRealmForClient,
+  type ClientAudienceMetadata,
+} from "./realm-check.ts";
 
 const TOKEN_RL_POINTS = 30;
 const AUTHORIZE_RL_POINTS = 30;
 const INTROSPECT_RL_POINTS = 60;
 const REVOKE_RL_POINTS = 60;
+// CLI device flow — per-IP limits on the BA-mounted endpoints. A single
+// CLI session polls `/device/token` roughly once per `interval` (5s) up to
+// `expiresIn` (10 min = ~120 polls). 30/min/IP comfortably accommodates
+// one CLI per IP while capping poll-storms or brute-force probing of
+// active device codes. `/device/code` is a write (inserts a row) and
+// rarely called more than once per login; 10/min/IP is a loose ceiling.
+const DEVICE_CODE_RL_POINTS = 10;
+const DEVICE_TOKEN_RL_POINTS = 30;
 
 /**
  * Per-client_id brute-force limit on `/oauth2/token`. Complements the
@@ -278,6 +294,92 @@ async function enforceMagicLinkSignupPolicy(ctx: {
   throw ctx.redirect(target.toString());
 }
 
+/**
+ * Realm-enforcement gate on Better Auth's `/device/approve`.
+ *
+ * The `deviceAuthorization()` plugin mints BA sessions directly via its
+ * internal adapter path — it does NOT flow through `@better-auth/oauth-provider`,
+ * so `customAccessTokenClaims` (where `assertUserRealm` normally fires
+ * for `/oauth2/token`) never runs for device-flow approvals. Without this
+ * hook, an end-user of application X (realm=`"end_user:<appId>"`) could
+ * approve an `appstrate-cli` (level=`"instance"`) device code and obtain
+ * a session attached to their identity. The session would be blocked by
+ * `requirePlatformRealm` on every subsequent platform request — but the
+ * right place to reject the cross-audience attempt is here, at the first
+ * moment we know both the approving user AND the target client. Mirrors
+ * the level→realm dispatch inside `plugins.ts::buildClaimsForClient`.
+ *
+ * Also runs on `/device/deny` so a correctly-provisioned realm is
+ * required even to refuse — avoids a cross-audience user being able to
+ * deny someone else's device code through confused-deputy semantics.
+ */
+async function enforceDeviceApproveRealm(ctx: {
+  request?: Request;
+  body?: unknown;
+  context: unknown;
+}): Promise<void> {
+  const session = await getSessionFromCtx(ctx as Parameters<typeof getSessionFromCtx>[0]);
+  if (!session) {
+    throw new APIError("UNAUTHORIZED", {
+      error: "unauthorized",
+      error_description: "You must be signed in to approve or deny a device authorization.",
+    });
+  }
+
+  const body = (ctx.body ?? {}) as { userCode?: unknown };
+  const rawUserCode = typeof body.userCode === "string" ? body.userCode : "";
+  const cleanUserCode = rawUserCode.replace(/-/g, "");
+  if (!cleanUserCode) {
+    // Let BA's own handler produce the canonical validation error. If we
+    // threw here we'd mask it.
+    return;
+  }
+
+  // Adapter shape from Better Auth's request context — matches what
+  // `deviceAuthorization()` itself uses internally. Typed loosely to
+  // avoid pulling in `@better-auth/core` internals.
+  const adapter = (ctx.context as { adapter?: { findOne?: (args: unknown) => Promise<unknown> } })
+    .adapter;
+  if (!adapter?.findOne) return;
+  const record = (await adapter.findOne({
+    model: "deviceCode",
+    where: [{ field: "userCode", value: cleanUserCode }],
+  })) as { id?: string; clientId?: string | null; status?: string } | null;
+  // Unknown code / already-processed / expired — defer to BA's own
+  // handler (runs next) to produce the canonical error response.
+  if (!record || !record.clientId || record.status !== "pending") return;
+
+  const [client] = await db
+    .select({ metadata: oauthClient.metadata, level: oauthClient.level })
+    .from(oauthClient)
+    .where(eq(oauthClient.clientId, record.clientId))
+    .limit(1);
+  if (!client) {
+    throw new APIError("BAD_REQUEST", {
+      error: "invalid_client",
+      error_description: "The OAuth client associated with this device code no longer exists.",
+    });
+  }
+
+  let metadata: ClientAudienceMetadata = { level: client.level as ClientAudienceMetadata["level"] };
+  if (client.metadata) {
+    try {
+      const parsed = JSON.parse(client.metadata) as Partial<ClientAudienceMetadata>;
+      metadata = { ...metadata, ...parsed };
+    } catch {
+      // Corrupt metadata → fall back to column level only. expectedRealmForClient
+      // will reject if level is missing/unknown, which is the safer path.
+    }
+  }
+
+  const expected = expectedRealmForClient(metadata);
+  await assertUserRealm(session.user.id, expected, {
+    clientLevel: metadata.level ?? "unknown",
+    applicationId: metadata.referencedApplicationId ?? null,
+    orgId: metadata.referencedOrgId ?? null,
+  });
+}
+
 export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
   const audiences = [...opts.validAudiences];
 
@@ -288,6 +390,23 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
         {
           matcher: (ctx: { path?: string }) => ctx.path === "/magic-link/verify",
           handler: createAuthMiddleware(enforceMagicLinkSignupPolicy),
+        },
+        {
+          matcher: (ctx: { path?: string }) =>
+            ctx.path === "/device/approve" || ctx.path === "/device/deny",
+          handler: createAuthMiddleware(enforceDeviceApproveRealm),
+        },
+        {
+          matcher: (ctx: { path?: string }) => ctx.path === "/device/code",
+          handler: createAuthMiddleware(async (ctx) => {
+            await enforceRateLimit("device-code", DEVICE_CODE_RL_POINTS, ctx.request);
+          }),
+        },
+        {
+          matcher: (ctx: { path?: string }) => ctx.path === "/device/token",
+          handler: createAuthMiddleware(async (ctx) => {
+            await enforceRateLimit("device-token", DEVICE_TOKEN_RL_POINTS, ctx.request);
+          }),
         },
         {
           matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/token",

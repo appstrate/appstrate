@@ -88,7 +88,14 @@ import { renderForgotPasswordPage } from "./pages/forgot-password.ts";
 import { renderResetPasswordPage, renderInvalidTokenPage } from "./pages/reset-password.ts";
 import { renderConsentPage } from "./pages/consent.ts";
 import { renderErrorPage } from "./pages/error.ts";
+import {
+  renderActivateEntryPage,
+  renderActivateConsentPage,
+  renderActivateResultPage,
+} from "./pages/activate.ts";
 import { SOCIAL_SIGN_IN_SCRIPT } from "./pages/social-sign-in-script.ts";
+import { getAuth } from "@appstrate/db/auth";
+import { oauthClient, deviceCode } from "./schema.ts";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1928,6 +1935,270 @@ export function createOidcRouter() {
 
     const acceptsHtml = prefersHtml(c.req.header("accept"));
     return maybeJsonRedirectToLocation(consentResponse, acceptsHtml);
+  });
+
+  // ── Device authorization /activate page (RFC 8628 §3.3) ────────────────────
+  //
+  // Renders the end-user verification page for the device-flow grant minted
+  // by `POST /api/auth/device/code`. Three paths:
+  //
+  //   1. `GET /activate` (no query)    → entry form to type the 8-char code.
+  //   2. `GET /activate?user_code=...` → consent panel if the code resolves
+  //      to a pending row and the user is authenticated; otherwise redirects
+  //      to `/auth/login?returnTo=/activate?user_code=...`.
+  //   3. `POST /activate`              → normalizes the submitted code and
+  //      303-redirects to `GET /activate?user_code=...` so the consent view
+  //      is addressable.
+  //   4. `POST /activate/approve`      → CSRF-verifies and delegates to BA's
+  //      `/device/approve` via `getOidcAuthApi().deviceApprove`. The realm
+  //      guard on that path (see `oidcGuardsPlugin`) rejects cross-audience
+  //      approval attempts.
+  //   5. `POST /activate/deny`         → symmetric deny.
+  //
+  // Branding is always the platform default — device flow is instance-
+  // level (the `appstrate-cli` client); application-level device flows are
+  // out of scope for v0.
+
+  const deviceApproveRateLimit = rateLimitByIp(20);
+
+  router.get("/activate", rateLimitByIp(60), async (c: Context<AppEnv>) => {
+    const url = new URL(c.req.url);
+    const rawUserCode = url.searchParams.get("user_code");
+    const csrfToken = issueCsrfToken(c);
+
+    if (!rawUserCode) {
+      const page = renderActivateEntryPage({
+        branding: PLATFORM_DEFAULT_BRANDING,
+        csrfToken,
+      });
+      return c.html(page.value);
+    }
+
+    const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
+    if (!session) {
+      const returnTo = `/activate?user_code=${encodeURIComponent(rawUserCode)}`;
+      return c.redirect(`/auth/login?returnTo=${encodeURIComponent(returnTo)}`, 302);
+    }
+
+    const cleanUserCode = rawUserCode.replace(/-/g, "").toUpperCase();
+    if (cleanUserCode.length !== 8) {
+      const page = renderActivateEntryPage({
+        branding: PLATFORM_DEFAULT_BRANDING,
+        csrfToken,
+        initialUserCode: rawUserCode,
+        error:
+          "Ce code est invalide. Vérifiez qu'il correspond exactement à celui affiché par le CLI.",
+      });
+      return c.html(page.value, 400);
+    }
+
+    const [record] = await db
+      .select({
+        clientId: deviceCode.clientId,
+        scope: deviceCode.scope,
+        status: deviceCode.status,
+        expiresAt: deviceCode.expiresAt,
+      })
+      .from(deviceCode)
+      .where(eq(deviceCode.userCode, cleanUserCode))
+      .limit(1);
+
+    if (!record || !record.clientId) {
+      const page = renderActivateEntryPage({
+        branding: PLATFORM_DEFAULT_BRANDING,
+        csrfToken,
+        initialUserCode: rawUserCode,
+        error:
+          "Code introuvable ou déjà utilisé. Relancez la commande pour obtenir un nouveau code.",
+      });
+      return c.html(page.value, 404);
+    }
+    if (record.expiresAt < new Date()) {
+      const page = renderActivateEntryPage({
+        branding: PLATFORM_DEFAULT_BRANDING,
+        csrfToken,
+        error: "Ce code a expiré. Relancez la commande pour en obtenir un nouveau.",
+      });
+      return c.html(page.value, 400);
+    }
+    if (record.status !== "pending") {
+      const page = renderActivateResultPage({
+        branding: PLATFORM_DEFAULT_BRANDING,
+        outcome: record.status === "approved" ? "approved" : "denied",
+      });
+      return c.html(page.value);
+    }
+
+    const [client] = await db
+      .select({ name: oauthClient.name })
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, record.clientId))
+      .limit(1);
+
+    const scopes = (record.scope ?? "openid profile email offline_access")
+      .split(/\s+/)
+      .filter(Boolean);
+    const userCodeDisplay = `${cleanUserCode.slice(0, 4)}-${cleanUserCode.slice(4)}`;
+
+    const page = renderActivateConsentPage({
+      branding: PLATFORM_DEFAULT_BRANDING,
+      clientName: client?.name ?? record.clientId,
+      userCodeDisplay,
+      userCodeRaw: cleanUserCode,
+      scopes,
+      csrfToken,
+    });
+    return c.html(page.value);
+  });
+
+  router.post("/activate", rateLimitByIp(30), async (c: Context<AppEnv>) => {
+    const form = await c.req.parseBody();
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
+      const csrfToken = issueCsrfToken(c);
+      const page = renderActivateEntryPage({
+        branding: PLATFORM_DEFAULT_BRANDING,
+        csrfToken,
+        error: "Votre session a expiré. Veuillez réessayer.",
+      });
+      return c.html(page.value, 403);
+    }
+    const raw = readFormString(form, "user_code") ?? "";
+    const cleaned = raw.replace(/-/g, "").toUpperCase().trim();
+    if (!cleaned) {
+      const csrfToken = issueCsrfToken(c);
+      const page = renderActivateEntryPage({
+        branding: PLATFORM_DEFAULT_BRANDING,
+        csrfToken,
+        error: "Entrez le code affiché par votre outil en ligne de commande.",
+      });
+      return c.html(page.value, 400);
+    }
+    return c.redirect(`/activate?user_code=${encodeURIComponent(cleaned)}`, 303);
+  });
+
+  router.post("/activate/approve", deviceApproveRateLimit, async (c: Context<AppEnv>) => {
+    const form = await c.req.parseBody();
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
+      return c.html(
+        renderActivateResultPage({
+          branding: PLATFORM_DEFAULT_BRANDING,
+          outcome: "denied",
+          error: "Session expirée. Relancez la commande et réessayez.",
+        }).value,
+        403,
+      );
+    }
+    const userCode = (readFormString(form, "user_code") ?? "").replace(/-/g, "").toUpperCase();
+    if (!userCode) return c.redirect("/activate", 303);
+
+    // Read the session + deviceCode row up-front so the audit log has
+    // userId and clientId even after the approve mutates state. This is
+    // purely observational — the realm/level guard is enforced by
+    // `oidcGuardsPlugin.hooks.before` when `deviceApprove` fires.
+    const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
+    const [codeRow] = await db
+      .select({ clientId: deviceCode.clientId })
+      .from(deviceCode)
+      .where(eq(deviceCode.userCode, userCode))
+      .limit(1);
+
+    try {
+      await getOidcAuthApi().deviceApprove({
+        body: { userCode },
+        headers: c.req.raw.headers,
+        request: c.req.raw,
+      });
+    } catch (err) {
+      logger.warn("oidc: device approve failed", {
+        module: "oidc",
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return c.html(
+        renderActivateResultPage({
+          branding: PLATFORM_DEFAULT_BRANDING,
+          outcome: "denied",
+          error:
+            "L'autorisation a échoué. Le code a peut-être expiré, été déjà utilisé ou votre compte n'est pas autorisé pour cette application.",
+        }).value,
+        400,
+      );
+    }
+
+    logger.info("cli.device.approved", {
+      module: "oidc",
+      audit: true,
+      event: "cli.device.approved",
+      userId: session?.user?.id ?? null,
+      clientId: codeRow?.clientId ?? null,
+      ipBrowser: getClientIp(c),
+      userAgentBrowser: c.req.header("user-agent") ?? "unknown",
+      requestId: c.get("requestId"),
+    });
+
+    return c.html(
+      renderActivateResultPage({
+        branding: PLATFORM_DEFAULT_BRANDING,
+        outcome: "approved",
+      }).value,
+    );
+  });
+
+  router.post("/activate/deny", deviceApproveRateLimit, async (c: Context<AppEnv>) => {
+    const form = await c.req.parseBody();
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
+      return c.html(
+        renderActivateResultPage({
+          branding: PLATFORM_DEFAULT_BRANDING,
+          outcome: "denied",
+          error: "Session expirée.",
+        }).value,
+        403,
+      );
+    }
+    const userCode = (readFormString(form, "user_code") ?? "").replace(/-/g, "").toUpperCase();
+    if (!userCode) return c.redirect("/activate", 303);
+
+    try {
+      await getOidcAuthApi().deviceDeny({
+        body: { userCode },
+        headers: c.req.raw.headers,
+        request: c.req.raw,
+      });
+    } catch (err) {
+      // Still render the denied page — from the user's POV the request is
+      // refused either way. Log for ops visibility.
+      logger.warn("oidc: device deny call failed", {
+        module: "oidc",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    const denySession = await getAuth()
+      .api.getSession({ headers: c.req.raw.headers })
+      .catch(() => null);
+    const [denyCodeRow] = await db
+      .select({ clientId: deviceCode.clientId })
+      .from(deviceCode)
+      .where(eq(deviceCode.userCode, userCode))
+      .limit(1);
+
+    logger.info("cli.device.denied", {
+      module: "oidc",
+      audit: true,
+      event: "cli.device.denied",
+      userId: denySession?.user?.id ?? null,
+      clientId: denyCodeRow?.clientId ?? null,
+      ipBrowser: getClientIp(c),
+      userAgentBrowser: c.req.header("user-agent") ?? "unknown",
+      requestId: c.get("requestId"),
+    });
+
+    return c.html(
+      renderActivateResultPage({
+        branding: PLATFORM_DEFAULT_BRANDING,
+        outcome: "denied",
+      }).value,
+    );
   });
 
   // ── RP-Initiated Logout helper ───────────────────────────────────────────────

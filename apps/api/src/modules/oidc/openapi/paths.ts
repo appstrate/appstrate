@@ -759,4 +759,202 @@ export const oidcPaths = {
       },
     },
   },
+  "/api/auth/device/code": {
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "deviceAuthorizationCode",
+      summary: "Request a device + user code (RFC 8628 §3.2)",
+      description:
+        "Initiates a device-authorization grant. The CLI calls this first and receives a short `user_code` to display plus an opaque `device_code` to poll `/api/auth/device/token` with. Mounted by Better Auth's `deviceAuthorization()` plugin; CLI clients are gated by `validateClient` — only OAuth clients registered with the device-code grant are accepted.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/x-www-form-urlencoded": {
+            schema: {
+              type: "object",
+              required: ["client_id"],
+              properties: {
+                client_id: { type: "string", description: "Public client identifier." },
+                scope: {
+                  type: "string",
+                  description: "Space-separated scopes. Defaults to the client's registered set.",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Device + user codes issued.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: [
+                  "device_code",
+                  "user_code",
+                  "verification_uri",
+                  "verification_uri_complete",
+                  "expires_in",
+                  "interval",
+                ],
+                properties: {
+                  device_code: { type: "string" },
+                  user_code: { type: "string" },
+                  verification_uri: { type: "string", format: "uri" },
+                  verification_uri_complete: { type: "string", format: "uri" },
+                  expires_in: { type: "integer" },
+                  interval: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "400": {
+          description: "Invalid client or request.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  error: { type: "string", enum: ["invalid_client", "invalid_request"] },
+                  error_description: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/auth/device/token": {
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "deviceAuthorizationToken",
+      summary: "Exchange approved device_code for an access token (RFC 8628 §3.4)",
+      description:
+        "Polled by the CLI until the user approves or the code expires. On success, returns a BA session token as `access_token`. The token is opaque (not a JWT) and must be sent back as `Authorization: Bearer <token>` on subsequent requests.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/x-www-form-urlencoded": {
+            schema: {
+              type: "object",
+              required: ["grant_type", "device_code", "client_id"],
+              properties: {
+                grant_type: {
+                  type: "string",
+                  enum: ["urn:ietf:params:oauth:grant-type:device_code"],
+                },
+                device_code: { type: "string" },
+                client_id: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "User approved — access token issued.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["access_token", "token_type", "expires_in"],
+                properties: {
+                  access_token: { type: "string" },
+                  token_type: { type: "string", enum: ["Bearer"] },
+                  expires_in: { type: "integer" },
+                  scope: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": {
+          description: "Authorization pending, slow down, or terminal error.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  error: {
+                    type: "string",
+                    enum: [
+                      "authorization_pending",
+                      "slow_down",
+                      "expired_token",
+                      "access_denied",
+                      "invalid_request",
+                      "invalid_grant",
+                    ],
+                  },
+                  error_description: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/activate": {
+    get: {
+      tags: ["Device Authorization"],
+      operationId: "deviceActivateGet",
+      summary: "User-facing verification page",
+      description:
+        "Server-rendered HTML page where the user types the short `user_code` shown by the CLI. When called with `?user_code=...` and a valid session, resolves to a consent panel; otherwise shows the entry form or redirects to `/auth/login` with a `returnTo` that preserves the code.",
+      parameters: [
+        {
+          name: "user_code",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+        },
+      ],
+      responses: {
+        "200": { description: "HTML page rendered." },
+        "302": { description: "Redirect to `/auth/login` when unauthenticated." },
+        "400": { description: "Invalid code format." },
+        "404": { description: "Code not found or already used." },
+      },
+    },
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "deviceActivateSubmit",
+      summary: "Normalize a submitted user_code and redirect to the consent panel",
+      responses: {
+        "303": { description: "Redirect to `GET /activate?user_code=...`." },
+        "400": { description: "Empty user_code." },
+        "403": { description: "CSRF check failed." },
+      },
+    },
+  },
+  "/activate/approve": {
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "deviceActivateApprove",
+      summary: "Approve a pending device authorization",
+      description:
+        "Delegates to Better Auth's `/api/auth/device/approve`. The realm/level guard registered by `oidcGuardsPlugin` enforces that the approving user's realm matches the target client's level — a cross-audience approval is rejected with 403.",
+      responses: {
+        "200": { description: "Approved — renders the success page." },
+        "400": { description: "Approval failed (expired, already processed, realm mismatch)." },
+        "403": { description: "CSRF check failed." },
+      },
+    },
+  },
+  "/activate/deny": {
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "deviceActivateDeny",
+      summary: "Deny a pending device authorization",
+      responses: {
+        "200": { description: "Denied — renders the refusal page." },
+        "403": { description: "CSRF check failed." },
+      },
+    },
+  },
 };
