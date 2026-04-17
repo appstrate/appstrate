@@ -134,9 +134,9 @@ export function validateInlineManifest(
     );
   }
 
-  if (errors.length > 0) {
+  if (errors.length > 0 || !manifest) {
     return { valid: false, errors };
   }
 
-  return { valid: true, errors: [], manifest: manifest!, canonicalManifestJson: canonical };
+  return { valid: true, errors: [], manifest, canonicalManifestJson: canonical };
 }

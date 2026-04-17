@@ -6,24 +6,30 @@
  */
 
 import type { LoadedPackage, ProviderProfileMap } from "../types/index.ts";
-import { validateAgentDependencies, collectDependencyErrors } from "./dependency-validation.ts";
+import { collectDependencyErrors } from "./dependency-validation.ts";
 import { validateConfig } from "./schema.ts";
 import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 
-/**
- * Collect every readiness error as structured field entries (non-throwing).
- * Used by accumulate-mode preflight. The throwing wrapper below raises the
- * first error with the original code, preserving backwards compatibility.
- */
-export async function collectAgentReadinessErrors(params: {
+export interface AgentReadinessParams {
   agent: LoadedPackage;
   providerProfiles: ProviderProfileMap;
   orgId: string;
   config?: Record<string, unknown>;
   applicationId: string;
-}): Promise<ValidationFieldError[]> {
+}
+
+/**
+ * Collect every readiness error as structured field entries (non-throwing).
+ *
+ * Single source of truth for readiness checks — the throwing wrapper
+ * `validateAgentReadiness` delegates to this. Order matches the historical
+ * fail-fast sequence: prompt → skills → tools → provider deps → config.
+ */
+export async function collectAgentReadinessErrors(
+  params: AgentReadinessParams,
+): Promise<ValidationFieldError[]> {
   const { agent, providerProfiles, orgId, config, applicationId } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
@@ -83,83 +89,31 @@ export async function collectAgentReadinessErrors(params: {
   return errors;
 }
 
+const CODE_TITLES: Record<string, string> = {
+  empty_prompt: "Empty Prompt",
+  missing_skill: "Missing Skill",
+  missing_tool: "Missing Tool",
+  provider_not_enabled: "Provider Not Enabled",
+  provider_not_configured: "Provider Not Configured",
+  needs_reconnection: "Needs Reconnection",
+  scope_insufficient: "Scope Insufficient",
+  dependency_not_satisfied: "Dependency Not Satisfied",
+  config_incomplete: "Config Incomplete",
+};
+
 /**
- * Validate that an agent is ready for a run.
- * Checks are ordered cheapest-first, fail-fast on first error.
- *
- * 1. Empty prompt
- * 2. Missing required skills
- * 3. Missing required tools
- * 4. Provider dependencies (delegates to validateAgentDependencies)
- * 5. Config validation (if config provided)
- *
- * Throws ApiError on first validation failure.
+ * Validate that an agent is ready for a run. Delegates to
+ * `collectAgentReadinessErrors` and throws the first error, preserving the
+ * historical fail-fast contract (single ApiError with the original code).
  */
-export async function validateAgentReadiness(params: {
-  agent: LoadedPackage;
-  providerProfiles: ProviderProfileMap;
-  orgId: string;
-  config?: Record<string, unknown>;
-  applicationId: string;
-}): Promise<void> {
-  const { agent, providerProfiles, orgId, config, applicationId } = params;
-  const { manifest } = agent;
-
-  // 1. Empty prompt
-  if (isPromptEmpty(agent.prompt)) {
-    throw new ApiError({
-      status: 400,
-      code: "empty_prompt",
-      title: "Empty Prompt",
-      detail: "Agent prompt is empty",
-    });
-  }
-
-  // 2. Missing skills
-  const missingSkills = findMissingDependencies(
-    manifest.dependencies?.skills ?? {},
-    agent.skills.map((s) => s.id),
-  );
-  if (missingSkills.length > 0) {
-    throw new ApiError({
-      status: 400,
-      code: "missing_skill",
-      title: "Missing Skill",
-      detail: `Required skill '${missingSkills[0]}' is not installed`,
-    });
-  }
-
-  // 3. Missing tools
-  const missingTools = findMissingDependencies(
-    (manifest.dependencies?.tools ?? {}) as Record<string, string>,
-    agent.tools.map((e) => e.id),
-  );
-  if (missingTools.length > 0) {
-    throw new ApiError({
-      status: 400,
-      code: "missing_tool",
-      title: "Missing Tool",
-      detail: `Required tool '${missingTools[0]}' is not installed`,
-    });
-  }
-
-  // 4. Provider dependencies
-  const manifestProviders = resolveManifestProviders(manifest);
-  await validateAgentDependencies(manifestProviders, providerProfiles, orgId, applicationId);
-
-  // 5. Config validation
-  if (config) {
-    const { config: configSchema } = extractManifestSchemas(manifest);
-    const effectiveSchema = configSchema ?? { type: "object" as const, properties: {} };
-    const configValidation = validateConfig(config, effectiveSchema);
-    if (!configValidation.valid) {
-      const first = configValidation.errors[0]!;
-      throw new ApiError({
-        status: 400,
-        code: "config_incomplete",
-        title: "Config Incomplete",
-        detail: `Parameter '${first.field}' is required`,
-      });
-    }
-  }
+export async function validateAgentReadiness(params: AgentReadinessParams): Promise<void> {
+  const errors = await collectAgentReadinessErrors(params);
+  if (errors.length === 0) return;
+  const first = errors[0]!;
+  throw new ApiError({
+    status: 400,
+    code: first.code,
+    title: CODE_TITLES[first.code] ?? "Validation Failed",
+    detail: first.message,
+  });
 }

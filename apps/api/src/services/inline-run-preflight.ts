@@ -20,6 +20,10 @@
  *     Used by POST /api/runs/inline/validate, whose entire purpose is to let
  *     developers iterate on a manifest in one round-trip.
  *
+ * Infrastructure errors (DB, Redis, Docker) always bubble up as-is — they
+ * are never converted into ValidationFieldError entries. Only `ApiError`
+ * instances raised by validation helpers are folded into the accumulator.
+ *
  * Throws `ApiError` on any failure (same shape the routes already emit).
  */
 import { z } from "zod";
@@ -27,7 +31,6 @@ import type { Actor } from "../lib/actor.ts";
 import type { AgentManifest, ProviderProfileMap } from "../types/index.ts";
 import {
   ApiError,
-  invalidRequest,
   validationFailed,
   zodIssuesToFieldErrors,
   type ValidationFieldError,
@@ -64,12 +67,14 @@ export interface InlineRunPreflightResult {
 
 const providerProfilesSchema = z.record(z.string(), z.uuid()).optional();
 
+type Mode = "fail-fast" | "accumulate";
+
 export async function runInlinePreflight(params: {
   orgId: string;
   applicationId: string;
   actor: Actor | null;
   body: InlineRunBody;
-  mode?: "fail-fast" | "accumulate";
+  mode?: Mode;
 }): Promise<InlineRunPreflightResult> {
   const { orgId, applicationId, actor, body, mode = "fail-fast" } = params;
 
@@ -77,6 +82,19 @@ export async function runInlinePreflight(params: {
   // throw once at the end. The shape of individual entries matches every
   // other `validation_failed` response emitted by the platform.
   const accumulated: ValidationFieldError[] = [];
+  const collect = (errs: ValidationFieldError[], throwCode?: string): void => {
+    if (errs.length === 0) return;
+    if (mode === "fail-fast") {
+      throw new ApiError({
+        status: 400,
+        code: throwCode ?? "validation_failed",
+        title: throwCode ? codeToTitle(throwCode) : "Validation Failed",
+        detail: `${errs[0]!.field}: ${errs[0]!.message}`,
+        errors: errs,
+      });
+    }
+    accumulated.push(...errs);
+  };
 
   // ----- 1. Manifest shape -----
   const validated = validateInlineManifest({
@@ -85,18 +103,10 @@ export async function runInlinePreflight(params: {
     limits: getInlineRunLimits(),
   });
   if (!validated.valid) {
-    if (mode === "fail-fast") {
-      throw new ApiError({
-        status: 400,
-        code: "invalid_inline_manifest",
-        title: "Invalid Inline Manifest",
-        detail: validated.errors.join("; "),
-        errors: validated.errors.map((e) => toFieldError(e, "invalid_inline_manifest")),
-      });
-    }
-    for (const err of validated.errors) {
-      accumulated.push(toFieldError(err, "invalid_inline_manifest"));
-    }
+    collect(
+      validated.errors.map((e) => toFieldError(e, "invalid_inline_manifest")),
+      "invalid_inline_manifest",
+    );
   }
 
   // A parsed manifest is only available when structural validation passed.
@@ -108,15 +118,7 @@ export async function runInlinePreflight(params: {
   // ----- 2. Body-field validation -----
   const providerProfilesParsed = providerProfilesSchema.safeParse(body.providerProfiles);
   if (!providerProfilesParsed.success) {
-    if (mode === "fail-fast") {
-      throw invalidRequest(
-        "providerProfiles must map providerId → profileUUID",
-        "providerProfiles",
-      );
-    }
-    accumulated.push(
-      ...zodIssuesToFieldErrors(providerProfilesParsed.error.issues, "providerProfiles"),
-    );
+    collect(zodIssuesToFieldErrors(providerProfilesParsed.error.issues, "providerProfiles"));
   }
   const providerProfilesOverride = providerProfilesParsed.success
     ? providerProfilesParsed.data
@@ -139,22 +141,13 @@ export async function runInlinePreflight(params: {
     if (configSchema) {
       const cv = validateConfig(effectiveConfig, asJSONSchemaObject(configSchema));
       if (!cv.valid) {
-        if (mode === "fail-fast") {
-          throw validationFailed(
-            cv.errors.map((e) => ({
-              field: e.field ? `config.${e.field}` : "config",
-              code: "invalid_config",
-              message: e.message,
-            })),
-          );
-        }
-        for (const e of cv.errors) {
-          accumulated.push({
+        collect(
+          cv.errors.map((e) => ({
             field: e.field ? `config.${e.field}` : "config",
             code: "invalid_config",
             message: e.message,
-          });
-        }
+          })),
+        );
       }
     }
 
@@ -162,22 +155,13 @@ export async function runInlinePreflight(params: {
     if (inputSchema) {
       const iv = validateInput(effectiveInput ?? undefined, asJSONSchemaObject(inputSchema));
       if (!iv.valid) {
-        if (mode === "fail-fast") {
-          throw validationFailed(
-            iv.errors.map((e) => ({
-              field: e.field ? `input.${e.field}` : "input",
-              code: "invalid_input",
-              message: e.message,
-            })),
-          );
-        }
-        for (const e of iv.errors) {
-          accumulated.push({
+        collect(
+          iv.errors.map((e) => ({
             field: e.field ? `input.${e.field}` : "input",
             code: "invalid_input",
             message: e.message,
-          });
-        }
+          })),
+        );
       }
     }
   }
@@ -200,7 +184,10 @@ export async function runInlinePreflight(params: {
         applicationId,
       );
     } catch (err) {
-      if (mode === "fail-fast") throw err;
+      // Only ApiError is a validation signal. Everything else (DB outage,
+      // network timeout, programmer error) must bubble as-is so the error
+      // handler emits a 5xx and alerting fires.
+      if (mode === "fail-fast" || !(err instanceof ApiError)) throw err;
       accumulated.push(apiErrorToField(err, "providers"));
       providerProfiles = {};
     }
@@ -230,8 +217,15 @@ export async function runInlinePreflight(params: {
     throw validationFailed(accumulated);
   }
 
+  // Guaranteed non-null: accumulate mode throws above when manifest is
+  // missing (structural errors were collected), and fail-fast throws at
+  // stage 1 before reaching this point.
+  if (!manifest) {
+    throw new Error("runInlinePreflight: reached success path without a manifest");
+  }
+
   return {
-    manifest: manifest!,
+    manifest,
     prompt,
     effectiveConfig,
     effectiveInput,
@@ -249,18 +243,23 @@ function toFieldError(raw: string, code: string): ValidationFieldError {
   return { field: raw.slice(0, idx), code, message: raw.slice(idx + 2) };
 }
 
-/** Best-effort conversion of a caught ApiError into a ValidationFieldError. */
-function apiErrorToField(err: unknown, fallbackField: string): ValidationFieldError {
-  if (err instanceof ApiError) {
-    return {
-      field: err.param ?? fallbackField,
-      code: err.code,
-      message: err.message,
-    };
-  }
+/**
+ * Fold a caught ApiError into a ValidationFieldError.
+ *
+ * Callers MUST have already verified `err instanceof ApiError` — non-ApiError
+ * instances represent infrastructure failures and should never reach here.
+ */
+function apiErrorToField(err: ApiError, fallbackField: string): ValidationFieldError {
   return {
-    field: fallbackField,
-    code: "internal_error",
-    message: err instanceof Error ? err.message : String(err),
+    field: err.param ?? fallbackField,
+    code: err.code,
+    message: err.message,
   };
+}
+
+function codeToTitle(code: string): string {
+  return code
+    .split("_")
+    .map((w) => (w.length === 0 ? w : w[0]!.toUpperCase() + w.slice(1)))
+    .join(" ");
 }
