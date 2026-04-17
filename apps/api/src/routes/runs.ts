@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { Hono } from "hono";
 import { logger } from "../lib/logger.ts";
-import type { LoadedPackage, AppEnv } from "../types/index.ts";
+import type { LoadedPackage, AppEnv, AgentManifest } from "../types/index.ts";
 import {
   updateRun,
   appendRunLog,
@@ -15,18 +15,22 @@ import {
   listRunLogs,
   addPackageMemories,
 } from "../services/state/index.ts";
-import { resolveActorProfileContext, getAgentAppProfile } from "../services/connection-profiles.ts";
+import {
+  resolveActorProfileContext,
+  getAgentAppProfile,
+  resolveProviderProfiles,
+} from "../services/connection-profiles.ts";
 import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
 import type { TokenUsage } from "../services/adapters/index.ts";
 import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
-import { validateOutput } from "../services/schema.ts";
+import { validateOutput, validateInput, validateConfig } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { trackRun, untrackRun, abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { ApiError, notFound, conflict } from "../lib/errors.ts";
+import { ApiError, notFound, conflict, invalidRequest } from "../lib/errors.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
@@ -34,6 +38,15 @@ import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
+import { validateInlineManifest } from "../services/inline-manifest-validation.ts";
+import { getInlineRunLimits } from "../services/run-limits.ts";
+import {
+  insertShadowPackage,
+  buildShadowLoadedPackage,
+  deleteOrphanShadowPackage,
+} from "../services/inline-run.ts";
+import { resolveManifestProviders } from "../lib/manifest-utils.ts";
+import { validateAgentReadiness } from "../services/agent-readiness.ts";
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens;
   total.output_tokens += addition.output_tokens;
@@ -656,6 +669,180 @@ export function createRunsRouter() {
 
     return c.json({ ok: true });
   });
+
+  // POST /api/runs/inline — execute an inline (no persisted package) agent.
+  // See docs/specs/INLINE_RUNS.md. The manifest + prompt travel in the
+  // request body; the platform creates a transient shadow package
+  // (ephemeral = true), runs it through the existing pipeline, and
+  // returns 202 { runId } immediately. The client streams progress via
+  // GET /api/realtime/runs/:id (existing SSE endpoint).
+  router.post(
+    "/runs/inline",
+    // Dedicated rate limit — the cap is loaded from INLINE_RUN_LIMITS
+    // each time the middleware is constructed. We read it at route-build
+    // time; changes to the env require a reboot.
+    rateLimit(getInlineRunLimits().rate_per_min),
+    idempotency(),
+    requirePermission("agents", "run"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const applicationId = c.get("applicationId");
+      const actor = getActor(c);
+
+      const body = await c.req.json<{
+        manifest?: unknown;
+        prompt?: unknown;
+        input?: Record<string, unknown>;
+        config?: Record<string, unknown>;
+        providerProfiles?: Record<string, string>;
+        modelId?: string | null;
+        proxyId?: string | null;
+      }>();
+
+      // ----- 1. Shape validation (cheap, does not touch DB) -----
+      const limits = getInlineRunLimits();
+      const validated = validateInlineManifest({
+        manifest: body.manifest,
+        prompt: body.prompt,
+        limits,
+      });
+      if (!validated.valid) {
+        throw new ApiError({
+          status: 400,
+          code: "invalid_inline_manifest",
+          title: "Invalid Inline Manifest",
+          detail: validated.errors.join("; "),
+        });
+      }
+
+      // ----- 2. Body-field validation -----
+      const providerProfilesSchema = z.record(z.string(), z.uuid()).optional();
+      const providerProfilesOverride = providerProfilesSchema.safeParse(body.providerProfiles);
+      if (!providerProfilesOverride.success) {
+        throw invalidRequest(
+          "providerProfiles must map providerId → profileUUID",
+          "providerProfiles",
+        );
+      }
+      const modelIdOverride = body.modelId ?? null;
+      const proxyIdOverride = body.proxyId ?? null;
+
+      // Validate config + input against the manifest's own schemas (AJV).
+      const manifest = validated.manifest as AgentManifest;
+      const configSchema = manifest.config?.schema;
+      const effectiveConfig =
+        body.config && typeof body.config === "object" && !Array.isArray(body.config)
+          ? (body.config as Record<string, unknown>)
+          : {};
+      if (configSchema) {
+        const cv = validateConfig(effectiveConfig, asJSONSchemaObject(configSchema));
+        if (!cv.valid) {
+          throw invalidRequest(`config: ${cv.errors?.[0]?.message ?? "invalid"}`, "config");
+        }
+      }
+
+      const inputSchema = manifest.input?.schema;
+      const effectiveInput =
+        body.input && typeof body.input === "object" && !Array.isArray(body.input)
+          ? (body.input as Record<string, unknown>)
+          : null;
+      if (inputSchema) {
+        const iv = validateInput(effectiveInput ?? undefined, asJSONSchemaObject(inputSchema));
+        if (!iv.valid) {
+          throw invalidRequest(`input: ${iv.errors?.[0]?.message ?? "invalid"}`, "input");
+        }
+      }
+
+      // ----- 3. Insert shadow row -----
+      const createdBy = actor?.type === "member" ? actor.id : null;
+      const shadowId = await insertShadowPackage({
+        orgId,
+        createdBy,
+        manifest,
+        prompt: validated.canonicalManifestJson ? (body.prompt as string) : (body.prompt as string),
+      });
+
+      // ----- 4. Build agent + preflight -----
+      const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, body.prompt as string);
+
+      let providerProfiles;
+      try {
+        // Actor default profile + body overrides. Shadow packages have no
+        // application_packages row, so no app-level profile binding applies.
+        const { defaultUserProfileId } = await resolveActorProfileContext(actor, shadowId);
+        providerProfiles = await resolveProviderProfiles(
+          resolveManifestProviders(manifest),
+          defaultUserProfileId,
+          providerProfilesOverride.data,
+          null,
+          applicationId,
+        );
+        await validateAgentReadiness({
+          agent: shadowAgent,
+          providerProfiles,
+          orgId,
+          config: effectiveConfig,
+          applicationId,
+        });
+      } catch (err) {
+        await deleteOrphanShadowPackage(shadowId);
+        if (err instanceof ApiError) throw err;
+        throw err;
+      }
+
+      // ----- 5. Fire the pipeline -----
+      const runId = `run_${crypto.randomUUID()}`;
+      let pipelineResult;
+      try {
+        pipelineResult = await prepareAndExecuteRun({
+          runId,
+          agent: shadowAgent,
+          providerProfiles,
+          orgId,
+          actor,
+          input: effectiveInput,
+          config: effectiveConfig,
+          modelId: modelIdOverride,
+          proxyId: proxyIdOverride,
+          applicationId,
+          apiKeyId: c.get("apiKeyId") ?? undefined,
+        });
+      } catch (err) {
+        await deleteOrphanShadowPackage(shadowId);
+        throw err;
+      }
+
+      if (!pipelineResult.ok) {
+        await deleteOrphanShadowPackage(shadowId);
+        const { error } = pipelineResult;
+        if (error.code === "model_not_configured") {
+          throw new ApiError({
+            status: 400,
+            code: "model_not_configured",
+            title: "Bad Request",
+            detail: error.message,
+          });
+        }
+        if ("status" in error && typeof error.status === "number") {
+          throw new ApiError({
+            status: error.status,
+            code: error.code,
+            title: error.message,
+            detail: error.message,
+          });
+        }
+        throw new ApiError({
+          status: 500,
+          code: "inline_run_failed",
+          title: "Inline run failed",
+          detail: error.message,
+        });
+      }
+
+      c.status(202);
+      return c.json({ runId, packageId: shadowId });
+    },
+  );
 
   // DELETE /api/agents/:scope/:name/runs — delete all runs for an agent
   router.delete(
