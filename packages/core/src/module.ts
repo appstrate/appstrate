@@ -435,6 +435,14 @@ export interface RunStatusChangeParams {
   duration?: number;
   /** Model source: "system" or "org" (only on terminal status). */
   modelSource?: string | null;
+  /**
+   * Whether the underlying `packages` row is a shadow package (inline run).
+   * Omitted for classic runs (treat as false). Consumers — e.g. the
+   * webhooks module — surface this to subscribers so downstream systems
+   * can distinguish inline vs cataloged executions without an extra DB
+   * round-trip.
+   */
+  packageEphemeral?: boolean;
   /** Additional data for webhook payloads (result, error, etc.). */
   extra?: Record<string, unknown>;
 }

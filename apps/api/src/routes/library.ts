@@ -5,7 +5,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, applicationPackages, applications } from "@appstrate/db/schema";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { orgOrSystemFilter } from "../lib/package-helpers.ts";
+import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import type { AppEnv } from "../types/index.ts";
 
@@ -45,7 +45,7 @@ export function createLibraryRouter() {
             sql`${applicationPackages.applicationId} IN (SELECT ${applications.id} FROM ${applications} WHERE ${applications.orgId} = ${orgId})`,
           ),
         )
-        .where(orgOrSystemFilter(orgId))
+        .where(and(orgOrSystemFilter(orgId), notEphemeralFilter()))
         .orderBy(packages.id),
     ]);
 

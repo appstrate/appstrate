@@ -10,8 +10,10 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
   listUserRuns,
-  listOrgRuns,
+  listGlobalRuns,
+  type GlobalRunKind,
 } from "../services/state/index.ts";
+import { invalidRequest } from "../lib/errors.ts";
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();
 
@@ -48,7 +50,9 @@ export function createNotificationsRouter() {
     return c.json({ updated });
   });
 
-  // GET /api/runs (org runs, optionally filtered by ?user=me)
+  // GET /api/runs — global paginated run list across the application.
+  // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
+  // for inline-run filtering, ?status, ?startDate/?endDate.
   router.get("/runs", async (c) => {
     const actor = getActor(c);
     const orgId = c.get("orgId");
@@ -69,12 +73,39 @@ export function createNotificationsRouter() {
     const userFilter = c.req.query("user");
     const endUser = c.get("endUser");
 
-    // End-users always see only their own runs
-    const result =
-      userFilter === "me" || endUser
-        ? await listUserRuns(actor.id, orgId, { limit, offset, applicationId: applicationId })
-        : await listOrgRuns(orgId, { limit, offset, applicationId: applicationId });
-    return c.json(result);
+    // End-users always see only their own runs — same semantic as before.
+    if (userFilter === "me" || endUser) {
+      return c.json(await listUserRuns(actor.id, orgId, { limit, offset, applicationId }));
+    }
+
+    const rawKind = c.req.query("kind");
+    const kind: GlobalRunKind | undefined =
+      rawKind === "inline" || rawKind === "package" || rawKind === "all"
+        ? (rawKind as GlobalRunKind)
+        : undefined;
+    const status = c.req.query("status");
+    const startDateRaw = c.req.query("startDate");
+    const endDateRaw = c.req.query("endDate");
+    const startDate = startDateRaw ? new Date(startDateRaw) : undefined;
+    const endDate = endDateRaw ? new Date(endDateRaw) : undefined;
+    if (startDate && Number.isNaN(startDate.getTime())) {
+      throw invalidRequest("startDate is not a valid ISO date", "startDate");
+    }
+    if (endDate && Number.isNaN(endDate.getTime())) {
+      throw invalidRequest("endDate is not a valid ISO date", "endDate");
+    }
+
+    return c.json(
+      await listGlobalRuns(orgId, {
+        applicationId,
+        limit,
+        offset,
+        kind,
+        status,
+        startDate,
+        endDate,
+      }),
+    );
   });
 
   return router;

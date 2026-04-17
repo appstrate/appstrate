@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
+import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
 import { SidebarNavLink } from "./sidebar-nav-link";
@@ -36,7 +37,16 @@ export function NavOrg() {
   const { isAdmin } = usePermissions();
   const { features } = useAppConfig();
 
-  const hasRunning = agents?.some((f) => f.runningRuns > 0) ?? false;
+  // Inline runs live on ephemeral shadow packages that are not in `agents`,
+  // so they don't contribute to `runningRuns`. Check them separately.
+  const { data: runningInline } = usePaginatedRuns({
+    kind: "inline",
+    status: "running",
+    limit: 1,
+    offset: 0,
+  });
+  const hasRunning =
+    (agents?.some((f) => f.runningRuns > 0) ?? false) || (runningInline?.total ?? 0) > 0;
   const unread = unreadCount ?? 0;
 
   const automationItems = [

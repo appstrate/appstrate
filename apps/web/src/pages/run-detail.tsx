@@ -31,11 +31,14 @@ export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { scope, name, runId } = useParams<{ scope: string; name: string; runId: string }>();
   const packageId = `${scope}/${name}`;
+  // Skip the agent detail fetch for inline shadow packages — the shadow is
+  // filtered from catalog endpoints so the query would 404 on every view.
+  const isInlinePath = packageId.startsWith("@inline/");
   const location = useLocation();
   const stateNumber = (location.state as { runNumber?: number } | null)?.runNumber;
   const orgId = useCurrentOrgId();
   const appId = useCurrentApplicationId();
-  const { data: agent } = usePackageDetail("agent", packageId);
+  const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
   const [liveStatus, setLiveStatus] = useState<RunStatus | null>(null);
@@ -146,25 +149,34 @@ export function RunDetailPage() {
 
   const enrichedRun = run as EnrichedRun;
   const date = run.startedAt ? formatDateField(run.startedAt) : "";
+  const isInline = enrichedRun.packageEphemeral === true;
+
+  // For inline runs the agent crumb *is* the last crumb (the run itself),
+  // so omit href — PageHeader renders it as the current-page indicator.
+  const agentCrumb = isInline
+    ? {
+        label: enrichedRun.agentName
+          ? `${enrichedRun.agentName} (${t("runs.inlineBadge").toLowerCase()})`
+          : t("runs.inlineBadge"),
+      }
+    : { label: agent?.displayName || packageId || "", href: `/agents/${packageId}` };
+
+  const runCrumbLabel = runNumber
+    ? t("exec.breadcrumb", { number: runNumber })
+    : date || runId?.slice(0, 8) || "";
+
+  // Inline agents are 1:1 with their single run — the agent crumb already
+  // identifies the run, so a trailing "Run #N" crumb is redundant.
+  const breadcrumbs = [
+    { label: t("nav.orgSection", { ns: "common" }), href: "/" },
+    { label: t("detail.breadcrumb"), href: "/agents" },
+    agentCrumb,
+    ...(isInline ? [] : [{ label: runCrumbLabel }]),
+  ];
 
   return (
     <div className="p-6">
-      <PageHeader
-        title={
-          runNumber ? t("exec.breadcrumb", { number: runNumber }) : date || runId?.slice(0, 8) || ""
-        }
-        emoji="▶️"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("detail.breadcrumb"), href: "/agents" },
-          { label: agent?.displayName || packageId || "", href: `/agents/${packageId}` },
-          {
-            label: runNumber
-              ? t("exec.breadcrumb", { number: runNumber })
-              : date || runId?.slice(0, 8) || "",
-          },
-        ]}
-      />
+      <PageHeader title={runCrumbLabel} emoji="▶️" breadcrumbs={breadcrumbs} />
 
       <div className="border-border mb-4 rounded-md border">
         <RunRow run={enrichedRun} disableLink />

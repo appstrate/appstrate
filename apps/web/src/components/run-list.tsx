@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { usePaginatedRuns } from "../hooks/use-paginated-runs";
+import { usePaginatedRuns, type RunKindFilter } from "../hooks/use-paginated-runs";
 import { useAgents } from "../hooks/use-packages";
 import { RunRow } from "./run-row";
 import { EmptyState } from "./page-states";
@@ -27,6 +27,8 @@ interface RunListProps {
   firstPageBanner?: React.ReactNode;
   /** Filter runs by user -- "me" for current user only */
   user?: "me";
+  /** Filter runs by kind -- "all" | "package" | "inline" */
+  kind?: RunKindFilter;
 }
 
 export function RunList({
@@ -39,6 +41,7 @@ export function RunList({
   emptyState,
   firstPageBanner,
   user,
+  kind,
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
   const [page, setPage] = useState(0);
@@ -47,6 +50,7 @@ export function RunList({
     packageId,
     scheduleId,
     user,
+    kind,
     limit: pageSize,
     offset: page * pageSize,
   });
@@ -80,6 +84,12 @@ export function RunList({
   const resolveAgentName = (run: EnrichedRun) => {
     if (hideAgentName) return undefined;
     if (fixedAgentName) return fixedAgentName;
+    // Inline runs: use the manifest displayName snapshot (run.agentName) — the
+    // raw shadow packageId (`@inline/r-…`) is never meaningful to users, and
+    // the ephemeral row isn't in `agents` so the map lookup would miss anyway.
+    if (run.packageEphemeral === true) {
+      return run.agentName || t("runs.inlineBadge");
+    }
     return agentNameMap.get(run.packageId ?? "") ?? run.packageId ?? "\u2014";
   };
 

@@ -9,7 +9,7 @@ import { eq, and, or, sql, isNotNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, packages } from "@appstrate/db/schema";
 import { notFound, conflict } from "../lib/errors.ts";
-import { orgOrSystemFilter } from "../lib/package-helpers.ts";
+import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import type { PackageType } from "@appstrate/core/validation";
 
@@ -23,11 +23,12 @@ export async function installPackage(
   packageId: string,
   config?: Record<string, unknown>,
 ) {
-  // Verify the package exists in the org catalog (or is a system package)
+  // Verify the package exists in the org catalog (or is a system package).
+  // Ephemeral shadow packages are never installable.
   const [pkg] = await db
     .select({ id: packages.id, type: packages.type })
     .from(packages)
-    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
     .limit(1);
 
   if (!pkg) {
@@ -169,6 +170,7 @@ export async function listAccessiblePackages(
       and(
         eq(packages.type, type),
         orgOrSystemFilter(orgId),
+        notEphemeralFilter(),
         // system packages always visible, local packages only if installed
         or(eq(packages.source, "system"), isNotNull(applicationPackages.packageId)),
       ),
@@ -194,6 +196,7 @@ export async function hasPackageAccess(applicationId: string, packageId: string)
     .where(
       and(
         eq(packages.id, packageId),
+        notEphemeralFilter(),
         or(eq(packages.source, "system"), isNotNull(applicationPackages.packageId)),
       ),
     )

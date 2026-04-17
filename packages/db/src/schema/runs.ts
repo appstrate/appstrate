@@ -90,6 +90,13 @@ export const runs = pgTable(
       onDelete: "set null",
     }),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    config: jsonb("config").$type<Record<string, unknown>>(),
+    // Snapshot of the agent's @scope/name at run creation time. Survives
+    // package rename, delete, or inline-run compaction (where manifest is
+    // NULLed). Read by global /api/runs view and UI to display agent name
+    // without relying on `packages.manifest.name`.
+    agentScope: text("agent_scope"),
+    agentName: text("agent_name"),
   },
   (table) => [
     index("idx_runs_package_id").on(table.packageId),

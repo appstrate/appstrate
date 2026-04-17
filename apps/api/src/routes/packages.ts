@@ -15,7 +15,7 @@ import { installPackage, hasPackageAccess } from "../services/application-packag
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/agent-service.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
-import { orgOrSystemFilter } from "../lib/package-helpers.ts";
+import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { getVersionForDownload, replaceVersionContent } from "../services/package-versions.ts";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -1439,11 +1439,11 @@ export function createPackagesRouter() {
     const orgId = c.get("orgId");
     const versionQuery = c.req.param("version")!;
 
-    // Verify org ownership (or system package)
+    // Verify org ownership (or system package). Ephemeral shadows are hidden.
     const [pkg] = await db
       .select({ id: packages.id })
       .from(packages)
-      .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
+      .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
       .limit(1);
     if (!pkg) {
       throw notFound("Package not found");
