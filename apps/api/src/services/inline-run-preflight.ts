@@ -36,6 +36,7 @@ import {
   zodIssuesToFieldErrors,
   type ValidationFieldError,
 } from "../lib/errors.ts";
+import { parsePathMessage } from "../lib/field-errors.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { logger } from "../lib/logger.ts";
 import { validateConfig, validateInput } from "./schema.ts";
@@ -256,18 +257,11 @@ export async function runInlinePreflight(params: {
 }
 
 /**
- * Parse an inline-manifest error string (`"path: message"`) into a field entry.
- *
- * `validateManifest` returns flat strings, so we reconstruct the structured
- * shape here. The split is anchored on a strict path-like prefix
- * (alphanumeric, dots, brackets) so messages that themselves contain `": "`
- * (e.g. quoted regex patterns) don't truncate the human-readable part.
+ * Parse an inline-manifest error string into a field entry. `validateInlineManifest`
+ * already prefixes paths with `manifest.`, so no extra prefix is needed here.
  */
-const PATH_PREFIX_RE = /^([A-Za-z_][A-Za-z0-9_.[\]]*): (.+)$/s;
 function toFieldError(raw: string, code: string): ValidationFieldError {
-  const m = PATH_PREFIX_RE.exec(raw);
-  if (!m) return { field: "manifest", code, title: "Invalid Inline Manifest", message: raw };
-  return { field: m[1]!, code, title: "Invalid Inline Manifest", message: m[2]! };
+  return parsePathMessage(raw, { code, title: "Invalid Inline Manifest" });
 }
 
 /**
@@ -278,10 +272,13 @@ function toFieldError(raw: string, code: string): ValidationFieldError {
  * so we don't collapse rich detail into a single line. Otherwise we synth a
  * single entry from `param` / `code` / `title` / `message`.
  *
- * Callers MUST have already verified `err instanceof ApiError` — non-ApiError
- * instances represent infrastructure failures and should never reach here.
+ * The runtime `instanceof` guard re-throws any non-ApiError — infrastructure
+ * failures (DB, Redis, Docker) must surface as 5xx, never as a 400
+ * `validation_failed`. Call sites check the same invariant before calling
+ * here; the guard is belt-and-suspenders for future callers.
  */
-function apiErrorToFields(err: ApiError, fallbackField: string): ValidationFieldError[] {
+function apiErrorToFields(err: unknown, fallbackField: string): ValidationFieldError[] {
+  if (!(err instanceof ApiError)) throw err;
   if (err.fieldErrors && err.fieldErrors.length > 0) return err.fieldErrors;
   return [
     {
