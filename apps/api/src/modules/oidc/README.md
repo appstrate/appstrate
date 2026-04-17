@@ -310,6 +310,12 @@ DELETE FROM oauth_clients WHERE client_id = 'admin-dashboard';
 
 …then edit the env and restart. All active sessions for that client are invalidated, which is the correct loud behavior for a production change.
 
+### Auto-provisioned platform client — `APP_URL` reconciliation
+
+The platform SPA client (auto-provisioned by `ensureInstanceClient()`, `clientId` prefixed `oauth_`) follows a **different** policy than env-declared satellites: its `redirectUris` / `postLogoutRedirectUris` are silently reconciled against `APP_URL` on every boot. Same `client_id`, so outstanding tokens and live sessions remain valid. A `warn` log is emitted when an update actually happens.
+
+Why different: satellite URIs are operator-owned and drift must be loud; the platform client's URIs are entirely derived from `APP_URL` and have no operator-owned degree of freedom, so letting the DB diverge only produces breakage (the dashboard loops on `/api/auth/oauth2/authorize` and hits the per-IP rate limit). Changing `APP_URL` + restart is the supported path for domain moves and for fixing a placeholder URL set on first boot.
+
 ### Token shape
 
 Tokens minted for env-provisioned instance clients carry `actor_type: "user"` and no `org_id` claim. Satellites resolve the current org per-request via the `X-Org-Id` header — identical to the platform dashboard SPA. See `auth/strategy.ts → resolveInstanceUser` (`deferOrgResolution: true`).
