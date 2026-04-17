@@ -167,6 +167,45 @@ describe("ensureInstanceClient", () => {
       .limit(1);
     expect(after!.updatedAt!.getTime()).toBe(originalUpdatedAt);
   });
+
+  it("normalizes a trailing slash on APP_URL", async () => {
+    const { ensureInstanceClient } = await import("../../../services/oauth-admin.ts");
+    const clientId = await ensureInstanceClient("https://example.com/");
+
+    const [row] = await db
+      .select()
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, clientId))
+      .limit(1);
+    expect(row!.redirectUris).toEqual(["https://example.com/auth/callback"]);
+    expect(row!.postLogoutRedirectUris).toEqual([
+      "https://example.com",
+      "https://example.com/login",
+    ]);
+
+    // Idempotent: boot again without the slash → no-op (not a drift)
+    const sameAgain = await ensureInstanceClient("https://example.com");
+    expect(sameAgain).toBe(clientId);
+    const [after] = await db
+      .select()
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, clientId))
+      .limit(1);
+    expect(after!.redirectUris).toEqual(["https://example.com/auth/callback"]);
+  });
+
+  it("rejects APP_URL that would produce an invalid redirect URI", async () => {
+    const { ensureInstanceClient, OAuthAdminValidationError } =
+      await import("../../../services/oauth-admin.ts");
+    // `javascript:` scheme is rejected by isValidRedirectUri
+    let thrown: unknown = null;
+    try {
+      await ensureInstanceClient("javascript:alert(1)//evil");
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(OAuthAdminValidationError);
+  });
 });
 
 // ─── cachedTrustedClients snapshot ────────────────────────────────────────────

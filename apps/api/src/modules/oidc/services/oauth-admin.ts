@@ -581,11 +581,40 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
  * the per-IP rate limit (see `auth/guards.ts` `AUTHORIZE_RL_POINTS`),
  * forcing operators to wipe the DB to recover.
  *
+ * ## Concurrency
+ *
+ * The SELECT+UPDATE is not transactional. Under multi-replica boot, both
+ * replicas may detect drift and both issue the UPDATE — benign, since
+ * both compute the exact same `expectedRedirectUris` from the same
+ * `APP_URL` env var (last-write-wins with identical payloads). No
+ * coordination primitive required.
+ *
+ * ## Cache propagation across replicas
+ *
+ * `cacheInvalidate()` only clears the local per-process cache (see
+ * `CLIENT_CACHE_TTL_MS`). Other replicas may serve stale URIs from
+ * their local cache for up to one TTL window (~30s). Acceptable in
+ * practice because reconciliation only happens at boot, and all
+ * replicas boot with the same `APP_URL` and therefore reconcile
+ * independently — the old cached value never gets exercised.
+ *
  * Called from `oidcModule.init()` at boot.
  */
 export async function ensureInstanceClient(appUrl: string): Promise<string> {
-  const expectedRedirectUris = [`${appUrl}/auth/callback`];
-  const expectedPostLogoutRedirectUris = [appUrl, `${appUrl}/login`];
+  // Normalize: strip trailing slash(es) so `APP_URL=https://x.com/` does
+  // not produce `https://x.com//auth/callback`. Reconciliation on an
+  // already-created-with-trailing-slash row will also now converge to
+  // the normalized form.
+  const normalizedAppUrl = appUrl.replace(/\/+$/, "");
+  const expectedRedirectUris = [`${normalizedAppUrl}/auth/callback`];
+  const expectedPostLogoutRedirectUris = [normalizedAppUrl, `${normalizedAppUrl}/login`];
+
+  // Same validation policy as the create path below (and as every other
+  // callsite of `assertValidRedirectUris`): reject loopback-in-prod,
+  // bad schemes, etc. Keeps the update path from silently writing a
+  // value the create path would refuse, should `isValidRedirectUri`
+  // ever tighten its rules.
+  assertValidRedirectUris(expectedRedirectUris);
 
   const [existing] = await db
     .select({
@@ -615,7 +644,7 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
       logger.warn("OIDC platform client redirect URIs updated to match APP_URL", {
         module: "oidc",
         clientId: existing.clientId,
-        appUrl,
+        appUrl: normalizedAppUrl,
         redirectUrisFrom: existing.redirectUris,
         redirectUrisTo: expectedRedirectUris,
         postLogoutRedirectUrisFrom: storedPostLogout,
