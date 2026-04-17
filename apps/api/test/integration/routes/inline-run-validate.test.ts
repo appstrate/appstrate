@@ -118,6 +118,48 @@ describe("POST /api/runs/inline/validate", () => {
     expect(body.detail ?? "").toMatch(/input/i);
   });
 
+  it("accumulates errors from multiple stages in one response", async () => {
+    // Empty prompt + bad config + bad input — three independent stages must
+    // all contribute to the errors[] array. This is the entire purpose of
+    // accumulate mode: one round-trip, every problem listed.
+    const manifest = validManifest() as Record<string, unknown>;
+    manifest.config = {
+      schema: {
+        type: "object",
+        properties: { maxBullets: { type: "integer", minimum: 1 } },
+        required: ["maxBullets"],
+      },
+    };
+    manifest.input = {
+      schema: {
+        type: "object",
+        properties: { text: { type: "string", minLength: 5 } },
+        required: ["text"],
+      },
+    };
+
+    const res = await post({
+      manifest,
+      prompt: "",
+      config: {},
+      input: { text: "no" },
+    });
+    expect(res.status).toBe(400);
+
+    const body = (await res.json()) as {
+      code?: string;
+      errors?: { field: string; code: string; message: string }[];
+    };
+    expect(body.code).toBe("validation_failed");
+    expect(Array.isArray(body.errors)).toBe(true);
+
+    const fields = (body.errors ?? []).map((e) => e.field);
+    // One entry per stage at minimum: prompt, config, input.
+    expect(fields.some((f) => f.startsWith("prompt"))).toBe(true);
+    expect(fields.some((f) => f.startsWith("config"))).toBe(true);
+    expect(fields.some((f) => f.startsWith("input"))).toBe(true);
+  });
+
   it("rejects unauthenticated requests with 401", async () => {
     const res = await app.request("/api/runs/inline/validate", {
       method: "POST",
