@@ -427,6 +427,31 @@ export const schemas = {
         type: ["string", "null"],
         description: "Name of the schedule that triggered the run",
       },
+      agentScope: {
+        type: ["string", "null"],
+        description:
+          "Denormalized agent scope at run creation. Survives rename, delete, or shadow compaction — the global run view falls back to this when the source package is gone.",
+      },
+      agentName: {
+        type: ["string", "null"],
+        description: "Denormalized agent name at run creation (see agentScope).",
+      },
+      packageEphemeral: {
+        type: "boolean",
+        description:
+          "Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline).",
+      },
+      inlineManifest: {
+        type: ["object", "null"],
+        description:
+          "Inline runs only. Snapshot of the manifest submitted at run time. Null once the shadow has been compacted (see INLINE_RUN_LIMITS.retention_days).",
+        additionalProperties: true,
+      },
+      inlinePrompt: {
+        type: ["string", "null"],
+        description:
+          "Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted.",
+      },
     },
   },
   RunLog: {

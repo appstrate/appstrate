@@ -427,21 +427,7 @@ export const runsPaths = {
                 properties: {
                   runs: {
                     type: "array",
-                    items: {
-                      allOf: [
-                        { $ref: "#/components/schemas/Run" },
-                        {
-                          type: "object",
-                          properties: {
-                            packageEphemeral: {
-                              type: "boolean",
-                              description:
-                                "True when the underlying package is an inline-run shadow.",
-                            },
-                          },
-                        },
-                      ],
-                    },
+                    items: { $ref: "#/components/schemas/Run" },
                   },
                   total: { type: "integer" },
                 },
