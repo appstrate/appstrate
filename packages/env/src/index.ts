@@ -61,6 +61,22 @@ const envSchema = z
       .default("[]")
       .transform((s) => JSON.parse(s) as unknown[]),
 
+    // Platform-wide run limits (applied to EVERY run — classic + inline).
+    // Empty object means defaults apply. Validated strictly inside the API
+    // layer (apps/api/src/services/run-limits.ts); defaults are designed to
+    // be non-breaking for existing deployments.
+    PLATFORM_RUN_LIMITS: z
+      .string()
+      .default("{}")
+      .transform((s) => JSON.parse(s) as Record<string, unknown>),
+
+    // Inline-run specific limits (caps on manifest size, skills/tools count,
+    // authorized URIs, retention). See docs/specs/INLINE_RUNS.md §6.
+    INLINE_RUN_LIMITS: z
+      .string()
+      .default("{}")
+      .transform((s) => JSON.parse(s) as Record<string, unknown>),
+
     // Modules (comma-separated specifiers).
     // Default loads built-in OSS modules (oidc, webhooks).
     // Append external specifiers (npm package names) to extend.

@@ -20,6 +20,7 @@ import {
 import { initRealtime } from "../services/realtime.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../services/model-registry.ts";
+import { initRunLimits } from "../services/run-limits.ts";
 import {
   initSystemPackages,
   getSystemPackages,
@@ -100,6 +101,10 @@ export async function boot(): Promise<void> {
 
   // Verify storage backend is accessible (fail-fast if misconfigured)
   await ensureBucket();
+
+  // Parse + validate run limits (PLATFORM_RUN_LIMITS, INLINE_RUN_LIMITS).
+  // Throws at boot on invalid shape — no run can start without them.
+  initRunLimits();
 
   // Load system proxies from SYSTEM_PROXIES env var
   initSystemProxies();
