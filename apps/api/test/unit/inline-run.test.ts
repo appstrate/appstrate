@@ -85,5 +85,15 @@ describe("inline-run helpers", () => {
       const loaded = buildShadowLoadedPackage("@inline/r-2", manifest, prompt);
       expect(loaded.prompt).toBe(prompt);
     });
+
+    it("applies resolved skills/tools when deps are passed", () => {
+      const deps = {
+        skills: [{ id: "@x/skill", version: "^1.0.0" }],
+        tools: [{ id: "@x/tool", version: "^1.0.0" }],
+      };
+      const loaded = buildShadowLoadedPackage("@inline/r-3", manifest, "p", deps);
+      expect(loaded.skills).toEqual(deps.skills);
+      expect(loaded.tools).toEqual(deps.tools);
+    });
   });
 });

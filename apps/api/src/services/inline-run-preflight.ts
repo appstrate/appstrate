@@ -20,7 +20,7 @@
  */
 import { z } from "zod";
 import type { Actor } from "../lib/actor.ts";
-import type { AgentManifest, ProviderProfileMap } from "../types/index.ts";
+import type { AgentManifest, LoadedPackage, ProviderProfileMap } from "../types/index.ts";
 import { ApiError, invalidRequest } from "../lib/errors.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { validateConfig, validateInput } from "./schema.ts";
@@ -51,6 +51,7 @@ export interface InlineRunPreflightResult {
   providerProfilesOverride: Record<string, string> | undefined;
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
+  resolvedDeps: Pick<LoadedPackage, "skills" | "tools">;
 }
 
 const providerProfilesSchema = z.record(z.string(), z.uuid()).optional();
@@ -120,11 +121,17 @@ export async function runInlinePreflight(params: {
   // caller — they build the real LoadedPackage from the inserted shadowId.
   // `resolveActorProfileContext` looks up per-agent overrides by id and
   // will simply miss (no such package exists yet) — intended for preflight.
-  const probeAgent = buildShadowLoadedPackage(generateShadowPackageId(), manifest, prompt);
-  // deps are registry-only refs for inline manifests; resolve against org/system catalog before readiness
+  // Inline manifests only embed registry ID refs for skills/tools; resolve
+  // them against the org/system catalog up-front so both the readiness probe
+  // here AND the downstream run pipeline (env-builder reads agent.skills /
+  // agent.tools) see the same resolved list.
   const resolvedDeps = await resolveManifestCatalogDeps(manifest, orgId);
-  probeAgent.skills = resolvedDeps.skills;
-  probeAgent.tools = resolvedDeps.tools;
+  const probeAgent = buildShadowLoadedPackage(
+    generateShadowPackageId(),
+    manifest,
+    prompt,
+    resolvedDeps,
+  );
 
   const { defaultUserProfileId } = await resolveActorProfileContext(actor, probeAgent.id);
   const providerProfiles = await resolveProviderProfiles(
@@ -151,5 +158,6 @@ export async function runInlinePreflight(params: {
     providerProfilesOverride: providerProfilesOverride.data,
     modelIdOverride,
     proxyIdOverride,
+    resolvedDeps,
   };
 }

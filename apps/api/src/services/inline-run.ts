@@ -87,24 +87,26 @@ export async function insertShadowPackage(params: InsertShadowPackageParams): Pr
 }
 
 /**
- * Build a `LoadedPackage` from an already-inserted shadow row. Returns
- * empty skills/tools arrays — inline manifests only embed ID refs, so
- * `runInlinePreflight` is responsible for resolving them against the
- * org/system catalog (via `resolveManifestCatalogDeps`) before calling
- * `validateAgentReadiness`. Callers downstream of preflight already have
- * the resolved shadow agent and never re-invoke this builder.
+ * Build a `LoadedPackage` from an already-inserted shadow row. Inline
+ * manifests only embed ID refs, so callers must pass the resolved
+ * skills/tools (via `resolveManifestCatalogDeps`) when the returned
+ * package will flow into the run pipeline — otherwise `env-builder`
+ * will see empty arrays and skip skill/tool injection into the
+ * container. Defaults to empty arrays for callers that only need the
+ * shape (e.g. deserialization, tests).
  */
 export function buildShadowLoadedPackage(
   id: string,
   manifest: AgentManifest,
   prompt: string,
+  deps: Pick<LoadedPackage, "skills" | "tools"> = { skills: [], tools: [] },
 ): LoadedPackage {
   return {
     id,
     manifest,
     prompt,
-    skills: [],
-    tools: [],
+    skills: deps.skills,
+    tools: deps.tools,
     source: "local",
   };
 }

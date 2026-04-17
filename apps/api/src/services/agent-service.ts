@@ -42,24 +42,24 @@ function mapDependencies(
     });
 }
 
+function pickSkillsAndTools(
+  depRefs: NonNullable<DbPackageRow["depRefs"]>,
+  manifest: AgentManifest,
+): Pick<LoadedPackage, "skills" | "tools"> {
+  const deps = manifest.dependencies ?? {};
+  return {
+    skills: mapDependencies(depRefs, "skill", (deps.skills ?? {}) as Record<string, string>),
+    tools: mapDependencies(depRefs, "tool", (deps.tools ?? {}) as Record<string, string>),
+  };
+}
+
 function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
   const manifest = asRecord(row.draftManifest) as AgentManifest;
-  const deps = row.depRefs ?? [];
-
   return {
     id: row.id,
     manifest,
     prompt: row.draftContent,
-    skills: mapDependencies(
-      deps,
-      "skill",
-      (manifest.dependencies?.skills ?? {}) as Record<string, string>,
-    ),
-    tools: mapDependencies(
-      deps,
-      "tool",
-      (manifest.dependencies?.tools ?? {}) as Record<string, string>,
-    ),
+    ...pickSkillsAndTools(row.depRefs ?? [], manifest),
     source: (row.source as "system" | "local") ?? "local",
     updatedAt: row.updatedAt,
   };
@@ -106,18 +106,7 @@ export async function resolveManifestCatalogDeps(
   orgId: string,
 ): Promise<Pick<LoadedPackage, "skills" | "tools">> {
   const depRefs = await resolveDepRefs(manifest, orgId);
-  return {
-    skills: mapDependencies(
-      depRefs,
-      "skill",
-      (manifest.dependencies?.skills ?? {}) as Record<string, string>,
-    ),
-    tools: mapDependencies(
-      depRefs,
-      "tool",
-      (manifest.dependencies?.tools ?? {}) as Record<string, string>,
-    ),
-  };
+  return pickSkillsAndTools(depRefs, manifest);
 }
 
 /**

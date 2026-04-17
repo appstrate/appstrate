@@ -710,12 +710,13 @@ export function createRunsRouter() {
         providerProfiles,
         modelIdOverride,
         proxyIdOverride,
+        resolvedDeps,
       } = preflight;
 
       // ----- 2. Insert shadow row (now that we know the manifest is valid). -----
       const createdBy = actor?.type === "member" ? actor.id : null;
       const shadowId = await insertShadowPackage({ orgId, createdBy, manifest, prompt });
-      const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, prompt);
+      const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, prompt, resolvedDeps);
 
       // ----- 3. Fire the pipeline. -----
       const runId = `run_${crypto.randomUUID()}`;
