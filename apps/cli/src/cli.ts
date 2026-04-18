@@ -26,6 +26,7 @@ import { loginCommand } from "./commands/login.ts";
 import { logoutCommand } from "./commands/logout.ts";
 import { whoamiCommand } from "./commands/whoami.ts";
 import { exitWithError } from "./lib/ui.ts";
+import { CLI_VERSION } from "./lib/version.ts";
 
 // Catch stray unhandled rejections + uncaughts before Bun's default
 // stack-trace dump kicks in — commands are async and may throw after
@@ -38,7 +39,7 @@ const program = new Command();
 program
   .name("appstrate")
   .description("Official CLI for the Appstrate platform")
-  .version("0.0.0")
+  .version(CLI_VERSION)
   .option(
     "-p, --profile <name>",
     "Profile to use (overrides APPSTRATE_PROFILE / defaultProfile / 'default').",
