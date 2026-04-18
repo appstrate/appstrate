@@ -12,6 +12,11 @@ env:
 permissions:
   contents: write
   packages: write
+  # SLSA build provenance via `actions/attest-build-provenance` runs on
+  # the CLI binaries in `sign-cli` — keeps the supply-chain attestation
+  # attached to the release alongside the minisign-signed checksums.
+  id-token: write
+  attestations: write
 
 jobs:
   build-and-push:
@@ -139,8 +144,104 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # ─── CLI supply-chain: minisign-signed checksums + SLSA provenance ────────
+  #
+  # Closes the trust chain from `get.appstrate.dev` down to the running
+  # CLI binary. The published `bootstrap.sh` downloads the binary from
+  # this release + the `checksums.txt` + `checksums.txt.minisig` produced
+  # here, verifies the signature against `scripts/appstrate.pub` (shipped
+  # alongside), and refuses to exec the binary unless its SHA-256
+  # matches. Without this job the bootstrapper has no cryptographic
+  # anchor and the whole curl | bash path degrades to TLS-only trust.
+  sign-cli:
+    name: Sign CLI binaries
+    needs: build-cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download CLI binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: cli-binaries
+          merge-multiple: false
+
+      - name: Stage binaries
+        id: stage
+        run: |
+          # Each artifact extracts into its own subdir — flatten into a
+          # single directory so checksum + signing steps see one tree.
+          mkdir -p out
+          find cli-binaries -type f -name 'appstrate-*' -exec cp {} out/ \;
+          ls -la out/
+          # Fail fast if any expected target is missing — the release
+          # should not ship with a partial binary set.
+          for asset in appstrate-darwin-arm64 appstrate-darwin-x64 \
+                       appstrate-linux-x64 appstrate-linux-arm64; do
+            if [ ! -f "out/$asset" ]; then
+              echo "::error::Missing CLI binary: $asset"
+              exit 1
+            fi
+          done
+
+      - name: Generate checksums
+        run: |
+          cd out
+          # `shasum -a 256` output format matches what `sha256sum -c`
+          # expects, so `bootstrap.sh` can verify with either tool.
+          sha256sum appstrate-* > checksums.txt
+          cat checksums.txt
+
+      - name: Sign checksums with minisign
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          # Secrets are required: we intentionally fail rather than ship
+          # a release with unsigned binaries. Mixed signed/unsigned
+          # releases would force `bootstrap.sh` to tolerate missing
+          # signatures, which defeats the whole verification flow.
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ] || [ -z "${MINISIGN_PASSWORD:-}" ]; then
+            echo "::error::MINISIGN_SECRET_KEY + MINISIGN_PASSWORD secrets must be set."
+            echo "::error::Rotation SOP: docs/adr/ADR-006-cli-device-flow-monorepo.md"
+            exit 1
+          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          umask 077
+          printf '%s' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
+          printf '%s\n' "$MINISIGN_PASSWORD" | \
+            minisign -S -s /tmp/minisign.key \
+              -t "appstrate CLI $VERSION" \
+              -m out/checksums.txt
+          rm -f /tmp/minisign.key
+          # Ship the public key next to the signed checksums so air-gapped
+          # users and second-party mirrors have everything they need in
+          # one place. `scripts/appstrate.pub` is the source of truth;
+          # copying to `out/` just avoids a second checkout on the
+          # consumer side.
+          cp scripts/appstrate.pub out/appstrate.pub
+
+      - name: Attest CLI binary provenance (SLSA)
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: out/appstrate-*
+
+      - name: Upload signed bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cli-signed-bundle
+          path: |
+            out/checksums.txt
+            out/checksums.txt.minisig
+            out/appstrate.pub
+          if-no-files-found: error
+          retention-days: 7
+
   release:
-    needs: [build-and-push, build-cli]
+    needs: [build-and-push, build-cli, sign-cli]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -156,6 +257,12 @@ jobs:
           # Each artifact is extracted into its own subdir under `path`;
           # flatten by globbing in the release step below.
           merge-multiple: false
+
+      - name: Download signed bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cli-signed-bundle
+          path: cli-signed
 
       - name: Generate release notes
         id: notes
@@ -193,5 +300,11 @@ jobs:
         with:
           body: ${{ steps.notes.outputs.body }}
           # Flatten the per-artifact subdirs into a single glob so every
-          # CLI binary lands as a top-level asset on the release.
-          files: cli-binaries/*/appstrate-*
+          # CLI binary lands as a top-level asset on the release, then
+          # append the signed checksum bundle so `bootstrap.sh` can
+          # verify integrity + provenance before chmod+x on a fresh host.
+          files: |
+            cli-binaries/*/appstrate-*
+            cli-signed/checksums.txt
+            cli-signed/checksums.txt.minisig
+            cli-signed/appstrate.pub
