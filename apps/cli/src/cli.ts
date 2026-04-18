@@ -42,7 +42,19 @@ program
   .option(
     "-p, --profile <name>",
     "Profile to use (overrides APPSTRATE_PROFILE / defaultProfile / 'default').",
-  );
+  )
+  .option(
+    "--insecure",
+    "Allow connecting to a non-HTTPS, non-loopback instance. Your bearer token will be transmitted in plaintext — only use on a trusted network. Equivalent to APPSTRATE_INSECURE=1.",
+  )
+  .hook("preAction", () => {
+    // Hoist `--insecure` into the env so every downstream module that
+    // reads it (instance-url.ts::isInsecureOptIn) sees a single source
+    // of truth — no need to thread the flag through every command.
+    if (program.opts<{ insecure?: boolean }>().insecure) {
+      process.env.APPSTRATE_INSECURE = "1";
+    }
+  });
 
 program
   .command("install")

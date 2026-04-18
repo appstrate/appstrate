@@ -21,6 +21,7 @@
  */
 
 import { setTimeout as delay } from "node:timers/promises";
+import { normalizeInstance } from "./instance-url.ts";
 
 export interface DeviceCodeResponse {
   deviceCode: string;
@@ -83,7 +84,7 @@ export async function startDeviceFlow(
   clientId: string,
   scope: string,
 ): Promise<DeviceCodeResponse> {
-  const res = await fetch(`${normalizeBase(instance)}/api/auth/device/code`, {
+  const res = await fetch(`${normalizeInstance(instance)}/api/auth/device/code`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ client_id: clientId, scope }),
@@ -158,7 +159,7 @@ export async function pollDeviceFlow(
       throw new DeviceFlowError("access_denied", "Polling aborted by caller.", 0);
     }
 
-    const res = await fetch(`${normalizeBase(instance)}/api/auth/device/token`, {
+    const res = await fetch(`${normalizeInstance(instance)}/api/auth/device/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
@@ -201,10 +202,6 @@ export async function pollDeviceFlow(
     "The device code expired before the user approved it.",
     0,
   );
-}
-
-function normalizeBase(instance: string): string {
-  return instance.endsWith("/") ? instance.slice(0, -1) : instance;
 }
 
 async function parseErrorBody(res: Response): Promise<RawErrorBody> {
