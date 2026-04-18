@@ -33,6 +33,13 @@ import {
   writeEnvFile as writeTier0Env,
 } from "../lib/install/tier0.ts";
 import { openBrowser } from "../lib/install/os.ts";
+import {
+  detectInstallMode,
+  mergeEnv,
+  backupFiles,
+  restoreBackups,
+  cleanupBackups,
+} from "../lib/install/upgrade.ts";
 import { CLI_VERSION } from "../lib/version.ts";
 
 export interface InstallOptions {
@@ -182,25 +189,77 @@ async function installDockerTier(dir: string, tier: 1 | 2 | 3): Promise<void> {
     throw err;
   }
 
-  // Compose + .env.
-  const writeSpinner = spinner();
-  writeSpinner.start("Writing compose + .env");
-  await writeComposeFile(dir, tier);
-  const envVars = generateEnvForTier(tier, DEFAULT_APP_URL);
-  await writeComposeEnv(dir, renderEnvFile(envVars));
-  writeSpinner.stop(`Wrote ${dir}/docker-compose.yml + .env`);
+  // Upgrade detection: if `dir` already has a `.env` or
+  // `docker-compose.yml` we're overwriting an existing deployment.
+  // Rotating BETTER_AUTH_SECRET or CONNECTION_ENCRYPTION_KEY silently
+  // would invalidate every session and brick every stored OAuth
+  // credential — see `lib/install/upgrade.ts` for the threat model.
+  const { mode, existing } = await detectInstallMode(dir);
+  if (mode === "upgrade") {
+    const proceed = await confirm(
+      `An existing install was detected at ${dir}. Existing secrets (BETTER_AUTH_SECRET, CONNECTION_ENCRYPTION_KEY, POSTGRES_PASSWORD, …) will be preserved; the compose file will be replaced with the Tier ${tier} template. Continue?`,
+    );
+    if (!proceed) throw new Error("Upgrade cancelled.");
+  }
 
-  // Bring stack up.
-  const upSpinner = spinner();
-  upSpinner.start("Starting Appstrate (docker compose up -d)");
-  await dockerComposeUp(dir);
-  upSpinner.stop("Containers up");
+  // Backup BEFORE writing so a rollback is possible all the way back
+  // to "user's last-known-good config". The list we backup is exactly
+  // the set of files we're about to overwrite — backupFiles skips any
+  // that aren't present so a half-installed dir (only `.env`, no
+  // compose) works too.
+  const backedUp = mode === "upgrade" ? await backupFiles(dir, [".env", "docker-compose.yml"]) : [];
 
-  // Healthcheck.
-  const healthSpinner = spinner();
-  healthSpinner.start("Waiting for Appstrate to become healthy");
-  await waitForAppstrate(DEFAULT_APP_URL);
-  healthSpinner.stop("Appstrate is healthy");
+  try {
+    // Compose + .env.
+    const writeSpinner = spinner();
+    writeSpinner.start(
+      mode === "upgrade" ? "Rewriting compose + merging .env" : "Writing compose + .env",
+    );
+    await writeComposeFile(dir, tier);
+    const fresh = generateEnvForTier(tier, DEFAULT_APP_URL);
+    const envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
+    await writeComposeEnv(dir, renderEnvFile(envVars));
+    writeSpinner.stop(
+      mode === "upgrade"
+        ? `Rewrote ${dir}/docker-compose.yml (secrets preserved)`
+        : `Wrote ${dir}/docker-compose.yml + .env`,
+    );
+
+    // Bring stack up.
+    const upSpinner = spinner();
+    upSpinner.start("Starting Appstrate (docker compose up -d)");
+    await dockerComposeUp(dir);
+    upSpinner.stop("Containers up");
+
+    // Healthcheck.
+    const healthSpinner = spinner();
+    healthSpinner.start("Waiting for Appstrate to become healthy");
+    await waitForAppstrate(DEFAULT_APP_URL);
+    healthSpinner.stop("Appstrate is healthy");
+
+    // Success — clean up the backup copies. Keep them on any failure
+    // path so the user can restore manually if needed.
+    if (backedUp.length > 0) await cleanupBackups(dir, backedUp);
+  } catch (err) {
+    if (backedUp.length > 0) {
+      // Rollback: restore the user's previous config before re-raising
+      // so they're never left with a broken half-upgraded state.
+      try {
+        await restoreBackups(dir, backedUp);
+      } catch (restoreErr) {
+        const originalMsg = err instanceof Error ? err.message : String(err);
+        const restoreMsg = restoreErr instanceof Error ? restoreErr.message : String(restoreErr);
+        throw new Error(
+          `Upgrade failed (${originalMsg}). Rollback also failed (${restoreMsg}); .backup files are preserved in ${dir} for manual recovery.`,
+        );
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Upgrade failed (${msg}). Original files restored from backup; run \`docker compose up -d\` in ${dir} to resume on the previous config.`,
+      );
+    }
+    throw err;
+  }
 
   await openBrowser(DEFAULT_APP_URL);
   outro(

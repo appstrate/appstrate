@@ -38,6 +38,13 @@ jobs:
       - name: Run unit tests
         run: bun test apps/api/test/unit/ runtime-pi/ packages/connect/ packages/ui/
 
+      # CLI tests live in a separate workspace with its own bunfig.toml
+      # (no Docker preload needed), so we run them from that directory to
+      # pick up the right config and keep them fast.
+      - name: Run CLI unit tests
+        working-directory: apps/cli
+        run: bun test
+
   integration:
     name: Integration tests
     if: contains(github.event.pull_request.labels.*.name, 'integration')
