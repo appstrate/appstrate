@@ -20,10 +20,11 @@ import {
   assertDockerAvailable,
   DockerMissingError,
   dockerComposeUp,
-  findRunningComposeProject,
+  findRunningComposeProject as findRunningComposeProjectImport,
   waitForAppstrate,
   writeComposeFile,
   writeEnvFile as writeComposeEnv,
+  type RunningComposeProject,
 } from "../lib/install/tier123.ts";
 import {
   cloneAppstrateSource,
@@ -40,7 +41,10 @@ import {
   backupFiles,
   cleanupBackups,
   runWithRollback,
+  type ExistingInstall,
+  type InstallMode,
 } from "../lib/install/upgrade.ts";
+import type { EnvVars } from "../lib/install/secrets.ts";
 import {
   LEGACY_PROJECT_NAME,
   deriveProjectName,
@@ -88,15 +92,50 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
     // one-liner installer), so any prompt hangs the pipeline.
     const nonInteractive = opts.tier !== undefined;
 
-    const port = await resolveAppstratePort(opts.port, nonInteractive);
+    // Detect install mode BEFORE port resolution. On upgrade the ports
+    // we'll actually use are inherited from the existing `.env` (see
+    // `mergeEnv` — existing wins by default), and the existing stack
+    // is already bound to those ports, so a bind-based preflight would
+    // always false-positive against our own running containers. We
+    // pass the install mode + parsed env through to the port resolvers
+    // so they can skip the preflight on the inherited path.
+    const installState = await detectInstallMode(dir);
+
+    // For docker tiers, resolve the compose project name BEFORE port
+    // resolution so the resolver can cross-check with `docker compose ls`:
+    // a port bound by OUR running stack is safe to skip-preflight, a
+    // port bound by anyone else is not. Tier 0 has no compose project.
+    const project =
+      tier === 0 ? undefined : await resolveProjectName(dir, installState.existing.hasCompose);
+
+    const port = await resolveAppstratePort(
+      opts.port,
+      nonInteractive,
+      installState.mode,
+      installState.existing,
+      dir,
+      project?.name,
+    );
     const minioConsolePort =
-      tier === 3 ? await resolveMinioConsolePort(opts.minioConsolePort, nonInteractive) : undefined;
+      tier === 3
+        ? await resolveMinioConsolePort(
+            opts.minioConsolePort,
+            nonInteractive,
+            installState.mode,
+            installState.existing,
+            dir,
+            project?.name,
+          )
+        : undefined;
 
     if (tier === 0) {
       await installTier0(dir, port);
     } else {
       await installDockerTier(dir, tier, port, minioConsolePort, {
         force: opts.force ?? false,
+        mode: installState.mode,
+        existing: installState.existing,
+        project: project!,
       });
     }
   } catch (err) {
@@ -104,32 +143,107 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
   }
 }
 
+/** Default-shaped `ExistingInstall` used when the resolver is called without upgrade context. */
+const NO_EXISTING_INSTALL: ExistingInstall = { hasEnv: false, hasCompose: false, existingEnv: {} };
+
+/** DI seam for the cross-check with `docker compose ls` — tests inject a fake, production uses the real helper. */
+export interface PortResolverDeps {
+  findRunningComposeProject?: (name: string) => Promise<RunningComposeProject | null>;
+}
+
 /**
- * Parse / validate a user-supplied port. Accepts `--port` via CLI flag
- * and falls back to `$APPSTRATE_PORT`, then the tier default. Returns
- * the port after preflight: if it's free, we return it as-is; if it
- * conflicts we describe the holder, prompt for an alternative (or
- * fail fast when `nonInteractive`) and recurse on the user's pick.
+ * Decide whether the inherited port belongs to OUR running stack. Only
+ * a positive match (a live compose project whose configFiles point at
+ * `<dir>/docker-compose.yml`) lets us skip the preflight safely —
+ * otherwise a third-party process may have squatted the port after a
+ * `docker compose down` and we want the early, friendly preflight error
+ * rather than the late failure from `docker compose up`.
+ *
+ * Tier 0 has no compose project, so `projectName === undefined` keeps
+ * the legacy behaviour (skip preflight on hasEnv alone — there's no
+ * cross-check we can perform).
  */
+async function ourStackOwnsPort(
+  dir: string | undefined,
+  projectName: string | undefined,
+  findRunning: (name: string) => Promise<RunningComposeProject | null>,
+): Promise<boolean> {
+  if (projectName === undefined) return true;
+  if (dir === undefined) return true;
+  const running = await findRunning(projectName);
+  if (!running) return false;
+  const expected = join(dir, "docker-compose.yml");
+  return running.configFiles.some((p) => p === expected);
+}
+
+/** Resolve the Appstrate host port: inherit-on-upgrade (when our stack owns it) or parse-and-preflight. */
 export async function resolveAppstratePort(
   raw: string | undefined,
   nonInteractive: boolean,
+  mode: InstallMode = "fresh",
+  existing: ExistingInstall = NO_EXISTING_INSTALL,
+  dir?: string,
+  projectName?: string,
+  deps: PortResolverDeps = {},
 ): Promise<number> {
-  const requested = parsePort(raw, process.env.APPSTRATE_PORT, DEFAULT_PORT, "--port");
+  const envValue = process.env.APPSTRATE_PORT;
+  const requested = parsePort(raw, envValue, DEFAULT_PORT, "--port");
+  // Gated on `hasEnv`: a dir with only a stray compose file reaches
+  // mode="upgrade" too, but has no port to inherit — mergeEnv would
+  // produce fresh ports in that case, so we need the real preflight.
+  if (mode === "upgrade" && existing.hasEnv) {
+    const findRunning = deps.findRunningComposeProject ?? findRunningComposeProjectImport;
+    if (await ourStackOwnsPort(dir, projectName, findRunning)) {
+      const inherited = readExistingPort(existing.existingEnv, "PORT", DEFAULT_PORT);
+      // Warn only when the user actually expressed a divergent choice
+      // (either `--port` or `$APPSTRATE_PORT`); `requested === DEFAULT_PORT`
+      // via pure fallback is not a user intent we need to flag.
+      const userExpressed = (raw ?? envValue ?? "") !== "";
+      if (userExpressed && requested !== inherited) {
+        clack.log.warn(
+          `port ${requested} ignored on upgrade — existing .env pins PORT=${inherited}, and secrets/config are preserved across upgrades (see mergeEnv). Edit <dir>/.env manually to change the port.`,
+        );
+      }
+      return inherited;
+    }
+  }
   return ensurePortFree(requested, "APPSTRATE_PORT", "--port", "Appstrate", nonInteractive);
 }
 
-/** Same as `resolveAppstratePort` but for the MinIO console (Tier 3). */
+/** Resolve the MinIO console port (Tier 3); preflight-skip additionally gated on MINIO_ROOT_PASSWORD so a Tier 1/2 → 3 upgrade still probes the net-new port. */
 export async function resolveMinioConsolePort(
   raw: string | undefined,
   nonInteractive: boolean,
+  mode: InstallMode = "fresh",
+  existing: ExistingInstall = NO_EXISTING_INSTALL,
+  dir?: string,
+  projectName?: string,
+  deps: PortResolverDeps = {},
 ): Promise<number> {
-  const requested = parsePort(
-    raw,
-    process.env.APPSTRATE_MINIO_CONSOLE_PORT,
-    DEFAULT_MINIO_CONSOLE_PORT,
-    "--minio-console-port",
-  );
+  const envValue = process.env.APPSTRATE_MINIO_CONSOLE_PORT;
+  const requested = parsePort(raw, envValue, DEFAULT_MINIO_CONSOLE_PORT, "--minio-console-port");
+  // MINIO_ROOT_PASSWORD presence is the unambiguous signal that the
+  // previous install actually ran MinIO — absence means MinIO is
+  // net-new on this upgrade and its port must genuinely be free.
+  const minioWasPresent =
+    existing.hasEnv && typeof existing.existingEnv.MINIO_ROOT_PASSWORD === "string";
+  if (mode === "upgrade" && minioWasPresent) {
+    const findRunning = deps.findRunningComposeProject ?? findRunningComposeProjectImport;
+    if (await ourStackOwnsPort(dir, projectName, findRunning)) {
+      const inherited = readExistingPort(
+        existing.existingEnv,
+        "MINIO_CONSOLE_PORT",
+        DEFAULT_MINIO_CONSOLE_PORT,
+      );
+      const userExpressed = (raw ?? envValue ?? "") !== "";
+      if (userExpressed && requested !== inherited) {
+        clack.log.warn(
+          `port ${requested} ignored on upgrade — existing .env pins MINIO_CONSOLE_PORT=${inherited}. Edit <dir>/.env manually to change the port.`,
+        );
+      }
+      return inherited;
+    }
+  }
   return ensurePortFree(
     requested,
     "APPSTRATE_MINIO_CONSOLE_PORT",
@@ -137,6 +251,20 @@ export async function resolveMinioConsolePort(
     "MinIO console",
     nonInteractive,
   );
+}
+
+/** Read a port from parsed `.env`, falling back to `fallback` when absent (secrets.ts elides defaults) or malformed. */
+function readExistingPort(existingEnv: EnvVars, key: string, fallback: number): number {
+  const raw = existingEnv[key];
+  if (raw === undefined || raw === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    clack.log.warn(
+      `Ignoring invalid ${key}="${raw}" in existing .env — using default ${fallback}. Fix the .env manually to silence this warning.`,
+    );
+    return fallback;
+  }
+  return parsed;
 }
 
 /**
@@ -349,7 +477,7 @@ async function preflightProjectCollision(
   force: boolean,
 ): Promise<void> {
   if (force) return;
-  const running = await findRunningComposeProject(projectName);
+  const running = await findRunningComposeProjectImport(projectName);
   if (!running) return;
   const configPaths = running.configFiles;
   const belongsToThisDir = configPaths.some((p) => p === join(dir, "docker-compose.yml"));
@@ -381,7 +509,12 @@ async function installDockerTier(
   tier: 1 | 2 | 3,
   port: number,
   minioConsolePort: number | undefined,
-  opts: { force: boolean },
+  opts: {
+    force: boolean;
+    mode: InstallMode;
+    existing: ExistingInstall;
+    project: { name: string; origin: "sidecar" | "legacy" | "derived" };
+  },
 ): Promise<void> {
   const appUrl = appUrlForPort(port);
   // Docker.
@@ -396,24 +529,17 @@ async function installDockerTier(
     throw err;
   }
 
-  // Upgrade detection: if `dir` already has a `.env` or
-  // `docker-compose.yml` we're overwriting an existing deployment.
-  // Rotating BETTER_AUTH_SECRET or CONNECTION_ENCRYPTION_KEY silently
-  // would invalidate every session and brick every stored OAuth
-  // credential — see `lib/install/upgrade.ts` for the threat model.
-  const { mode, existing } = await detectInstallMode(dir);
+  // Upgrade detection already ran in `installCommand` (it's needed
+  // earlier to skip the port preflight against our own running stack
+  // on re-runs — see `resolveAppstratePort`). Reuse the result rather
+  // than re-probing the filesystem.
+  const { mode, existing, project } = opts;
   if (mode === "upgrade") {
     const proceed = await confirm(
       `An existing install was detected at ${dir}. Existing secrets (BETTER_AUTH_SECRET, CONNECTION_ENCRYPTION_KEY, POSTGRES_PASSWORD, …) will be preserved; the compose file will be replaced with the Tier ${tier} template. Continue?`,
     );
     if (!proceed) throw new Error("Upgrade cancelled.");
   }
-
-  // Resolve the Compose project name BEFORE any mutating step — it
-  // feeds both the preflight and `dockerComposeUp`. On a fresh install
-  // `origin === "derived"` and we must persist the name on success so
-  // subsequent upgrades pin to the exact same value.
-  const project = await resolveProjectName(dir, existing.hasCompose);
 
   // Preflight: does another install already claim this project name?
   // Only meaningful on the derived / legacy paths — a sidecar-recorded

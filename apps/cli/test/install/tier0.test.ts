@@ -17,10 +17,16 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm, writeFile, chmod, stat, readFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, chmod, stat, readFile, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
-import { detectBun, writeEnvFile, GitMissingError } from "../../src/lib/install/tier0.ts";
+import { spawnSync } from "node:child_process";
+import {
+  detectBun,
+  writeEnvFile,
+  GitMissingError,
+  cloneAppstrateSource,
+} from "../../src/lib/install/tier0.ts";
 
 let workDir: string;
 const originalPath = process.env.PATH;
@@ -98,5 +104,85 @@ describe("GitMissingError", () => {
     expect(err.message).toMatch(/git/);
     expect(err.message).toMatch(/curl/);
     expect(err.message).toMatch(/tar/);
+  });
+});
+
+/**
+ * Regression: Tier 0 has no upgrade semantics — unlike tiers 1/2/3 it
+ * cannot merge an existing `.env` or reuse an existing clone. The
+ * de-facto guard preventing `appstrate install --tier 0` from clobbering
+ * a user's work in a non-empty dir is `cloneAppstrateSource` itself,
+ * which wraps `git clone` and relies on git's native refusal to clone
+ * into a non-empty destination.
+ *
+ * This test locks that invariant down: a future refactor that replaces
+ * the clone with `mkdir + tar extract` (no emptiness check of its own)
+ * would silently lose the safety, and this test would catch it.
+ *
+ * Offline-safe: git's "destination path '...' already exists and is not
+ * an empty directory" error fires BEFORE any network access (it's a
+ * local stat on the destination), so we can point at a bogus git URL
+ * and still exercise the refusal path without a live network. If git is
+ * missing from the host (tarball fallback path) we skip — the fallback
+ * path is a separate story and covered by e2e.
+ */
+describe("cloneAppstrateSource refuses non-empty dirs (regression)", () => {
+  const gitAvailable =
+    spawnSync(platform() === "win32" ? "where" : "which", ["git"], {
+      stdio: "ignore",
+    }).status === 0;
+
+  it("rejects without touching the user's existing files", async () => {
+    if (!gitAvailable) {
+      // Tarball fallback has no emptiness check of its own — a separate
+      // concern. Skip here; e2e covers the git-less host case.
+      return;
+    }
+
+    // Drop two sentinel files that a user mid-install might have: a
+    // populated `.env` they do not want overwritten and a
+    // docker-compose.yml they might be hand-tweaking. At least one is
+    // enough to trip git's "not empty" guard; we use two to prove no
+    // file is touched.
+    const envPath = join(workDir, ".env");
+    const envBody = "BETTER_AUTH_SECRET=existing-value\nAPP_URL=http://localhost:3000\n";
+    const composePath = join(workDir, "docker-compose.yml");
+    const composeBody = "# user-edited — do not clobber\nservices: {}\n";
+    await writeFile(envPath, envBody);
+    await writeFile(composePath, composeBody);
+
+    // Pre-state: establish that the dir is observably non-empty
+    // BEFORE the call, so if the call were to somehow succeed by
+    // deleting+cloning we'd still have a recorded baseline.
+    const before = (await readdir(workDir)).sort();
+    expect(before).toEqual([".env", "docker-compose.yml"]);
+
+    // Bogus URL: git's emptiness check is local (stat on destination)
+    // and fires before it resolves/connects to the URL. Using a
+    // file:// URL to a nonexistent path keeps the test offline-safe
+    // even if git's order of operations ever shifts.
+    // The wrapper swallows git's stderr (stdio: "inherit" → terminal,
+    // not captured), so we match the wrapper's own error shape:
+    // "git clone failed: exit 128". Exit 128 is git's generic "clone
+    // preconditions not met" — emptiness check, invalid URL, etc. We
+    // care that the clone was refused; the sentinel-file assertions
+    // below prove WHY (emptiness) rather than relying on message text.
+    await expect(
+      cloneAppstrateSource(workDir, {
+        version: undefined,
+        gitUrl: "file:///definitely/not/a/real/repo/path",
+      }),
+    ).rejects.toThrow(/git clone failed/i);
+
+    // Invariant: the user's files must be byte-for-byte intact. This
+    // is the stronger guarantee — "clone errored" is necessary but not
+    // sufficient; what matters is that nothing was clobbered.
+    expect(await readFile(envPath, "utf8")).toBe(envBody);
+    expect(await readFile(composePath, "utf8")).toBe(composeBody);
+
+    // And no stray files were deposited alongside them (e.g. a partial
+    // `.git/` or `.appstrate-source.tar.gz` from a fallthrough path).
+    const after = (await readdir(workDir)).sort();
+    expect(after).toEqual([".env", "docker-compose.yml"]);
   });
 });
