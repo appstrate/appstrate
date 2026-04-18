@@ -79,9 +79,10 @@ jobs:
   # Preflight PF-1 confirmed that compiling for linux-x64 from macOS
   # produces a binary that fails at runtime with "Cannot find native
   # binding" on Linux. So each target must build on its own native
-  # runner: macOS arm64 on `macos-14` (M1), macOS x64 on `macos-13`
-  # (Intel), Linux x64 on `ubuntu-latest`, Linux arm64 on
-  # `ubuntu-24.04-arm` (GitHub's free ARM runner tier).
+  # runner: macOS arm64 on `macos-14` (M1), macOS x64 on `macos-15-intel`
+  # (last remaining Intel-macOS runner since GitHub retired macos-13),
+  # Linux x64 on `ubuntu-latest`, Linux arm64 on `ubuntu-24.04-arm`
+  # (GitHub's free ARM runner tier).
   #
   # Artifact asset names match the pattern `bootstrap.sh` downloads
   # (`appstrate-${OS}-${ARCH}`) — do NOT rename without also updating
@@ -97,7 +98,7 @@ jobs:
           - runner: macos-14
             target: bun-darwin-arm64
             asset: appstrate-darwin-arm64
-          - runner: macos-13
+          - runner: macos-15-intel
             target: bun-darwin-x64
             asset: appstrate-darwin-x64
           - runner: ubuntu-latest
