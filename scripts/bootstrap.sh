@@ -50,7 +50,11 @@ esac
 case "$OS" in
   darwin | linux) ;;
   *)
-    echo "Unsupported OS: $OS. Windows users: \`bunx @appstrate/cli install\`." >&2
+    # Windows fallback via `bunx @appstrate/cli` is tracked in
+    # https://github.com/appstrate/appstrate/issues/163 — until the npm
+    # package is published, there is no working install path on Windows
+    # and we fail loud rather than hint at something that doesn't exist.
+    echo "Unsupported OS: $OS. Only darwin and linux are supported today." >&2
     exit 1
     ;;
 esac
