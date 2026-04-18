@@ -21,6 +21,7 @@
  */
 
 import { Command } from "commander";
+import { installCommand } from "./commands/install.ts";
 import { loginCommand } from "./commands/login.ts";
 import { logoutCommand } from "./commands/logout.ts";
 import { whoamiCommand } from "./commands/whoami.ts";
@@ -42,6 +43,21 @@ program
     "-p, --profile <name>",
     "Profile to use (overrides APPSTRATE_PROFILE / defaultProfile / 'default').",
   );
+
+program
+  .command("install")
+  .description("Install Appstrate locally (Tier 0) or bring up the Docker stack (Tiers 1/2/3)")
+  .option(
+    "-t, --tier <0|1|2|3>",
+    "Skip the interactive tier prompt (0 = hobby / Bun, 1/2/3 = Docker stacks).",
+  )
+  .option("-d, --dir <path>", "Install directory (default: ~/appstrate).")
+  .action(async (opts) => {
+    await installCommand({
+      tier: typeof opts.tier === "string" ? opts.tier : undefined,
+      dir: typeof opts.dir === "string" ? opts.dir : undefined,
+    });
+  });
 
 program
   .command("login")
