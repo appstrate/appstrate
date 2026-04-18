@@ -232,6 +232,18 @@ jobs:
           grep -q "APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"" /tmp/bootstrap.sh \
             || { echo "::error::pubkey rewrite did not take effect"; exit 1; }
 
+          # ── Pre-create the install destinations ──────────────────────
+          # bootstrap.sh calls `install -m 0755 …` which does NOT create
+          # intermediate directories; we need each $APPSTRATE_BIN_DIR to
+          # exist up-front or `install` exits non-zero before the happy
+          # banner is printed (which would swallow the output via $(…)).
+          mkdir -p \
+            "$GITHUB_WORKSPACE/bin" \
+            "$GITHUB_WORKSPACE/bin-tampered" \
+            "$GITHUB_WORKSPACE/bin-sig" \
+            "$GITHUB_WORKSPACE/bin-nomini" \
+            "$GITHUB_WORKSPACE/bin-skip"
+
           # ── Start the HTTP server for the whole job ───────────────────
           cd "$ROOT"
           python3 -m http.server 8766 >/tmp/httpd.log 2>&1 &
@@ -244,8 +256,16 @@ jobs:
           export APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin"
           export PATH="$APPSTRATE_BIN_DIR:$PATH"
 
+          # Run with `set +e` around the capture so a failing bootstrap
+          # still surfaces its stdout/stderr in the log instead of being
+          # killed silently by `set -e` at the `OUT=$(...)` assignment.
+          set +e
           OUT=$(bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
           echo "$OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap exited $rc on the happy path"; exit 1; }
           echo "$OUT" | grep -q "Integrity + provenance verified" \
             || { echo "::error::bootstrap did not emit the verified banner"; exit 1; }
           echo "$OUT" | grep -q "FAKE_CLI_RAN subcommand=install" \
