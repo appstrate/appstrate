@@ -74,6 +74,8 @@ export interface ClientMetadata {
   clientId?: string;
 }
 
+const SHA256_HEX_LENGTH = 64;
+
 /**
  * Constant-time comparison of the SHA-256 hex digest of `clientSecret`
  * against the stored hash. Uses `crypto.timingSafeEqual` on raw buffers
@@ -83,10 +85,38 @@ export interface ClientMetadata {
  * `timingSafeEqual` requires equal-length buffers — we early-return on
  * length mismatch, which is safe because the stored hash length is a
  * public constant (64 hex chars) and does not leak secret material.
+ *
+ * Exported for unit testing — not part of the module's public surface.
  */
-async function sha256HexVerify(clientSecret: string, storedHash: string): Promise<boolean> {
+export async function sha256HexVerify(clientSecret: string, storedHash: string): Promise<boolean> {
   const computed = await hashSecret(clientSecret);
-  if (computed.length !== storedHash.length) return false;
+  // Invariant: hashSecret() produces SHA-256 hex (64 chars) and stored
+  // hashes were written by the same function. A length mismatch here
+  // means either the hash algorithm was changed without re-hashing
+  // existing rows (migration bug) or storedHash is corrupt/truncated —
+  // both are states that must not silently deny-all. Fail loud so the
+  // operator sees the incident.
+  if (computed.length !== SHA256_HEX_LENGTH) {
+    logger.error("oidc: hashSecret() returned unexpected length — possible algorithm drift", {
+      module: "oidc",
+      audit: true,
+      event: "oauth.client_secret.hash_length_drift",
+      expected: SHA256_HEX_LENGTH,
+      actual: computed.length,
+    });
+    throw new Error("OAuth client secret verification is misconfigured — contact the operator.");
+  }
+  if (storedHash.length !== SHA256_HEX_LENGTH) {
+    logger.warn("oidc: stored client secret hash has unexpected length — rejecting", {
+      module: "oidc",
+      audit: true,
+      event: "oauth.client_secret.stored_hash_length_mismatch",
+      expected: SHA256_HEX_LENGTH,
+      actual: storedHash.length,
+    });
+    return false;
+  }
+  // Both lengths are the known constant — safe to use timingSafeEqual.
   const a = Buffer.from(computed, "utf8");
   const b = Buffer.from(storedHash, "utf8");
   return timingSafeEqual(a, b);

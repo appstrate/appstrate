@@ -120,7 +120,22 @@ _appstrate_bootstrap() {
   curl -fsSL "$URL" -o "$TMPDIR/$ASSET"
 
   if [ "${APPSTRATE_SKIP_VERIFY:-0}" = "1" ]; then
-    warn "APPSTRATE_SKIP_VERIFY=1 — integrity + provenance checks skipped."
+    # Hard-gate the skip on CI=true. The flag exists ONLY for CI debug
+    # of the verification path itself; in any other context (interactive
+    # shell, social-engineered paste-bin) bypassing the signature +
+    # checksum gate is a security regression. Refuse loudly instead of
+    # warning — a warning on a user machine is exactly the failure mode
+    # this gate is designed to prevent.
+    if [ "${CI:-}" != "true" ]; then
+      err "APPSTRATE_SKIP_VERIFY=1 requires CI=true. Refusing to skip verification"
+      err "  on an interactive / user machine — this flag exists only for CI debug."
+      err "  If this is a CI run, export CI=true. Otherwise install minisign:"
+      err "    → macOS:   brew install minisign"
+      err "    → Debian:  sudo apt install minisign"
+      err "    → Alpine:  apk add minisign"
+      exit 1
+    fi
+    warn "APPSTRATE_SKIP_VERIFY=1 + CI=true — integrity + provenance checks skipped."
     warn "Only use this in controlled CI debug runs. Do NOT set on user machines."
     # Deliberate 5-second pause so a sysadmin auditing a paste-bin install
     # script has a visible window to Ctrl-C before execution. A silent warn
@@ -170,7 +185,28 @@ _appstrate_bootstrap() {
       cd "$TMPDIR"
       # Only the line for our asset matters — filtering keeps the tool
       # from failing on missing sibling binaries we didn't download.
-      grep " ${ASSET}\$" checksums.txt >checksums.local.txt
+      # The `|| true` lets us own the empty-result error path below
+      # instead of dying inside `grep` with a generic exit 1.
+      grep " ${ASSET}\$" checksums.txt >checksums.local.txt || true
+      # CRITICAL: `sha256sum -c` on an empty manifest exits 0 silently
+      # ("0 lines processed, 0 failures"), which would let an attacker
+      # bypass integrity by publishing a checksums.txt that's validly
+      # signed but missing our asset line (broken release matrix, asset-
+      # rename typo, or targeted tampering). Assert the line exists, and
+      # belt-and-braces assert it's the ONLY line for our asset (catches
+      # accidental duplicate entries that could mask a real mismatch).
+      if [ ! -s checksums.local.txt ]; then
+        err "Asset ${ASSET} is not listed in the signed checksums manifest."
+        err "  → This is either a broken release or tampering — do NOT execute."
+        err "  → Report: https://github.com/appstrate/appstrate/issues"
+        exit 1
+      fi
+      lines=$(wc -l <checksums.local.txt)
+      if [ "$lines" -ne 1 ]; then
+        err "Expected exactly one line for ${ASSET} in checksums.txt, got ${lines}."
+        err "  → Duplicate or malformed entries — do NOT execute."
+        exit 1
+      fi
       if have_sha256sum; then
         sha256sum -c --quiet checksums.local.txt
       elif have_shasum; then
@@ -202,7 +238,12 @@ _appstrate_bootstrap() {
   $SUDO install -m 0755 "$TMPDIR/$ASSET" "$DEST"
 
   log "Launching \`appstrate install\`"
-  exec appstrate install "$@"
+  # Exec by absolute path, NOT by `appstrate` on PATH. A different
+  # `appstrate` binary earlier in PATH (dev machine with `bun link`,
+  # stale install in /usr/local/bin shadowed by ~/.local/bin, etc.)
+  # would silently shadow the one we just verified — defeating the
+  # whole trust chain. `$DEST` is the exact file we wrote + chmod'd.
+  exec "$DEST" install "$@"
 
 }
 

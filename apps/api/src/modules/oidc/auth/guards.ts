@@ -60,6 +60,18 @@ const REVOKE_RL_POINTS = 60;
 // rarely called more than once per login; 10/min/IP is a loose ceiling.
 const DEVICE_CODE_RL_POINTS = 10;
 const DEVICE_TOKEN_RL_POINTS = 30;
+// Per-IP budget on Better Auth's `GET /device?user_code=…` endpoint
+// (mounted by `deviceAuthorization()` — see
+// `node_modules/better-auth/dist/plugins/device-authorization/routes.mjs:285-337`,
+// public, no auth, returns the device code's `status` for a given
+// `user_code`). Without a guard here this becomes an unrate-limited
+// user_code probe endpoint: an attacker can enumerate the ~34.6-bit
+// user_code space looking for a `pending` row before the legitimate
+// user reaches the consent screen, then race them to `/device/approve`
+// (where the realm guard + per-row attempts counter take over). 10/min
+// /IP is consistent with the other write-shaped device endpoints; the
+// happy path here is a single GET on consent-page render.
+const DEVICE_VERIFY_RL_POINTS = 10;
 // Per-IP budget on the BA-mounted `/device/approve` and `/device/deny`
 // endpoints. The SSR wrapper at `/activate/approve` already has its own
 // stricter limiter (5 / 15 min / IP via `rateLimitByIp`) but the direct
@@ -281,7 +293,7 @@ async function enforceClientRateLimit(clientId: string): Promise<void> {
  * with the redirect before BA reaches `createUser`. The db hook remains
  * as defense-in-depth for every other signup path.
  */
-async function enforceMagicLinkSignupPolicy(ctx: {
+export async function enforceMagicLinkSignupPolicy(ctx: {
   request?: Request;
   query?: unknown;
   context: { baseURL: string; internalAdapter?: unknown };
@@ -326,7 +338,48 @@ async function enforceMagicLinkSignupPolicy(ctx: {
 
   const rawErrorCallback = query.errorCallbackURL ?? query.callbackURL;
   if (!rawErrorCallback) return;
-  const target = new URL(decodeURIComponent(rawErrorCallback), ctx.context.baseURL);
+  const baseURL = new URL(ctx.context.baseURL);
+  const target = new URL(decodeURIComponent(rawErrorCallback), baseURL);
+  // Same-origin gate on the redirect target. Better Auth's own
+  // `originCheck` middleware (registered via `use:` on the magic-link
+  // verify route — see `node_modules/better-auth/dist/plugins/magic-link/
+  // index.mjs:87-95`) validates `errorCallbackURL` against
+  // `trustedOrigins` BEFORE running the route handler. BUT plugin
+  // `hooks.before` fire BEFORE `use:` middlewares (see
+  // `node_modules/better-auth/dist/api/to-auth-endpoints.mjs:74,100` —
+  // `runBeforeHooks` precedes `endpoint(...)` which executes the
+  // route's `use:` chain). That means at this point the URL is still
+  // attacker-controlled: an absolute `errorCallbackURL=https://evil/x`
+  // would resolve through `new URL(rawErrorCallback, baseURL)` to
+  // `https://evil/x` and be passed to `ctx.redirect()`, producing an
+  // authenticated open-redirect (attacker-controlled domain receiving
+  // a navigation that originates from the magic-link click flow,
+  // useful for branded phishing). The exploit window is narrow — only
+  // triggers when a pending OAuth client cookie is present AND its
+  // signup policy is closed AND the email is new — but the cost of
+  // closing it is one origin comparison.
+  //
+  // Fail-closed: any URL that resolves outside `baseURL.origin` is
+  // dropped and we redirect to a safe in-origin default. Logged at
+  // warn so operators can spot misconfigured callers (legit clients
+  // should always pass a same-origin URL); the normalized response
+  // still carries `?error=signup_disabled` so the OIDC login page can
+  // render the localized banner via `mapLoginErrorCode`.
+  if (target.origin !== baseURL.origin) {
+    logger.warn(
+      "oidc: magic-link signup gate received off-origin errorCallbackURL — falling back to baseURL",
+      {
+        module: "oidc",
+        audit: true,
+        event: "oidc.magic_link.error_callback.off_origin",
+        attemptedOrigin: target.origin,
+        baseOrigin: baseURL.origin,
+      },
+    );
+    const safe = new URL(baseURL);
+    safe.searchParams.set("error", "signup_disabled");
+    throw ctx.redirect(safe.toString());
+  }
   target.searchParams.set("error", "signup_disabled");
   throw ctx.redirect(target.toString());
 }
@@ -377,6 +430,15 @@ async function enforceDeviceApproveRealm(ctx: {
   // it ever changes would turn this guard into a no-op. Reading from
   // the same `device_codes` table BA writes to keeps the check anchored
   // on authoritative state.
+  //
+  // Correctness relies on the schema-level UNIQUE constraint on
+  // `device_codes.user_code` (see `schema.ts::deviceCode` and migration
+  // `0004_device_codes.sql`). Without it, two concurrently-issued rows
+  // could share a `user_code` and `.limit(1)` would silently mask the
+  // collision — picking an arbitrary row whose `clientId` may not match
+  // the one the legit user is approving. The UNIQUE B-tree also serves
+  // every `WHERE userCode = ?` lookup in this file (the SELECT here, the
+  // increment UPDATE, and the lockout UPDATE below).
   const [record] = await db
     .select({ clientId: deviceCode.clientId, status: deviceCode.status })
     .from(deviceCode)
@@ -394,6 +456,19 @@ async function enforceDeviceApproveRealm(ctx: {
   // status to `approved` right after this hook returns — further probes
   // fail at the status check above, not at the counter.
   //
+  // The UPDATE is guarded by `status = 'pending'` to close the
+  // SELECT-then-UPDATE TOCTOU window: between the SELECT above and this
+  // statement, a concurrent request can flip status to `approved` /
+  // `denied` (BA's own handler runs immediately after our hook returns
+  // for a successful approval). Without the predicate we'd waste a
+  // write incrementing `attempts` on an already-decided row, and the
+  // post-increment lockout block below would needlessly evaluate
+  // `bumped.attempts > MAX` against a now-irrelevant counter. With the
+  // predicate, the UPDATE hits 0 rows when status has flipped,
+  // `returning()` yields `[]`, `bumped` is undefined, and we short-
+  // circuit — leaving BA's own handler (which runs next) to produce
+  // the canonical "code already processed" error.
+  //
   // Documented trade-off: an authenticated user who learns a victim's
   // `user_code` (shoulder surf, leaked screenshot, CLI log copy-paste)
   // can burn it in 5 wrong-realm POSTs — the row transitions to `denied`
@@ -410,10 +485,18 @@ async function enforceDeviceApproveRealm(ctx: {
   const [bumped] = await db
     .update(deviceCode)
     .set({ attempts: sql`${deviceCode.attempts} + 1` })
-    .where(eq(deviceCode.userCode, cleanUserCode))
+    .where(and(eq(deviceCode.userCode, cleanUserCode), eq(deviceCode.status, "pending")))
     .returning({ attempts: deviceCode.attempts });
 
-  if (bumped && bumped.attempts > MAX_APPROVE_ATTEMPTS) {
+  // Row flipped to approved/denied between our SELECT and this UPDATE —
+  // defer to BA's own handler (runs next) to produce the canonical
+  // "already processed" error. We must NOT throw our own error here:
+  // the legit user might have just clicked approve from another tab,
+  // and surfacing an `access_denied` from this guard would mask BA's
+  // semantically-correct response.
+  if (!bumped) return;
+
+  if (bumped.attempts > MAX_APPROVE_ATTEMPTS) {
     // Retire the row so even a later correct-realm attempt (whether the
     // legit user or the attacker's last guess) is refused. Guarded with
     // `status = 'pending'` so we don't clobber a row that BA's handler
@@ -508,6 +591,19 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
           matcher: (ctx: { path?: string }) => ctx.path === "/device/token",
           handler: createAuthMiddleware(async (ctx) => {
             await enforceRateLimit("device-token", DEVICE_TOKEN_RL_POINTS, ctx.request);
+          }),
+        },
+        {
+          // BA's device-authorization plugin exposes `GET /device?user_code=…`
+          // for the SSR consent page to look up the status of a code. Public,
+          // no auth — without this guard it is an unrate-limited user_code
+          // probe surface. See `DEVICE_VERIFY_RL_POINTS` above for the
+          // rationale. The exact path is `/device` (not `/device/verify`),
+          // matching the upstream endpoint registration in
+          // `better-auth@1.6.5/plugins/device-authorization/routes.mjs:285`.
+          matcher: (ctx: { path?: string }) => ctx.path === "/device",
+          handler: createAuthMiddleware(async (ctx) => {
+            await enforceRateLimit("device-verify", DEVICE_VERIFY_RL_POINTS, ctx.request);
           }),
         },
         {

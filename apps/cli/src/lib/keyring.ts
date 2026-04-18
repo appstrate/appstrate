@@ -85,12 +85,15 @@ function fallbackPath(): string {
  * observed during preflight PF-1 (Debian slim without libsecret,
  * stripped CI image). If this list drifts out of sync with upstream
  * the only cost is an extra warning line — never a wrong outcome.
+ *
+ * Note: `"No matching entry"` is intentionally NOT in this list.
+ * `classifyKeyringError` checks for it FIRST and returns
+ * `"entry-missing"` before this array is consulted, so including it
+ * here would be unreachable dead code. Entry-missing is a read-path
+ * concept (the user simply hasn't logged in yet), distinct from the
+ * "no keyring daemon at all" fallback signal this list represents.
  */
-const MISSING_BACKEND_MARKERS = [
-  "Platform secure storage failure",
-  "No storage",
-  "No matching entry",
-];
+const MISSING_BACKEND_MARKERS = ["Platform secure storage failure", "No storage"];
 
 /** De-dupe stderr output across calls within the same process. */
 let _backendWarningEmitted = false;
@@ -209,10 +212,39 @@ export async function saveTokens(profile: string, tokens: Tokens): Promise<void>
   await saveToFile(profile, tokens);
 }
 
+/**
+ * Expired tokens are treated as absent to prevent stale credentials
+ * from being presented as bearer headers — the caller must re-run
+ * `appstrate login`. We don't apply a grace window: the consumer is
+ * the bearer-auth header and the server will reject an expired token
+ * regardless, so any clock-skew tolerance just delays the inevitable
+ * re-auth while widening the window in which a leaked-but-expired
+ * token could be replayed.
+ */
+function isExpired(tokens: Tokens): boolean {
+  return tokens.expiresAt <= Date.now();
+}
+
 export async function loadTokens(profile: string): Promise<Tokens | null> {
   try {
     const raw = _keyringFactory(profile).getPassword();
-    if (typeof raw === "string" && raw.length > 0) return parseTokens(raw);
+    if (typeof raw === "string" && raw.length > 0) {
+      const parsed = parseTokens(raw);
+      if (parsed && isExpired(parsed)) {
+        // Best-effort cleanup — if the keyring delete throws (broken
+        // daemon, race with another process), swallow it: the value
+        // we're returning to the caller (null) is correct regardless,
+        // and surfacing a delete error here would mask the real
+        // signal ("you need to log in again").
+        try {
+          _keyringFactory(profile).deletePassword();
+        } catch {
+          /* best-effort */
+        }
+        return null;
+      }
+      return parsed;
+    }
   } catch (err) {
     if (_shouldRefuseWindowsFallback(process.platform, err)) refuseWindowsFallback("read", err);
     // "No matching entry" on read is normal — the user simply hasn't
@@ -230,7 +262,16 @@ export async function loadTokens(profile: string): Promise<Tokens | null> {
   // Windows never reaches here: the guard above either succeeded on
   // Credential Manager or threw via `refuseWindowsFallback`.
   if (process.platform === "win32") return null;
-  return loadFromFile(profile);
+  const fromFile = await loadFromFile(profile);
+  if (fromFile && isExpired(fromFile)) {
+    // Proactively scrub the expired entry from the file store. Same
+    // rationale as the keyring branch — the caller sees `null` and
+    // re-runs login; we just don't want a stale plaintext token
+    // sitting on disk indefinitely after it stopped being usable.
+    await deleteFromFile(profile);
+    return null;
+  }
+  return fromFile;
 }
 
 export async function deleteTokens(profile: string): Promise<void> {
@@ -287,8 +328,59 @@ interface FileStore {
  */
 const fileMutex = new Mutex();
 
+/**
+ * SSH-style strict-mode check on the parent directory of the credentials
+ * file. The `mkdir(..., { mode: 0o700 })` call is a no-op when the dir
+ * already exists — so an attacker (or an earlier umask quirk, or a
+ * misguided `chmod -R` on `~/.config`) could leave the dir at 0o755 and
+ * we'd silently keep using it. World/group-readability of the parent dir
+ * is enough to enable symlink-planting and tmp-file racing attacks even
+ * though the credentials file itself is 0600.
+ *
+ * Alternative considered: `chmod(path, 0o700)` post-mkdir. Rejected to
+ * stay aligned with the credentials-file strict-mode check (~L306-323
+ * REFUSES instead of silently fixing) and SSH's own strict-mode style —
+ * silently changing perms on a user's config dir would mask whatever
+ * misconfiguration set it wrong, hiding a likely real problem.
+ *
+ * Skipped on Windows: NTFS doesn't have unix mode bits, and the file
+ * fallback is refused on win32 anyway.
+ */
+async function assertConfigDirSecure(path: string): Promise<void> {
+  if (process.platform === "win32") return;
+  const st = await stat(path);
+  const mode = st.mode & 0o777;
+  if (mode !== 0o700) {
+    throw new Error(
+      `Refusing to use ${path}: insecure directory permissions ${mode.toString(8)} (expected 700).\n` +
+        `  A world/group-readable parent directory enables symlink-planting and\n` +
+        `  tmp-file racing attacks against credentials.json even though the file\n` +
+        `  itself is 0600.\n\n` +
+        `  Fixes:\n` +
+        `    • chmod 700 "${path}"\n` +
+        `    • Or delete the directory and re-run \`appstrate login\`.`,
+    );
+  }
+  // `process.getuid()` is defined on posix only; the typings allow
+  // `undefined` so we narrow rather than `!`-assert. Matches the
+  // ownership check on the credentials file in `readFileStore`.
+  const getuid = process.getuid;
+  if (typeof getuid === "function" && st.uid !== getuid.call(process)) {
+    throw new Error(
+      `Refusing to use ${path}: directory is not owned by the current user (uid ${st.uid}).\n` +
+        `  Delete it and re-run \`appstrate login\`.`,
+    );
+  }
+}
+
 async function withLock<T>(fn: () => Promise<T>): Promise<T> {
-  await mkdir(dirname(fallbackPath()), { recursive: true, mode: 0o700 });
+  const dir = dirname(fallbackPath());
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  // Validate AFTER mkdir — mkdir is a no-op when the dir already exists,
+  // so a pre-existing 0o755 dir would slip past without this check.
+  // Placing the assertion in `withLock` covers all file-fallback ops
+  // (save/load/delete) in a single chokepoint.
+  await assertConfigDirSecure(dir);
   return fileMutex.runExclusive(fn);
 }
 
@@ -365,8 +457,25 @@ async function saveToFile(profile: string, tokens: Tokens): Promise<void> {
 }
 
 async function loadFromFile(profile: string): Promise<Tokens | null> {
-  // Reads don't need the lock: `writeFileStore` is atomic via rename,
-  // so a concurrent read sees either the old or the new complete file.
+  // Reads don't need the in-process mutex: `writeFileStore` is atomic
+  // via rename, so a concurrent read sees either the old or the new
+  // complete file. We DO still need the parent-dir strict-mode check
+  // — `withLock` is the chokepoint for save/delete, but loads bypass
+  // it for the lock-skipping reason above. Calling
+  // `assertConfigDirSecure` directly here keeps every file-fallback
+  // operation (save/load/delete) uniformly guarded against a
+  // pre-existing world-readable parent dir.
+  //
+  // ENOENT on the dir means the user has never logged in via the
+  // file fallback — return null silently rather than asserting on a
+  // path that doesn't exist.
+  const dir = dirname(fallbackPath());
+  try {
+    await assertConfigDirSecure(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
   const store = await readFileStore();
   const row = store[profile];
   if (!row) return null;

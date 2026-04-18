@@ -125,6 +125,34 @@ describe("oauth2-token per-client_id rate limit", () => {
     expect(tooEarly).toBe(0);
   });
 
+  it("429s the 11th GET /device user_code probe from the same IP", async () => {
+    // Regression: BA's `deviceAuthorization()` plugin exposes
+    // `GET /device?user_code=…` (see `node_modules/better-auth/dist/
+    // plugins/device-authorization/routes.mjs:285-337`) — public, no
+    // auth, returns the row's `status` for any matching user_code. Without
+    // a guard in `oidcGuardsPlugin`, this is an unrate-limited probe
+    // surface against the ~34.6-bit user_code space. The CLI happy path
+    // hits this once (consent-page render), so 10/min/IP is comfortable.
+    const statuses: number[] = [];
+    for (let i = 0; i < 11; i++) {
+      const res = await app.request(`/api/auth/device?user_code=BOGUS-${i}`, {
+        method: "GET",
+        // Same source IP so the per-IP limiter binds. The user_code
+        // payload is invalid but we don't care about the response body —
+        // we're asserting the 429 fires before BA's handler can probe.
+        headers: { "X-Forwarded-For": "10.0.99.1" },
+      });
+      statuses.push(res.status);
+    }
+
+    // First 10 reach BA (which 400s on unknown code); the 11th must be
+    // 429 from `enforceRateLimit("device-verify", ...)`.
+    const last = statuses[statuses.length - 1];
+    expect(last).toBe(429);
+    const tooEarly = statuses.slice(0, 10).filter((s) => s === 429).length;
+    expect(tooEarly).toBe(0);
+  });
+
   it("includes Retry-After on the 429 response", async () => {
     // Use distinct client_id so it isolates from the test above if
     // they ever run in the same Redis instance without a flush. Use an

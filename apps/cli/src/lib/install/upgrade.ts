@@ -39,8 +39,9 @@
  * usefully diagnose.
  */
 
-import { stat, readFile, copyFile, rename, unlink } from "node:fs/promises";
+import { stat, readFile, copyFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import writeFileAtomic from "write-file-atomic";
 import type { EnvVars } from "./secrets.ts";
 
 export type InstallMode = "fresh" | "upgrade";
@@ -63,8 +64,18 @@ async function fileExists(path: string): Promise<boolean> {
   try {
     await stat(path);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return false;
+    // Re-throw EACCES and friends. A permission error here means we
+    // can't reliably tell whether `<dir>/.env` already exists, and
+    // silently treating "I can't read it" as "fresh install" would
+    // cause `detectInstallMode` to return `"fresh"` → the upgrade
+    // path is bypassed → `BETTER_AUTH_SECRET` and
+    // `CONNECTION_ENCRYPTION_KEY` get rotated on top of a deployment
+    // the user just happens to be running as a different uid. Better
+    // to surface the EACCES so they can re-run with the right user.
+    throw err;
   }
 }
 
@@ -230,20 +241,27 @@ export async function cleanupBackups(dir: string, backedUp: string[]): Promise<v
 }
 
 /**
- * Convenience: atomically replace `<dir>/<name>` by writing to a
- * sibling `.tmp` file and renaming. Used for the `.env` + compose
- * writes so a crashed/killed process can never leave a half-written
- * file behind — the rename is atomic on every filesystem we target.
+ * Convenience: atomically replace `<dir>/<name>` via `write-file-atomic`.
+ * Used for the `.env` + compose writes so a crashed/killed process can
+ * never leave a half-written file behind.
+ *
+ * `write-file-atomic` (the same primitive `keyring.ts` uses) gives us
+ * what a naive `writeFile(tmp) + rename(tmp, path)` does NOT:
+ *   - O_EXCL tmp file with a crypto-random suffix (so two concurrent
+ *     `appstrate install` invocations can't collide on `.env.tmp`),
+ *   - `fsync` on the tmp fd before the rename — without this, a power
+ *     loss between rename and flush on ext4/xfs can leave `.env`
+ *     existing but zero-byte, which would brick the next boot,
+ *   - `fsync` on the parent dir after the rename so the directory
+ *     entry itself is durable,
+ *   - tmp cleanup on failure.
  *
  * Kept here (next to the backup helpers) rather than in `tier123.ts`
  * because the atomicity guarantee is an upgrade-safety feature, not
  * a tier-specific concern.
  */
 export async function atomicReplace(path: string, body: string, mode?: number): Promise<void> {
-  const tmp = `${path}.tmp`;
-  const { writeFile } = await import("node:fs/promises");
-  await writeFile(tmp, body, mode !== undefined ? { mode } : undefined);
-  await rename(tmp, path);
+  await writeFileAtomic(path, body, mode !== undefined ? { mode } : undefined);
 }
 
 /**

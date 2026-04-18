@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm, writeFile, readFile, readdir, stat } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, readdir, stat, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
 import {
@@ -76,6 +76,41 @@ describe("detectInstallMode", () => {
     expect(mode).toBe("upgrade");
     expect(existing.existingEnv.BETTER_AUTH_SECRET).toBe("keep");
     expect(existing.existingEnv.CONNECTION_ENCRYPTION_KEY).toBe("dont-rotate");
+  });
+
+  it("returns 'fresh' when .env truly does not exist (ENOENT path)", async () => {
+    // Happy-path coverage that ENOENT is treated as absence — the
+    // counterpart to the EACCES test below.
+    const { mode, existing } = await detectInstallMode(workDir);
+    expect(mode).toBe("fresh");
+    expect(existing.hasEnv).toBe(false);
+  });
+
+  it("throws when stat() returns a non-ENOENT error (EACCES is NOT silently treated as fresh)", async () => {
+    // Critical: a permission error must NOT be swallowed as
+    // `hasEnv: false`. Doing so would route the install through the
+    // fresh-install path and rotate BETTER_AUTH_SECRET +
+    // CONNECTION_ENCRYPTION_KEY on top of an existing deployment the
+    // current user just can't read. We'd rather surface the error.
+    //
+    // Note: on POSIX, `stat(file)` only needs SEARCH permission on the
+    // parent dir, not READ on the file itself — chmod 000 on the file
+    // alone won't trigger EACCES. We chmod the parent dir to 000
+    // instead, which exercises the same code path: any non-ENOENT
+    // errno from stat() must re-throw, not be coerced to `false`.
+    if (platform() === "win32") return;
+    if (process.getuid?.() === 0) return; // root bypasses unix perms
+    const subDir = join(workDir, "deployment");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(subDir);
+    await writeFile(join(subDir, ".env"), "BETTER_AUTH_SECRET=keep-me\n");
+    await chmod(subDir, 0o000);
+    try {
+      await expect(detectInstallMode(subDir)).rejects.toThrow(/EACCES|permission/i);
+    } finally {
+      // Restore perms so afterEach's rm() can clean up.
+      await chmod(subDir, 0o700);
+    }
   });
 
   it("degrades gracefully if .env is unreadable (directory, not a file)", async () => {
@@ -290,6 +325,29 @@ describe("atomicReplace", () => {
     await writeFile(target, "OLD=1\n");
     await atomicReplace(target, "NEW=1\n");
     expect(await readFile(target, "utf8")).toBe("NEW=1\n");
+  });
+
+  it("works without a mode argument (write-file-atomic must not receive `{ mode: undefined }`)", async () => {
+    // Regression guard: passing `{ mode: undefined }` to write-file-atomic
+    // can short-circuit its "infer mode from existing file" behaviour,
+    // so we deliberately omit the options object when the caller didn't
+    // pass a mode. Just assert the call resolves and the bytes land.
+    const target = join(workDir, "compose.yml");
+    await atomicReplace(target, "services: {}\n");
+    expect(await readFile(target, "utf8")).toBe("services: {}\n");
+  });
+
+  it("cleans up any tmp sibling on success — directory contains only the target", async () => {
+    // write-file-atomic uses a crypto-random suffix (not `.tmp`), so
+    // the regression we're guarding against is "stray tmp file with
+    // any suffix left in the dir". Asserting `entries.length === 1`
+    // catches both the old-style `.env.tmp` and the new-style random
+    // suffix if cleanup ever broke.
+    const target = join(workDir, ".env");
+    await atomicReplace(target, "FOO=bar\n");
+    const entries = await readdir(workDir);
+    expect(entries.length).toBe(1);
+    expect(entries[0]).toBe(".env");
   });
 });
 

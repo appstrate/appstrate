@@ -119,6 +119,41 @@ describe("device-flow brute-force lockout", () => {
     expect(final?.attempts).toBe(6);
   });
 
+  it("does not increment attempts when the row has already flipped to approved", async () => {
+    // Regression: closes the SELECT-then-UPDATE TOCTOU window in the
+    // realm guard. The `WHERE status = 'pending'` predicate on the
+    // increment UPDATE means a row that another request just flipped
+    // to `approved` (or `denied`) is left untouched. We simulate that
+    // by directly setting `status='approved'` on the row before
+    // calling /device/approve — the guard's SELECT may still see
+    // `pending` momentarily in the wild, but the predicate on the
+    // UPDATE makes the test deterministic without orchestrating two
+    // concurrent requests against PostgreSQL's snapshot isolation.
+    const cookie = await signUpEndUser("approved-row@example.com");
+    const userCode = await requestCode();
+    const clean = userCode.replace(/-/g, "").toUpperCase();
+
+    await db.update(deviceCode).set({ status: "approved" }).where(eq(deviceCode.userCode, clean));
+
+    // The status guard at the top of `enforceDeviceApproveRealm` already
+    // short-circuits before reaching the increment UPDATE on this path.
+    // The test value is in pinning the *contract* — if a future refactor
+    // moves the increment up or weakens the status check, the assertion
+    // below catches it. `attempts` MUST remain at 0 (its seed value
+    // from /device/code) regardless of how many times we POST.
+    for (let i = 0; i < 5; i++) {
+      await approve(userCode, cookie);
+    }
+
+    const [row] = await db
+      .select({ attempts: deviceCode.attempts, status: deviceCode.status })
+      .from(deviceCode)
+      .where(eq(deviceCode.userCode, clean))
+      .limit(1);
+    expect(row?.attempts).toBe(0);
+    expect(row?.status).toBe("approved");
+  });
+
   it("does not count attempts when the user_code does not match a row", async () => {
     const cookie = await signUpEndUser("nomatch@example.com");
     await requestCode(); // issue SOME code so the table isn't empty
