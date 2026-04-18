@@ -103,6 +103,10 @@ jobs:
           - runner: macos-14
             target: bun-darwin-arm64
             asset: appstrate-darwin-arm64
+          # `macos-15-intel` is GitHub's last Intel-mac runner (macos-13
+          # retired 2025-12). When it follows, drop the darwin-x64 row
+          # and ship only darwin-arm64 — Intel Macs are a rounding error
+          # on the CLI install curve by then. Tracked in ADR-006.
           - runner: macos-15-intel
             target: bun-darwin-x64
             asset: appstrate-darwin-x64
@@ -124,6 +128,21 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Stamp release version into CLI package.json
+        working-directory: apps/cli
+        run: |
+          # `lib/version.ts` imports `package.json` statically so
+          # `bun build --compile` bakes whatever version is on disk at
+          # build time. Repo default is `0.0.0` (dev). Overwrite with
+          # the tag being released so the shipped binary reports the
+          # matching semver on `appstrate --version`. jq is installed
+          # on both ubuntu-latest and macos-14/macos-15-intel runner
+          # images by default.
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
+          mv package.json.tmp package.json
+          grep '"version"' package.json
+
       - name: Compile CLI binary
         working-directory: apps/cli
         run: |
@@ -132,9 +151,18 @@ jobs:
             src/cli.ts \
             --outfile=${{ matrix.asset }}
 
-      - name: Smoke-test binary (--help)
+      - name: Smoke-test binary (--help + --version)
         working-directory: apps/cli
-        run: ./${{ matrix.asset }} --help
+        run: |
+          ./${{ matrix.asset }} --help
+          REPORTED=$(./${{ matrix.asset }} --version)
+          EXPECTED="${GITHUB_REF_NAME#v}"
+          echo "Binary reports: $REPORTED / expected: $EXPECTED"
+          if [ "$REPORTED" != "$EXPECTED" ]; then
+            echo "::error::Version mismatch — compiled binary reports '$REPORTED', tag is '$EXPECTED'."
+            echo "::error::Check that the 'Stamp release version' step ran before 'Compile CLI binary'."
+            exit 1
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
