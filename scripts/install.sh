@@ -169,8 +169,22 @@ detect_environment() {
   command_exists curl || fatal "curl not found"
   command_exists openssl || fatal "openssl not found"
 
-  # Port (auto-fallback in non-interactive mode = always for piped install)
+  # Port (auto-fallback in non-interactive mode = always for piped install).
+  #
+  # Re-install on the same port: the existing .env pins PORT to the same value,
+  # which means the running platform container is the reason the port shows as
+  # busy. Falling back to a different port here would point wait_for_health at
+  # an empty port and time out the upgrade/noop. Detect this case and reuse.
   if port_in_use "$APPSTRATE_PORT"; then
+    # `-Fx` = fixed-string (no regex meta interpretation) full-line match.
+    # APPSTRATE_PORT is already validated as numeric by the time we get here,
+    # but using a fixed-string match keeps this robust against any future
+    # change to upstream validation.
+    if [ -f "$APPSTRATE_DIR/.env" ] &&
+      grep -qFx "PORT=$APPSTRATE_PORT" "$APPSTRATE_DIR/.env" 2>/dev/null; then
+      ok "Port $APPSTRATE_PORT in use by existing install — reusing"
+      return
+    fi
     local original=$APPSTRATE_PORT
     for p in 3001 3002 3003 3010 8080; do
       if ! port_in_use "$p"; then
