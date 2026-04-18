@@ -2019,6 +2019,17 @@ export function createOidcRouter() {
       });
       return c.html(page.value, 404);
     }
+    // Status before expiry: an already-approved (or denied) row that also
+    // happens to be past `expiresAt` should show the terminal result, not
+    // an "expired" error. The user acted in time; the expiry window only
+    // matters while the code is still `pending` and awaiting approval.
+    if (record.status !== "pending") {
+      const page = renderActivateResultPage({
+        branding: PLATFORM_DEFAULT_BRANDING,
+        outcome: record.status === "approved" ? "approved" : "denied",
+      });
+      return c.html(page.value);
+    }
     if (record.expiresAt < new Date()) {
       const page = renderActivateEntryPage({
         branding: PLATFORM_DEFAULT_BRANDING,
@@ -2026,13 +2037,6 @@ export function createOidcRouter() {
         error: "Ce code a expiré. Relancez la commande pour en obtenir un nouveau.",
       });
       return c.html(page.value, 400);
-    }
-    if (record.status !== "pending") {
-      const page = renderActivateResultPage({
-        branding: PLATFORM_DEFAULT_BRANDING,
-        outcome: record.status === "approved" ? "approved" : "denied",
-      });
-      return c.html(page.value);
     }
 
     const [client] = await db

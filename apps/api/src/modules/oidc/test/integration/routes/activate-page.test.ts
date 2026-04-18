@@ -47,13 +47,15 @@ async function signUpPlatformUser(): Promise<string> {
 }
 
 async function requestDeviceCode(): Promise<{ userCode: string }> {
+  // BA's `better-call` router only accepts JSON despite RFC 8628 §3.2
+  // mandating `application/x-www-form-urlencoded`. Match the server.
   const res = await app.request("/api/auth/device/code", {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       client_id: "appstrate-cli",
       scope: "openid profile email offline_access",
-    }).toString(),
+    }),
   });
   expect(res.status).toBe(200);
   const body = (await res.json()) as { user_code: string };

@@ -18,6 +18,7 @@ import { intro, outro, askText, spinner, formatUserCode, exitWithError } from ".
 import { readConfig, resolveProfileName, setProfile } from "../lib/config.ts";
 import { saveTokens } from "../lib/keyring.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
+import { CLI_USER_AGENT } from "../lib/version.ts";
 
 /** Canonical clientId for the official CLI. Matches `ensureCliClient()` server-side. */
 const CLI_CLIENT_ID = "appstrate-cli";
@@ -116,7 +117,7 @@ async function fetchSessionIdentity(
   const res = await fetch(`${instance}/api/auth/get-session`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      "User-Agent": `appstrate-cli/${process.env.npm_package_version ?? "0.0.0"}`,
+      "User-Agent": CLI_USER_AGENT,
     },
   });
   if (!res.ok) {

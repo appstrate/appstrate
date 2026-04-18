@@ -23,24 +23,27 @@ import {
 } from "../src/lib/keyring.ts";
 
 // In-memory keyring backend + a toggle to simulate a failing daemon.
+// `throwMessage` defaults to the napi-rs/keyring error surfaced when no
+// backend is available — the expected silent-fallback path.
 class FakeKeyring implements KeyringHandle {
   static store = new Map<string, string>();
   static shouldThrow = false;
+  static throwMessage = "Platform secure storage failure";
 
   constructor(private profile: string) {}
 
   setPassword(value: string): void {
-    if (FakeKeyring.shouldThrow) throw new Error("keyring daemon unavailable");
+    if (FakeKeyring.shouldThrow) throw new Error(FakeKeyring.throwMessage);
     FakeKeyring.store.set(this.profile, value);
   }
 
   getPassword(): string | null {
-    if (FakeKeyring.shouldThrow) throw new Error("keyring daemon unavailable");
+    if (FakeKeyring.shouldThrow) throw new Error(FakeKeyring.throwMessage);
     return FakeKeyring.store.get(this.profile) ?? null;
   }
 
   deletePassword(): void {
-    if (FakeKeyring.shouldThrow) throw new Error("keyring daemon unavailable");
+    if (FakeKeyring.shouldThrow) throw new Error(FakeKeyring.throwMessage);
     FakeKeyring.store.delete(this.profile);
   }
 }
@@ -58,6 +61,7 @@ beforeEach(async () => {
   process.env.XDG_CONFIG_HOME = tmpDir;
   FakeKeyring.store.clear();
   FakeKeyring.shouldThrow = false;
+  FakeKeyring.throwMessage = "Platform secure storage failure";
   _setKeyringFactoryForTesting((profile) => new FakeKeyring(profile));
 });
 

@@ -69,11 +69,11 @@ describe("device-flow happy path", () => {
     // 1. Request a device code (no auth required at `/device/code`).
     const codeRes = await app.request("/api/auth/device/code", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         client_id: "appstrate-cli",
         scope: "openid profile email offline_access",
-      }).toString(),
+      }),
     });
     expect(codeRes.status).toBe(200);
     const code = (await codeRes.json()) as {
@@ -93,12 +93,12 @@ describe("device-flow happy path", () => {
     // 2. Poll before approval → authorization_pending.
     const pendingRes = await app.request("/api/auth/device/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",
         device_code: code.device_code,
         client_id: "appstrate-cli",
-      }).toString(),
+      }),
     });
     expect(pendingRes.status).toBe(400);
     const pendingBody = (await pendingRes.json()) as { error?: string };
@@ -112,15 +112,24 @@ describe("device-flow happy path", () => {
     });
     expect(approveRes.status).toBe(200);
 
-    // 4. Poll again → access_token issued.
+    // 4. Rewind `lastPolledAt` so the next poll doesn't trip BA's RFC
+    //    8628 §5.5 `slow_down` throttle (polling inside the 5s interval
+    //    returns 400 even once the code is approved). Production CLIs
+    //    naturally wait; tests can't afford the delay.
+    await db
+      .update(deviceCode)
+      .set({ lastPolledAt: new Date(Date.now() - 10_000) })
+      .where(eq(deviceCode.deviceCode, code.device_code));
+
+    // 5. Poll again → access_token issued.
     const tokenRes = await app.request("/api/auth/device/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",
         device_code: code.device_code,
         client_id: "appstrate-cli",
-      }).toString(),
+      }),
     });
     expect(tokenRes.status).toBe(200);
     const tokenBody = (await tokenRes.json()) as {
@@ -145,8 +154,8 @@ describe("device-flow happy path", () => {
   it("rejects unknown client_id with invalid_client", async () => {
     const res = await app.request("/api/auth/device/code", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_id: "does-not-exist" }).toString(),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "does-not-exist" }),
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error?: string };
@@ -184,8 +193,8 @@ describe("device-flow happy path", () => {
 
     const res = await app.request("/api/auth/device/code", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_id: "no-device-grant" }).toString(),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "no-device-grant" }),
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error?: string };

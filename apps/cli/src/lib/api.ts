@@ -29,6 +29,7 @@
 
 import { loadTokens } from "./keyring.ts";
 import { getProfile, type Profile } from "./config.ts";
+import { CLI_USER_AGENT } from "./version.ts";
 
 export class ApiError extends Error {
   constructor(
@@ -99,7 +100,7 @@ export async function apiFetchRaw(
   const headers: Record<string, string> = {
     ...(init.headers ?? {}),
     Authorization: `Bearer ${token}`,
-    "User-Agent": `appstrate-cli/${process.env.npm_package_version ?? "0.0.0"}`,
+    "User-Agent": CLI_USER_AGENT,
   };
   if (!headers["Content-Type"] && init.body) {
     headers["Content-Type"] = "application/json";

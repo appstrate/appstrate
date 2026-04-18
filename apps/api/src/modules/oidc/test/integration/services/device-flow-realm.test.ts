@@ -59,13 +59,16 @@ async function signUpUserWithRealm(
 }
 
 async function requestDeviceCode(): Promise<{ userCode: string; deviceCode: string }> {
+  // Better Auth's `better-call` router rejects `application/x-www-form-urlencoded`
+  // with 415 despite RFC 8628 §3.2 specifying it — send JSON to match the
+  // server reality (and the CLI client in `apps/cli/src/lib/device-flow.ts`).
   const res = await app.request("/api/auth/device/code", {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       client_id: "appstrate-cli",
       scope: "openid profile email offline_access",
-    }).toString(),
+    }),
   });
   expect(res.status).toBe(200);
   const body = (await res.json()) as { user_code: string; device_code: string };

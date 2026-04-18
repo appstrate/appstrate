@@ -38,7 +38,8 @@ import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import { db } from "@appstrate/db/client";
 import { getRateLimiterFactory } from "../../../infra/index.ts";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
-import { oauthClient } from "../schema.ts";
+import { deviceCode, oauthClient } from "../schema.ts";
+import { logger } from "../../../lib/logger.ts";
 import { loadClientSignupPolicy } from "../services/orgmember-mapping.ts";
 import { readPendingClientCookieFromHeaders } from "../services/pending-client-cookie.ts";
 import {
@@ -335,16 +336,16 @@ async function enforceDeviceApproveRealm(ctx: {
     return;
   }
 
-  // Adapter shape from Better Auth's request context — matches what
-  // `deviceAuthorization()` itself uses internally. Typed loosely to
-  // avoid pulling in `@better-auth/core` internals.
-  const adapter = (ctx.context as { adapter?: { findOne?: (args: unknown) => Promise<unknown> } })
-    .adapter;
-  if (!adapter?.findOne) return;
-  const record = (await adapter.findOne({
-    model: "deviceCode",
-    where: [{ field: "userCode", value: cleanUserCode }],
-  })) as { id?: string; clientId?: string | null; status?: string } | null;
+  // Direct Drizzle lookup rather than the BA internal adapter — the
+  // adapter shape is an internal BA contract and silently degrading if
+  // it ever changes would turn this guard into a no-op. Reading from
+  // the same `device_codes` table BA writes to keeps the check anchored
+  // on authoritative state.
+  const [record] = await db
+    .select({ clientId: deviceCode.clientId, status: deviceCode.status })
+    .from(deviceCode)
+    .where(eq(deviceCode.userCode, cleanUserCode))
+    .limit(1);
   // Unknown code / already-processed / expired — defer to BA's own
   // handler (runs next) to produce the canonical error response.
   if (!record || !record.clientId || record.status !== "pending") return;
@@ -366,9 +367,16 @@ async function enforceDeviceApproveRealm(ctx: {
     try {
       const parsed = JSON.parse(client.metadata) as Partial<ClientAudienceMetadata>;
       metadata = { ...metadata, ...parsed };
-    } catch {
-      // Corrupt metadata → fall back to column level only. expectedRealmForClient
-      // will reject if level is missing/unknown, which is the safer path.
+    } catch (err) {
+      // Corrupt metadata → fall back to column level only.
+      // `expectedRealmForClient` will reject if level is missing or
+      // unknown, which is the safer path. Surface the drift so operators
+      // can repair the row instead of it lingering silently.
+      logger.warn("oidc: oauth_clients.metadata JSON is corrupt — falling back to column level", {
+        module: "oidc",
+        clientId: record.clientId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

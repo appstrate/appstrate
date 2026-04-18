@@ -765,11 +765,11 @@ export const oidcPaths = {
       operationId: "deviceAuthorizationCode",
       summary: "Request a device + user code (RFC 8628 §3.2)",
       description:
-        "Initiates a device-authorization grant. The CLI calls this first and receives a short `user_code` to display plus an opaque `device_code` to poll `/api/auth/device/token` with. Mounted by Better Auth's `deviceAuthorization()` plugin; CLI clients are gated by `validateClient` — only OAuth clients registered with the device-code grant are accepted.",
+        "Initiates a device-authorization grant. The CLI calls this first and receives a short `user_code` to display plus an opaque `device_code` to poll `/api/auth/device/token` with. Mounted by Better Auth's `deviceAuthorization()` plugin; CLI clients are gated by `validateClient` — only OAuth clients registered with the device-code grant are accepted. **Note:** RFC 8628 §3.2 specifies `application/x-www-form-urlencoded`, but Better Auth's `better-call` router only accepts JSON. Third-party clients must send `application/json` to interoperate with this instance.",
       requestBody: {
         required: true,
         content: {
-          "application/x-www-form-urlencoded": {
+          "application/json": {
             schema: {
               type: "object",
               required: ["client_id"],
@@ -834,11 +834,11 @@ export const oidcPaths = {
       operationId: "deviceAuthorizationToken",
       summary: "Exchange approved device_code for an access token (RFC 8628 §3.4)",
       description:
-        "Polled by the CLI until the user approves or the code expires. On success, returns a BA session token as `access_token`. The token is opaque (not a JWT) and must be sent back as `Authorization: Bearer <token>` on subsequent requests.",
+        "Polled by the CLI until the user approves or the code expires. On success, returns a BA session token as `access_token`. The token is opaque (not a JWT) and must be sent back as `Authorization: Bearer <token>` on subsequent requests. **Note:** RFC 8628 §3.4 specifies `application/x-www-form-urlencoded`, but Better Auth's `better-call` router only accepts JSON. Third-party clients must send `application/json` to interoperate with this instance.",
       requestBody: {
         required: true,
         content: {
-          "application/x-www-form-urlencoded": {
+          "application/json": {
             schema: {
               type: "object",
               required: ["grant_type", "device_code", "client_id"],
