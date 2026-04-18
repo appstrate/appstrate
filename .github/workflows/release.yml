@@ -176,6 +176,23 @@ jobs:
             exit 1
           fi
 
+      # `--help` and `--version` do not exercise the `@napi-rs/keyring`
+      # native module. A cross-compile misconfiguration or a future Bun
+      # regression could ship a binary whose `require()` of the `.node`
+      # has been silently replaced by a throw stub — it would pass the
+      # checks above and crash the first time a user runs `login`. Build
+      # and run a tiny probe against the same `--target` to force the
+      # native binding to load.
+      - name: Smoke-test keyring native binding
+        working-directory: apps/cli
+        run: |
+          bun build --compile \
+            --target=${{ matrix.target }} \
+            scripts/ci-keyring-probe.ts \
+            --outfile=ci-keyring-probe
+          ./ci-keyring-probe
+          rm -f ci-keyring-probe
+
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

@@ -223,4 +223,12 @@ If you see `OS keyring ... failed ... falling back to ~/.config/appstrate/creden
 
 Source at [`apps/cli/`](../../apps/cli/). Tests at `apps/cli/test/` (unit tests, run with `bun test` from the CLI directory). E2E against a real instance: spin up an Appstrate Tier 0 with `bun run dev`, then `bun run src/cli.ts login --instance http://localhost:3000`.
 
+### Building locally
+
+`bun build --compile --target=bun-<host>` produces a working standalone binary for the **host platform** — `@napi-rs/keyring`'s native `.node` binding is resolved from `node_modules` at bundle time and embedded into the output.
+
+**Cross-compiling from a single host does not work.** `bun build --compile --target=bun-linux-x64` from a macOS machine (or any other mismatched combination) will compile successfully but replace every `require("./keyring.<target>.node")` with a `throw new Error("Cannot require module …")`, because only the host-matching `@napi-rs/keyring-<platform>` optional dependency is installed by `bun install`. The binary will start, print `--help`, and crash the moment any code path touches the keyring (`login`, `logout`, `whoami`).
+
+The release pipeline (`.github/workflows/release.yml`) handles this by running one job per target on a native runner (macOS arm64, macOS x64, Linux x64, Linux arm64) — each job's `bun install` fetches the matching native binding. If you need a binary for a platform other than your host locally, run `bun build --compile` on that target's OS or wait for a GitHub Release.
+
 Architectural decisions in [ADR-006](../../docs/adr/ADR-006-cli-device-flow-monorepo.md); implementation plan in `docs/specs/CLI_IMPLEMENTATION_PLAN.md` (local-only, gitignored); preflight results in `docs/specs/cli-preflight-results.md` (also gitignored).

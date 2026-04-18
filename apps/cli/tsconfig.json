@@ -5,5 +5,5 @@
     "noUnusedParameters": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*", "test/**/*", "package.json"]
+  "include": ["src/**/*", "test/**/*", "scripts/**/*", "package.json"]
 }
