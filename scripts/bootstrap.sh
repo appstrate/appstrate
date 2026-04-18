@@ -50,11 +50,13 @@ esac
 case "$OS" in
   darwin | linux) ;;
   *)
-    # Windows fallback via `bunx @appstrate/cli` is tracked in
-    # https://github.com/appstrate/appstrate/issues/163 — until the npm
-    # package is published, there is no working install path on Windows
-    # and we fail loud rather than hint at something that doesn't exist.
-    echo "Unsupported OS: $OS. Only darwin and linux are supported today." >&2
+    # Windows is deliberately not a v1 target — see ADR-006 § Deliverable.
+    # The recommended path on Windows is WSL2 (which reuses the linux-x64
+    # binary); `bunx @appstrate/cli install` is the Bun-native escape
+    # hatch for users who have Bun but no WSL2. We fail loud here instead
+    # of hinting at a flow this script doesn't handle.
+    echo "Unsupported OS: $OS." >&2
+    echo "On Windows, run this inside WSL2 (recommended), or install natively via: bunx @appstrate/cli install" >&2
     exit 1
     ;;
 esac

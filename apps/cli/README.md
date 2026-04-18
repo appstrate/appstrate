@@ -14,7 +14,7 @@ curl -fsSL https://get.appstrate.dev | bash
 
 Detects your OS/arch, downloads the matching binary from [GitHub Releases](https://github.com/appstrate/appstrate/releases/latest), drops it at `/usr/local/bin/appstrate`, and immediately execs `appstrate install`.
 
-Supported: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Windows users can invoke via `bunx @appstrate/cli install` (requires Bun).
+Supported: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. **Windows is not a v1 target** — run the one-liner inside WSL2 (which reuses the `linux-x64` binary), or invoke `bunx @appstrate/cli install` natively if you already have Bun on Windows.
 
 ### Alternate install paths
 
@@ -211,7 +211,7 @@ Session expired or was revoked server-side. Re-run `appstrate login`.
 The instance's `appstrate-cli` OAuth client is missing. Boot the platform — `ensureCliClient()` auto-provisions it on startup. If the instance is much older than the CLI (pre-Phase-1 device flow), the CLI binary is incompatible — downgrade via `APPSTRATE_VERSION=<older-tag> curl get.appstrate.dev | bash`.
 
 **`Docker is required for this tier but was not found`**
-`appstrate install --tier {1,2,3}` needs Docker. Install Docker Desktop (macOS / Windows) or the Docker engine (Linux) and re-run. Tier 0 doesn't need Docker.
+`appstrate install --tier {1,2,3}` needs Docker. Install Docker Desktop (macOS) or the Docker engine (Linux) and re-run. On Windows, run inside WSL2 with the Docker engine installed in the WSL distro (Docker Desktop's WSL integration also works). Tier 0 doesn't need Docker.
 
 **`Bun is not installed.`**
 Tier 0 bootstrap couldn't find `bun` on PATH. The CLI offers to install it via the upstream `curl https://bun.sh/install | bash` (user-local, no sudo). Decline to install manually from [bun.sh](https://bun.sh/).
