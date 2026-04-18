@@ -90,8 +90,8 @@ export const deviceCode = pgTable("device_codes", {
   // (`MAX_APPROVE_ATTEMPTS` in `auth/guards.ts`), the guard flips the
   // row to `status = 'denied'` so no one (attacker or legit user) can
   // approve it anymore — the code is sacrificed and a fresh one must be
-  // requested. See migration 0005_device_code_attempts for the full
-  // rationale and threat model.
+  // requested. See migration 0004_device_codes for the full rationale
+  // and threat model.
   attempts: integer("attempts").notNull().default(0),
 });
 // No extra indexes on this table: `device_code` / `user_code` lookups

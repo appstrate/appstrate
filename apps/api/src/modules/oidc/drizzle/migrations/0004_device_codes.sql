@@ -13,6 +13,16 @@
 -- metadata, so the platform-realm check for instance-level CLI clients
 -- must be injected via the guard plugin, mirroring the same pattern used
 -- for `/oauth2/token` / `/oauth2/authorize` / etc. See `auth/guards.ts`.
+--
+-- `attempts` backs brute-force lockout on `/device/approve` + `/device/deny`:
+-- the realm guard increments it on every approval attempt and transitions
+-- the row to `status = 'denied'` at `MAX_APPROVE_ATTEMPTS` (see
+-- `auth/guards.ts`). This covers the post-lookup part of the attack path —
+-- once a user_code is known (log forwarding, shoulder surf, partial
+-- disclosure via the consent page), an attacker cannot retry realm
+-- mismatches indefinitely across accounts. Guess-the-code-from-cold
+-- remains bounded by per-IP rate limits on `/device/approve` + `/activate*`
+-- and the ~34.6 bits of entropy in the 20⁸ user-code space.
 
 CREATE TABLE IF NOT EXISTS "device_codes" (
   "id" text PRIMARY KEY,
@@ -24,7 +34,8 @@ CREATE TABLE IF NOT EXISTS "device_codes" (
   "last_polled_at" timestamp,
   "polling_interval" integer,
   "client_id" text REFERENCES "oauth_clients"("client_id") ON DELETE CASCADE,
-  "scope" text
+  "scope" text,
+  "attempts" integer NOT NULL DEFAULT 0
 );
 
 -- Intentionally no extra indexes. The UNIQUE constraints on

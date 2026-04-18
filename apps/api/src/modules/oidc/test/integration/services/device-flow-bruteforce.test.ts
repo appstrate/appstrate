@@ -3,7 +3,7 @@
 /**
  * Brute-force lockout on `/device/approve` + `/device/deny`.
  *
- * Covers the attack surface described in migration 0005: an attacker
+ * Covers the attack surface described in migration 0004: an attacker
  * who has learned a valid `user_code` (leak, shoulder surf, partial
  * disclosure) should not be able to retry realm mismatches across many
  * accounts hoping to find one in the right audience. After
