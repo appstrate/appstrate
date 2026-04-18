@@ -100,9 +100,24 @@ jobs:
         # Belt-and-suspenders check: pull from the actual registry and
         # run via bunx. Catches cases where the tarball is correct but
         # npm registry metadata is wrong (bin field dropped, etc).
+        #
+        # `npm publish` returns as soon as the registry accepts the
+        # tarball, but the version may take 30-90s to appear in the
+        # public CDN that `bunx` queries — alpha.55 saw a 404 from
+        # bunx ~10s after publish. Retry with backoff so a propagation
+        # delay doesn't fail the workflow.
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          bunx -y "appstrate@${VERSION}" --help
+          for attempt in 1 2 3 4 5 6; do
+            if bunx -y "appstrate@${VERSION}" --help; then
+              echo "Smoke test passed on attempt $attempt"
+              exit 0
+            fi
+            echo "Attempt $attempt failed (registry propagation?), retrying in 20s…"
+            sleep 20
+          done
+          echo "::error::Post-publish smoke test failed after 6 attempts (~120s of backoff)."
+          exit 1
 
       - name: Create GitHub Release
         if: github.event_name == 'push'
