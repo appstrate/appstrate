@@ -72,12 +72,31 @@ jobs:
           echo "Publishing @appstrate/cli@$VERSION"
           jq '.version' package.json
 
+      - name: Pre-publish smoke test (pack + install + run locally)
+        # Build the tarball with `npm pack` (triggers `prepack` →
+        # `bun run build`), install it into a throwaway directory, and
+        # invoke the bin. This mirrors exactly what a consumer gets from
+        # `bunx @appstrate/cli`. If the bundle is broken or missing
+        # inlined assets (the #175 regression), we fail BEFORE polluting
+        # the npm registry — unlike a post-publish smoke test, this
+        # failure mode is recoverable without `npm deprecate`.
+        run: |
+          npm pack
+          TARBALL="$(ls appstrate-cli-*.tgz | head -1)"
+          WORK="$(mktemp -d)"
+          (cd "$WORK" && npm init -y >/dev/null && npm install "${GITHUB_WORKSPACE}/apps/cli/$TARBALL")
+          "$WORK/node_modules/.bin/appstrate" --help
+          rm -rf "$WORK" "$TARBALL" dist
+
       - name: Publish to npm
         run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Smoke-test published version
+      - name: Post-publish smoke test (registry → bunx)
+        # Belt-and-suspenders check: pull from the actual registry and
+        # run via bunx. Catches cases where the tarball is correct but
+        # npm registry metadata is wrong (bin field dropped, etc).
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           bunx -y "@appstrate/cli@${VERSION}" --help
