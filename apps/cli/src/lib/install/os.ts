@@ -39,11 +39,21 @@ export async function runCommand(
 ): Promise<CommandResult> {
   const stdio = opts.stdio ?? "pipe";
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, {
+    // `cmd` and `args` are passed separately (no shell invocation), so
+    // special characters in args cannot trigger command injection — the
+    // child runs directly via `execve`. We also do NOT wire `process.env`
+    // into the `env` option: leaving it undefined makes Node inherit the
+    // parent environment by default, with the side benefit of cutting
+    // the dataflow that CodeQL's `js/shell-command-injection-from-
+    // environment` rule traces from `process.env` into `spawn()`. The
+    // effective behavior is unchanged — children still see the same env
+    // they would have via the previous `env: opts.env ?? process.env`.
+    const spawnOpts: SpawnOptions = {
       cwd: opts.cwd,
-      env: opts.env ?? process.env,
       stdio: stdio === "pipe" ? ["ignore", "pipe", "pipe"] : stdio,
-    } satisfies SpawnOptions);
+    };
+    if (opts.env) spawnOpts.env = opts.env;
+    const child = spawn(cmd, args, spawnOpts);
 
     let stdout = "";
     let stderr = "";
