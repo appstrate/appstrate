@@ -51,12 +51,16 @@ const originalFetch = globalThis.fetch;
 let fetchCalls: FetchCall[];
 
 function installFetch(responder: (url: string, init?: RequestInit) => Promise<Response>): void {
-  globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+  const stub = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = typeof input === "string" ? input : input.toString();
     const headers = (init?.headers ?? {}) as Record<string, string>;
     fetchCalls.push({ url, method: init?.method, auth: headers.Authorization ?? null });
     return responder(url, init);
   };
+  // Bun's `typeof fetch` now includes a `preconnect` method we don't
+  // need for the stub; cast through unknown so the type narrowing
+  // doesn't force us to reimplement it.
+  globalThis.fetch = stub as unknown as typeof fetch;
 }
 
 beforeEach(async () => {

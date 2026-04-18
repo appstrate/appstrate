@@ -93,7 +93,7 @@ describe("writeEnvFile", () => {
     if (platform() === "win32") return;
     await writeEnvFile(workDir, "BETTER_AUTH_SECRET=deadbeef\n");
     const s = await stat(join(workDir, ".env"));
-     
+
     expect(s.mode & 0o777).toBe(0o600);
   });
 });
@@ -134,14 +134,14 @@ describe("assertDockerAvailable", () => {
 
 describe("waitForAppstrate", () => {
   it("resolves when the app URL returns 2xx", async () => {
-    globalThis.fetch = (async () => new Response("", { status: 200 })) as typeof fetch;
+    globalThis.fetch = (async () => new Response("", { status: 200 })) as unknown as typeof fetch;
     await waitForAppstrate("http://127.0.0.1:65535", 500);
   });
 
   it("throws a helpful message when the timeout elapses", async () => {
     globalThis.fetch = (async () => {
       throw new Error("ECONNREFUSED");
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     await expect(waitForAppstrate("http://127.0.0.1:65535", 50)).rejects.toThrow(
       /did not become healthy/i,
     );

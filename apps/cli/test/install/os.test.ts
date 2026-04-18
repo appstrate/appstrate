@@ -25,7 +25,7 @@ beforeEach(() => {
   // Default stub — each test overrides.
   globalThis.fetch = (async () => {
     throw new Error("no fetch stub installed");
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 });
 
 afterEach(() => {
@@ -83,14 +83,14 @@ describe("waitForHttp", () => {
     globalThis.fetch = (async () => {
       calls++;
       return new Response("", { status: 200 });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const ok = await waitForHttp("http://127.0.0.1:65535/", 3_000);
     expect(ok).toBe(true);
     expect(calls).toBe(1);
   });
 
   it("accepts 3xx redirects as healthy", async () => {
-    globalThis.fetch = (async () => new Response("", { status: 302 })) as typeof fetch;
+    globalThis.fetch = (async () => new Response("", { status: 302 })) as unknown as typeof fetch;
     const ok = await waitForHttp("http://127.0.0.1:65535/", 3_000);
     expect(ok).toBe(true);
   });
@@ -102,7 +102,7 @@ describe("waitForHttp", () => {
       // HEAD → 405, GET → 200
       if (init?.method === "HEAD") return new Response("", { status: 405 });
       return new Response("", { status: 200 });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const ok = await waitForHttp("http://127.0.0.1:65535/", 3_000);
     expect(ok).toBe(true);
     expect(methods).toEqual(["HEAD", "GET"]);
@@ -111,7 +111,7 @@ describe("waitForHttp", () => {
   it("returns false when the deadline elapses without a healthy response", async () => {
     globalThis.fetch = (async () => {
       throw new TypeError("fetch failed");
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const start = Date.now();
     const ok = await waitForHttp("http://127.0.0.1:65535/", 50);
     expect(ok).toBe(false);
@@ -126,7 +126,7 @@ describe("waitForHttp", () => {
       calls++;
       if (calls < 2) throw new TypeError("ECONNREFUSED");
       return new Response("", { status: 200 });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const ok = await waitForHttp("http://127.0.0.1:65535/", 5_000);
     expect(ok).toBe(true);
     expect(calls).toBeGreaterThanOrEqual(2);

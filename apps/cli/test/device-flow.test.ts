@@ -15,7 +15,7 @@ type Responder = (input: string | URL | Request, init?: RequestInit) => Promise<
 const originalFetch = globalThis.fetch;
 
 function installFetch(responder: Responder): void {
-  globalThis.fetch = responder as typeof fetch;
+  globalThis.fetch = responder as unknown as typeof fetch;
 }
 
 beforeEach(() => {
