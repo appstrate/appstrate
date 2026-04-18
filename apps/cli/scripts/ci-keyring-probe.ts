@@ -2,24 +2,42 @@
 
 /**
  * CI-only probe — proves that `@napi-rs/keyring`'s native `.node` binding
- * is actually embedded in the compiled binary and callable at runtime.
+ * is actually embedded in the compiled binary and loadable at runtime.
  *
- * `bun build --compile` happily produces a binary whose `require("./keyring.<target>.node")`
- * has been replaced by `throw new Error("Cannot require module …")` when the
- * target's platform package isn't present in node_modules — this happens
- * silently on mis-matched cross-compiles. `--help` and `--version` never
- * touch the native module, so the existing smoke tests would pass on a
- * binary that crashes the moment `appstrate login` is invoked.
+ * What we are guarding against
+ * ----------------------------
+ * `bun build --compile` happily produces a binary whose
+ * `require("./keyring.<target>.node")` has been replaced by a throw stub
+ * when the target's platform package isn't present in node_modules — this
+ * happens silently on mis-matched cross-compiles. `--help` and `--version`
+ * never touch the native module, so the existing smoke tests would pass
+ * on a binary that crashes the moment `appstrate login` is invoked.
  *
- * This probe exercises the one operation that forces the native `.node`
- * to load: constructing an `Entry`. Headless CI runners typically don't
- * have a secret-service daemon, so the probe accepts three outcomes:
+ * What this probe does NOT assert
+ * --------------------------------
+ * The probe does NOT verify that the platform's secret-store backend is
+ * functional or that round-trip storage works. Backend behavior on CI
+ * runners is wildly inconsistent across:
  *
- *   - `setPassword` / `getPassword` round-trip succeeds → `OK`
- *   - `Entry` construction succeeds but the operation fails with a
- *     backend-missing error → `OK (no backend)`; the CLI falls back
- *     to the 0600 JSON file in this case, which is legitimate
- *   - anything else (module not found, load error) → exit 2
+ *   - Linux: secret-service / DBus may be absent → `setPassword` throws
+ *     a `NO_BACKEND_MARKER` error.
+ *   - macOS arm64: native keychain may be locked / unauthenticated →
+ *     `setPassword` throws "Platform secure storage failure", and
+ *     `getPassword` on a fresh entry returns `null` (NOT a throw).
+ *   - macOS x64 (macos-15-intel): keychain may be in a degraded state
+ *     where `setPassword` silently succeeds but the very next
+ *     `getPassword` returns `null` (so the round-trip "succeeded" but
+ *     read back nothing).
+ *   - Windows: never observed by us; credential manager presumed
+ *     working in headed sessions, undefined in headless.
+ *
+ * Asserting any specific backend behavior produces a probe that flakes
+ * across one runner image bump or another. The ONLY robust invariant is:
+ * if the FFI bridge to the native `.node` did not load, we get a
+ * recognisable module-load error from Bun. Any other outcome — string
+ * back, null back, weird object back, throw with a backend-specific
+ * message — proves the binding loaded and surrendered control to the
+ * Rust side. That is exactly what we need to know.
  *
  * Compiled in CI with the same `--target=<matrix.target>` as the main
  * CLI binary and then executed on the matching native runner.
@@ -30,115 +48,71 @@ import { randomBytes } from "node:crypto";
 
 const SERVICE = "appstrate-ci-probe";
 // Nonce included so two reruns on the same CI runner within the same
-// second don't collide on a lingering entry if a prior probe somehow
-// wrote and failed to clean up. PID alone is not enough (same PID on a
-// recycled runner), nor is `Date.now()` (two probes in the same tick).
+// second don't collide on a lingering entry. PID alone is not enough
+// (same PID on a recycled runner), nor is `Date.now()` (two probes in
+// the same tick).
 const ACCOUNT = `probe-${process.pid}-${randomBytes(8).toString("hex")}`;
 
-const NO_BACKEND_MARKERS = [
-  "Platform secure storage failure",
-  "No secret service available",
-  "SecretService",
-  "DBus",
-  "org.freedesktop.secrets",
-];
-
 /**
- * Distinct from `NO_BACKEND_MARKERS`: these strings are what napi-rs
- * returns when the backend IS working but the probed entry simply
- * doesn't exist yet. Used on the "entry-missing" confirmation probe
- * below — if we see this wording, the backend is fully functional,
- * which is strictly stronger evidence than "no backend" alone.
+ * Bun's `--compile` stub for an absent `.node` binding throws an error
+ * whose message includes `Cannot require module` and the `.node` path.
+ * Node's native module loader uses `MODULE_NOT_FOUND` / `Cannot find
+ * module` for the same scenario. Match conservatively on those signals
+ * — a stray `.node` in an unrelated message would over-match, so the
+ * pattern requires either an explicit `Cannot require/find module`
+ * verb OR a `MODULE_NOT_FOUND` code marker.
  */
-const ENTRY_MISSING_MARKERS = ["No matching entry"];
+const MODULE_LOAD_ERROR = /Cannot (require|find) module|MODULE_NOT_FOUND/i;
 
-function isNoBackendError(err: unknown): boolean {
+function isModuleLoadError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
-  return NO_BACKEND_MARKERS.some((marker) => message.includes(marker));
+  return MODULE_LOAD_ERROR.test(message);
 }
 
-function isEntryMissingError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return ENTRY_MISSING_MARKERS.some((marker) => message.includes(marker));
-}
-
-try {
-  const entry = new Entry(SERVICE, ACCOUNT);
-  try {
-    entry.setPassword(`probe-${Date.now()}`);
-    const read = entry.getPassword();
-    entry.deletePassword();
-    if (typeof read !== "string") {
-      process.stderr.write(`FAIL: round-trip returned non-string (${typeof read})\n`);
-      process.exit(2);
-    }
-    process.stdout.write(
-      "OK: keyring round-trip succeeded (native binding loaded + backend available)\n",
-    );
-    process.exit(0);
-  } catch (opErr) {
-    if (isNoBackendError(opErr)) {
-      // Confirmation probe — a *second* operation on an entry we haven't
-      // written must also fail with a backend-missing or entry-missing
-      // error. Without this, a future regression where the native binding
-      // loads but every single operation throws a generic "SecretService"
-      // error (broad substring match in `isNoBackendError`) would pass
-      // silently — the probe's whole point is to catch such stubs. A
-      // freshly-constructed `Entry` that has never been written to MUST
-      // yield either `entry-missing` (backend working, nothing stored
-      // yet) or `no-backend`; anything else means the binding is in a
-      // degraded state we can't distinguish from a load failure.
-      try {
-        const freshEntry = new Entry(
-          SERVICE,
-          `nonexistent-${process.pid}-${randomBytes(8).toString("hex")}`,
-        );
-        const confirmRead = freshEntry.getPassword();
-        // Per `@napi-rs/keyring`'s typedef, `Entry.getPassword()` returns
-        // `string | null` — the macOS native keychain backend yields
-        // `null` for a missing entry instead of throwing `NoEntry` like
-        // the Linux secret-service backend does. Both outcomes are
-        // equally strong evidence that the native binding loaded and
-        // the backend responded, so accept either as OK. A non-null
-        // string here would mean the keychain returned a value for an
-        // account we never wrote — that's the actual regression we're
-        // guarding against.
-        if (confirmRead === null || confirmRead === undefined) {
-          process.stdout.write(
-            `OK (no backend): native binding loaded, backend unavailable on this runner — ${opErr instanceof Error ? opErr.message : String(opErr)}\n`,
-          );
-          process.exit(0);
-        }
-        process.stderr.write(
-          "FAIL: confirmation probe returned a value for an entry we never wrote.\n",
-        );
-        process.exit(2);
-      } catch (confirmErr) {
-        if (isNoBackendError(confirmErr) || isEntryMissingError(confirmErr)) {
-          process.stdout.write(
-            `OK (no backend): native binding loaded, backend unavailable on this runner — ${opErr instanceof Error ? opErr.message : String(opErr)}\n`,
-          );
-          process.exit(0);
-        }
-        process.stderr.write(
-          `FAIL: confirmation probe threw an unexpected error (native binding likely stubbed): ${confirmErr instanceof Error ? confirmErr.message : String(confirmErr)}\n`,
-        );
-        if (confirmErr instanceof Error && confirmErr.stack) {
-          process.stderr.write(confirmErr.stack + "\n");
-        }
-        process.exit(2);
-      }
-    }
-    process.stderr.write(
-      `FAIL: Entry operation failed with unexpected error: ${opErr instanceof Error ? opErr.message : String(opErr)}\n`,
-    );
-    if (opErr instanceof Error && opErr.stack) process.stderr.write(opErr.stack + "\n");
-    process.exit(2);
+function fail(reason: string, err?: unknown): never {
+  process.stderr.write(`FAIL: ${reason}\n`);
+  if (err instanceof Error) {
+    process.stderr.write(`  Error: ${err.message}\n`);
+    if (err.stack) process.stderr.write(`  Stack:\n${err.stack}\n`);
   }
-} catch (loadErr) {
-  process.stderr.write(
-    `FAIL: could not construct Entry — native binding likely missing from compiled binary. ${loadErr instanceof Error ? loadErr.message : String(loadErr)}\n`,
-  );
-  if (loadErr instanceof Error && loadErr.stack) process.stderr.write(loadErr.stack + "\n");
   process.exit(2);
+}
+
+// Step 1 — instantiate. `new Entry(...)` is the first call that forces
+// the .node FFI bridge to load. A module-load failure surfaces here.
+let entry: Entry;
+try {
+  entry = new Entry(SERVICE, ACCOUNT);
+} catch (err) {
+  if (isModuleLoadError(err)) {
+    fail("could not construct Entry — native binding missing from compiled binary.", err);
+  }
+  // Constructor threw something other than a module-load error → the
+  // binding loaded, the Rust side rejected the inputs (extremely
+  // unlikely with our hard-coded SERVICE/ACCOUNT, but if it happens
+  // the binding is still proven loaded).
+  process.stdout.write(
+    `OK: native binding loaded (constructor surrendered to Rust with non-load error: ${err instanceof Error ? err.message : String(err)})\n`,
+  );
+  process.exit(0);
+}
+
+// Step 2 — invoke a method. We pick `getPassword()` because it has no
+// side-effects on the underlying store. We do NOT care whether it
+// returns a string, returns null, or throws — only whether the throw
+// (if any) is a module-load failure.
+try {
+  const result = entry.getPassword();
+  process.stdout.write(
+    `OK: native binding loaded (getPassword returned ${result === null ? "null" : typeof result === "string" ? `string(${result.length})` : typeof result})\n`,
+  );
+  process.exit(0);
+} catch (err) {
+  if (isModuleLoadError(err)) {
+    fail("getPassword threw module-load error — native binding stubbed.", err);
+  }
+  process.stdout.write(
+    `OK: native binding loaded (getPassword threw non-load error: ${err instanceof Error ? err.message : String(err)})\n`,
+  );
+  process.exit(0);
 }
