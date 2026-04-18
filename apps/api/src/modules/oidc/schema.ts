@@ -85,6 +85,14 @@ export const deviceCode = pgTable("device_codes", {
     onDelete: "cascade",
   }),
   scope: text("scope"),
+  // Brute-force lockout counter — incremented by the realm guard on
+  // `/device/approve` + `/device/deny`. When it exceeds the threshold
+  // (`MAX_APPROVE_ATTEMPTS` in `auth/guards.ts`), the guard flips the
+  // row to `status = 'denied'` so no one (attacker or legit user) can
+  // approve it anymore — the code is sacrificed and a fresh one must be
+  // requested. See migration 0005_device_code_attempts for the full
+  // rationale and threat model.
+  attempts: integer("attempts").notNull().default(0),
 });
 // No extra indexes on this table: `device_code` / `user_code` lookups
 // go through their UNIQUE B-tree, `client_id` is never used as a query

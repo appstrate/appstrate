@@ -29,6 +29,7 @@
 
 import { loadTokens } from "./keyring.ts";
 import { getProfile, type Profile } from "./config.ts";
+import { normalizeInstance } from "./instance-url.ts";
 import { CLI_USER_AGENT } from "./version.ts";
 
 export class ApiError extends Error {
@@ -47,10 +48,6 @@ export class AuthError extends Error {
     super(message);
     this.name = "AuthError";
   }
-}
-
-function normalizeBase(instance: string): string {
-  return instance.endsWith("/") ? instance.slice(0, -1) : instance;
 }
 
 async function resolveProfileOrThrow(profileName: string): Promise<Profile> {
@@ -107,7 +104,7 @@ export async function apiFetchRaw(
   }
   if (profile.orgId) headers["X-Org-Id"] = profile.orgId;
 
-  return fetch(`${normalizeBase(profile.instance)}${path}`, { ...init, headers });
+  return fetch(`${normalizeInstance(profile.instance)}${path}`, { ...init, headers });
 }
 
 /**

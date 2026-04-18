@@ -9,6 +9,7 @@
 import * as clack from "@clack/prompts";
 import { DeviceFlowError } from "./device-flow.ts";
 import { ApiError, AuthError } from "./api.ts";
+import { InsecureInstanceError } from "./instance-url.ts";
 
 export function intro(title: string): void {
   clack.intro(title);
@@ -60,6 +61,7 @@ export function formatError(err: unknown): string {
     const base = canonical[err.code] ?? err.message;
     return `${base} (${err.code})`;
   }
+  if (err instanceof InsecureInstanceError) return err.message;
   if (err instanceof AuthError) return err.message;
   if (err instanceof ApiError) return `API error (${err.status}): ${err.message}`;
   if (err instanceof Error) return err.message;

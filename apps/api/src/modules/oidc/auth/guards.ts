@@ -33,7 +33,7 @@
  */
 
 import { createAuthMiddleware, APIError, getSessionFromCtx } from "better-auth/api";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { RateLimiterAbstract } from "rate-limiter-flexible";
 import { db } from "@appstrate/db/client";
 import { getRateLimiterFactory } from "../../../infra/index.ts";
@@ -60,6 +60,15 @@ const REVOKE_RL_POINTS = 60;
 // rarely called more than once per login; 10/min/IP is a loose ceiling.
 const DEVICE_CODE_RL_POINTS = 10;
 const DEVICE_TOKEN_RL_POINTS = 30;
+// Per-row brute-force lockout on `/device/approve` + `/device/deny`.
+// Covers the post-lookup attack path: once an attacker knows a valid
+// user_code (leaked / shoulder-surfed / partial disclosure) they cannot
+// keep retrying realm mismatches across different accounts until one
+// lands in the right audience. 5 failed attempts retire the row — the
+// legit user requests a fresh code and keeps the happy-path cost to a
+// single browser click. Pure brute-force of the 20⁸ user-code space is
+// separately constrained by the per-IP rate limits on these endpoints.
+const MAX_APPROVE_ATTEMPTS = 5;
 
 /**
  * Per-client_id brute-force limit on `/oauth2/token`. Complements the
@@ -349,6 +358,43 @@ async function enforceDeviceApproveRealm(ctx: {
   // Unknown code / already-processed / expired — defer to BA's own
   // handler (runs next) to produce the canonical error response.
   if (!record || !record.clientId || record.status !== "pending") return;
+
+  // Atomically bump the per-row attempt counter BEFORE the realm check
+  // runs so every probe counts, including cross-audience attempts that
+  // the guard below will refuse. The counter is returned post-increment
+  // so we can lock the row at the exact threshold without a read-modify-
+  // write window. When a legit user succeeds, BA's handler flips the
+  // status to `approved` right after this hook returns — further probes
+  // fail at the status check above, not at the counter.
+  const [bumped] = await db
+    .update(deviceCode)
+    .set({ attempts: sql`${deviceCode.attempts} + 1` })
+    .where(eq(deviceCode.userCode, cleanUserCode))
+    .returning({ attempts: deviceCode.attempts });
+
+  if (bumped && bumped.attempts > MAX_APPROVE_ATTEMPTS) {
+    // Retire the row so even a later correct-realm attempt (whether the
+    // legit user or the attacker's last guess) is refused. Guarded with
+    // `status = 'pending'` so we don't clobber a row that BA's handler
+    // just flipped to `approved` in a parallel request.
+    await db
+      .update(deviceCode)
+      .set({ status: "denied" })
+      .where(and(eq(deviceCode.userCode, cleanUserCode), eq(deviceCode.status, "pending")));
+    logger.warn("oidc: device approve locked out after too many failed attempts", {
+      module: "oidc",
+      audit: true,
+      event: "cli.device.approve.locked_out",
+      clientId: record.clientId,
+      userId: session.user.id,
+      attempts: bumped.attempts,
+    });
+    throw new APIError("FORBIDDEN", {
+      error: "access_denied",
+      error_description:
+        "Too many failed approval attempts for this device code. Request a new code from the CLI.",
+    });
+  }
 
   const [client] = await db
     .select({ metadata: oauthClient.metadata, level: oauthClient.level })

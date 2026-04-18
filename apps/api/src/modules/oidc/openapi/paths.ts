@@ -911,7 +911,17 @@ export const oidcPaths = {
           name: "user_code",
           in: "query",
           required: false,
-          schema: { type: "string" },
+          schema: {
+            type: "string",
+            // Mirrors the HTML form `pattern` in `pages/activate.ts` +
+            // the generator's alphabet in `auth/plugins.ts::USER_CODE_ALPHABET`
+            // (GitHub-style: no vowels, no visually-ambiguous pairs, no
+            // digits). The server accepts either casing (it uppercases
+            // before lookup) and the optional `-` inside `XXXX-XXXX` is
+            // stripped. 8 or 9 chars lets us accept the dash-separated
+            // display form AND the raw form in the same schema.
+            pattern: "^[BCDFGHJKLMNPQRSTVWXZbcdfghjklmnpqrstvwxz-]{8,9}$",
+          },
         },
       ],
       responses: {

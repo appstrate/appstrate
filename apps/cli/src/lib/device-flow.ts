@@ -21,6 +21,7 @@
  */
 
 import { setTimeout as delay } from "node:timers/promises";
+import { normalizeInstance } from "./instance-url.ts";
 
 export interface DeviceCodeResponse {
   deviceCode: string;
@@ -83,7 +84,7 @@ export async function startDeviceFlow(
   clientId: string,
   scope: string,
 ): Promise<DeviceCodeResponse> {
-  const res = await fetch(`${normalizeBase(instance)}/api/auth/device/code`, {
+  const res = await fetch(`${normalizeInstance(instance)}/api/auth/device/code`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ client_id: clientId, scope }),
@@ -121,6 +122,19 @@ export interface PollOptions {
   delayFn?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
+/**
+ * Hard ceiling on the total polling duration, independent of the
+ * `expires_in` the server returns in `/device/code`. A compromised or
+ * misbehaving server could return `expires_in: 86400` and trap the CLI
+ * in a 24-hour loop shipping tokens (or nothing) to whoever replies;
+ * this cap is the belt-and-braces limit on top of the server's own
+ * deadline. 15 minutes leaves comfortable headroom over the BA plugin's
+ * 10-minute default for legitimate slow approvals (user away from
+ * browser for a minute, looking up password, etc.). On reach, the loop
+ * exits with `expired_token` — same terminal state the legit path hits.
+ */
+const MAX_POLL_DURATION_MS = 15 * 60 * 1000;
+
 /** RFC 8628 §3.4 — poll the token endpoint until terminal response or budget exhausted. */
 export async function pollDeviceFlow(
   instance: string,
@@ -128,7 +142,12 @@ export async function pollDeviceFlow(
   clientId: string,
   opts: PollOptions,
 ): Promise<DeviceTokenResponse> {
-  const deadline = Date.now() + opts.expiresIn * 1000;
+  // Use the MIN of the server-suggested `expires_in` and our own hard
+  // ceiling so neither side can push the loop past what the other
+  // considers safe. Tests can still race through with `expiresIn: 0`
+  // because Math.min picks that value.
+  const now = Date.now();
+  const deadline = Math.min(now + opts.expiresIn * 1000, now + MAX_POLL_DURATION_MS);
   // Tests pass `interval: 0` + a no-op `delayFn` to race through the
   // loop; production code would never set either to 0. The `Math.max(0, …)`
   // guard exists only so a pathological `interval: -1` from a misbehaving
@@ -158,7 +177,7 @@ export async function pollDeviceFlow(
       throw new DeviceFlowError("access_denied", "Polling aborted by caller.", 0);
     }
 
-    const res = await fetch(`${normalizeBase(instance)}/api/auth/device/token`, {
+    const res = await fetch(`${normalizeInstance(instance)}/api/auth/device/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
@@ -201,10 +220,6 @@ export async function pollDeviceFlow(
     "The device code expired before the user approved it.",
     0,
   );
-}
-
-function normalizeBase(instance: string): string {
-  return instance.endsWith("/") ? instance.slice(0, -1) : instance;
 }
 
 async function parseErrorBody(res: Response): Promise<RawErrorBody> {

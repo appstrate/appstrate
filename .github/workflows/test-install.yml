@@ -165,3 +165,193 @@ jobs:
           echo "$TAMPER_OUT" | grep -qE "(Signature verification FAILED|tampered)" \
             || { echo "::error::verify.sh did not report tampering"; exit 1; }
           echo "✓ tamper path OK"
+
+  # End-to-end exercise of bootstrap.sh's internal verification path:
+  # fetches checksums.txt + .minisig, verifies minisign against the
+  # baked-in pubkey, verifies SHA-256 of the binary, installs, execs.
+  # We stage a fake release on a local HTTP server + rewrite bootstrap.sh's
+  # URL_BASE + pubkey constant so the trust chain uses our throwaway keypair.
+  # This guards against regressions in the checksum/signature gate that
+  # otherwise only surface after a real tag push.
+  #
+  # All scenarios run in ONE step because each `run:` block spawns a fresh
+  # shell (the background HTTP server + `trap` don't persist across steps).
+  bootstrap-verify-dry-run:
+    runs-on: ubuntu-latest
+    needs: [static, workflow-lint]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install minisign
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+
+      - name: Exercise bootstrap.sh verification path end-to-end
+        run: |
+          set -euo pipefail
+
+          # ── Stage a fake release tree served under /release/* ──────────
+          ROOT="$GITHUB_WORKSPACE/served"
+          mkdir -p "$ROOT/release"
+
+          # Fake CLI binary: prints a marker so we can assert bootstrap
+          # actually exec'd it at the tail of the trust chain.
+          cat > "$ROOT/release/appstrate-linux-x64" <<'CLI'
+          #!/usr/bin/env bash
+          echo "FAKE_CLI_RAN subcommand=$1"
+          exit 0
+          CLI
+          chmod +x "$ROOT/release/appstrate-linux-x64"
+
+          # Checksum manifest — `<hash>  <filename>` format matches the
+          # GNU `sha256sum -c` input format bootstrap.sh uses.
+          (cd "$ROOT/release" && sha256sum appstrate-linux-x64 > checksums.txt)
+
+          # Throwaway signing key (CI-friendly, unencrypted).
+          umask 077
+          minisign -G -W -f -p /tmp/dry.pub -s /tmp/dry.key
+          minisign -S -s /tmp/dry.key -t "dry-run" -m "$ROOT/release/checksums.txt"
+          cp "$ROOT/release/checksums.txt.minisig" "$ROOT/release/checksums.txt.minisig.signed"
+
+          PUBKEY=$(grep -v '^untrusted' /tmp/dry.pub | head -1 | tr -d '\n')
+
+          # ── Rewrite bootstrap.sh: URL_BASE → localhost, pubkey → ours ──
+          # `latest` and pinned paths both hit the same served dir because
+          # we only maintain one release tree.
+          # shellcheck disable=SC2016  # `${VERSION}` is literal in the sed pattern
+          sed \
+            -e "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" \
+            -e 's|https://github.com/appstrate/appstrate-oss/releases/latest/download|http://localhost:8766/release|' \
+            -e 's|https://github.com/appstrate/appstrate-oss/releases/download/${VERSION}|http://localhost:8766/release|' \
+            -e "s|APPSTRATE_MINISIGN_PUBKEY=\"[^\"]*\"|APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"|" \
+            scripts/bootstrap.sh > /tmp/bootstrap.sh
+          bash -n /tmp/bootstrap.sh
+
+          grep -q "http://localhost:8766/release" /tmp/bootstrap.sh \
+            || { echo "::error::URL_BASE rewrite did not take effect"; exit 1; }
+          grep -q "APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"" /tmp/bootstrap.sh \
+            || { echo "::error::pubkey rewrite did not take effect"; exit 1; }
+
+          # ── Pre-create the install destinations ──────────────────────
+          # bootstrap.sh calls `install -m 0755 …` which does NOT create
+          # intermediate directories; we need each $APPSTRATE_BIN_DIR to
+          # exist up-front or `install` exits non-zero before the happy
+          # banner is printed (which would swallow the output via $(…)).
+          mkdir -p \
+            "$GITHUB_WORKSPACE/bin" \
+            "$GITHUB_WORKSPACE/bin-tampered" \
+            "$GITHUB_WORKSPACE/bin-sig" \
+            "$GITHUB_WORKSPACE/bin-nomini" \
+            "$GITHUB_WORKSPACE/bin-skip"
+
+          # ── Start the HTTP server for the whole job ───────────────────
+          cd "$ROOT"
+          python3 -m http.server 8766 >/tmp/httpd.log 2>&1 &
+          SERVER=$!
+          trap 'kill $SERVER 2>/dev/null || true; rm -f /tmp/dry.key' EXIT
+          sleep 1
+
+          # ── Scenario 1: happy path ────────────────────────────────────
+          echo "::group::happy path"
+          export APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin"
+          export PATH="$APPSTRATE_BIN_DIR:$PATH"
+
+          # Run with `set +e` around the capture so a failing bootstrap
+          # still surfaces its stdout/stderr in the log instead of being
+          # killed silently by `set -e` at the `OUT=$(...)` assignment.
+          set +e
+          OUT=$(bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap exited $rc on the happy path"; exit 1; }
+          echo "$OUT" | grep -q "Integrity + provenance verified" \
+            || { echo "::error::bootstrap did not emit the verified banner"; exit 1; }
+          echo "$OUT" | grep -q "FAKE_CLI_RAN subcommand=install" \
+            || { echo "::error::bootstrap did not exec the installed binary"; exit 1; }
+          test -x "$APPSTRATE_BIN_DIR/appstrate"
+          echo "::endgroup::"
+          echo "✓ happy path OK"
+
+          # ── Scenario 2: tampered binary ───────────────────────────────
+          echo "::group::tampered binary"
+          cp "$ROOT/release/appstrate-linux-x64" "$ROOT/release/appstrate-linux-x64.bak"
+          echo "echo TAMPERED" >> "$ROOT/release/appstrate-linux-x64"
+          set +e
+          TAMPER_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-tampered" \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$TAMPER_OUT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::bootstrap executed a tampered binary"; exit 1
+          fi
+          echo "$TAMPER_OUT" | grep -qE "SHA-256 mismatch|does NOT match" \
+            || { echo "::error::bootstrap did not report the SHA-256 mismatch"; exit 1; }
+          # Restore for subsequent scenarios.
+          mv "$ROOT/release/appstrate-linux-x64.bak" "$ROOT/release/appstrate-linux-x64"
+          echo "::endgroup::"
+          echo "✓ tampered-binary path OK"
+
+          # ── Scenario 3: tampered checksums.txt (signature mismatch) ──
+          echo "::group::tampered checksums"
+          cp "$ROOT/release/checksums.txt" "$ROOT/release/checksums.txt.bak"
+          echo "deadbeef  appstrate-linux-x64" > "$ROOT/release/checksums.txt"
+          set +e
+          SIG_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-sig" \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$SIG_OUT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::bootstrap accepted a tampered checksums.txt"; exit 1
+          fi
+          echo "$SIG_OUT" | grep -qE "Signature verification FAILED|signed by the Appstrate key" \
+            || { echo "::error::bootstrap did not report signature failure"; exit 1; }
+          mv "$ROOT/release/checksums.txt.bak" "$ROOT/release/checksums.txt"
+          echo "::endgroup::"
+          echo "✓ tampered-checksums path OK"
+
+          # ── Scenario 4: minisign missing from PATH (fail closed) ─────
+          echo "::group::minisign missing"
+          # Strip /usr/bin (where minisign lives on Ubuntu) but keep enough
+          # for curl + sh builtins + sha256sum (all in /usr/bin, so we also
+          # need to shadow minisign by pointing PATH elsewhere and relying
+          # on an explicit denylist). Simpler: create a PATH with only the
+          # minimum required tools, symlinked explicitly.
+          NOBIN="$GITHUB_WORKSPACE/no-minisign-path"
+          mkdir -p "$NOBIN"
+          for b in curl bash grep sed tr head cat mkdir mktemp rm install chmod cd cp ln sha256sum sudo uname tee printf; do
+            if command -v "$b" >/dev/null 2>&1; then
+              ln -sf "$(command -v "$b")" "$NOBIN/$b" 2>/dev/null || true
+            fi
+          done
+          set +e
+          NOMINI_OUT=$(PATH="$NOBIN" APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-nomini" \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$NOMINI_OUT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::bootstrap proceeded without minisign available"; exit 1
+          fi
+          echo "$NOMINI_OUT" | grep -q "minisign is required" \
+            || { echo "::error::bootstrap did not emit the minisign-missing hint"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ missing-minisign path OK"
+
+          # ── Scenario 5: APPSTRATE_SKIP_VERIFY=1 bypass (warns + proceeds) ─
+          echo "::group::skip-verify bypass"
+          APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-skip" \
+          APPSTRATE_SKIP_VERIFY=1 \
+          PATH="$GITHUB_WORKSPACE/bin-skip:$PATH" \
+            bash /tmp/bootstrap.sh > /tmp/skip.out 2>&1
+          SKIP_OUT=$(cat /tmp/skip.out)
+          echo "$SKIP_OUT"
+          echo "$SKIP_OUT" | grep -q "APPSTRATE_SKIP_VERIFY=1" \
+            || { echo "::error::skip-verify did not emit the warning banner"; exit 1; }
+          echo "$SKIP_OUT" | grep -q "FAKE_CLI_RAN" \
+            || { echo "::error::skip-verify did not exec the binary"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ skip-verify path OK"

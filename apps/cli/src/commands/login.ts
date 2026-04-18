@@ -18,6 +18,7 @@ import { intro, outro, askText, spinner, formatUserCode, exitWithError } from ".
 import { readConfig, resolveProfileName, setProfile } from "../lib/config.ts";
 import { saveTokens } from "../lib/keyring.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
+import { normalizeInstance } from "../lib/instance-url.ts";
 import { CLI_USER_AGENT } from "../lib/version.ts";
 
 /** Canonical clientId for the official CLI. Matches `ensureCliClient()` server-side. */
@@ -39,14 +40,23 @@ export async function loginCommand(opts: LoginOptions): Promise<void> {
 
   intro(`Appstrate login — profile "${profileName}"`);
 
-  const instance = (
+  const rawInstance =
     opts.instance ??
     (await askText(
       "Instance URL",
       config.profiles[profileName]?.instance ?? "http://localhost:3000",
-    ))
-  ).trim();
-  const normalizedInstance = instance.endsWith("/") ? instance.slice(0, -1) : instance;
+    ));
+
+  // Validate + strip trailing `/` up front. Throws `InsecureInstanceError`
+  // if the user pointed at a non-loopback `http://` host without
+  // `--insecure` / `APPSTRATE_INSECURE=1` — we surface that via
+  // `exitWithError` like any other terminal failure below.
+  let normalizedInstance: string;
+  try {
+    normalizedInstance = normalizeInstance(rawInstance);
+  } catch (err) {
+    exitWithError(err);
+  }
 
   try {
     await runLogin(profileName, normalizedInstance);

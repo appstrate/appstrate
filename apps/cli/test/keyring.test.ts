@@ -19,6 +19,7 @@ import {
   loadTokens,
   deleteTokens,
   _setKeyringFactoryForTesting,
+  _shouldRefuseWindowsFallback,
   type KeyringHandle,
 } from "../src/lib/keyring.ts";
 
@@ -152,6 +153,53 @@ describe("keyring fallback path (daemon unavailable)", () => {
   });
 });
 
+describe("concurrent writes via file fallback", () => {
+  beforeEach(() => {
+    FakeKeyring.shouldThrow = true; // force every save onto the file path
+  });
+
+  it("serializes concurrent saves without losing profiles", async () => {
+    // 10 parallel saves, each with a distinct profile name. The lock
+    // must serialize the read-modify-write cycles — without it, later
+    // writers clobber earlier profiles by overwriting a stale snapshot.
+    const saves = Array.from({ length: 10 }, (_, i) =>
+      saveTokens(`profile${i}`, { accessToken: `tok-${i}`, expiresAt: 1000 + i }),
+    );
+    await Promise.all(saves);
+
+    // Every profile must be readable — if the lock were absent, most of
+    // these would return null because the last writer overwrote them.
+    for (let i = 0; i < 10; i++) {
+      expect(await loadTokens(`profile${i}`)).toEqual({
+        accessToken: `tok-${i}`,
+        expiresAt: 1000 + i,
+      });
+    }
+  });
+
+  it("writes are atomic — no torn state on mid-write crash", async () => {
+    // Seed an initial valid state.
+    await saveTokens("existing", { accessToken: "keep", expiresAt: 1 });
+
+    // A crash between `writeFile(tmp)` and `rename(tmp, target)` would
+    // leave `.tmp` files on disk but never a half-written target. We
+    // can't actually crash Bun mid-operation in a unit test, so assert
+    // the invariant that matters: after every `saveTokens`, the target
+    // file parses cleanly as JSON with every previously-written profile
+    // intact.
+    for (let i = 0; i < 5; i++) {
+      await saveTokens(`p${i}`, { accessToken: `t${i}`, expiresAt: i });
+      const { readFile } = await import("node:fs/promises");
+      const raw = await readFile(credentialsPath(), "utf-8");
+      const parsed = JSON.parse(raw) as Record<string, { accessToken: string }>;
+      expect(parsed.existing?.accessToken).toBe("keep");
+      for (let j = 0; j <= i; j++) {
+        expect(parsed[`p${j}`]?.accessToken).toBe(`t${j}`);
+      }
+    }
+  });
+});
+
 describe("corrupt data handling", () => {
   it("returns null for malformed keyring payloads instead of crashing", async () => {
     // Simulate a foreign tool writing junk under our service key.
@@ -162,5 +210,34 @@ describe("corrupt data handling", () => {
   it("returns null when required fields are missing", async () => {
     FakeKeyring.store.set("default", JSON.stringify({ accessToken: "t" }));
     expect(await loadTokens("default")).toBeNull();
+  });
+});
+
+describe("Windows fallback refusal", () => {
+  // The in-process platform check is exercised via the exported
+  // `_shouldRefuseWindowsFallback` helper — stubbing
+  // `process.platform` globally is racy with Bun's test runner and
+  // would leak between tests.
+  it("refuses the fallback on win32 when the keyring backend is missing", () => {
+    const err = new Error("Platform secure storage failure");
+    expect(_shouldRefuseWindowsFallback("win32", err)).toBe(true);
+  });
+
+  it("refuses the fallback on win32 when the keyring backend is broken", () => {
+    const err = new Error("Credential Manager RPC call failed");
+    expect(_shouldRefuseWindowsFallback("win32", err)).toBe(true);
+  });
+
+  it("does NOT refuse on win32 when the entry simply doesn't exist yet", () => {
+    // Reads on a fresh install hit this path — no creds stored yet.
+    // The caller just returns null; no fallback needed, no refusal.
+    const err = new Error("No matching entry");
+    expect(_shouldRefuseWindowsFallback("win32", err)).toBe(false);
+  });
+
+  it("never refuses on non-Windows platforms", () => {
+    const err = new Error("Platform secure storage failure");
+    expect(_shouldRefuseWindowsFallback("linux", err)).toBe(false);
+    expect(_shouldRefuseWindowsFallback("darwin", err)).toBe(false);
   });
 });

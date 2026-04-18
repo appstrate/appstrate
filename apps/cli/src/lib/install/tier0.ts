@@ -20,7 +20,7 @@
  * fully populated monorepo in the install dir.
  */
 
-import { mkdir, writeFile, access } from "node:fs/promises";
+import { mkdir, writeFile, access, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -54,6 +54,13 @@ export function detectBun(): { found: boolean; path: string | null } {
  * installer is a shell script that curls the latest release tarball
  * — we pipe it into `bash` directly without caching, mirroring the
  * documented install path.
+ *
+ * Note on `bash -c`: the command string is a string literal with zero
+ * user-supplied substitution. There is no interpolation of any runtime
+ * value into the shell command, so the shell-injection rules that
+ * apply to `cloneAppstrateSource`'s tarball fallback do not apply
+ * here. If that invariant ever changes, switch this to a tmp-file +
+ * `bash <file>` pattern first.
  */
 export async function installBun(): Promise<void> {
   const res = await runCommand("bash", ["-c", "curl -fsSL https://bun.sh/install | bash"], {
@@ -116,13 +123,26 @@ export async function cloneAppstrateSource(
   const tarballUrl = opts.tarballUrl ?? `${DEFAULT_TARBALL_BASE}/${tagRef}.tar.gz`;
   if (!commandExists("curl") || !commandExists("tar")) throw new GitMissingError();
 
-  const res = await runCommand(
-    "bash",
-    ["-c", `curl -fsSL "${tarballUrl}" | tar -xz --strip-components=1 -C "${dir}"`],
-    { stdio: "inherit" },
-  );
-  if (!res.ok) {
-    throw new Error(`Tarball download failed: ${res.stderr || `exit ${res.exitCode}`}`);
+  // Two distinct spawns instead of `bash -c "curl … | tar … -C <dir>"`.
+  // The shell-piped form interpolated the user-supplied `dir` inside
+  // the bash `-c` string, which meant a dir containing `;`, backticks,
+  // `$(...)`, or newlines would run arbitrary code. We now spawn `curl`
+  // and `tar` directly with `dir` as a positional argv — neither tool
+  // interprets shell metacharacters in arguments.
+  const tmpTarball = join(dir, ".appstrate-source.tar.gz");
+  const dl = await runCommand("curl", ["-fsSL", "-o", tmpTarball, tarballUrl], {
+    stdio: "inherit",
+  });
+  if (!dl.ok) {
+    await unlink(tmpTarball).catch(() => {});
+    throw new Error(`Tarball download failed: ${dl.stderr || `exit ${dl.exitCode}`}`);
+  }
+  const ex = await runCommand("tar", ["-xzf", tmpTarball, "--strip-components=1", "-C", dir], {
+    stdio: "inherit",
+  });
+  await unlink(tmpTarball).catch(() => {});
+  if (!ex.ok) {
+    throw new Error(`Tarball extraction failed: ${ex.stderr || `exit ${ex.exitCode}`}`);
   }
 }
 

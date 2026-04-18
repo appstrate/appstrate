@@ -63,7 +63,7 @@ export function renderActivateEntryPage(props: ActivateEntryPageProps): RawHtml 
         autofocus
         required
         inputmode="text"
-        pattern="[A-Za-z-]{8,9}"
+        pattern="[BCDFGHJKLMNPQRSTVWXZbcdfghjklmnpqrstvwxz-]{8,9}"
       />
       <button type="submit">Continuer</button>
     </form>
