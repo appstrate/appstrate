@@ -1,4 +1,4 @@
-name: Release Docker Images
+name: Release Docker Images + CLI Binaries
 
 on:
   push:
@@ -70,8 +70,76 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # ─── CLI single-binary builds (per-target, native runners) ────────────────
+  #
+  # `bun build --compile --target=bun-<os>-<arch>` cross-compiles the JS
+  # bundle + embeds a Bun runtime, but it does NOT cross-install N-API
+  # native modules — `@napi-rs/keyring`'s platform-specific binding is
+  # resolved at `bun install` time against the host's `process.platform`.
+  # Preflight PF-1 confirmed that compiling for linux-x64 from macOS
+  # produces a binary that fails at runtime with "Cannot find native
+  # binding" on Linux. So each target must build on its own native
+  # runner: macOS arm64 on `macos-14` (M1), macOS x64 on `macos-13`
+  # (Intel), Linux x64 on `ubuntu-latest`, Linux arm64 on
+  # `ubuntu-24.04-arm` (GitHub's free ARM runner tier).
+  #
+  # Artifact asset names match the pattern `bootstrap.sh` downloads
+  # (`appstrate-${OS}-${ARCH}`) — do NOT rename without also updating
+  # `scripts/bootstrap.sh`.
+  build-cli:
+    name: CLI binary (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: bun-darwin-arm64
+            asset: appstrate-darwin-arm64
+          - runner: macos-13
+            target: bun-darwin-x64
+            asset: appstrate-darwin-x64
+          - runner: ubuntu-latest
+            target: bun-linux-x64
+            asset: appstrate-linux-x64
+          - runner: ubuntu-24.04-arm
+            target: bun-linux-arm64
+            asset: appstrate-linux-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Compile CLI binary
+        working-directory: apps/cli
+        run: |
+          bun build --compile \
+            --target=${{ matrix.target }} \
+            src/cli.ts \
+            --outfile=${{ matrix.asset }}
+
+      - name: Smoke-test binary (--help)
+        working-directory: apps/cli
+        run: ./${{ matrix.asset }} --help
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.asset }}
+          path: apps/cli/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 7
+
   release:
-    needs: build-and-push
+    needs: [build-and-push, build-cli]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -79,6 +147,14 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+
+      - name: Download CLI binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: cli-binaries
+          # Each artifact is extracted into its own subdir under `path`;
+          # flatten by globbing in the release step below.
+          merge-multiple: false
 
       - name: Generate release notes
         id: notes
@@ -102,6 +178,12 @@ jobs:
             echo "docker pull ghcr.io/${{ github.repository_owner }}/appstrate-pi:${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
             echo "docker pull ghcr.io/${{ github.repository_owner }}/appstrate-sidecar:${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
             echo '```' >> "$GITHUB_OUTPUT"
+            echo "" >> "$GITHUB_OUTPUT"
+            echo "## Install the CLI" >> "$GITHUB_OUTPUT"
+            echo "" >> "$GITHUB_OUTPUT"
+            echo '```sh' >> "$GITHUB_OUTPUT"
+            echo "curl -fsSL https://get.appstrate.dev | bash" >> "$GITHUB_OUTPUT"
+            echo '```' >> "$GITHUB_OUTPUT"
             echo "$EOF" >> "$GITHUB_OUTPUT"
           fi
 
@@ -109,3 +191,6 @@ jobs:
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           body: ${{ steps.notes.outputs.body }}
+          # Flatten the per-artifact subdirs into a single glob so every
+          # CLI binary lands as a top-level asset on the release.
+          files: cli-binaries/*/appstrate-*
