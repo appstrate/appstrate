@@ -10,6 +10,7 @@ WORKDIR /app
 # Copy workspace structure for dependency resolution
 COPY package.json bun.lock turbo.json ./
 COPY apps/api/package.json apps/api/
+COPY apps/cli/package.json apps/cli/
 COPY apps/web/package.json apps/web/
 COPY packages/core/package.json packages/core/
 COPY packages/shared-types/package.json packages/shared-types/
