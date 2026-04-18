@@ -34,7 +34,7 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 describe("startDeviceFlow", () => {
-  it("posts JSON body and maps snake_case → camelCase", async () => {
+  it("posts form-urlencoded body (RFC 8628 §3.2) and maps snake_case → camelCase", async () => {
     let capturedUrl: string | undefined;
     let capturedBody: string | undefined;
     let capturedContentType: string | null | undefined;
@@ -54,11 +54,10 @@ describe("startDeviceFlow", () => {
 
     const result = await startDeviceFlow("https://app", "appstrate-cli", "openid profile");
     expect(capturedUrl).toBe("https://app/api/auth/device/code");
-    expect(capturedContentType).toBe("application/json");
-    expect(JSON.parse(capturedBody!)).toEqual({
-      client_id: "appstrate-cli",
-      scope: "openid profile",
-    });
+    expect(capturedContentType).toBe("application/x-www-form-urlencoded");
+    const parsed = new URLSearchParams(capturedBody!);
+    expect(parsed.get("client_id")).toBe("appstrate-cli");
+    expect(parsed.get("scope")).toBe("openid profile");
     expect(result).toEqual({
       deviceCode: "dc1",
       userCode: "ABCDEFGH",
@@ -118,6 +117,30 @@ describe("pollDeviceFlow", () => {
       expiresIn: 600,
       scope: "openid profile",
     });
+  });
+
+  it("posts form-urlencoded body (RFC 8628 §3.4) with grant_type + device_code + client_id", async () => {
+    let capturedContentType: string | null | undefined;
+    let capturedBody: string | undefined;
+    installFetch(async (_input, init) => {
+      capturedContentType = (init?.headers as Record<string, string>)?.["Content-Type"];
+      capturedBody = init?.body as string;
+      return jsonResponse(200, {
+        access_token: "tok",
+        token_type: "Bearer",
+        expires_in: 60,
+        scope: "",
+      });
+    });
+    await pollDeviceFlow("https://app", "device-code-123", "appstrate-cli", {
+      interval: 0,
+      expiresIn: 60,
+    });
+    expect(capturedContentType).toBe("application/x-www-form-urlencoded");
+    const parsed = new URLSearchParams(capturedBody!);
+    expect(parsed.get("grant_type")).toBe("urn:ietf:params:oauth:grant-type:device_code");
+    expect(parsed.get("device_code")).toBe("device-code-123");
+    expect(parsed.get("client_id")).toBe("appstrate-cli");
   });
 
   it("loops on authorization_pending then returns the token", async () => {
