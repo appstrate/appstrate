@@ -86,6 +86,41 @@ function classifyKeyringError(err: unknown): "missing-backend" | "entry-missing"
   return "broken";
 }
 
+/**
+ * On Windows, refuse the file fallback entirely: NTFS ACLs do NOT
+ * enforce Unix 0600 permissions, so `fs.chmod(0o600)` is a no-op. A
+ * plaintext credentials file dropped under `%APPDATA%\appstrate\` is
+ * readable by every local user on the machine — bearer token = full
+ * account takeover. Credential Manager is the only acceptable store on
+ * Windows; if it's down, we fail loudly rather than silently fall back
+ * to disk. DPAPI-based encryption would fix this but is out of scope
+ * for v1 (tracked as a follow-up in ADR-006).
+ *
+ * `entry-missing` is a read-path concept ("user hasn't logged in yet")
+ * and never triggers a fallback, so we don't refuse on that case.
+ * Export kept under the `_`-prefix convention for unit testability —
+ * the real `process.platform` can't be faked cleanly in bun:test.
+ */
+export function _shouldRefuseWindowsFallback(platform: string, err: unknown): boolean {
+  if (platform !== "win32") return false;
+  return classifyKeyringError(err) !== "entry-missing";
+}
+
+function refuseWindowsFallback(op: "read" | "write" | "delete", err: unknown): never {
+  const cause = err instanceof Error ? err.message : String(err);
+  throw new Error(
+    `Cannot ${op} Appstrate credentials: Windows Credential Manager is unavailable.\n` +
+      `  Cause: ${cause}\n` +
+      `  The file fallback is disabled on Windows because NTFS ACLs do not\n` +
+      `  enforce Unix 0600 permissions — a plaintext credentials.json would\n` +
+      `  be readable by every local user on this machine.\n\n` +
+      `  Fixes:\n` +
+      `    • Ensure the "Credential Manager" service is running\n` +
+      `      (services.msc → CredentialManager → Start).\n` +
+      `    • Or run the CLI inside WSL, where libsecret handles storage.`,
+  );
+}
+
 function warnBackendOnce(op: "read" | "write" | "delete", err: unknown): void {
   if (_backendWarningEmitted) return;
   _backendWarningEmitted = true;
@@ -102,6 +137,7 @@ export async function saveTokens(profile: string, tokens: Tokens): Promise<void>
     _keyringFactory(profile).setPassword(payload);
     return;
   } catch (err) {
+    if (_shouldRefuseWindowsFallback(process.platform, err)) refuseWindowsFallback("write", err);
     // Entry-missing is a read-path concept — on write, any failure means
     // the backend cannot accept the payload. Only missing-backend is
     // silent; anything else warns once.
@@ -115,12 +151,16 @@ export async function loadTokens(profile: string): Promise<Tokens | null> {
     const raw = _keyringFactory(profile).getPassword();
     if (typeof raw === "string" && raw.length > 0) return parseTokens(raw);
   } catch (err) {
+    if (_shouldRefuseWindowsFallback(process.platform, err)) refuseWindowsFallback("read", err);
     // "No matching entry" on read is normal — the user simply hasn't
     // stored credentials for this profile yet. Missing-backend is the
     // expected fallback trigger. Anything else is worth a warning.
     const kind = classifyKeyringError(err);
     if (kind === "broken") warnBackendOnce("read", err);
   }
+  // Windows never reaches here: the guard above either succeeded on
+  // Credential Manager or threw via `refuseWindowsFallback`.
+  if (process.platform === "win32") return null;
   return loadFromFile(profile);
 }
 
@@ -128,11 +168,15 @@ export async function deleteTokens(profile: string): Promise<void> {
   try {
     _keyringFactory(profile).deletePassword();
   } catch (err) {
+    if (_shouldRefuseWindowsFallback(process.platform, err)) refuseWindowsFallback("delete", err);
     // A missing entry is not an error; the file fallback below still
     // runs so a partial keyring/file divergence is cleaned up. Only
     // warn on genuinely broken backends.
     if (classifyKeyringError(err) === "broken") warnBackendOnce("delete", err);
   }
+  // Windows has no file fallback to clean up — Credential Manager is
+  // the single source of truth there.
+  if (process.platform === "win32") return;
   await deleteFromFile(profile);
 }
 

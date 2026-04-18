@@ -19,6 +19,7 @@ import {
   loadTokens,
   deleteTokens,
   _setKeyringFactoryForTesting,
+  _shouldRefuseWindowsFallback,
   type KeyringHandle,
 } from "../src/lib/keyring.ts";
 
@@ -209,5 +210,34 @@ describe("corrupt data handling", () => {
   it("returns null when required fields are missing", async () => {
     FakeKeyring.store.set("default", JSON.stringify({ accessToken: "t" }));
     expect(await loadTokens("default")).toBeNull();
+  });
+});
+
+describe("Windows fallback refusal", () => {
+  // The in-process platform check is exercised via the exported
+  // `_shouldRefuseWindowsFallback` helper — stubbing
+  // `process.platform` globally is racy with Bun's test runner and
+  // would leak between tests.
+  it("refuses the fallback on win32 when the keyring backend is missing", () => {
+    const err = new Error("Platform secure storage failure");
+    expect(_shouldRefuseWindowsFallback("win32", err)).toBe(true);
+  });
+
+  it("refuses the fallback on win32 when the keyring backend is broken", () => {
+    const err = new Error("Credential Manager RPC call failed");
+    expect(_shouldRefuseWindowsFallback("win32", err)).toBe(true);
+  });
+
+  it("does NOT refuse on win32 when the entry simply doesn't exist yet", () => {
+    // Reads on a fresh install hit this path — no creds stored yet.
+    // The caller just returns null; no fallback needed, no refusal.
+    const err = new Error("No matching entry");
+    expect(_shouldRefuseWindowsFallback("win32", err)).toBe(false);
+  });
+
+  it("never refuses on non-Windows platforms", () => {
+    const err = new Error("Platform secure storage failure");
+    expect(_shouldRefuseWindowsFallback("linux", err)).toBe(false);
+    expect(_shouldRefuseWindowsFallback("darwin", err)).toBe(false);
   });
 });
