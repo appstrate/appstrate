@@ -176,8 +176,12 @@ detect_environment() {
   # busy. Falling back to a different port here would point wait_for_health at
   # an empty port and time out the upgrade/noop. Detect this case and reuse.
   if port_in_use "$APPSTRATE_PORT"; then
+    # `-Fx` = fixed-string (no regex meta interpretation) full-line match.
+    # APPSTRATE_PORT is already validated as numeric by the time we get here,
+    # but using a fixed-string match keeps this robust against any future
+    # change to upstream validation.
     if [ -f "$APPSTRATE_DIR/.env" ] &&
-      grep -qE "^PORT=$APPSTRATE_PORT$" "$APPSTRATE_DIR/.env" 2>/dev/null; then
+      grep -qFx "PORT=$APPSTRATE_PORT" "$APPSTRATE_DIR/.env" 2>/dev/null; then
       ok "Port $APPSTRATE_PORT in use by existing install — reusing"
       return
     fi

@@ -431,6 +431,93 @@ jobs:
             --env-file /tmp/appstrate-e2e/.env logs --tail 30
           exit 1
 
+      # Regression for #145 / fix in #157: when APP_URL changes between boots,
+      # the platform OIDC client's `redirect_uris` must be reconciled in place
+      # (same client_id, no DB wipe required). Snapshots the oauth_clients row,
+      # edits .env (APP_URL/TRUSTED_ORIGINS/PORT → drift port), re-runs the
+      # installer, then asserts via SQL that URIs were updated and the
+      # client_id was preserved. Re-uses the post-rollback healthy stack on
+      # port 3000.
+      - name: APP_URL drift → OIDC reconciliation
+        run: |
+          set -euo pipefail
+
+          pg_query() {
+            docker exec -i appstrate-postgres-1 \
+              psql -U appstrate -d appstrate -tA -c "$1"
+          }
+          instance_row() {
+            pg_query "SELECT client_id || '|' || array_to_string(redirect_uris, ',') || '|' || array_to_string(post_logout_redirect_uris, ',') FROM oauth_clients WHERE level='instance' ORDER BY created_at ASC LIMIT 1;"
+          }
+
+          before=$(instance_row)
+          [ -n "$before" ] || { echo "✗ no instance-level oauth_clients row"; exit 1; }
+          before_id=$(printf '%s' "$before" | cut -d'|' -f1)
+          before_redirect=$(printf '%s' "$before" | cut -d'|' -f2)
+          before_post=$(printf '%s' "$before" | cut -d'|' -f3)
+          echo "before: client_id=$before_id redirect_uris=$before_redirect"
+          [ "$before_redirect" = "http://localhost:3000/auth/callback" ] \
+            || { echo "✗ unexpected initial redirect_uris: $before_redirect"; exit 1; }
+          [ "$before_post" = "http://localhost:3000,http://localhost:3000/login" ] \
+            || { echo "✗ unexpected initial post_logout_redirect_uris: $before_post"; exit 1; }
+
+          echo "── Editing .env: APP_URL/TRUSTED_ORIGINS/PORT → 3001 ──"
+          awk -v from=3000 -v to=3001 '
+            /^APP_URL=/         { sub(":" from, ":" to); print; next }
+            /^TRUSTED_ORIGINS=/ { sub(":" from, ":" to); print; next }
+            /^PORT=/            { print "PORT=" to; next }
+            { print }
+          ' /tmp/appstrate-e2e/.env > /tmp/appstrate-e2e/.env.new
+          mv /tmp/appstrate-e2e/.env.new /tmp/appstrate-e2e/.env
+          chmod 600 /tmp/appstrate-e2e/.env
+
+          echo "── Re-running installer on port 3001 (compose recreates container) ──"
+          APPSTRATE_DIR=/tmp/appstrate-e2e \
+          APPSTRATE_PORT=3001 \
+          APPSTRATE_QUIET=1 \
+          APPSTRATE_VERSION=local \
+          APPSTRATE_ASSETS_DIR=${{ github.workspace }}/examples/self-hosting \
+            bash /tmp/install.sh
+
+          echo "── Probing http://localhost:3001 (max 60s) ──"
+          deadline=$((SECONDS + 60))
+          while [ $SECONDS -lt $deadline ]; do
+            if curl -fsS --max-time 3 http://localhost:3001/ >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS --max-time 3 http://localhost:3001/ >/dev/null 2>&1 \
+            || { echo "✗ not responding on 3001"; docker logs appstrate-appstrate-1 --tail 30; exit 1; }
+
+          after=$(instance_row)
+          after_id=$(printf '%s' "$after" | cut -d'|' -f1)
+          after_redirect=$(printf '%s' "$after" | cut -d'|' -f2)
+          after_post=$(printf '%s' "$after" | cut -d'|' -f3)
+          echo "after:  client_id=$after_id redirect_uris=$after_redirect"
+
+          [ "$after_id" = "$before_id" ] \
+            || { echo "✗ client_id changed (was $before_id, now $after_id) — outstanding tokens would be invalidated"; exit 1; }
+          [ "$after_redirect" = "http://localhost:3001/auth/callback" ] \
+            || { echo "✗ redirect_uris not reconciled: $after_redirect"; exit 1; }
+          [ "$after_post" = "http://localhost:3001,http://localhost:3001/login" ] \
+            || { echo "✗ post_logout_redirect_uris not reconciled: $after_post"; exit 1; }
+          echo "✓ URIs reconciled, client_id preserved"
+
+          # Pino's worker transport flushes asynchronously — poll with a deadline.
+          deadline=$((SECONDS + 15))
+          while [ $SECONDS -lt $deadline ]; do
+            if docker logs appstrate-appstrate-1 2>&1 \
+              | grep -q "OIDC platform client redirect URIs updated to match APP_URL"; then
+              echo "✓ reconcile log line emitted"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "✗ reconcile log line not found within 15s"
+          docker logs appstrate-appstrate-1 --tail 40
+          exit 1
+
       - name: Teardown
         if: always()
         run: |

@@ -16,7 +16,7 @@
 #   ./scripts/test-install-local.sh --port 8080
 #   ./scripts/test-install-local.sh --keep               # don't uninstall at the end
 #   ./scripts/test-install-local.sh --no-build           # skip rebuild (reuse :local)
-#   ./scripts/test-install-local.sh --runtime-tag X.Y.Z  # which pi/sidecar to alias
+#   ./scripts/test-install-local.sh --runtime-tag X.Y.Z  # which pi/sidecar to alias (default: highest local tag)
 #   DRIFT_PORT=4500 ./scripts/test-install-local.sh      # override drift port (default: PORT+1)
 
 set -euo pipefail
@@ -24,7 +24,11 @@ set -euo pipefail
 PORT=3999
 KEEP=0
 BUILD=1
-RUNTIME_TAG="${APPSTRATE_RUNTIME_TAG:-latest}"
+# `latest` is NOT published on GHCR for the runtime images, so leave the
+# default empty and resolve it later (auto-detect from local images, falling
+# back to a fail-fast hint). Explicit `--runtime-tag X.Y.Z` or
+# `APPSTRATE_RUNTIME_TAG=X.Y.Z` short-circuits the resolver.
+RUNTIME_TAG="${APPSTRATE_RUNTIME_TAG:-}"
 DRIFT_PORT=""
 
 while [ $# -gt 0 ]; do
@@ -69,6 +73,30 @@ cleanup_workdir() {
   rm -rf "$WORKDIR" 2>/dev/null || true
 }
 
+resolve_runtime_tag() {
+  # GHCR has no `:latest` tag for appstrate-pi / appstrate-sidecar — picking
+  # the highest-versioned local tag that exists for BOTH images keeps the
+  # script usable out-of-the-box. Fail-fast with an actionable hint when
+  # nothing is locally available rather than letting `docker pull :latest`
+  # explode mid-step.
+  local pi_tags sidecar_tags candidates pick
+  pi_tags=$(docker images --format '{{.Tag}}' ghcr.io/appstrate/appstrate-pi 2>/dev/null |
+    grep -v '^<none>$' | grep -v "^$TAG\$" | sort -V -u)
+  sidecar_tags=$(docker images --format '{{.Tag}}' ghcr.io/appstrate/appstrate-sidecar 2>/dev/null |
+    grep -v '^<none>$' | grep -v "^$TAG\$" | sort -V -u)
+  candidates=$(comm -12 <(printf '%s\n' "$pi_tags") <(printf '%s\n' "$sidecar_tags") | sort -V)
+  pick=$(printf '%s\n' "$candidates" | tail -1)
+  if [ -z "$pick" ]; then
+    red "No local tag found for both ghcr.io/appstrate/appstrate-pi and …-sidecar."
+    red "Pull a published version, e.g.:"
+    red "  docker pull ghcr.io/appstrate/appstrate-pi:1.0.0-alpha.52"
+    red "  docker pull ghcr.io/appstrate/appstrate-sidecar:1.0.0-alpha.52"
+    red "Then re-run, or pass --runtime-tag X.Y.Z explicitly."
+    exit 1
+  fi
+  printf '%s' "$pick"
+}
+
 cd "$REPO_ROOT"
 
 cyan "── 0. Pre-flight"
@@ -89,7 +117,12 @@ else
   cyan "── 1. Skipping build (image present, --no-build)"
 fi
 
-cyan "── 2. Aliasing pi/sidecar runtime images ($RUNTIME_TAG → $TAG)"
+if [ -z "$RUNTIME_TAG" ]; then
+  RUNTIME_TAG=$(resolve_runtime_tag)
+  cyan "── 2. Auto-detected runtime tag: $RUNTIME_TAG (override with --runtime-tag)"
+else
+  cyan "── 2. Aliasing pi/sidecar runtime images ($RUNTIME_TAG → $TAG)"
+fi
 for img in appstrate-pi appstrate-sidecar; do
   if ! docker image inspect "ghcr.io/appstrate/$img:$RUNTIME_TAG" >/dev/null 2>&1; then
     docker pull "ghcr.io/appstrate/$img:$RUNTIME_TAG"
