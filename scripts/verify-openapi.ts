@@ -408,6 +408,14 @@ try {
       // Public endpoints (health, OAuth callback, OpenAPI spec, docs) intentionally
       // have no 4xx responses — they are unauthenticated and always succeed or 5xx
       "operation-4xx-response": "off",
+      // `POST /activate` (OIDC device-flow entry form) follows the Post-Redirect-Get
+      // pattern: happy path = 303 to `GET /activate?user_code=...`, error paths re-
+      // render HTML with 400/403. There is no 2xx response by design — the endpoint
+      // never returns content directly, only a redirect or an error page. Redocly's
+      // `operation-2xx-response` rule doesn't treat 3xx as success, so we turn it
+      // off globally; the 190+ other endpoints all have 2xx responses enforced by
+      // code review and Zod<>OpenAPI parity checks below.
+      "operation-2xx-response": "off",
     },
   });
 
