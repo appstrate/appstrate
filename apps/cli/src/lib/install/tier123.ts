@@ -59,13 +59,99 @@ export async function writeEnvFile(dir: string, envFileBody: string): Promise<vo
   await writeFile(join(dir, ".env"), envFileBody, { mode: 0o600 });
 }
 
-/** Run `docker compose up -d` in the given directory. Throws on non-zero exit. */
-export async function dockerComposeUp(dir: string): Promise<CommandResult> {
-  const res = await runCommand("docker", ["compose", "up", "-d"], { cwd: dir, stdio: "inherit" });
+/**
+ * Run `docker compose up -d` in the given directory, pinned to the
+ * Compose project name `projectName`. Threading `--project-name` on
+ * every invocation (instead of relying on a top-level `name:` in the
+ * compose template, as the first cut did) is what keeps two installs
+ * under different directories from cannibalizing each other's
+ * containers — see `./project.ts` for the full rationale.
+ */
+export async function dockerComposeUp(dir: string, projectName: string): Promise<CommandResult> {
+  const res = await runCommand("docker", ["compose", "--project-name", projectName, "up", "-d"], {
+    cwd: dir,
+    stdio: "inherit",
+  });
   if (!res.ok) {
     throw new Error(`docker compose up failed with exit code ${res.exitCode}`);
   }
   return res;
+}
+
+/**
+ * Describe a currently-running Compose project discovered via
+ * `docker compose ls`. We only consume two fields; the rest of the
+ * Compose output is ignored.
+ */
+export interface RunningComposeProject {
+  name: string;
+  /** Absolute path(s) to the compose file(s) backing the project. */
+  configFiles: string[];
+}
+
+/**
+ * Look up a single running Compose project by exact name. Returns
+ * `null` when no such project is active, a descriptor otherwise.
+ *
+ * Why exact-name and not `--filter name=<prefix>`: Compose's `name=`
+ * filter is a substring match, so filtering on `appstrate` would also
+ * match legitimate neighbour projects named `appstrate-<slug>-<hash>`.
+ * We pull the full list and match ourselves — it's a single cheap
+ * Docker round-trip per install.
+ *
+ * `docker compose ls` emits one object per line in `--format json`.
+ * Corrupt output (truncated JSON, docker CLI crash) is treated as
+ * "no project running" rather than crashing the install — the worst
+ * case is that we fall through to the live `docker compose up`, which
+ * will surface a concrete docker error of its own.
+ */
+export async function findRunningComposeProject(
+  projectName: string,
+): Promise<RunningComposeProject | null> {
+  const res = await runCommand("docker", ["compose", "ls", "--all", "--format", "json"], {
+    stdio: "pipe",
+  });
+  if (!res.ok) return null;
+  // Compose emits either a single JSON array (modern versions) or NDJSON
+  // (one object per line on older builds). Handle both shapes so the
+  // preflight works on the full supported Compose range.
+  const candidates: unknown[] = [];
+  const trimmed = res.stdout.trim();
+  if (trimmed.length === 0) return null;
+  try {
+    const first = JSON.parse(trimmed);
+    if (Array.isArray(first)) {
+      candidates.push(...first);
+    } else {
+      candidates.push(first);
+    }
+  } catch {
+    for (const line of trimmed.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      try {
+        candidates.push(JSON.parse(line));
+      } catch {
+        // Skip unparseable lines — a stray warning line on stdout (seen
+        // occasionally with plugin upgrades) must not brick the install.
+      }
+    }
+  }
+  for (const entry of candidates) {
+    if (!entry || typeof entry !== "object") continue;
+    const rec = entry as Record<string, unknown>;
+    const name =
+      typeof rec.Name === "string" ? rec.Name : typeof rec.name === "string" ? rec.name : null;
+    if (name !== projectName) continue;
+    const rawConfig =
+      typeof rec.ConfigFiles === "string"
+        ? rec.ConfigFiles
+        : typeof rec.configFiles === "string"
+          ? rec.configFiles
+          : "";
+    const configFiles = rawConfig.length > 0 ? rawConfig.split(",").map((s) => s.trim()) : [];
+    return { name, configFiles };
+  }
+  return null;
 }
 
 /** Poll `<appUrl>/` until it returns 2xx or the timeout elapses. */

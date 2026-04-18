@@ -25,6 +25,7 @@ import {
   writeComposeFile,
   writeEnvFile,
   assertDockerAvailable,
+  findRunningComposeProject,
   waitForAppstrate,
   DockerMissingError,
 } from "../../src/lib/install/tier123.ts";
@@ -154,6 +155,74 @@ describe("DockerMissingError", () => {
     expect(err.name).toBe("DockerMissingError");
     expect(err.message).toMatch(/Docker Desktop/i);
     expect(err.message).toMatch(/Tier 0/i);
+  });
+});
+
+describe("findRunningComposeProject", () => {
+  // `docker compose ls --all --format json` emits a JSON array on
+  // modern Compose and NDJSON on older builds; the implementation
+  // must parse both. Each test installs a shim that stubs the exact
+  // stdout shape we want `findRunningComposeProject` to see.
+  it("returns the matching project (array-shaped stdout, modern Compose)", async () => {
+    if (platform() === "win32") return;
+    const shimDir = join(workDir, "shim-array");
+    await mkShim(
+      shimDir,
+      "docker",
+      `#!/usr/bin/env bash\ncat <<'JSON'\n[{"Name":"appstrate-dev-11111111","Status":"running","ConfigFiles":"/home/bob/dev/docker-compose.yml"}]\nJSON\n`,
+    );
+    process.env.PATH = `${shimDir}:${originalPath}`;
+    const hit = await findRunningComposeProject("appstrate-dev-11111111");
+    expect(hit).not.toBeNull();
+    expect(hit?.name).toBe("appstrate-dev-11111111");
+    expect(hit?.configFiles).toEqual(["/home/bob/dev/docker-compose.yml"]);
+  });
+
+  it("returns the matching project (NDJSON stdout, older Compose)", async () => {
+    if (platform() === "win32") return;
+    const shimDir = join(workDir, "shim-ndjson");
+    await mkShim(
+      shimDir,
+      "docker",
+      `#!/usr/bin/env bash\ncat <<'JSON'\n{"Name":"other","Status":"running","ConfigFiles":"/tmp/unrelated/docker-compose.yml"}\n{"Name":"appstrate-prod-22222222","Status":"running","ConfigFiles":"/home/bob/prod/docker-compose.yml"}\nJSON\n`,
+    );
+    process.env.PATH = `${shimDir}:${originalPath}`;
+    const hit = await findRunningComposeProject("appstrate-prod-22222222");
+    expect(hit?.configFiles).toEqual(["/home/bob/prod/docker-compose.yml"]);
+  });
+
+  it("returns null when no project matches the exact name", async () => {
+    if (platform() === "win32") return;
+    const shimDir = join(workDir, "shim-nomatch");
+    await mkShim(shimDir, "docker", `#!/usr/bin/env bash\necho '[]'\n`);
+    process.env.PATH = `${shimDir}:${originalPath}`;
+    const hit = await findRunningComposeProject("appstrate-dev-11111111");
+    expect(hit).toBeNull();
+  });
+
+  it("does not substring-match — a neighbour project named `appstrate` is not reported for `appstrate-dev-…`", async () => {
+    // Exact-name match is the whole point: the pre-#167 bug was that
+    // filtering by prefix adopted every project whose name contained
+    // "appstrate", including the one we were trying to install on top of.
+    if (platform() === "win32") return;
+    const shimDir = join(workDir, "shim-substring");
+    await mkShim(
+      shimDir,
+      "docker",
+      `#!/usr/bin/env bash\necho '[{"Name":"appstrate","Status":"running","ConfigFiles":"/etc/appstrate/docker-compose.yml"}]'\n`,
+    );
+    process.env.PATH = `${shimDir}:${originalPath}`;
+    const hit = await findRunningComposeProject("appstrate-dev-11111111");
+    expect(hit).toBeNull();
+  });
+
+  it("returns null on docker CLI failure instead of throwing", async () => {
+    if (platform() === "win32") return;
+    const shimDir = join(workDir, "shim-fail");
+    await mkShim(shimDir, "docker", `#!/usr/bin/env bash\nexit 2\n`);
+    process.env.PATH = `${shimDir}:${originalPath}`;
+    const hit = await findRunningComposeProject("appstrate-dev-11111111");
+    expect(hit).toBeNull();
   });
 });
 

@@ -9,8 +9,13 @@
 # When to use: low-traffic self-host, single-node deploys, internal
 # staging. For anything with >1 platform replica or sustained uploads,
 # scale up to Tier 2 (adds Redis) or Tier 3 (adds MinIO/S3).
-
-name: appstrate
+#
+# Note: no top-level `name:` is set here. The CLI passes
+# `--project-name <name>` based on `.appstrate/project.json` written at
+# install time, so two installs under different directories get isolated
+# projects (container namespaces) and can coexist on the same host. A
+# hand-run of `docker compose up -d` on this file falls back to Compose's
+# default (directory basename), which is still isolated per directory.
 
 networks:
   appstrate-data:

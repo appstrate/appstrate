@@ -20,6 +20,7 @@ import {
   assertDockerAvailable,
   DockerMissingError,
   dockerComposeUp,
+  findRunningComposeProject,
   waitForAppstrate,
   writeComposeFile,
   writeEnvFile as writeComposeEnv,
@@ -40,6 +41,12 @@ import {
   restoreBackups,
   cleanupBackups,
 } from "../lib/install/upgrade.ts";
+import {
+  LEGACY_PROJECT_NAME,
+  deriveProjectName,
+  readProjectFile,
+  writeProjectFile,
+} from "../lib/install/project.ts";
 import { CLI_VERSION } from "../lib/version.ts";
 
 export interface InstallOptions {
@@ -47,6 +54,14 @@ export interface InstallOptions {
   tier?: string;
   /** Skip the directory prompt. */
   dir?: string;
+  /**
+   * Bypass the "another stack is already running under this project
+   * name" preflight. Escape hatch for edge cases where the operator
+   * knows the running project is the intended one (e.g. recovering
+   * from a corrupted `.appstrate/project.json`). Not documented in the
+   * common install path — see `#167`.
+   */
+  force?: boolean;
 }
 
 const DEFAULT_INSTALL_DIR = join(homedir(), "appstrate");
@@ -62,7 +77,7 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
     if (tier === 0) {
       await installTier0(dir);
     } else {
-      await installDockerTier(dir, tier);
+      await installDockerTier(dir, tier, { force: opts.force ?? false });
     }
   } catch (err) {
     exitWithError(err);
@@ -181,7 +196,80 @@ async function installTier0(dir: string): Promise<void> {
   );
 }
 
-async function installDockerTier(dir: string, tier: 1 | 2 | 3): Promise<void> {
+/**
+ * Resolve the Compose project name for this install directory.
+ *
+ * Three cases:
+ *   1. `.appstrate/project.json` exists → use the recorded name
+ *      (authoritative; never re-derive, never drift).
+ *   2. No sidecar but a compose file is already present → legacy
+ *      pre-#167 install. Use the fixed `appstrate` name so the upgrade
+ *      targets the same containers the user's stack is currently
+ *      running under.
+ *   3. Fresh install → derive from the absolute dir path (stable +
+ *      unique + readable). The caller writes the sidecar on success
+ *      so subsequent runs hit case (1).
+ *
+ * Exported for unit testing.
+ */
+export async function resolveProjectName(
+  dir: string,
+  hasLegacyCompose: boolean,
+): Promise<{ name: string; origin: "sidecar" | "legacy" | "derived" }> {
+  const recorded = await readProjectFile(dir);
+  if (recorded) return { name: recorded.projectName, origin: "sidecar" };
+  if (hasLegacyCompose) return { name: LEGACY_PROJECT_NAME, origin: "legacy" };
+  return { name: deriveProjectName(dir), origin: "derived" };
+}
+
+/**
+ * Refuse to proceed when an unrelated stack is already running under
+ * the same project name from a different directory — the pre-fix case
+ * that turned `appstrate install` into a stack-cannibal (#167). The
+ * docker daemon keys a project by name, not by working directory, so
+ * two installs that resolve to the same name would silently adopt
+ * each other's containers. Better to abort, loudly.
+ *
+ * `--force` bypasses this guard.
+ */
+async function preflightProjectCollision(
+  dir: string,
+  projectName: string,
+  force: boolean,
+): Promise<void> {
+  if (force) return;
+  const running = await findRunningComposeProject(projectName);
+  if (!running) return;
+  const configPaths = running.configFiles;
+  const belongsToThisDir = configPaths.some((p) => p === join(dir, "docker-compose.yml"));
+  if (belongsToThisDir) return;
+  const pretty =
+    configPaths.length > 0
+      ? `\n  Running stack: ${configPaths.join(", ")}`
+      : `\n  Running stack: (compose config path unavailable)`;
+  const stopHint =
+    configPaths.length > 0 && configPaths[0]
+      ? `cd "${join(configPaths[0], "..")}" && docker compose down`
+      : `docker compose --project-name ${projectName} down`;
+  throw new Error(
+    `A Docker Compose project named "${projectName}" is already running from another directory.${pretty}\n\n` +
+      `  Refusing to continue — re-running \`appstrate install\` now would adopt and recreate\n` +
+      `  those containers against fresh secrets, breaking the other stack (and potentially\n` +
+      `  corrupting its data). See https://github.com/appstrate/appstrate/issues/167.\n\n` +
+      `  Fixes:\n` +
+      `    • Stop the other stack first:  ${stopHint}\n` +
+      `    • Or install into a different directory — the CLI derives an isolated\n` +
+      `      project name per install dir, so two installs can coexist on the same host.\n` +
+      `    • Or pass \`--force\` if you're sure this is the install you intend to\n` +
+      `      recreate (requires you to have already backed up any data).\n`,
+  );
+}
+
+async function installDockerTier(
+  dir: string,
+  tier: 1 | 2 | 3,
+  opts: { force: boolean },
+): Promise<void> {
   // Docker.
   const dockerSpinner = spinner();
   dockerSpinner.start("Checking Docker");
@@ -207,6 +295,18 @@ async function installDockerTier(dir: string, tier: 1 | 2 | 3): Promise<void> {
     if (!proceed) throw new Error("Upgrade cancelled.");
   }
 
+  // Resolve the Compose project name BEFORE any mutating step — it
+  // feeds both the preflight and `dockerComposeUp`. On a fresh install
+  // `origin === "derived"` and we must persist the name on success so
+  // subsequent upgrades pin to the exact same value.
+  const project = await resolveProjectName(dir, existing.hasCompose);
+
+  // Preflight: does another install already claim this project name?
+  // Only meaningful on the derived / legacy paths — a sidecar-recorded
+  // name IS the running project by definition, so the collision check
+  // would just reject the user's own running stack.
+  await preflightProjectCollision(dir, project.name, opts.force);
+
   // Backup BEFORE writing so a rollback is possible all the way back
   // to "user's last-known-good config". The list we backup is exactly
   // the set of files we're about to overwrite — backupFiles skips any
@@ -230,10 +330,12 @@ async function installDockerTier(dir: string, tier: 1 | 2 | 3): Promise<void> {
         : `Wrote ${dir}/docker-compose.yml + .env`,
     );
 
-    // Bring stack up.
+    // Bring stack up. The project name is pinned via `--project-name`
+    // rather than baked into the compose template, so two installs
+    // under different dirs get isolated namespaces.
     const upSpinner = spinner();
-    upSpinner.start("Starting Appstrate (docker compose up -d)");
-    await dockerComposeUp(dir);
+    upSpinner.start(`Starting Appstrate (docker compose --project-name ${project.name} up -d)`);
+    await dockerComposeUp(dir, project.name);
     upSpinner.stop("Containers up");
 
     // Healthcheck.
@@ -241,6 +343,14 @@ async function installDockerTier(dir: string, tier: 1 | 2 | 3): Promise<void> {
     healthSpinner.start("Waiting for Appstrate to become healthy");
     await waitForAppstrate(DEFAULT_APP_URL);
     healthSpinner.stop("Appstrate is healthy");
+
+    // Persist the project-name binding on success. Written AFTER the
+    // healthcheck so a stack that never came up doesn't leave a sidecar
+    // file behind — the next attempt would then skip the preflight
+    // check and potentially collide with a different running install.
+    if (project.origin !== "sidecar") {
+      await writeProjectFile(dir, project.name);
+    }
 
     // Success — clean up the backup copies. Keep them on any failure
     // path so the user can restore manually if needed.
@@ -268,6 +378,9 @@ async function installDockerTier(dir: string, tier: 1 | 2 | 3): Promise<void> {
 
   await openBrowser(DEFAULT_APP_URL);
   outro(
-    `Appstrate is running at ${DEFAULT_APP_URL}.\nManage the stack from ${dir}: \`docker compose logs -f\`, \`docker compose down\`.`,
+    `Appstrate is running at ${DEFAULT_APP_URL}.\n` +
+      `Manage the stack from ${dir}:\n` +
+      `  docker compose --project-name ${project.name} logs -f\n` +
+      `  docker compose --project-name ${project.name} down`,
   );
 }
