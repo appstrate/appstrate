@@ -8,7 +8,6 @@
     "appstrate": "./src/cli.ts"
   },
   "scripts": {
-    "dev": "bun run src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test test/",
     "build": "bun build --target=bun --outdir=dist src/cli.ts"
