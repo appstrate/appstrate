@@ -152,6 +152,53 @@ describe("keyring fallback path (daemon unavailable)", () => {
   });
 });
 
+describe("concurrent writes via file fallback", () => {
+  beforeEach(() => {
+    FakeKeyring.shouldThrow = true; // force every save onto the file path
+  });
+
+  it("serializes concurrent saves without losing profiles", async () => {
+    // 10 parallel saves, each with a distinct profile name. The lock
+    // must serialize the read-modify-write cycles — without it, later
+    // writers clobber earlier profiles by overwriting a stale snapshot.
+    const saves = Array.from({ length: 10 }, (_, i) =>
+      saveTokens(`profile${i}`, { accessToken: `tok-${i}`, expiresAt: 1000 + i }),
+    );
+    await Promise.all(saves);
+
+    // Every profile must be readable — if the lock were absent, most of
+    // these would return null because the last writer overwrote them.
+    for (let i = 0; i < 10; i++) {
+      expect(await loadTokens(`profile${i}`)).toEqual({
+        accessToken: `tok-${i}`,
+        expiresAt: 1000 + i,
+      });
+    }
+  });
+
+  it("writes are atomic — no torn state on mid-write crash", async () => {
+    // Seed an initial valid state.
+    await saveTokens("existing", { accessToken: "keep", expiresAt: 1 });
+
+    // A crash between `writeFile(tmp)` and `rename(tmp, target)` would
+    // leave `.tmp` files on disk but never a half-written target. We
+    // can't actually crash Bun mid-operation in a unit test, so assert
+    // the invariant that matters: after every `saveTokens`, the target
+    // file parses cleanly as JSON with every previously-written profile
+    // intact.
+    for (let i = 0; i < 5; i++) {
+      await saveTokens(`p${i}`, { accessToken: `t${i}`, expiresAt: i });
+      const { readFile } = await import("node:fs/promises");
+      const raw = await readFile(credentialsPath(), "utf-8");
+      const parsed = JSON.parse(raw) as Record<string, { accessToken: string }>;
+      expect(parsed.existing?.accessToken).toBe("keep");
+      for (let j = 0; j <= i; j++) {
+        expect(parsed[`p${j}`]?.accessToken).toBe(`t${j}`);
+      }
+    }
+  });
+});
+
 describe("corrupt data handling", () => {
   it("returns null for malformed keyring payloads instead of crashing", async () => {
     // Simulate a foreign tool writing junk under our service key.

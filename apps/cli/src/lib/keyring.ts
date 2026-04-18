@@ -23,7 +23,8 @@
 
 import { Entry } from "@napi-rs/keyring";
 import { join, dirname } from "node:path";
-import { readFile, writeFile, unlink, mkdir, chmod } from "node:fs/promises";
+import { readFile, writeFile, unlink, mkdir, rename, open } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { getConfigDir } from "./config.ts";
 
 export interface Tokens {
@@ -137,12 +138,93 @@ export async function deleteTokens(profile: string): Promise<void> {
 
 // ─── File fallback ───────────────────────────────────────────────────────────
 //
-// One JSON object keyed by profile. Rewriting the full file on every
-// save is fine — this path is exercised only when the keyring is
-// unavailable and writes happen at most once per login.
+// One JSON object keyed by profile. Writes are atomic (tmp + rename) and
+// serialized by a PID-aware advisory lock so two concurrent `appstrate
+// login` invocations targeting different profiles don't clobber each
+// other's entries via the read-modify-write cycle.
 
 interface FileStore {
   [profile: string]: Tokens;
+}
+
+function lockPath(): string {
+  return `${fallbackPath()}.lock`;
+}
+
+/**
+ * Serialize read-modify-write cycles on the credentials file.
+ *
+ * Uses `open(..., "wx")` (O_EXCL + O_CREAT + O_WRONLY) as a primitive
+ * advisory lock and stores the holder's PID inside so we can detect
+ * crashed-and-left-over locks from previous CLI runs. 5-second overall
+ * deadline — credential writes are single-digit milliseconds; anything
+ * longer means a crashed peer or a truly pathological filesystem.
+ */
+async function withLock<T>(fn: () => Promise<T>): Promise<T> {
+  const path = lockPath();
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+
+  const DEADLINE_MS = 5_000;
+  const POLL_MS = 50;
+  const start = Date.now();
+  let staleRecoveryDone = false;
+
+  while (true) {
+    try {
+      const fd = await open(path, "wx", 0o600);
+      try {
+        await fd.writeFile(`${process.pid}\n`);
+      } finally {
+        await fd.close();
+      }
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+
+      // Lock held — check if the holder is still alive. A single stale
+      // recovery per `withLock` call avoids spinning on a lock file that
+      // a concurrent peer keeps recreating.
+      if (!staleRecoveryDone) {
+        staleRecoveryDone = true;
+        try {
+          const heldBy = parseInt((await readFile(path, "utf-8")).trim(), 10);
+          if (heldBy && !processIsAlive(heldBy)) {
+            await unlink(path).catch(() => {});
+            continue;
+          }
+        } catch {
+          // Lock vanished between EEXIST and readFile — next iteration
+          // will race cleanly for it.
+          continue;
+        }
+      }
+
+      if (Date.now() - start > DEADLINE_MS) {
+        throw new Error(
+          `Timed out acquiring credentials lock ${path}. ` +
+            `If no other appstrate command is running, remove this file manually.`,
+        );
+      }
+      await delay(POLL_MS);
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    await unlink(path).catch(() => {});
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    // `kill(pid, 0)` is the POSIX "process exists" probe — no signal
+    // delivered, throws ESRCH if the PID is gone.
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function readFileStore(): Promise<FileStore> {
@@ -159,22 +241,37 @@ async function readFileStore(): Promise<FileStore> {
   }
 }
 
+/**
+ * Atomic overwrite — tmp file in the same directory, `rename()` over
+ * the target. Matches `lib/config.ts::writeConfig` so the same crash /
+ * Ctrl-C semantics apply to both files: post-crash state is always
+ * either the pre-write contents or the full post-write contents, never
+ * a truncated or partially-written mix.
+ */
 async function writeFileStore(store: FileStore): Promise<void> {
-  const dir = dirname(fallbackPath());
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  await writeFile(fallbackPath(), JSON.stringify(store, null, 2), { mode: 0o600 });
-  // Re-chmod defensively — umask on some hosts lets writeFile create
-  // files with wider permissions despite the `mode` option.
-  await chmod(fallbackPath(), 0o600).catch(() => {});
+  const target = fallbackPath();
+  await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+  const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tmp, JSON.stringify(store, null, 2), { mode: 0o600 });
+  try {
+    await rename(tmp, target);
+  } catch (err) {
+    await unlink(tmp).catch(() => {});
+    throw err;
+  }
 }
 
 async function saveToFile(profile: string, tokens: Tokens): Promise<void> {
-  const store = await readFileStore();
-  store[profile] = tokens;
-  await writeFileStore(store);
+  await withLock(async () => {
+    const store = await readFileStore();
+    store[profile] = tokens;
+    await writeFileStore(store);
+  });
 }
 
 async function loadFromFile(profile: string): Promise<Tokens | null> {
+  // Reads don't need the lock: `writeFileStore` is atomic via rename,
+  // so a concurrent read sees either the old or the new complete file.
   const store = await readFileStore();
   const row = store[profile];
   if (!row) return null;
@@ -184,19 +281,21 @@ async function loadFromFile(profile: string): Promise<Tokens | null> {
 }
 
 async function deleteFromFile(profile: string): Promise<void> {
-  let store: FileStore;
-  try {
-    store = await readFileStore();
-  } catch {
-    return;
-  }
-  if (!(profile in store)) return;
-  delete store[profile];
-  if (Object.keys(store).length === 0) {
-    await unlink(fallbackPath()).catch(() => {});
-    return;
-  }
-  await writeFileStore(store);
+  await withLock(async () => {
+    let store: FileStore;
+    try {
+      store = await readFileStore();
+    } catch {
+      return;
+    }
+    if (!(profile in store)) return;
+    delete store[profile];
+    if (Object.keys(store).length === 0) {
+      await unlink(fallbackPath()).catch(() => {});
+      return;
+    }
+    await writeFileStore(store);
+  });
 }
 
 function parseTokens(raw: string): Tokens | null {
