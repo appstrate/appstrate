@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, lazy, Suspense } from "react";
-import { Routes, Route, Outlet, useLocation, Navigate, Link } from "react-router-dom";
+import {
+  Routes,
+  Route,
+  Outlet,
+  useLocation,
+  useSearchParams,
+  Navigate,
+  Link,
+} from "react-router-dom";
 import { PackageList } from "./pages/package-list";
 import { UnifiedPackageDetailPage } from "./pages/unified-package-detail";
 import { PackageEditorPage } from "./pages/package-editor";
@@ -123,7 +131,24 @@ function GlobalRealtimeSync({ children }: { children: React.ReactNode }) {
 }
 
 /** Routes that don't require an org to be selected. */
-const ORG_GATE_BYPASS = ["/welcome", "/onboarding", "/invite"];
+const ORG_GATE_BYPASS = ["/welcome", "/onboarding", "/invite", "/auth/callback"];
+
+/**
+ * Bridge for server-side redirects that land at `/auth/login?returnTo=...`.
+ *
+ * Only same-origin absolute paths are accepted — no schemes, no host,
+ * no path-traversal tricks — so this cannot be abused as an open
+ * redirect even if the `returnTo` query lands in an attacker-controlled
+ * email. Anything malformed silently falls through to the default
+ * post-login destination (`/`).
+ */
+function AuthLoginReturnToBridge() {
+  const [params] = useSearchParams();
+  const raw = params.get("returnTo");
+  let from: string | undefined;
+  if (raw && raw.startsWith("/") && !raw.startsWith("//")) from = raw;
+  return <Navigate to="/login" replace state={from ? { from } : undefined} />;
+}
 
 function OrgGate({ children }: { children: React.ReactNode }) {
   const { currentOrg, orgs, loading } = useOrg();
@@ -203,6 +228,16 @@ export function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          {/*
+           * Server-rendered flows outside the SPA (e.g. the device-flow
+           * `/activate` page) redirect unauthenticated visitors here with
+           * a `?returnTo=<path>` query. Capture it into `state.from`
+           * before forwarding to `/login` so `LoginPage`'s existing
+           * `location.state?.from` hookup feeds it into
+           * `startOidcLogin(redirectTo)` and the callback returns to the
+           * original page. The `replace` keeps the back button sane.
+           */}
+          <Route path="/auth/login" element={<AuthLoginReturnToBridge />} />
           {features.oidc && (
             <Route
               path="/auth/callback"
@@ -248,6 +283,30 @@ export function App() {
         <Routes>
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/register" element={<Navigate to="/" replace />} />
+          {/*
+           * `/auth/callback` must be reachable while authenticated too: by
+           * the time the browser lands here, the BA session cookie is
+           * already set by the server, so `useAuth()` flips us into this
+           * block before `AuthCallbackPage` runs. Without the route here
+           * the URL falls through to the catch-all and the `sessionStorage`
+           * returnTo we stashed pre-login is never consumed.
+           */}
+          {features.oidc && (
+            <Route
+              path="/auth/callback"
+              element={
+                <Suspense
+                  fallback={
+                    <div className="flex min-h-screen items-center justify-center">
+                      <Spinner />
+                    </div>
+                  }
+                >
+                  <AuthCallbackPage />
+                </Suspense>
+              }
+            />
+          )}
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="/invite/:token/accept" element={<InviteAcceptPage />} />
           <Route path="/welcome" element={<WelcomePage />} />
