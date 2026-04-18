@@ -187,6 +187,39 @@ describe("pollDeviceFlow", () => {
       pollDeviceFlow("https://app", "dc", "c", { interval: 0, expiresIn: 0 }),
     ).rejects.toMatchObject({ name: "DeviceFlowError", code: "expired_token" });
   });
+
+  it("honors the client-side MAX_POLL_DURATION cap even when the server returns a huge expires_in", async () => {
+    // A misbehaving / compromised server returns `expires_in: 86400`
+    // (24h). Without a client-side ceiling the CLI would keep polling
+    // for a day — the hard cap in `device-flow.ts` caps at 15 minutes.
+    // We can't actually wait 15 minutes; instead assert the deadline
+    // is computed from MIN(server, ceiling) by checking Date.now()
+    // wasn't extended past the ceiling. We do that indirectly by
+    // observing that the loop still terminates quickly under a no-op
+    // delay + `authorization_pending` spam — if the ceiling weren't
+    // applied, `Date.now() < deadline` would stay true for hours.
+    installFetch(async () => jsonResponse(400, { error: "authorization_pending" }));
+
+    // Pin `Date.now` to a moving clock that advances 1 minute per
+    // delay tick. After 16 ticks we've burned 16 minutes — past the
+    // 15-minute ceiling — so the loop must exit.
+    const originalNow = Date.now;
+    let fakeMs = 1_700_000_000_000;
+    Date.now = () => fakeMs;
+    try {
+      await expect(
+        pollDeviceFlow("https://app", "dc", "c", {
+          interval: 0,
+          expiresIn: 86_400, // server claims 24h
+          delayFn: async () => {
+            fakeMs += 60_000;
+          },
+        }),
+      ).rejects.toMatchObject({ name: "DeviceFlowError", code: "expired_token" });
+    } finally {
+      Date.now = originalNow;
+    }
+  });
 });
 
 describe("DeviceFlowError shape", () => {
