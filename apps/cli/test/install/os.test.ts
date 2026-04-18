@@ -12,12 +12,19 @@
  *     and returns false on timeout without hanging.
  *   - `commandExists` uses the right platform lookup tool (which/where)
  *     and returns a clean boolean.
- *   - `openBrowser` swallows errors (headless/CI safety).
+ *
+ * Not tested: `openBrowser`. On a dev machine with a GUI it *actually
+ * launches the default browser*, which is a terrible test experience.
+ * The function itself is a three-line try/catch around `open()` — its
+ * only job is to swallow errors on headless hosts, and that's better
+ * exercised by the integration smoke tests in CI (where there's no
+ * browser to launch anyway) than by opening random tabs during `bun
+ * test` on someone's laptop.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { platform } from "node:os";
-import { runCommand, waitForHttp, commandExists, openBrowser } from "../../src/lib/install/os.ts";
+import { runCommand, waitForHttp, commandExists } from "../../src/lib/install/os.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -130,13 +137,5 @@ describe("waitForHttp", () => {
     const ok = await waitForHttp("http://127.0.0.1:65535/", 5_000);
     expect(ok).toBe(true);
     expect(calls).toBeGreaterThanOrEqual(2);
-  });
-});
-
-describe("openBrowser", () => {
-  it("never throws even if the platform has no GUI", async () => {
-    // `open` on a headless CI container fails silently; the wrapper
-    // swallows. This test just asserts no exception escapes.
-    await openBrowser("http://127.0.0.1:65535");
   });
 });
