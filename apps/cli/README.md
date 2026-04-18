@@ -14,7 +14,7 @@ curl -fsSL https://get.appstrate.dev | bash
 
 Detects your OS/arch, downloads the matching binary from [GitHub Releases](https://github.com/appstrate/appstrate/releases/latest), drops it at `/usr/local/bin/appstrate`, and immediately execs `appstrate install`.
 
-Supported: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. **Windows is not a v1 target** — run the one-liner inside WSL2 (which reuses the `linux-x64` binary), or invoke `bunx @appstrate/cli install` natively if you already have Bun on Windows.
+Supported: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. **Windows is not a v1 target** — run the one-liner inside WSL2 (which reuses the `linux-x64` binary), or invoke `bunx appstrate install` natively if you already have Bun on Windows.
 
 ### Alternate install paths
 
@@ -23,7 +23,7 @@ Supported: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. **Windows i
 curl -fsSL https://get.appstrate.dev/verify.sh | bash
 
 # Bun-native (if you already have Bun)
-bunx @appstrate/cli install
+bunx appstrate install
 ```
 
 See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#verifying-the-installer) for signature verification details (minisign + SLSA build provenance).

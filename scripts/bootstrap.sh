@@ -63,11 +63,11 @@ _appstrate_bootstrap() {
     *)
       # Windows is deliberately not a v1 target — see ADR-006 § Deliverable.
       # The recommended path on Windows is WSL2 (which reuses the linux-x64
-      # binary); `bunx @appstrate/cli install` is the Bun-native escape
+      # binary); `bunx appstrate install` is the Bun-native escape
       # hatch for users who have Bun but no WSL2. We fail loud here instead
       # of hinting at a flow this script doesn't handle.
       echo "Unsupported OS: $OS." >&2
-      echo "On Windows, run this inside WSL2 (recommended), or install natively via: bunx @appstrate/cli install" >&2
+      echo "On Windows, run this inside WSL2 (recommended), or install natively via: bunx appstrate install" >&2
       exit 1
       ;;
   esac
