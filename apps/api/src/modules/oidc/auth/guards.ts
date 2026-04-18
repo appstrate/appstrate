@@ -68,9 +68,20 @@ const DEVICE_TOKEN_RL_POINTS = 30;
 // user_code probe endpoint: an attacker can enumerate the ~34.6-bit
 // user_code space looking for a `pending` row before the legitimate
 // user reaches the consent screen, then race them to `/device/approve`
-// (where the realm guard + per-row attempts counter take over). 10/min
-// /IP is consistent with the other write-shaped device endpoints; the
-// happy path here is a single GET on consent-page render.
+// (where the realm guard + per-row attempts counter take over).
+//
+// Happy-path traffic audit (grep anchor for future operators surprised
+// by a 429 on `/device`):
+//   - `/device` is consumed SERVER-SIDE only by the `/activate` SSR
+//     page (`apps/api/src/modules/oidc/pages/activate.ts`) at consent
+//     render — one GET per device-authorization session, from the
+//     platform's own IP.
+//   - The web SPA (`apps/web/src/`) does NOT call `/device`; there is
+//     no `fetch("/device")` in the client bundle.
+//   - The CLI client does NOT poll `/device` either — it polls
+//     `/device/token`, covered by `DEVICE_TOKEN_RL_POINTS = 30`.
+// Net: legit flows cost 1 hit/session, so 10/min/IP is intentionally
+// generous for legit traffic and tight against probe enumeration.
 const DEVICE_VERIFY_RL_POINTS = 10;
 // Per-IP budget on the BA-mounted `/device/approve` and `/device/deny`
 // endpoints. The SSR wrapper at `/activate/approve` already has its own
@@ -339,7 +350,54 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   const rawErrorCallback = query.errorCallbackURL ?? query.callbackURL;
   if (!rawErrorCallback) return;
   const baseURL = new URL(ctx.context.baseURL);
-  const target = new URL(decodeURIComponent(rawErrorCallback), baseURL);
+
+  // Shared fallback — used both for off-origin URLs (attack path:
+  // attacker-controlled absolute URL that would open-redirect) and for
+  // unparseable input (attack path: `%ZZ` / lone `%` / malformed URL
+  // surfaces an uncaught URIError/TypeError as a 500 instead of a clean
+  // redirect; a 500 is itself a minor oracle distinguishing "hook fired
+  // and choked" from "hook did not fire"). Both paths converge on an
+  // in-origin redirect carrying `?error=signup_disabled` so the OIDC
+  // login page still renders the localized banner via `mapLoginErrorCode`.
+  // Typed `never` so TypeScript narrows `target` after the try/catch.
+  // Explicit `function` declaration (rather than arrow) because TS
+  // propagates the `never` annotation from a declared-function return
+  // position more reliably than from a `const foo = (...): never => …`
+  // expression — the latter can fail to narrow `target` at the callsite
+  // even though the body always throws.
+  function redirectToSafeDefault(auditEvent: string, logFields: Record<string, unknown>): never {
+    logger.warn("oidc: magic-link signup gate falling back to safe redirect", {
+      module: "oidc",
+      audit: true,
+      event: auditEvent,
+      ...logFields,
+    });
+    const safe = new URL(baseURL);
+    safe.searchParams.set("error", "signup_disabled");
+    throw ctx.redirect(safe.toString());
+  }
+
+  // `decodeURIComponent` throws `URIError` on malformed percent-escapes
+  // (`%ZZ`, lone `%`); `new URL` throws `TypeError` on syntactically
+  // invalid URLs (`https://[bracket-without-close`, control chars, …).
+  // Neither is a security regression on its own — we never hand session
+  // material to an attacker-controlled origin — but letting the throw
+  // escape converts the intended `?error=signup_disabled` redirect into
+  // an opaque 500, which is both ugly UX and a weak oracle for an
+  // attacker who can plant a pending-client cookie and trigger this
+  // path. Convert to the same safe in-origin redirect as the off-origin
+  // branch below. Truncate the raw value in the log field so we don't
+  // pipe unbounded attacker-controlled payloads through the log pipeline.
+  let target: URL;
+  try {
+    target = new URL(decodeURIComponent(rawErrorCallback), baseURL);
+  } catch (err) {
+    redirectToSafeDefault("oidc.magic_link.error_callback.unparseable", {
+      rawErrorCallback: rawErrorCallback.slice(0, 200),
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   // Same-origin gate on the redirect target. Better Auth's own
   // `originCheck` middleware (registered via `use:` on the magic-link
   // verify route — see `node_modules/better-auth/dist/plugins/magic-link/
@@ -366,19 +424,10 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   // still carries `?error=signup_disabled` so the OIDC login page can
   // render the localized banner via `mapLoginErrorCode`.
   if (target.origin !== baseURL.origin) {
-    logger.warn(
-      "oidc: magic-link signup gate received off-origin errorCallbackURL — falling back to baseURL",
-      {
-        module: "oidc",
-        audit: true,
-        event: "oidc.magic_link.error_callback.off_origin",
-        attemptedOrigin: target.origin,
-        baseOrigin: baseURL.origin,
-      },
-    );
-    const safe = new URL(baseURL);
-    safe.searchParams.set("error", "signup_disabled");
-    throw ctx.redirect(safe.toString());
+    redirectToSafeDefault("oidc.magic_link.error_callback.off_origin", {
+      attemptedOrigin: target.origin,
+      baseOrigin: baseURL.origin,
+    });
   }
   target.searchParams.set("error", "signup_disabled");
   throw ctx.redirect(target.toString());

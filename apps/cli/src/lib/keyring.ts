@@ -236,10 +236,33 @@ export async function loadTokens(profile: string): Promise<Tokens | null> {
         // we're returning to the caller (null) is correct regardless,
         // and surfacing a delete error here would mask the real
         // signal ("you need to log in again").
+        //
+        // Cross-process race mitigation: re-read the keyring entry
+        // right before deleting and only proceed if the expiresAt
+        // still matches what we just classified as expired. If a
+        // concurrent `saveTokens` from another process bumped the row
+        // to a fresh token in the gap, leave it alone — the
+        // unconditional delete would destroy a valid fresh login. The
+        // napi-rs/keyring API doesn't expose an atomic test-and-delete
+        // primitive, so this is the closest we get; if the re-read
+        // itself throws, skip the delete (prefer a stale entry over
+        // destroying a fresh one).
+        let safeToDelete = false;
         try {
-          _keyringFactory(profile).deletePassword();
+          const reread = _keyringFactory(profile).getPassword();
+          const rereadTokens = typeof reread === "string" ? parseTokens(reread) : null;
+          if (!rereadTokens || rereadTokens.expiresAt === parsed.expiresAt) {
+            safeToDelete = true;
+          }
         } catch {
-          /* best-effort */
+          /* re-read failed: leave the entry alone */
+        }
+        if (safeToDelete) {
+          try {
+            _keyringFactory(profile).deletePassword();
+          } catch {
+            /* best-effort */
+          }
         }
         return null;
       }
@@ -268,7 +291,15 @@ export async function loadTokens(profile: string): Promise<Tokens | null> {
     // rationale as the keyring branch — the caller sees `null` and
     // re-runs login; we just don't want a stale plaintext token
     // sitting on disk indefinitely after it stopped being usable.
-    await deleteFromFile(profile);
+    //
+    // Compare-and-swap on `expiresAt`: a concurrent `saveTokens` from
+    // another process may have bumped the row to a fresh token in the
+    // window between our read and the delete. Without the CAS, the
+    // unconditional delete would destroy a valid fresh login the user
+    // would then have to redo — a regression from the pre-scrub
+    // behavior where that concurrent save would simply have won via
+    // last-write-wins (see top-of-section doc on benign races).
+    await deleteFromFile(profile, { onlyIfExpiresAtMatches: fromFile.expiresAt });
     return null;
   }
   return fromFile;
@@ -484,7 +515,34 @@ async function loadFromFile(profile: string): Promise<Tokens | null> {
   return { accessToken: row.accessToken, expiresAt: row.expiresAt };
 }
 
-async function deleteFromFile(profile: string): Promise<void> {
+/**
+ * Remove a profile from the file store. Unconditional by default
+ * (used by `deleteTokens` / logout — the user's intent is to nuke
+ * the row regardless of its current state).
+ *
+ * Compare-and-swap variant via `opts.onlyIfExpiresAtMatches`: the
+ * caller passes the `expiresAt` they read a moment earlier, and the
+ * delete only proceeds if the row currently stored still carries
+ * that same `expiresAt`. Used by the `loadTokens` expired-token
+ * scrub to avoid destroying a fresh token that another process
+ * wrote into the store between our read and the delete. The
+ * top-of-section doc accepts concurrent-save races as benign
+ * (last-write-wins), but the unconditional scrub turns that benign
+ * race into the destruction of a valid login — the CAS preserves
+ * the benign semantics.
+ *
+ * The `loadTokens` keyring-path scrub uses the same rationale but
+ * with a re-read guard instead of a proper CAS — napi-rs/keyring
+ * exposes no atomic test-and-delete primitive, so that branch is
+ * best-effort where this one is exact (fileMutex + in-lock re-read
+ * serialize same-process racers; cross-process racers are caught
+ * because we only ever delete when the stored `expiresAt` matches
+ * what the caller saw).
+ */
+async function deleteFromFile(
+  profile: string,
+  opts?: { onlyIfExpiresAtMatches?: number },
+): Promise<void> {
   await withLock(async () => {
     let store: FileStore;
     try {
@@ -493,6 +551,10 @@ async function deleteFromFile(profile: string): Promise<void> {
       return;
     }
     if (!(profile in store)) return;
+    if (opts?.onlyIfExpiresAtMatches !== undefined) {
+      const current = store[profile];
+      if (!current || current.expiresAt !== opts.onlyIfExpiresAtMatches) return;
+    }
     delete store[profile];
     if (Object.keys(store).length === 0) {
       await unlink(fallbackPath()).catch(() => {});

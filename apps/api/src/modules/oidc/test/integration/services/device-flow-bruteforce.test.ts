@@ -120,27 +120,48 @@ describe("device-flow brute-force lockout", () => {
   });
 
   it("does not increment attempts when the row has already flipped to approved", async () => {
-    // Regression: closes the SELECT-then-UPDATE TOCTOU window in the
-    // realm guard. The `WHERE status = 'pending'` predicate on the
-    // increment UPDATE means a row that another request just flipped
-    // to `approved` (or `denied`) is left untouched. We simulate that
-    // by directly setting `status='approved'` on the row before
-    // calling /device/approve — the guard's SELECT may still see
-    // `pending` momentarily in the wild, but the predicate on the
-    // UPDATE makes the test deterministic without orchestrating two
-    // concurrent requests against PostgreSQL's snapshot isolation.
+    // Scope of this test — read carefully before assuming it covers the
+    // `AND status='pending'` predicate added to the increment UPDATE.
+    //
+    // What this test actually pins: the *observational contract* that
+    // `/device/approve` does NOT bump `attempts` on a row whose status
+    // is no longer `pending`. We pre-set `status='approved'` on the row
+    // and then POST /device/approve repeatedly — the counter must stay
+    // at its seed value (0) and the status must stay `approved`.
+    //
+    // What this test does NOT directly exercise: the newly-added
+    // `WHERE status='pending'` predicate on the increment UPDATE in
+    // `guards.ts::enforceDeviceApproveRealm`. The guard's early SELECT
+    // (`if (!record || !record.clientId || record.status !== "pending")
+    // return;` at the top of the guard — see `guards.ts:449`) fires
+    // BEFORE the increment UPDATE is reached on this path. So a future
+    // reviewer who deletes `AND status='pending'` from the UPDATE would
+    // see this test keep passing — the SELECT short-circuits first.
+    //
+    // Why we accept that limitation: directly exercising the UPDATE
+    // predicate would require pg transaction-level orchestration where
+    // one session's SELECT sees `status='pending'` (snapshot isolation),
+    // a concurrent session flips the row to `approved` and commits, and
+    // the first session's UPDATE must then hit 0 rows. That is buildable
+    // (SERIALIZABLE + advisory locks, or two `pg` connections with
+    // manual BEGIN/COMMIT timing) but the test-infra cost is
+    // substantial for a window that is already narrow in practice.
+    //
+    // Code-review anchor for the predicate's correctness: the
+    // `if (!bumped) return` short-circuit at `guards.ts:497`. If the
+    // UPDATE ever hits 0 rows (status flipped between SELECT and
+    // UPDATE), `bumped` is undefined and the guard defers to BA's own
+    // handler. Reviewers modifying the predicate must preserve that
+    // branch — this test alone will not catch its removal.
     const cookie = await signUpEndUser("approved-row@example.com");
     const userCode = await requestCode();
     const clean = userCode.replace(/-/g, "").toUpperCase();
 
     await db.update(deviceCode).set({ status: "approved" }).where(eq(deviceCode.userCode, clean));
 
-    // The status guard at the top of `enforceDeviceApproveRealm` already
-    // short-circuits before reaching the increment UPDATE on this path.
-    // The test value is in pinning the *contract* — if a future refactor
-    // moves the increment up or weakens the status check, the assertion
-    // below catches it. `attempts` MUST remain at 0 (its seed value
-    // from /device/code) regardless of how many times we POST.
+    // Pins the observational contract: `attempts` MUST remain at 0
+    // (its seed value from /device/code) regardless of how many times
+    // we POST while the row is non-pending.
     for (let i = 0; i < 5; i++) {
       await approve(userCode, cookie);
     }

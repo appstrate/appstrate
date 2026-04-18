@@ -200,6 +200,74 @@ describe("enforceMagicLinkSignupPolicy — redirect target gating", () => {
     expect(target.searchParams.get("error")).toBe("signup_disabled");
   });
 
+  it("falls back to safe redirect on malformed errorCallbackURL (lone %)", async () => {
+    // `decodeURIComponent("%ZZ")` throws `URIError`. Before the fix,
+    // that surfaced as an uncaught 500 — ugly UX and a minor oracle
+    // distinguishing "hook fired and choked" from "hook did not fire"
+    // for an attacker who can plant the pending-client cookie. Post-
+    // fix: the URIError is caught and we emit the same in-origin
+    // `?error=signup_disabled` redirect as the off-origin branch.
+    const ctx = makeCtx({
+      baseURL,
+      cookie: pendingClientCookie(closedOrgClientId),
+      query: {
+        token: "magic_redir_malformed",
+        errorCallbackURL: "%ZZ",
+        callbackURL: `${baseURL}/cb`,
+      },
+      email: `malformed-${Date.now()}@example.com`,
+      emailExists: false,
+    });
+
+    let redirected: RedirectThrown | null = null;
+    try {
+      await enforceMagicLinkSignupPolicy(ctx);
+    } catch (err) {
+      redirected = err as RedirectThrown;
+    }
+
+    // The hook MUST throw a redirect (not surface the URIError as a
+    // 500). If this fails as an unhandled error, the fix regressed.
+    expect(redirected).not.toBeNull();
+    const target = new URL(redirected!.redirectTo);
+    expect(target.origin).toBe(baseURL);
+    expect(target.searchParams.get("error")).toBe("signup_disabled");
+  });
+
+  it("falls back to safe redirect on unparseable URL string", async () => {
+    // `new URL("https://[", baseURL)` throws `TypeError` — the bracket
+    // opens an IPv6-literal host that is never closed. Same contract
+    // as the malformed-percent case above: the throw must be caught
+    // and converted into the safe in-origin redirect. Assert this as
+    // a separate case because the underlying error class differs
+    // (TypeError vs URIError) and a `catch (err: URIError)`-style
+    // narrowing mistake in the fix would fail this test but not the
+    // one above.
+    const ctx = makeCtx({
+      baseURL,
+      cookie: pendingClientCookie(closedOrgClientId),
+      query: {
+        token: "magic_redir_unparseable",
+        errorCallbackURL: "https://[",
+        callbackURL: `${baseURL}/cb`,
+      },
+      email: `unparseable-${Date.now()}@example.com`,
+      emailExists: false,
+    });
+
+    let redirected: RedirectThrown | null = null;
+    try {
+      await enforceMagicLinkSignupPolicy(ctx);
+    } catch (err) {
+      redirected = err as RedirectThrown;
+    }
+
+    expect(redirected).not.toBeNull();
+    const target = new URL(redirected!.redirectTo);
+    expect(target.origin).toBe(baseURL);
+    expect(target.searchParams.get("error")).toBe("signup_disabled");
+  });
+
   it("pass-through when no pending-client cookie is present", async () => {
     // Sanity: outside an OIDC flow, the hook is a no-op. If this ever
     // starts redirecting, the gate has accidentally widened to apply
