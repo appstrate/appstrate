@@ -222,6 +222,12 @@ jobs:
       - name: Download CLI binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
+          # `docker/build-push-action` auto-uploads
+          # `<name>~<name>~<id>.dockerbuild` summary artifacts to the
+          # same run; without a pattern filter, download-artifact pulls
+          # them too — and they're large enough to flake the 5-retry
+          # blob download budget. Restrict to the binary asset names.
+          pattern: appstrate-*
           path: cli-binaries
           merge-multiple: false
 
@@ -310,6 +316,9 @@ jobs:
       - name: Download CLI binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
+          # Same filter as the sign job — skip the docker-buildx summary
+          # artifacts that share the run.
+          pattern: appstrate-*
           path: cli-binaries
           # Each artifact is extracted into its own subdir under `path`;
           # flatten by globbing in the release step below.
