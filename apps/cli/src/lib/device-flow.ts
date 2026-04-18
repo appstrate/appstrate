@@ -73,21 +73,23 @@ interface RawErrorBody {
 /**
  * RFC 8628 §3.2 — initiate the grant.
  *
- * RFC 8628 specifies `application/x-www-form-urlencoded` for both
- * endpoints, but Better Auth's plugin accepts only JSON (its
- * `better-call` router rejects form-urlencoded with 415 in production).
- * Since both sides ship lockstep-versioned from this monorepo, we send
- * JSON to match the server rather than ask for an upstream RFC fix.
+ * Body is `application/x-www-form-urlencoded` per the spec. The Appstrate
+ * server accepts both form-urlencoded and JSON at these endpoints (a
+ * platform-level shim transforms form-urlencoded → JSON before Better
+ * Auth's `better-call` router sees the request). Sticking to the RFC
+ * content type here keeps the CLI interoperable with any standards-
+ * compliant OIDC server as well.
  */
 export async function startDeviceFlow(
   instance: string,
   clientId: string,
   scope: string,
 ): Promise<DeviceCodeResponse> {
+  const body = new URLSearchParams({ client_id: clientId, scope });
   const res = await fetch(`${normalizeInstance(instance)}/api/auth/device/code`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ client_id: clientId, scope }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
   });
   if (!res.ok) {
     const err = await parseErrorBody(res);
@@ -157,13 +159,14 @@ export async function pollDeviceFlow(
     opts.delayFn ??
     ((ms: number, signal?: AbortSignal) => delay(ms, undefined, { signal }).then(() => undefined));
 
-  // JSON body — see the note on `startDeviceFlow` for why we don't use
-  // `application/x-www-form-urlencoded` here despite the RFC wording.
-  const body = JSON.stringify({
+  // Form-urlencoded body per RFC 8628 §3.4. Server accepts both content
+  // types; we stick to the RFC so the CLI interoperates with any
+  // standards-compliant OIDC provider.
+  const body = new URLSearchParams({
     grant_type: "urn:ietf:params:oauth:grant-type:device_code",
     device_code: deviceCode,
     client_id: clientId,
-  });
+  }).toString();
 
   while (Date.now() < deadline) {
     if (opts.signal?.aborted) {
@@ -179,7 +182,7 @@ export async function pollDeviceFlow(
 
     const res = await fetch(`${normalizeInstance(instance)}/api/auth/device/token`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
     });
 

@@ -151,6 +151,62 @@ describe("device-flow happy path", () => {
     expect(rowAfter).toBeUndefined();
   });
 
+  it("accepts application/x-www-form-urlencoded at /device/code + /device/token (RFC 8628 §3.2/§3.4)", async () => {
+    const { cookie } = await signUpPlatformUser();
+
+    // /device/code with form-urlencoded body — the platform-level shim
+    // rewrites it to JSON before Better Auth's deviceAuthorization()
+    // plugin sees the request.
+    const codeRes = await app.request("/api/auth/device/code", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: "appstrate-cli",
+        scope: "openid profile email offline_access",
+      }).toString(),
+    });
+    expect(codeRes.status).toBe(200);
+    const code = (await codeRes.json()) as {
+      device_code: string;
+      user_code: string;
+    };
+    expect(code.device_code).toBeTruthy();
+
+    // Approve with the platform user's session so the next /device/token
+    // call returns the access token (not authorization_pending).
+    const approveRes = await app.request("/api/auth/device/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ userCode: code.user_code }),
+    });
+    expect(approveRes.status).toBe(200);
+
+    // Rewind lastPolledAt so the next poll doesn't trip the §5.5 slow_down
+    // throttle — same rationale as the happy-path test.
+    await db
+      .update(deviceCode)
+      .set({ lastPolledAt: new Date(Date.now() - 10_000) })
+      .where(eq(deviceCode.deviceCode, code.device_code));
+
+    // /device/token with form-urlencoded body.
+    const tokenRes = await app.request("/api/auth/device/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: code.device_code,
+        client_id: "appstrate-cli",
+      }).toString(),
+    });
+    expect(tokenRes.status).toBe(200);
+    const tokenBody = (await tokenRes.json()) as {
+      access_token: string;
+      token_type: string;
+    };
+    expect(tokenBody.access_token).toBeTruthy();
+    expect(tokenBody.token_type).toBe("Bearer");
+  });
+
   it("rejects unknown client_id with invalid_client", async () => {
     const res = await app.request("/api/auth/device/code", {
       method: "POST",
