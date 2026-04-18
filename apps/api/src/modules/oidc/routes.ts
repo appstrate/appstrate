@@ -1960,11 +1960,17 @@ export function createOidcRouter() {
   // out of scope for v0.
 
   const deviceApproveRateLimit = rateLimitByIp(20);
+  // The CSRF cookie must be scoped to a path that covers every POST on
+  // this flow (`/activate`, `/activate/approve`, `/activate/deny`).
+  // Browsers send cookies on requests whose path starts with the cookie
+  // path, so `/activate` works as a single prefix — contrast with the
+  // default `/api/oauth` used by the OIDC login/consent pages.
+  const DEVICE_CSRF_PATH = "/activate";
 
   router.get("/activate", rateLimitByIp(60), async (c: Context<AppEnv>) => {
     const url = new URL(c.req.url);
     const rawUserCode = url.searchParams.get("user_code");
-    const csrfToken = issueCsrfToken(c);
+    const csrfToken = issueCsrfToken(c, DEVICE_CSRF_PATH);
 
     if (!rawUserCode) {
       const page = renderActivateEntryPage({
@@ -2053,8 +2059,8 @@ export function createOidcRouter() {
 
   router.post("/activate", rateLimitByIp(30), async (c: Context<AppEnv>) => {
     const form = await c.req.parseBody();
-    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
-      const csrfToken = issueCsrfToken(c);
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"), DEVICE_CSRF_PATH)) {
+      const csrfToken = issueCsrfToken(c, DEVICE_CSRF_PATH);
       const page = renderActivateEntryPage({
         branding: PLATFORM_DEFAULT_BRANDING,
         csrfToken,
@@ -2065,7 +2071,7 @@ export function createOidcRouter() {
     const raw = readFormString(form, "user_code") ?? "";
     const cleaned = raw.replace(/-/g, "").toUpperCase().trim();
     if (!cleaned) {
-      const csrfToken = issueCsrfToken(c);
+      const csrfToken = issueCsrfToken(c, DEVICE_CSRF_PATH);
       const page = renderActivateEntryPage({
         branding: PLATFORM_DEFAULT_BRANDING,
         csrfToken,
@@ -2078,7 +2084,7 @@ export function createOidcRouter() {
 
   router.post("/activate/approve", deviceApproveRateLimit, async (c: Context<AppEnv>) => {
     const form = await c.req.parseBody();
-    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"), DEVICE_CSRF_PATH)) {
       return c.html(
         renderActivateResultPage({
           branding: PLATFORM_DEFAULT_BRANDING,
@@ -2145,7 +2151,7 @@ export function createOidcRouter() {
 
   router.post("/activate/deny", deviceApproveRateLimit, async (c: Context<AppEnv>) => {
     const form = await c.req.parseBody();
-    if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
+    if (!verifyCsrfToken(c, readFormString(form, "_csrf"), DEVICE_CSRF_PATH)) {
       return c.html(
         renderActivateResultPage({
           branding: PLATFORM_DEFAULT_BRANDING,

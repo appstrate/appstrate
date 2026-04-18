@@ -1,0 +1,120 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * `appstrate login` — interactive device-flow sign-in.
+ *
+ * Flow:
+ *   1. Resolve profile name (flag → env → default).
+ *   2. Ask for instance URL if not passed via `--instance`.
+ *   3. POST /api/auth/device/code → receive user_code + verification URL.
+ *   4. Print the code in the terminal + open the browser.
+ *   5. Poll /api/auth/device/token until approval.
+ *   6. Store the BA session token in the keyring; GET /api/profile to
+ *      capture email + orgId; persist the profile in config.toml.
+ */
+
+import open from "open";
+import { intro, outro, askText, spinner, formatUserCode, exitWithError } from "../lib/ui.ts";
+import { readConfig, resolveProfileName, setProfile } from "../lib/config.ts";
+import { saveTokens } from "../lib/keyring.ts";
+import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
+import { apiFetch } from "../lib/api.ts";
+
+/** Canonical clientId for the official CLI. Matches `ensureCliClient()` server-side. */
+const CLI_CLIENT_ID = "appstrate-cli";
+
+/** Fixed scope set — RFC 8628 lets any registered scope through, but the
+ * server only honors the CLI client's declared set (openid, profile,
+ * email, offline_access). Hard-coding here keeps the request unambiguous. */
+const CLI_SCOPE = "openid profile email offline_access";
+
+export interface LoginOptions {
+  profile?: string;
+  instance?: string;
+}
+
+export async function loginCommand(opts: LoginOptions): Promise<void> {
+  const config = await readConfig();
+  const profileName = resolveProfileName(opts.profile, config);
+
+  intro(`Appstrate login — profile "${profileName}"`);
+
+  const instance = (
+    opts.instance ??
+    (await askText(
+      "Instance URL",
+      config.profiles[profileName]?.instance ?? "http://localhost:3000",
+    ))
+  ).trim();
+  const normalizedInstance = instance.endsWith("/") ? instance.slice(0, -1) : instance;
+
+  try {
+    await runLogin(profileName, normalizedInstance);
+  } catch (err) {
+    exitWithError(err);
+  }
+}
+
+async function runLogin(profileName: string, instance: string): Promise<void> {
+  // Step 1 — device code.
+  const s = spinner();
+  s.start("Requesting device code");
+  const code = await startDeviceFlow(instance, CLI_CLIENT_ID, CLI_SCOPE);
+  s.stop(`Code received — expires in ${Math.round(code.expiresIn / 60)}m`);
+
+  const display = formatUserCode(code.userCode);
+
+  // Step 2 — show the user what to do. Print outside the spinner so the
+  // code remains visible even after the spinner rewinds the cursor.
+  process.stdout.write(`\n  Visit: ${code.verificationUri}\n`);
+  process.stdout.write(`  Code:  ${display}\n\n`);
+
+  // Step 3 — open the browser on the complete URI (pre-fills user_code).
+  // If `open` fails (headless SSH / no display), the printed URL + code
+  // above keep the flow usable. Swallow the error silently.
+  open(code.verificationUriComplete).catch(() => {});
+
+  // Step 4 — poll until approval or terminal error.
+  const pollSpinner = spinner();
+  pollSpinner.start("Waiting for approval in your browser");
+  const token = await pollDeviceFlow(instance, code.deviceCode, CLI_CLIENT_ID, {
+    interval: code.interval,
+    expiresIn: code.expiresIn,
+  });
+  pollSpinner.stop("Approved");
+
+  // Step 5 — persist tokens FIRST so the follow-up /api/profile call can
+  // authenticate. `setProfile` needs the user id + email which we fetch
+  // from /api/profile once the cookie-compatible tokens are in place.
+  const expiresAt = Date.now() + token.expiresIn * 1000;
+  await saveTokens(profileName, {
+    accessToken: token.accessToken,
+    expiresAt,
+  });
+
+  // Step 6 — seed the profile with a placeholder so `apiFetch` has a
+  // profile to resolve. Real values overwrite it on the next line.
+  await setProfile(profileName, {
+    instance,
+    userId: "",
+    email: "",
+  });
+
+  // Read identity from Better Auth's session endpoint. `/api/profile`
+  // exposes displayName + language from the `profiles` table but not
+  // `email` — the BA session carries the authoritative identity.
+  const session = await apiFetch<{
+    user: { id: string; email: string; name?: string };
+  } | null>(profileName, "/api/auth/get-session");
+  if (!session?.user) {
+    throw new Error("Authenticated but /api/auth/get-session returned no user");
+  }
+
+  await setProfile(profileName, {
+    instance,
+    userId: session.user.id,
+    email: session.user.email,
+  });
+
+  outro(`Logged in as ${session.user.email}`);
+}

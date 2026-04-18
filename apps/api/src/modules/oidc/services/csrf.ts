@@ -20,22 +20,30 @@ import type { AppEnv } from "../../../types/index.ts";
 
 const COOKIE_NAME = "oidc_csrf";
 const COOKIE_MAX_AGE = 10 * 60; // 10 minutes — long enough for login, short enough to rotate
+/** Default cookie path — fits every form under `/api/oauth/*`. */
+const DEFAULT_PATH = "/api/oauth";
 
 /**
  * Generate a new CSRF token, set the paired cookie on the response, and
  * return the token string to embed in the form body.
  *
+ * Pass `path` when the form POSTs to a surface outside `/api/oauth/*`
+ * (the device-flow `/activate` pages pass `/activate` so the cookie
+ * is sent on POST /activate/approve + /activate/deny). The verify call
+ * MUST pass the matching path so the rotation delete targets the same
+ * cookie scope.
+ *
  * The `secure` flag is derived from `APP_URL` scheme — browsers silently
  * drop `Secure` cookies over HTTP, which would break Tier 0 dev mode
  * (`http://localhost:3000`). In HTTPS deployments the flag is set.
  */
-export function issueCsrfToken(c: Context<AppEnv>): string {
+export function issueCsrfToken(c: Context<AppEnv>, path: string = DEFAULT_PATH): string {
   const token = generateToken();
   setCookie(c, COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "Lax",
     secure: getEnv().APP_URL.startsWith("https://"),
-    path: "/api/oauth",
+    path,
     maxAge: COOKIE_MAX_AGE,
   });
   return token;
@@ -47,12 +55,16 @@ export function issueCsrfToken(c: Context<AppEnv>): string {
  * cookie or missing body field). On match, the cookie is rotated — a given
  * token is good for exactly one POST.
  */
-export function verifyCsrfToken(c: Context<AppEnv>, bodyToken: string | undefined): boolean {
+export function verifyCsrfToken(
+  c: Context<AppEnv>,
+  bodyToken: string | undefined,
+  path: string = DEFAULT_PATH,
+): boolean {
   const cookieToken = getCookie(c, COOKIE_NAME);
   if (!cookieToken || !bodyToken) return false;
   if (!constantTimeEqual(cookieToken, bodyToken)) return false;
   // One-shot: rotate by deleting so replays fail.
-  deleteCookie(c, COOKIE_NAME, { path: "/api/oauth" });
+  deleteCookie(c, COOKIE_NAME, { path });
   return true;
 }
 

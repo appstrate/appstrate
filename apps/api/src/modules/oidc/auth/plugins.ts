@@ -32,7 +32,7 @@
 import { randomInt, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { oauthProvider } from "@better-auth/oauth-provider";
-import { jwt } from "better-auth/plugins";
+import { bearer, jwt } from "better-auth/plugins";
 import { deviceAuthorization } from "better-auth/plugins/device-authorization";
 import { APIError } from "better-auth/api";
 import { getEnv } from "@appstrate/env";
@@ -118,6 +118,17 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     jwt({
       jwks: { keyPairConfig: { alg: "ES256" } },
     }),
+    // Accept `Authorization: Bearer <raw_session_token>` as a session
+    // credential. The Appstrate CLI stores the raw token returned by
+    // `/api/auth/device/token` in the OS keyring and presents it as a
+    // Bearer header on subsequent calls — without this plugin, BA would
+    // only honor the signed cookie form (`<token>.<signature>`) which
+    // the CLI cannot produce without the auth secret. The plugin reads
+    // the token, looks up the session via the internal adapter, and
+    // populates the request context identically to a cookie session so
+    // every downstream hook (`requirePlatformRealm`, org membership,
+    // etc.) sees the correct identity.
+    bearer(),
     deviceAuthorization({
       expiresIn: "10m",
       interval: "5s",
