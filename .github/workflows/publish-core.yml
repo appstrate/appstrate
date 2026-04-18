@@ -10,6 +10,12 @@ permissions:
   contents: write
   id-token: write
 
+# Serialize ALL core publishes — see publish-cli.yml for rationale
+# (npm `latest` dist-tag race on rapid-fire tag pushes).
+concurrency:
+  group: publish-core
+  cancel-in-progress: false
+
 jobs:
   publish:
     name: Quality, Tests & Publish

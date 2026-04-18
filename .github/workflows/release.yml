@@ -5,14 +5,19 @@ on:
     tags:
       - "v*"
 
-# Serialize per-tag so two tags pushed in rapid succession can never
-# race on shared release artifacts (npm package overwrite, GH Release
-# creation, GHCR image push). `cancel-in-progress: false` because once
-# a release has started publishing to npm/GHCR, cancelling mid-flight
-# leaves the registries in an inconsistent state — better to let it
-# finish, then run the next tag.
+# Serialize ALL release runs (single global group, NOT per-tag).
+# Two different tags pushed in rapid succession would otherwise race
+# on shared cross-tag state:
+#   - `metadata-action` with `flavor: latest=auto` (line ~82) pushes
+#     the GHCR `:latest` tag based on highest-semver-seen — if v1.0.0
+#     finishes after v1.0.1, `:latest` ends up pointing at v1.0.0.
+#   - GH Release marking (which tag is `latest`) has the same hazard.
+# `cancel-in-progress: false` because once a release has started
+# publishing to GHCR / signing binaries / creating the GH Release,
+# cancelling mid-flight leaves registries inconsistent — better to
+# let it finish, then run the queued tag.
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release
   cancel-in-progress: false
 
 env:

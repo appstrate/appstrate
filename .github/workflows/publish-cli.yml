@@ -20,6 +20,16 @@ permissions:
   contents: write
   id-token: write
 
+# Serialize ALL CLI publishes — `npm publish` updates the `latest`
+# dist-tag on every non-prerelease publish. Two tags pushed in rapid
+# succession (cli@1.0.0 then cli@1.0.1) would race: if 1.0.0 finishes
+# last, `latest` points back to the older version. `cancel-in-progress:
+# false` because a cancelled publish mid-flight leaves the registry
+# inconsistent (provenance attestation orphaned, etc).
+concurrency:
+  group: publish-cli
+  cancel-in-progress: false
+
 jobs:
   publish:
     name: Quality, Tests & Publish
