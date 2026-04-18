@@ -22,10 +22,10 @@
  */
 
 import { Entry } from "@napi-rs/keyring";
-import { randomBytes } from "node:crypto";
 import { join, dirname } from "node:path";
-import { readFile, unlink, mkdir, rename, open, stat } from "node:fs/promises";
-import { setTimeout as delay } from "node:timers/promises";
+import { readFile, unlink, mkdir, stat } from "node:fs/promises";
+import writeFileAtomic from "write-file-atomic";
+import { Mutex } from "async-mutex";
 import { getConfigDir } from "./config.ts";
 
 /**
@@ -256,190 +256,40 @@ export async function deleteTokens(profile: string): Promise<void> {
 
 // ─── File fallback ───────────────────────────────────────────────────────────
 //
-// One JSON object keyed by profile. Writes are atomic (tmp + rename) and
-// serialized by a PID-aware advisory lock so two concurrent `appstrate
-// login` invocations targeting different profiles don't clobber each
-// other's entries via the read-modify-write cycle.
+// One JSON object keyed by profile. Individual writes are atomic via
+// `write-file-atomic` (O_EXCL tmp file with crypto-random suffix, fsync
+// tmp fd, rename, fsync parent dir). Read-modify-write cycles are
+// serialized by an in-process `async-mutex` so concurrent `saveTokens`
+// calls in the same Node process don't clobber each other's profiles via
+// a stale-snapshot race.
+//
+// Cross-process coordination (two `appstrate login` invocations from
+// different terminals at the same moment) is intentionally NOT handled:
+//   - The only node-land library that ever covered it (`proper-lockfile`)
+//     has not shipped a release since 2021-01; no actively maintained
+//     alternative exists.
+//   - The concrete failure mode without the lock is benign: the later
+//     write wins, the "losing" session needs a re-login. No credential
+//     corruption, no cross-profile leakage (each profile is its own key).
+//   - Mainstream CLIs (`gh`, `aws`, `gcloud`) do not lock their credentials
+//     file either. The attack surface is not worth a stale dependency.
 
 interface FileStore {
   [profile: string]: Tokens;
 }
 
-function lockPath(): string {
-  return `${fallbackPath()}.lock`;
-}
-
 /**
- * Serialize read-modify-write cycles on the credentials file.
- *
- * Uses `open(..., "wx")` (O_EXCL + O_CREAT + O_WRONLY) as a primitive
- * advisory lock and stores `<pid>:<nonce>` inside. PID alone is vulnerable
- * to reuse: between the stale-detection readFile and the subsequent
- * unlink, the original holder can exit and the OS can recycle the PID
- * for a fresh process that happens to have just claimed a new lock —
- * we would then unlink *its* lock and steal the slot. The nonce is a
- * 128-bit random value unique to our own acquisition attempt, so after
- * unlinking we re-claim and re-read to confirm the file actually carries
- * our nonce before proceeding. 5-second overall deadline — credential
- * writes are single-digit milliseconds; anything longer means a crashed
- * peer or a truly pathological filesystem.
+ * Serialize in-process read-modify-write cycles on the credentials file.
+ * A single `Mutex` shared across every `saveToFile` / `deleteFromFile`
+ * call ensures 10 concurrent `Promise.all([saveTokens(...), ...])` in
+ * the same process land in the file one at a time. See the top-of-section
+ * note for why we don't attempt cross-process locking.
  */
+const fileMutex = new Mutex();
+
 async function withLock<T>(fn: () => Promise<T>): Promise<T> {
-  const path = lockPath();
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-
-  const DEADLINE_MS = 5_000;
-  const POLL_MS = 50;
-  const start = Date.now();
-
-  // Outer retry loop for the "someone swapped their lock in where ours
-  // should be" race after verification. Bounded by the shared deadline
-  // (and a hard attempt cap to guard against a truly hostile FS that
-  // keeps satisfying the `O_EXCL` but produces different post-claim
-  // observations each time). Each iteration generates a *fresh* nonce —
-  // we don't want a rogue peer to have a past observation of our
-  // payload and replay it into their own file.
-  const MAX_ATTEMPTS = 16;
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const ourNonce = randomBytes(16).toString("hex");
-    const ourPayload = `${process.pid}:${ourNonce}\n`;
-    let staleRecoveryDone = false;
-
-    // Inner loop: claim the lock via O_EXCL, retry with a short sleep
-    // on EEXIST, one-shot stale-PID recovery, hit the global deadline
-    // on timeout.
-    claim: while (true) {
-      try {
-        const fd = await open(path, "wx", 0o600);
-        try {
-          await fd.writeFile(ourPayload);
-        } finally {
-          await fd.close();
-        }
-        break claim;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-
-        // Lock held — probe the holder's PID once. A single stale
-        // recovery per attempt avoids spinning against a peer that
-        // keeps recreating the lock within the deadline.
-        if (!staleRecoveryDone) {
-          staleRecoveryDone = true;
-          try {
-            const heldBy = parsePidFromLock(await readFile(path, "utf-8"));
-            if (heldBy !== null && !processIsAlive(heldBy)) {
-              await unlink(path).catch(() => {});
-              continue claim;
-            }
-          } catch {
-            // Lock vanished between EEXIST and readFile — race again.
-            continue claim;
-          }
-        }
-
-        if (Date.now() - start > DEADLINE_MS) {
-          throw new Error(
-            `Timed out acquiring credentials lock ${path}. ` +
-              `If no other appstrate command is running, remove this file manually.`,
-          );
-        }
-        await delay(POLL_MS);
-      }
-    }
-
-    // Verify the file we just wrote still carries *our* nonce. The only
-    // way it wouldn't: stale-recovery unlinked a lock whose PID had
-    // been reused by a peer that claimed the lock just after we read
-    // the PID. In that race the peer's lock now sits where ours should.
-    let observed: string;
-    try {
-      observed = await readFile(path, "utf-8");
-    } catch {
-      // Lock vanished mid-flight — someone removed it between our claim
-      // and our verification. Retry the outer loop with a fresh nonce.
-      continue;
-    }
-    if (!observed.includes(ourNonce)) {
-      // Peer's lock is in place, not ours. Don't unlink (it isn't ours
-      // to remove). Retry the outer loop against the new holder.
-      continue;
-    }
-
-    // Happy path — we own the lock.
-    try {
-      return await fn();
-    } finally {
-      // Only unlink if the file still carries our nonce. If a rogue peer
-      // swapped in their own lock during our work, removing it would be
-      // a silent DoS on them. Best-effort.
-      try {
-        const stillOurs = (await readFile(path, "utf-8")).includes(ourNonce);
-        if (stillOurs) await unlink(path).catch(() => {});
-      } catch {
-        // Lock already gone — nothing to clean up.
-      }
-    }
-  }
-
-  throw new Error(
-    `Failed to acquire credentials lock ${path} after ${MAX_ATTEMPTS} verified attempts. ` +
-      `This indicates a hostile filesystem environment — investigate concurrent access to ${dirname(path)}.`,
-  );
-}
-
-/**
- * Parse the PID prefix from a lock file payload. Tolerates both the
- * legacy `<pid>\n` format and the new `<pid>:<nonce>\n` — we don't want
- * a mid-upgrade CLI to choke on a lock written by the previous version.
- */
-function parsePidFromLock(content: string): number | null {
-  const head = content.trim().split(":", 1)[0] ?? "";
-  // `parseInt("123abc", 10)` returns 123 — we don't want to silently
-  // trust the prefix of a malformed payload as a PID. Require the head
-  // to match `/^\d+$/` strictly before parsing.
-  if (!/^\d+$/.test(head)) return null;
-  const pid = parseInt(head, 10);
-  return Number.isFinite(pid) && pid > 0 ? pid : null;
-}
-
-function processIsAlive(pid: number): boolean {
-  try {
-    // `kill(pid, 0)` is the POSIX "process exists" probe — no signal
-    // delivered, throws ESRCH if the PID is gone.
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Atomic-create a tmp file in the same directory as `target` with
- * `O_EXCL | O_CREAT | O_WRONLY` semantics via node's `"wx"` flag. Retries
- * with a fresh 64-bit random nonce if the name collides (another CLI
- * process racing, or — the reason O_EXCL exists here — an attacker
- * pre-planting the tmp name as a symlink). Gives up after 5 attempts so
- * a hostile file system doesn't stall the CLI indefinitely.
- */
-async function openExclusiveTmp(
-  target: string,
-): Promise<{ tmp: string; tmpFd: Awaited<ReturnType<typeof open>> }> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const nonce = randomBytes(8).toString("hex");
-    const tmp = `${target}.${process.pid}.${Date.now()}.${nonce}.tmp`;
-    try {
-      const tmpFd = await open(tmp, "wx", 0o600);
-      return { tmp, tmpFd };
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      // Collision — either a concurrent CLI on the same tick or an
-      // attacker-planted name. Retry with a fresh nonce.
-    }
-  }
-  throw new Error(
-    `Failed to create exclusive tmp file next to ${target} after 5 attempts. ` +
-      `If no other appstrate command is running, check for suspicious files in ${dirname(target)}.`,
-  );
+  await mkdir(dirname(fallbackPath()), { recursive: true, mode: 0o700 });
+  return fileMutex.runExclusive(fn);
 }
 
 async function readFileStore(): Promise<FileStore> {
@@ -485,62 +335,25 @@ async function readFileStore(): Promise<FileStore> {
 }
 
 /**
- * Atomic overwrite — tmp file in the same directory, `rename()` over
- * the target. Matches `lib/config.ts::writeConfig` so the same crash /
- * Ctrl-C semantics apply to both files: post-crash state is always
- * either the pre-write contents or the full post-write contents, never
- * a truncated or partially-written mix.
+ * Atomic overwrite via `write-file-atomic`. It handles:
+ *   - O_EXCL tmp file in the same directory with a crypto-random suffix
+ *     (closes symlink-planting on shared XDG_CONFIG_HOME)
+ *   - `fsync` on the tmp fd before rename
+ *   - `rename()` onto the target
+ *   - `fsync` on the parent directory (Linux ext4/xfs durability)
+ *   - Tmp cleanup on rename failure
  *
- * Durability: we `fsync` both the tmp file and its parent directory
- * before the rename, so a post-rename power loss cannot leave a
- * directory entry pointing at a zero-length inode. Credential writes
- * happen once per login and complete in single-digit ms — the fsync
- * cost is irrelevant in exchange for crash-consistency.
+ * We don't set `chown` — the default behavior (match the existing
+ * target's uid/gid on overwrite, or fall through to the current user on
+ * first write) is exactly what we want. The strict-mode + uid check in
+ * `readFileStore` already refuses to hand tokens to a foreign-owned file,
+ * so the no-op case where the owner matches is the only one we ever
+ * write into.
  */
 async function writeFileStore(store: FileStore): Promise<void> {
   const target = fallbackPath();
-  const parent = dirname(target);
-  await mkdir(parent, { recursive: true, mode: 0o700 });
-
-  // Create the tmp file with O_EXCL ("wx") to refuse a pre-existing
-  // symlink/file at the tmp path. Without O_EXCL, an attacker on the
-  // same machine (shared XDG_CONFIG_HOME — misconfigured CI, multi-user
-  // dev VM) can plant a symlink at the predictable tmp name and have
-  // `open("w", …)` follow it, writing the token through the symlink to
-  // an arbitrary location. Retry with a fresh nonce up to 5 times if we
-  // collide with another concurrent write (extremely unlikely with
-  // 64 random bits on top of the PID+timestamp).
-  const { tmp, tmpFd } = await openExclusiveTmp(target);
-  try {
-    await tmpFd.writeFile(JSON.stringify(store, null, 2));
-    await tmpFd.sync();
-  } finally {
-    await tmpFd.close();
-  }
-  try {
-    await rename(tmp, target);
-  } catch (err) {
-    await unlink(tmp).catch(() => {});
-    throw err;
-  }
-  // Dir fsync makes the rename itself durable — on Linux ext4/xfs, the
-  // directory entry update is only guaranteed on-disk after the parent
-  // is fsync'd. Best-effort on platforms that don't support dir fds
-  // (Windows), where we don't ship this fallback anyway.
-  try {
-    const dirFd = await open(parent, "r");
-    try {
-      await dirFd.sync();
-    } finally {
-      await dirFd.close();
-    }
-  } catch {
-    // Non-fatal — the data is already on disk via the tmp fsync. If the
-    // directory fsync is unavailable on this platform / filesystem, the
-    // worst post-crash outcome is the rename being rolled back and the
-    // previous credentials file being seen, which is recoverable by
-    // re-running `appstrate login`.
-  }
+  await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+  await writeFileAtomic(target, JSON.stringify(store, null, 2), { mode: 0o600 });
 }
 
 async function saveToFile(profile: string, tokens: Tokens): Promise<void> {
