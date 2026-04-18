@@ -221,8 +221,8 @@ jobs:
           # shellcheck disable=SC2016  # `${VERSION}` is literal in the sed pattern
           sed \
             -e "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" \
-            -e 's|https://github.com/appstrate/appstrate-oss/releases/latest/download|http://localhost:8766/release|' \
-            -e 's|https://github.com/appstrate/appstrate-oss/releases/download/${VERSION}|http://localhost:8766/release|' \
+            -e 's|https://github.com/appstrate/appstrate/releases/latest/download|http://localhost:8766/release|' \
+            -e 's|https://github.com/appstrate/appstrate/releases/download/${VERSION}|http://localhost:8766/release|' \
             -e "s|APPSTRATE_MINISIGN_PUBKEY=\"[^\"]*\"|APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"|" \
             scripts/bootstrap.sh > /tmp/bootstrap.sh
           bash -n /tmp/bootstrap.sh

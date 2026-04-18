@@ -1959,7 +1959,13 @@ export function createOidcRouter() {
   // level (the `appstrate-cli` client); application-level device flows are
   // out of scope for v0.
 
-  const deviceApproveRateLimit = rateLimitByIp(20);
+  // Device-flow approve/deny: tightest limit in the OIDC surface because
+  // each POST targets a specific `user_code` whose search space is ~43
+  // bits (RFC 8628 §6.1). ADR-006 §Protocol parameters: 5/15min/IP.
+  // Combined with the per-row `MAX_APPROVE_ATTEMPTS=5` counter enforced
+  // in `oidcGuardsPlugin.hooks.before`, a single IP cannot burn through
+  // enough wrong-realm/wrong-code attempts to probe the code space.
+  const deviceApproveRateLimit = rateLimitByIp(5, 900);
   // The CSRF cookie must be scoped to a path that covers every POST on
   // this flow (`/activate`, `/activate/approve`, `/activate/deny`).
   // Browsers send cookies on requests whose path starts with the cookie
@@ -1967,7 +1973,11 @@ export function createOidcRouter() {
   // default `/api/oauth` used by the OIDC login/consent pages.
   const DEVICE_CSRF_PATH = "/activate";
 
-  router.get("/activate", rateLimitByIp(60), async (c: Context<AppEnv>) => {
+  // GET /activate is authenticated (unauthenticated hits are 302'd to
+  // /auth/login before any code lookup), so a per-IP 30/min ceiling is
+  // more than enough for legit reload patterns and keeps
+  // authenticated-attacker lifecycle probing bounded.
+  router.get("/activate", rateLimitByIp(30), async (c: Context<AppEnv>) => {
     const url = new URL(c.req.url);
     const rawUserCode = url.searchParams.get("user_code");
     const csrfToken = issueCsrfToken(c, DEVICE_CSRF_PATH);

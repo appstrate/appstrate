@@ -78,10 +78,18 @@ jobs:
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
+          # Fail-close: the installer published at get.appstrate.dev is the
+          # only thing between the user's shell and arbitrary code execution
+          # (`curl ... | bash`). Publishing it unsigned would mean the
+          # user's only verification option (`scripts/verify.sh`) silently
+          # succeeds against a missing signature — worse than no verify
+          # step at all. Mirror the guard in `release.yml`: if the secret
+          # is absent we refuse to publish rather than fan out `signed=false`
+          # through the rest of the workflow.
           if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
-            echo "MINISIGN_SECRET_KEY secret not set — skipping minisign signature"
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::error::MINISIGN_SECRET_KEY secret is not set — refusing to publish an unsigned installer."
+            echo "::error::  Configure the secret in repo settings, or dispatch a build that rotates the key."
+            exit 1
           fi
           sudo apt-get update -qq && sudo apt-get install -y -qq minisign
           umask 077

@@ -73,7 +73,7 @@ Version number tracks the platform release train (lockstep).
 
 ### Repo placement
 
-Lives in `apps/cli/` inside the `appstrate-oss` monorepo. Turbo-buildable, versioned in lockstep with `apps/api` and `apps/web`, released in the same changelog. Reasoning: CLI is in the same language as the platform (Bun/TS), platform is fully OSS, CLI shares compile-time types with `@appstrate/core`, `@appstrate/env`, and the OpenAPI types generated from `apps/api/src/openapi/`.
+Lives in `apps/cli/` inside the `appstrate/appstrate` monorepo. Turbo-buildable, versioned in lockstep with `apps/api` and `apps/web`, released in the same changelog. Reasoning: CLI is in the same language as the platform (Bun/TS), platform is fully OSS, CLI shares compile-time types with `@appstrate/core`, `@appstrate/env`, and the OpenAPI types generated from `apps/api/src/openapi/`.
 
 ### Authentication — Device Authorization Grant (RFC 8628)
 
@@ -86,14 +86,13 @@ Lives in `apps/cli/` inside the `appstrate-oss` monorepo. Turbo-buildable, versi
 
 ### Protocol parameters
 
-| Parameter              | Value                                                                                                                                         | Rationale                                                         |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `user_code` format     | `XXXX-XXXX`, alphabet `BCDFGHJKLMNPQRSTVWXZ` (GitHub convention)                                                                              | ~43 bits entropy, zero visual ambiguity (`0/O`, `1/I/l` excluded) |
-| `device_code` lifetime | 10 min                                                                                                                                        | Upstream default, matches GitHub / Google                         |
-| Polling `interval`     | 5s base, exponential backoff on `slow_down`                                                                                                   | Upstream default                                                  |
-| Access token lifetime  | 15 min                                                                                                                                        | RFC 9700 § 4.13                                                   |
-| Refresh token lifetime | 30 days, rotating with reuse detection                                                                                                        | RFC 9700 § 4.14                                                   |
-| Rate limits            | `/device/code`: 10/min/IP; `/device/token`: 30/min/IP + 1/`interval`s/device_code; `/activate` POST: 5/15min/IP (user_code brute-force guard) | Aligned with existing `oidcGuardsPlugin`                          |
+| Parameter              | Value                                                                                                                                                                | Rationale                                                                                                                                                                                                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user_code` format     | `XXXX-XXXX`, alphabet `BCDFGHJKLMNPQRSTVWXZ` (GitHub convention)                                                                                                     | ~43 bits entropy, zero visual ambiguity (`0/O`, `1/I/l` excluded)                                                                                                                                                                                                   |
+| `device_code` lifetime | 10 min                                                                                                                                                               | Upstream default, matches GitHub / Google                                                                                                                                                                                                                           |
+| Polling `interval`     | 5s base, exponential backoff on `slow_down`                                                                                                                          | Upstream default                                                                                                                                                                                                                                                    |
+| Session token lifetime | 7 days (Better Auth session)                                                                                                                                         | v0 ships Better Auth session tokens rather than signed JWT access+refresh pairs. `deviceAuthorization()` returns the session cookie's bearer value; when it expires the user re-runs `appstrate login`. Moving to 15 min access + 30 day rotating refresh is a v1.1 |
+| Rate limits            | `/device/code`: 10/min/IP; `/device/token`: 30/min/IP + 1/`interval`s/device_code; `/activate/{approve,deny}`: 5/15min/IP + per-row `MAX_APPROVE_ATTEMPTS=5` counter | Aligned with existing `oidcGuardsPlugin`; the per-row counter bounds `user_code` brute-force even below the per-IP ceiling                                                                                                                                          |
 
 ### Library stack
 
@@ -116,8 +115,8 @@ Lives in `apps/cli/` inside the `appstrate-oss` monorepo. Turbo-buildable, versi
 
 ### Install flow (Step 1)
 
-- Four Docker Compose templates live in `examples/self-hosting/` as source of truth: `docker-compose.tier0.yml`, `tier1.yml`, `tier2.yml`, `tier3.yml`. Tier 3 is the existing file, renamed.
-- The CLI embeds these templates via `Bun.embeddedFiles` so the binary is self-contained. At install time it writes the selected template to the install directory alongside a generated `.env` with secrets from `crypto.randomBytes`.
+- Three Docker Compose templates live in `examples/self-hosting/` as source of truth: `docker-compose.tier1.yml`, `tier2.yml`, `tier3.yml`. Tier 0 is Docker-free (Bun + PGlite in-process + filesystem) and therefore has no compose file — the CLI detects or installs Bun, `git clone`s the monorepo, and runs `bun run dev` directly.
+- The CLI embeds the tier 1/2/3 templates via `Bun.embeddedFiles` so the binary is self-contained. At install time it writes the selected template to the install directory alongside a generated `.env` with secrets from `crypto.randomBytes`.
 - Tier-specific prompts mirror the existing `scripts/setup.ts` pattern. Healthcheck wait and `open http://localhost:3000` close the loop.
 
 ### Audit logging

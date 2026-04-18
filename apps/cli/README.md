@@ -12,7 +12,7 @@ Lives at [`apps/cli/`](./) in the monorepo; versioned in lockstep with the platf
 curl -fsSL https://get.appstrate.dev | bash
 ```
 
-Detects your OS/arch, downloads the matching binary from [GitHub Releases](https://github.com/appstrate/appstrate-oss/releases/latest), drops it at `/usr/local/bin/appstrate`, and immediately execs `appstrate install`.
+Detects your OS/arch, downloads the matching binary from [GitHub Releases](https://github.com/appstrate/appstrate/releases/latest), drops it at `/usr/local/bin/appstrate`, and immediately execs `appstrate install`.
 
 Supported: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. Windows users can invoke via `bunx @appstrate/cli install` (requires Bun).
 
@@ -67,7 +67,7 @@ appstrate install --tier 0 --dir ~/demo-appstrate
 | 2    | Docker       | PostgreSQL + Redis         | Filesystem | Adds Redis (BullMQ, distributed rate-limiter).         |
 | 3    | Docker       | PostgreSQL + Redis + MinIO | S3         | Full production stack (default self-host target).      |
 
-**Tier 0 specifics**: `git clone`s the `appstrate-oss` monorepo at the CLI's release tag, runs `bun install`, writes `.env`, and `bun run dev` spawns the platform as a detached process. If Bun is absent, the CLI prompts to install it via the official installer into `~/.bun/bin` (user-local, no sudo).
+**Tier 0 specifics**: `git clone`s the `appstrate/appstrate` monorepo at the CLI's release tag, runs `bun install`, writes `.env`, and `bun run dev` spawns the platform as a detached process. If Bun is absent, the CLI prompts to install it via the official installer into `~/.bun/bin` (user-local, no sudo).
 
 **Tier 1/2/3 specifics**: checks `docker info`, writes `docker-compose.yml` from an embedded template (`examples/self-hosting/docker-compose.tier{1,2,3}.yml`), writes `.env`, runs `docker compose up -d`, polls `/` for up to 120s.
 

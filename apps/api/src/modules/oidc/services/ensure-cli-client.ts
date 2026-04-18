@@ -65,36 +65,46 @@ export async function ensureCliClient(): Promise<string> {
     clientId: APPSTRATE_CLI_CLIENT_ID,
   };
 
-  await db.insert(oauthClient).values({
-    id: prefixedId("oac"),
-    clientId: APPSTRATE_CLI_CLIENT_ID,
-    clientSecret: null,
-    name: "Appstrate CLI",
-    redirectUris: [],
-    postLogoutRedirectUris: [],
-    scopes: ["openid", "profile", "email", "offline_access"],
-    level: "instance",
-    referencedOrgId: null,
-    referencedApplicationId: null,
-    metadata: JSON.stringify(metadata),
-    skipConsent: false,
-    // CLI does not self-provision users — a platform operator authenticates
-    // with an account that already exists. Signup through this client is
-    // nonsensical (there is no browser-side registration surface).
-    allowSignup: false,
-    signupRole: "member",
-    disabled: false,
-    type: "native",
-    public: true,
-    tokenEndpointAuthMethod: "none",
-    grantTypes: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"],
-    // `responseTypes` is defined by RFC 6749 for the `authorization_code`
-    // grant; not applicable to the device grant. Left empty.
-    responseTypes: [],
-    requirePKCE: true,
-    createdAt: now,
-    updatedAt: now,
-  });
+  // ON CONFLICT DO NOTHING closes the read-then-insert race between two
+  // concurrently-booting platform instances (blue-green rollout, test
+  // preload, HA restart). The unique constraint on `client_id` would
+  // raise anyway, but surfacing it as a hard error would abort the
+  // whole boot path for a benign race — both processes have already
+  // reached the same conclusion (the row should exist with these
+  // values). Whichever insert wins, the outcome is identical.
+  await db
+    .insert(oauthClient)
+    .values({
+      id: prefixedId("oac"),
+      clientId: APPSTRATE_CLI_CLIENT_ID,
+      clientSecret: null,
+      name: "Appstrate CLI",
+      redirectUris: [],
+      postLogoutRedirectUris: [],
+      scopes: ["openid", "profile", "email", "offline_access"],
+      level: "instance",
+      referencedOrgId: null,
+      referencedApplicationId: null,
+      metadata: JSON.stringify(metadata),
+      skipConsent: false,
+      // CLI does not self-provision users — a platform operator authenticates
+      // with an account that already exists. Signup through this client is
+      // nonsensical (there is no browser-side registration surface).
+      allowSignup: false,
+      signupRole: "member",
+      disabled: false,
+      type: "native",
+      public: true,
+      tokenEndpointAuthMethod: "none",
+      grantTypes: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"],
+      // `responseTypes` is defined by RFC 6749 for the `authorization_code`
+      // grant; not applicable to the device grant. Left empty.
+      responseTypes: [],
+      requirePKCE: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoNothing({ target: oauthClient.clientId });
 
   return APPSTRATE_CLI_CLIENT_ID;
 }

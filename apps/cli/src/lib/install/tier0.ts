@@ -88,8 +88,8 @@ export interface CloneSourceOptions {
   tarballUrl?: string;
 }
 
-const DEFAULT_GIT_URL = "https://github.com/appstrate/appstrate-oss.git";
-const DEFAULT_TARBALL_BASE = "https://github.com/appstrate/appstrate-oss/archive/refs";
+const DEFAULT_GIT_URL = "https://github.com/appstrate/appstrate.git";
+const DEFAULT_TARBALL_BASE = "https://github.com/appstrate/appstrate/archive/refs";
 
 /**
  * Fetch the Appstrate source into `dir`. Tries `git clone --depth=1`

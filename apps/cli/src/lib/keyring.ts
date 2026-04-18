@@ -23,9 +23,24 @@
 
 import { Entry } from "@napi-rs/keyring";
 import { join, dirname } from "node:path";
-import { readFile, writeFile, unlink, mkdir, rename, open } from "node:fs/promises";
+import { readFile, unlink, mkdir, rename, open } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { getConfigDir } from "./config.ts";
+
+/**
+ * Opt-in escape hatch for environments where the keyring daemon is
+ * present but refuses to serve (SSH-attached macOS without a logged-in
+ * loginwindow, frozen gnome-keyring, stripped container with a stale
+ * libsecret socket). Without this env var set, a `"broken"` keyring
+ * error is fatal instead of silently writing plaintext tokens to the
+ * file fallback. The rationale is symmetric with the Windows refusal:
+ * if the user's machine is configured to protect secrets via the OS
+ * keyring, a broken backend is a signal, not a reason to quietly
+ * downgrade.
+ */
+function plaintextFallbackAllowed(): boolean {
+  return process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS === "1";
+}
 
 export interface Tokens {
   /** BA session token — sent as `Cookie: better-auth.session_token=<value>`. */
@@ -121,6 +136,37 @@ function refuseWindowsFallback(op: "read" | "write" | "delete", err: unknown): n
   );
 }
 
+/**
+ * Refuse the plaintext file fallback on unix hosts where the keyring
+ * daemon is installed but broken (locked Keychain on headless SSH, a
+ * gnome-keyring that can't unlock, etc.). Returns instead of throwing
+ * so callers can still layer their own context (op name), but always
+ * ends by throwing. Silent plaintext-on-disk is the worst failure mode
+ * — a bearer token in `~/.config/appstrate/credentials.json` equals
+ * full account takeover for anyone with read access to the file.
+ */
+function refuseBrokenKeyring(op: "read" | "write" | "delete", err: unknown): never {
+  const cause = err instanceof Error ? err.message : String(err);
+  throw new Error(
+    `Cannot ${op} Appstrate credentials: the OS keyring is installed but not serving.\n` +
+      `  Cause: ${cause}\n` +
+      `  Refusing to fall back to the plaintext file store because your\n` +
+      `  machine is configured to protect secrets via the keyring — a\n` +
+      `  plaintext credentials.json would be a silent downgrade.\n\n` +
+      `  Fixes (pick one):\n` +
+      `    • macOS: run the CLI from a Terminal attached to a logged-in\n` +
+      `      GUI session (Keychain needs loginwindow). Under SSH, run\n` +
+      `      \`security unlock-keychain\` first or re-attach via tmux from\n` +
+      `      a GUI terminal.\n` +
+      `    • Linux: ensure gnome-keyring / kwallet is running and unlocked\n` +
+      `      (check with \`secret-tool store …\`).\n` +
+      `    • Explicitly accept plaintext storage with:\n` +
+      `        APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1 appstrate ${op === "delete" ? "logout" : "login"}\n` +
+      `      Only do this if you understand the tokens will be written\n` +
+      `      to ~/.config/appstrate/credentials.json (mode 0600).`,
+  );
+}
+
 function warnBackendOnce(op: "read" | "write" | "delete", err: unknown): void {
   if (_backendWarningEmitted) return;
   _backendWarningEmitted = true;
@@ -139,9 +185,14 @@ export async function saveTokens(profile: string, tokens: Tokens): Promise<void>
   } catch (err) {
     if (_shouldRefuseWindowsFallback(process.platform, err)) refuseWindowsFallback("write", err);
     // Entry-missing is a read-path concept — on write, any failure means
-    // the backend cannot accept the payload. Only missing-backend is
-    // silent; anything else warns once.
-    if (classifyKeyringError(err) === "broken") warnBackendOnce("write", err);
+    // the backend cannot accept the payload. A "broken" daemon (installed
+    // but misbehaving) is refused unless the user opts into plaintext
+    // explicitly; "missing-backend" keeps the silent fallback (CI, bare
+    // container — no keyring expected).
+    if (classifyKeyringError(err) === "broken") {
+      if (!plaintextFallbackAllowed()) refuseBrokenKeyring("write", err);
+      warnBackendOnce("write", err);
+    }
   }
   await saveToFile(profile, tokens);
 }
@@ -154,9 +205,15 @@ export async function loadTokens(profile: string): Promise<Tokens | null> {
     if (_shouldRefuseWindowsFallback(process.platform, err)) refuseWindowsFallback("read", err);
     // "No matching entry" on read is normal — the user simply hasn't
     // stored credentials for this profile yet. Missing-backend is the
-    // expected fallback trigger. Anything else is worth a warning.
+    // expected fallback trigger. A broken daemon is refused on unix
+    // unless the user opts into plaintext explicitly, otherwise we'd
+    // silently read from a plaintext file the user never consented to
+    // populate.
     const kind = classifyKeyringError(err);
-    if (kind === "broken") warnBackendOnce("read", err);
+    if (kind === "broken") {
+      if (!plaintextFallbackAllowed()) refuseBrokenKeyring("read", err);
+      warnBackendOnce("read", err);
+    }
   }
   // Windows never reaches here: the guard above either succeeded on
   // Credential Manager or threw via `refuseWindowsFallback`.
@@ -170,9 +227,14 @@ export async function deleteTokens(profile: string): Promise<void> {
   } catch (err) {
     if (_shouldRefuseWindowsFallback(process.platform, err)) refuseWindowsFallback("delete", err);
     // A missing entry is not an error; the file fallback below still
-    // runs so a partial keyring/file divergence is cleaned up. Only
-    // warn on genuinely broken backends.
-    if (classifyKeyringError(err) === "broken") warnBackendOnce("delete", err);
+    // runs so a partial keyring/file divergence is cleaned up. A broken
+    // daemon is still refused on unix unless the user opts into
+    // plaintext — otherwise `logout` would silently only clear half of
+    // a split-brain storage situation.
+    if (classifyKeyringError(err) === "broken") {
+      if (!plaintextFallbackAllowed()) refuseBrokenKeyring("delete", err);
+      warnBackendOnce("delete", err);
+    }
   }
   // Windows has no file fallback to clean up — Credential Manager is
   // the single source of truth there.
@@ -291,17 +353,48 @@ async function readFileStore(): Promise<FileStore> {
  * Ctrl-C semantics apply to both files: post-crash state is always
  * either the pre-write contents or the full post-write contents, never
  * a truncated or partially-written mix.
+ *
+ * Durability: we `fsync` both the tmp file and its parent directory
+ * before the rename, so a post-rename power loss cannot leave a
+ * directory entry pointing at a zero-length inode. Credential writes
+ * happen once per login and complete in single-digit ms — the fsync
+ * cost is irrelevant in exchange for crash-consistency.
  */
 async function writeFileStore(store: FileStore): Promise<void> {
   const target = fallbackPath();
-  await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+  const parent = dirname(target);
+  await mkdir(parent, { recursive: true, mode: 0o700 });
   const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, JSON.stringify(store, null, 2), { mode: 0o600 });
+  const tmpFd = await open(tmp, "w", 0o600);
+  try {
+    await tmpFd.writeFile(JSON.stringify(store, null, 2));
+    await tmpFd.sync();
+  } finally {
+    await tmpFd.close();
+  }
   try {
     await rename(tmp, target);
   } catch (err) {
     await unlink(tmp).catch(() => {});
     throw err;
+  }
+  // Dir fsync makes the rename itself durable — on Linux ext4/xfs, the
+  // directory entry update is only guaranteed on-disk after the parent
+  // is fsync'd. Best-effort on platforms that don't support dir fds
+  // (Windows), where we don't ship this fallback anyway.
+  try {
+    const dirFd = await open(parent, "r");
+    try {
+      await dirFd.sync();
+    } finally {
+      await dirFd.close();
+    }
+  } catch {
+    // Non-fatal — the data is already on disk via the tmp fsync. If the
+    // directory fsync is unavailable on this platform / filesystem, the
+    // worst post-crash outcome is the rename being rolled back and the
+    // previous credentials file being seen, which is recoverable by
+    // re-running `appstrate login`.
   }
 }
 

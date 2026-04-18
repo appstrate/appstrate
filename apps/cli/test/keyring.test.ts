@@ -213,6 +213,59 @@ describe("corrupt data handling", () => {
   });
 });
 
+describe("broken-keyring fallback refusal (unix)", () => {
+  // On unix, a "broken" keyring error (daemon installed but not serving —
+  // SSH'd macOS without loginwindow, locked gnome-keyring) must refuse
+  // the plaintext file fallback unless the user opts in explicitly. The
+  // default silent-fallback was a downgrade attack vector: a secrets-
+  // protected workstation would still write tokens to a 0600 file an
+  // operator never consented to populate.
+  const originalPlaintextEnv = process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+
+  beforeEach(() => {
+    FakeKeyring.shouldThrow = true;
+    FakeKeyring.throwMessage = "gnome-keyring: DBus call timed out";
+    delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+  });
+
+  afterEach(() => {
+    if (originalPlaintextEnv === undefined) {
+      delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+    } else {
+      process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = originalPlaintextEnv;
+    }
+  });
+
+  it("refuses saveTokens when the daemon is broken and no opt-in is set", async () => {
+    await expect(saveTokens("default", { accessToken: "t", expiresAt: 1 })).rejects.toThrow(
+      /keyring is installed but not serving/,
+    );
+  });
+
+  it("refuses loadTokens when the daemon is broken and no opt-in is set", async () => {
+    await expect(loadTokens("default")).rejects.toThrow(/keyring is installed but not serving/);
+  });
+
+  it("refuses deleteTokens when the daemon is broken and no opt-in is set", async () => {
+    await expect(deleteTokens("default")).rejects.toThrow(/keyring is installed but not serving/);
+  });
+
+  it("allows the plaintext fallback when APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1", async () => {
+    process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = "1";
+    await saveTokens("default", { accessToken: "t", expiresAt: 1 });
+    expect(await loadTokens("default")).toEqual({ accessToken: "t", expiresAt: 1 });
+  });
+
+  it("still silent-falls-back on missing-backend (CI, stripped container)", async () => {
+    FakeKeyring.throwMessage = "Platform secure storage failure";
+    // No opt-in env var. This is the bare-container / CI case — a
+    // keyring is not expected, so falling back to 0600 file is the
+    // documented behavior.
+    await saveTokens("default", { accessToken: "t", expiresAt: 1 });
+    expect(await loadTokens("default")).toEqual({ accessToken: "t", expiresAt: 1 });
+  });
+});
+
 describe("Windows fallback refusal", () => {
   // The in-process platform check is exercised via the exported
   // `_shouldRefuseWindowsFallback` helper — stubbing

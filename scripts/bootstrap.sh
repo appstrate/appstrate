@@ -80,9 +80,9 @@ ASSET="appstrate-${OS}-${ARCH}"
 APPSTRATE_MINISIGN_PUBKEY="RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e"
 
 if [ "$VERSION" = "latest" ]; then
-  URL_BASE="https://github.com/appstrate/appstrate-oss/releases/latest/download"
+  URL_BASE="https://github.com/appstrate/appstrate/releases/latest/download"
 else
-  URL_BASE="https://github.com/appstrate/appstrate-oss/releases/download/${VERSION}"
+  URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
 fi
 URL="${URL_BASE}/${ASSET}"
 CHECKSUMS_URL="${URL_BASE}/checksums.txt"
@@ -109,6 +109,13 @@ curl -fsSL "$URL" -o "$TMPDIR/$ASSET"
 if [ "${APPSTRATE_SKIP_VERIFY:-0}" = "1" ]; then
   warn "APPSTRATE_SKIP_VERIFY=1 — integrity + provenance checks skipped."
   warn "Only use this in controlled CI debug runs. Do NOT set on user machines."
+  # Deliberate 5-second pause so a sysadmin auditing a paste-bin install
+  # script has a visible window to Ctrl-C before execution. A silent warn
+  # on stderr is trivially lost in terminal noise; `rustup-init` uses the
+  # same pattern. Non-interactive contexts (no TTY) still pause — the
+  # whole point is to slow down unattended piping into `| bash`.
+  warn "Proceeding in 5 seconds. Press Ctrl-C to abort."
+  sleep 5
 else
   # Verification is gated on minisign availability. Without it we can't
   # cryptographically tie the binary to the Appstrate release key; just
