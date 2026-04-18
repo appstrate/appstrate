@@ -21,7 +21,7 @@
  */
 
 import { setTimeout as delay } from "node:timers/promises";
-import { normalizeInstance } from "./instance-url.ts";
+import { assertSafeVerificationUrl, normalizeInstance } from "./instance-url.ts";
 
 export interface DeviceCodeResponse {
   deviceCode: string;
@@ -85,8 +85,9 @@ export async function startDeviceFlow(
   clientId: string,
   scope: string,
 ): Promise<DeviceCodeResponse> {
+  const normalizedInstance = normalizeInstance(instance);
   const body = new URLSearchParams({ client_id: clientId, scope });
-  const res = await fetch(`${normalizeInstance(instance)}/api/auth/device/code`, {
+  const res = await fetch(`${normalizedInstance}/api/auth/device/code`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
@@ -103,6 +104,23 @@ export async function startDeviceFlow(
     expires_in: number;
     interval: number;
   };
+  // Validate both verification URLs before returning. A malicious or
+  // compromised server could attempt to redirect the user's browser to
+  // `file:///etc/passwd`, `javascript:…`, or an attacker-controlled
+  // domain — `assertSafeVerificationUrl` rejects non-http(s) schemes and
+  // enforces host-match against the instance the CLI was invoked with.
+  // Failures throw `DeviceFlowError` so `commands/login.ts` renders them
+  // through the same terminal-error path as any other protocol failure.
+  try {
+    assertSafeVerificationUrl(json.verification_uri, normalizedInstance);
+    assertSafeVerificationUrl(json.verification_uri_complete, normalizedInstance);
+  } catch (err) {
+    throw new DeviceFlowError(
+      "invalid_request",
+      err instanceof Error ? err.message : String(err),
+      res.status,
+    );
+  }
   return {
     deviceCode: json.device_code,
     userCode: json.user_code,
@@ -122,6 +140,14 @@ export interface PollOptions {
   signal?: AbortSignal;
   /** Injectable delay for tests — defaults to `setTimeout`. Do not set in prod. */
   delayFn?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /**
+   * Injectable clock for tests — defaults to `Date.now`. Scoped to this
+   * poll loop only; the test no longer has to monkey-patch the global
+   * `Date.now`, which would otherwise leak into any parallel code in
+   * the same Bun worker and make the suite order-dependent. Do not set
+   * in prod.
+   */
+  now?: () => number;
 }
 
 /**
@@ -148,7 +174,8 @@ export async function pollDeviceFlow(
   // ceiling so neither side can push the loop past what the other
   // considers safe. Tests can still race through with `expiresIn: 0`
   // because Math.min picks that value.
-  const now = Date.now();
+  const clock = opts.now ?? Date.now;
+  const now = clock();
   const deadline = Math.min(now + opts.expiresIn * 1000, now + MAX_POLL_DURATION_MS);
   // Tests pass `interval: 0` + a no-op `delayFn` to race through the
   // loop; production code would never set either to 0. The `Math.max(0, …)`
@@ -168,7 +195,7 @@ export async function pollDeviceFlow(
     client_id: clientId,
   }).toString();
 
-  while (Date.now() < deadline) {
+  while (clock() < deadline) {
     if (opts.signal?.aborted) {
       throw new DeviceFlowError("access_denied", "Polling aborted by caller.", 0);
     }

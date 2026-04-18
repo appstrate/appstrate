@@ -26,9 +26,14 @@
  */
 
 import { Entry } from "@napi-rs/keyring";
+import { randomBytes } from "node:crypto";
 
 const SERVICE = "appstrate-ci-probe";
-const ACCOUNT = `probe-${process.pid}`;
+// Nonce included so two reruns on the same CI runner within the same
+// second don't collide on a lingering entry if a prior probe somehow
+// wrote and failed to clean up. PID alone is not enough (same PID on a
+// recycled runner), nor is `Date.now()` (two probes in the same tick).
+const ACCOUNT = `probe-${process.pid}-${randomBytes(8).toString("hex")}`;
 
 const NO_BACKEND_MARKERS = [
   "Platform secure storage failure",
@@ -38,9 +43,23 @@ const NO_BACKEND_MARKERS = [
   "org.freedesktop.secrets",
 ];
 
+/**
+ * Distinct from `NO_BACKEND_MARKERS`: these strings are what napi-rs
+ * returns when the backend IS working but the probed entry simply
+ * doesn't exist yet. Used on the "entry-missing" confirmation probe
+ * below — if we see this wording, the backend is fully functional,
+ * which is strictly stronger evidence than "no backend" alone.
+ */
+const ENTRY_MISSING_MARKERS = ["No matching entry"];
+
 function isNoBackendError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return NO_BACKEND_MARKERS.some((marker) => message.includes(marker));
+}
+
+function isEntryMissingError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return ENTRY_MISSING_MARKERS.some((marker) => message.includes(marker));
 }
 
 try {
@@ -59,10 +78,43 @@ try {
     process.exit(0);
   } catch (opErr) {
     if (isNoBackendError(opErr)) {
-      process.stdout.write(
-        `OK (no backend): native binding loaded, backend unavailable on this runner — ${opErr instanceof Error ? opErr.message : String(opErr)}\n`,
-      );
-      process.exit(0);
+      // Confirmation probe — a *second* operation on an entry we haven't
+      // written must also fail with a backend-missing or entry-missing
+      // error. Without this, a future regression where the native binding
+      // loads but every single operation throws a generic "SecretService"
+      // error (broad substring match in `isNoBackendError`) would pass
+      // silently — the probe's whole point is to catch such stubs. A
+      // freshly-constructed `Entry` that has never been written to MUST
+      // yield either `entry-missing` (backend working, nothing stored
+      // yet) or `no-backend`; anything else means the binding is in a
+      // degraded state we can't distinguish from a load failure.
+      try {
+        const freshEntry = new Entry(
+          SERVICE,
+          `nonexistent-${process.pid}-${randomBytes(8).toString("hex")}`,
+        );
+        freshEntry.getPassword();
+        // If this call returned *without* throwing, something is very
+        // wrong — we never wrote that entry. Fall through to FAIL.
+        process.stderr.write(
+          "FAIL: confirmation probe returned a value for an entry we never wrote.\n",
+        );
+        process.exit(2);
+      } catch (confirmErr) {
+        if (isNoBackendError(confirmErr) || isEntryMissingError(confirmErr)) {
+          process.stdout.write(
+            `OK (no backend): native binding loaded, backend unavailable on this runner — ${opErr instanceof Error ? opErr.message : String(opErr)}\n`,
+          );
+          process.exit(0);
+        }
+        process.stderr.write(
+          `FAIL: confirmation probe threw an unexpected error (native binding likely stubbed): ${confirmErr instanceof Error ? confirmErr.message : String(confirmErr)}\n`,
+        );
+        if (confirmErr instanceof Error && confirmErr.stack) {
+          process.stderr.write(confirmErr.stack + "\n");
+        }
+        process.exit(2);
+      }
     }
     process.stderr.write(
       `FAIL: Entry operation failed with unexpected error: ${opErr instanceof Error ? opErr.message : String(opErr)}\n`,

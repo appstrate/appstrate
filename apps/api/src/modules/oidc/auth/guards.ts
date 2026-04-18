@@ -60,6 +60,16 @@ const REVOKE_RL_POINTS = 60;
 // rarely called more than once per login; 10/min/IP is a loose ceiling.
 const DEVICE_CODE_RL_POINTS = 10;
 const DEVICE_TOKEN_RL_POINTS = 30;
+// Per-IP budget on the BA-mounted `/device/approve` and `/device/deny`
+// endpoints. The SSR wrapper at `/activate/approve` already has its own
+// stricter limiter (5 / 15 min / IP via `rateLimitByIp`) but the direct
+// BA routes accept the same JSON body from any authenticated caller, so
+// a per-IP ceiling here closes the remaining online-guessing surface
+// against the 20⁸ ≈ 34.6-bit user_code space. 10/min/IP is tight enough
+// that a single attacker cannot materially erode the birthday bound
+// against the set of active codes, while leaving legitimate users ample
+// headroom (a browser typically issues a single POST per approval).
+const DEVICE_APPROVE_RL_POINTS = 10;
 // Per-row brute-force lockout on `/device/approve` + `/device/deny`.
 // Covers the post-lookup attack path: once an attacker knows a valid
 // user_code (leaked / shoulder-surfed / partial disclosure) they cannot
@@ -174,7 +184,7 @@ async function enforceRateLimit(
         error: "rate_limited",
         error_description: `Too many requests to ${category}. Retry after ${retry}s.`,
       },
-      { "Retry-After": String(retry) },
+      { "Retry-After": String(retry), "X-RateLimit-Scope": "ip" },
     );
   }
 }
@@ -219,13 +229,30 @@ async function enforceClientRateLimit(clientId: string): Promise<void> {
       rej && typeof rej === "object" && "msBeforeNext" in rej
         ? Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000)
         : 60;
+    // Log the discriminator internally so operators can triage which
+    // limiter fired without surfacing the keying strategy in the
+    // response body. Externally we emit the same generic
+    // `error_description` as `enforceRateLimit` — an attacker probing
+    // rate limits can infer SOME limit exists from the 429, but giving
+    // them "we key on client_id" in plaintext makes it trivial to plan
+    // the distributed-IP bypass the secondary limiter is meant to
+    // catch. The distinguishing `X-RateLimit-Scope` header lets tests
+    // assert which limiter fired without leaking the info to anonymous
+    // token-endpoint callers who already know they were throttled.
+    logger.warn("oidc: /oauth2/token per-client rate limit tripped", {
+      module: "oidc",
+      audit: true,
+      event: "oauth.token.rate_limited.client",
+      clientId,
+      retryAfterSeconds: retry,
+    });
     throw new APIError(
       "TOO_MANY_REQUESTS",
       {
         error: "rate_limited",
-        error_description: `Too many token requests for this client_id. Retry after ${retry}s.`,
+        error_description: `Too many token requests. Retry after ${retry}s.`,
       },
-      { "Retry-After": String(retry) },
+      { "Retry-After": String(retry), "X-RateLimit-Scope": "client" },
     );
   }
 }
@@ -366,6 +393,20 @@ async function enforceDeviceApproveRealm(ctx: {
   // write window. When a legit user succeeds, BA's handler flips the
   // status to `approved` right after this hook returns — further probes
   // fail at the status check above, not at the counter.
+  //
+  // Documented trade-off: an authenticated user who learns a victim's
+  // `user_code` (shoulder surf, leaked screenshot, CLI log copy-paste)
+  // can burn it in 5 wrong-realm POSTs — the row transitions to `denied`
+  // and the legit user has to request a fresh code. This is a minor DoS,
+  // not a compromise (no token is ever minted to the attacker), and the
+  // recovery is one CLI re-run. Moving the increment AFTER the realm
+  // check would close the burn-the-code window but open the symmetric
+  // one: an attacker in the right realm could now iterate the ~34.6-bit
+  // code space without ever being counted. Counting pre-check is the
+  // safer default; the CLI's `user_code` entropy (8 chars, 20-letter
+  // alphabet) + per-IP rate limits on this endpoint (10/min/IP via
+  // `DEVICE_APPROVE_RL_POINTS`) + the SSR wrapper's stricter 5/15min/IP
+  // keep the attack surface bounded.
   const [bumped] = await db
     .update(deviceCode)
     .set({ attempts: sql`${deviceCode.attempts} + 1` })
@@ -444,6 +485,13 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
         {
           matcher: (ctx: { path?: string }) => ctx.path === "/magic-link/verify",
           handler: createAuthMiddleware(enforceMagicLinkSignupPolicy),
+        },
+        {
+          matcher: (ctx: { path?: string }) =>
+            ctx.path === "/device/approve" || ctx.path === "/device/deny",
+          handler: createAuthMiddleware(async (ctx) => {
+            await enforceRateLimit("device-approve", DEVICE_APPROVE_RL_POINTS, ctx.request);
+          }),
         },
         {
           matcher: (ctx: { path?: string }) =>

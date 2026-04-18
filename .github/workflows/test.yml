@@ -47,7 +47,13 @@ jobs:
 
   integration:
     name: Integration tests
-    if: contains(github.event.pull_request.labels.*.name, 'integration')
+    # Run on every push to main (post-merge gate) + on PRs labeled
+    # `integration` (opt-in pre-merge). Without the main-branch arm,
+    # code could land on main via a never-labeled PR and reach production
+    # without the integration suite ever having been exercised in CI —
+    # the e2e job below is label-OR-main for the same reason, keeping
+    # both jobs aligned on post-merge validation.
+    if: contains(github.event.pull_request.labels.*.name, 'integration') || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

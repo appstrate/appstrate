@@ -27,6 +27,7 @@ import {
   restoreBackups,
   cleanupBackups,
   atomicReplace,
+  runWithRollback,
 } from "../../src/lib/install/upgrade.ts";
 
 let workDir: string;
@@ -350,5 +351,95 @@ describe("end-to-end upgrade flow (integration)", () => {
     const entries = await readdir(workDir);
     expect(entries).toContain(".env.backup");
     expect(entries).toContain("docker-compose.yml.backup");
+  });
+});
+
+describe("runWithRollback", () => {
+  // Contract that guards `commands/install.ts::installDockerTier`: a
+  // downstream failure (docker compose up, healthcheck timeout, ctrl-C)
+  // MUST trigger `restoreBackups` before re-raising, so the user is
+  // never left with a half-upgraded config that matches neither the old
+  // nor the new stack. Extracting the helper into `upgrade.ts` means
+  // the contract is unit-testable — a regression that dropped the
+  // try/catch in `installDockerTier` would be caught here, not silently
+  // bypassed on the install command's happy path.
+  const originalEnv = "BETTER_AUTH_SECRET=keep-me\n";
+  const originalCompose = "# tier 1\n";
+
+  beforeEach(async () => {
+    await writeFile(join(workDir, ".env"), originalEnv);
+    await writeFile(join(workDir, "docker-compose.yml"), originalCompose);
+  });
+
+  it("returns the step's value on success and runs onSuccess", async () => {
+    const backedUp = await backupFiles(workDir, [".env", "docker-compose.yml"]);
+    let onSuccessCalled = false;
+    const out = await runWithRollback(
+      workDir,
+      backedUp,
+      async () => {
+        await writeFile(join(workDir, ".env"), "REWRITTEN=1\n");
+        return "ok";
+      },
+      async () => {
+        onSuccessCalled = true;
+      },
+    );
+    expect(out).toBe("ok");
+    expect(onSuccessCalled).toBe(true);
+    // Step wrote the new content; onSuccess was called so the files
+    // stay at the new state.
+    expect(await readFile(join(workDir, ".env"), "utf8")).toBe("REWRITTEN=1\n");
+  });
+
+  it("restores backups when the step throws and wraps the error", async () => {
+    const backedUp = await backupFiles(workDir, [".env", "docker-compose.yml"]);
+    let onSuccessCalled = false;
+    await expect(
+      runWithRollback(
+        workDir,
+        backedUp,
+        async () => {
+          // Mid-upgrade: overwrite both files, then simulate docker
+          // compose up failing.
+          await writeFile(join(workDir, ".env"), "ROTATED_SECRET=danger\n");
+          await writeFile(join(workDir, "docker-compose.yml"), "# wrong tier\n");
+          throw new Error("docker compose up failed");
+        },
+        async () => {
+          onSuccessCalled = true;
+        },
+      ),
+    ).rejects.toThrow(/Upgrade failed.*docker compose up failed.*restored from backup/s);
+
+    // onSuccess must NOT have run on the failure path.
+    expect(onSuccessCalled).toBe(false);
+
+    // Both files are back to their pre-upgrade content.
+    expect(await readFile(join(workDir, ".env"), "utf8")).toBe(originalEnv);
+    expect(await readFile(join(workDir, "docker-compose.yml"), "utf8")).toBe(originalCompose);
+  });
+
+  it("reports restore failure distinctly so the user can escalate", async () => {
+    const backedUp = await backupFiles(workDir, [".env", "docker-compose.yml"]);
+    // Delete the backup files so `restoreBackups` itself will fail.
+    await rm(join(workDir, ".env.backup"));
+
+    await expect(
+      runWithRollback(workDir, backedUp, async () => {
+        throw new Error("docker compose up failed");
+      }),
+    ).rejects.toThrow(/Rollback also failed.*manual recovery/s);
+  });
+
+  it("propagates the original error unchanged on fresh installs (no backups)", async () => {
+    // Fresh install → backedUp is empty. Any failure should bubble up
+    // verbatim; there's nothing to restore and dressing the message up
+    // would be misleading ("restored from backup" is false).
+    await expect(
+      runWithRollback(workDir, [], async () => {
+        throw new Error("docker compose up failed");
+      }),
+    ).rejects.toThrow(/^docker compose up failed$/);
   });
 });

@@ -38,8 +38,8 @@ import {
   detectInstallMode,
   mergeEnv,
   backupFiles,
-  restoreBackups,
   cleanupBackups,
+  runWithRollback,
 } from "../lib/install/upgrade.ts";
 import {
   LEGACY_PROJECT_NAME,
@@ -428,67 +428,62 @@ async function installDockerTier(
   // compose) works too.
   const backedUp = mode === "upgrade" ? await backupFiles(dir, [".env", "docker-compose.yml"]) : [];
 
-  try {
-    // Compose + .env.
-    const writeSpinner = spinner();
-    writeSpinner.start(
-      mode === "upgrade" ? "Rewriting compose + merging .env" : "Writing compose + .env",
-    );
-    await writeComposeFile(dir, tier);
-    const fresh = generateEnvForTier(tier, appUrl, { port, minioConsolePort });
-    const envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
-    await writeComposeEnv(dir, renderEnvFile(envVars));
-    writeSpinner.stop(
-      mode === "upgrade"
-        ? `Rewrote ${dir}/docker-compose.yml (secrets preserved)`
-        : `Wrote ${dir}/docker-compose.yml + .env`,
-    );
-
-    // Bring stack up. The project name is pinned via `--project-name`
-    // rather than baked into the compose template, so two installs
-    // under different dirs get isolated namespaces.
-    const upSpinner = spinner();
-    upSpinner.start(`Starting Appstrate (docker compose --project-name ${project.name} up -d)`);
-    await dockerComposeUp(dir, project.name);
-    upSpinner.stop("Containers up");
-
-    // Healthcheck.
-    const healthSpinner = spinner();
-    healthSpinner.start("Waiting for Appstrate to become healthy");
-    await waitForAppstrate(appUrl);
-    healthSpinner.stop("Appstrate is healthy");
-
-    // Persist the project-name binding on success. Written AFTER the
-    // healthcheck so a stack that never came up doesn't leave a sidecar
-    // file behind — the next attempt would then skip the preflight
-    // check and potentially collide with a different running install.
-    if (project.origin !== "sidecar") {
-      await writeProjectFile(dir, project.name);
-    }
-
-    // Success — clean up the backup copies. Keep them on any failure
-    // path so the user can restore manually if needed.
-    if (backedUp.length > 0) await cleanupBackups(dir, backedUp);
-  } catch (err) {
-    if (backedUp.length > 0) {
-      // Rollback: restore the user's previous config before re-raising
-      // so they're never left with a broken half-upgraded state.
-      try {
-        await restoreBackups(dir, backedUp);
-      } catch (restoreErr) {
-        const originalMsg = err instanceof Error ? err.message : String(err);
-        const restoreMsg = restoreErr instanceof Error ? restoreErr.message : String(restoreErr);
-        throw new Error(
-          `Upgrade failed (${originalMsg}). Rollback also failed (${restoreMsg}); .backup files are preserved in ${dir} for manual recovery.`,
-        );
-      }
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        `Upgrade failed (${msg}). Original files restored from backup; run \`docker compose up -d\` in ${dir} to resume on the previous config.`,
+  // `runWithRollback` centralizes the "on failure, restore backups
+  // before rethrowing" contract. Keeping the rollback inside a shared
+  // helper (rather than a hand-rolled try/catch here) means the
+  // regression where someone drops the catch block is caught by the
+  // helper's own unit test rather than needing a full install E2E to
+  // notice the silent coverage loss.
+  await runWithRollback(
+    dir,
+    backedUp,
+    async () => {
+      // Compose + .env.
+      const writeSpinner = spinner();
+      writeSpinner.start(
+        mode === "upgrade" ? "Rewriting compose + merging .env" : "Writing compose + .env",
       );
-    }
-    throw err;
-  }
+      await writeComposeFile(dir, tier);
+      const fresh = generateEnvForTier(tier, appUrl, { port, minioConsolePort });
+      const envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
+      await writeComposeEnv(dir, renderEnvFile(envVars));
+      writeSpinner.stop(
+        mode === "upgrade"
+          ? `Rewrote ${dir}/docker-compose.yml (secrets preserved)`
+          : `Wrote ${dir}/docker-compose.yml + .env`,
+      );
+
+      // Bring stack up. The project name is pinned via `--project-name`
+      // rather than baked into the compose template, so two installs
+      // under different dirs get isolated namespaces.
+      const upSpinner = spinner();
+      upSpinner.start(`Starting Appstrate (docker compose --project-name ${project.name} up -d)`);
+      await dockerComposeUp(dir, project.name);
+      upSpinner.stop("Containers up");
+
+      // Healthcheck.
+      const healthSpinner = spinner();
+      healthSpinner.start("Waiting for Appstrate to become healthy");
+      await waitForAppstrate(appUrl);
+      healthSpinner.stop("Appstrate is healthy");
+
+      // Persist the project-name binding on success. Written AFTER the
+      // healthcheck so a stack that never came up doesn't leave a
+      // sidecar file behind — the next attempt would then skip the
+      // preflight check and potentially collide with a different
+      // running install.
+      if (project.origin !== "sidecar") {
+        await writeProjectFile(dir, project.name);
+      }
+    },
+    // Success-only cleanup: drop the backup copies once the upgrade
+    // reached the healthy state. Kept out of the rollback path so a
+    // failed upgrade leaves the `.backup` files on disk for manual
+    // recovery.
+    async () => {
+      if (backedUp.length > 0) await cleanupBackups(dir, backedUp);
+    },
+  );
 
   await openBrowser(appUrl);
   outro(

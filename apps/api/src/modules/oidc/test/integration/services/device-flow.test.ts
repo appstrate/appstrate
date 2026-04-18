@@ -218,6 +218,150 @@ describe("device-flow happy path", () => {
     expect(body.error).toBe("invalid_client");
   });
 
+  it("rejects replay of a consumed device_code on /device/token", async () => {
+    // Regression for the RFC 8628 §3.5 one-shot contract: a device_code
+    // that has already been exchanged for an access_token MUST NOT be
+    // exchangeable again. BA's `deviceAuthorization()` plugin deletes
+    // the row on successful mint, so a second poll hits the
+    // unknown-code path — which MUST return `invalid_grant` (or
+    // `expired_token`), never 200 with a fresh token. Without this
+    // test a regression that stopped deleting the row (or that flipped
+    // status back to `pending` on completion) would ship silently.
+    const { cookie } = await signUpPlatformUser();
+    const codeRes = await app.request("/api/auth/device/code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "appstrate-cli", scope: "openid" }),
+    });
+    expect(codeRes.status).toBe(200);
+    const code = (await codeRes.json()) as { device_code: string; user_code: string };
+
+    const approveRes = await app.request("/api/auth/device/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ userCode: code.user_code }),
+    });
+    expect(approveRes.status).toBe(200);
+
+    await db
+      .update(deviceCode)
+      .set({ lastPolledAt: new Date(Date.now() - 10_000) })
+      .where(eq(deviceCode.deviceCode, code.device_code));
+
+    // First exchange → token minted, row deleted.
+    const first = await app.request("/api/auth/device/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: code.device_code,
+        client_id: "appstrate-cli",
+      }),
+    });
+    expect(first.status).toBe(200);
+    // Assert the happy path actually produced a token — otherwise a
+    // regression where `/device/token` never mints on any call would
+    // make the replay check below pass vacuously (both calls fail for
+    // the same reason, confirming nothing about replay semantics).
+    const firstBody = (await first.json()) as { access_token?: string };
+    expect(firstBody.access_token).toBeTruthy();
+
+    // Second exchange on the same device_code → row is gone, must fail.
+    const replay = await app.request("/api/auth/device/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: code.device_code,
+        client_id: "appstrate-cli",
+      }),
+    });
+    expect(replay.status).toBeGreaterThanOrEqual(400);
+    expect(replay.status).toBeLessThan(500);
+    const replayBody = (await replay.json()) as { error?: string; access_token?: string };
+    expect(replayBody.access_token).toBeUndefined();
+    expect(["invalid_grant", "expired_token", "invalid_request"]).toContain(replayBody.error ?? "");
+  });
+
+  it("rejects /device/token when client_id does not match the device_code's client", async () => {
+    // Regression for cross-client exchange after approval: the
+    // device_code row is FK-bound to a single `client_id`, and BA's
+    // `/device/token` handler verifies the incoming `client_id` matches
+    // that row. An attacker who registers their own OAuth client and
+    // discovers a victim's `device_code` MUST NOT be able to mint a
+    // token against their own client. Without this test a future
+    // regression in BA's exchange handler (or in a local patch) could
+    // quietly allow cross-client minting — and the realm guard only
+    // fires on `/device/approve`, not on `/device/token`.
+    const { cookie } = await signUpPlatformUser();
+
+    // Seed a second device-flow-capable client.
+    const { prefixedId } = await import("../../../../../lib/ids.ts");
+    const { oauthClient } = await import("../../../schema.ts");
+    const attackerClientId = "attacker-cli";
+    await db.insert(oauthClient).values({
+      id: prefixedId("oac"),
+      clientId: attackerClientId,
+      clientSecret: null,
+      name: "Attacker CLI",
+      redirectUris: [],
+      postLogoutRedirectUris: [],
+      scopes: ["openid"],
+      level: "instance",
+      metadata: JSON.stringify({ level: "instance", clientId: attackerClientId }),
+      skipConsent: true,
+      allowSignup: false,
+      signupRole: "member",
+      disabled: false,
+      type: "native",
+      public: true,
+      tokenEndpointAuthMethod: "none",
+      grantTypes: ["urn:ietf:params:oauth:grant-type:device_code"],
+      responseTypes: [],
+      requirePKCE: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    // Victim initiates against the legitimate CLI client.
+    const codeRes = await app.request("/api/auth/device/code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "appstrate-cli", scope: "openid" }),
+    });
+    expect(codeRes.status).toBe(200);
+    const code = (await codeRes.json()) as { device_code: string; user_code: string };
+
+    // Victim approves.
+    const approveRes = await app.request("/api/auth/device/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ userCode: code.user_code }),
+    });
+    expect(approveRes.status).toBe(200);
+
+    await db
+      .update(deviceCode)
+      .set({ lastPolledAt: new Date(Date.now() - 10_000) })
+      .where(eq(deviceCode.deviceCode, code.device_code));
+
+    // Attacker attempts to exchange the code against *their* client_id.
+    const crossExchange = await app.request("/api/auth/device/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: code.device_code,
+        client_id: attackerClientId,
+      }),
+    });
+    expect(crossExchange.status).toBeGreaterThanOrEqual(400);
+    expect(crossExchange.status).toBeLessThan(500);
+    const body = (await crossExchange.json()) as { error?: string; access_token?: string };
+    expect(body.access_token).toBeUndefined();
+    expect(["invalid_grant", "invalid_client", "invalid_request"]).toContain(body.error ?? "");
+  });
+
   it("rejects a client without the device_code grant type", async () => {
     // Insert a minimal org-level client without the device grant and
     // verify it's refused.

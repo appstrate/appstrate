@@ -36,6 +36,17 @@
 
 set -euo pipefail
 
+# The entire script body is wrapped in `_appstrate_bootstrap` and only
+# invoked at the very end of the file. `curl -fsSL … | bash` reads the
+# script over a streaming TCP connection; if the connection drops
+# mid-transfer, bash would otherwise execute whatever bytes arrived —
+# potentially the top half of a security-critical flow (download but
+# skip verification). Defining everything inside a function means the
+# shell must parse the whole file before reaching the invocation; a
+# truncated download produces a syntax error that exits non-zero
+# instead of a partial execution.
+_appstrate_bootstrap() {
+
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 case "$ARCH" in
@@ -192,3 +203,11 @@ $SUDO install -m 0755 "$TMPDIR/$ASSET" "$DEST"
 
 log "Launching \`appstrate install\`"
 exec appstrate install "$@"
+
+}
+
+# Deliberate: guard against partial `curl | bash` execution by only
+# invoking the function after the full file has been parsed. A truncated
+# download dies with a shell syntax error on the unclosed function body
+# or the missing invocation line, never with a half-run install.
+_appstrate_bootstrap "$@"

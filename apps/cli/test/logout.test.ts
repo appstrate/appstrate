@@ -14,7 +14,7 @@
  *      user locally logged in.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -46,7 +46,12 @@ class FakeKeyring implements KeyringHandle {
 type FetchCall = { url: string; method: string | undefined; auth: string | null };
 
 let tmpDir: string;
-const originalXdg = process.env.XDG_CONFIG_HOME;
+// Captured at `beforeAll` rather than module load. If another test file
+// running earlier in the same Bun worker mutated `XDG_CONFIG_HOME` and
+// forgot to restore it, a module-level capture would snapshot the stale
+// value — and our `afterAll` would then write that wrong value back
+// into the worker's env, poisoning any test that runs next.
+let originalXdg: string | undefined;
 const originalFetch = globalThis.fetch;
 let fetchCalls: FetchCall[];
 
@@ -63,6 +68,15 @@ function installFetch(responder: (url: string, init?: RequestInit) => Promise<Re
   globalThis.fetch = stub as unknown as typeof fetch;
 }
 
+beforeAll(() => {
+  originalXdg = process.env.XDG_CONFIG_HOME;
+});
+
+afterAll(() => {
+  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = originalXdg;
+});
+
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "appstrate-cli-logout-"));
   process.env.XDG_CONFIG_HOME = tmpDir;
@@ -72,8 +86,6 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdg;
   _setKeyringFactoryForTesting(null);
   globalThis.fetch = originalFetch;
   await rm(tmpDir, { recursive: true, force: true });
