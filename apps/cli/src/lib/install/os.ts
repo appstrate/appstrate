@@ -11,6 +11,7 @@
  */
 
 import { spawn, spawnSync, type SpawnOptions } from "node:child_process";
+import { createServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 
 export interface CommandResult {
@@ -100,6 +101,105 @@ export async function waitForHttp(url: string, timeoutMs: number): Promise<boole
     await delay(1000);
   }
   return false;
+}
+
+/**
+ * Probe whether `port` is free by attempting to bind a listener on
+ * `host` (default `0.0.0.0` — the wildcard IPv4 address that Docker
+ * and `bun run dev` also bind to). Resolves `true` on `listening`,
+ * `false` on `EADDRINUSE` (or any other bind error). The server is
+ * closed immediately in both branches, so the probe is side-effect
+ * free.
+ *
+ * Binding to `0.0.0.0` catches conflicts with anything listening on
+ * the same port on any interface — which is the same scope compose /
+ * the dev server will try to occupy a moment later.
+ */
+export function isPortAvailable(port: number, host = "0.0.0.0"): Promise<boolean> {
+  // Out-of-range ports are never "available" — validate up-front so
+  // callers don't get tripped up by `listen(-1)`'s platform-specific
+  // behaviour (Node/Bun may treat it as "pick any port" and report the
+  // bogus input as free).
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return Promise.resolve(false);
+  }
+  return new Promise((resolvePromise) => {
+    const srv = createServer();
+    srv.unref();
+    const done = (ok: boolean) => {
+      try {
+        srv.close();
+      } catch {
+        // already closed
+      }
+      resolvePromise(ok);
+    };
+    srv.once("error", () => done(false));
+    srv.once("listening", () => done(true));
+    try {
+      srv.listen(port, host);
+    } catch {
+      // Synchronous throw (rare — e.g. invalid port). Treat as unavailable.
+      resolvePromise(false);
+    }
+  });
+}
+
+/**
+ * Best-effort "who's holding port <port>?" probe. Runs `lsof` (macOS /
+ * most Linux) then falls back to `ss` (modern Linux / musl). Returns a
+ * short human description (e.g. `"node (pid 1234)"`) when it can parse
+ * one, or `null` when the probe isn't available, isn't permitted, or
+ * returns empty output. Never throws — the caller treats `null` as
+ * "no hint, move on".
+ *
+ * On Windows we return `null` (PowerShell's `Get-NetTCPConnection`
+ * output is too noisy to parse reliably from a cross-platform CLI).
+ */
+export async function describeProcessOnPort(port: number): Promise<string | null> {
+  if (process.platform === "win32") return null;
+  // lsof: prints a header + one line per holder. Example line:
+  //   node      12345 user   23u  IPv4 0x...  0t0  TCP *:3000 (LISTEN)
+  if (commandExists("lsof")) {
+    const res = await runCommand("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-F", "pc"], {
+      stdio: "pipe",
+    });
+    if (res.ok) {
+      const hint = parseLsofField(res.stdout);
+      if (hint) return hint;
+    }
+  }
+  // ss: `-H` suppresses header. Example line:
+  //   LISTEN 0 511 *:3000 *:* users:(("node",pid=12345,fd=22))
+  if (commandExists("ss")) {
+    const res = await runCommand("ss", ["-Hlntp", `sport = :${port}`], { stdio: "pipe" });
+    if (res.ok) {
+      const hint = parseSsOutput(res.stdout);
+      if (hint) return hint;
+    }
+  }
+  return null;
+}
+
+/** Parse `lsof -F pc` output (one field per line, `p<pid>` / `c<cmd>`). */
+function parseLsofField(raw: string): string | null {
+  let pid: string | undefined;
+  let cmd: string | undefined;
+  for (const line of raw.split("\n")) {
+    if (line.startsWith("p")) pid = line.slice(1).trim();
+    else if (line.startsWith("c")) cmd = line.slice(1).trim();
+    if (pid && cmd) break;
+  }
+  if (!pid && !cmd) return null;
+  if (pid && cmd) return `${cmd} (pid ${pid})`;
+  return cmd ?? `pid ${pid}`;
+}
+
+/** Extract the first `users:(("name",pid=N,…))` tuple from `ss` output. */
+function parseSsOutput(raw: string): string | null {
+  const match = raw.match(/users:\(\("([^"]+)",pid=(\d+)/);
+  if (!match) return null;
+  return `${match[1]} (pid ${match[2]})`;
 }
 
 /**

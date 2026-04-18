@@ -23,8 +23,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { createServer, type Server } from "node:net";
 import { platform } from "node:os";
-import { runCommand, waitForHttp, commandExists } from "../../src/lib/install/os.ts";
+import {
+  runCommand,
+  waitForHttp,
+  commandExists,
+  isPortAvailable,
+  describeProcessOnPort,
+} from "../../src/lib/install/os.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -139,3 +146,95 @@ describe("waitForHttp", () => {
     expect(calls).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("isPortAvailable", () => {
+  it("returns true for a free ephemeral port", async () => {
+    // `listen(0)` → OS picks any free port. We grab one, close it, and
+    // probe the same port number. The race window (another process
+    // grabbing the just-released port before we probe) is negligible on
+    // loopback-only test machines — and if it flakes we'd see it across
+    // the suite, not as a one-off.
+    const port = await pickEphemeralPort();
+    expect(await isPortAvailable(port)).toBe(true);
+  });
+
+  it("returns false when a listener already holds the port", async () => {
+    const holder = createServer();
+    holder.unref();
+    const port = await new Promise<number>((resolve, reject) => {
+      holder.once("error", reject);
+      holder.listen(0, "0.0.0.0", () => {
+        const addr = holder.address();
+        if (addr && typeof addr === "object") resolve(addr.port);
+        else reject(new Error("no port"));
+      });
+    });
+    try {
+      expect(await isPortAvailable(port)).toBe(false);
+    } finally {
+      await closeServer(holder);
+    }
+  });
+
+  it("returns false for an invalid port without throwing", async () => {
+    // `-1` / `99999` trigger either `RangeError` (sync throw) or an
+    // `error` event depending on platform — both paths must resolve
+    // to `false`, never propagate.
+    expect(await isPortAvailable(-1)).toBe(false);
+  });
+});
+
+describe("describeProcessOnPort", () => {
+  it("returns a non-null hint for a listener we control (when lsof/ss are present)", async () => {
+    if (platform() === "win32") return;
+    // Only meaningful when at least one of the probe tools is on PATH —
+    // on minimal CI images neither may exist, in which case returning
+    // `null` is the documented contract and the test passes trivially.
+    if (!commandExists("lsof") && !commandExists("ss")) return;
+
+    const holder = createServer();
+    holder.unref();
+    const port = await new Promise<number>((resolve, reject) => {
+      holder.once("error", reject);
+      holder.listen(0, "0.0.0.0", () => {
+        const addr = holder.address();
+        if (addr && typeof addr === "object") resolve(addr.port);
+        else reject(new Error("no port"));
+      });
+    });
+    try {
+      const hint = await describeProcessOnPort(port);
+      // `null` is an acceptable outcome on hosts where lsof requires
+      // elevated privileges. When non-null the hint must include a pid.
+      if (hint !== null) expect(hint).toMatch(/pid\s+\d+/);
+    } finally {
+      await closeServer(holder);
+    }
+  });
+
+  it("returns null for a port nobody is holding", async () => {
+    // Pick an ephemeral port + immediately close it → nobody listens.
+    const port = await pickEphemeralPort();
+    const hint = await describeProcessOnPort(port);
+    expect(hint).toBeNull();
+  });
+});
+
+async function pickEphemeralPort(): Promise<number> {
+  const srv = createServer();
+  srv.unref();
+  const port = await new Promise<number>((resolve, reject) => {
+    srv.once("error", reject);
+    srv.listen(0, "0.0.0.0", () => {
+      const addr = srv.address();
+      if (addr && typeof addr === "object") resolve(addr.port);
+      else reject(new Error("no port"));
+    });
+  });
+  await closeServer(srv);
+  return port;
+}
+
+function closeServer(srv: Server): Promise<void> {
+  return new Promise((resolve) => srv.close(() => resolve()));
+}

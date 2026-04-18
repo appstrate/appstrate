@@ -65,6 +65,14 @@ program
   )
   .option("-d, --dir <path>", "Install directory (default: ~/appstrate).")
   .option(
+    "--port <port>",
+    "Host port the Appstrate platform binds to (default: 3000). Also honored via APPSTRATE_PORT.",
+  )
+  .option(
+    "--minio-console-port <port>",
+    "Host port the MinIO console binds to on Tier 3 (default: 9001). Also honored via APPSTRATE_MINIO_CONSOLE_PORT.",
+  )
+  .option(
     "--force",
     "Bypass the 'another Compose project is already running under this name' preflight. Only use if you have already backed up the other install's data.",
   )
@@ -72,6 +80,9 @@ program
     await installCommand({
       tier: typeof opts.tier === "string" ? opts.tier : undefined,
       dir: typeof opts.dir === "string" ? opts.dir : undefined,
+      port: typeof opts.port === "string" ? opts.port : undefined,
+      minioConsolePort:
+        typeof opts.minioConsolePort === "string" ? opts.minioConsolePort : undefined,
       force: opts.force === true,
     });
   });

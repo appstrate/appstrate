@@ -123,6 +123,34 @@ describe("generateEnvForTier — value formats", () => {
   });
 });
 
+describe("generateEnvForTier — port overrides", () => {
+  it("omits PORT when the default (3000) is requested — keeps the .env minimal", () => {
+    const env = generateEnvForTier(0, "http://localhost:3000", { port: 3000 });
+    expect(env.PORT).toBeUndefined();
+  });
+
+  it("emits PORT when a non-default port is requested (Tier 0)", () => {
+    const env = generateEnvForTier(0, "http://localhost:4000", { port: 4000 });
+    expect(env.PORT).toBe("4000");
+  });
+
+  it("emits PORT on Docker tiers too (compose interpolates ${PORT:-3000})", () => {
+    const env = generateEnvForTier(2, "http://localhost:5000", { port: 5000 });
+    expect(env.PORT).toBe("5000");
+  });
+
+  it("emits MINIO_CONSOLE_PORT only on Tier 3 + only when non-default", () => {
+    const t3 = generateEnvForTier(3, "http://localhost:3000", { minioConsolePort: 9100 });
+    expect(t3.MINIO_CONSOLE_PORT).toBe("9100");
+
+    const t3Default = generateEnvForTier(3, "http://localhost:3000", { minioConsolePort: 9001 });
+    expect(t3Default.MINIO_CONSOLE_PORT).toBeUndefined();
+
+    const t1 = generateEnvForTier(1, "http://localhost:3000", { minioConsolePort: 9100 });
+    expect(t1.MINIO_CONSOLE_PORT).toBeUndefined();
+  });
+});
+
 describe("generateEnvForTier — randomness", () => {
   it("produces a different secret set on each call", () => {
     const a = generateEnvForTier(3);
