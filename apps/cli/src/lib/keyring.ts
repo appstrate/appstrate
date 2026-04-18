@@ -22,8 +22,9 @@
  */
 
 import { Entry } from "@napi-rs/keyring";
+import { randomBytes } from "node:crypto";
 import { join, dirname } from "node:path";
-import { readFile, unlink, mkdir, rename, open } from "node:fs/promises";
+import { readFile, unlink, mkdir, rename, open, stat } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { getConfigDir } from "./config.ts";
 
@@ -184,12 +185,23 @@ export async function saveTokens(profile: string, tokens: Tokens): Promise<void>
     return;
   } catch (err) {
     if (_shouldRefuseWindowsFallback(process.platform, err)) refuseWindowsFallback("write", err);
-    // Entry-missing is a read-path concept — on write, any failure means
-    // the backend cannot accept the payload. A "broken" daemon (installed
-    // but misbehaving) is refused unless the user opts into plaintext
-    // explicitly; "missing-backend" keeps the silent fallback (CI, bare
-    // container — no keyring expected).
-    if (classifyKeyringError(err) === "broken") {
+    // Three classes of error on write:
+    //   - `missing-backend`: no keyring daemon on this host (bare CI,
+    //     stripped container). Legitimate silent fallback to the 0600
+    //     JSON file — that's the whole point of the fallback.
+    //   - `broken`: keyring installed but not serving (locked Keychain,
+    //     frozen gnome-keyring). Refused by default. `APPSTRATE_ALLOW_
+    //     PLAINTEXT_TOKENS=1` opts in.
+    //   - `entry-missing`: napi-rs's "No matching entry" wording, which
+    //     is a read-path concept that shouldn't surface on a write.
+    //     Treat it symmetrically with `broken` — refuse by default,
+    //     because if the classification is wrong we'd rather fail loud
+    //     than silently drop plaintext tokens on disk. The same
+    //     `APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1` escape hatch covers the
+    //     corner case where a future napi-rs version legitimately uses
+    //     that wording on write.
+    const kind = classifyKeyringError(err);
+    if (kind === "broken" || kind === "entry-missing") {
       if (!plaintextFallbackAllowed()) refuseBrokenKeyring("write", err);
       warnBackendOnce("write", err);
     }
@@ -261,10 +273,16 @@ function lockPath(): string {
  * Serialize read-modify-write cycles on the credentials file.
  *
  * Uses `open(..., "wx")` (O_EXCL + O_CREAT + O_WRONLY) as a primitive
- * advisory lock and stores the holder's PID inside so we can detect
- * crashed-and-left-over locks from previous CLI runs. 5-second overall
- * deadline — credential writes are single-digit milliseconds; anything
- * longer means a crashed peer or a truly pathological filesystem.
+ * advisory lock and stores `<pid>:<nonce>` inside. PID alone is vulnerable
+ * to reuse: between the stale-detection readFile and the subsequent
+ * unlink, the original holder can exit and the OS can recycle the PID
+ * for a fresh process that happens to have just claimed a new lock —
+ * we would then unlink *its* lock and steal the slot. The nonce is a
+ * 128-bit random value unique to our own acquisition attempt, so after
+ * unlinking we re-claim and re-read to confirm the file actually carries
+ * our nonce before proceeding. 5-second overall deadline — credential
+ * writes are single-digit milliseconds; anything longer means a crashed
+ * peer or a truly pathological filesystem.
  */
 async function withLock<T>(fn: () => Promise<T>): Promise<T> {
   const path = lockPath();
@@ -273,53 +291,115 @@ async function withLock<T>(fn: () => Promise<T>): Promise<T> {
   const DEADLINE_MS = 5_000;
   const POLL_MS = 50;
   const start = Date.now();
-  let staleRecoveryDone = false;
 
-  while (true) {
-    try {
-      const fd = await open(path, "wx", 0o600);
+  // Outer retry loop for the "someone swapped their lock in where ours
+  // should be" race after verification. Bounded by the shared deadline
+  // (and a hard attempt cap to guard against a truly hostile FS that
+  // keeps satisfying the `O_EXCL` but produces different post-claim
+  // observations each time). Each iteration generates a *fresh* nonce —
+  // we don't want a rogue peer to have a past observation of our
+  // payload and replay it into their own file.
+  const MAX_ATTEMPTS = 16;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const ourNonce = randomBytes(16).toString("hex");
+    const ourPayload = `${process.pid}:${ourNonce}\n`;
+    let staleRecoveryDone = false;
+
+    // Inner loop: claim the lock via O_EXCL, retry with a short sleep
+    // on EEXIST, one-shot stale-PID recovery, hit the global deadline
+    // on timeout.
+    claim: while (true) {
       try {
-        await fd.writeFile(`${process.pid}\n`);
-      } finally {
-        await fd.close();
-      }
-      break;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-
-      // Lock held — check if the holder is still alive. A single stale
-      // recovery per `withLock` call avoids spinning on a lock file that
-      // a concurrent peer keeps recreating.
-      if (!staleRecoveryDone) {
-        staleRecoveryDone = true;
+        const fd = await open(path, "wx", 0o600);
         try {
-          const heldBy = parseInt((await readFile(path, "utf-8")).trim(), 10);
-          if (heldBy && !processIsAlive(heldBy)) {
-            await unlink(path).catch(() => {});
-            continue;
-          }
-        } catch {
-          // Lock vanished between EEXIST and readFile — next iteration
-          // will race cleanly for it.
-          continue;
+          await fd.writeFile(ourPayload);
+        } finally {
+          await fd.close();
         }
-      }
+        break claim;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
 
-      if (Date.now() - start > DEADLINE_MS) {
-        throw new Error(
-          `Timed out acquiring credentials lock ${path}. ` +
-            `If no other appstrate command is running, remove this file manually.`,
-        );
+        // Lock held — probe the holder's PID once. A single stale
+        // recovery per attempt avoids spinning against a peer that
+        // keeps recreating the lock within the deadline.
+        if (!staleRecoveryDone) {
+          staleRecoveryDone = true;
+          try {
+            const heldBy = parsePidFromLock(await readFile(path, "utf-8"));
+            if (heldBy !== null && !processIsAlive(heldBy)) {
+              await unlink(path).catch(() => {});
+              continue claim;
+            }
+          } catch {
+            // Lock vanished between EEXIST and readFile — race again.
+            continue claim;
+          }
+        }
+
+        if (Date.now() - start > DEADLINE_MS) {
+          throw new Error(
+            `Timed out acquiring credentials lock ${path}. ` +
+              `If no other appstrate command is running, remove this file manually.`,
+          );
+        }
+        await delay(POLL_MS);
       }
-      await delay(POLL_MS);
+    }
+
+    // Verify the file we just wrote still carries *our* nonce. The only
+    // way it wouldn't: stale-recovery unlinked a lock whose PID had
+    // been reused by a peer that claimed the lock just after we read
+    // the PID. In that race the peer's lock now sits where ours should.
+    let observed: string;
+    try {
+      observed = await readFile(path, "utf-8");
+    } catch {
+      // Lock vanished mid-flight — someone removed it between our claim
+      // and our verification. Retry the outer loop with a fresh nonce.
+      continue;
+    }
+    if (!observed.includes(ourNonce)) {
+      // Peer's lock is in place, not ours. Don't unlink (it isn't ours
+      // to remove). Retry the outer loop against the new holder.
+      continue;
+    }
+
+    // Happy path — we own the lock.
+    try {
+      return await fn();
+    } finally {
+      // Only unlink if the file still carries our nonce. If a rogue peer
+      // swapped in their own lock during our work, removing it would be
+      // a silent DoS on them. Best-effort.
+      try {
+        const stillOurs = (await readFile(path, "utf-8")).includes(ourNonce);
+        if (stillOurs) await unlink(path).catch(() => {});
+      } catch {
+        // Lock already gone — nothing to clean up.
+      }
     }
   }
 
-  try {
-    return await fn();
-  } finally {
-    await unlink(path).catch(() => {});
-  }
+  throw new Error(
+    `Failed to acquire credentials lock ${path} after ${MAX_ATTEMPTS} verified attempts. ` +
+      `This indicates a hostile filesystem environment — investigate concurrent access to ${dirname(path)}.`,
+  );
+}
+
+/**
+ * Parse the PID prefix from a lock file payload. Tolerates both the
+ * legacy `<pid>\n` format and the new `<pid>:<nonce>\n` — we don't want
+ * a mid-upgrade CLI to choke on a lock written by the previous version.
+ */
+function parsePidFromLock(content: string): number | null {
+  const head = content.trim().split(":", 1)[0] ?? "";
+  // `parseInt("123abc", 10)` returns 123 — we don't want to silently
+  // trust the prefix of a malformed payload as a PID. Require the head
+  // to match `/^\d+$/` strictly before parsing.
+  if (!/^\d+$/.test(head)) return null;
+  const pid = parseInt(head, 10);
+  return Number.isFinite(pid) && pid > 0 ? pid : null;
 }
 
 function processIsAlive(pid: number): boolean {
@@ -333,9 +413,66 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
+/**
+ * Atomic-create a tmp file in the same directory as `target` with
+ * `O_EXCL | O_CREAT | O_WRONLY` semantics via node's `"wx"` flag. Retries
+ * with a fresh 64-bit random nonce if the name collides (another CLI
+ * process racing, or — the reason O_EXCL exists here — an attacker
+ * pre-planting the tmp name as a symlink). Gives up after 5 attempts so
+ * a hostile file system doesn't stall the CLI indefinitely.
+ */
+async function openExclusiveTmp(
+  target: string,
+): Promise<{ tmp: string; tmpFd: Awaited<ReturnType<typeof open>> }> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const nonce = randomBytes(8).toString("hex");
+    const tmp = `${target}.${process.pid}.${Date.now()}.${nonce}.tmp`;
+    try {
+      const tmpFd = await open(tmp, "wx", 0o600);
+      return { tmp, tmpFd };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      // Collision — either a concurrent CLI on the same tick or an
+      // attacker-planted name. Retry with a fresh nonce.
+    }
+  }
+  throw new Error(
+    `Failed to create exclusive tmp file next to ${target} after 5 attempts. ` +
+      `If no other appstrate command is running, check for suspicious files in ${dirname(target)}.`,
+  );
+}
+
 async function readFileStore(): Promise<FileStore> {
+  const target = fallbackPath();
   try {
-    const raw = await readFile(fallbackPath(), "utf-8");
+    // SSH-style strict-mode check on the credentials file: refuse to
+    // parse a credentials store that is group/world-readable or owned
+    // by another user. A credentials.json left at 0644 by an earlier
+    // buggy version, a tool that chmod'd it unsafely, or a malicious
+    // peer who swapped the file to their own ownership on a shared host
+    // should not silently yield tokens to the caller. Skipped on Windows
+    // where unix mode bits are meaningless (NTFS ACLs — and we refuse
+    // the file fallback there anyway).
+    if (process.platform !== "win32") {
+      const st = await stat(target);
+      const mode = st.mode & 0o777;
+      if (mode !== 0o600) {
+        throw new Error(
+          `Refusing to read ${target}: insecure permissions ${mode.toString(8)} (expected 600). ` +
+            `Run: chmod 600 "${target}" — or delete it and re-run \`appstrate login\`.`,
+        );
+      }
+      // `process.getuid()` is defined on posix only. The typings allow
+      // `undefined` so we narrow rather than `!`-assert.
+      const getuid = process.getuid;
+      if (typeof getuid === "function" && st.uid !== getuid.call(process)) {
+        throw new Error(
+          `Refusing to read ${target}: file is not owned by the current user (uid ${st.uid}). ` +
+            `Delete it and re-run \`appstrate login\`.`,
+        );
+      }
+    }
+    const raw = await readFile(target, "utf-8");
     const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return parsed as FileStore;
@@ -364,8 +501,16 @@ async function writeFileStore(store: FileStore): Promise<void> {
   const target = fallbackPath();
   const parent = dirname(target);
   await mkdir(parent, { recursive: true, mode: 0o700 });
-  const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  const tmpFd = await open(tmp, "w", 0o600);
+
+  // Create the tmp file with O_EXCL ("wx") to refuse a pre-existing
+  // symlink/file at the tmp path. Without O_EXCL, an attacker on the
+  // same machine (shared XDG_CONFIG_HOME — misconfigured CI, multi-user
+  // dev VM) can plant a symlink at the predictable tmp name and have
+  // `open("w", …)` follow it, writing the token through the symlink to
+  // an arbitrary location. Retry with a fresh nonce up to 5 times if we
+  // collide with another concurrent write (extremely unlikely with
+  // 64 random bits on top of the PID+timestamp).
+  const { tmp, tmpFd } = await openExclusiveTmp(target);
   try {
     await tmpFd.writeFile(JSON.stringify(store, null, 2));
     await tmpFd.sync();

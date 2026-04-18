@@ -245,3 +245,53 @@ export async function atomicReplace(path: string, body: string, mode?: number): 
   await writeFile(tmp, body, mode !== undefined ? { mode } : undefined);
   await rename(tmp, path);
 }
+
+/**
+ * Wrap an upgrade step with rollback-on-failure semantics.
+ *
+ * Contract:
+ *   - Calls `step`. If it resolves, calls `onSuccess` (e.g. cleanup
+ *     backups) and returns the step's value.
+ *   - If `step` rejects AND `backedUp` is non-empty, restores the
+ *     backup files BEFORE re-throwing. The rethrown error message is
+ *     augmented to explain what happened; a restore failure is
+ *     surfaced separately so the user can escalate.
+ *   - If `backedUp` is empty (fresh install), the error propagates
+ *     unchanged — there's nothing to restore.
+ *
+ * Extracted from `commands/install.ts::installDockerTier` so the
+ * rollback contract can be unit-tested without having to mock docker,
+ * healthchecks, project-file sidecars, etc. The regression it guards
+ * against: someone removes the `try/catch → restoreBackups` block and
+ * the full-path integration test passes on the happy path while
+ * silently losing its rollback-on-failure coverage.
+ */
+export async function runWithRollback<T>(
+  dir: string,
+  backedUp: string[],
+  step: () => Promise<T>,
+  onSuccess?: () => Promise<void>,
+): Promise<T> {
+  try {
+    const result = await step();
+    if (onSuccess) await onSuccess();
+    return result;
+  } catch (err) {
+    if (backedUp.length === 0) throw err;
+    try {
+      await restoreBackups(dir, backedUp);
+    } catch (restoreErr) {
+      const originalMsg = err instanceof Error ? err.message : String(err);
+      const restoreMsg = restoreErr instanceof Error ? restoreErr.message : String(restoreErr);
+      throw new Error(
+        `Upgrade failed (${originalMsg}). Rollback also failed (${restoreMsg}); ` +
+          `.backup files are preserved in ${dir} for manual recovery.`,
+      );
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Upgrade failed (${msg}). Original files restored from backup; ` +
+        `run \`docker compose up -d\` in ${dir} to resume on the previous config.`,
+    );
+  }
+}

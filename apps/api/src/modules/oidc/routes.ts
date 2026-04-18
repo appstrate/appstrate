@@ -1960,11 +1960,18 @@ export function createOidcRouter() {
   // out of scope for v0.
 
   // Device-flow approve/deny: tightest limit in the OIDC surface because
-  // each POST targets a specific `user_code` whose search space is ~43
-  // bits (RFC 8628 §6.1). ADR-006 §Protocol parameters: 5/15min/IP.
-  // Combined with the per-row `MAX_APPROVE_ATTEMPTS=5` counter enforced
-  // in `oidcGuardsPlugin.hooks.before`, a single IP cannot burn through
-  // enough wrong-realm/wrong-code attempts to probe the code space.
+  // each POST targets a specific `user_code` whose search space is
+  // log₂(20⁸) ≈ 34.6 bits (RFC 8628 §6.1 — 20-letter GitHub-convention
+  // alphabet, 8 chars, no dash). The nominal RFC §6.1 entropy target
+  // (20⁹ ≈ 38.9 bits) is reached when the server issues a 9-char code
+  // instead; the 8-char form aligns with GitHub's device flow UX while
+  // still satisfying the spec's "2⁻¹⁶ probability of a successful attack
+  // in 15 minutes" example when combined with per-IP rate limiting.
+  // ADR-006 §Protocol parameters: 5/15min/IP on this SSR endpoint; the
+  // BA-direct `/device/approve` carries its own 10/min/IP ceiling in
+  // `oidcGuardsPlugin`. Combined with the per-row `MAX_APPROVE_ATTEMPTS=5`
+  // counter, a single IP cannot burn through enough wrong-realm /
+  // wrong-code attempts to probe the code space.
   const deviceApproveRateLimit = rateLimitByIp(5, 900);
   // The CSRF cookie must be scoped to a path that covers every POST on
   // this flow (`/activate`, `/activate/approve`, `/activate/deny`).
