@@ -1,9 +1,16 @@
 name: Publish Installer
 
+# Triggered AFTER `release.yml` succeeds for a `v*` tag — NOT directly
+# on the tag push. This ordering matters: `install.sh` pinned to vX.Y.Z
+# tells `curl get.appstrate.dev | bash` to fetch CLI binaries from the
+# vX.Y.Z GH Release. If the installer publishes before `release.yml`
+# finishes signing & uploading those binaries, users hit a 404 in the
+# 10-15 min window between the two workflows. `workflow_run` chains
+# them so the installer only updates once the release artifacts exist.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: ["Release Docker Images + CLI Binaries"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -24,23 +31,45 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Skip when:
+    #   - `release.yml` did not succeed (failure / cancelled / skipped)
+    #     → publishing an installer pointing at a missing release would
+    #       brick `get.appstrate.dev`.
+    #   - `release.yml` was triggered by something other than a v* tag
+    #     push (defensive — the workflow currently only triggers on v*
+    #     tags, but `workflow_run.head_branch` is the cleanest filter
+    #     in case that ever changes).
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+        startsWith(github.event.workflow_run.head_branch, 'v'))
     steps:
-      - name: Checkout source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
       - name: Resolve version
         id: ver
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ inputs.version }}"
           else
-            VERSION="${GITHUB_REF_NAME}"
+            # `workflow_run.head_branch` carries the tag name (e.g.
+            # `v1.0.0-alpha.59`) when the upstream workflow was tag-
+            # triggered — per GitHub webhook payload docs.
+            VERSION="${{ github.event.workflow_run.head_branch }}"
           fi
           if ! echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$'; then
             echo "Invalid version format: $VERSION (expected vMAJOR.MINOR.PATCH[-prerelease])" >&2
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout source at tag
+        # `workflow_run` runs in the context of the default branch
+        # (so `github.ref` is `refs/heads/main`, NOT the tag). Check
+        # out the resolved tag explicitly so we render `bootstrap.sh`,
+        # `verify.sh`, and `appstrate.pub` from the exact commit that
+        # was released — not whatever happens to be on main right now.
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ steps.ver.outputs.version }}
 
       - name: Render installer with pinned version
         run: |
