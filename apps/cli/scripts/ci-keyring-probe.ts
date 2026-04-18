@@ -93,9 +93,22 @@ try {
           SERVICE,
           `nonexistent-${process.pid}-${randomBytes(8).toString("hex")}`,
         );
-        freshEntry.getPassword();
-        // If this call returned *without* throwing, something is very
-        // wrong — we never wrote that entry. Fall through to FAIL.
+        const confirmRead = freshEntry.getPassword();
+        // Per `@napi-rs/keyring`'s typedef, `Entry.getPassword()` returns
+        // `string | null` — the macOS native keychain backend yields
+        // `null` for a missing entry instead of throwing `NoEntry` like
+        // the Linux secret-service backend does. Both outcomes are
+        // equally strong evidence that the native binding loaded and
+        // the backend responded, so accept either as OK. A non-null
+        // string here would mean the keychain returned a value for an
+        // account we never wrote — that's the actual regression we're
+        // guarding against.
+        if (confirmRead === null || confirmRead === undefined) {
+          process.stdout.write(
+            `OK (no backend): native binding loaded, backend unavailable on this runner — ${opErr instanceof Error ? opErr.message : String(opErr)}\n`,
+          );
+          process.exit(0);
+        }
         process.stderr.write(
           "FAIL: confirmation probe returned a value for an entry we never wrote.\n",
         );
