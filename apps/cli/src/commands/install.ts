@@ -65,9 +65,10 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
 /**
  * Parse `--tier` or drop into an interactive select. `clack`'s
  * `select` with 4 options reads better than free-form text and avoids
- * the "what did I type?" typo recovery.
+ * the "what did I type?" typo recovery. Exported so unit tests can
+ * lock down the validation contract without invoking the prompt.
  */
-async function resolveTier(raw: string | undefined): Promise<Tier> {
+export async function resolveTier(raw: string | undefined): Promise<Tier> {
   if (raw !== undefined) {
     const parsed = Number(raw);
     if (parsed === 0 || parsed === 1 || parsed === 2 || parsed === 3) return parsed as Tier;
@@ -89,7 +90,11 @@ async function resolveTier(raw: string | undefined): Promise<Tier> {
   return chosen;
 }
 
-async function resolveDir(raw: string | undefined): Promise<string> {
+/**
+ * Parse `--dir` or prompt for it, then reject newlines / NUL bytes and
+ * normalize to an absolute path. Exported for unit testing.
+ */
+export async function resolveDir(raw: string | undefined): Promise<string> {
   const chosen = raw ?? (await askText("Install directory", DEFAULT_INSTALL_DIR));
   // `tier0.ts` passes `dir` as an argv positional to `tar`, `curl`,
   // `git`, etc. without a shell wrapper, so interpolation injection is
