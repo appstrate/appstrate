@@ -10,7 +10,7 @@
  *   - `renderEnvFile` output stability + safe characters
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { generateEnvForTier, renderEnvFile, type EnvVars } from "../../src/lib/install/secrets.ts";
 
 const HEX_64 = /^[0-9a-f]{64}$/;
@@ -18,6 +18,20 @@ const HEX_64 = /^[0-9a-f]{64}$/;
 const BASE64_KEY_32 = /^[A-Za-z0-9+/]{43}=$/;
 // `randomBytes(24)` as base64url has no padding; 24 bytes → 32 chars.
 const BASE64URL_PASSWORD_24 = /^[A-Za-z0-9_-]{32}$/;
+
+// Workspace CLI_VERSION is "0.0.0" — a dev build. By contract,
+// `generateEnvForTier` on docker tiers refuses to guess an image tag for
+// a dev build. Provide an explicit override for every test by default;
+// the two tests that assert the throw behavior clear the override before
+// running and restore it after.
+const previousAppstrateVersion = process.env.APPSTRATE_VERSION;
+beforeEach(() => {
+  process.env.APPSTRATE_VERSION = "1.2.3";
+});
+afterEach(() => {
+  if (previousAppstrateVersion === undefined) delete process.env.APPSTRATE_VERSION;
+  else process.env.APPSTRATE_VERSION = previousAppstrateVersion;
+});
 
 describe("generateEnvForTier — tier envelope", () => {
   it("Tier 0 contains only the core secrets (no infra passwords, no APPSTRATE_VERSION)", () => {
@@ -41,16 +55,14 @@ describe("generateEnvForTier — tier envelope", () => {
     expect(env.POSTGRES_USER).toBe("appstrate");
     expect(env.POSTGRES_PASSWORD).toBeDefined();
     expect(env.MINIO_ROOT_PASSWORD).toBeUndefined();
-    // Image pin is required so compose doesn't fall back to `:latest`.
-    expect(env.APPSTRATE_VERSION).toBeDefined();
-    expect(env.APPSTRATE_VERSION).not.toBe("latest");
+    expect(env.APPSTRATE_VERSION).toBe("1.2.3");
   });
 
   it("Tier 2 matches Tier 1 + image pin (Redis has no password by default)", () => {
     const env = generateEnvForTier(2);
     expect(env.POSTGRES_PASSWORD).toBeDefined();
     expect(env.MINIO_ROOT_PASSWORD).toBeUndefined();
-    expect(env.APPSTRATE_VERSION).toBeDefined();
+    expect(env.APPSTRATE_VERSION).toBe("1.2.3");
   });
 
   it("Tier 3 adds MinIO creds + bucket + region + APPSTRATE_VERSION", () => {
@@ -60,7 +72,22 @@ describe("generateEnvForTier — tier envelope", () => {
     expect(env.MINIO_ROOT_PASSWORD).toBeDefined();
     expect(env.S3_BUCKET).toBe("appstrate");
     expect(env.S3_REGION).toBe("us-east-1");
-    expect(env.APPSTRATE_VERSION).toBeDefined();
+    expect(env.APPSTRATE_VERSION).toBe("1.2.3");
+  });
+
+  it("dev CLI without APPSTRATE_VERSION override throws on docker tiers", () => {
+    // Clear the override the outer `beforeEach` installed.
+    delete process.env.APPSTRATE_VERSION;
+    expect(() => generateEnvForTier(1)).toThrow(/dev build of the CLI/);
+    expect(() => generateEnvForTier(2)).toThrow(/dev build of the CLI/);
+    expect(() => generateEnvForTier(3)).toThrow(/dev build of the CLI/);
+  });
+
+  it("dev CLI still builds tier 0 (no image pin needed)", () => {
+    delete process.env.APPSTRATE_VERSION;
+    const env = generateEnvForTier(0);
+    expect(env.APPSTRATE_VERSION).toBeUndefined();
+    expect(env.BETTER_AUTH_SECRET).toBeDefined();
   });
 });
 
