@@ -1,0 +1,151 @@
+# ADR-006: Official CLI — Monorepo Placement, Device Authorization Grant, and Library Stack
+
+## Status
+
+Accepted
+
+## Context
+
+Appstrate is distributed today via a hosted shell installer (`curl -fsSL https://get.appstrate.dev | bash`). The installer is a single monolithic Bash script that sets up a Tier 3 stack (PostgreSQL + Redis + MinIO + platform) from a fixed Docker Compose template. Two limitations have become blocking:
+
+1. **No tier selection.** The Bash installer cannot match a user to the right infrastructure tier (0/1/2/3 — see `CLAUDE.md` § Progressive Infrastructure). Users who want Tier 0 (zero-install PGlite + filesystem) or Tier 1/2 (subset of services) have to hand-edit compose files.
+2. **No way to authenticate back into the instance.** After install, there is no programmatic path for a user to establish an authenticated session with their freshly-provisioned Appstrate instance other than opening a browser and typing credentials. Tooling on top of Appstrate (scripts, pipelines, editors) cannot bootstrap without manually-minted API keys.
+
+The remediation is an **official CLI** — named `appstrate` — that owns both concerns end-to-end:
+
+- **Step 1 (`appstrate install`)** replaces the Bash installer. Interactive tier selection, declarative Compose rendering from embedded templates, secret generation, healthcheck wait, and browser launch.
+- **Step 2 (`appstrate login`)** authenticates the user against the instance they just installed and persists tokens for subsequent commands.
+
+Several upstream decisions must be anchored before implementation, because they compound: the authentication strategy drives the client registration model, the client registration model drives the OIDC module wiring, the runtime language drives the packaging pipeline, and the repo layout drives the CI/CD and type-sharing story. This ADR records all of them in one place.
+
+### Authentication strategy — Device Authorization Grant vs Loopback
+
+The OIDC module (`apps/api/src/modules/oidc/`) is a full OAuth 2.1 / OIDC authorization server built on Better Auth + `@better-auth/oauth-provider`. Its current `isValidRedirectUri` (`services/redirect-uri.ts:40`) rejects loopback addresses (`http://127.0.0.1`, `http://localhost`) in production, and `@better-auth/oauth-provider` performs strict-equality matching on `redirect_uri` — no RFC 8252 port-flexible matching. The OIDC README explicitly flags these as blockers for public clients (CLI, desktop, SPA).
+
+Three strategies were evaluated for the CLI:
+
+1. **Loopback + PKCE (RFC 8252).** CLI spins up a local HTTP listener, browser redirects to `http://127.0.0.1:<port>/callback`. Requires relaxing `isValidRedirectUri` to accept loopback behind an explicit flag, plus a port allowlist or a single fixed port. Fails in SSH / WSL / corporate firewall scenarios.
+2. **Device Authorization Grant (RFC 8628).** CLI asks the instance for a `device_code` + `user_code`, displays the code + verification URL, polls the token endpoint while the user approves in any browser (same machine or another). Works in every environment including headless.
+3. **Out-of-band copy-paste.** User manually pastes a one-time code from browser to CLI. Trivial but primitive.
+
+Research on the CLI ecosystem (`gh`, `gcloud`, `aws sso`, `stripe`, `doctl`, `heroku`, `1Password`, `Okta`, `Auth0`) shows a clear 2025 SOTA: **Device Authorization Grant is the default** for all recently-redesigned CLI auth flows. Loopback remains a legitimate fallback (`gcloud`, `vercel`) but is being phased out in new tooling because of the headless/firewall edge cases.
+
+A separate decision within the device flow is whether the CLI client registration lives in the existing `OIDC_INSTANCE_CLIENTS` env var (operator-declared) or is auto-provisioned at boot. The env-var path fits admin dashboards and second-party web apps — trusted confidential clients whose redirect URIs the operator owns. The CLI is different: it must exist on **every** Appstrate instance with zero configuration, and its identity is the same across all installs. Auto-provisioning via a boot-time `ensureCliClient()` helper (parallel to `ensureInstanceClient()` for the platform SPA) is the only option that satisfies that invariant.
+
+The `client_id` itself carries no security. OAuth 2.1 explicitly treats public-client identifiers as non-secret (RFC 9700 § 4.1); the security of the flow rests on PKCE, resource indicators (already enforced by `oidcGuardsPlugin`), exact redirect-URI match (N/A for device flow — there is no redirect), and user consent at `/activate`. Debating whether to embed the `client_id` in the binary or fetch it from a bootstrap endpoint is a DX question, not a security question — the auto-provisioned client is identical on every instance, so embedding is simpler.
+
+### Better Auth device-flow support
+
+Better Auth ships a first-class `deviceAuthorization()` plugin (`packages/better-auth/src/plugins/device-authorization/` in the upstream repo, documented at `better-auth.com/docs/plugins/device-authorization`) since v1.6. It provides the full RFC 8628 surface — `/device/code`, `/device/token`, `/device/approve`, `/device/deny`, `/device/verify` — plus the schema for the `oauthDeviceCode` table and the polling error vocabulary (`authorization_pending`, `slow_down`, `access_denied`, `expired_token`). Appstrate is on `better-auth@^1.6.2`; a bump to `^1.6.5` unlocks it. **No custom device-flow plugin needs to be written.**
+
+### Activation page — SSR vs SPA
+
+The OIDC module already owns server-rendered login and consent pages (`apps/api/src/modules/oidc/pages/login.ts`, `consent.ts`) using the zero-dependency `html` tagged template from `pages/html.ts`. These pages are CSP-hardened, XSS-safe by construction, and never load third-party JavaScript. Adding a fourth page (`/activate`) alongside them is a one-file change. Routing it through the `apps/web` React SPA would require wiring auth-bypass paths, duplicating the CSRF-hardening pipeline, and accepting a hard dependency on the SPA bundle at an unauthenticated URL — a larger attack surface for zero gain.
+
+### CLI — multi-profile, token storage, QR code
+
+Every production CLI that manages multiple cloud environments supports **profiles** (AWS, gcloud, doctl, fly, supabase). The cost of shipping `--profile` at v0 is ~50 lines in `apps/cli/src/lib/config.ts`; the cost of retrofitting after users have written automation against a single-profile binary is a migration doc and a deprecation window. It ships on day one.
+
+For token storage, `keytar` (the historical npm keyring binding) was **archived by GitHub in December 2022** and has had no releases since v7.9.0. `@napi-rs/keyring` (maintained by the napi-rs org, last release September 2025) wraps the Rust `keyring-rs` crate via N-API prebuilds for 12 platform targets, eliminating the `node-gyp` rebuild pain. A plain-file fallback at `$XDG_CONFIG_HOME/appstrate/credentials.json` with `0600` permissions covers headless environments where no keyring daemon exists (CI runners, stripped containers).
+
+The CLI device flow's `verification_uri_complete` could in principle be rendered as a QR code in the terminal for mobile-assisted approval. In practice, Appstrate is a web-only platform — users approve from a browser on the same machine the CLI runs on, or from a browser on another laptop. None of `gh`, `gcloud`, `aws sso`, `stripe`, `heroku`, `vercel`, or `doctl` ships a QR code. It is not part of 2025 dev-tool SOTA, and shipping it would add a dependency (`qrcode`) and terminal-width edge cases for a scenario nobody has.
+
+### Repo layout — monorepo vs dedicated repo
+
+Research on 13 comparable CLI projects (Supabase, Vercel, Railway, Neon, PlanetScale, Fly, GitHub CLI, Stripe, Clerk, Heroku, Auth0, Convex, Cloudflare Wrangler) shows the split is **not** about best-practice-in-the-abstract — it tracks two concrete constraints:
+
+- **Language mismatch** between CLI and platform. Supabase, PlanetScale, Fly, Stripe, Auth0, Heroku all ship Go/Rust binaries while their platforms are written in something else. They cannot share compile-time types, so a separate repo carries zero cost.
+- **Platform source availability.** Closed-source platforms (Fly, Stripe, Auth0, Railway) must separate by necessity — the CLI is the only public artifact.
+
+When the CLI **is** in the platform language AND the platform is open-source, the industry SOTA is **monorepo with a dedicated package**: Vercel (`vercel/vercel` → `packages/cli`), Cloudflare Wrangler (`cloudflare/workers-sdk` → `packages/wrangler`), Convex (bundled with the client SDK). Appstrate fits this profile exactly: Bun/TS on both sides, fully OSS, with `@appstrate/core` (Zod env schema, naming, validation) and `@appstrate/shared-types` already positioned to be shared compile-time contracts between the CLI and the platform. A monorepo placement also lets the CLI embed docker-compose templates via `Bun.embeddedFiles` and version them in lockstep with the platform images they target.
+
+## Decision
+
+### Deliverable
+
+An official CLI, `appstrate`, distributed as:
+
+- An npm package `@appstrate/cli` (installable via `bunx @appstrate/cli …`).
+- Standalone single-binary builds for `linux-x64`, `linux-arm64`, `darwin-x64`, and `darwin-arm64`, produced by `bun build --compile --target=<target>` and attached to GitHub Releases. **Windows (`win32-x64`) is deliberately out of scope for v1** — the 2026 dev-tool baseline (Supabase, Railway, Fly, Neon, Wrangler) is WSL2 on Windows, which reuses the `linux-x64` binary. Shipping a native Windows build would double the `install` / `login` manual-test surface (Docker Desktop paths, CRLF line endings, Credential Manager quirks) for a user segment that is already well-served via WSL2. A native Windows binary can be added post-v1 by appending a `windows-latest` row to the release matrix if demand warrants.
+- A refactored `https://get.appstrate.dev` shell one-liner that detects OS/arch, downloads the matching binary to `/usr/local/bin/appstrate`, and chains into `appstrate install`. Windows users run the one-liner inside a WSL2 shell, or invoke `bunx @appstrate/cli install` natively if they already have Bun on Windows.
+
+Version number tracks the platform release train (lockstep).
+
+### Repo placement
+
+Lives in `apps/cli/` inside the `appstrate/appstrate` monorepo. Turbo-buildable, versioned in lockstep with `apps/api` and `apps/web`, released in the same changelog. Reasoning: CLI is in the same language as the platform (Bun/TS), platform is fully OSS, CLI shares compile-time types with `@appstrate/core`, `@appstrate/env`, and the OpenAPI types generated from `apps/api/src/openapi/`.
+
+### Authentication — Device Authorization Grant (RFC 8628)
+
+- Server-side: Better Auth's built-in `deviceAuthorization()` plugin, enabled alongside the existing `@better-auth/oauth-provider` plugin in the `oidc` module's `betterAuthPlugins()` array.
+- Client `appstrate-cli` auto-provisioned at module boot by a new `ensureCliClient()` service helper, parallel to `ensureInstanceClient()`. `level="instance"`, `type="native"`, `token_endpoint_auth_method="none"`, `requirePKCE=true`, `grant_types=["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"]`, `scopes=["openid", "profile", "email", "offline_access"]`. The client exists on every Appstrate install with zero operator configuration.
+- A new SSR page `/activate` in `apps/api/src/modules/oidc/pages/activate.ts` handles the user-facing verification flow (enter `user_code`, authenticate if needed, approve or deny with the CLI device metadata — user agent and public IP — displayed for anti-phishing verification).
+- **No loopback redirect support is added.** `isValidRedirectUri` is not modified. Device flow supersedes the loopback strategy.
+- **No QR code** is rendered in the terminal.
+- **Consent is always required** on `/activate`. `skipConsent` is never honored for the CLI client — mandatory UX per RFC 8628 § 5.2 anti-phishing guidance.
+
+### Protocol parameters
+
+| Parameter              | Value                                                                                                                                                                | Rationale                                                                                                                                                                                                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `user_code` format     | `XXXX-XXXX`, alphabet `BCDFGHJKLMNPQRSTVWXZ` (GitHub convention)                                                                                                     | ~43 bits entropy, zero visual ambiguity (`0/O`, `1/I/l` excluded)                                                                                                                                                                                                   |
+| `device_code` lifetime | 10 min                                                                                                                                                               | Upstream default, matches GitHub / Google                                                                                                                                                                                                                           |
+| Polling `interval`     | 5s base, exponential backoff on `slow_down`                                                                                                                          | Upstream default                                                                                                                                                                                                                                                    |
+| Session token lifetime | 7 days (Better Auth session)                                                                                                                                         | v0 ships Better Auth session tokens rather than signed JWT access+refresh pairs. `deviceAuthorization()` returns the session cookie's bearer value; when it expires the user re-runs `appstrate login`. Moving to 15 min access + 30 day rotating refresh is a v1.1 |
+| Rate limits            | `/device/code`: 10/min/IP; `/device/token`: 30/min/IP + 1/`interval`s/device_code; `/activate/{approve,deny}`: 5/15min/IP + per-row `MAX_APPROVE_ATTEMPTS=5` counter | Aligned with existing `oidcGuardsPlugin`; the per-row counter bounds `user_code` brute-force even below the per-IP ceiling                                                                                                                                          |
+
+### Library stack
+
+| Concern               | Library                                      | Version  | Rationale                                                                                                  |
+| --------------------- | -------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
+| Server — device grant | `better-auth` `deviceAuthorization()` plugin | `^1.6.5` | Native RFC 8628 support, maintained by Better Auth team, zero custom code                                  |
+| Client — OIDC/OAuth   | `openid-client` (panva)                      | `^6.x`   | SOTA reference; exposes `initiateDeviceAuthorization()` + `pollDeviceAuthorizationGrant()`; Bun-compatible |
+| CLI framework         | `commander`                                  | `^14.x`  | Pragmatic, stable, compiles cleanly with `bun build --compile`                                             |
+| Prompts / spinner     | `@clack/prompts`                             | `^1.2`   | Most polished 2025 UX, built-in spinner eliminates `ora` dep                                               |
+| OS keyring            | `@napi-rs/keyring`                           | `^1.2`   | `keytar` is archived; N-API prebuilds for 12 platforms, no `node-gyp`                                      |
+| Browser launcher      | `open` (sindresorhus)                        | `^11.x`  | Industry standard, WSL/SSH-aware                                                                           |
+| JWT verification      | `jose` (panva)                               | `^6.x`   | Pure Web Crypto, Bun first-class, already in use via Better Auth                                           |
+
+### Multi-profile & storage
+
+- Profiles supported from v0. Selection via `--profile <name>`, environment variable `APPSTRATE_PROFILE`, or default `default`. AWS-style layout.
+- Config file at `$XDG_CONFIG_HOME/appstrate/config.toml` with `[profile.<name>]` sections holding `instance`, `user_id`, `email`, `org_id`. TOML for readability and user-editability.
+- Refresh and access tokens stored in the OS keyring via `@napi-rs/keyring` under the service key `appstrate:<profile>`. Fallback to `$XDG_CONFIG_HOME/appstrate/credentials.json` with `0600` permissions when no keyring backend is available (headless CI, stripped containers).
+- `appstrate logout` calls `/oauth2/revoke` (RFC 7009) before wiping local storage. `appstrate logout --all` deferred to v1.1.
+
+### Install flow (Step 1)
+
+- Three Docker Compose templates live in `examples/self-hosting/` as source of truth: `docker-compose.tier1.yml`, `tier2.yml`, `tier3.yml`. Tier 0 is Docker-free (Bun + PGlite in-process + filesystem) and therefore has no compose file — the CLI detects or installs Bun, `git clone`s the monorepo, and runs `bun run dev` directly.
+- The CLI embeds the tier 1/2/3 templates via `Bun.embeddedFiles` so the binary is self-contained. At install time it writes the selected template to the install directory alongside a generated `.env` with secrets from `crypto.randomBytes`.
+- Tier-specific prompts mirror the existing `scripts/setup.ts` pattern. Healthcheck wait and `open http://localhost:3000` close the loop.
+
+### Audit logging
+
+Every approved device grant is logged with: `userId`, `clientId=appstrate-cli`, `ip_cli`, `ip_browser`, `userAgent_cli`, `timestamp`, `requestId`. Feeds a future "authorized devices" admin UI (v1.1, not part of this ADR).
+
+## Consequences
+
+**Positive**
+
+- Zero custom device-flow plugin to maintain — Better Auth upstream owns the protocol surface.
+- CLI authenticates in every environment (headless, SSH, WSL, corporate firewall) without a local HTTP listener.
+- No loopback redirect exception in `isValidRedirectUri` — production redirect policy stays strict.
+- `OIDC_INSTANCE_CLIENTS` env var remains operator-controlled for satellite apps; CLI client has its own provisioning path with no config ceremony.
+- Lockstep versioning between CLI binary and platform images guarantees that `appstrate install` always provisions a compatible stack — impossible to drift.
+- Shared types between CLI and platform (`@appstrate/env`, `@appstrate/shared-types`, OpenAPI) make the CLI commands strongly typed against the API surface with no code duplication.
+- Single release train, single changelog, single CI pipeline via Turbo.
+- Token storage follows 2025 SOTA (N-API keyring primary, file fallback) with no dependency on archived packages.
+
+**Negative**
+
+- CLI version is coupled to platform version. A standalone CLI hotfix requires a platform release bump. Acceptable trade-off given the shared-types benefit; if this proves painful, extracting `apps/cli/` to a dedicated repo is mechanical.
+- Device Authorization Grant requires a boot-time dependency bump to `better-auth@^1.6.5`. Minor, but must be coordinated across `apps/api` and `packages/db`.
+- Users must own a browser somewhere (same or different machine). Pure fully-headless environments where no human can approve are not supported — API keys remain the path for unattended automation.
+- `bun build --compile` with `@napi-rs/keyring` (N-API native module) is an unverified combination. A POC confirmation is required in Phase 0 of implementation; if it fails, the CLI falls back to npm-only distribution with no single-binary releases.
+- `/activate` page consent is always required. Adds one click to the login UX compared to `skipConsent: true`, deliberately — consent is the RFC 8628 § 5.2 anti-phishing measure and cannot be skipped.
+
+**Neutral**
+
+- Four docker-compose templates instead of one. Each matches a documented tier and is maintained alongside the existing `docker-compose.dev.yml` (development) and root `docker-compose.yml` (production) — no new concept, just materialized per tier.
+- Multi-profile support from day one aligns with AWS / gcloud / doctl / fly / supabase CLI conventions.
+- The existing `OIDC_INSTANCE_CLIENTS` env var reconciliation (create-only, fail-on-drift) is untouched. The CLI client uses a separate auto-provisioning path and is whitelisted from orphan warnings the same way the auto-provisioned SPA client is today.

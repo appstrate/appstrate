@@ -599,6 +599,21 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
  * independently — the old cached value never gets exercised.
  *
  * Called from `oidcModule.init()` at boot.
+ *
+ * The platform SPA is a **public** OAuth client: it runs in a browser
+ * and cannot hold a `client_secret` (any value shipped in the JS bundle
+ * is publicly readable, so OAuth 2.1 RFC 9700 § 2.2 mandates treating
+ * SPAs as public clients). PKCE is the proof-of-possession. We bypass
+ * `createClient` here because that helper hard-codes `client_secret_basic`
+ * + a hashed secret for confidential clients — the SPA has no way to
+ * send the Basic header, so the token exchange would 400 on
+ * `invalid_client`. Direct insert keeps the confidential defaults
+ * correct for every other caller.
+ *
+ * The platform auto-provisioned instance client also opts into open
+ * signup at boot so a fresh Appstrate install can register its first
+ * user. Every other client (env-declared satellites, org tenants,
+ * application clients) keeps the closed `allowSignup: false` default.
  */
 export async function ensureInstanceClient(appUrl: string): Promise<string> {
   // Normalize: strip trailing slash(es) so `APP_URL=https://x.com/` does
@@ -654,21 +669,37 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
     return existing.clientId;
   }
 
-  // The platform auto-provisioned instance client opts into open signup at
-  // boot so a fresh Appstrate install can register its first user. Every
-  // other client (env-declared satellites, org tenants, application
-  // clients) keeps the closed `allowSignup: false` default from
-  // `createClient()` and can opt in independently via the admin API.
-  const created = await createClient({
-    level: "instance",
+  const id = prefixedId("oac");
+  const clientId = `oauth_${randomSecret().slice(0, 24)}`;
+  const now = new Date();
+  const metadata = { level: "instance" as const, clientId };
+
+  await db.insert(oauthClient).values({
+    id,
+    clientId,
+    clientSecret: null,
     name: "Appstrate Platform",
     redirectUris: expectedRedirectUris,
     postLogoutRedirectUris: expectedPostLogoutRedirectUris,
     scopes: ["openid", "profile", "email", "offline_access"],
-    isFirstParty: true,
+    level: "instance",
+    referencedOrgId: null,
+    referencedApplicationId: null,
+    metadata: JSON.stringify(metadata),
+    skipConsent: true,
     allowSignup: true,
+    signupRole: "member",
+    disabled: false,
+    type: "web",
+    public: true,
+    tokenEndpointAuthMethod: "none",
+    grantTypes: ["authorization_code", "refresh_token"],
+    responseTypes: ["code"],
+    requirePKCE: true,
+    createdAt: now,
+    updatedAt: now,
   });
-  return created.clientId;
+  return clientId;
 }
 
 // ─── Env-provisioned instance clients ─────────────────────────────────────────

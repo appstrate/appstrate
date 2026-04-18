@@ -76,6 +76,13 @@ interface SignOutArgs {
   asResponse?: boolean;
 }
 
+interface DeviceApproveDenyArgs {
+  body: { userCode: string };
+  headers: Headers;
+  request?: Request;
+  asResponse?: boolean;
+}
+
 export interface OidcAuthApi {
   signInEmail(args: SignInEmailArgs): Promise<Response | unknown>;
   signUpEmail(args: SignUpEmailArgs): Promise<Response | unknown>;
@@ -87,6 +94,8 @@ export interface OidcAuthApi {
   getOpenIdConfig(args: DiscoveryArgs): Promise<unknown>;
   getOAuthServerConfig(args: DiscoveryArgs): Promise<unknown>;
   getJwks(args: JwksArgs): Promise<{ keys?: jose.JWK[] } | null>;
+  deviceApprove(args: DeviceApproveDenyArgs): Promise<Response | unknown>;
+  deviceDeny(args: DeviceApproveDenyArgs): Promise<Response | unknown>;
 }
 
 export function getOidcAuthApi(): OidcAuthApi {

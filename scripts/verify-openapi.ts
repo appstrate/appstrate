@@ -428,7 +428,26 @@ try {
     return value;
   });
   const source = JSON.stringify(strippedSpec, null, 2);
-  const problems = await lintFromString({ source, config });
+  const rawProblems = await lintFromString({ source, config });
+
+  // Allow-list: individual (ruleId, pointer) pairs that are intentional
+  // deviations from best practice. Prefer keeping rules globally ON and
+  // listing narrow exceptions here so any NEW violation still surfaces.
+  // Format: `${ruleId}@${pointer}`.
+  const LINT_ALLOWLIST = new Set<string>([
+    // OIDC device-flow entry form follows Post-Redirect-Get: happy path
+    // is 303 to `GET /activate?user_code=...`, error paths re-render HTML
+    // with 400/403. Redocly's `operation-2xx-response` rule doesn't
+    // treat 3xx as success, but a 2xx here would be a lie — the endpoint
+    // never returns content directly. This exception is intentional and
+    // scoped to POST /activate only; all other routes must still have a
+    // 2xx response.
+    "operation-2xx-response@#/paths/~1activate/post/responses",
+  ]);
+  const problems = rawProblems.filter((p) => {
+    const pointer = p.location?.[0]?.pointer ?? "";
+    return !LINT_ALLOWLIST.has(`${p.ruleId}@${pointer}`);
+  });
 
   const errors = problems.filter((p) => p.severity === "error");
   const warnings = problems.filter((p) => p.severity === "warn");

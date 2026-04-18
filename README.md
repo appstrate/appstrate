@@ -54,13 +54,15 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 
 ## Self-Hosting
 
-Deploy Appstrate with a single command. Docker 20+ with Compose V2 required.
+Deploy Appstrate with a single command. The installer downloads the `appstrate` CLI and prompts for a [tier](#progressive-infrastructure) — from a zero-dependency Bun-only install (Tier 0) to a full PostgreSQL + Redis + MinIO production stack (Tier 3).
 
 ```sh
 curl -fsSL https://get.appstrate.dev | bash
 ```
 
-This generates secrets, pulls images from GHCR, and starts the full stack (PostgreSQL, Redis, MinIO). Open [http://localhost:3000](http://localhost:3000) and sign up. See [`examples/self-hosting/`](./examples/self-hosting/) for manual setup and configuration options.
+Once a tier is chosen, the CLI generates cryptographic secrets, writes `.env` + `docker-compose.yml` (Tiers 1/2/3) or clones the source + spawns `bun run dev` (Tier 0), waits for the healthcheck, and opens [http://localhost:3000](http://localhost:3000). Non-interactive: `curl ... | bash -s -- --tier 3 --dir ~/appstrate`.
+
+See [`apps/cli/README.md`](./apps/cli/README.md) for the full CLI reference, and [`examples/self-hosting/`](./examples/self-hosting/) for manual Docker Compose setup.
 
 ## Quick Start (Development)
 

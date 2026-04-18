@@ -100,6 +100,18 @@ export async function boot(): Promise<void> {
   }
   logInfraMode();
 
+  // Warn loudly if TRUST_PROXY is enabled without an obvious reverse
+  // proxy in front. `TRUST_PROXY=true|N` tells `lib/client-ip.ts` to
+  // honor `X-Forwarded-For` / `X-Real-IP` — which is correct *only*
+  // when a trusted proxy is actually terminating the connection and
+  // writing those headers. Setting it on a server directly exposed to
+  // the internet lets any client spoof its source IP, which in turn
+  // bypasses every per-IP rate limit in the platform (notably the
+  // OIDC `/oauth2/token` limiter and the CLI device-flow limiters
+  // added in ADR-006). We can't detect a real proxy with certainty,
+  // but we can flag the most common misconfigurations.
+  warnOnTrustProxyMisconfig(env.TRUST_PROXY, env.NODE_ENV);
+
   // Verify storage backend is accessible (fail-fast if misconfigured)
   await ensureBucket();
 
@@ -407,4 +419,46 @@ async function applyCoreMigrations(): Promise<void> {
     release();
   }
   logger.info("Core migrations applied");
+}
+
+/**
+ * Log a prominent warning when `TRUST_PROXY` is enabled but the operator
+ * might not realize what it costs them.
+ *
+ * `TRUST_PROXY` tells `lib/client-ip.ts` to honor XFF / X-Real-IP. That
+ * is ONLY safe when a trusted reverse proxy is terminating the client
+ * connection and writing those headers itself — if the server is
+ * directly exposed, any client can put arbitrary data in `X-Forwarded-For`
+ * and every per-IP rate-limit in the platform collapses. The OIDC
+ * `/oauth2/token` limiter, the CLI device-flow limiters, and the
+ * per-IP auth limiters all rely on `getClientIpFromRequest` returning
+ * the real client address.
+ *
+ * We can't detect a real proxy with certainty (network topology is
+ * out-of-band). The best we can do is flag the two most common
+ * misconfigurations: `TRUST_PROXY=true` in production without an
+ * obvious reverse-proxy signal, and the default `false` when the
+ * server is apparently behind a proxy (XFF present from a first
+ * request — out of scope for this boot-time check; runtime detection
+ * in a middleware would be more invasive than warranted for v1).
+ */
+function warnOnTrustProxyMisconfig(trustProxy: string, nodeEnv: string): void {
+  if (trustProxy === "false") return;
+  const msg =
+    `TRUST_PROXY=${trustProxy} — X-Forwarded-For headers will be honored on incoming requests. ` +
+    `This is CORRECT only when a trusted reverse proxy (nginx, Traefik, Caddy, cloud LB) ` +
+    `is terminating client connections and writing those headers itself. If the server is ` +
+    `directly exposed to the internet, any client can spoof their source IP, bypassing every ` +
+    `per-IP rate limit (OIDC /oauth2/token, CLI device-flow, auth endpoints). ` +
+    `Verify the deployment topology or set TRUST_PROXY=false.`;
+  // In production we emit at `error` severity deliberately — a
+  // deployment running `LOG_LEVEL=warn` or `error` is exactly the one
+  // most likely to silently ship TRUST_PROXY=true with no front proxy,
+  // and silencing the warning is the opposite of what the operator
+  // needs. The misconfiguration is high-impact (every per-IP rate
+  // limit in the platform becomes bypassable) and the line count is
+  // one per boot — not spammy. Dev / test are kept at `info` so local
+  // runs with TRUST_PROXY=true don't colour the logs red.
+  if (nodeEnv === "production") logger.error(msg);
+  else logger.info(msg);
 }

@@ -3,19 +3,16 @@ name: Test Installer
 on:
   pull_request:
     paths:
-      - "scripts/install.sh"
+      - "scripts/bootstrap.sh"
       - "scripts/verify.sh"
       - "scripts/appstrate.pub"
-      - "test/install/**"
-      - "examples/self-hosting/**"
       - ".github/workflows/test-install.yml"
       - ".github/workflows/publish-installer.yml"
   push:
     branches: [main]
     paths:
-      - "scripts/install.sh"
+      - "scripts/bootstrap.sh"
       - "scripts/verify.sh"
-      - "test/install/**"
       - ".github/workflows/test-install.yml"
       - ".github/workflows/publish-installer.yml"
   workflow_dispatch:
@@ -45,7 +42,7 @@ jobs:
             "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
           echo "${SHFMT_SHA256}  /tmp/shfmt" | sha256sum --check --strict
           chmod +x /tmp/shfmt
-          /tmp/shfmt -d -i 2 -ci scripts/install.sh
+          /tmp/shfmt -d -i 2 -ci scripts/bootstrap.sh scripts/verify.sh
 
   workflow-lint:
     runs-on: ubuntu-latest
@@ -67,24 +64,10 @@ jobs:
           bash /tmp/download-actionlint.bash 1.7.12
           ./actionlint -color -ignore 'SC2129' .github/workflows/*.yml
 
-  unit-bats:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Run BATS unit tests
-        run: |
-          docker run --rm -v "$PWD:/code" -w /code --entrypoint sh \
-            bats/bats:1.11.0 -c '
-              apk add --no-cache openssl python3 >/dev/null
-              bats test/install/install.bats
-            '
-
-  # End-to-end dry-run of the publish pipeline (render + SLSA-less sign +
-  # verify.sh flow) using a throwaway keypair. Catches sed substitution bugs,
-  # minisign invocation syntax, and verify.sh integration issues before a real
-  # tag push exercises publish-installer.yml in anger.
+  # End-to-end dry-run of the publish pipeline (render + minisign sign +
+  # verify.sh flow) using a throwaway keypair. Catches sed substitution
+  # bugs, minisign invocation syntax, and verify.sh integration issues
+  # before a real tag push exercises publish-installer.yml in anger.
   publish-dry-run:
     runs-on: ubuntu-latest
     needs: [static, workflow-lint]
@@ -100,8 +83,10 @@ jobs:
           set -euo pipefail
           mkdir -p out pages
 
-          # --- Render install.sh (mirrors publish-installer.yml "Render" step) ---
-          sed "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" scripts/install.sh > out/install.sh
+          # --- Render bootstrap.sh as install.sh (mirrors publish-installer.yml "Render" step) ---
+          # Published filename stays `install.sh` so legacy URLs keep working;
+          # content is now the thin CLI-downloader bootstrap.
+          sed "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" scripts/bootstrap.sh > out/install.sh
           if grep -q "__APPSTRATE_VERSION__" out/install.sh; then
             echo "::error::version placeholder not replaced"; exit 1
           fi
@@ -140,8 +125,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Swap real install.sh for a stub (avoid actually installing Docker).
-          # Re-sign the stub with the same key so verify.sh accepts it.
+          # Swap the real bootstrap output for a stub (avoids actually
+          # downloading a binary + execing it). Re-sign the stub with the
+          # same key so verify.sh accepts it.
           cat > pages/install.sh <<'STUB'
           #!/usr/bin/env bash
           echo "STUB_INSTALLER_RAN"
@@ -180,347 +166,254 @@ jobs:
             || { echo "::error::verify.sh did not report tampering"; exit 1; }
           echo "✓ tamper path OK"
 
-  # Validates installer logic in a minimal Linux container (DinD):
-  # prereq detection, env generation, compose config validity, mode detection.
-  validate-dind:
+  # End-to-end exercise of bootstrap.sh's internal verification path:
+  # fetches checksums.txt + .minisig, verifies minisign against the
+  # baked-in pubkey, verifies SHA-256 of the binary, installs, execs.
+  # We stage a fake release on a local HTTP server + rewrite bootstrap.sh's
+  # URL_BASE + pubkey constant so the trust chain uses our throwaway keypair.
+  # This guards against regressions in the checksum/signature gate that
+  # otherwise only surface after a real tag push.
+  #
+  # All scenarios run in ONE step because each `run:` block spawns a fresh
+  # shell (the background HTTP server + `trap` don't persist across steps).
+  bootstrap-verify-dry-run:
     runs-on: ubuntu-latest
-    needs: [static, unit-bats]
+    needs: [static, workflow-lint]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Render install.sh
-        run: |
-          sed "s|__APPSTRATE_VERSION__|latest|g" \
-            scripts/install.sh > /tmp/install.sh
-          chmod +x /tmp/install.sh
+      - name: Install minisign
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
 
-      # This script tests things that REQUIRE Docker (can't be covered by BATS):
-      # prereq detection, GID probe, compose config validation, env generation
-      # with real Docker socket. Mode detection + secret logic are in BATS.
-      - name: Write validation script
+      - name: Exercise bootstrap.sh verification path end-to-end
         run: |
-          cat > /tmp/dind-test.sh <<'SCRIPT'
+          set -euo pipefail
+
+          # ── Stage a fake release tree served under /release/* ──────────
+          ROOT="$GITHUB_WORKSPACE/served"
+          mkdir -p "$ROOT/release"
+
+          # Fake CLI binary: prints a marker so we can assert bootstrap
+          # actually exec'd it at the tail of the trust chain.
+          cat > "$ROOT/release/appstrate-linux-x64" <<'CLI'
           #!/usr/bin/env bash
-          set -euo pipefail
+          echo "FAKE_CLI_RAN subcommand=$1"
+          exit 0
+          CLI
+          chmod +x "$ROOT/release/appstrate-linux-x64"
 
-          export APPSTRATE_DIR=/root/.appstrate
-          export APPSTRATE_QUIET=1
-          export APPSTRATE_PORT=3000
-          export APPSTRATE_ASSETS_DIR=/assets
-          export NO_COLOR=1
+          # Checksum manifest — `<hash>  <filename>` format matches the
+          # GNU `sha256sum -c` input format bootstrap.sh uses.
+          (cd "$ROOT/release" && sha256sum appstrate-linux-x64 > checksums.txt)
 
+          # Throwaway signing key (CI-friendly, unencrypted).
+          umask 077
+          minisign -G -W -f -p /tmp/dry.pub -s /tmp/dry.key
+          minisign -S -s /tmp/dry.key -t "dry-run" -m "$ROOT/release/checksums.txt"
+          cp "$ROOT/release/checksums.txt.minisig" "$ROOT/release/checksums.txt.minisig.signed"
+
+          PUBKEY=$(grep -v '^untrusted' /tmp/dry.pub | head -1 | tr -d '\n')
+
+          # ── Rewrite bootstrap.sh: URL_BASE → localhost, pubkey → ours ──
+          # `latest` and pinned paths both hit the same served dir because
+          # we only maintain one release tree.
+          # shellcheck disable=SC2016  # `${VERSION}` is literal in the sed pattern
+          sed \
+            -e "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" \
+            -e 's|https://github.com/appstrate/appstrate/releases/latest/download|http://localhost:8766/release|' \
+            -e 's|https://github.com/appstrate/appstrate/releases/download/${VERSION}|http://localhost:8766/release|' \
+            -e "s|APPSTRATE_MINISIGN_PUBKEY=\"[^\"]*\"|APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"|" \
+            scripts/bootstrap.sh > /tmp/bootstrap.sh
+          bash -n /tmp/bootstrap.sh
+
+          grep -q "http://localhost:8766/release" /tmp/bootstrap.sh \
+            || { echo "::error::URL_BASE rewrite did not take effect"; exit 1; }
+          grep -q "APPSTRATE_MINISIGN_PUBKEY=\"${PUBKEY}\"" /tmp/bootstrap.sh \
+            || { echo "::error::pubkey rewrite did not take effect"; exit 1; }
+
+          # ── Pre-create the install destinations ──────────────────────
+          # bootstrap.sh calls `install -m 0755 …` which does NOT create
+          # intermediate directories; we need each $APPSTRATE_BIN_DIR to
+          # exist up-front or `install` exits non-zero before the happy
+          # banner is printed (which would swallow the output via $(…)).
+          mkdir -p \
+            "$GITHUB_WORKSPACE/bin" \
+            "$GITHUB_WORKSPACE/bin-tampered" \
+            "$GITHUB_WORKSPACE/bin-sig" \
+            "$GITHUB_WORKSPACE/bin-nomini" \
+            "$GITHUB_WORKSPACE/bin-skip" \
+            "$GITHUB_WORKSPACE/bin-skip-noci" \
+            "$GITHUB_WORKSPACE/bin-empty"
+
+          # ── Start the HTTP server for the whole job ───────────────────
+          cd "$ROOT"
+          python3 -m http.server 8766 >/tmp/httpd.log 2>&1 &
+          SERVER=$!
+          trap 'kill $SERVER 2>/dev/null || true; rm -f /tmp/dry.key' EXIT
+          sleep 1
+
+          # ── Scenario 1: happy path ────────────────────────────────────
+          echo "::group::happy path"
+          export APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin"
+          export PATH="$APPSTRATE_BIN_DIR:$PATH"
+
+          # Run with `set +e` around the capture so a failing bootstrap
+          # still surfaces its stdout/stderr in the log instead of being
+          # killed silently by `set -e` at the `OUT=$(...)` assignment.
           set +e
-          source /install.sh
-          set +eo pipefail
-          trap - ERR
-
-          echo "── 1. Prereq detection (Docker, Compose, arch) ──"
-          detect_environment
-          echo "✓ prereqs detected"
-
-          echo "── 2. Docker GID probe ──"
-          gid=$(detect_docker_gid)
-          [ -n "$gid" ] || { echo "✗ empty GID"; exit 1; }
-          echo "✓ Docker socket GID: $gid"
-
-          echo "── 3. Full env generation ──"
-          prepare_workdir
-          determine_install_mode
-          download_assets
-          handle_env_file
-          echo "✓ env + assets generated"
-
-          echo "── 4. Compose config validation ──"
-          docker compose -f /root/.appstrate/docker-compose.yml \
-            --env-file /root/.appstrate/.env config --quiet
-          echo "✓ compose config valid (all vars resolved)"
-
-          echo "── All checks passed ──"
-          SCRIPT
-          chmod +x /tmp/dind-test.sh
-
-      - name: Run in DinD
-        run: |
-          docker run --rm --privileged \
-            -v /tmp/install.sh:/install.sh:ro \
-            -v /tmp/dind-test.sh:/dind-test.sh:ro \
-            -v "${{ github.workspace }}/examples/self-hosting:/assets:ro" \
-            -e DOCKER_TLS_CERTDIR= \
-            docker:27-dind sh -c '
-              set -e
-              export DOCKER_HOST=unix:///var/run/docker.sock
-              dockerd-entrypoint.sh > /var/log/dockerd.log 2>&1 &
-              for i in $(seq 1 60); do
-                docker info >/dev/null 2>&1 && break
-                sleep 1
-              done
-              docker info >/dev/null || { tail -50 /var/log/dockerd.log; exit 1; }
-              apk add --no-cache bash curl openssl lsof >/dev/null
-              bash /dind-test.sh
-            '
-
-  # Full E2E: build image from source, run installer, verify stack is healthy.
-  # Runs on the ubuntu runner directly (has Docker + Compose pre-installed).
-  e2e:
-    runs-on: ubuntu-latest
-    needs: [static, unit-bats]
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Build appstrate image
-        run: docker build -t ghcr.io/appstrate/appstrate:local .
-
-      - name: Create dummy runtime images
-        run: |
-          docker pull alpine:3
-          docker tag alpine:3 ghcr.io/appstrate/appstrate-pi:local
-          docker tag alpine:3 ghcr.io/appstrate/appstrate-sidecar:local
-
-      - name: Render install.sh
-        run: |
-          sed "s|__APPSTRATE_VERSION__|local|g" \
-            scripts/install.sh > /tmp/install.sh
-          chmod +x /tmp/install.sh
-
-      - name: Run installer
-        run: |
-          APPSTRATE_DIR=/tmp/appstrate-e2e \
-          APPSTRATE_PORT=3000 \
-          APPSTRATE_QUIET=1 \
-          APPSTRATE_VERSION=local \
-          APPSTRATE_ASSETS_DIR=${{ github.workspace }}/examples/self-hosting \
-            bash /tmp/install.sh
-
-      - name: Health check
-        run: |
-          echo "── Probing http://localhost:3000 (max 120s) ──"
-          deadline=$((SECONDS + 120))
-          while [ $SECONDS -lt $deadline ]; do
-            if curl -fsS --max-time 3 http://localhost:3000/ >/dev/null 2>&1; then
-              echo "✓ healthy"
-              exit 0
-            fi
-            sleep 3
-          done
-          echo "✗ Not responding after 120s"
-          docker compose -f /tmp/appstrate-e2e/docker-compose.yml \
-            --env-file /tmp/appstrate-e2e/.env logs --tail 50
-          exit 1
-
-      - name: Verify API
-        run: |
-          curl -fsS --max-time 10 http://localhost:3000/api/openapi.json | head -c 100
-          echo ""
-          echo "✓ API responding"
-
-      - name: Verify services
-        run: |
-          CF=/tmp/appstrate-e2e/docker-compose.yml
-          EF=/tmp/appstrate-e2e/.env
-          for svc in appstrate postgres redis minio; do
-            status=$(docker compose -f "$CF" --env-file "$EF" ps --format json "$svc" | head -1)
-            state=$(echo "$status" | jq -r '.State // empty' 2>/dev/null || echo "$status")
-            echo "$svc: $state"
-            echo "$status" | jq -e '.State == "running"' >/dev/null 2>&1 \
-              || { echo "✗ $svc not running"; docker compose -f "$CF" --env-file "$EF" logs "$svc" --tail 20; exit 1; }
-          done
-          echo "✓ all services running"
-
-      - name: Noop re-run
-        run: |
-          APPSTRATE_DIR=/tmp/appstrate-e2e \
-          APPSTRATE_PORT=3000 \
-          APPSTRATE_QUIET=1 \
-          APPSTRATE_VERSION=local \
-          APPSTRATE_ASSETS_DIR=${{ github.workspace }}/examples/self-hosting \
-            bash /tmp/install.sh 2>&1 | tee /tmp/run2.log
-          grep -q "Already at" /tmp/run2.log
-          echo "✓ noop confirmed"
-
-      # Force an upgrade failure and verify rollback restores the previous state.
-      # Strategy: ship a broken docker-compose.yml via APPSTRATE_ASSETS_DIR. The
-      # installer will backup the good compose/env, copy the broken one in, fail
-      # `docker compose config --quiet`, and roll back automatically.
-      - name: Upgrade rollback
-        run: |
-          mkdir -p /tmp/broken-assets
-          # Compose referencing a required var with no default → `docker compose
-          # config` exits non-zero, which is exactly where rollback_upgrade triggers.
-          cat > /tmp/broken-assets/docker-compose.yml <<'YAML'
-          name: appstrate
-          services:
-            sabotaged:
-              image: alpine:3
-              command: ["true"]
-              environment:
-                - REQUIRED=${ROLLBACK_SABOTAGE:?this variable is intentionally missing to force config failure}
-          YAML
-          cp ${{ github.workspace }}/examples/self-hosting/.env.example /tmp/broken-assets/.env.example
-
-          # Trigger an upgrade by pinning to a new version (any non-"local" value).
-          # `set -o pipefail` ensures exit_code picks up install.sh's status
-          # rather than tee's (which always succeeds). PIPESTATUS[0] is also
-          # captured as a belt-and-suspenders check.
-          set +e
-          set -o pipefail
-          APPSTRATE_DIR=/tmp/appstrate-e2e \
-          APPSTRATE_PORT=3000 \
-          APPSTRATE_QUIET=1 \
-          APPSTRATE_VERSION=v9.9.9 \
-          APPSTRATE_ASSETS_DIR=/tmp/broken-assets \
-            bash /tmp/install.sh 2>&1 | tee /tmp/run3.log
-          exit_code=${PIPESTATUS[0]}
-          set +o pipefail
+          OUT=$(bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
           set -e
+          echo "$OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap exited $rc on the happy path"; exit 1; }
+          echo "$OUT" | grep -q "Integrity + provenance verified" \
+            || { echo "::error::bootstrap did not emit the verified banner"; exit 1; }
+          echo "$OUT" | grep -q "FAKE_CLI_RAN subcommand=install" \
+            || { echo "::error::bootstrap did not exec the installed binary"; exit 1; }
+          test -x "$APPSTRATE_BIN_DIR/appstrate"
+          echo "::endgroup::"
+          echo "✓ happy path OK"
 
-          # Dump install log on any failure to help diagnose rollback issues.
-          dump_install_log() {
-            echo "── /tmp/run3.log ──"
-            cat /tmp/run3.log || true
-            echo "── install.sh log files ──"
-            for f in /tmp/appstrate-e2e/install-*.log; do
-              [ -f "$f" ] || continue
-              echo "── $f ──"
-              cat "$f"
-            done
-            echo "── docker ps -a ──"
-            docker ps -a || true
-            echo "── backup files ──"
-            ls -la /tmp/appstrate-e2e/ || true
-          }
-
-          # Installer must exit non-zero on the botched upgrade
-          if [ "$exit_code" -eq 0 ]; then
-            echo "✗ installer exited 0, expected non-zero"
-            dump_install_log
-            exit 1
+          # ── Scenario 2: tampered binary ───────────────────────────────
+          echo "::group::tampered binary"
+          cp "$ROOT/release/appstrate-linux-x64" "$ROOT/release/appstrate-linux-x64.bak"
+          echo "echo TAMPERED" >> "$ROOT/release/appstrate-linux-x64"
+          set +e
+          TAMPER_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-tampered" \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$TAMPER_OUT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::bootstrap executed a tampered binary"; exit 1
           fi
+          echo "$TAMPER_OUT" | grep -qE "SHA-256 mismatch|does NOT match" \
+            || { echo "::error::bootstrap did not report the SHA-256 mismatch"; exit 1; }
+          # Restore for subsequent scenarios.
+          mv "$ROOT/release/appstrate-linux-x64.bak" "$ROOT/release/appstrate-linux-x64"
+          echo "::endgroup::"
+          echo "✓ tampered-binary path OK"
 
-          # Rollback path must have executed
-          if ! grep -q "Rolling back to" /tmp/run3.log; then
-            echo "✗ rollback did not trigger"
-            dump_install_log
-            exit 1
+          # ── Scenario 3: tampered checksums.txt (signature mismatch) ──
+          echo "::group::tampered checksums"
+          cp "$ROOT/release/checksums.txt" "$ROOT/release/checksums.txt.bak"
+          echo "deadbeef  appstrate-linux-x64" > "$ROOT/release/checksums.txt"
+          set +e
+          SIG_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-sig" \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$SIG_OUT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::bootstrap accepted a tampered checksums.txt"; exit 1
           fi
-          if ! grep -q "rolled back to" /tmp/run3.log; then
-            echo "✗ rollback did not complete"
-            dump_install_log
-            exit 1
-          fi
-          echo "✓ rollback executed"
+          echo "$SIG_OUT" | grep -qE "Signature verification FAILED|signed by the Appstrate key" \
+            || { echo "::error::bootstrap did not report signature failure"; exit 1; }
+          mv "$ROOT/release/checksums.txt.bak" "$ROOT/release/checksums.txt"
+          echo "::endgroup::"
+          echo "✓ tampered-checksums path OK"
 
-          # .env + compose.yml must be restored (no REQUIRED_VAR reference)
-          if grep -q "ROLLBACK_SABOTAGE" /tmp/appstrate-e2e/docker-compose.yml; then
-            echo "✗ compose.yml not restored"
-            exit 1
-          fi
-          echo "✓ compose.yml restored to previous version"
-
-          # Stack must still be serving on port 3000 (rollback restarted old stack)
-          for _ in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -fsS --max-time 3 http://localhost:3000/ >/dev/null 2>&1; then
-              echo "✓ old stack responding after rollback"
-              exit 0
+          # ── Scenario 4: minisign missing from PATH (fail closed) ─────
+          echo "::group::minisign missing"
+          # Strip /usr/bin (where minisign lives on Ubuntu) but keep enough
+          # for curl + sh builtins + sha256sum (all in /usr/bin, so we also
+          # need to shadow minisign by pointing PATH elsewhere and relying
+          # on an explicit denylist). Simpler: create a PATH with only the
+          # minimum required tools, symlinked explicitly.
+          NOBIN="$GITHUB_WORKSPACE/no-minisign-path"
+          mkdir -p "$NOBIN"
+          for b in curl bash grep sed tr head cat mkdir mktemp rm install chmod cd cp ln sha256sum sudo uname tee printf; do
+            if command -v "$b" >/dev/null 2>&1; then
+              ln -sf "$(command -v "$b")" "$NOBIN/$b" 2>/dev/null || true
             fi
-            sleep 2
           done
-          echo "✗ old stack not responding after rollback"
-          docker compose -f /tmp/appstrate-e2e/docker-compose.yml \
-            --env-file /tmp/appstrate-e2e/.env logs --tail 30
-          exit 1
+          set +e
+          NOMINI_OUT=$(PATH="$NOBIN" APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-nomini" \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$NOMINI_OUT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::bootstrap proceeded without minisign available"; exit 1
+          fi
+          echo "$NOMINI_OUT" | grep -q "minisign is required" \
+            || { echo "::error::bootstrap did not emit the minisign-missing hint"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ missing-minisign path OK"
 
-      # Regression for #145 / fix in #157: when APP_URL changes between boots,
-      # the platform OIDC client's `redirect_uris` must be reconciled in place
-      # (same client_id, no DB wipe required). Snapshots the oauth_clients row,
-      # edits .env (APP_URL/TRUSTED_ORIGINS/PORT → drift port), re-runs the
-      # installer, then asserts via SQL that URIs were updated and the
-      # client_id was preserved. Re-uses the post-rollback healthy stack on
-      # port 3000.
-      - name: APP_URL drift → OIDC reconciliation
-        run: |
-          set -euo pipefail
+          # ── Scenario 5: APPSTRATE_SKIP_VERIFY=1 + CI=true (warns + proceeds) ─
+          # Skip is gated on CI=true to prevent social-engineered bypass on
+          # interactive user shells. CI runs (this one) must opt in explicitly.
+          echo "::group::skip-verify bypass"
+          APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-skip" \
+          APPSTRATE_SKIP_VERIFY=1 \
+          CI=true \
+          PATH="$GITHUB_WORKSPACE/bin-skip:$PATH" \
+            bash /tmp/bootstrap.sh > /tmp/skip.out 2>&1
+          SKIP_OUT=$(cat /tmp/skip.out)
+          echo "$SKIP_OUT"
+          echo "$SKIP_OUT" | grep -q "APPSTRATE_SKIP_VERIFY=1" \
+            || { echo "::error::skip-verify did not emit the warning banner"; exit 1; }
+          echo "$SKIP_OUT" | grep -q "FAKE_CLI_RAN" \
+            || { echo "::error::skip-verify did not exec the binary"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ skip-verify path OK"
 
-          pg_query() {
-            docker exec -i appstrate-postgres-1 \
-              psql -U appstrate -d appstrate -tA -c "$1"
-          }
-          instance_row() {
-            pg_query "SELECT client_id || '|' || array_to_string(redirect_uris, ',') || '|' || array_to_string(post_logout_redirect_uris, ',') FROM oauth_clients WHERE level='instance' ORDER BY created_at ASC LIMIT 1;"
-          }
+          # ── Scenario 6: APPSTRATE_SKIP_VERIFY=1 without CI (must fail) ─
+          # Defends against the social-engineered copy-paste attack:
+          # "just run with APPSTRATE_SKIP_VERIFY=1 to bypass the error".
+          echo "::group::skip-verify without CI=true"
+          set +e
+          # `env -u CI` strips the GitHub-Actions-injected CI=true so we
+          # actually exercise the no-CI guard path.
+          SKIP_NOCI_OUT=$(env -u CI \
+            APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-skip-noci" \
+            APPSTRATE_SKIP_VERIFY=1 \
+            PATH="$GITHUB_WORKSPACE/bin-skip-noci:$PATH" \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$SKIP_NOCI_OUT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::bootstrap accepted APPSTRATE_SKIP_VERIFY=1 without CI=true"; exit 1
+          fi
+          echo "$SKIP_NOCI_OUT" | grep -q "requires CI=true" \
+            || { echo "::error::bootstrap did not emit the CI=true guard error"; exit 1; }
+          echo "$SKIP_NOCI_OUT" | grep -q "FAKE_CLI_RAN" \
+            && { echo "::error::bootstrap exec'd the binary despite refusing skip"; exit 1; }
+          # Exit was non-zero AND no exec — guard works as intended.
+          echo "::endgroup::"
+          echo "✓ skip-verify-no-ci path OK"
 
-          before=$(instance_row)
-          [ -n "$before" ] || { echo "✗ no instance-level oauth_clients row"; exit 1; }
-          before_id=$(printf '%s' "$before" | cut -d'|' -f1)
-          before_redirect=$(printf '%s' "$before" | cut -d'|' -f2)
-          before_post=$(printf '%s' "$before" | cut -d'|' -f3)
-          echo "before: client_id=$before_id redirect_uris=$before_redirect"
-          [ "$before_redirect" = "http://localhost:3000/auth/callback" ] \
-            || { echo "✗ unexpected initial redirect_uris: $before_redirect"; exit 1; }
-          [ "$before_post" = "http://localhost:3000,http://localhost:3000/login" ] \
-            || { echo "✗ unexpected initial post_logout_redirect_uris: $before_post"; exit 1; }
-
-          echo "── Editing .env: APP_URL/TRUSTED_ORIGINS/PORT → 3001 ──"
-          awk -v from=3000 -v to=3001 '
-            /^APP_URL=/         { sub(":" from, ":" to); print; next }
-            /^TRUSTED_ORIGINS=/ { sub(":" from, ":" to); print; next }
-            /^PORT=/            { print "PORT=" to; next }
-            { print }
-          ' /tmp/appstrate-e2e/.env > /tmp/appstrate-e2e/.env.new
-          mv /tmp/appstrate-e2e/.env.new /tmp/appstrate-e2e/.env
-          chmod 600 /tmp/appstrate-e2e/.env
-
-          echo "── Re-running installer on port 3001 (compose recreates container) ──"
-          APPSTRATE_DIR=/tmp/appstrate-e2e \
-          APPSTRATE_PORT=3001 \
-          APPSTRATE_QUIET=1 \
-          APPSTRATE_VERSION=local \
-          APPSTRATE_ASSETS_DIR=${{ github.workspace }}/examples/self-hosting \
-            bash /tmp/install.sh
-
-          echo "── Probing http://localhost:3001 (max 60s) ──"
-          deadline=$((SECONDS + 60))
-          while [ $SECONDS -lt $deadline ]; do
-            if curl -fsS --max-time 3 http://localhost:3001/ >/dev/null 2>&1; then
-              break
-            fi
-            sleep 2
-          done
-          curl -fsS --max-time 3 http://localhost:3001/ >/dev/null 2>&1 \
-            || { echo "✗ not responding on 3001"; docker logs appstrate-appstrate-1 --tail 30; exit 1; }
-
-          after=$(instance_row)
-          after_id=$(printf '%s' "$after" | cut -d'|' -f1)
-          after_redirect=$(printf '%s' "$after" | cut -d'|' -f2)
-          after_post=$(printf '%s' "$after" | cut -d'|' -f3)
-          echo "after:  client_id=$after_id redirect_uris=$after_redirect"
-
-          [ "$after_id" = "$before_id" ] \
-            || { echo "✗ client_id changed (was $before_id, now $after_id) — outstanding tokens would be invalidated"; exit 1; }
-          [ "$after_redirect" = "http://localhost:3001/auth/callback" ] \
-            || { echo "✗ redirect_uris not reconciled: $after_redirect"; exit 1; }
-          [ "$after_post" = "http://localhost:3001,http://localhost:3001/login" ] \
-            || { echo "✗ post_logout_redirect_uris not reconciled: $after_post"; exit 1; }
-          echo "✓ URIs reconciled, client_id preserved"
-
-          # Pino's worker transport flushes asynchronously — poll with a deadline.
-          deadline=$((SECONDS + 15))
-          while [ $SECONDS -lt $deadline ]; do
-            if docker logs appstrate-appstrate-1 2>&1 \
-              | grep -q "OIDC platform client redirect URIs updated to match APP_URL"; then
-              echo "✓ reconcile log line emitted"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "✗ reconcile log line not found within 15s"
-          docker logs appstrate-appstrate-1 --tail 40
-          exit 1
-
-      - name: Teardown
-        if: always()
-        run: |
-          docker compose -f /tmp/appstrate-e2e/docker-compose.yml \
-            --env-file /tmp/appstrate-e2e/.env down -v 2>/dev/null || true
-          rm -rf /tmp/appstrate-e2e
+          # ── Scenario 7: empty-manifest (signed checksums.txt missing the asset) ─
+          # Validly signed manifest, but does NOT list our asset. Without
+          # the explicit empty-result check, `sha256sum -c` exits 0 on an
+          # empty input file → bypass. Guards the silent-success trap.
+          echo "::group::empty manifest"
+          cp "$ROOT/release/checksums.txt" "$ROOT/release/checksums.txt.bak"
+          cp "$ROOT/release/checksums.txt.minisig" "$ROOT/release/checksums.txt.minisig.bak"
+          # Replace with a manifest that contains a different asset line —
+          # validly signed by the same key, but our asset is absent.
+          echo "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef  appstrate-linux-arm64" \
+            > "$ROOT/release/checksums.txt"
+          minisign -S -s /tmp/dry.key -t "empty-manifest test" \
+            -m "$ROOT/release/checksums.txt"
+          set +e
+          EMPTY_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-empty" \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$EMPTY_OUT"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::bootstrap accepted a manifest missing our asset"; exit 1
+          fi
+          echo "$EMPTY_OUT" | grep -q "not listed in the signed checksums manifest" \
+            || { echo "::error::bootstrap did not report the missing-asset error"; exit 1; }
+          echo "$EMPTY_OUT" | grep -q "FAKE_CLI_RAN" \
+            && { echo "::error::bootstrap exec'd the binary despite missing manifest entry"; exit 1; }
+          mv "$ROOT/release/checksums.txt.bak" "$ROOT/release/checksums.txt"
+          mv "$ROOT/release/checksums.txt.minisig.bak" "$ROOT/release/checksums.txt.minisig"
+          echo "::endgroup::"
+          echo "✓ empty-manifest path OK"

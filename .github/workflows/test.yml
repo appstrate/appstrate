@@ -38,9 +38,22 @@ jobs:
       - name: Run unit tests
         run: bun test apps/api/test/unit/ runtime-pi/ packages/connect/ packages/ui/
 
+      # CLI tests live in a separate workspace with its own bunfig.toml
+      # (no Docker preload needed), so we run them from that directory to
+      # pick up the right config and keep them fast.
+      - name: Run CLI unit tests
+        working-directory: apps/cli
+        run: bun test
+
   integration:
     name: Integration tests
-    if: contains(github.event.pull_request.labels.*.name, 'integration')
+    # Run on every push to main (post-merge gate) + on PRs labeled
+    # `integration` (opt-in pre-merge). Without the main-branch arm,
+    # code could land on main via a never-labeled PR and reach production
+    # without the integration suite ever having been exercised in CI —
+    # the e2e job below is label-OR-main for the same reason, keeping
+    # both jobs aligned on post-merge validation.
+    if: contains(github.event.pull_request.labels.*.name, 'integration') || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

@@ -1,6 +1,9 @@
 # Self-Hosting
 
-Deploy Appstrate with PostgreSQL, Redis, and MinIO using Docker Compose.
+Deploy Appstrate via the official `appstrate` CLI, or manually with
+Docker Compose. This directory holds the production `docker-compose.yml`
+(the Tier 3 full stack: PostgreSQL + Redis + MinIO) plus progressive
+`docker-compose.tier{1,2,3}.yml` templates used by `appstrate install`.
 
 ## One-Liner Install (Recommended)
 
@@ -8,20 +11,23 @@ Deploy Appstrate with PostgreSQL, Redis, and MinIO using Docker Compose.
 curl -fsSL https://get.appstrate.dev | bash
 ```
 
-The installer handles everything automatically:
+This downloads the `appstrate` CLI binary for your OS/arch and hands
+control to `appstrate install`, which prompts for a tier:
 
-- Checks prerequisites (Docker 20+, Compose V2, curl, openssl)
-- Generates cryptographic secrets (auth, encryption, DB passwords)
-- Detects the Docker socket GID for container access
-- Downloads and starts the full stack
-- Waits for the platform to become healthy
-- Rolls back automatically to the previous version on upgrade failure
+- **Tier 0** — Bun + PGlite + filesystem (no Docker, hobby / evaluation)
+- **Tier 1** — Postgres + filesystem storage
+- **Tier 2** — Postgres + Redis + filesystem storage
+- **Tier 3** — Postgres + Redis + MinIO (full production, what this README covers)
 
-Open [http://localhost:3000](http://localhost:3000) and sign up.
+The CLI generates cryptographic secrets, writes `.env` +
+`docker-compose.yml`, runs `docker compose up -d`, waits for the
+healthcheck, and opens http://localhost:3000 in your browser.
 
-Overrides: `APPSTRATE_VERSION=v1.2.3`, `APPSTRATE_DIR=~/.appstrate`, `APPSTRATE_PORT=8080`.
+Overrides: `APPSTRATE_VERSION=v1.2.3` (env var pins a specific release
+binary). Non-interactive: `curl ... | bash -s -- --tier 3 --dir ~/appstrate`.
 
-To upgrade, re-run the same command — existing secrets are preserved and new config keys are merged automatically.
+To upgrade, re-run the same command with the new tag — `APPSTRATE_VERSION`
+controls which CLI binary is downloaded.
 
 ## Verifying the Installer
 

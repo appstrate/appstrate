@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import {
   _resetRunLimitsForTesting,
   _setRunLimitsForTesting,
@@ -11,6 +11,18 @@ import {
 describe("run-limits registry", () => {
   beforeEach(() => {
     _resetRunLimitsForTesting();
+  });
+
+  // `bun test` runs all files in one process. The last test in this file
+  // calls `_setRunLimitsForTesting` with invalid params that throw inside
+  // the Zod parse, leaving `platformLimits` / `inlineLimits` at null (set
+  // by `beforeEach`'s reset). Integration tests that follow rely on the
+  // module-level `initRunLimits()` in `helpers/app.ts` which only runs
+  // once per process — they hit `getInlineRunLimits()` and crash with
+  // "Run limits not initialized". Restore defaults once so siblings are
+  // insulated.
+  afterAll(() => {
+    _setRunLimitsForTesting({}, {});
   });
 
   it("throws before init() to catch bootstrap-ordering bugs", () => {
