@@ -30,10 +30,10 @@
     "self-hosting"
   ],
   "bin": {
-    "appstrate": "./src/cli.ts"
+    "appstrate": "./dist/cli.js"
   },
   "files": [
-    "src",
+    "dist",
     "README.md",
     "LICENSE",
     "NOTICE"
@@ -41,7 +41,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test test/",
-    "build": "bun build --target=bun --outdir=dist src/cli.ts"
+    "build": "bun build --target=bun --packages external --outdir=dist src/cli.ts",
+    "prepack": "bun run build"
   },
   "dependencies": {
     "@clack/prompts": "^1.2.0",
