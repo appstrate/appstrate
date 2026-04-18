@@ -33,6 +33,7 @@ import {
   writeEnvFile as writeTier0Env,
 } from "../lib/install/tier0.ts";
 import { openBrowser } from "../lib/install/os.ts";
+import { CLI_VERSION } from "../lib/version.ts";
 
 export interface InstallOptions {
   /** Skip the tier prompt (valid values: "0" | "1" | "2" | "3"). */
@@ -111,10 +112,16 @@ async function installTier0(dir: string): Promise<void> {
   }
   const bunPath = bun.path ?? "bun";
 
-  // Source.
+  // Source. Use the CLI's own version as the tag — lockstep-versioned
+  // per ADR-006, so the cloned source matches exactly what this binary
+  // was built against. `CLI_VERSION` is inlined at bundle time via the
+  // static package.json import in `lib/version.ts`; falling back to
+  // `undefined` when the value is a dev placeholder lets `main` be
+  // checked out instead of a bogus tag.
   const cloneSpinner = spinner();
   cloneSpinner.start("Cloning Appstrate source");
-  await cloneAppstrateSource(dir, { version: process.env.npm_package_version });
+  const versionTag = CLI_VERSION === "0.0.0" ? undefined : `v${CLI_VERSION}`;
+  await cloneAppstrateSource(dir, { version: versionTag });
   cloneSpinner.stop("Source cloned");
 
   // Dependencies.
