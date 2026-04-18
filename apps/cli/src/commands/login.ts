@@ -18,7 +18,6 @@ import { intro, outro, askText, spinner, formatUserCode, exitWithError } from ".
 import { readConfig, resolveProfileName, setProfile } from "../lib/config.ts";
 import { saveTokens } from "../lib/keyring.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
-import { apiFetch } from "../lib/api.ts";
 
 /** Canonical clientId for the official CLI. Matches `ensureCliClient()` server-side. */
 const CLI_CLIENT_ID = "appstrate-cli";
@@ -83,33 +82,20 @@ async function runLogin(profileName: string, instance: string): Promise<void> {
   });
   pollSpinner.stop("Approved");
 
-  // Step 5 — persist tokens FIRST so the follow-up /api/profile call can
-  // authenticate. `setProfile` needs the user id + email which we fetch
-  // from /api/profile once the cookie-compatible tokens are in place.
-  const expiresAt = Date.now() + token.expiresIn * 1000;
+  // Step 5 — fetch the BA session identity with the fresh token BEFORE
+  // persisting anything locally. `apiFetch` reads the profile + tokens
+  // from disk, but we haven't written either yet — sidestepping it with
+  // a direct authenticated `fetch` avoids a placeholder-profile write
+  // that would stick in the config file if the /get-session call 500s.
+  const session = await fetchSessionIdentity(instance, token.accessToken);
+
+  // Step 6 — persist both the tokens and the profile in one pass with
+  // the real user id + email. `/api/profile` only exposes displayName
+  // + language, so the BA `/get-session` response is authoritative here.
   await saveTokens(profileName, {
     accessToken: token.accessToken,
-    expiresAt,
+    expiresAt: Date.now() + token.expiresIn * 1000,
   });
-
-  // Step 6 — seed the profile with a placeholder so `apiFetch` has a
-  // profile to resolve. Real values overwrite it on the next line.
-  await setProfile(profileName, {
-    instance,
-    userId: "",
-    email: "",
-  });
-
-  // Read identity from Better Auth's session endpoint. `/api/profile`
-  // exposes displayName + language from the `profiles` table but not
-  // `email` — the BA session carries the authoritative identity.
-  const session = await apiFetch<{
-    user: { id: string; email: string; name?: string };
-  } | null>(profileName, "/api/auth/get-session");
-  if (!session?.user) {
-    throw new Error("Authenticated but /api/auth/get-session returned no user");
-  }
-
   await setProfile(profileName, {
     instance,
     userId: session.user.id,
@@ -117,4 +103,28 @@ async function runLogin(profileName: string, instance: string): Promise<void> {
   });
 
   outro(`Logged in as ${session.user.email}`);
+}
+
+interface SessionIdentity {
+  user: { id: string; email: string; name?: string };
+}
+
+async function fetchSessionIdentity(
+  instance: string,
+  accessToken: string,
+): Promise<SessionIdentity> {
+  const res = await fetch(`${instance}/api/auth/get-session`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "User-Agent": `appstrate-cli/${process.env.npm_package_version ?? "0.0.0"}`,
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch session identity: HTTP ${res.status}`);
+  }
+  const body = (await res.json()) as SessionIdentity | null;
+  if (!body?.user) {
+    throw new Error("Authenticated but /api/auth/get-session returned no user");
+  }
+  return body;
 }

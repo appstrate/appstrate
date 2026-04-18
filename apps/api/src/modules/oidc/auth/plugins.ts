@@ -236,18 +236,6 @@ function generateAppstrateUserCode(): string {
 }
 
 /**
- * Insert the `XXXX-XXXX` visual separator for display purposes. BA stores
- * user codes as 8 contiguous characters (see `generateAppstrateUserCode`);
- * this helper is for places that render the code to a human — terminal
- * output, the `/activate` prefilled form, etc.
- */
-export function formatUserCodeForDisplay(raw: string): string {
-  const clean = raw.replace(/-/g, "");
-  if (clean.length !== 8) return raw;
-  return `${clean.slice(0, 4)}-${clean.slice(4)}`;
-}
-
-/**
  * Allowlist callback invoked by BA's deviceAuthorization plugin at both
  * `/device/code` (initial request) and `/device/token` (polling). Returns
  * `true` only for OAuth clients whose registered `grantTypes` include the

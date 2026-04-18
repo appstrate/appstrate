@@ -82,20 +82,20 @@ export interface ApiFetchInit extends Omit<RequestInit, "headers"> {
 }
 
 /**
- * Authenticated fetch. Pass `path` with a leading `/` — joined against
- * `profile.instance`. The response body is parsed as JSON when the
- * response is 2xx. Non-2xx throws an `ApiError` with the parsed body (or
- * raw text) attached.
+ * Low-level authenticated fetch — primitive shared by `apiFetch` (JSON)
+ * and direct callers that need access to the raw Response (streaming,
+ * binary downloads, 204 sign-out). Resolves `profile.instance` + tokens
+ * once, injects Authorization / X-Org-Id / User-Agent headers, and
+ * returns the untouched fetch Response.
  */
-export async function apiFetch<T>(
+export async function apiFetchRaw(
   profileName: string,
   path: string,
   init: ApiFetchInit = {},
-): Promise<T> {
+): Promise<Response> {
   const profile = await resolveProfileOrThrow(profileName);
   const token = await resolveTokensOrThrow(profileName);
 
-  const url = `${normalizeBase(profile.instance)}${path}`;
   const headers: Record<string, string> = {
     ...(init.headers ?? {}),
     Authorization: `Bearer ${token}`,
@@ -106,14 +106,26 @@ export async function apiFetch<T>(
   }
   if (profile.orgId) headers["X-Org-Id"] = profile.orgId;
 
-  const res = await fetch(url, { ...init, headers });
+  return fetch(`${normalizeBase(profile.instance)}${path}`, { ...init, headers });
+}
+
+/**
+ * Authenticated JSON fetch. Parses 2xx bodies as JSON (204 → undefined),
+ * translates 401 into a re-login `AuthError`, and every other non-2xx
+ * into an `ApiError` carrying the parsed body + a best-effort message.
+ */
+export async function apiFetch<T>(
+  profileName: string,
+  path: string,
+  init: ApiFetchInit = {},
+): Promise<T> {
+  const res = await apiFetchRaw(profileName, path, init);
 
   if (res.status === 401) {
     throw new AuthError(
       `Unauthorized — your session may have been revoked. Run: appstrate login --profile ${profileName}`,
     );
   }
-
   if (!res.ok) {
     let body: unknown;
     try {
@@ -130,31 +142,4 @@ export async function apiFetch<T>(
 
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
-}
-
-/**
- * Low-level fetch for endpoints that don't return JSON (e.g.
- * `/api/auth/sign-out` returns 204). Returns the raw Response so
- * callers can inspect status codes or headers.
- */
-export async function apiFetchRaw(
-  profileName: string,
-  path: string,
-  init: ApiFetchInit = {},
-): Promise<Response> {
-  const profile = await resolveProfileOrThrow(profileName);
-  const token = await resolveTokensOrThrow(profileName);
-
-  const url = `${normalizeBase(profile.instance)}${path}`;
-  const headers: Record<string, string> = {
-    ...(init.headers ?? {}),
-    Authorization: `Bearer ${token}`,
-    "User-Agent": `appstrate-cli/${process.env.npm_package_version ?? "0.0.0"}`,
-  };
-  if (!headers["Content-Type"] && init.body) {
-    headers["Content-Type"] = "application/json";
-  }
-  if (profile.orgId) headers["X-Org-Id"] = profile.orgId;
-
-  return fetch(url, { ...init, headers });
 }
