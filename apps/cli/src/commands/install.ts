@@ -33,7 +33,7 @@ import {
   spawnDevServer,
   writeEnvFile as writeTier0Env,
 } from "../lib/install/tier0.ts";
-import { openBrowser } from "../lib/install/os.ts";
+import { openBrowser, isPortAvailable, describeProcessOnPort } from "../lib/install/os.ts";
 import {
   detectInstallMode,
   mergeEnv,
@@ -54,6 +54,10 @@ export interface InstallOptions {
   tier?: string;
   /** Skip the directory prompt. */
   dir?: string;
+  /** Override the host port the platform binds to (Tier 0/1/2/3). */
+  port?: string;
+  /** Override the host port the MinIO console binds to (Tier 3 only). */
+  minioConsolePort?: string;
   /**
    * Bypass the "another stack is already running under this project
    * name" preflight. Escape hatch for edge cases where the operator
@@ -65,7 +69,12 @@ export interface InstallOptions {
 }
 
 const DEFAULT_INSTALL_DIR = join(homedir(), "appstrate");
-const DEFAULT_APP_URL = "http://localhost:3000";
+const DEFAULT_PORT = 3000;
+const DEFAULT_MINIO_CONSOLE_PORT = 9001;
+
+function appUrlForPort(port: number): string {
+  return port === 80 ? "http://localhost" : `http://localhost:${port}`;
+}
 
 export async function installCommand(opts: InstallOptions): Promise<void> {
   intro("Appstrate install");
@@ -73,15 +82,118 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
   try {
     const tier = await resolveTier(opts.tier);
     const dir = await resolveDir(opts.dir);
+    // "Non-interactive" means the caller skipped the tier prompt — in
+    // that mode we fail fast on port conflicts rather than blocking on
+    // `askText`. A `--tier` invocation is almost always scripted (CI,
+    // one-liner installer), so any prompt hangs the pipeline.
+    const nonInteractive = opts.tier !== undefined;
+
+    const port = await resolveAppstratePort(opts.port, nonInteractive);
+    const minioConsolePort =
+      tier === 3 ? await resolveMinioConsolePort(opts.minioConsolePort, nonInteractive) : undefined;
 
     if (tier === 0) {
-      await installTier0(dir);
+      await installTier0(dir, port);
     } else {
-      await installDockerTier(dir, tier, { force: opts.force ?? false });
+      await installDockerTier(dir, tier, port, minioConsolePort, {
+        force: opts.force ?? false,
+      });
     }
   } catch (err) {
     exitWithError(err);
   }
+}
+
+/**
+ * Parse / validate a user-supplied port. Accepts `--port` via CLI flag
+ * and falls back to `$APPSTRATE_PORT`, then the tier default. Returns
+ * the port after preflight: if it's free, we return it as-is; if it
+ * conflicts we describe the holder, prompt for an alternative (or
+ * fail fast when `nonInteractive`) and recurse on the user's pick.
+ */
+export async function resolveAppstratePort(
+  raw: string | undefined,
+  nonInteractive: boolean,
+): Promise<number> {
+  const requested = parsePort(raw, process.env.APPSTRATE_PORT, DEFAULT_PORT, "--port");
+  return ensurePortFree(requested, "APPSTRATE_PORT", "--port", "Appstrate", nonInteractive);
+}
+
+/** Same as `resolveAppstratePort` but for the MinIO console (Tier 3). */
+export async function resolveMinioConsolePort(
+  raw: string | undefined,
+  nonInteractive: boolean,
+): Promise<number> {
+  const requested = parsePort(
+    raw,
+    process.env.APPSTRATE_MINIO_CONSOLE_PORT,
+    DEFAULT_MINIO_CONSOLE_PORT,
+    "--minio-console-port",
+  );
+  return ensurePortFree(
+    requested,
+    "APPSTRATE_MINIO_CONSOLE_PORT",
+    "--minio-console-port",
+    "MinIO console",
+    nonInteractive,
+  );
+}
+
+/**
+ * Pure: resolve a port value from (flag | env | default), rejecting
+ * anything outside 1..65535. Exported for tests.
+ */
+export function parsePort(
+  flagValue: string | undefined,
+  envValue: string | undefined,
+  defaultValue: number,
+  flagName: string,
+): number {
+  const raw = flagValue ?? envValue;
+  if (raw === undefined || raw === "") return defaultValue;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    throw new Error(
+      `Invalid ${flagName} value "${raw}". Expected an integer in the range 1..65535.`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Probe the port; on conflict, print a best-effort "who's holding it"
+ * hint and either prompt the user for a new one (interactive) or
+ * throw a helpful error (non-interactive).
+ */
+async function ensurePortFree(
+  port: number,
+  envVar: string,
+  flagName: string,
+  label: string,
+  nonInteractive: boolean,
+): Promise<number> {
+  if (await isPortAvailable(port)) return port;
+
+  const holder = await describeProcessOnPort(port);
+  const holderHint = holder ? ` Held by ${holder}.` : "";
+
+  if (nonInteractive) {
+    throw new Error(
+      `Port ${port} is already in use (${label}).${holderHint} Re-run with ${flagName} <n> or set ${envVar}=<n> to pick a free port.`,
+    );
+  }
+
+  clack.log.warn(
+    `Port ${port} (${label}) is already in use.${holderHint} Free it or pick a different port.`,
+  );
+  const pick = await askText(`New port for ${label}`, String(port));
+  const next = Number(pick);
+  if (!Number.isInteger(next) || next < 1 || next > 65535) {
+    throw new Error(`Invalid port "${pick}". Expected an integer in the range 1..65535.`);
+  }
+  // Recurse so the newly-picked port is checked again — cheap, and
+  // covers the "user typed the same conflicting port twice" case.
+  return ensurePortFree(next, envVar, flagName, label, nonInteractive);
 }
 
 /**
@@ -131,7 +243,8 @@ export async function resolveDir(raw: string | undefined): Promise<string> {
   return resolve(chosen);
 }
 
-async function installTier0(dir: string): Promise<void> {
+async function installTier0(dir: string, port: number): Promise<void> {
+  const appUrl = appUrlForPort(port);
   // Bun — either already present, or install it via the upstream script.
   // We only care whether a working Bun is reachable; the actual path
   // resolution happens inside `runBunInstall` / `spawnDevServer` via
@@ -173,27 +286,25 @@ async function installTier0(dir: string): Promise<void> {
   installSpinner.stop("Dependencies installed");
 
   // `.env`.
-  const env = generateEnvForTier(0, DEFAULT_APP_URL);
+  const env = generateEnvForTier(0, appUrl, { port });
   await writeTier0Env(dir, renderEnvFile(env));
 
   // Run dev server?
   const shouldStart = await confirm("Start the dev server now?");
   if (!shouldStart) {
     outro(
-      `Ready. Start it later with:\n\n  cd ${dir}\n  bun run dev\n\nOpen http://localhost:3000 once it boots.`,
+      `Ready. Start it later with:\n\n  cd ${dir}\n  bun run dev\n\nOpen ${appUrl} once it boots.`,
     );
     return;
   }
 
   const devSpinner = spinner();
   devSpinner.start("Starting dev server");
-  const { pid } = await spawnDevServer(dir, DEFAULT_APP_URL);
+  const { pid } = await spawnDevServer(dir, appUrl);
   devSpinner.stop(`Dev server running (pid ${pid})`);
 
-  await openBrowser(DEFAULT_APP_URL);
-  outro(
-    `Appstrate is running at ${DEFAULT_APP_URL} (pid ${pid}).\nKill it with \`kill ${pid}\` when done.`,
-  );
+  await openBrowser(appUrl);
+  outro(`Appstrate is running at ${appUrl} (pid ${pid}).\nKill it with \`kill ${pid}\` when done.`);
 }
 
 /**
@@ -268,8 +379,11 @@ async function preflightProjectCollision(
 async function installDockerTier(
   dir: string,
   tier: 1 | 2 | 3,
+  port: number,
+  minioConsolePort: number | undefined,
   opts: { force: boolean },
 ): Promise<void> {
+  const appUrl = appUrlForPort(port);
   // Docker.
   const dockerSpinner = spinner();
   dockerSpinner.start("Checking Docker");
@@ -321,7 +435,7 @@ async function installDockerTier(
       mode === "upgrade" ? "Rewriting compose + merging .env" : "Writing compose + .env",
     );
     await writeComposeFile(dir, tier);
-    const fresh = generateEnvForTier(tier, DEFAULT_APP_URL);
+    const fresh = generateEnvForTier(tier, appUrl, { port, minioConsolePort });
     const envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
     await writeComposeEnv(dir, renderEnvFile(envVars));
     writeSpinner.stop(
@@ -341,7 +455,7 @@ async function installDockerTier(
     // Healthcheck.
     const healthSpinner = spinner();
     healthSpinner.start("Waiting for Appstrate to become healthy");
-    await waitForAppstrate(DEFAULT_APP_URL);
+    await waitForAppstrate(appUrl);
     healthSpinner.stop("Appstrate is healthy");
 
     // Persist the project-name binding on success. Written AFTER the
@@ -376,9 +490,9 @@ async function installDockerTier(
     throw err;
   }
 
-  await openBrowser(DEFAULT_APP_URL);
+  await openBrowser(appUrl);
   outro(
-    `Appstrate is running at ${DEFAULT_APP_URL}.\n` +
+    `Appstrate is running at ${appUrl}.\n` +
       `Manage the stack from ${dir}:\n` +
       `  docker compose --project-name ${project.name} logs -f\n` +
       `  docker compose --project-name ${project.name} down`,
