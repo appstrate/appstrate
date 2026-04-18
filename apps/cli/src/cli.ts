@@ -64,10 +64,15 @@ program
     "Skip the interactive tier prompt (0 = hobby / Bun, 1/2/3 = Docker stacks).",
   )
   .option("-d, --dir <path>", "Install directory (default: ~/appstrate).")
+  .option(
+    "--force",
+    "Bypass the 'another Compose project is already running under this name' preflight. Only use if you have already backed up the other install's data.",
+  )
   .action(async (opts) => {
     await installCommand({
       tier: typeof opts.tier === "string" ? opts.tier : undefined,
       dir: typeof opts.dir === "string" ? opts.dir : undefined,
+      force: opts.force === true,
     });
   });
 

@@ -5,8 +5,11 @@
 # `./data/storage` (mounted into the platform container). Suitable
 # for small-to-mid deployments where you don't need an S3-compatible
 # object store and a local volume is acceptable.
-
-name: appstrate
+#
+# Note: no top-level `name:` is set here — the CLI passes
+# `--project-name <name>` based on `.appstrate/project.json`, so two
+# installs in different directories get isolated projects. A hand-run
+# of `docker compose up -d` falls back to the directory basename.
 
 networks:
   appstrate-data:
