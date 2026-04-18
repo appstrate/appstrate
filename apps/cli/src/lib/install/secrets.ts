@@ -13,6 +13,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { resolveDockerImageTag } from "../version.ts";
 
 /**
  * Supported tier identifiers. `Tier` matches the `--tier` flag values
@@ -67,6 +68,14 @@ export function generateEnvForTier(tier: Tier, appUrl = "http://localhost:3000")
     // Tier 0 runs directly against PGlite + filesystem, no infra passwords needed.
     return env;
   }
+
+  // Tiers 1/2/3: pin the image tag to the CLI's own version (lockstep
+  // per ADR-006) so `docker compose pull` can't silently drag in a
+  // newer or older appstrate/appstrate-pi/appstrate-sidecar image than
+  // the CLI was built to orchestrate. Without this, compose falls back
+  // to `${APPSTRATE_VERSION:-latest}` — and `latest` may not exist on
+  // GHCR during pre-release trains.
+  env.APPSTRATE_VERSION = resolveDockerImageTag();
 
   // Tiers 1/2/3: Postgres password is always required.
   env.POSTGRES_USER = "appstrate";

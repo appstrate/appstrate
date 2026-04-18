@@ -57,11 +57,23 @@ jobs:
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+          # `flavor: latest=auto` makes metadata-action add `latest` for
+          # the highest non-prerelease semver tag seen — so `v1.0.0`
+          # gets `latest`, but `v1.0.0-alpha.50` does NOT. Replaces a
+          # previous `type=raw,value=latest,enable={{is_default_branch}}`
+          # which never fired on tag-triggered runs (`is_default_branch`
+          # is only true for pushes to the default branch, not tags) —
+          # leaving `get.appstrate.dev` bootstrap users pulling `:latest`
+          # against an image that was never tagged. The CLI now pins
+          # `APPSTRATE_VERSION` in the generated `.env` for a belt-and-
+          # braces guarantee (ADR-006 lockstep), so `latest` is the
+          # compat fallback for consumers that skip the CLI.
+          flavor: |
+            latest=auto
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2

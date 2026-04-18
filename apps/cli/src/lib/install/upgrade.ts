@@ -136,10 +136,23 @@ export function parseEnvFile(body: string): EnvVars {
 }
 
 /**
- * Merge an existing `.env` dict with a freshly-generated one, giving
- * precedence to the existing values.
+ * Keys whose `fresh` value must ALWAYS override `existing` — the opposite
+ * of the default "existing wins" semantics. These are lockstep knobs,
+ * not secrets: preserving an old value across re-installs would defeat
+ * the invariant the CLI enforces.
  *
- * Why existing wins:
+ *   - APPSTRATE_VERSION: ADR-006 §Lockstep versioning. The Docker image
+ *     tag must track the CLI that orchestrates it; otherwise a `bun
+ *     upgrade` of the CLI leaves the install pointing at stale images.
+ */
+const OVERRIDE_KEYS: readonly string[] = ["APPSTRATE_VERSION"];
+
+/**
+ * Merge an existing `.env` dict with a freshly-generated one, giving
+ * precedence to the existing values EXCEPT for a small set of keys
+ * (`OVERRIDE_KEYS`) that must track the current CLI.
+ *
+ * Why existing wins (by default):
  *   - BETTER_AUTH_SECRET: rotating invalidates every cookie session.
  *   - CONNECTION_ENCRYPTION_KEY: rotating bricks every encrypted
  *     credential row in `provider_credentials` (AES-256-GCM auth tag
@@ -157,7 +170,11 @@ export function parseEnvFile(body: string): EnvVars {
  * like SMTP_HOST stay intact).
  */
 export function mergeEnv(existing: EnvVars, fresh: EnvVars): EnvVars {
-  return { ...fresh, ...existing };
+  const merged: EnvVars = { ...fresh, ...existing };
+  for (const key of OVERRIDE_KEYS) {
+    if (key in fresh) merged[key] = fresh[key] as string;
+  }
+  return merged;
 }
 
 /**

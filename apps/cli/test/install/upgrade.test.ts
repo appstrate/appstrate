@@ -174,6 +174,32 @@ describe("mergeEnv", () => {
     expect(existing).toEqual({ A: "1" });
     expect(fresh).toEqual({ B: "2" });
   });
+
+  it("APPSTRATE_VERSION ALWAYS takes the fresh value, even when existing has one", () => {
+    // Lockstep invariant (ADR-006): the Docker image tag must track the
+    // CLI that orchestrates it. Preserving an existing APPSTRATE_VERSION
+    // would leave a CLI-upgraded install pointing at the old images.
+    const existing = {
+      APPSTRATE_VERSION: "1.0.0-alpha.50",
+      BETTER_AUTH_SECRET: "keep-me",
+    };
+    const fresh = {
+      APPSTRATE_VERSION: "1.0.0-alpha.52",
+      BETTER_AUTH_SECRET: "rotated-would-break-sessions",
+    };
+    const out = mergeEnv(existing, fresh);
+    expect(out.APPSTRATE_VERSION).toBe("1.0.0-alpha.52"); // fresh wins
+    expect(out.BETTER_AUTH_SECRET).toBe("keep-me"); // existing wins
+  });
+
+  it("APPSTRATE_VERSION in existing alone is preserved when fresh omits it", () => {
+    // If fresh didn't set the key (e.g. a future tier-0 upgrade path),
+    // we don't want to blow away what was there — the overlay only
+    // triggers when `fresh` has a non-undefined value.
+    const existing = { APPSTRATE_VERSION: "1.0.0-alpha.50" };
+    const fresh = {};
+    expect(mergeEnv(existing, fresh).APPSTRATE_VERSION).toBe("1.0.0-alpha.50");
+  });
 });
 
 describe("backupFiles + restoreBackups", () => {

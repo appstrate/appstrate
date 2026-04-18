@@ -20,7 +20,7 @@ const BASE64_KEY_32 = /^[A-Za-z0-9+/]{43}=$/;
 const BASE64URL_PASSWORD_24 = /^[A-Za-z0-9_-]{32}$/;
 
 describe("generateEnvForTier — tier envelope", () => {
-  it("Tier 0 contains only the core secrets (no infra passwords)", () => {
+  it("Tier 0 contains only the core secrets (no infra passwords, no APPSTRATE_VERSION)", () => {
     const env = generateEnvForTier(0);
     expect(Object.keys(env).sort()).toEqual(
       [
@@ -32,28 +32,35 @@ describe("generateEnvForTier — tier envelope", () => {
         "UPLOAD_SIGNING_SECRET",
       ].sort(),
     );
+    // Tier 0 runs bun directly — no compose templates, no image pin.
+    expect(env.APPSTRATE_VERSION).toBeUndefined();
   });
 
-  it("Tier 1 adds Postgres user + password, no Redis/MinIO", () => {
+  it("Tier 1 adds Postgres user + password + APPSTRATE_VERSION, no Redis/MinIO", () => {
     const env = generateEnvForTier(1);
     expect(env.POSTGRES_USER).toBe("appstrate");
     expect(env.POSTGRES_PASSWORD).toBeDefined();
     expect(env.MINIO_ROOT_PASSWORD).toBeUndefined();
+    // Image pin is required so compose doesn't fall back to `:latest`.
+    expect(env.APPSTRATE_VERSION).toBeDefined();
+    expect(env.APPSTRATE_VERSION).not.toBe("latest");
   });
 
-  it("Tier 2 matches Tier 1 (Redis has no password by default)", () => {
+  it("Tier 2 matches Tier 1 + image pin (Redis has no password by default)", () => {
     const env = generateEnvForTier(2);
     expect(env.POSTGRES_PASSWORD).toBeDefined();
     expect(env.MINIO_ROOT_PASSWORD).toBeUndefined();
+    expect(env.APPSTRATE_VERSION).toBeDefined();
   });
 
-  it("Tier 3 adds MinIO creds + bucket + region", () => {
+  it("Tier 3 adds MinIO creds + bucket + region + APPSTRATE_VERSION", () => {
     const env = generateEnvForTier(3);
     expect(env.POSTGRES_PASSWORD).toBeDefined();
     expect(env.MINIO_ROOT_USER).toBe("appstrate");
     expect(env.MINIO_ROOT_PASSWORD).toBeDefined();
     expect(env.S3_BUCKET).toBe("appstrate");
     expect(env.S3_REGION).toBe("us-east-1");
+    expect(env.APPSTRATE_VERSION).toBeDefined();
   });
 });
 
