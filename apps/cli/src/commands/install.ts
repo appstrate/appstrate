@@ -12,7 +12,7 @@
  */
 
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import * as clack from "@clack/prompts";
 import { intro, outro, askText, confirm, spinner, exitWithError } from "../lib/ui.ts";
 import { generateEnvForTier, renderEnvFile, type Tier } from "../lib/install/secrets.ts";
@@ -90,8 +90,18 @@ async function resolveTier(raw: string | undefined): Promise<Tier> {
 }
 
 async function resolveDir(raw: string | undefined): Promise<string> {
-  if (raw !== undefined) return raw;
-  return askText("Install directory", DEFAULT_INSTALL_DIR);
+  const chosen = raw ?? (await askText("Install directory", DEFAULT_INSTALL_DIR));
+  // `tier0.ts` passes `dir` as an argv positional to `tar`, `curl`,
+  // `git`, etc. without a shell wrapper, so interpolation injection is
+  // already ruled out at the spawn layer. But newlines + NUL bytes in
+  // paths are a long-standing source of surprising behaviour in shell
+  // tools that DO iterate paths (bash glob expansion in hand-written
+  // recovery scripts, log aggregators, etc.) — reject them up-front so
+  // the user sees a clear error instead of a mysterious truncation.
+  if (/[\r\n\0]/.test(chosen)) {
+    throw new Error("Install directory must not contain newlines or NUL bytes.");
+  }
+  return resolve(chosen);
 }
 
 async function installTier0(dir: string): Promise<void> {
