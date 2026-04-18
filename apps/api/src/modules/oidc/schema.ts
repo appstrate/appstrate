@@ -70,30 +70,29 @@ export const jwks = pgTable("jwks", {
 // because the BA plugin bypasses `@better-auth/oauth-provider` — its
 // default session-mint path doesn't consult `oauth_clients` metadata.
 
-export const deviceCode = pgTable(
-  "device_codes",
-  {
-    id: text("id").primaryKey(),
-    deviceCode: text("device_code").notNull().unique(),
-    userCode: text("user_code").notNull().unique(),
-    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
-    expiresAt: timestamp("expires_at").notNull(),
-    status: text("status").notNull(),
-    lastPolledAt: timestamp("last_polled_at"),
-    pollingInterval: integer("polling_interval"),
-    // FK to oauth_clients so pending codes die with the client. BA stores
-    // this as a plain string — the FK is Appstrate defense-in-depth.
-    clientId: text("client_id").references(() => oauthClient.clientId, {
-      onDelete: "cascade",
-    }),
-    scope: text("scope"),
-  },
-  (t) => [
-    index("idx_device_codes_user_code").on(t.userCode),
-    index("idx_device_codes_client").on(t.clientId),
-    index("idx_device_codes_expires_at").on(t.expiresAt),
-  ],
-);
+export const deviceCode = pgTable("device_codes", {
+  id: text("id").primaryKey(),
+  deviceCode: text("device_code").notNull().unique(),
+  userCode: text("user_code").notNull().unique(),
+  userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at").notNull(),
+  status: text("status").notNull(),
+  lastPolledAt: timestamp("last_polled_at"),
+  pollingInterval: integer("polling_interval"),
+  // FK to oauth_clients so pending codes die with the client. BA stores
+  // this as a plain string — the FK is Appstrate defense-in-depth.
+  clientId: text("client_id").references(() => oauthClient.clientId, {
+    onDelete: "cascade",
+  }),
+  scope: text("scope"),
+});
+// No extra indexes on this table: `device_code` / `user_code` lookups
+// go through their UNIQUE B-tree, `client_id` is never used as a query
+// predicate (we always resolve it via the PK after finding the row by
+// user_code), and expiry is checked inline during polling on the single
+// row already fetched. A fresh install typically holds at most a
+// handful of pending codes; seq-scan on delete-cascade is cheap enough
+// to forgo an FK index.
 
 // ─── Better Auth: oauth-provider plugin ───────────────────────────────────────
 

@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS "device_codes" (
   "scope" text
 );
 
-CREATE INDEX IF NOT EXISTS "idx_device_codes_user_code" ON "device_codes" ("user_code");
-CREATE INDEX IF NOT EXISTS "idx_device_codes_client" ON "device_codes" ("client_id");
-CREATE INDEX IF NOT EXISTS "idx_device_codes_expires_at" ON "device_codes" ("expires_at");
+-- Intentionally no extra indexes. The UNIQUE constraints on
+-- `device_code` / `user_code` already create B-trees for the only
+-- equality lookups this table supports; `client_id` is never a query
+-- predicate; expiry is checked inline on the single row fetched by
+-- user_code. Pending codes are few (seconds-to-minutes TTL) so a
+-- seq-scan on FK cascade delete is cheap.
