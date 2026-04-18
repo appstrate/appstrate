@@ -82,7 +82,9 @@ jobs:
         # failure mode is recoverable without `npm deprecate`.
         run: |
           npm pack
-          TARBALL="$(ls appstrate-*.tgz | head -1)"
+          # `npm pack` names the tarball `<package>-<version>.tgz` deterministically;
+          # constructing the path is safer than globbing (shellcheck SC2012).
+          TARBALL="appstrate-${{ steps.version.outputs.version }}.tgz"
           WORK="$(mktemp -d)"
           (cd "$WORK" && npm init -y >/dev/null && npm install "${GITHUB_WORKSPACE}/apps/cli/$TARBALL")
           "$WORK/node_modules/.bin/appstrate" --help
