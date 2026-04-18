@@ -3,22 +3,23 @@
 #
 # Appstrate CLI bootstrap — thin downloader for `get.appstrate.dev`.
 #
-# Replaces the monolithic `scripts/install.sh` once per-target CLI
-# binaries are published to GitHub Releases (Phase 3+). Single
-# responsibility: detect OS + arch, download the matching `appstrate`
-# binary, drop it on PATH, and exec `appstrate install` to hand
-# control to the CLI itself.
+# Single responsibility: detect OS + arch, download the matching
+# `appstrate` CLI binary from the GitHub Release whose tag is pinned
+# by `publish-installer.yml` at publish time (or `latest` if this
+# script is being run from a raw source copy), drop it on PATH, and
+# exec `appstrate install` to hand control to the CLI itself.
 #
-# No install logic lives here — tier selection, secrets, compose
-# rendering, healthchecks, upgrades are all owned by the CLI binary.
-# This script should never need to grow beyond ~30 lines.
+# No install logic lives here — tier selection, secrets generation,
+# compose rendering, healthchecks, and upgrades are all owned by the
+# CLI binary. This script should never need to grow beyond ~30 lines.
 #
 # Usage:
 #   curl -fsSL https://get.appstrate.dev | bash
 #   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3
 #
 # Env overrides:
-#   APPSTRATE_VERSION   Pin a release tag (default: latest).
+#   APPSTRATE_VERSION   Pin a release tag (default: the tag the
+#                       publish pipeline stamped into this script).
 #   APPSTRATE_BIN_DIR   Install location (default: /usr/local/bin).
 
 set -euo pipefail
@@ -42,7 +43,15 @@ case "$OS" in
     ;;
 esac
 
-VERSION="${APPSTRATE_VERSION:-latest}"
+# Default version pinned by `publish-installer.yml` at publish time —
+# rewriting `__APPSTRATE_VERSION__` so `curl get.appstrate.dev | bash`
+# downloads the binary matching the release that published this script.
+# Users can override via APPSTRATE_VERSION env var (e.g. to pin an older
+# release). When the placeholder is still present (local dev / unrendered
+# copy), fall back to `latest` so the script stays runnable out of tree.
+_DEFAULT_VERSION="__APPSTRATE_VERSION__"
+if [[ "$_DEFAULT_VERSION" == __* ]]; then _DEFAULT_VERSION="latest"; fi
+VERSION="${APPSTRATE_VERSION:-$_DEFAULT_VERSION}"
 BIN_DIR="${APPSTRATE_BIN_DIR:-/usr/local/bin}"
 DEST="${BIN_DIR}/appstrate"
 

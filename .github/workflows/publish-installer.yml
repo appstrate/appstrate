@@ -42,12 +42,20 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Render install.sh with pinned version
+      - name: Render installer with pinned version
         run: |
+          # `scripts/bootstrap.sh` is the published entry point — a thin
+          # downloader that fetches the per-platform CLI binary from the
+          # release matching this tag, then execs `appstrate install`.
+          # Pin its default `APPSTRATE_VERSION` to this tag so
+          # `curl get.appstrate.dev | bash` is reproducible (same tag →
+          # same binary). Users can still override via env var. Published
+          # filename remains `install.sh` so legacy URLs and docs that
+          # reference `get.appstrate.dev/install.sh` keep resolving.
           mkdir -p out/${{ steps.ver.outputs.version }}
           sed "s|__APPSTRATE_VERSION__|${{ steps.ver.outputs.version }}|g" \
-            scripts/install.sh > out/install.sh
-          # Verify all placeholders were replaced
+            scripts/bootstrap.sh > out/install.sh
+          # Verify all placeholders were replaced.
           if grep -q "__APPSTRATE_VERSION__" out/install.sh; then
             echo "::error::Placeholder __APPSTRATE_VERSION__ was not fully replaced"
             exit 1

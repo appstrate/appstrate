@@ -3,19 +3,16 @@ name: Test Installer
 on:
   pull_request:
     paths:
-      - "scripts/install.sh"
+      - "scripts/bootstrap.sh"
       - "scripts/verify.sh"
       - "scripts/appstrate.pub"
-      - "test/install/**"
-      - "examples/self-hosting/**"
       - ".github/workflows/test-install.yml"
       - ".github/workflows/publish-installer.yml"
   push:
     branches: [main]
     paths:
-      - "scripts/install.sh"
+      - "scripts/bootstrap.sh"
       - "scripts/verify.sh"
-      - "test/install/**"
       - ".github/workflows/test-install.yml"
       - ".github/workflows/publish-installer.yml"
   workflow_dispatch:
@@ -45,7 +42,7 @@ jobs:
             "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
           echo "${SHFMT_SHA256}  /tmp/shfmt" | sha256sum --check --strict
           chmod +x /tmp/shfmt
-          /tmp/shfmt -d -i 2 -ci scripts/install.sh
+          /tmp/shfmt -d -i 2 -ci scripts/bootstrap.sh scripts/verify.sh
 
   workflow-lint:
     runs-on: ubuntu-latest
@@ -67,24 +64,10 @@ jobs:
           bash /tmp/download-actionlint.bash 1.7.12
           ./actionlint -color -ignore 'SC2129' .github/workflows/*.yml
 
-  unit-bats:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Run BATS unit tests
-        run: |
-          docker run --rm -v "$PWD:/code" -w /code --entrypoint sh \
-            bats/bats:1.11.0 -c '
-              apk add --no-cache openssl python3 >/dev/null
-              bats test/install/install.bats
-            '
-
-  # End-to-end dry-run of the publish pipeline (render + SLSA-less sign +
-  # verify.sh flow) using a throwaway keypair. Catches sed substitution bugs,
-  # minisign invocation syntax, and verify.sh integration issues before a real
-  # tag push exercises publish-installer.yml in anger.
+  # End-to-end dry-run of the publish pipeline (render + minisign sign +
+  # verify.sh flow) using a throwaway keypair. Catches sed substitution
+  # bugs, minisign invocation syntax, and verify.sh integration issues
+  # before a real tag push exercises publish-installer.yml in anger.
   publish-dry-run:
     runs-on: ubuntu-latest
     needs: [static, workflow-lint]
@@ -100,8 +83,10 @@ jobs:
           set -euo pipefail
           mkdir -p out pages
 
-          # --- Render install.sh (mirrors publish-installer.yml "Render" step) ---
-          sed "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" scripts/install.sh > out/install.sh
+          # --- Render bootstrap.sh as install.sh (mirrors publish-installer.yml "Render" step) ---
+          # Published filename stays `install.sh` so legacy URLs keep working;
+          # content is now the thin CLI-downloader bootstrap.
+          sed "s|__APPSTRATE_VERSION__|v1.0.0-dry|g" scripts/bootstrap.sh > out/install.sh
           if grep -q "__APPSTRATE_VERSION__" out/install.sh; then
             echo "::error::version placeholder not replaced"; exit 1
           fi
@@ -140,8 +125,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Swap real install.sh for a stub (avoid actually installing Docker).
-          # Re-sign the stub with the same key so verify.sh accepts it.
+          # Swap the real bootstrap output for a stub (avoids actually
+          # downloading a binary + execing it). Re-sign the stub with the
+          # same key so verify.sh accepts it.
           cat > pages/install.sh <<'STUB'
           #!/usr/bin/env bash
           echo "STUB_INSTALLER_RAN"
@@ -179,348 +165,3 @@ jobs:
           echo "$TAMPER_OUT" | grep -qE "(Signature verification FAILED|tampered)" \
             || { echo "::error::verify.sh did not report tampering"; exit 1; }
           echo "✓ tamper path OK"
-
-  # Validates installer logic in a minimal Linux container (DinD):
-  # prereq detection, env generation, compose config validity, mode detection.
-  validate-dind:
-    runs-on: ubuntu-latest
-    needs: [static, unit-bats]
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Render install.sh
-        run: |
-          sed "s|__APPSTRATE_VERSION__|latest|g" \
-            scripts/install.sh > /tmp/install.sh
-          chmod +x /tmp/install.sh
-
-      # This script tests things that REQUIRE Docker (can't be covered by BATS):
-      # prereq detection, GID probe, compose config validation, env generation
-      # with real Docker socket. Mode detection + secret logic are in BATS.
-      - name: Write validation script
-        run: |
-          cat > /tmp/dind-test.sh <<'SCRIPT'
-          #!/usr/bin/env bash
-          set -euo pipefail
-
-          export APPSTRATE_DIR=/root/.appstrate
-          export APPSTRATE_QUIET=1
-          export APPSTRATE_PORT=3000
-          export APPSTRATE_ASSETS_DIR=/assets
-          export NO_COLOR=1
-
-          set +e
-          source /install.sh
-          set +eo pipefail
-          trap - ERR
-
-          echo "── 1. Prereq detection (Docker, Compose, arch) ──"
-          detect_environment
-          echo "✓ prereqs detected"
-
-          echo "── 2. Docker GID probe ──"
-          gid=$(detect_docker_gid)
-          [ -n "$gid" ] || { echo "✗ empty GID"; exit 1; }
-          echo "✓ Docker socket GID: $gid"
-
-          echo "── 3. Full env generation ──"
-          prepare_workdir
-          determine_install_mode
-          download_assets
-          handle_env_file
-          echo "✓ env + assets generated"
-
-          echo "── 4. Compose config validation ──"
-          docker compose -f /root/.appstrate/docker-compose.yml \
-            --env-file /root/.appstrate/.env config --quiet
-          echo "✓ compose config valid (all vars resolved)"
-
-          echo "── All checks passed ──"
-          SCRIPT
-          chmod +x /tmp/dind-test.sh
-
-      - name: Run in DinD
-        run: |
-          docker run --rm --privileged \
-            -v /tmp/install.sh:/install.sh:ro \
-            -v /tmp/dind-test.sh:/dind-test.sh:ro \
-            -v "${{ github.workspace }}/examples/self-hosting:/assets:ro" \
-            -e DOCKER_TLS_CERTDIR= \
-            docker:27-dind sh -c '
-              set -e
-              export DOCKER_HOST=unix:///var/run/docker.sock
-              dockerd-entrypoint.sh > /var/log/dockerd.log 2>&1 &
-              for i in $(seq 1 60); do
-                docker info >/dev/null 2>&1 && break
-                sleep 1
-              done
-              docker info >/dev/null || { tail -50 /var/log/dockerd.log; exit 1; }
-              apk add --no-cache bash curl openssl lsof >/dev/null
-              bash /dind-test.sh
-            '
-
-  # Full E2E: build image from source, run installer, verify stack is healthy.
-  # Runs on the ubuntu runner directly (has Docker + Compose pre-installed).
-  e2e:
-    runs-on: ubuntu-latest
-    needs: [static, unit-bats]
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Build appstrate image
-        run: docker build -t ghcr.io/appstrate/appstrate:local .
-
-      - name: Create dummy runtime images
-        run: |
-          docker pull alpine:3
-          docker tag alpine:3 ghcr.io/appstrate/appstrate-pi:local
-          docker tag alpine:3 ghcr.io/appstrate/appstrate-sidecar:local
-
-      - name: Render install.sh
-        run: |
-          sed "s|__APPSTRATE_VERSION__|local|g" \
-            scripts/install.sh > /tmp/install.sh
-          chmod +x /tmp/install.sh
-
-      - name: Run installer
-        run: |
-          APPSTRATE_DIR=/tmp/appstrate-e2e \
-          APPSTRATE_PORT=3000 \
-          APPSTRATE_QUIET=1 \
-          APPSTRATE_VERSION=local \
-          APPSTRATE_ASSETS_DIR=${{ github.workspace }}/examples/self-hosting \
-            bash /tmp/install.sh
-
-      - name: Health check
-        run: |
-          echo "── Probing http://localhost:3000 (max 120s) ──"
-          deadline=$((SECONDS + 120))
-          while [ $SECONDS -lt $deadline ]; do
-            if curl -fsS --max-time 3 http://localhost:3000/ >/dev/null 2>&1; then
-              echo "✓ healthy"
-              exit 0
-            fi
-            sleep 3
-          done
-          echo "✗ Not responding after 120s"
-          docker compose -f /tmp/appstrate-e2e/docker-compose.yml \
-            --env-file /tmp/appstrate-e2e/.env logs --tail 50
-          exit 1
-
-      - name: Verify API
-        run: |
-          curl -fsS --max-time 10 http://localhost:3000/api/openapi.json | head -c 100
-          echo ""
-          echo "✓ API responding"
-
-      - name: Verify services
-        run: |
-          CF=/tmp/appstrate-e2e/docker-compose.yml
-          EF=/tmp/appstrate-e2e/.env
-          for svc in appstrate postgres redis minio; do
-            status=$(docker compose -f "$CF" --env-file "$EF" ps --format json "$svc" | head -1)
-            state=$(echo "$status" | jq -r '.State // empty' 2>/dev/null || echo "$status")
-            echo "$svc: $state"
-            echo "$status" | jq -e '.State == "running"' >/dev/null 2>&1 \
-              || { echo "✗ $svc not running"; docker compose -f "$CF" --env-file "$EF" logs "$svc" --tail 20; exit 1; }
-          done
-          echo "✓ all services running"
-
-      - name: Noop re-run
-        run: |
-          APPSTRATE_DIR=/tmp/appstrate-e2e \
-          APPSTRATE_PORT=3000 \
-          APPSTRATE_QUIET=1 \
-          APPSTRATE_VERSION=local \
-          APPSTRATE_ASSETS_DIR=${{ github.workspace }}/examples/self-hosting \
-            bash /tmp/install.sh 2>&1 | tee /tmp/run2.log
-          grep -q "Already at" /tmp/run2.log
-          echo "✓ noop confirmed"
-
-      # Force an upgrade failure and verify rollback restores the previous state.
-      # Strategy: ship a broken docker-compose.yml via APPSTRATE_ASSETS_DIR. The
-      # installer will backup the good compose/env, copy the broken one in, fail
-      # `docker compose config --quiet`, and roll back automatically.
-      - name: Upgrade rollback
-        run: |
-          mkdir -p /tmp/broken-assets
-          # Compose referencing a required var with no default → `docker compose
-          # config` exits non-zero, which is exactly where rollback_upgrade triggers.
-          cat > /tmp/broken-assets/docker-compose.yml <<'YAML'
-          name: appstrate
-          services:
-            sabotaged:
-              image: alpine:3
-              command: ["true"]
-              environment:
-                - REQUIRED=${ROLLBACK_SABOTAGE:?this variable is intentionally missing to force config failure}
-          YAML
-          cp ${{ github.workspace }}/examples/self-hosting/.env.example /tmp/broken-assets/.env.example
-
-          # Trigger an upgrade by pinning to a new version (any non-"local" value).
-          # `set -o pipefail` ensures exit_code picks up install.sh's status
-          # rather than tee's (which always succeeds). PIPESTATUS[0] is also
-          # captured as a belt-and-suspenders check.
-          set +e
-          set -o pipefail
-          APPSTRATE_DIR=/tmp/appstrate-e2e \
-          APPSTRATE_PORT=3000 \
-          APPSTRATE_QUIET=1 \
-          APPSTRATE_VERSION=v9.9.9 \
-          APPSTRATE_ASSETS_DIR=/tmp/broken-assets \
-            bash /tmp/install.sh 2>&1 | tee /tmp/run3.log
-          exit_code=${PIPESTATUS[0]}
-          set +o pipefail
-          set -e
-
-          # Dump install log on any failure to help diagnose rollback issues.
-          dump_install_log() {
-            echo "── /tmp/run3.log ──"
-            cat /tmp/run3.log || true
-            echo "── install.sh log files ──"
-            for f in /tmp/appstrate-e2e/install-*.log; do
-              [ -f "$f" ] || continue
-              echo "── $f ──"
-              cat "$f"
-            done
-            echo "── docker ps -a ──"
-            docker ps -a || true
-            echo "── backup files ──"
-            ls -la /tmp/appstrate-e2e/ || true
-          }
-
-          # Installer must exit non-zero on the botched upgrade
-          if [ "$exit_code" -eq 0 ]; then
-            echo "✗ installer exited 0, expected non-zero"
-            dump_install_log
-            exit 1
-          fi
-
-          # Rollback path must have executed
-          if ! grep -q "Rolling back to" /tmp/run3.log; then
-            echo "✗ rollback did not trigger"
-            dump_install_log
-            exit 1
-          fi
-          if ! grep -q "rolled back to" /tmp/run3.log; then
-            echo "✗ rollback did not complete"
-            dump_install_log
-            exit 1
-          fi
-          echo "✓ rollback executed"
-
-          # .env + compose.yml must be restored (no REQUIRED_VAR reference)
-          if grep -q "ROLLBACK_SABOTAGE" /tmp/appstrate-e2e/docker-compose.yml; then
-            echo "✗ compose.yml not restored"
-            exit 1
-          fi
-          echo "✓ compose.yml restored to previous version"
-
-          # Stack must still be serving on port 3000 (rollback restarted old stack)
-          for _ in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -fsS --max-time 3 http://localhost:3000/ >/dev/null 2>&1; then
-              echo "✓ old stack responding after rollback"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "✗ old stack not responding after rollback"
-          docker compose -f /tmp/appstrate-e2e/docker-compose.yml \
-            --env-file /tmp/appstrate-e2e/.env logs --tail 30
-          exit 1
-
-      # Regression for #145 / fix in #157: when APP_URL changes between boots,
-      # the platform OIDC client's `redirect_uris` must be reconciled in place
-      # (same client_id, no DB wipe required). Snapshots the oauth_clients row,
-      # edits .env (APP_URL/TRUSTED_ORIGINS/PORT → drift port), re-runs the
-      # installer, then asserts via SQL that URIs were updated and the
-      # client_id was preserved. Re-uses the post-rollback healthy stack on
-      # port 3000.
-      - name: APP_URL drift → OIDC reconciliation
-        run: |
-          set -euo pipefail
-
-          pg_query() {
-            docker exec -i appstrate-postgres-1 \
-              psql -U appstrate -d appstrate -tA -c "$1"
-          }
-          instance_row() {
-            pg_query "SELECT client_id || '|' || array_to_string(redirect_uris, ',') || '|' || array_to_string(post_logout_redirect_uris, ',') FROM oauth_clients WHERE level='instance' ORDER BY created_at ASC LIMIT 1;"
-          }
-
-          before=$(instance_row)
-          [ -n "$before" ] || { echo "✗ no instance-level oauth_clients row"; exit 1; }
-          before_id=$(printf '%s' "$before" | cut -d'|' -f1)
-          before_redirect=$(printf '%s' "$before" | cut -d'|' -f2)
-          before_post=$(printf '%s' "$before" | cut -d'|' -f3)
-          echo "before: client_id=$before_id redirect_uris=$before_redirect"
-          [ "$before_redirect" = "http://localhost:3000/auth/callback" ] \
-            || { echo "✗ unexpected initial redirect_uris: $before_redirect"; exit 1; }
-          [ "$before_post" = "http://localhost:3000,http://localhost:3000/login" ] \
-            || { echo "✗ unexpected initial post_logout_redirect_uris: $before_post"; exit 1; }
-
-          echo "── Editing .env: APP_URL/TRUSTED_ORIGINS/PORT → 3001 ──"
-          awk -v from=3000 -v to=3001 '
-            /^APP_URL=/         { sub(":" from, ":" to); print; next }
-            /^TRUSTED_ORIGINS=/ { sub(":" from, ":" to); print; next }
-            /^PORT=/            { print "PORT=" to; next }
-            { print }
-          ' /tmp/appstrate-e2e/.env > /tmp/appstrate-e2e/.env.new
-          mv /tmp/appstrate-e2e/.env.new /tmp/appstrate-e2e/.env
-          chmod 600 /tmp/appstrate-e2e/.env
-
-          echo "── Re-running installer on port 3001 (compose recreates container) ──"
-          APPSTRATE_DIR=/tmp/appstrate-e2e \
-          APPSTRATE_PORT=3001 \
-          APPSTRATE_QUIET=1 \
-          APPSTRATE_VERSION=local \
-          APPSTRATE_ASSETS_DIR=${{ github.workspace }}/examples/self-hosting \
-            bash /tmp/install.sh
-
-          echo "── Probing http://localhost:3001 (max 60s) ──"
-          deadline=$((SECONDS + 60))
-          while [ $SECONDS -lt $deadline ]; do
-            if curl -fsS --max-time 3 http://localhost:3001/ >/dev/null 2>&1; then
-              break
-            fi
-            sleep 2
-          done
-          curl -fsS --max-time 3 http://localhost:3001/ >/dev/null 2>&1 \
-            || { echo "✗ not responding on 3001"; docker logs appstrate-appstrate-1 --tail 30; exit 1; }
-
-          after=$(instance_row)
-          after_id=$(printf '%s' "$after" | cut -d'|' -f1)
-          after_redirect=$(printf '%s' "$after" | cut -d'|' -f2)
-          after_post=$(printf '%s' "$after" | cut -d'|' -f3)
-          echo "after:  client_id=$after_id redirect_uris=$after_redirect"
-
-          [ "$after_id" = "$before_id" ] \
-            || { echo "✗ client_id changed (was $before_id, now $after_id) — outstanding tokens would be invalidated"; exit 1; }
-          [ "$after_redirect" = "http://localhost:3001/auth/callback" ] \
-            || { echo "✗ redirect_uris not reconciled: $after_redirect"; exit 1; }
-          [ "$after_post" = "http://localhost:3001,http://localhost:3001/login" ] \
-            || { echo "✗ post_logout_redirect_uris not reconciled: $after_post"; exit 1; }
-          echo "✓ URIs reconciled, client_id preserved"
-
-          # Pino's worker transport flushes asynchronously — poll with a deadline.
-          deadline=$((SECONDS + 15))
-          while [ $SECONDS -lt $deadline ]; do
-            if docker logs appstrate-appstrate-1 2>&1 \
-              | grep -q "OIDC platform client redirect URIs updated to match APP_URL"; then
-              echo "✓ reconcile log line emitted"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "✗ reconcile log line not found within 15s"
-          docker logs appstrate-appstrate-1 --tail 40
-          exit 1
-
-      - name: Teardown
-        if: always()
-        run: |
-          docker compose -f /tmp/appstrate-e2e/docker-compose.yml \
-            --env-file /tmp/appstrate-e2e/.env down -v 2>/dev/null || true
-          rm -rf /tmp/appstrate-e2e
