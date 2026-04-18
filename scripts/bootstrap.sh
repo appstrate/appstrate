@@ -89,13 +89,13 @@ CHECKSUMS_SIG_URL="${URL_BASE}/checksums.txt.minisig"
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-warn()  { printf '\033[0;33m⚠\033[0m  %s\n' "$*" >&2; }
-log()   { printf '\033[0;36m→\033[0m  %s\n' "$*"; }
-err()   { printf '\033[0;31m✗\033[0m  %s\n' "$*" >&2; }
+warn() { printf '\033[0;33m⚠\033[0m  %s\n' "$*" >&2; }
+log() { printf '\033[0;36m→\033[0m  %s\n' "$*"; }
+err() { printf '\033[0;31m✗\033[0m  %s\n' "$*" >&2; }
 
 have_sha256sum() { command -v sha256sum >/dev/null 2>&1; }
-have_shasum()    { command -v shasum >/dev/null 2>&1; }
-have_minisign()  { command -v minisign >/dev/null 2>&1; }
+have_shasum() { command -v shasum >/dev/null 2>&1; }
+have_minisign() { command -v minisign >/dev/null 2>&1; }
 
 # ─── Download + verify ──────────────────────────────────────────────────────
 
@@ -126,7 +126,7 @@ else
   fi
 
   log "Fetching release checksums + signature"
-  curl -fsSL "$CHECKSUMS_URL"     -o "$TMPDIR/checksums.txt"
+  curl -fsSL "$CHECKSUMS_URL" -o "$TMPDIR/checksums.txt"
   curl -fsSL "$CHECKSUMS_SIG_URL" -o "$TMPDIR/checksums.txt.minisig"
 
   log "Verifying signature against Appstrate release key"
@@ -146,7 +146,7 @@ else
     cd "$TMPDIR"
     # Only the line for our asset matters — filtering keeps the tool
     # from failing on missing sibling binaries we didn't download.
-    grep " ${ASSET}\$" checksums.txt > checksums.local.txt
+    grep " ${ASSET}\$" checksums.txt >checksums.local.txt
     if have_sha256sum; then
       sha256sum -c --quiet checksums.local.txt
     elif have_shasum; then
