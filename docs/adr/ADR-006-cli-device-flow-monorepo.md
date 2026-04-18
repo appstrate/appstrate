@@ -65,9 +65,9 @@ When the CLI **is** in the platform language AND the platform is open-source, th
 
 An official CLI, `appstrate`, distributed as:
 
-- An npm package `@appstrate/cli` (installable via `bunx @appstrate/cli …`).
+- An npm package `appstrate` (installable via `bunx appstrate …`).
 - Standalone single-binary builds for `linux-x64`, `linux-arm64`, `darwin-x64`, and `darwin-arm64`, produced by `bun build --compile --target=<target>` and attached to GitHub Releases. **Windows (`win32-x64`) is deliberately out of scope for v1** — the 2026 dev-tool baseline (Supabase, Railway, Fly, Neon, Wrangler) is WSL2 on Windows, which reuses the `linux-x64` binary. Shipping a native Windows build would double the `install` / `login` manual-test surface (Docker Desktop paths, CRLF line endings, Credential Manager quirks) for a user segment that is already well-served via WSL2. A native Windows binary can be added post-v1 by appending a `windows-latest` row to the release matrix if demand warrants.
-- A refactored `https://get.appstrate.dev` shell one-liner that detects OS/arch, downloads the matching binary to `/usr/local/bin/appstrate`, and chains into `appstrate install`. Windows users run the one-liner inside a WSL2 shell, or invoke `bunx @appstrate/cli install` natively if they already have Bun on Windows.
+- A refactored `https://get.appstrate.dev` shell one-liner that detects OS/arch, downloads the matching binary to `/usr/local/bin/appstrate`, and chains into `appstrate install`. Windows users run the one-liner inside a WSL2 shell, or invoke `bunx appstrate install` natively if they already have Bun on Windows.
 
 Version number tracks the platform release train (lockstep).
 

@@ -1,4 +1,4 @@
-name: Publish @appstrate/cli to npm
+name: Publish appstrate CLI to npm
 
 # The CLI keeps `version: "0.0.0"` in the repo as a dev-build sentinel
 # (see `apps/cli/src/lib/version.ts::DEV_CLI_VERSION`). This workflow
@@ -69,27 +69,30 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
           mv package.json.tmp package.json
-          echo "Publishing @appstrate/cli@$VERSION"
+          echo "Publishing appstrate@$VERSION"
           jq '.version' package.json
 
       - name: Pre-publish smoke test (pack + install + run locally)
         # Build the tarball with `npm pack` (triggers `prepack` →
         # `bun run build`), install it into a throwaway directory, and
         # invoke the bin. This mirrors exactly what a consumer gets from
-        # `bunx @appstrate/cli`. If the bundle is broken or missing
+        # `bunx appstrate`. If the bundle is broken or missing
         # inlined assets (the #175 regression), we fail BEFORE polluting
         # the npm registry — unlike a post-publish smoke test, this
         # failure mode is recoverable without `npm deprecate`.
         run: |
           npm pack
-          TARBALL="$(ls appstrate-cli-*.tgz | head -1)"
+          # `npm pack` names the tarball `<package>-<version>.tgz` deterministically;
+          # constructing the path is safer than globbing (shellcheck SC2012).
+          TARBALL="appstrate-${{ steps.version.outputs.version }}.tgz"
           WORK="$(mktemp -d)"
           (cd "$WORK" && npm init -y >/dev/null && npm install "${GITHUB_WORKSPACE}/apps/cli/$TARBALL")
           "$WORK/node_modules/.bin/appstrate" --help
           rm -rf "$WORK" "$TARBALL" dist
 
       - name: Publish to npm
-        run: npm publish --access public --provenance
+        # Unscoped packages are public by default — no `--access public` needed.
+        run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -99,7 +102,7 @@ jobs:
         # npm registry metadata is wrong (bin field dropped, etc).
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          bunx -y "@appstrate/cli@${VERSION}" --help
+          bunx -y "appstrate@${VERSION}" --help
 
       - name: Create GitHub Release
         if: github.event_name == 'push'

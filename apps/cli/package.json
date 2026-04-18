@@ -1,5 +1,5 @@
 {
-  "name": "@appstrate/cli",
+  "name": "appstrate",
   "version": "0.0.0",
   "description": "Official CLI for Appstrate — install, login, and manage your instance",
   "license": "Apache-2.0",
@@ -8,7 +8,6 @@
     "bun": ">=1.3.9"
   },
   "publishConfig": {
-    "access": "public",
     "provenance": true
   },
   "author": "Appstrate <hello@appstrate.dev>",

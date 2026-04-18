@@ -18,7 +18,7 @@
  * literal.
  *
  * The 0.0.0 release on npm was broken because it shipped raw `src/` and
- * `bunx @appstrate/cli --help` exploded with:
+ * `bunx appstrate --help` exploded with:
  *
  *   Cannot find module '../../../../../examples/self-hosting/docker-compose.tier1.yml'
  *
@@ -29,7 +29,7 @@
  *      templates — if any tier is missing, YAML inlining regressed.
  *   4. Spawns the bundle with `--help` and asserts it prints usage.
  *
- * If this test breaks, `bunx @appstrate/cli` will break for users. Do
+ * If this test breaks, `bunx appstrate` will break for users. Do
  * not skip or delete — fix the underlying cause.
  */
 
