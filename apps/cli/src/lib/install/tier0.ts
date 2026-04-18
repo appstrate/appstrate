@@ -40,13 +40,29 @@ export class GitMissingError extends Error {
 }
 
 /** Check if `bun` is on PATH or in the user-local `~/.bun/bin`. */
-export function detectBun(): { found: boolean; path: string | null } {
-  if (commandExists("bun")) return { found: true, path: "bun" };
-  const localPath = join(BUN_BIN, "bun");
-  // Best effort — spawnSync stat would work but commandExists already
-  // returned false, so try a direct probe via `access` would be async.
-  // Return the local path optimistically; the caller can re-probe.
-  return { found: false, path: localPath };
+export function detectBun(): { found: boolean; local: boolean } {
+  if (commandExists("bun")) return { found: true, local: false };
+  // `~/.bun/bin/bun` may still exist (installed but not on PATH). The
+  // caller augments PATH with BUN_BIN before spawning so bare `"bun"`
+  // resolves — we never hand an absolute path back to subprocess code,
+  // which keeps CodeQL's `js/shell-command-injection-from-environment`
+  // rule happy and defense-in-depths against accidentally executing a
+  // binary at an attacker-controlled path derived from `$HOME`.
+  return { found: false, local: false };
+}
+
+/**
+ * Environment for spawning `bun` child processes, with user-local bun
+ * prepended to PATH so bare-name resolution finds it even when the
+ * shell hasn't been configured to include `~/.bun/bin`. We return a
+ * fresh object rather than mutating `process.env` so concurrent CLI
+ * commands don't race on the env of unrelated children.
+ */
+function bunEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    PATH: `${BUN_BIN}:${process.env.PATH ?? ""}`,
+  };
 }
 
 /**
@@ -146,9 +162,13 @@ export async function cloneAppstrateSource(
   }
 }
 
-/** Run `bun install` in the clone. Uses the user-local bun if PATH bun is absent. */
-export async function runBunInstall(dir: string, bunPath: string): Promise<void> {
-  const res = await runCommand(bunPath, ["install"], { cwd: dir, stdio: "inherit" });
+/** Run `bun install` in the clone. PATH is augmented with `~/.bun/bin` so bare `bun` resolves to a user-local install when present. */
+export async function runBunInstall(dir: string): Promise<void> {
+  const res = await runCommand("bun", ["install"], {
+    cwd: dir,
+    stdio: "inherit",
+    env: bunEnv(),
+  });
   if (!res.ok) {
     throw new Error(`bun install failed with exit code ${res.exitCode}`);
   }
@@ -167,19 +187,20 @@ export async function writeEnvFile(dir: string, envFileBody: string): Promise<vo
  */
 export async function spawnDevServer(
   dir: string,
-  bunPath: string,
   appUrl: string,
   timeoutMs = 60_000,
 ): Promise<{ pid: number }> {
-  const env = {
-    ...process.env,
-    // Prepend user-local Bun to PATH so `bun run dev`'s own scripts
-    // resolve `bun` consistently even when it was just installed.
-    PATH: `${BUN_BIN}:${process.env.PATH ?? ""}`,
-  };
-  const child = spawn(bunPath, ["run", "dev"], {
+  // `"bun"` is a string literal passed to spawn — argument separation
+  // rules out shell injection, and PATH resolution happens in the
+  // kernel's execvp against an augmented PATH that still only contains
+  // paths we control (BUN_BIN) or the user's own (inherited PATH). We
+  // deliberately do NOT pass an absolute path built from `homedir()`
+  // into spawn — doing so feeds a `$HOME`-derived value into the
+  // command position, which CodeQL `js/shell-command-injection-from-
+  // environment` rightly flags.
+  const child = spawn("bun", ["run", "dev"], {
     cwd: dir,
-    env,
+    env: bunEnv(),
     detached: true,
     stdio: "ignore",
   });

@@ -118,7 +118,11 @@ export async function resolveDir(raw: string | undefined): Promise<string> {
 
 async function installTier0(dir: string): Promise<void> {
   // Bun — either already present, or install it via the upstream script.
-  let bun = detectBun();
+  // We only care whether a working Bun is reachable; the actual path
+  // resolution happens inside `runBunInstall` / `spawnDevServer` via
+  // `bunEnv()`, which prepends `~/.bun/bin` to PATH so the just-installed
+  // copy is picked up by a bare `spawn("bun", ...)`.
+  const bun = detectBun();
   if (!bun.found) {
     const proceed = await confirm(
       "Bun is not installed. Install it now via `curl https://bun.sh/install | bash`?",
@@ -130,9 +134,10 @@ async function installTier0(dir: string): Promise<void> {
     bunSpinner.start("Installing Bun");
     await installBun();
     bunSpinner.stop("Bun installed");
-    bun = detectBun();
+    // No re-probe: `installBun()` placed the binary at `~/.bun/bin/bun`
+    // and verified it via `access()`. Downstream spawns PATH-resolve
+    // through `bunEnv()`, which includes BUN_BIN.
   }
-  const bunPath = bun.path ?? "bun";
 
   // Source. Use the CLI's own version as the tag — lockstep-versioned
   // per ADR-006, so the cloned source matches exactly what this binary
@@ -149,7 +154,7 @@ async function installTier0(dir: string): Promise<void> {
   // Dependencies.
   const installSpinner = spinner();
   installSpinner.start("Installing dependencies");
-  await runBunInstall(dir, bunPath);
+  await runBunInstall(dir);
   installSpinner.stop("Dependencies installed");
 
   // `.env`.
@@ -160,14 +165,14 @@ async function installTier0(dir: string): Promise<void> {
   const shouldStart = await confirm("Start the dev server now?");
   if (!shouldStart) {
     outro(
-      `Ready. Start it later with:\n\n  cd ${dir}\n  ${bunPath} run dev\n\nOpen http://localhost:3000 once it boots.`,
+      `Ready. Start it later with:\n\n  cd ${dir}\n  bun run dev\n\nOpen http://localhost:3000 once it boots.`,
     );
     return;
   }
 
   const devSpinner = spinner();
   devSpinner.start("Starting dev server");
-  const { pid } = await spawnDevServer(dir, bunPath, DEFAULT_APP_URL);
+  const { pid } = await spawnDevServer(dir, DEFAULT_APP_URL);
   devSpinner.stop(`Dev server running (pid ${pid})`);
 
   await openBrowser(DEFAULT_APP_URL);

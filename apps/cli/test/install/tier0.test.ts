@@ -20,7 +20,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm, writeFile, chmod, stat, readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
-import { detectBun, writeEnvFile, GitMissingError, BUN_BIN } from "../../src/lib/install/tier0.ts";
+import { detectBun, writeEnvFile, GitMissingError } from "../../src/lib/install/tier0.ts";
 
 let workDir: string;
 const originalPath = process.env.PATH;
@@ -46,21 +46,21 @@ describe("detectBun", () => {
     process.env.PATH = `${shimDir}:${originalPath}`;
     const res = detectBun();
     expect(res.found).toBe(true);
-    expect(res.path).toBe("bun");
+    expect(res.local).toBe(false);
   });
 
-  it("always returns a usable path string (never null/empty), even when bun is absent", () => {
-    // Contract: the caller treats `path` as a last-resort exec target
-    // when `found` is false, so it must always be a non-empty string.
-    // We don't try to force "bun missing" here — PATH manipulation in
-    // Bun subprocesses is unreliable across platforms, and integration
-    // CI covers the real "no bun" path end-to-end.
+  it("returns a boolean shape (no absolute path leaks back to callers)", () => {
+    // Contract: `detectBun` only reports whether bun is findable via
+    // spawn("bun") with the CLI-augmented PATH. It intentionally does
+    // NOT hand back a `$HOME`-derived absolute path — that was the
+    // dataflow CodeQL's `js/shell-command-injection-from-environment`
+    // traced through to spawn(). Callers must rely on `"bun"` +
+    // PATH-augmented env instead.
     const res = detectBun();
-    expect(typeof res.path).toBe("string");
-    expect((res.path ?? "").length).toBeGreaterThan(0);
-    // When bun is NOT on PATH, the fallback is ~/.bun/bin/bun; when it
-    // IS on PATH we return the string "bun". Both are valid.
-    expect(res.path === "bun" || res.path === join(BUN_BIN, "bun")).toBe(true);
+    expect(typeof res.found).toBe("boolean");
+    expect(typeof res.local).toBe("boolean");
+    // @ts-expect-error — `path` was removed in the CodeQL-hardening refactor.
+    expect(res.path).toBeUndefined();
   });
 });
 
@@ -76,7 +76,7 @@ describe("writeEnvFile", () => {
     if (platform() === "win32") return;
     await writeEnvFile(workDir, "BETTER_AUTH_SECRET=x\n");
     const s = await stat(join(workDir, ".env"));
-     
+
     expect(s.mode & 0o777).toBe(0o600);
   });
 
