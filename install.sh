@@ -77,12 +77,12 @@ _appstrate_bootstrap() {
   esac
 
   # Default version pinned by `publish-installer.yml` at publish time —
-  # rewriting `v1.0.0-alpha.61` so `curl get.appstrate.dev | bash`
+  # rewriting `v1.0.0-alpha.62` so `curl get.appstrate.dev | bash`
   # downloads the binary matching the release that published this script.
   # Users can override via APPSTRATE_VERSION env var (e.g. to pin an older
   # release). When the placeholder is still present (local dev / unrendered
   # copy), fall back to `latest` so the script stays runnable out of tree.
-  _DEFAULT_VERSION="v1.0.0-alpha.61"
+  _DEFAULT_VERSION="v1.0.0-alpha.62"
   if [[ "$_DEFAULT_VERSION" == __* ]]; then _DEFAULT_VERSION="latest"; fi
   VERSION="${APPSTRATE_VERSION:-$_DEFAULT_VERSION}"
   # Rootless default: install into $HOME/.local/bin (XDG user-space equivalent
@@ -367,6 +367,17 @@ _appstrate_bootstrap() {
     log "Restart your shell to pick up the new PATH."
   fi
 
+  # APPSTRATE_NO_LAUNCH=1 drops the binary and stops, leaving the user in
+  # control of the next step (e.g. run `appstrate install` interactively
+  # once the Bun macOS setRawMode regression in #199 is fixed, or chain
+  # the binary into their own tooling). Same pattern as rustup's
+  # `--no-modify-path` + skip-default-toolchain combo used for scripted
+  # provisioning where install is a separate concern.
+  if [ "${APPSTRATE_NO_LAUNCH:-0}" = "1" ]; then
+    log "APPSTRATE_NO_LAUNCH=1: skipping \`appstrate install\`. Binary ready at $DEST."
+    exit 0
+  fi
+
   log "Launching \`appstrate install\`"
   # Exec by absolute path, NOT by `appstrate` on PATH. A different
   # `appstrate` binary earlier in PATH (dev machine with `bun link`,
@@ -374,32 +385,34 @@ _appstrate_bootstrap() {
   # would silently shadow the one we just verified — defeating the
   # whole trust chain. `$DEST` is the exact file we wrote + chmod'd.
   #
-  # Reopen stdin from the controlling terminal before exec'ing the CLI.
-  # Under `curl … | bash`, bash's stdin is the pipe from curl; once the
-  # download is done the pipe is closed, and `exec` inherits that closed
-  # pipe as stdin. `appstrate install` is interactive (`@clack/prompts`
-  # for tier + directory), so it would die silently (SIGKILL'd by the
-  # shell) with no prompt ever shown. Redirecting stdin to /dev/tty is
-  # the same pattern used by rustup-init, bun, deno, and Homebrew. The
-  # `$@` forwarding is preserved — redirections come before argv.
+  # Always pass `--yes` so the CLI never enters `@clack/prompts` raw
+  # mode. See #199: a `bun build --compile` binary on macOS hangs in the
+  # tier select because Bun's runtime fails to deliver keypress events
+  # via the kqueue/poll path on fd 0 (family of oven-sh/bun issues
+  # #6862, #7033, #24615, #5240, #14483 — some closed, some open, the
+  # bug regularly reappears). Zero prompts = zero `setRawMode` = the bug
+  # is bypassed by construction, independent of upstream fix status.
+  # Per-field flags the user forwards via `-s -- --tier 1 --dir ~/foo`
+  # still win: --yes only supplies defaults for fields the user did not
+  # specify (Docker-aware tier, DEFAULT_INSTALL_DIR, auto-start). A user
+  # who genuinely wants the interactive prompts can run
+  # `appstrate install` directly after bootstrap drops the binary (see
+  # APPSTRATE_NO_LAUNCH=1 above).
   #
-  # Detection: `[ -r /dev/tty ]` only checks permission bits (world-
-  # readable on Linux: `crw-rw-rw-`), not whether this process has a
-  # controlling terminal. In CI / command substitutions the permission
-  # check passes but `open("/dev/tty")` still returns ENXIO, which would
-  # make the `exec </dev/tty …` below fail and kill the install. So we
-  # *actually* try to open /dev/tty in a subshell — if that succeeds,
-  # the redirect on the real exec will succeed too.
-  if (exec </dev/tty) >/dev/null 2>&1; then
-    exec </dev/tty "$DEST" install "$@"
-  else
-    # No controlling terminal (CI, Dockerfile `RUN curl | bash`, cron).
-    # Exec without the redirect and let the CLI surface a clear "stdin
-    # is not a TTY, pass --tier N" error instead of being SIGKILL'd.
-    # The CLI already supports `--tier` as a non-interactive escape
-    # hatch (see `apps/cli/src/commands/install.ts`).
-    exec "$DEST" install "$@"
-  fi
+  # We deliberately DO NOT redirect stdin from `/dev/tty`. Previous
+  # revisions did (matching rustup / bun / deno bootstrap patterns) to
+  # reopen a readable stdin under `curl | bash`. With `--yes` no prompt
+  # fires, so the redirect is unnecessary — and on macOS the
+  # `exec </dev/tty "$DEST"` combo triggers a second Bun runtime bug
+  # (`EINVAL: invalid argument, kqueue`) when the CLI later spawns
+  # subprocesses (`bun run dev`, `docker compose up`). The crash is
+  # orthogonal to the setRawMode regression: it manifests AFTER `--yes`
+  # has correctly skipped every prompt, killing the install mid-flow.
+  # Dropping the redirect eliminates both bugs with one change and
+  # keeps the contract tight — if a prompt is ever reintroduced on this
+  # path, the "stdin is not a TTY" guard in `resolveTier`/`resolveDir`
+  # fails loud instead of hanging.
+  exec "$DEST" install --yes "$@"
 
 }
 
