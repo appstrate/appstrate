@@ -97,8 +97,19 @@ function buildPlatformServices(): PlatformServices {
     applications: { getDefault: getDefaultApplication },
     connections: { listAllForActor: listAllActorConnections },
     runs: {
-      appendLog: appendRunLog,
-      update: updateRun,
+      // Adapter: positional args internally, object args at the public boundary
+      // so the published contract is non-breaking when fields are added.
+      appendLog: (a) =>
+        appendRunLog(
+          a.runId,
+          a.orgId,
+          a.type,
+          a.event ?? null,
+          a.message ?? null,
+          a.data ?? null,
+          a.level,
+        ),
+      update: (a) => updateRun(a.runId, a.orgId, a.applicationId, a.updates),
       abort: abortRun,
     },
     inline: { preflight: runInlinePreflight },

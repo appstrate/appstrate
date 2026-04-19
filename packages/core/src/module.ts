@@ -571,19 +571,30 @@ export interface PlatformServices {
     /** Returns `{ providers: [...] }` — not a bare array. */
     listAllForActor(actor: Actor): Promise<{ providers: PlatformConnectionProviderGroup[] }>;
   };
-  /** Run lifecycle operations (append log, update, abort). */
+  /**
+   * Run lifecycle operations (append log, update, abort).
+   *
+   * `appendLog` / `update` take a single args object so future fields are
+   * non-breaking and the three id parameters (`runId` / `orgId` /
+   * `applicationId`) cannot be silently swapped at the call site.
+   */
   runs: {
     /** Returns the inserted log row id. */
-    appendLog(
-      runId: string,
-      orgId: string,
-      type: string,
-      event: string | null,
-      message: string | null,
-      data: Record<string, unknown> | null,
-      level?: RunLogLevel,
-    ): Promise<number>;
-    update(id: string, orgId: string, applicationId: string, updates: RunUpdate): Promise<void>;
+    appendLog(args: {
+      runId: string;
+      orgId: string;
+      type: string;
+      event?: string | null;
+      message?: string | null;
+      data?: Record<string, unknown> | null;
+      level?: RunLogLevel;
+    }): Promise<number>;
+    update(args: {
+      runId: string;
+      orgId: string;
+      applicationId: string;
+      updates: RunUpdate;
+    }): Promise<void>;
     abort(runId: string): void;
   };
   /**
