@@ -4,14 +4,11 @@
  * Unit tests for `commands/logout.ts`.
  *
  * Contract we care about:
- *   1. 2.x profiles (with a stored refresh token) MUST call
- *      `POST /api/auth/cli/revoke` so the refresh-token family is
- *      invalidated server-side. Otherwise a stolen keyring export
- *      would still be usable against the server after "logout".
- *   2. Legacy 1.x profiles (no stored refresh token) fall back to the
- *      original `POST /api/auth/sign-out` path so upgrade users can
- *      cleanly sign out without first re-authenticating.
- *   3. If the server is unreachable or returns a non-200, the local
+ *   1. Profiles MUST call `POST /api/auth/cli/revoke` so the
+ *      refresh-token family is invalidated server-side. Otherwise a
+ *      stolen keyring export would still be usable against the server
+ *      after "logout".
+ *   2. If the server is unreachable or returns a non-200, the local
  *      cleanup must still complete. A network partition must not leave
  *      the user locally logged in.
  */
@@ -104,7 +101,7 @@ afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true });
 });
 
-async function seedLoggedInProfile2x(name: string): Promise<void> {
+async function seedLoggedInProfile(name: string): Promise<void> {
   await setProfile(name, {
     instance: "https://app.example.com",
     userId: "u_1",
@@ -118,22 +115,9 @@ async function seedLoggedInProfile2x(name: string): Promise<void> {
   });
 }
 
-async function seedLoggedInProfileLegacy(name: string): Promise<void> {
-  // Legacy 1.x payload: access token only, no refresh token (pre-#165).
-  await setProfile(name, {
-    instance: "https://app.example.com",
-    userId: "u_1",
-    email: "a@example.com",
-  });
-  await saveTokens(name, {
-    accessToken: "tok-abc",
-    expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-  });
-}
-
-describe("logout (2.x — with refresh token, issue #165)", () => {
+describe("logout (with refresh token)", () => {
   it("calls POST /api/auth/cli/revoke with refresh_token + client_id, then wipes state", async () => {
-    await seedLoggedInProfile2x("default");
+    await seedLoggedInProfile("default");
     installFetch(async () => new Response(JSON.stringify({ revoked: true }), { status: 200 }));
 
     await logoutCommand({ profile: "default" });
@@ -155,7 +139,7 @@ describe("logout (2.x — with refresh token, issue #165)", () => {
   });
 
   it("still wipes local state when /cli/revoke fails (network error)", async () => {
-    await seedLoggedInProfile2x("default");
+    await seedLoggedInProfile("default");
     installFetch(async () => {
       throw new TypeError("fetch failed");
     });
@@ -168,7 +152,7 @@ describe("logout (2.x — with refresh token, issue #165)", () => {
   });
 
   it("still wipes local state when /cli/revoke returns 500", async () => {
-    await seedLoggedInProfile2x("default");
+    await seedLoggedInProfile("default");
     installFetch(async () => new Response("oops", { status: 500 }));
 
     await logoutCommand({ profile: "default" });
@@ -178,7 +162,7 @@ describe("logout (2.x — with refresh token, issue #165)", () => {
   });
 
   it("still wipes local state when /cli/revoke returns 401 (already revoked)", async () => {
-    await seedLoggedInProfile2x("default");
+    await seedLoggedInProfile("default");
     installFetch(
       async () =>
         new Response(JSON.stringify({ error: "invalid_client" }), {
@@ -190,56 +174,6 @@ describe("logout (2.x — with refresh token, issue #165)", () => {
     await logoutCommand({ profile: "default" });
 
     // The 401 branch is benign — warn-and-continue.
-    expect(await loadTokens("default")).toBeNull();
-    expect(await getProfile("default")).toBeNull();
-  });
-});
-
-describe("logout (legacy 1.x — no refresh token)", () => {
-  it("calls POST /api/auth/sign-out with the Bearer token (backward compat path)", async () => {
-    await seedLoggedInProfileLegacy("default");
-    installFetch(async () => new Response("", { status: 200 }));
-
-    await logoutCommand({ profile: "default" });
-
-    // Legacy fallback — same path 1.x used.
-    expect(fetchCalls).toHaveLength(1);
-    expect(fetchCalls[0]!.url).toBe("https://app.example.com/api/auth/sign-out");
-    expect(fetchCalls[0]!.method).toBe("POST");
-    expect(fetchCalls[0]!.auth).toBe("Bearer tok-abc");
-
-    expect(await loadTokens("default")).toBeNull();
-    expect(await getProfile("default")).toBeNull();
-  });
-
-  it("treats 401 from /api/auth/sign-out as 'already revoked' without warning", async () => {
-    await seedLoggedInProfileLegacy("default");
-    installFetch(async () => new Response("", { status: 401 }));
-
-    await logoutCommand({ profile: "default" });
-
-    expect(await loadTokens("default")).toBeNull();
-    expect(await getProfile("default")).toBeNull();
-  });
-
-  it("still wipes local state when /api/auth/sign-out returns 500", async () => {
-    await seedLoggedInProfileLegacy("default");
-    installFetch(async () => new Response("", { status: 500 }));
-
-    await logoutCommand({ profile: "default" });
-
-    expect(await loadTokens("default")).toBeNull();
-    expect(await getProfile("default")).toBeNull();
-  });
-
-  it("still wipes local state when the server is unreachable (legacy path)", async () => {
-    await seedLoggedInProfileLegacy("default");
-    installFetch(async () => {
-      throw new TypeError("fetch failed");
-    });
-
-    await logoutCommand({ profile: "default" });
-
     expect(await loadTokens("default")).toBeNull();
     expect(await getProfile("default")).toBeNull();
   });

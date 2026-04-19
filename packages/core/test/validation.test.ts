@@ -743,27 +743,6 @@ describe("buildProviderDefinitionFromManifest", () => {
     });
     expect(resolved.credentialFieldName).toBe("token");
   });
-
-  test("falls back to legacy flat definition.credentialFieldName", () => {
-    const resolved = buildProviderDefinitionFromManifest("@test/p", {
-      definition: {
-        authMode: "api_key",
-        credentialFieldName: "legacy_key",
-      },
-    });
-    expect(resolved.credentialFieldName).toBe("legacy_key");
-  });
-
-  test("nested canonical wins over legacy flat when both present", () => {
-    const resolved = buildProviderDefinitionFromManifest("@test/p", {
-      definition: {
-        authMode: "api_key",
-        credentials: { fieldName: "canonical" },
-        credentialFieldName: "legacy",
-      },
-    });
-    expect(resolved.credentialFieldName).toBe("canonical");
-  });
 });
 
 // ─────────────────────────────────────────────

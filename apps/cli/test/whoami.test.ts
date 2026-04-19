@@ -317,20 +317,21 @@ describe("whoami (happy path)", () => {
 describe("whoami (error paths)", () => {
   it("reports a re-login hint and exits 1 when the server returns 401", async () => {
     await seedLoggedInProfile("default");
-    // Legacy session (no refreshToken) avoids the reactive-refresh
-    // branch and routes the 401 straight into apiFetch's AuthError.
-    FakeKeyring.store.clear();
-    await saveTokens("default", {
-      accessToken: "tok-abc",
-      expiresAt: Date.now() + 15 * 60 * 1000,
-    });
-    installFetch(
-      async () =>
-        new Response(JSON.stringify({ error: "unauthorized" }), {
-          status: 401,
+    installFetch(async (url) => {
+      // /api/profile stays a 401; the reactive refresh also 401s with
+      // invalid_grant so doRefresh wipes credentials and the original
+      // 401 bubbles up as an AuthError.
+      if (url.includes("/api/auth/cli/token")) {
+        return new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
           headers: { "Content-Type": "application/json" },
-        }),
-    );
+        });
+      }
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
 
     let exitCode: number | undefined;
     try {

@@ -7,17 +7,11 @@
  *   - `/api/auth/device/code` to initiate (RFC 8628 §3.1).
  *   - `/api/auth/cli/token`   to poll / exchange (Appstrate #165).
  *
- * **Token shape change (issue #165)**: since v2.x we poll
- * `/api/auth/cli/token` (NOT `/api/auth/device/token`) and receive a
- * **signed JWT access token (15 min) + rotating opaque refresh token
- * (30 d)** instead of a 7-day Better Auth session. The same endpoint
- * also serves the silent-refresh grant (`grant_type=refresh_token`) so
- * the CLI can mint fresh access tokens without re-authenticating. The
- * protocol stays RFC 8628 — only the response shape widens with a
- * `refresh_token` field and the transport endpoint moves to a different
- * path. Legacy 1.x CLI binaries continue to work against the original
- * `/device/token` endpoint which the server keeps mounted for backward
- * compatibility.
+ * We poll `/api/auth/cli/token` and receive a **signed JWT access
+ * token (15 min) + rotating opaque refresh token (30 d)**. The same
+ * endpoint also serves the silent-refresh grant
+ * (`grant_type=refresh_token`) so the CLI can mint fresh access tokens
+ * without re-authenticating.
  *
  * Two entry points:
  *   - `startDeviceFlow(instance, clientId, scope)` → initial pair of
@@ -46,10 +40,9 @@ export interface DeviceTokenResponse {
   accessToken: string;
   /**
    * 30-day rotating refresh token issued by `/api/auth/cli/token`
-   * alongside the JWT access. `undefined` only on servers that still
-   * host the legacy `/device/token` handler — the CLI treats a
-   * missing refresh_token as an auth-protocol downgrade and surfaces
-   * it through `commands/login.ts`.
+   * alongside the JWT access. `undefined` when a non-conforming proxy
+   * stripped the field — the CLI treats a missing refresh_token as an
+   * auth-protocol downgrade and surfaces it through `commands/login.ts`.
    */
   refreshToken?: string;
   tokenType: string;
@@ -57,8 +50,8 @@ export interface DeviceTokenResponse {
   expiresIn: number;
   /**
    * Seconds until the refresh_token expires. `undefined` when the
-   * server did not issue a refresh token (legacy 1.x `/device/token`
-   * endpoint, or a non-conforming proxy stripped the field).
+   * server did not issue a refresh token (non-conforming proxy
+   * stripped the field).
    */
   refreshExpiresIn?: number;
   scope: string;
@@ -229,10 +222,6 @@ export async function pollDeviceFlow(
       throw new DeviceFlowError("access_denied", "Polling aborted by caller.", 0);
     }
 
-    // NOTE: `/api/auth/cli/token` replaces `/api/auth/device/token` for
-    // the 2.x CLI (issue #165). The new endpoint returns JWT + rotating
-    // refresh pair; the original stays mounted server-side for 1.x
-    // binaries but we never poll it from this branch.
     const res = await fetch(`${normalizeInstance(instance)}/api/auth/cli/token`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },

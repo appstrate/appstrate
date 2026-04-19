@@ -4,19 +4,13 @@
  * CLI → Appstrate API fetch wrapper.
  *
  * Authenticates by sending `Authorization: Bearer <jwt_access_token>`.
- * Since issue #165 the access token is a 15-minute ES256 JWT minted by
+ * The access token is a 15-minute ES256 JWT minted by
  * `/api/auth/cli/token`; the CLI silently rotates it via the stored
  * 30-day refresh token when:
  *
  *   - the access token is past (or within 30s of) its `expiresAt`
  *     BEFORE issuing the request (proactive refresh), OR
  *   - the request returns `401` (reactive refresh + single retry).
- *
- * Legacy 1.x credentials (no `refreshToken` on disk) skip both refresh
- * paths — the access token is sent as-is, and if the server rejects it
- * we surface an `AuthError` telling the user to re-run `appstrate
- * login`. This is the migration path called for by issue #165's
- * acceptance criteria.
  *
  * Inject `X-Org-Id` when the profile is pinned to a specific
  * organization — matches the dashboard SPA's header contract
@@ -152,8 +146,6 @@ async function resolveProfileOrThrow(profileName: string): Promise<Profile> {
  *
  * Failure modes:
  *   - No tokens stored → `AuthError` ("run appstrate login").
- *   - Access expired, no refresh token (legacy session) → `AuthError`
- *     with a migration-specific message.
  *   - Access expired, refresh token also expired → clears local
  *     credentials, `AuthError`.
  *   - Refresh call returns `invalid_grant` (revoked, rotated, reused)
@@ -215,16 +207,7 @@ async function resolveAccessToken(profileName: string, profile: Profile): Promis
 }
 
 async function doRefresh(profileName: string, profile: Profile, tokens: Tokens): Promise<string> {
-  if (!tokens.refreshToken) {
-    // Legacy 1.x session or malformed store — cannot rotate. Wipe so a
-    // subsequent invocation hits the "not logged in" branch instead of
-    // re-retrying the same doomed refresh.
-    await deleteTokens(profileName).catch(() => {});
-    throw new AuthError(
-      `Legacy session detected for profile "${profileName}" — 2.x auth requires a refresh token. Run: appstrate login --profile ${profileName}`,
-    );
-  }
-  if (tokens.refreshExpiresAt !== undefined && tokens.refreshExpiresAt <= Date.now()) {
+  if (tokens.refreshExpiresAt <= Date.now()) {
     await deleteTokens(profileName).catch(() => {});
     throw new AuthError(
       `Refresh token expired for profile "${profileName}". Run: appstrate login --profile ${profileName}`,
@@ -323,7 +306,7 @@ export async function apiFetchRaw(
   // rotated mid-request, or the server revoked the underlying session.
   // Try ONE rotation + retry; a second 401 is terminal.
   const stored = await loadTokens(profileName);
-  if (!stored || !stored.refreshToken) {
+  if (!stored) {
     return res;
   }
   // If a parallel caller already rotated the token between our initial

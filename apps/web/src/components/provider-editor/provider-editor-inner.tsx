@@ -30,7 +30,7 @@ import {
   metadataToManifestPatch,
   getManifestName,
 } from "../agent-editor/utils";
-import { writeCredentialsToDef, patchCredentialsInDef, migrateLegacyFieldName } from "./utils";
+import { writeCredentialsToDef, patchCredentialsInDef } from "./utils";
 import { SectionCard } from "../section-card";
 import { EditorShell } from "../editor-shell";
 import { ContentEditor } from "../package-editor/content-editor";
@@ -113,38 +113,31 @@ function normalizeProviderInitialState(initial: ProviderEditorState): {
   state: ProviderEditorState;
   credentialFields: SchemaField[];
 } {
-  // Migrate any legacy flat credentialFieldName into the canonical nested shape
-  // on load. Subsequent writes use patchCredentialsInDef.
-  const migratedDef = migrateLegacyFieldName(getDef(initial.manifest));
-  const migratedManifest = { ...initial.manifest, definition: migratedDef };
-  const migratedState: ProviderEditorState =
-    migratedDef === getDef(initial.manifest) ? initial : { ...initial, manifest: migratedManifest };
-
-  const def = migratedDef;
+  const def = getDef(initial.manifest);
   const authMode = (def.authMode as string) || "oauth2";
   const creds = def.credentials as { schema?: JSONSchemaObject } | undefined;
 
   if (!isCredentialMode(authMode)) {
-    return { state: migratedState, credentialFields: [] };
+    return { state: initial, credentialFields: [] };
   }
 
   if (creds?.schema) {
     return {
-      state: migratedState,
+      state: initial,
       credentialFields: schemaToFields(creds.schema, "credentials"),
     };
   }
 
   const seeded = makeDefaultCredentialFields(authMode);
   if (seeded.length === 0) {
-    return { state: migratedState, credentialFields: [] };
+    return { state: initial, credentialFields: [] };
   }
 
   return {
     state: {
-      ...migratedState,
+      ...initial,
       manifest: {
-        ...migratedState.manifest,
+        ...initial.manifest,
         definition: writeCredentialsToDef(def, seeded),
       },
     },
@@ -914,11 +907,10 @@ export function ProviderEditorInner({ initialState, isEdit, packageId }: Provide
           key={jsonEditorKey}
           value={state.manifest}
           onApply={(manifest) => {
-            const migratedDef = migrateLegacyFieldName(getDef(manifest));
-            const canonical = { ...manifest, definition: migratedDef };
-            setState((s) => ({ ...s, manifest: canonical }));
-            // Sync credential fields from the migrated definition
-            const creds = migratedDef.credentials as { schema?: JSONSchemaObject } | undefined;
+            setState((s) => ({ ...s, manifest }));
+            // Sync credential fields from the applied definition
+            const def = getDef(manifest);
+            const creds = def.credentials as { schema?: JSONSchemaObject } | undefined;
             setCredentialFields(creds?.schema ? schemaToFields(creds.schema, "credentials") : []);
             setActiveTab("general");
           }}

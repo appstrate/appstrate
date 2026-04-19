@@ -242,19 +242,20 @@ describe("openapi list", () => {
 
   it("exits 1 with an actionable error when the server returns 401", async () => {
     await seedLoggedInProfile();
-    // Drop refresh token so the 401 is terminal
-    FakeKeyring.store.clear();
-    await saveTokens("default", {
-      accessToken: "tok-abc",
-      expiresAt: Date.now() + 15 * 60 * 1000,
-    });
-    installFetch(
-      async () =>
-        new Response(JSON.stringify({ error: "unauth" }), {
-          status: 401,
+    installFetch(async (url) => {
+      // Reactive refresh also fails → doRefresh wipes credentials and
+      // the original 401 bubbles up through apiFetch as an AuthError.
+      if (url.includes("/api/auth/cli/token")) {
+        return new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
           headers: { "Content-Type": "application/json" },
-        }),
-    );
+        });
+      }
+      return new Response(JSON.stringify({ error: "unauth" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
     let code: number | undefined;
     try {
       await openapiListCommand({ profile: "default" });

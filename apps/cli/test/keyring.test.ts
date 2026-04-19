@@ -21,7 +21,36 @@ import {
   _setKeyringFactoryForTesting,
   _shouldRefuseWindowsFallback,
   type KeyringHandle,
+  type Tokens,
 } from "../src/lib/keyring.ts";
+
+/**
+ * Tests that don't care about refresh-token mechanics use this helper
+ * to fill in the mandatory refresh fields. `refreshExpiresAt` defaults
+ * to ~1h in the future so `loadTokens` doesn't auto-scrub the entry.
+ * Pass a past `refreshExpiresAt` to deliberately exercise the scrub.
+ */
+function mkTokens(partial: {
+  accessToken: string;
+  expiresAt: number;
+  refreshExpiresAt?: number;
+}): Tokens {
+  return {
+    accessToken: partial.accessToken,
+    expiresAt: partial.expiresAt,
+    refreshToken: "rt-" + partial.accessToken,
+    refreshExpiresAt: partial.refreshExpiresAt ?? Date.now() + 3_600_000,
+  };
+}
+
+/** Build a JSON string of a full token payload for raw FakeKeyring.store.set seeds. */
+function mkTokensJson(partial: {
+  accessToken: string;
+  expiresAt: number;
+  refreshExpiresAt?: number;
+}): string {
+  return JSON.stringify(mkTokens(partial));
+}
 
 // In-memory keyring backend + a toggle to simulate a failing daemon.
 // `throwMessage` defaults to the napi-rs/keyring error surfaced when no
@@ -94,22 +123,23 @@ afterEach(async () => {
 describe("keyring happy path", () => {
   it("round-trips tokens through the keyring", async () => {
     const exp = futureMs();
-    await saveTokens("default", { accessToken: "t1", expiresAt: exp });
+    const toks = mkTokens({ accessToken: "t1", expiresAt: exp });
+    await saveTokens("default", toks);
     const read = await loadTokens("default");
-    expect(read).toEqual({ accessToken: "t1", expiresAt: exp });
+    expect(read).toEqual(toks);
   });
 
   it("scopes entries by profile name", async () => {
-    const expProd = futureMs(1);
-    const expDev = futureMs(2);
-    await saveTokens("prod", { accessToken: "prod-t", expiresAt: expProd });
-    await saveTokens("dev", { accessToken: "dev-t", expiresAt: expDev });
-    expect(await loadTokens("prod")).toEqual({ accessToken: "prod-t", expiresAt: expProd });
-    expect(await loadTokens("dev")).toEqual({ accessToken: "dev-t", expiresAt: expDev });
+    const prodToks = mkTokens({ accessToken: "prod-t", expiresAt: futureMs(1) });
+    const devToks = mkTokens({ accessToken: "dev-t", expiresAt: futureMs(2) });
+    await saveTokens("prod", prodToks);
+    await saveTokens("dev", devToks);
+    expect(await loadTokens("prod")).toEqual(prodToks);
+    expect(await loadTokens("dev")).toEqual(devToks);
   });
 
   it("deletes tokens", async () => {
-    await saveTokens("default", { accessToken: "t", expiresAt: futureMs() });
+    await saveTokens("default", mkTokens({ accessToken: "t", expiresAt: futureMs() }));
     await deleteTokens("default");
     expect(await loadTokens("default")).toBeNull();
   });
@@ -122,36 +152,32 @@ describe("keyring happy path", () => {
 describe("keyring fallback path (daemon unavailable)", () => {
   it("falls back to the file when setPassword throws", async () => {
     FakeKeyring.shouldThrow = true;
-    await saveTokens("default", { accessToken: "t-fallback", expiresAt: 99 });
+    const toks = mkTokens({ accessToken: "t-fallback", expiresAt: futureMs() });
+    await saveTokens("default", toks);
     // File must now hold the tokens.
     const { readFile } = await import("node:fs/promises");
     const raw = await readFile(credentialsPath(), "utf-8");
-    expect(JSON.parse(raw)).toEqual({
-      default: { accessToken: "t-fallback", expiresAt: 99 },
-    });
+    expect(JSON.parse(raw)).toEqual({ default: toks });
   });
 
   it("loadTokens recovers from the file when keyring throws", async () => {
     // First write via keyring (working), then flip to failing backend —
     // simulates `/tmp`-based container setups where the agent could read
     // at boot but now cannot hit the daemon.
-    await saveTokens("default", { accessToken: "t-real", expiresAt: futureMs() });
+    await saveTokens("default", mkTokens({ accessToken: "t-real", expiresAt: futureMs() }));
     FakeKeyring.shouldThrow = true;
     // Keyring store is gone (we just flipped to a throwing backend) but
     // the file has nothing either — so load returns null.
     expect(await loadTokens("default")).toBeNull();
     // Now write through fallback + read through fallback works.
-    const exp = futureMs(2);
-    await saveTokens("default", { accessToken: "t-fallback", expiresAt: exp });
-    expect(await loadTokens("default")).toEqual({
-      accessToken: "t-fallback",
-      expiresAt: exp,
-    });
+    const toks = mkTokens({ accessToken: "t-fallback", expiresAt: futureMs(2) });
+    await saveTokens("default", toks);
+    expect(await loadTokens("default")).toEqual(toks);
   });
 
   it("writes the fallback file with 0600 permissions", async () => {
     FakeKeyring.shouldThrow = true;
-    await saveTokens("default", { accessToken: "t", expiresAt: 1 });
+    await saveTokens("default", mkTokens({ accessToken: "t", expiresAt: futureMs() }));
     const { stat } = await import("node:fs/promises");
     const s = await stat(credentialsPath());
     expect(s.mode & 0o777).toBe(0o600);
@@ -159,7 +185,7 @@ describe("keyring fallback path (daemon unavailable)", () => {
 
   it("deleteTokens removes the file when it was the last profile", async () => {
     FakeKeyring.shouldThrow = true;
-    await saveTokens("only", { accessToken: "t", expiresAt: 1 });
+    await saveTokens("only", mkTokens({ accessToken: "t", expiresAt: futureMs() }));
     await deleteTokens("only");
     const { access } = await import("node:fs/promises");
     await expect(access(credentialsPath())).rejects.toBeDefined();
@@ -167,12 +193,13 @@ describe("keyring fallback path (daemon unavailable)", () => {
 
   it("deleteTokens preserves other profiles in the fallback file", async () => {
     FakeKeyring.shouldThrow = true;
-    const expB = futureMs(2);
-    await saveTokens("a", { accessToken: "a-t", expiresAt: futureMs(1) });
-    await saveTokens("b", { accessToken: "b-t", expiresAt: expB });
+    const aToks = mkTokens({ accessToken: "a-t", expiresAt: futureMs(1) });
+    const bToks = mkTokens({ accessToken: "b-t", expiresAt: futureMs(2) });
+    await saveTokens("a", aToks);
+    await saveTokens("b", bToks);
     await deleteTokens("a");
     expect(await loadTokens("a")).toBeNull();
-    expect(await loadTokens("b")).toEqual({ accessToken: "b-t", expiresAt: expB });
+    expect(await loadTokens("b")).toEqual(bToks);
   });
 });
 
@@ -186,24 +213,24 @@ describe("concurrent writes via file fallback", () => {
     // must serialize the read-modify-write cycles — without it, later
     // writers clobber earlier profiles by overwriting a stale snapshot.
     const base = Date.now() + 3_600_000;
-    const saves = Array.from({ length: 10 }, (_, i) =>
-      saveTokens(`profile${i}`, { accessToken: `tok-${i}`, expiresAt: base + i }),
-    );
+    const toksByProfile = new Map<string, Tokens>();
+    const saves = Array.from({ length: 10 }, (_, i) => {
+      const t = mkTokens({ accessToken: `tok-${i}`, expiresAt: base + i });
+      toksByProfile.set(`profile${i}`, t);
+      return saveTokens(`profile${i}`, t);
+    });
     await Promise.all(saves);
 
     // Every profile must be readable — if the lock were absent, most of
     // these would return null because the last writer overwrote them.
     for (let i = 0; i < 10; i++) {
-      expect(await loadTokens(`profile${i}`)).toEqual({
-        accessToken: `tok-${i}`,
-        expiresAt: base + i,
-      });
+      expect(await loadTokens(`profile${i}`)).toEqual(toksByProfile.get(`profile${i}`)!);
     }
   });
 
   it("writes are atomic — no torn state on mid-write crash", async () => {
     // Seed an initial valid state.
-    await saveTokens("existing", { accessToken: "keep", expiresAt: 1 });
+    await saveTokens("existing", mkTokens({ accessToken: "keep", expiresAt: futureMs() }));
 
     // A crash between `writeFile(tmp)` and `rename(tmp, target)` would
     // leave `.tmp` files on disk but never a half-written target. We
@@ -212,7 +239,7 @@ describe("concurrent writes via file fallback", () => {
     // file parses cleanly as JSON with every previously-written profile
     // intact.
     for (let i = 0; i < 5; i++) {
-      await saveTokens(`p${i}`, { accessToken: `t${i}`, expiresAt: i });
+      await saveTokens(`p${i}`, mkTokens({ accessToken: `t${i}`, expiresAt: futureMs(100 + i) }));
       const { readFile } = await import("node:fs/promises");
       const raw = await readFile(credentialsPath(), "utf-8");
       const parsed = JSON.parse(raw) as Record<string, { accessToken: string }>;
@@ -261,9 +288,9 @@ describe("broken-keyring fallback refusal (unix)", () => {
   });
 
   it("refuses saveTokens when the daemon is broken and no opt-in is set", async () => {
-    await expect(saveTokens("default", { accessToken: "t", expiresAt: 1 })).rejects.toThrow(
-      /keyring is installed but not serving/,
-    );
+    await expect(
+      saveTokens("default", mkTokens({ accessToken: "t", expiresAt: futureMs() })),
+    ).rejects.toThrow(/keyring is installed but not serving/);
   });
 
   it("refuses loadTokens when the daemon is broken and no opt-in is set", async () => {
@@ -276,9 +303,9 @@ describe("broken-keyring fallback refusal (unix)", () => {
 
   it("allows the plaintext fallback when APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1", async () => {
     process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = "1";
-    const exp = futureMs();
-    await saveTokens("default", { accessToken: "t", expiresAt: exp });
-    expect(await loadTokens("default")).toEqual({ accessToken: "t", expiresAt: exp });
+    const toks = mkTokens({ accessToken: "t", expiresAt: futureMs() });
+    await saveTokens("default", toks);
+    expect(await loadTokens("default")).toEqual(toks);
   });
 
   it("still silent-falls-back on missing-backend (CI, stripped container)", async () => {
@@ -286,9 +313,9 @@ describe("broken-keyring fallback refusal (unix)", () => {
     // No opt-in env var. This is the bare-container / CI case — a
     // keyring is not expected, so falling back to 0600 file is the
     // documented behavior.
-    const exp = futureMs();
-    await saveTokens("default", { accessToken: "t", expiresAt: exp });
-    expect(await loadTokens("default")).toEqual({ accessToken: "t", expiresAt: exp });
+    const toks = mkTokens({ accessToken: "t", expiresAt: futureMs() });
+    await saveTokens("default", toks);
+    expect(await loadTokens("default")).toEqual(toks);
   });
 });
 
@@ -343,9 +370,11 @@ describe("fallback file: insecure-permission refusal", () => {
     const parent = join(tmpDir, "appstrate");
     await mkdir(parent, { recursive: true, mode: 0o700 });
     const target = credentialsPath();
-    await writeFile(target, JSON.stringify({ default: { accessToken: "x", expiresAt: 1 } }), {
-      mode: 0o644,
-    });
+    await writeFile(
+      target,
+      JSON.stringify({ default: mkTokens({ accessToken: "x", expiresAt: futureMs() }) }),
+      { mode: 0o644 },
+    );
     // On some umask configurations the mode in writeFile options is
     // masked; enforce it explicitly to make the test deterministic.
     await chmod(target, 0o644);
@@ -385,9 +414,9 @@ describe("fallback file: parent dir strict-mode refusal", () => {
     const preStat = await stat(parent);
     expect(preStat.mode & 0o777).toBe(0o755);
 
-    await expect(saveTokens("default", { accessToken: "t", expiresAt: 1 })).rejects.toThrow(
-      /insecure directory permissions/i,
-    );
+    await expect(
+      saveTokens("default", mkTokens({ accessToken: "t", expiresAt: futureMs() })),
+    ).rejects.toThrow(/insecure directory permissions/i);
   });
 
   ifUnix("refuses to load when the parent dir already exists with 0o755", async () => {
@@ -399,7 +428,7 @@ describe("fallback file: parent dir strict-mode refusal", () => {
     await mkdir(parent, { recursive: true, mode: 0o700 });
     await writeFile(
       credentialsPath(),
-      JSON.stringify({ default: { accessToken: "x", expiresAt: Date.now() + 60_000 } }),
+      JSON.stringify({ default: mkTokens({ accessToken: "x", expiresAt: futureMs() }) }),
       { mode: 0o600 },
     );
     await chmod(parent, 0o755);
@@ -425,17 +454,17 @@ describe("fallback file: parent dir strict-mode refusal", () => {
 });
 
 describe("loadTokens expiration handling", () => {
-  // Expired tokens must be treated as absent. The previous behavior
-  // (return whatever's stored) made every caller responsible for the
-  // expiration check — easy to forget, with the failure mode being
-  // "send an expired bearer header and get a 401 round-trip later".
-  // Returning null forces the caller to re-run `appstrate login`.
+  // A token row is "unrecoverably expired" — and therefore eligible for
+  // auto-scrub — only when `refreshExpiresAt` is in the past. The
+  // access token alone expiring is healthy (api.ts rotates it). We
+  // verify both the keyring and file paths scrub the dead row and that
+  // a fresh-refresh entry survives regardless of access-token state.
 
-  it("returns null for expired tokens via the keyring path and best-effort deletes", async () => {
+  it("returns null for refresh-expired tokens via the keyring path and best-effort deletes", async () => {
     const past = Date.now() - 1000;
     FakeKeyring.store.set(
       "default",
-      JSON.stringify({ accessToken: "expired-keyring", expiresAt: past }),
+      mkTokensJson({ accessToken: "expired-keyring", expiresAt: past, refreshExpiresAt: past }),
     );
     expect(FakeKeyring.store.has("default")).toBe(true);
 
@@ -444,17 +473,20 @@ describe("loadTokens expiration handling", () => {
     expect(FakeKeyring.store.has("default")).toBe(false);
   });
 
-  it("returns null for expired tokens via the file path and scrubs the profile", async () => {
+  it("returns null for refresh-expired tokens via the file path and scrubs the profile", async () => {
     FakeKeyring.shouldThrow = true; // route everything to the file fallback
     const past = Date.now() - 1000;
-    await saveTokens("default", { accessToken: "expired-file", expiresAt: past });
+    const expired = mkTokens({
+      accessToken: "expired-file",
+      expiresAt: past,
+      refreshExpiresAt: past,
+    });
+    await saveTokens("default", expired);
 
     // Sanity: file should currently hold the expired token.
     const { readFile } = await import("node:fs/promises");
     const before = await readFile(credentialsPath(), "utf-8");
-    expect(JSON.parse(before)).toEqual({
-      default: { accessToken: "expired-file", expiresAt: past },
-    });
+    expect(JSON.parse(before)).toEqual({ default: expired });
 
     expect(await loadTokens("default")).toBeNull();
 
@@ -465,30 +497,27 @@ describe("loadTokens expiration handling", () => {
     await expect(access(credentialsPath())).rejects.toBeDefined();
   });
 
-  it("returns tokens unchanged when expiresAt is in the future (keyring)", async () => {
-    const future = Date.now() + 60_000;
-    await saveTokens("default", { accessToken: "fresh", expiresAt: future });
-    expect(await loadTokens("default")).toEqual({ accessToken: "fresh", expiresAt: future });
+  it("returns tokens unchanged when refreshExpiresAt is in the future (keyring)", async () => {
+    const toks = mkTokens({ accessToken: "fresh", expiresAt: futureMs() });
+    await saveTokens("default", toks);
+    expect(await loadTokens("default")).toEqual(toks);
   });
 
-  it("returns tokens unchanged when expiresAt is in the future (file fallback)", async () => {
+  it("returns tokens unchanged when refreshExpiresAt is in the future (file fallback)", async () => {
     FakeKeyring.shouldThrow = true;
-    const future = Date.now() + 60_000;
-    await saveTokens("default", { accessToken: "fresh-file", expiresAt: future });
-    expect(await loadTokens("default")).toEqual({
-      accessToken: "fresh-file",
-      expiresAt: future,
-    });
+    const toks = mkTokens({ accessToken: "fresh-file", expiresAt: futureMs() });
+    await saveTokens("default", toks);
+    expect(await loadTokens("default")).toEqual(toks);
   });
 
-  it("treats exact-now expiresAt as expired (>= boundary, not >)", async () => {
-    // The boundary is `expiresAt <= Date.now()` — a token whose
-    // expiresAt equals the current millisecond is already invalid (the
-    // server would reject it on the next request anyway). Using a
-    // freshly-captured `now` and storing exactly that value verifies
-    // we picked `<=` not `<`.
+  it("treats exact-now refreshExpiresAt as expired (<= boundary, not <)", async () => {
+    // The boundary is `refreshExpiresAt <= Date.now()` — a token whose
+    // expiry equals the current millisecond is already invalid.
     const now = Date.now();
-    FakeKeyring.store.set("default", JSON.stringify({ accessToken: "boundary", expiresAt: now }));
+    FakeKeyring.store.set(
+      "default",
+      mkTokensJson({ accessToken: "boundary", expiresAt: now, refreshExpiresAt: now }),
+    );
     expect(await loadTokens("default")).toBeNull();
   });
 });
@@ -514,17 +543,15 @@ describe("classifyKeyringError after MISSING_BACKEND_MARKERS cleanup", () => {
     FakeKeyring.throwMessage = "Platform secure storage failure";
     // No APPSTRATE_ALLOW_PLAINTEXT_TOKENS — the missing-backend path
     // is the expected silent-fallback case (CI / stripped container).
-    await saveTokens("default", { accessToken: "ok", expiresAt: Date.now() + 60_000 });
-    expect(await loadTokens("default")).toEqual({
-      accessToken: "ok",
-      expiresAt: expect.any(Number),
-    });
+    const toks = mkTokens({ accessToken: "ok", expiresAt: futureMs() });
+    await saveTokens("default", toks);
+    expect(await loadTokens("default")).toEqual(toks);
   });
 
   it("still silent-falls-back on 'No storage' marker", async () => {
     FakeKeyring.shouldThrow = true;
     FakeKeyring.throwMessage = "No storage backend available";
-    await saveTokens("default", { accessToken: "ok2", expiresAt: Date.now() + 60_000 });
+    await saveTokens("default", mkTokens({ accessToken: "ok2", expiresAt: futureMs() }));
     const loaded = await loadTokens("default");
     expect(loaded?.accessToken).toBe("ok2");
   });
@@ -621,20 +648,22 @@ describe("loadTokens expired-scrub cross-process CAS", () => {
 
     FakeKeyring.shouldThrow = true; // route through the file path
     const past = Date.now() - 1000;
-    const future = Date.now() + 60_000;
 
-    // Seed the file with an expired row.
-    await saveTokens("default", { accessToken: "expired", expiresAt: past });
+    // Seed the file with a refresh-expired row.
+    const expired = mkTokens({
+      accessToken: "expired",
+      expiresAt: past,
+      refreshExpiresAt: past,
+    });
+    await saveTokens("default", expired);
     const { readFile } = await import("node:fs/promises");
     const initial = JSON.parse(await readFile(credentialsPath(), "utf-8"));
     expect(initial.default.expiresAt).toBe(past);
 
     // Race: start the expired scrub and a concurrent fresh save.
+    const fresh = mkTokens({ accessToken: "fresh-concurrent", expiresAt: futureMs() });
     const loadPromise = loadTokens("default");
-    const savePromise = saveTokens("default", {
-      accessToken: "fresh-concurrent",
-      expiresAt: future,
-    });
+    const savePromise = saveTokens("default", fresh);
     const [loadResult] = await Promise.all([loadPromise, savePromise]);
 
     // load returns null either way (it saw the expired row at read time).
@@ -645,13 +674,16 @@ describe("loadTokens expired-scrub cross-process CAS", () => {
     // the fresh row. With CAS, any interleaving preserves it.
     const finalRaw = await readFile(credentialsPath(), "utf-8");
     const final = JSON.parse(finalRaw);
-    expect(final.default).toEqual({ accessToken: "fresh-concurrent", expiresAt: future });
+    expect(final.default).toEqual(fresh);
   });
 
   it("file path: DOES scrub when tokens are still the expired ones", async () => {
     FakeKeyring.shouldThrow = true; // route through the file path
     const past = Date.now() - 1000;
-    await saveTokens("default", { accessToken: "expired-only", expiresAt: past });
+    await saveTokens(
+      "default",
+      mkTokens({ accessToken: "expired-only", expiresAt: past, refreshExpiresAt: past }),
+    );
 
     // Sanity: file holds the expired row.
     const { readFile, access } = await import("node:fs/promises");
@@ -667,7 +699,6 @@ describe("loadTokens expired-scrub cross-process CAS", () => {
 
   it("keyring path: does NOT scrub when the keyring entry was rewritten between read and delete", async () => {
     const past = Date.now() - 1000;
-    const future = Date.now() + 60_000;
 
     // Build a keyring wrapper that returns the expired token on the
     // first `getPassword` (the classification read inside
@@ -680,10 +711,14 @@ describe("loadTokens expired-scrub cross-process CAS", () => {
       getPassword(): string | null {
         getCallCount++;
         if (getCallCount === 1) {
-          return JSON.stringify({ accessToken: "expired", expiresAt: past });
+          return mkTokensJson({
+            accessToken: "expired",
+            expiresAt: past,
+            refreshExpiresAt: past,
+          });
         }
         // Re-read: a fresh token has landed.
-        return JSON.stringify({ accessToken: "fresh-from-race", expiresAt: future });
+        return mkTokensJson({ accessToken: "fresh-from-race", expiresAt: futureMs() });
       },
       setPassword(_value: string): void {
         /* unused */
@@ -708,7 +743,7 @@ describe("loadTokens expired-scrub cross-process CAS", () => {
     const past = Date.now() - 1000;
     FakeKeyring.store.set(
       "default",
-      JSON.stringify({ accessToken: "still-expired", expiresAt: past }),
+      mkTokensJson({ accessToken: "still-expired", expiresAt: past, refreshExpiresAt: past }),
     );
 
     // Happy path for the keyring CAS: no concurrent writer, the
@@ -721,13 +756,12 @@ describe("loadTokens expired-scrub cross-process CAS", () => {
     // Regression guard for call-site 3: the logout path must NOT
     // compare-and-swap. The user's intent is to nuke the tokens no
     // matter what's in the store (fresh, expired, or anything else).
-    const future = Date.now() + 60_000;
-    await saveTokens("default", { accessToken: "wipe-me", expiresAt: future });
+    await saveTokens("default", mkTokens({ accessToken: "wipe-me", expiresAt: futureMs() }));
     await deleteTokens("default");
     expect(FakeKeyring.store.has("default")).toBe(false);
     // And via the file path.
     FakeKeyring.shouldThrow = true;
-    await saveTokens("filewipe", { accessToken: "wipe-me-too", expiresAt: future });
+    await saveTokens("filewipe", mkTokens({ accessToken: "wipe-me-too", expiresAt: futureMs() }));
     await deleteTokens("filewipe");
     expect(await loadTokens("filewipe")).toBeNull();
   });
@@ -754,13 +788,12 @@ describe("fallback file: tmp path O_EXCL protection", () => {
     // (not a dangling empty file, not a symlink that swallowed the
     // write). The O_EXCL check is separately exercised by the unit
     // test on the helper below.
-    await saveTokens("default", { accessToken: "tok-excl", expiresAt: 42 });
+    const toksExcl = mkTokens({ accessToken: "tok-excl", expiresAt: futureMs() });
+    await saveTokens("default", toksExcl);
 
     const path = credentialsPath();
     const raw = await readFile(path, "utf-8");
-    expect(JSON.parse(raw)).toEqual({
-      default: { accessToken: "tok-excl", expiresAt: 42 },
-    });
+    expect(JSON.parse(raw)).toEqual({ default: toksExcl });
 
     // Extra sanity: if a rogue symlink had been followed, the *target*
     // of the symlink (outside the tmp dir) would contain the data. Make
@@ -769,24 +802,21 @@ describe("fallback file: tmp path O_EXCL protection", () => {
     const bait = join(parent, "bait");
     const baitSymlink = join(parent, "credentials.json.bait.symlink");
     await symlink(bait, baitSymlink).catch(() => {});
-    await saveTokens("second", { accessToken: "t2", expiresAt: 1 });
+    await saveTokens("second", mkTokens({ accessToken: "t2", expiresAt: futureMs() }));
     const { access } = await import("node:fs/promises");
     // The symlink target MUST NOT exist — saveTokens never touches it.
     await expect(access(bait)).rejects.toBeDefined();
   });
 });
 
-// ─── Issue #165 — refresh-token persistence contract ────────────────────────
+// ─── Refresh-token persistence contract ─────────────────────────────────────
 //
-// New in issue #165: the 2.x CLI stores BOTH the access token and a
-// rotating 30-day refresh token. The load/save surface must:
-//   1. Round-trip the new fields.
-//   2. Preserve legacy 1.x entries that have only the access token.
-//   3. Apply expiry-based auto-scrub to the REFRESH token's lifetime
-//      when present (falling back to access-token lifetime on legacy
-//      payloads).
+// The CLI stores BOTH the access token and a rotating 30-day refresh
+// token. The load/save surface must:
+//   1. Round-trip both fields.
+//   2. Apply expiry-based auto-scrub to the REFRESH token's lifetime.
 
-describe("refresh-token persistence (issue #165)", () => {
+describe("refresh-token persistence", () => {
   it("round-trips the full pair through the keyring", async () => {
     const accessExp = futureMs();
     const refreshExp = futureMs(3_600_000);
@@ -824,29 +854,17 @@ describe("refresh-token persistence (issue #165)", () => {
     });
   });
 
-  it("tolerates a legacy payload with no refresh fields", async () => {
-    // Simulate a pre-#165 keyring entry by writing the raw legacy JSON
-    // directly — saveTokens with a Tokens object always produces the
-    // new shape.
-    const legacyExp = futureMs();
-    FakeKeyring.store.set(
-      "default",
-      JSON.stringify({ accessToken: "legacy", expiresAt: legacyExp }),
-    );
-    const read = await loadTokens("default");
-    expect(read).toEqual({ accessToken: "legacy", expiresAt: legacyExp });
-    // Critical migration hint: refresh fields must NOT be synthesized —
-    // `api.ts` relies on their absence to raise the "re-run appstrate
-    // login" AuthError.
-    expect(read?.refreshToken).toBeUndefined();
-    expect(read?.refreshExpiresAt).toBeUndefined();
+  it("rejects a payload missing the refresh fields (treated as corrupt)", async () => {
+    // A payload without refresh fields is not a valid state — parseTokens
+    // must return null so `api.ts` hits the "not logged in" branch.
+    const exp = futureMs();
+    FakeKeyring.store.set("default", JSON.stringify({ accessToken: "at", expiresAt: exp }));
+    expect(await loadTokens("default")).toBeNull();
   });
 
-  it("discards a half-refresh entry (one field present, the other missing)", async () => {
+  it("rejects a half-refresh entry (one refresh field present, the other missing)", async () => {
     // Defensive: a corrupt payload with refreshToken but no
-    // refreshExpiresAt (or vice versa) is not a valid state. Treat as
-    // legacy — drop both fields rather than carry a half-baked pair
-    // forward into api.ts.
+    // refreshExpiresAt (or vice versa) is not a valid state.
     const exp = futureMs();
     FakeKeyring.store.set(
       "default",
@@ -857,8 +875,7 @@ describe("refresh-token persistence (issue #165)", () => {
         // refreshExpiresAt intentionally missing
       }),
     );
-    const read = await loadTokens("default");
-    expect(read).toEqual({ accessToken: "at", expiresAt: exp });
+    expect(await loadTokens("default")).toBeNull();
   });
 
   it("does NOT scrub when only the access token is expired but the refresh token is still valid", async () => {
@@ -887,15 +904,6 @@ describe("refresh-token persistence (issue #165)", () => {
       refreshToken: "rt",
       refreshExpiresAt: past,
     });
-    expect(await loadTokens("default")).toBeNull();
-  });
-
-  it("scrubs legacy payloads based on access-token expiry alone", async () => {
-    const past = Date.now() - 1_000;
-    FakeKeyring.store.set(
-      "default",
-      JSON.stringify({ accessToken: "expired-legacy", expiresAt: past }),
-    );
     expect(await loadTokens("default")).toBeNull();
   });
 });

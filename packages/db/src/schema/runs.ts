@@ -20,20 +20,7 @@ import { applications, endUsers } from "./applications.ts";
 import { apiKeys, organizations } from "./organizations.ts";
 import { packages } from "./packages.ts";
 import { connectionProfiles } from "./connections.ts";
-
-/**
- * Shape of a single entry in `runs.providerStatuses`. Mirrored by
- * `RunProviderSnapshot` in `@appstrate/shared-types`; duplicated here
- * to avoid a circular dependency (shared-types re-exports `Run`).
- */
-interface RunProviderSnapshot {
-  id: string;
-  status: string;
-  source: string | null;
-  profileName: string | null;
-  profileOwnerName: string | null;
-  scopesSufficient?: boolean;
-}
+import type { RunProviderSnapshot } from "./types.ts";
 
 export const runs = pgTable(
   "runs",

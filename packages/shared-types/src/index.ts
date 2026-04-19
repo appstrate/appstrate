@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { z } from "zod";
+
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
 
 export type { Profile, RunLog, ConnectionProfile } from "@appstrate/db/schema";
@@ -98,10 +100,11 @@ export type EnrichedSchedule = Schedule & {
 import { orgRoleEnum } from "@appstrate/db/schema";
 export type OrgRole = (typeof orgRoleEnum.enumValues)[number];
 
-export interface OrgSettings {
-  apiVersion?: string;
-  dashboardSsoEnabled?: boolean;
-}
+export const orgSettingsSchema = z.object({
+  apiVersion: z.string().optional(),
+  dashboardSsoEnabled: z.boolean().optional(),
+});
+export type OrgSettings = z.infer<typeof orgSettingsSchema>;
 
 export interface OrganizationMember {
   orgId: string;
@@ -145,7 +148,8 @@ export interface ConnectionInfo {
   updatedAt: string;
 }
 
-export type ConnectionStatusValue = "connected" | "not_connected" | "needs_reconnection";
+export type { ConnectionStatusValue } from "@appstrate/db/schema";
+import type { ConnectionStatusValue } from "@appstrate/db/schema";
 
 // --- Org Profile Binding Types ---
 
@@ -181,7 +185,8 @@ export interface UserConnectionProviderGroup {
   orgs: UserConnectionOrgGroup[];
 }
 
-export type ProviderProfileSource = "app_binding" | "user_profile";
+export type { ProviderProfileSource } from "@appstrate/db/schema";
+import type { ProviderProfileSource } from "@appstrate/db/schema";
 
 export interface ProviderStatus {
   id: string;
@@ -203,15 +208,7 @@ export interface ProviderStatus {
   profileOwnerName: string | null;
 }
 
-/** Lightweight snapshot of a provider's connection state at run time. */
-export interface RunProviderSnapshot {
-  id: string;
-  status: ConnectionStatusValue;
-  source: ProviderProfileSource | null;
-  profileName: string | null;
-  profileOwnerName: string | null;
-  scopesSufficient?: boolean;
-}
+export type { RunProviderSnapshot } from "@appstrate/db/schema";
 
 export interface AgentListItem {
   id: string;
@@ -298,13 +295,14 @@ export interface OrgPackageItemDetail extends OrgPackageItem {
 
 // --- Model Cost Types ---
 
-/** Per-model pricing in $/M tokens. */
-export interface ModelCost {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
+/** Per-model pricing in $/M tokens (margin included). */
+export const modelCostSchema = z.object({
+  input: z.number().nonnegative(),
+  output: z.number().nonnegative(),
+  cacheRead: z.number().nonnegative(),
+  cacheWrite: z.number().nonnegative(),
+});
+export type ModelCost = z.infer<typeof modelCostSchema>;
 
 // --- Package Version Types ---
 
