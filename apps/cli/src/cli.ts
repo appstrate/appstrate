@@ -4,10 +4,12 @@
 /**
  * `appstrate` — official Appstrate CLI entry point.
  *
- * Two commands in v0 (ADR-006 Phase 2):
- *   - `appstrate login`: RFC 8628 device-flow against an instance.
- *   - `appstrate logout`: revoke the session + wipe local storage.
- *   - `appstrate whoami`: print the active profile's identity.
+ * Commands:
+ *   - `appstrate install`: install Appstrate locally or bring up Docker.
+ *   - `appstrate login`:   RFC 8628 device-flow against an instance.
+ *   - `appstrate logout`:  revoke the session + wipe local storage.
+ *   - `appstrate whoami`:  server-authoritative identity check.
+ *   - `appstrate token`:   print access + refresh token metadata (debug).
  *
  * Global flags:
  *   - `--profile <name>` selects which profile (keyring entry + TOML
@@ -25,6 +27,7 @@ import { installCommand } from "./commands/install.ts";
 import { loginCommand } from "./commands/login.ts";
 import { logoutCommand } from "./commands/logout.ts";
 import { whoamiCommand } from "./commands/whoami.ts";
+import { tokenCommand } from "./commands/token.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
@@ -114,6 +117,14 @@ program
   .action(async () => {
     const globalOpts = program.opts<{ profile?: string }>();
     await whoamiCommand({ profile: globalOpts.profile });
+  });
+
+program
+  .command("token")
+  .description("Print metadata about the stored access + refresh tokens (debug)")
+  .action(async () => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await tokenCommand({ profile: globalOpts.profile });
   });
 
 program.parseAsync(process.argv).catch((err) => exitWithError(err));

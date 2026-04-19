@@ -36,6 +36,7 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | `appstrate login`   | Sign into an instance via RFC 8628 device-flow. Tokens land in the OS keyring. |
 | `appstrate logout`  | Revoke the active session server-side and wipe local credentials.              |
 | `appstrate whoami`  | Print the identity attached to the active profile.                             |
+| `appstrate token`   | Print metadata about the stored access + refresh tokens (debug).               |
 
 All commands accept `--profile <name>` to target a specific profile (see [Profiles](#profiles)).
 
@@ -142,6 +143,54 @@ Expires:  2026-04-25T00:36:40.285Z
 ```
 
 Exits non-zero if the profile is missing, the session is revoked, or the instance is unreachable — useful in CI scripts that need to fail fast when auth drifts.
+
+---
+
+### `appstrate token`
+
+Prints metadata about the access + refresh tokens stored for a profile. **Metadata only** — the token plaintext is never written to stdout or stderr, so copy-pasting the output into a screen share, a CI log, or a bug report never leaks a bearer.
+
+```sh
+appstrate token
+appstrate token --profile prod
+```
+
+Output:
+
+```
+Profile:           default
+Instance:          https://app.example.com
+
+Access token
+  Status:          fresh
+  Expires:         in 14m 32s
+  Expires at:      2026-04-19T16:23:45.000Z
+
+Refresh token
+  Status:          valid
+  Expires:         in 29d 23h
+  Expires at:      2026-05-18T16:08:45.000Z
+
+JWT claims
+  iss:             https://app.example.com/api/auth
+  aud:             https://app.example.com/api/auth
+  sub:             usr_abc123
+  azp:             appstrate-cli
+  actor_type:      user
+  scope:           cli
+  iat:             1713543325 (2026-04-19T16:08:45.000Z)
+  exp:             1713544225 (2026-04-19T16:23:45.000Z)
+  jti:             ab12cd34…
+```
+
+Status vocabulary:
+
+- **Access**: `fresh` (> 30s remaining) · `rotating-soon` (< 30s — `api.ts` will rotate on the next call) · `expired` (past TTL; claims still render for diagnostics)
+- **Refresh**: `valid` (> 24h remaining) · `expiring-soon` (< 24h) · `expired` (re-run `appstrate login`) · `not stored` (legacy 1.x credentials)
+
+No network call — this command inspects local state only. A refresh token revoked server-side still looks `valid` here by design. Use `whoami` for a server-authoritative identity check.
+
+If the JWT `exp` claim and the locally stored `expiresAt` diverge by more than 2 seconds, `token` flags the mismatch — `api.ts`'s proactive-rotation logic keys off the stored value, so a skew between the two is worth surfacing before it causes unexpected 401s.
 
 ## Profiles
 
