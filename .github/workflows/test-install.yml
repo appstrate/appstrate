@@ -281,6 +281,17 @@ jobs:
           # curl|bash flow on macOS — fail the CI before it ships.
           echo "$OUT" | grep -qE "FAKE_CLI_RAN .* argv=install --yes" \
             || { echo "::error::bootstrap did not forward --yes to the CLI (regression for #199)"; exit 1; }
+          # #199 (second bug): bootstrap MUST NOT redirect stdin from
+          # /dev/tty when exec'ing the CLI. The combo `exec </dev/tty
+          # "$DEST"` triggers an orthogonal Bun macOS bug — `EINVAL:
+          # invalid argument, kqueue` — when the CLI later spawns
+          # subprocesses (bun run dev, docker compose up). With --yes no
+          # prompt fires, so the redirect is unnecessary AND harmful.
+          # Any reintroduction of `</dev/tty` regresses the curl|bash
+          # flow on macOS — fail the CI before it ships.
+          grep -q "exec </dev/tty" scripts/bootstrap.sh \
+            && { echo "::error::bootstrap reintroduced </dev/tty redirect (regression for #199 kqueue bug)"; exit 1; }
+          # grep -q exit 1 means no match — guard asserted.
           test -x "$APPSTRATE_BIN_DIR/appstrate"
           echo "::endgroup::"
           echo "✓ happy path OK"
