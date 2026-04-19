@@ -214,6 +214,47 @@ export const oauthConsent = pgTable("oauth_consents", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// ─── CLI refresh tokens (issue #165) ──────────────────────────────────────────
+//
+// Backs the rotating refresh tokens issued by `POST /api/auth/cli/token`
+// for the `appstrate-cli` public client. One row per token ever minted;
+// rotations link via `parent_id` and share a common `family_id`. Reuse
+// detection revokes the entire family in a single UPDATE. See
+// `drizzle/migrations/0005_cli_refresh_tokens.sql` for the full rationale
+// + threat model, and `services/cli-tokens.ts` for the callers.
+
+export const cliRefreshToken = pgTable(
+  "cli_refresh_tokens",
+  {
+    id: text("id").primaryKey(),
+    tokenHash: text("token_hash").notNull().unique(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: "cascade" }),
+    familyId: text("family_id").notNull(),
+    // `parent_id` is the `id` of the row that rotated INTO this one. NULL
+    // on the head of a family (the initial device-code grant).
+    // Self-referential; Drizzle expresses this via the `.references()`
+    // target being the same table — we inline the column reference using
+    // a function that resolves post-hoist. Keeping the FK ON DELETE SET
+    // NULL preserves the family linked list even if a node is pruned.
+    parentId: text("parent_id"),
+    scope: text("scope"),
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    usedAt: timestamp("used_at"),
+    revokedAt: timestamp("revoked_at"),
+    revokedReason: text("revoked_reason"),
+  },
+  (t) => [
+    index("idx_cli_refresh_tokens_family").on(t.familyId),
+    index("idx_cli_refresh_tokens_user").on(t.userId),
+  ],
+);
+
 // ─── OIDC shadow profile (module-owned RBAC/linking layer) ───────────────────
 
 export const oidcEndUserProfiles = pgTable(

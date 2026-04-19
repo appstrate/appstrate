@@ -1,24 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate logout` — revoke the active session + wipe local storage.
+ * `appstrate logout` — revoke the active refresh-token family + wipe
+ * local storage.
  *
- * Calls Better Auth's sign-out endpoint (`POST /api/auth/sign-out`)
- * so the session row is deleted server-side before we forget it
- * locally. A non-200 response is logged but NOT fatal — the local
- * tokens still get wiped so the CLI returns to a clean state even
- * when the instance is unreachable.
+ * Since issue #165 the CLI stores a rotating refresh token (30 d) +
+ * a short-lived JWT access token (15 min). The correct server-side
+ * revocation target is the refresh-token FAMILY — calling `/cli/revoke`
+ * with the refresh token invalidates every rotation in the lineage
+ * (RFC 6819 §5.2.2.3 shape) so a leaked-but-not-yet-rotated copy is
+ * also killed. Local cleanup follows regardless of the server response
+ * so the CLI returns to a clean state even when the instance is
+ * unreachable.
  *
- * `/oauth2/revoke` is not used here because the device-flow access
- * token is a BA session, not an oauth-provider-minted token (see
- * preflight PF-3). Revoking via `/api/auth/sign-out` with the session
- * cookie is the correct path.
+ * Backwards compatibility: a legacy 1.x credentials bundle (pre-#165,
+ * no `refreshToken`) falls back to the original `/api/auth/sign-out`
+ * path so upgrade users can cleanly sign out without first running
+ * `appstrate login` on the new flow.
  */
 
 import { intro, outro, formatError } from "../lib/ui.ts";
 import { readConfig, resolveProfileName, deleteProfile } from "../lib/config.ts";
 import { loadTokens, deleteTokens } from "../lib/keyring.ts";
 import { apiFetchRaw, AuthError } from "../lib/api.ts";
+import { revokeCliRefreshToken } from "../lib/device-flow.ts";
+import { normalizeInstance } from "../lib/instance-url.ts";
+import { getProfile } from "../lib/config.ts";
+
+/** Canonical clientId for the official CLI. */
+const CLI_CLIENT_ID = "appstrate-cli";
 
 export interface LogoutOptions {
   profile?: string;
@@ -41,21 +51,41 @@ export async function logoutCommand(opts: LogoutOptions): Promise<void> {
     return;
   }
 
-  // Best-effort server-side sign-out. An expired / already-revoked
-  // session returns 401; unreachable instances throw. Either way we
-  // proceed to the local cleanup below.
-  try {
-    const res = await apiFetchRaw(profileName, "/api/auth/sign-out", { method: "POST" });
-    if (!res.ok && res.status !== 401) {
+  // Issue #165: 2.x CLI with a refresh token → hit `/cli/revoke` so the
+  // entire family dies server-side. Fallback to `/api/auth/sign-out`
+  // for legacy 1.x credentials so upgrade users aren't stranded.
+  if (tokens.refreshToken) {
+    try {
+      const profile = await getProfile(profileName);
+      if (profile) {
+        await revokeCliRefreshToken(
+          normalizeInstance(profile.instance),
+          CLI_CLIENT_ID,
+          tokens.refreshToken,
+        );
+      }
+    } catch (err) {
+      // Non-fatal: the refresh-token family may already be revoked on
+      // the server (reuse detection, or a prior partial logout). The
+      // local wipe below returns us to a consistent clean state.
       process.stderr.write(
-        `warning: sign-out returned HTTP ${res.status} (${res.statusText}); continuing with local cleanup.\n`,
+        `warning: could not revoke refresh token server-side (${formatError(err)}); continuing with local cleanup.\n`,
       );
     }
-  } catch (err) {
-    if (!(err instanceof AuthError)) {
-      process.stderr.write(
-        `warning: could not reach the instance to sign out (${formatError(err)}); continuing with local cleanup.\n`,
-      );
+  } else {
+    try {
+      const res = await apiFetchRaw(profileName, "/api/auth/sign-out", { method: "POST" });
+      if (!res.ok && res.status !== 401) {
+        process.stderr.write(
+          `warning: sign-out returned HTTP ${res.status} (${res.statusText}); continuing with local cleanup.\n`,
+        );
+      }
+    } catch (err) {
+      if (!(err instanceof AuthError)) {
+        process.stderr.write(
+          `warning: could not reach the instance to sign out (${formatError(err)}); continuing with local cleanup.\n`,
+        );
+      }
     }
   }
 

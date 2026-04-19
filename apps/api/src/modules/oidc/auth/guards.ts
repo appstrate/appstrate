@@ -60,6 +60,15 @@ const REVOKE_RL_POINTS = 60;
 // rarely called more than once per login; 10/min/IP is a loose ceiling.
 const DEVICE_CODE_RL_POINTS = 10;
 const DEVICE_TOKEN_RL_POINTS = 30;
+// CLI token endpoints (issue #165). `/cli/token` serves the SAME poll
+// cadence `/device/token` does during device flow (once per interval →
+// ~120 polls over 10 min) AND the silent-refresh path (once per ~15 min
+// per active CLI). 30/min/IP is symmetric with DEVICE_TOKEN and covers
+// both patterns. `/cli/revoke` is only called on `appstrate logout` and
+// is idempotent, but we cap it too to close any DoS vector on the
+// family-revocation UPDATE.
+const CLI_TOKEN_RL_POINTS = 30;
+const CLI_REVOKE_RL_POINTS = 30;
 // Per-IP budget on Better Auth's `GET /device?user_code=…` endpoint
 // (mounted by `deviceAuthorization()` — see
 // `node_modules/better-auth/dist/plugins/device-authorization/routes.mjs:285-337`,
@@ -640,6 +649,24 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
           matcher: (ctx: { path?: string }) => ctx.path === "/device/token",
           handler: createAuthMiddleware(async (ctx) => {
             await enforceRateLimit("device-token", DEVICE_TOKEN_RL_POINTS, ctx.request);
+          }),
+        },
+        {
+          // Issue #165 — rate-limit the CLI's JWT + rotating-refresh
+          // endpoints the same way we limit the legacy `/device/token`.
+          // `/cli/token` handles both the initial device-code → tokens
+          // exchange AND refresh-token rotation (discriminated by
+          // `grant_type` in the body); one ceiling covers both because
+          // legit traffic for either pattern is far under 30/min/IP.
+          matcher: (ctx: { path?: string }) => ctx.path === "/cli/token",
+          handler: createAuthMiddleware(async (ctx) => {
+            await enforceRateLimit("cli-token", CLI_TOKEN_RL_POINTS, ctx.request);
+          }),
+        },
+        {
+          matcher: (ctx: { path?: string }) => ctx.path === "/cli/revoke",
+          handler: createAuthMiddleware(async (ctx) => {
+            await enforceRateLimit("cli-revoke", CLI_REVOKE_RL_POINTS, ctx.request);
           }),
         },
         {

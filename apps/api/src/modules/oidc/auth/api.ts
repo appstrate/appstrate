@@ -83,6 +83,23 @@ interface DeviceApproveDenyArgs {
   asResponse?: boolean;
 }
 
+/**
+ * Signature for Better Auth's JWT plugin `signJWT` endpoint. Accepts a raw
+ * claims payload (merged with the plugin's defaults at sign time) plus
+ * per-call overrideOptions. Returns `{ token }` when called directly via
+ * `api.signJWT(...)` (no HTTP round-trip — runs in-process through
+ * `better-call`).
+ */
+interface SignJWTArgs {
+  body: {
+    payload: Record<string, unknown>;
+    overrideOptions?: Record<string, unknown>;
+  };
+  headers: Headers;
+  request?: Request;
+  asResponse?: boolean;
+}
+
 export interface OidcAuthApi {
   signInEmail(args: SignInEmailArgs): Promise<Response | unknown>;
   signUpEmail(args: SignUpEmailArgs): Promise<Response | unknown>;
@@ -96,6 +113,7 @@ export interface OidcAuthApi {
   getJwks(args: JwksArgs): Promise<{ keys?: jose.JWK[] } | null>;
   deviceApprove(args: DeviceApproveDenyArgs): Promise<Response | unknown>;
   deviceDeny(args: DeviceApproveDenyArgs): Promise<Response | unknown>;
+  signJWT(args: SignJWTArgs): Promise<{ token: string } | Response | unknown>;
 }
 
 export function getOidcAuthApi(): OidcAuthApi {

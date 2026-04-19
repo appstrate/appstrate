@@ -9,7 +9,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { startDeviceFlow, pollDeviceFlow, DeviceFlowError } from "../src/lib/device-flow.ts";
+import {
+  startDeviceFlow,
+  pollDeviceFlow,
+  refreshCliTokens,
+  revokeCliRefreshToken,
+  DeviceFlowError,
+} from "../src/lib/device-flow.ts";
 
 type Responder = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 const originalFetch = globalThis.fetch;
@@ -229,24 +235,58 @@ describe("startDeviceFlow", () => {
 
 describe("pollDeviceFlow", () => {
   it("returns the token on the first 2xx response", async () => {
+    let capturedUrl: string | undefined;
+    installFetch(async (input) => {
+      capturedUrl = typeof input === "string" ? input : input.toString();
+      return jsonResponse(200, {
+        access_token: "tok",
+        refresh_token: "rt",
+        token_type: "Bearer",
+        expires_in: 600,
+        refresh_expires_in: 2_592_000,
+        scope: "openid profile",
+      });
+    });
+    const result = await pollDeviceFlow("https://app", "dc", "c", {
+      interval: 0, // skip real waits
+      expiresIn: 60,
+    });
+    // Issue #165: polling hits the new `/cli/token` endpoint, not the
+    // legacy `/device/token`. The response shape widens with
+    // refresh_token + refresh_expires_in — both surface on the parsed
+    // return value.
+    expect(capturedUrl).toBe("https://app/api/auth/cli/token");
+    expect(result).toEqual({
+      accessToken: "tok",
+      refreshToken: "rt",
+      tokenType: "Bearer",
+      expiresIn: 600,
+      refreshExpiresIn: 2_592_000,
+      scope: "openid profile",
+    });
+  });
+
+  it("surfaces missing refresh_token as undefined (server downgrade signal)", async () => {
+    // A pre-2.x platform would keep the old `/device/token` response
+    // shape without a refresh_token. The CLI `commands/login.ts`
+    // refuses to persist such a response — here we verify the parser
+    // faithfully reports `undefined` so that higher-level code can act
+    // on it, rather than silently coerce to an empty string.
     installFetch(async () =>
       jsonResponse(200, {
         access_token: "tok",
         token_type: "Bearer",
         expires_in: 600,
-        scope: "openid profile",
+        scope: "",
       }),
     );
     const result = await pollDeviceFlow("https://app", "dc", "c", {
-      interval: 0, // skip real waits
+      interval: 0,
       expiresIn: 60,
     });
-    expect(result).toEqual({
-      accessToken: "tok",
-      tokenType: "Bearer",
-      expiresIn: 600,
-      scope: "openid profile",
-    });
+    expect(result.accessToken).toBe("tok");
+    expect(result.refreshToken).toBeUndefined();
+    expect(result.refreshExpiresIn).toBeUndefined();
   });
 
   it("posts form-urlencoded body (RFC 8628 §3.4) with grant_type + device_code + client_id", async () => {
@@ -282,8 +322,10 @@ describe("pollDeviceFlow", () => {
       }
       return jsonResponse(200, {
         access_token: "tok",
+        refresh_token: "rt",
         token_type: "Bearer",
         expires_in: 600,
+        refresh_expires_in: 2_592_000,
         scope: "",
       });
     });
@@ -311,8 +353,10 @@ describe("pollDeviceFlow", () => {
       if (calls === 1) return jsonResponse(400, { error: "slow_down" });
       return jsonResponse(200, {
         access_token: "ok",
+        refresh_token: "rt",
         token_type: "Bearer",
         expires_in: 1,
+        refresh_expires_in: 2_592_000,
         scope: "",
       });
     });
@@ -374,5 +418,126 @@ describe("DeviceFlowError shape", () => {
     expect(err.description).toBe("nope");
     expect(err.httpStatus).toBe(403);
     expect(err.message).toBe("nope");
+  });
+});
+
+// ─── Issue #165: refreshCliTokens / revokeCliRefreshToken ───────────────────
+//
+// Added by issue #165. Cover the grant_type=refresh_token and the
+// revocation endpoint paths the CLI exercises during silent rotation and
+// logout.
+
+describe("refreshCliTokens", () => {
+  it("posts grant_type=refresh_token to /api/auth/cli/token and returns a rotated pair", async () => {
+    let capturedUrl: string | undefined;
+    let capturedBody: string | undefined;
+    let capturedContentType: string | null | undefined;
+    installFetch(async (input, init) => {
+      capturedUrl = typeof input === "string" ? input : input.toString();
+      capturedBody = init?.body as string;
+      capturedContentType = (init?.headers as Record<string, string>)?.["Content-Type"];
+      return jsonResponse(200, {
+        access_token: "new-access",
+        refresh_token: "new-refresh",
+        token_type: "Bearer",
+        expires_in: 900,
+        refresh_expires_in: 2_592_000,
+        scope: "openid",
+      });
+    });
+    const result = await refreshCliTokens("https://app", "appstrate-cli", "old-refresh");
+    expect(capturedUrl).toBe("https://app/api/auth/cli/token");
+    expect(capturedContentType).toBe("application/x-www-form-urlencoded");
+    const parsed = new URLSearchParams(capturedBody!);
+    expect(parsed.get("grant_type")).toBe("refresh_token");
+    expect(parsed.get("refresh_token")).toBe("old-refresh");
+    expect(parsed.get("client_id")).toBe("appstrate-cli");
+    expect(result).toEqual({
+      accessToken: "new-access",
+      refreshToken: "new-refresh",
+      tokenType: "Bearer",
+      expiresIn: 900,
+      refreshExpiresIn: 2_592_000,
+      scope: "openid",
+    });
+  });
+
+  it("throws DeviceFlowError(invalid_grant) when the server rejects the refresh token (reuse / revoked / expired)", async () => {
+    installFetch(async () =>
+      jsonResponse(400, {
+        error: "invalid_grant",
+        error_description: "Refresh token reuse detected — family revoked.",
+      }),
+    );
+    await expect(
+      refreshCliTokens("https://app", "appstrate-cli", "stale-refresh"),
+    ).rejects.toMatchObject({
+      name: "DeviceFlowError",
+      code: "invalid_grant",
+    });
+  });
+
+  it("defaults scope to empty string when the server omits it", async () => {
+    installFetch(async () =>
+      jsonResponse(200, {
+        access_token: "a",
+        refresh_token: "r",
+        token_type: "Bearer",
+        expires_in: 900,
+        refresh_expires_in: 2_592_000,
+      }),
+    );
+    const result = await refreshCliTokens("https://app", "c", "x");
+    expect(result.scope).toBe("");
+  });
+});
+
+describe("revokeCliRefreshToken", () => {
+  it("posts the refresh token + client_id to /api/auth/cli/revoke", async () => {
+    let capturedUrl: string | undefined;
+    let capturedBody: string | undefined;
+    installFetch(async (input, init) => {
+      capturedUrl = typeof input === "string" ? input : input.toString();
+      capturedBody = init?.body as string;
+      return jsonResponse(200, { revoked: true });
+    });
+    await revokeCliRefreshToken("https://app", "appstrate-cli", "some-refresh");
+    expect(capturedUrl).toBe("https://app/api/auth/cli/revoke");
+    const parsed = new URLSearchParams(capturedBody!);
+    expect(parsed.get("token")).toBe("some-refresh");
+    expect(parsed.get("client_id")).toBe("appstrate-cli");
+  });
+
+  it("throws DeviceFlowError on non-2xx responses so logout can warn the user", async () => {
+    installFetch(async () =>
+      jsonResponse(401, {
+        error: "invalid_client",
+        error_description: "Unknown client",
+      }),
+    );
+    await expect(revokeCliRefreshToken("https://app", "unknown-client", "r")).rejects.toMatchObject(
+      {
+        name: "DeviceFlowError",
+        code: "invalid_client",
+      },
+    );
+  });
+
+  it("returns silently on 200 OK regardless of the `revoked` field value", async () => {
+    // An idempotent second logout hits `{ revoked: false }` — the
+    // client-side wipe still proceeds, so the function must not throw.
+    installFetch(async () => jsonResponse(200, { revoked: false }));
+    await revokeCliRefreshToken("https://app", "c", "r"); // no throw
+  });
+
+  it("tolerates a malformed JSON body on success (revocation is fire-and-forget)", async () => {
+    installFetch(
+      async () =>
+        new Response("not json", { status: 200, headers: { "Content-Type": "text/plain" } }),
+    );
+    // Must not throw: a server returning an empty / text body on 200
+    // is out-of-spec but the CLI does not rely on the body for
+    // correctness (local wipe is authoritative).
+    await revokeCliRefreshToken("https://app", "c", "r");
   });
 });

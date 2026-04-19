@@ -9,8 +9,9 @@
  *   3. POST /api/auth/device/code → receive user_code + verification URL.
  *   4. Print the code in the terminal + open the browser.
  *   5. Poll /api/auth/device/token until approval.
- *   6. Store the BA session token in the keyring; GET /api/profile to
- *      capture email + orgId; persist the profile in config.toml.
+ *   6. Store the JWT access + rotating refresh pair in the keyring
+ *      (issue #165); GET /api/auth/get-session to capture email +
+ *      userId; persist the profile in config.toml.
  */
 
 import open from "open";
@@ -103,9 +104,30 @@ async function runLogin(profileName: string, instance: string): Promise<void> {
   // Step 6 — persist both the tokens and the profile in one pass with
   // the real user id + email. `/api/profile` only exposes displayName
   // + language, so the BA `/get-session` response is authoritative here.
+  //
+  // Issue #165: a server that returns no `refresh_token` is not a 2.x
+  // platform — the CLI refuses the login rather than storing a session
+  // it cannot silently renew, because the user would otherwise be
+  // asked to re-authenticate every 15 minutes (the JWT's `expires_in`)
+  // with no grace path.
+  if (!token.refreshToken) {
+    throw new Error(
+      "Server did not issue a refresh token — the instance may be running a pre-2.x Appstrate. " +
+        "Upgrade the server, or use `--instance` to target a 2.x instance.",
+    );
+  }
   await saveTokens(profileName, {
     accessToken: token.accessToken,
     expiresAt: Date.now() + token.expiresIn * 1000,
+    refreshToken: token.refreshToken,
+    refreshExpiresAt:
+      token.refreshExpiresIn !== undefined
+        ? Date.now() + token.refreshExpiresIn * 1000
+        : // Defensive default — the server MUST echo refresh_expires_in,
+          // but if a non-conforming proxy strips it we still get a
+          // usable entry with the conservative 30-day window matching
+          // the server's own default from `services/cli-tokens.ts`.
+          Date.now() + 30 * 24 * 60 * 60 * 1000,
   });
   await setProfile(profileName, {
     instance,

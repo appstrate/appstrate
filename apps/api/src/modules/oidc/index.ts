@@ -45,6 +45,7 @@ import {
 import { oidcPaths } from "./openapi/paths.ts";
 import { oidcSchemas } from "./openapi/schemas.ts";
 import {
+  cliRefreshToken,
   deviceCode,
   jwks,
   oauthClient,
@@ -161,6 +162,7 @@ const oidcModule: AppstrateModule = {
       oauthRefreshToken,
       oauthConsent,
       deviceCode,
+      cliRefreshToken,
     };
   },
 
