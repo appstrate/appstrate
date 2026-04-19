@@ -17,7 +17,7 @@
  *     in tier0/tier123 gets a stable cwd.
  */
 
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, afterEach, spyOn } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
@@ -48,6 +48,100 @@ describe("resolveTier", () => {
     await expect(resolveTier("standard")).rejects.toThrow(/Invalid --tier/);
     await expect(resolveTier("1.5")).rejects.toThrow(/Invalid --tier/);
     await expect(resolveTier("NaN")).rejects.toThrow(/Invalid --tier/);
+  });
+});
+
+describe("resolveTier (interactive)", () => {
+  /** Captures whatever options are passed into the fake `select`. */
+  type SelectOpts = {
+    initialValue?: number;
+    options?: Array<{ value: number; label: string }>;
+  };
+
+  it("defaults to Tier 3 when Docker is available", async () => {
+    let captured: SelectOpts | undefined;
+    const select = (async (opts: SelectOpts) => {
+      captured = opts;
+      return opts.initialValue;
+    }) as unknown as typeof import("@clack/prompts").select;
+    const tier = await resolveTier(undefined, {
+      select,
+      isCancel: (() => false) as unknown as typeof import("@clack/prompts").isCancel,
+      note: () => {},
+      isDockerAvailable: async () => true,
+    });
+    expect(tier).toBe(3);
+    expect(captured?.initialValue).toBe(3);
+    expect(captured?.options?.[0]?.value).toBe(3);
+    expect(captured?.options?.[0]?.label).toMatch(/recommended/i);
+  });
+
+  it("falls back to Tier 0 default when Docker is missing and surfaces a note", async () => {
+    let captured: SelectOpts | undefined;
+    let noteCalls = 0;
+    const select = (async (opts: SelectOpts) => {
+      captured = opts;
+      return opts.initialValue;
+    }) as unknown as typeof import("@clack/prompts").select;
+    const tier = await resolveTier(undefined, {
+      select,
+      isCancel: (() => false) as unknown as typeof import("@clack/prompts").isCancel,
+      note: (msg) => {
+        noteCalls += 1;
+        expect(msg).toMatch(/Docker not detected/i);
+      },
+      isDockerAvailable: async () => false,
+    });
+    expect(tier).toBe(0);
+    expect(captured?.initialValue).toBe(0);
+    expect(noteCalls).toBe(1);
+  });
+
+  it("returns whatever the user explicitly selects, regardless of default", async () => {
+    const select = (async () => 2) as unknown as typeof import("@clack/prompts").select;
+    const tier = await resolveTier(undefined, {
+      select,
+      isCancel: (() => false) as unknown as typeof import("@clack/prompts").isCancel,
+      note: () => {},
+      isDockerAvailable: async () => true,
+    });
+    expect(tier).toBe(2);
+  });
+
+  it("orders options Tier 3 → 2 → 1 → 0", async () => {
+    let captured: SelectOpts | undefined;
+    const select = (async (opts: SelectOpts) => {
+      captured = opts;
+      return 3;
+    }) as unknown as typeof import("@clack/prompts").select;
+    await resolveTier(undefined, {
+      select,
+      isCancel: (() => false) as unknown as typeof import("@clack/prompts").isCancel,
+      note: () => {},
+      isDockerAvailable: async () => true,
+    });
+    expect(captured?.options?.map((o) => o.value)).toEqual([3, 2, 1, 0]);
+  });
+
+  it("exits with 130 on cancel", async () => {
+    const select = (async () =>
+      Symbol("cancel-sentinel")) as unknown as typeof import("@clack/prompts").select;
+    const exitSpy = spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+    try {
+      await expect(
+        resolveTier(undefined, {
+          select,
+          isCancel: ((value: unknown) =>
+            typeof value === "symbol") as unknown as typeof import("@clack/prompts").isCancel,
+          note: () => {},
+          isDockerAvailable: async () => true,
+        }),
+      ).rejects.toThrow("exit:130");
+    } finally {
+      exitSpy.mockRestore();
+    }
   });
 });
 

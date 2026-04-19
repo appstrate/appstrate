@@ -21,6 +21,7 @@ import {
   DockerMissingError,
   dockerComposeUp,
   findRunningComposeProject as findRunningComposeProjectImport,
+  isDockerAvailable,
   waitForAppstrate,
   writeComposeFile,
   writeEnvFile as writeComposeEnv,
@@ -325,27 +326,61 @@ async function ensurePortFree(
 }
 
 /**
+ * DI seam for `resolveTier()` — production wires `clack` + the real
+ * Docker probe; tests inject deterministic stubs.
+ */
+export interface TierResolverDeps {
+  select?: typeof clack.select;
+  isCancel?: typeof clack.isCancel;
+  note?: typeof clack.note;
+  isDockerAvailable?: () => Promise<boolean>;
+}
+
+/**
  * Parse `--tier` or drop into an interactive select. `clack`'s
  * `select` with 4 options reads better than free-form text and avoids
  * the "what did I type?" typo recovery. Exported so unit tests can
  * lock down the validation contract without invoking the prompt.
+ *
+ * Interactive default: Tier 3 (full production stack) when Docker is
+ * reachable — the happy path for the one-liner installer is
+ * `press Enter → working production-grade Appstrate`. When Docker is
+ * missing we silently downgrade the default to Tier 0 and surface a
+ * friendly note so the user is not pushed into a tier they cannot
+ * actually run; the fatal `DockerMissingError` in `installDockerTier`
+ * remains the safety net for the explicit-pick case.
  */
-export async function resolveTier(raw: string | undefined): Promise<Tier> {
+export async function resolveTier(
+  raw: string | undefined,
+  deps: TierResolverDeps = {},
+): Promise<Tier> {
   if (raw !== undefined) {
     const parsed = Number(raw);
     if (parsed === 0 || parsed === 1 || parsed === 2 || parsed === 3) return parsed as Tier;
     throw new Error(`Invalid --tier value "${raw}". Expected 0, 1, 2, or 3.`);
   }
-  const chosen = await clack.select<Tier>({
+  const select = deps.select ?? clack.select;
+  const isCancel = deps.isCancel ?? clack.isCancel;
+  const note = deps.note ?? clack.note;
+  const probe = deps.isDockerAvailable ?? isDockerAvailable;
+  const dockerOk = await probe();
+  const defaultTier: Tier = dockerOk ? 3 : 0;
+  if (!dockerOk) {
+    note(
+      "Docker not detected — Tier 0 selected by default. Install Docker Desktop and re-run for the production stack (Tier 3).",
+    );
+  }
+  const chosen = await select<Tier>({
     message: "Which tier do you want to install?",
+    initialValue: defaultTier,
     options: [
-      { value: 0, label: "Tier 0 — Hobby (Bun + local files, no Docker)" },
-      { value: 1, label: "Tier 1 — Minimal (PostgreSQL)" },
-      { value: 2, label: "Tier 2 — Standard (PostgreSQL + Redis)" },
-      { value: 3, label: "Tier 3 — Production (PostgreSQL + Redis + MinIO)" },
+      { value: 3, label: "Tier 3 — Production (PostgreSQL + Redis + MinIO) — recommended" },
+      { value: 2, label: "Tier 2 — Standard (PostgreSQL + Redis, no object storage)" },
+      { value: 1, label: "Tier 1 — Minimal (PostgreSQL only, dev/testing)" },
+      { value: 0, label: "Tier 0 — Hobby (no Docker, evaluation only)" },
     ],
   });
-  if (clack.isCancel(chosen)) {
+  if (isCancel(chosen)) {
     clack.cancel("Cancelled.");
     process.exit(130);
   }

@@ -47,6 +47,16 @@ export async function assertDockerAvailable(): Promise<void> {
   if (!res.ok) throw new DockerMissingError();
 }
 
+/**
+ * Non-throwing sibling of `assertDockerAvailable()`. Used by the tier
+ * prompt to decide which tier to highlight as the default — failure
+ * here is informational, not fatal.
+ */
+export async function isDockerAvailable(): Promise<boolean> {
+  const res = await runCommand("docker", ["info"], { stdio: "ignore" });
+  return res.ok;
+}
+
 /** Copy the embedded YAML for `tier` into `<dir>/docker-compose.yml`. */
 export async function writeComposeFile(dir: string, tier: DockerTier): Promise<void> {
   await mkdir(dir, { recursive: true });

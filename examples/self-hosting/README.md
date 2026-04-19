@@ -12,12 +12,16 @@ curl -fsSL https://get.appstrate.dev | bash
 ```
 
 This downloads the `appstrate` CLI binary for your OS/arch and hands
-control to `appstrate install`, which prompts for a tier:
+control to `appstrate install`. Just press Enter at the tier prompt to
+land on the recommended Tier 3 production stack:
 
+- **Tier 3** — Postgres + Redis + MinIO (full production, **default — what this README covers**)
+- **Tier 2** — Postgres + Redis (no object storage)
+- **Tier 1** — Postgres only (dev / testing)
 - **Tier 0** — Bun + PGlite + filesystem (no Docker, hobby / evaluation)
-- **Tier 1** — Postgres + filesystem storage
-- **Tier 2** — Postgres + Redis + filesystem storage
-- **Tier 3** — Postgres + Redis + MinIO (full production, what this README covers)
+
+If Docker is not detected on your machine the CLI automatically falls
+back to Tier 0 as the highlighted default.
 
 The CLI generates cryptographic secrets, writes `.env` +
 `docker-compose.yml`, runs `docker compose up -d`, waits for the
