@@ -29,10 +29,14 @@
 #   curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3
 #
 # Env overrides:
-#   APPSTRATE_VERSION        Pin a release tag (default: pinned or "latest").
-#   APPSTRATE_BIN_DIR        Install location (default: /usr/local/bin).
-#   APPSTRATE_SKIP_VERIFY=1  Skip signature + checksum verification (CI
-#                            debug only — do NOT set on user machines).
+#   APPSTRATE_VERSION             Pin a release tag (default: pinned or "latest").
+#   APPSTRATE_BIN_DIR             Install location (default: $HOME/.local/bin).
+#                                 Set to /usr/local/bin for a system-wide install
+#                                 (sudo will be requested).
+#   APPSTRATE_NO_MODIFY_PATH=1    Do not touch shell rc files to add BIN_DIR to
+#                                 PATH. Equivalent to uv's UV_NO_MODIFY_PATH.
+#   APPSTRATE_SKIP_VERIFY=1       Skip signature + checksum verification (CI
+#                                 debug only — do NOT set on user machines).
 
 set -euo pipefail
 
@@ -81,7 +85,12 @@ _appstrate_bootstrap() {
   _DEFAULT_VERSION="__APPSTRATE_VERSION__"
   if [[ "$_DEFAULT_VERSION" == __* ]]; then _DEFAULT_VERSION="latest"; fi
   VERSION="${APPSTRATE_VERSION:-$_DEFAULT_VERSION}"
-  BIN_DIR="${APPSTRATE_BIN_DIR:-/usr/local/bin}"
+  # Rootless default: install into $HOME/.local/bin (XDG user-space equivalent
+  # of /usr/local/bin). Matches uv, rustup, Bun, Deno, pipx — avoids a sudo
+  # prompt on the happy path, works in containers / CI without privileges, and
+  # contains blast radius if the binary is ever compromised (can't escape $HOME).
+  # Users who want a system-wide install can opt in via APPSTRATE_BIN_DIR.
+  BIN_DIR="${APPSTRATE_BIN_DIR:-$HOME/.local/bin}"
   DEST="${BIN_DIR}/appstrate"
   ASSET="appstrate-${OS}-${ARCH}"
 
@@ -226,9 +235,20 @@ _appstrate_bootstrap() {
 
   # ─── Install ────────────────────────────────────────────────────────────────
 
+  # Create BIN_DIR if it doesn't exist — ~/.local/bin isn't present by
+  # default on macOS vanilla. mkdir -p is a no-op if the dir already exists.
+  # We attempt this unconditionally under the current user; if BIN_DIR lives
+  # under a system path that requires root (explicit APPSTRATE_BIN_DIR
+  # override), the mkdir will silently fail and we'll catch it in the
+  # writability check below.
+  mkdir -p "$BIN_DIR" 2>/dev/null || true
+
   # `sudo` only if the destination isn't user-writable — skips a pointless
-  # auth prompt when /usr/local/bin is already owned by the user (common
-  # on macOS Homebrew setups under /opt/homebrew + symlinked /usr/local/bin).
+  # auth prompt on the rootless default ($HOME/.local/bin), and on
+  # /usr/local/bin setups where the dir is already user-owned (macOS Homebrew
+  # under /opt/homebrew + symlinked /usr/local/bin). Only the explicit
+  # APPSTRATE_BIN_DIR=/usr/local/bin override on a stock Linux/macOS system
+  # will trigger the sudo prompt.
   SUDO=""
   if [ ! -w "$BIN_DIR" ]; then
     SUDO="sudo"
@@ -236,6 +256,91 @@ _appstrate_bootstrap() {
 
   log "Installing to $DEST"
   $SUDO install -m 0755 "$TMPDIR/$ASSET" "$DEST"
+
+  # ─── PATH setup ─────────────────────────────────────────────────────────────
+
+  # Add BIN_DIR to PATH by appending `export PATH="$BIN_DIR:$PATH"` to the
+  # user's shell rc files. Same pattern as uv, rustup, Bun, Deno.
+  #
+  # Skipped when:
+  #   - APPSTRATE_NO_MODIFY_PATH=1 (explicit opt-out, like UV_NO_MODIFY_PATH)
+  #   - CI=true (CIs don't restart shells; they set PATH explicitly)
+  #   - BIN_DIR is already on PATH (common for /usr/local/bin — no-op needed)
+  #
+  # Idempotent: a marker comment (APPSTRATE_PATH_MARKER) is grep'd before
+  # appending, so re-running the installer doesn't duplicate lines.
+  APPSTRATE_PATH_MARKER="# added by appstrate installer"
+  MODIFIED_PROFILE=""
+  if [ "${APPSTRATE_NO_MODIFY_PATH:-0}" = "1" ] || [ "${CI:-}" = "true" ]; then
+    : # explicit opt-out
+  else
+    case ":${PATH}:" in
+      *":${BIN_DIR}:"*) : ;; # already on PATH, nothing to do
+      *)
+        _shell_name=$(basename "${SHELL:-}")
+        # The exact export line written to rc files. Quoted so variable
+        # expansion happens at shell-startup time, not now — keeps the rc
+        # file portable if HOME ever changes (it shouldn't, but).
+        _path_line="export PATH=\"${BIN_DIR}:\$PATH\""
+
+        # Append `$marker` + `$line` to `$file` if the marker isn't already
+        # present. Touches the file if it doesn't exist (uv shotgun pattern).
+        _append_path() {
+          _file="$1"
+          _line="$2"
+          if [ -f "$_file" ] && grep -qF "$APPSTRATE_PATH_MARKER" "$_file" 2>/dev/null; then
+            return 0
+          fi
+          # `>> "$file"` creates the file if absent — matches uv's behavior
+          # of writing .profile/.zshrc even on fresh systems.
+          printf '\n%s\n%s\n' "$APPSTRATE_PATH_MARKER" "$_line" >>"$_file"
+          MODIFIED_PROFILE="$_file"
+        }
+
+        case "$_shell_name" in
+          bash)
+            # Shotgun approach — bash's rc-file loading varies wildly
+            # (interactive vs login, macOS vs Linux, with/without
+            # .bash_profile). Writing to all common candidates covers every
+            # case without needing to introspect the invocation context.
+            # .profile is included for POSIX sh / dash fallback.
+            _append_path "$HOME/.profile" "$_path_line"
+            _append_path "$HOME/.bashrc" "$_path_line"
+            _append_path "$HOME/.bash_profile" "$_path_line"
+            ;;
+          zsh)
+            # zsh only loads .zshrc for interactive shells and .zshenv for
+            # all invocations. .zshrc is the common case; .zshenv is only
+            # touched if it already exists (avoid polluting non-interactive
+            # environments for users who haven't opted in).
+            _append_path "$HOME/.zshrc" "$_path_line"
+            if [ -f "$HOME/.zshenv" ]; then
+              _append_path "$HOME/.zshenv" "$_path_line"
+            fi
+            ;;
+          fish)
+            # fish has its own syntax and a dedicated drop-in directory for
+            # environment config — cleaner than touching config.fish
+            # directly, and removable by deleting a single file.
+            _fish_conf="$HOME/.config/fish/conf.d"
+            mkdir -p "$_fish_conf" 2>/dev/null || true
+            _append_path "$_fish_conf/appstrate.fish" "fish_add_path ${BIN_DIR}"
+            ;;
+          *)
+            # Unknown shell — fall back to .profile (sourced by sh/dash and
+            # some bash login configurations). Better than silently doing
+            # nothing: at least the next login shell will pick it up.
+            _append_path "$HOME/.profile" "$_path_line"
+            ;;
+        esac
+        ;;
+    esac
+  fi
+
+  if [ -n "$MODIFIED_PROFILE" ]; then
+    warn "Added ${BIN_DIR} to PATH in ${MODIFIED_PROFILE}."
+    warn "Restart your shell or run: source ${MODIFIED_PROFILE}"
+  fi
 
   log "Launching \`appstrate install\`"
   # Exec by absolute path, NOT by `appstrate` on PATH. A different
