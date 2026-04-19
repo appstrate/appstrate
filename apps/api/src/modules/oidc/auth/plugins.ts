@@ -170,7 +170,16 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     cliTokenPlugin(),
     deviceAuthorization({
       expiresIn: "10m",
-      interval: "5s",
+      // 2s polling interval — RFC 8628 §3.2 suggests 5s as a *default*, not a
+      // floor. `gh auth login`, `gcloud auth login`, and `aws sso login` all
+      // sit in the 1–2s band for snappier CLI UX (median perceived latency
+      // between browser approval and CLI detection drops from ~2.5s to ~1s,
+      // worst case from 5s to 2s). The server-side `slow_down` guard in
+      // `cli-tokens.ts::exchangeDeviceCodeForTokens` keys off this same
+      // `pollingInterval` column, so both sides stay consistent. The load
+      // cost is negligible: one poll every 2s per CLI in active login,
+      // capped by the 10-min `expiresIn`.
+      interval: "2s",
       userCodeLength: 8,
       generateUserCode: generateAppstrateUserCode,
       // Full URL so the CLI displays a click-through link. Relative paths

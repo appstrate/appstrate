@@ -6,7 +6,7 @@ export const profilePaths = {
       operationId: "getProfile",
       tags: ["Profile"],
       summary: "Get user profile",
-      description: "Get the current user's profile (display_name, language).",
+      description: "Get the current user's profile (email, name, display_name, language).",
       responses: {
         "200": {
           description: "User profile",
@@ -22,9 +22,17 @@ export const profilePaths = {
                   id: { type: "string" },
                   displayName: { type: "string" },
                   language: { type: "string", enum: ["fr", "en"] },
+                  email: { type: "string", format: "email" },
+                  name: { type: "string" },
                 },
               },
-              example: { id: "usr_abc123", displayName: "Alice Martin", language: "fr" },
+              example: {
+                id: "usr_abc123",
+                displayName: "Alice Martin",
+                language: "fr",
+                email: "alice@example.com",
+                name: "Alice Martin",
+              },
             },
           },
         },

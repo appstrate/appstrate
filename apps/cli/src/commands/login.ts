@@ -10,8 +10,9 @@
  *   4. Print the code in the terminal + open the browser.
  *   5. Poll /api/auth/device/token until approval.
  *   6. Store the JWT access + rotating refresh pair in the keyring
- *      (issue #165); GET /api/auth/get-session to capture email +
- *      userId; persist the profile in config.toml.
+ *      (issue #165); decode `sub` + `email` from the JWT payload
+ *      (via `lib/jwt-identity.ts`) to capture userId + email;
+ *      persist the profile in config.toml.
  */
 
 import open from "open";
@@ -20,8 +21,8 @@ import { readConfig, resolveProfileName, setProfile } from "../lib/config.ts";
 import { saveTokens } from "../lib/keyring.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
-import { CLI_USER_AGENT } from "../lib/version.ts";
 import { CLI_CLIENT_ID, CLI_SCOPE } from "../lib/cli-client.ts";
+import { decodeAccessTokenIdentity } from "../lib/jwt-identity.ts";
 
 export interface LoginOptions {
   profile?: string;
@@ -87,16 +88,19 @@ async function runLogin(profileName: string, instance: string): Promise<void> {
   });
   pollSpinner.stop("Approved");
 
-  // Step 5 — fetch the BA session identity with the fresh token BEFORE
-  // persisting anything locally. `apiFetch` reads the profile + tokens
-  // from disk, but we haven't written either yet — sidestepping it with
-  // a direct authenticated `fetch` avoids a placeholder-profile write
-  // that would stick in the config file if the /get-session call 500s.
-  const session = await fetchSessionIdentity(instance, token.accessToken);
+  // Step 5 — extract identity from the access token claims. The JWT
+  // minted by /api/auth/cli/token carries `sub` (BA user id), `email`,
+  // and `name` — everything the CLI needs to persist the profile. We
+  // decode locally (base64url payload, no signature verification) because
+  // the token was just obtained from an instance the user chose;
+  // verification happens on every server request anyway. Decoding
+  // locally also avoids the bootstrap problem: BA's /get-session only
+  // reads session cookies, and /api/auth/* bypasses our OIDC bearer
+  // strategy, so there is no endpoint that understands this JWT before
+  // we have persisted org context.
+  const identity = decodeAccessTokenIdentity(token.accessToken);
 
-  // Step 6 — persist both the tokens and the profile in one pass with
-  // the real user id + email. `/api/profile` only exposes displayName
-  // + language, so the BA `/get-session` response is authoritative here.
+  // Step 6 — persist both the tokens and the profile in one pass.
   //
   // Issue #165: a 2.x server MUST issue both `refresh_token` and
   // `refresh_expires_in`. A missing `refresh_token` means pre-2.x;
@@ -124,33 +128,9 @@ async function runLogin(profileName: string, instance: string): Promise<void> {
   });
   await setProfile(profileName, {
     instance,
-    userId: session.user.id,
-    email: session.user.email,
+    userId: identity.userId,
+    email: identity.email,
   });
 
-  outro(`Logged in as ${session.user.email}`);
-}
-
-interface SessionIdentity {
-  user: { id: string; email: string; name?: string };
-}
-
-async function fetchSessionIdentity(
-  instance: string,
-  accessToken: string,
-): Promise<SessionIdentity> {
-  const res = await fetch(`${instance}/api/auth/get-session`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "User-Agent": CLI_USER_AGENT,
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to fetch session identity: HTTP ${res.status}`);
-  }
-  const body = (await res.json()) as SessionIdentity | null;
-  if (!body?.user) {
-    throw new Error("Authenticated but /api/auth/get-session returned no user");
-  }
-  return body;
+  outro(`Logged in as ${identity.email}`);
 }

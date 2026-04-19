@@ -88,7 +88,7 @@ describe("device-flow happy path", () => {
     expect(code.user_code).toMatch(/^[BCDFGHJKLMNPQRSTVWXZ]{8}$/);
     expect(code.verification_uri).toContain("/activate");
     expect(code.expires_in).toBe(600);
-    expect(code.interval).toBe(5);
+    expect(code.interval).toBe(2);
 
     // 2. Poll before approval → authorization_pending.
     const pendingRes = await app.request("/api/auth/device/token", {
@@ -113,9 +113,9 @@ describe("device-flow happy path", () => {
     expect(approveRes.status).toBe(200);
 
     // 4. Rewind `lastPolledAt` so the next poll doesn't trip BA's RFC
-    //    8628 §5.5 `slow_down` throttle (polling inside the 5s interval
-    //    returns 400 even once the code is approved). Production CLIs
-    //    naturally wait; tests can't afford the delay.
+    //    8628 §5.5 `slow_down` throttle (polling inside the configured
+    //    interval returns 400 even once the code is approved). Production
+    //    CLIs naturally wait; tests can't afford the delay.
     await db
       .update(deviceCode)
       .set({ lastPolledAt: new Date(Date.now() - 10_000) })

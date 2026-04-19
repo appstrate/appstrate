@@ -67,7 +67,7 @@
  */
 
 import { randomBytes, createHash } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
@@ -154,11 +154,26 @@ export async function exchangeDeviceCodeForTokens(params: {
 }): Promise<TokenPair> {
   const { deviceCodeValue, clientId } = params;
 
-  type ExchangeOutcome =
-    | { kind: "ok"; pair: TokenPair }
+  // Two-phase exchange. Minting the JWT calls Better Auth's `signJWT`
+  // plugin which issues its own DB reads via the BA adapter; nesting
+  // that call inside a Drizzle `db.transaction(...)` deadlocks on
+  // PGlite's single-connection embedded mode — the adapter's query
+  // queues behind our own transaction, which can't commit until the
+  // adapter query returns. PostgreSQL pools dodge this because BA
+  // gets its own connection. The fix: do the read-and-validate work
+  // inside a short transaction, mint the JWT OUTSIDE, then persist
+  // the refresh token + consume the device_code row in a second
+  // transaction with `FOR UPDATE` to preserve the one-shot contract.
+  type ReadOutcome =
+    | {
+        kind: "ok";
+        rowId: string;
+        user: { id: string; email: string; name: string | null; emailVerified: boolean };
+        scope: string;
+      }
     | { kind: "error"; code: CliTokenErrorCode; description: string };
 
-  const outcome: ExchangeOutcome = await db.transaction(async (tx) => {
+  const readOutcome: ReadOutcome = await db.transaction(async (tx) => {
     const [row] = await tx
       .select()
       .from(deviceCode)
@@ -174,8 +189,6 @@ export async function exchangeDeviceCodeForTokens(params: {
       };
     }
     if (row.clientId && row.clientId !== clientId) {
-      // `client_id` swap between `/device/code` and `/cli/token` — treat
-      // as `invalid_grant` per RFC 8628 §3.5 (same rubric BA uses).
       return {
         kind: "error",
         code: "invalid_grant",
@@ -183,9 +196,7 @@ export async function exchangeDeviceCodeForTokens(params: {
       };
     }
 
-    // Polling-interval guard (RFC 8628 §5.5). BA's own `/device/token`
-    // enforces this on the same row; we mirror it so a CLI cannot bypass
-    // the throttle by calling our endpoint directly.
+    // Polling-interval guard (RFC 8628 §5.5).
     if (row.lastPolledAt && row.pollingInterval) {
       const sinceLast = Date.now() - new Date(row.lastPolledAt).getTime();
       if (sinceLast < row.pollingInterval) {
@@ -199,10 +210,6 @@ export async function exchangeDeviceCodeForTokens(params: {
     await tx.update(deviceCode).set({ lastPolledAt: new Date() }).where(eq(deviceCode.id, row.id));
 
     if (row.expiresAt < new Date()) {
-      // Sweep the expired row so a subsequent poll doesn't linger on a
-      // dead code. BA's handler has the same sweep — mirror it. The
-      // DELETE commits with the tx because we return an error tag
-      // rather than throwing.
       await tx.delete(deviceCode).where(eq(deviceCode.id, row.id));
       return {
         kind: "error",
@@ -233,7 +240,6 @@ export async function exchangeDeviceCodeForTokens(params: {
       };
     }
 
-    // Load the approving user + a lightweight `emailVerified` column read.
     const [userRow] = await tx
       .select({
         id: userTable.id,
@@ -252,15 +258,6 @@ export async function exchangeDeviceCodeForTokens(params: {
       };
     }
 
-    // Defense-in-depth scope gate. BA's `deviceAuthorization()` plugin
-    // stores whatever scope string the `/device/code` request posted —
-    // there is no universal contract that it narrows the request to
-    // the client's declared scope set before approval. Narrow it here
-    // so a non-conforming (or future-regressed) plugin version cannot
-    // silently mint a JWT with an unregistered scope. Drop unknown
-    // tokens and audit the delta; DO NOT reject (RFC 6749 §3.3 permits
-    // servers to issue a narrower scope than requested as long as the
-    // response echoes what was actually granted).
     const [clientRow] = await tx
       .select({ scopes: oauthClient.scopes })
       .from(oauthClient)
@@ -270,27 +267,65 @@ export async function exchangeDeviceCodeForTokens(params: {
       clientId,
       userId: userRow.id,
     });
-    const pair = await mintTokenPairInTx(tx, {
-      user: userRow,
+    return { kind: "ok", rowId: row.id, user: userRow, scope };
+  });
+
+  if (readOutcome.kind === "error") {
+    throw new CliTokenError(readOutcome.code, readOutcome.description);
+  }
+  const { rowId, user, scope } = readOutcome;
+
+  // JWT mint OUTSIDE any transaction — goes through BA's jwt() plugin
+  // which opens its own DB queries via the BA adapter.
+  const accessToken = await mintAccessJwt({
+    userId: user.id,
+    email: user.email,
+    name: user.name ?? user.email,
+    emailVerified: user.emailVerified === true,
+    scope,
+    clientId,
+  });
+
+  // Second transaction: persist refresh token + consume device_code row
+  // atomically. Re-verify the device_code row still exists to guard
+  // against a racing consumer (both concurrent polls would pass the
+  // first tx; FOR UPDATE here ensures only one persists).
+  const persistOutcome: ExchangeOutcome = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ id: deviceCode.id })
+      .from(deviceCode)
+      .where(eq(deviceCode.id, rowId))
+      .limit(1)
+      .for("update");
+    if (!row) {
+      return {
+        kind: "error",
+        code: "invalid_grant",
+        description: "Device code already consumed.",
+      };
+    }
+    const { refreshPlain } = await persistRefreshTokenInTx(tx, {
+      userId: user.id,
       clientId,
       scope,
       // No parent — head of a fresh family.
       parentId: null,
       familyId: prefixedId("crf"),
     });
-
-    // One-shot contract: delete the device_codes row so a replay hits
-    // `invalid_grant`. Same semantics as BA's default `/device/token`
-    // handler. Committing this inside the tx alongside the refresh-token
-    // INSERT is what makes the whole exchange atomic under contention.
-    await tx.delete(deviceCode).where(eq(deviceCode.id, row.id));
-
-    return { kind: "ok", pair };
+    // One-shot contract.
+    await tx.delete(deviceCode).where(eq(deviceCode.id, rowId));
+    return { kind: "ok", pair: tokenPairResponse(accessToken, refreshPlain, scope) };
   });
 
-  if (outcome.kind === "ok") return outcome.pair;
-  throw new CliTokenError(outcome.code, outcome.description);
+  if (persistOutcome.kind === "error") {
+    throw new CliTokenError(persistOutcome.code, persistOutcome.description);
+  }
+  return persistOutcome.pair;
 }
+
+type ExchangeOutcome =
+  | { kind: "ok"; pair: TokenPair }
+  | { kind: "error"; code: CliTokenErrorCode; description: string };
 
 /**
  * Rotate a refresh token. On success returns a fresh pair and marks
@@ -330,15 +365,23 @@ export async function rotateRefreshToken(params: {
   const { refreshToken, clientId } = params;
   const tokenHash = hashRefreshToken(refreshToken);
 
-  // The rotation transaction returns a tagged result rather than
-  // throwing, because throwing inside `db.transaction(...)` rolls back
-  // every statement inside — including the reuse-branch family revoke.
-  // A rolled-back revoke would leave a stolen token reusable on retry.
-  // We commit the tx with whatever state it determined, then decide
-  // outside whether that outcome needs an exception or a second
-  // (committed) revoke sweep.
-  type RotationOutcome =
-    | { kind: "ok"; pair: TokenPair }
+  // Two-phase rotation — same split as `exchangeDeviceCodeForTokens`:
+  // validate + mark-used in one transaction, mint JWT OUTSIDE, then
+  // persist the new refresh token in a second transaction. The mint
+  // step goes through Better Auth's `signJWT` API which reads the
+  // `jwks` table via the BA adapter; nesting that read inside our
+  // Drizzle transaction deadlocks on PGlite's single-connection
+  // embedded mode (PostgreSQL pools avoid this because BA gets its
+  // own connection). See `exchangeDeviceCodeForTokens` for the full
+  // rationale.
+  type ValidateOutcome =
+    | {
+        kind: "ok";
+        user: { id: string; email: string; name: string | null; emailVerified: boolean };
+        scope: string;
+        parentId: string;
+        familyId: string;
+      }
     | {
         kind: "error";
         code: CliTokenErrorCode;
@@ -351,13 +394,7 @@ export async function rotateRefreshToken(params: {
         clientId: string;
       };
 
-  const outcome: RotationOutcome = await db.transaction(async (tx) => {
-    // Lock the parent row for the duration of the transaction. Any
-    // concurrent rotation of the same plaintext token blocks here
-    // until we commit or rollback, at which point it re-reads the row
-    // and sees our `used_at` mutation. This serialization closes the
-    // TOCTOU window between the SELECT and the mark-UPDATE that
-    // would otherwise let two racers both pass the `usedAt` guard.
+  const validateOutcome: ValidateOutcome = await db.transaction(async (tx) => {
     const [row] = await tx
       .select()
       .from(cliRefreshToken)
@@ -390,10 +427,6 @@ export async function rotateRefreshToken(params: {
       };
     }
     if (row.usedAt) {
-      // Signal reuse to the outer scope. The family-wide revoke runs
-      // in a fresh transaction so a thrown error here (or an abort of
-      // THIS tx for any reason) can't undo the revoke. See
-      // RFC 6819 §5.2.2.3.
       return {
         kind: "reuse",
         familyId: row.familyId,
@@ -416,23 +449,15 @@ export async function rotateRefreshToken(params: {
       return { kind: "error", code: "invalid_grant", description: "User no longer exists." };
     }
 
-    // Mark-before-mint ordering: a crash between the UPDATE and the
-    // INSERT leaves `used_at` set without a child row. A retry of the
-    // same refresh token then trips the reuse branch and revokes the
-    // family. Safe failure — no duplicated-usable state.
+    // Mark-before-mint ordering: marking `used_at` here (inside the
+    // validate tx) means a crash BEFORE we persist the child row will
+    // still trip the reuse branch on retry and revoke the family.
+    // Safe failure — no duplicated-usable state.
     await tx
       .update(cliRefreshToken)
       .set({ usedAt: new Date() })
       .where(eq(cliRefreshToken.id, row.id));
 
-    // Re-narrow the stored scope against the client's CURRENT scopes
-    // (PR #191 review). The scope persisted on the parent row reflects
-    // what was granted at the initial device-code exchange; if an
-    // operator has since removed a scope from the client definition,
-    // the rotated JWT must not continue to advertise it. `narrowScope-
-    // ToClient` drops any scope token no longer declared on the client
-    // and audit-logs the delta (`cli.refresh_token.scope.dropped`
-    // event via the shared helper).
     const [clientRow] = await tx
       .select({ scopes: oauthClient.scopes })
       .from(oauthClient)
@@ -444,35 +469,87 @@ export async function rotateRefreshToken(params: {
       phase: "refresh_token",
     });
 
-    const pair = await mintTokenPairInTx(tx, {
+    return {
+      kind: "ok",
       user: userRow,
-      clientId,
       scope: narrowedScope,
       parentId: row.id,
       familyId: row.familyId,
-    });
-    return { kind: "ok", pair };
+    };
   });
 
-  if (outcome.kind === "ok") return outcome.pair;
-  if (outcome.kind === "error") {
-    throw new CliTokenError(outcome.code, outcome.description);
+  if (validateOutcome.kind === "error") {
+    throw new CliTokenError(validateOutcome.code, validateOutcome.description);
   }
-  // outcome.kind === "reuse". Revoke the family in a fresh transaction
-  // so it commits independently of the rotation tx. Because the
-  // parent-row lock above serialized us with any concurrent winner,
-  // their child row (if any) is already committed and visible to this
-  // sweep → the `family_id` UPDATE covers it.
-  await revokeFamily(outcome.familyId, "reuse");
-  logger.warn("oidc: CLI refresh-token reuse detected — family revoked", {
-    module: "oidc",
-    audit: true,
-    event: "cli.refresh_token.reuse",
-    familyId: outcome.familyId,
-    userId: outcome.userId,
-    clientId: outcome.clientId,
+  if (validateOutcome.kind === "reuse") {
+    // Reuse detected — revoke the whole family in a fresh transaction
+    // so the revoke commit is independent of the validate tx. Because
+    // the parent-row lock above serialized us with any concurrent
+    // winner, their child row (if any) is already committed and
+    // visible to this sweep → the `family_id` UPDATE covers it.
+    await revokeFamily(validateOutcome.familyId, "reuse");
+    logger.warn("oidc: CLI refresh-token reuse detected — family revoked", {
+      module: "oidc",
+      audit: true,
+      event: "cli.refresh_token.reuse",
+      familyId: validateOutcome.familyId,
+      userId: validateOutcome.userId,
+      clientId: validateOutcome.clientId,
+    });
+    throw new CliTokenError("invalid_grant", "Refresh token has been revoked.");
+  }
+
+  // Happy path: validateOutcome.kind === "ok". Mint JWT OUTSIDE any
+  // transaction (signJWT goes through BA's adapter), then persist the
+  // new child refresh token in a separate transaction.
+  const { user, scope, parentId, familyId } = validateOutcome;
+  const accessToken = await mintAccessJwt({
+    userId: user.id,
+    email: user.email,
+    name: user.name ?? user.email,
+    emailVerified: user.emailVerified === true,
+    scope,
+    clientId,
   });
-  throw new CliTokenError("invalid_grant", "Refresh token has been revoked.");
+  const { refreshPlain, selfRevoked } = await db.transaction(async (tx) => {
+    const persisted = await persistRefreshTokenInTx(tx, {
+      userId: user.id,
+      clientId,
+      scope,
+      parentId,
+      familyId,
+    });
+    // Concurrent-reuse defense: a racing rotation on the same parent
+    // token may have revoked the family AFTER our validate-tx committed
+    // but BEFORE this persist-tx ran. The family `revoked_at` UPDATE
+    // would have missed our freshly-inserted child because the INSERT
+    // hadn't happened yet. Catch the race here by checking the family's
+    // revoke state inside the persist-tx: if ANY sibling row is already
+    // revoked with reason `reuse`, sweep the family again so our child
+    // is marked too. This preserves the RFC 6819 §5.2.2.3 invariant
+    // that a detected reuse revokes the ENTIRE family, not just the
+    // pre-rotation lineage.
+    const revokedSibling = await tx
+      .select({ reason: cliRefreshToken.revokedReason })
+      .from(cliRefreshToken)
+      .where(and(eq(cliRefreshToken.familyId, familyId), isNotNull(cliRefreshToken.revokedAt)))
+      .limit(1);
+    if (revokedSibling.length > 0) {
+      await tx
+        .update(cliRefreshToken)
+        .set({
+          revokedAt: new Date(),
+          revokedReason: revokedSibling[0]!.reason ?? "reuse",
+        })
+        .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.revokedAt)));
+      return { refreshPlain: persisted.refreshPlain, selfRevoked: true };
+    }
+    return { refreshPlain: persisted.refreshPlain, selfRevoked: false };
+  });
+  if (selfRevoked) {
+    throw new CliTokenError("invalid_grant", "Refresh token has been revoked.");
+  }
+  return tokenPairResponse(accessToken, refreshPlain, scope);
 }
 
 /**
@@ -532,45 +609,31 @@ async function revokeFamily(familyId: string, reason: string): Promise<void> {
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
- * Mint a JWT access token + refresh-token row inside a caller-supplied
- * Drizzle transaction handle. The refresh-token INSERT commits atomically
- * with whatever the caller wrapped the tx around (`used_at` mark on the
- * parent row in `rotateRefreshToken`, DELETE of the device_codes row in
- * `exchangeDeviceCodeForTokens`). Both callers hold the relevant
- * FOR-UPDATE lock so a concurrent reuse-detection or duplicate-exchange
- * racer either sees the committed INSERT and revokes it, or hasn't
- * started yet because it's blocked on the lock.
+ * Persist a refresh-token row inside a caller-supplied Drizzle transaction.
+ * The caller mints the access JWT BEFORE opening the transaction (JWT
+ * signing goes through Better Auth's `jwt()` plugin which uses its own
+ * adapter path — nesting that inside a PGlite transaction deadlocks on
+ * single-connection embedded mode). Returns the plaintext refresh token;
+ * the hash is persisted to the DB.
  */
-async function mintTokenPairInTx(
+async function persistRefreshTokenInTx(
   tx: DbOrTx,
   params: {
-    user: { id: string; email: string; name: string | null; emailVerified: boolean };
+    userId: string;
     clientId: string;
     scope: string;
     parentId: string | null;
     familyId: string;
   },
-): Promise<TokenPair> {
-  const { user, clientId, scope, parentId, familyId } = params;
-
-  // 1. Mint JWT access token.
-  const accessToken = await mintAccessJwt({
-    userId: user.id,
-    email: user.email,
-    name: user.name ?? user.email,
-    emailVerified: user.emailVerified === true,
-    scope,
-    clientId,
-  });
-
-  // 2. Mint opaque refresh token + store.
+): Promise<{ refreshPlain: string }> {
+  const { userId, clientId, scope, parentId, familyId } = params;
   const refreshPlain = generateRefreshToken();
   const refreshHash = hashRefreshToken(refreshPlain);
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000);
   await tx.insert(cliRefreshToken).values({
     id: prefixedId("crf"),
     tokenHash: refreshHash,
-    userId: user.id,
+    userId,
     clientId,
     familyId,
     parentId,
@@ -581,7 +644,10 @@ async function mintTokenPairInTx(
     revokedAt: null,
     revokedReason: null,
   });
+  return { refreshPlain };
+}
 
+function tokenPairResponse(accessToken: string, refreshPlain: string, scope: string): TokenPair {
   return {
     accessToken,
     refreshToken: refreshPlain,

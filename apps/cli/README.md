@@ -36,6 +36,7 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | `appstrate login`   | Sign into an instance via RFC 8628 device-flow. Tokens land in the OS keyring. |
 | `appstrate logout`  | Revoke the active session server-side and wipe local credentials.              |
 | `appstrate whoami`  | Print the identity attached to the active profile.                             |
+| `appstrate token`   | Print metadata about the stored access + refresh tokens (debug).               |
 
 All commands accept `--profile <name>` to target a specific profile (see [Profiles](#profiles)).
 
@@ -95,11 +96,11 @@ appstrate login --profile prod --instance https://app.my.io
 1. `POST /api/auth/device/code` → receive `device_code`, `user_code`, `verification_uri_complete`, `expires_in` (10 min), `interval` (5s).
 2. CLI prints the code, opens the verification URI in the browser via the [`open`](https://www.npmjs.com/package/open) package (silent fallback on headless hosts — the URL is still displayed in the terminal).
 3. User authenticates on the instance's `/activate` SSR page and clicks "Autoriser". A realm guard on `/device/approve` rejects cross-audience approval attempts (e.g. an application-level end-user trying to approve a CLI session) — see [ADR-006](../../docs/adr/ADR-006-cli-device-flow-monorepo.md) for rationale.
-4. CLI polls `POST /api/auth/device/token` every `interval` seconds (honoring `slow_down` backoff) until approval. On success: receives `access_token` (a raw Better Auth session token, not a JWT).
-5. CLI calls `/api/auth/get-session` with `Authorization: Bearer <token>` to fetch the canonical identity.
-6. Session token is stored in the OS keyring; profile is written to `config.toml`.
+4. CLI polls `POST /api/auth/cli/token` every `interval` seconds (honoring `slow_down` backoff) until approval. On success: receives an `access_token` (15-minute signed JWT, ES256) + `refresh_token` (30-day opaque rotating token) pair — see issue #165.
+5. CLI decodes the JWT payload locally to extract `sub` (user id) and `email` from its claims. No second round-trip needed — the JWT is the authoritative identity source, and `/api/auth/get-session` does not understand Bearer JWTs (that endpoint is BA's cookie-based session reader).
+6. Tokens are stored in the OS keyring; profile is written to `config.toml`.
 
-**Session lifetime**: 7 days (Better Auth session default). No refresh token — re-run `appstrate login` when the session expires. The CLI surfaces an `AuthError` with a re-login hint on 401 responses.
+**Session lifetime**: 15-minute access token + 30-day rotating refresh token (RFC 6819 §5.2.2.3 reuse detection). The CLI transparently refreshes on 401; re-run `appstrate login` only when the refresh token family is revoked or the 30-day window elapses.
 
 ---
 
@@ -124,7 +125,7 @@ If the instance is unreachable, local credentials are still wiped (with a warnin
 
 ### `appstrate whoami`
 
-Prints the identity attached to a profile by calling `/api/auth/get-session` with the stored token.
+Prints the identity attached to a profile. Verifies the stored JWT is still valid by calling `GET /api/profile` (a 401 surfaces as a clear "re-login" error); the email comes from the profile persisted at login.
 
 ```sh
 appstrate whoami
@@ -142,6 +143,54 @@ Expires:  2026-04-25T00:36:40.285Z
 ```
 
 Exits non-zero if the profile is missing, the session is revoked, or the instance is unreachable — useful in CI scripts that need to fail fast when auth drifts.
+
+---
+
+### `appstrate token`
+
+Prints metadata about the access + refresh tokens stored for a profile. **Metadata only** — the token plaintext is never written to stdout or stderr, so copy-pasting the output into a screen share, a CI log, or a bug report never leaks a bearer.
+
+```sh
+appstrate token
+appstrate token --profile prod
+```
+
+Output:
+
+```
+Profile:           default
+Instance:          https://app.example.com
+
+Access token
+  Status:          fresh
+  Expires:         in 14m 32s
+  Expires at:      2026-04-19T16:23:45.000Z
+
+Refresh token
+  Status:          valid
+  Expires:         in 29d 23h
+  Expires at:      2026-05-18T16:08:45.000Z
+
+JWT claims
+  iss:             https://app.example.com/api/auth
+  aud:             https://app.example.com/api/auth
+  sub:             usr_abc123
+  azp:             appstrate-cli
+  actor_type:      user
+  scope:           cli
+  iat:             1713543325 (2026-04-19T16:08:45.000Z)
+  exp:             1713544225 (2026-04-19T16:23:45.000Z)
+  jti:             ab12cd34…
+```
+
+Status vocabulary:
+
+- **Access**: `fresh` (> 30s remaining) · `rotating-soon` (< 30s — `api.ts` will rotate on the next call) · `expired` (past TTL; claims still render for diagnostics)
+- **Refresh**: `valid` (> 24h remaining) · `expiring-soon` (< 24h) · `expired` (re-run `appstrate login`) · `not stored` (legacy 1.x credentials)
+
+No network call — this command inspects local state only. A refresh token revoked server-side still looks `valid` here by design. Use `whoami` for a server-authoritative identity check.
+
+If the JWT `exp` claim and the locally stored `expiresAt` diverge by more than 2 seconds, `token` flags the mismatch — `api.ts`'s proactive-rotation logic keys off the stored value, so a skew between the two is worth surfacing before it causes unexpected 401s.
 
 ## Profiles
 

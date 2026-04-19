@@ -23,7 +23,24 @@ const profileRouter = new Hono<AppEnv>();
 
 profileRouter.get("/profile", async (c) => {
   const user = c.get("user");
-  const rows = await db.select().from(profiles).where(eq(profiles.id, user.id)).limit(1);
+  // Intentionally joins `profiles` with `user` so the response carries
+  // the authoritative (BA-owned) email — the CLI's `whoami` surfaces
+  // this as the "current identity" check, catching cases where the
+  // locally cached email is stale after a dashboard-side email change.
+  // One indexed join on the user PK is cheap versus maintaining a
+  // second email copy on `profiles`.
+  const rows = await db
+    .select({
+      id: profiles.id,
+      displayName: profiles.displayName,
+      language: profiles.language,
+      email: userTable.email,
+      name: userTable.name,
+    })
+    .from(profiles)
+    .innerJoin(userTable, eq(userTable.id, profiles.id))
+    .where(eq(profiles.id, user.id))
+    .limit(1);
 
   if (!rows[0]) {
     throw notFound("Profile not found");
@@ -33,6 +50,8 @@ profileRouter.get("/profile", async (c) => {
     id: rows[0].id,
     displayName: rows[0].displayName,
     language: rows[0].language,
+    email: rows[0].email,
+    name: rows[0].name,
   });
 });
 
