@@ -36,6 +36,7 @@ function mockCtx(): ModuleInitContext {
     applyMigrations: async () => {},
     getSendMail: async () => () => {},
     getOrgAdminEmails: async () => [],
+    services: {} as ModuleInitContext["services"],
   };
 }
 

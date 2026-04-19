@@ -42,6 +42,8 @@
     "./logger": "./src/logger.ts",
     "./env": "./src/env.ts",
     "./ajv": "./src/ajv.ts",
+    "./api-errors": "./src/api-errors.ts",
+    "./safe-json": "./src/safe-json.ts",
     "./storage": "./src/storage.ts",
     "./storage-s3": "./src/storage-s3.ts",
     "./storage-fs": "./src/storage-fs.ts",
@@ -59,6 +61,7 @@
     "./schemas": "./src/schemas.ts",
     "./form": "./src/form.ts",
     "./module": "./src/module.ts",
+    "./platform-types": "./src/platform-types.ts",
     "./sidecar-types": "./src/sidecar-types.ts"
   },
   "dependencies": {

@@ -11,6 +11,19 @@
  */
 
 import type { Hono } from "hono";
+import type { Logger } from "./logger.ts";
+import type {
+  Actor,
+  ContainerOrchestrator,
+  InlinePreflightInput,
+  InlinePreflightResult,
+  PlatformApplication,
+  PlatformConnectionProviderGroup,
+  PlatformModel,
+  PlatformPackage,
+  PubSub,
+  RealtimeSubscriber,
+} from "./platform-types.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -482,4 +495,130 @@ export interface ModuleInitContext {
   getSendMail: () => Promise<(to: string, subject: string, html: string) => void>;
   /** Query helper: get org admin emails. */
   getOrgAdminEmails: (orgId: string) => Promise<string[]>;
+  /**
+   * Typed platform capabilities injected at init. Modules capture this
+   * reference and consume services through it without importing
+   * apps/api internals.
+   *
+   * DTO payloads expose stable public fields (id, source, name, …) with an
+   * open index signature so apps/api rows remain assignable without casts
+   * while modules get meaningful types for the fields they care about.
+   *
+   * ## Security
+   *
+   * `services` grants modules privileged access to the platform — they can
+   * abort runs, emit events, subscribe to the realtime bus, talk to the
+   * container orchestrator, and read/write run state across orgs. Modules
+   * are therefore trusted code on par with `apps/api` itself. Only load
+   * modules you control or have audited — never treat `MODULES=` as a
+   * safe extension point for untrusted packages.
+   */
+  services: PlatformServices;
+}
+
+// ---------------------------------------------------------------------------
+// PlatformServices — injected platform capabilities
+//
+// Namespaced sub-objects for discoverability. Keep the surface minimal —
+// only capabilities with stable cross-module demand belong here. Signatures
+// fix arity, argument names, and return cardinality (object vs array vs
+// void). DTO payloads use minimal public shapes from `platform-types.ts`
+// (PlatformPackage, PlatformModel, PlatformApplication, …) — concrete
+// apps/api rows remain assignable thanks to their open index signature.
+// ---------------------------------------------------------------------------
+
+/** Updates accepted by `runs.update`. Open shape — future fields OK. */
+export interface RunUpdate {
+  status?: string;
+  result?: Record<string, unknown>;
+  state?: Record<string, unknown>;
+  error?: string;
+  [key: string]: unknown;
+}
+
+/** Log level accepted by `runs.appendLog`. */
+export type RunLogLevel = "debug" | "info" | "warn" | "error";
+
+export interface PlatformServices {
+  /** Structured JSON logger (pino). */
+  logger: Logger;
+  /** Container orchestrator singleton accessor. Synchronous — instance is cached. */
+  orchestrator: { get(): ContainerOrchestrator };
+  /** Pub/Sub adapter accessor. Always async — Redis impl loads lazily. */
+  pubsub: { get(): Promise<PubSub> };
+  /** Tier/mode detection — surfaces which optional infrastructure is present. */
+  env: {
+    hasRedis(): boolean;
+    hasExternalDb(): boolean;
+  };
+  /** Org-scoped model catalog operations. */
+  models: {
+    load(orgId: string, modelDbId: string): Promise<PlatformModel | null>;
+    listForOrg(orgId: string): Promise<PlatformModel[]>;
+  };
+  /** Package catalog accessors. */
+  packages: {
+    get(
+      packageId: string,
+      orgId: string,
+      opts?: { includeEphemeral?: boolean },
+    ): Promise<PlatformPackage | null>;
+    isInlineShadow(packageId: string): boolean;
+  };
+  /** Application helpers. */
+  applications: {
+    getDefault(orgId: string): Promise<PlatformApplication | null>;
+  };
+  /** Connection manager helpers. */
+  connections: {
+    /** Returns `{ providers: [...] }` — not a bare array. */
+    listAllForActor(actor: Actor): Promise<{ providers: PlatformConnectionProviderGroup[] }>;
+  };
+  /**
+   * Run lifecycle operations (append log, update, abort).
+   *
+   * `appendLog` / `update` take a single args object so future fields are
+   * non-breaking and the three id parameters (`runId` / `orgId` /
+   * `applicationId`) cannot be silently swapped at the call site.
+   */
+  runs: {
+    /** Returns the inserted log row id. */
+    appendLog(args: {
+      runId: string;
+      orgId: string;
+      type: string;
+      event?: string | null;
+      message?: string | null;
+      data?: Record<string, unknown> | null;
+      level?: RunLogLevel;
+    }): Promise<number>;
+    update(args: {
+      runId: string;
+      orgId: string;
+      applicationId: string;
+      updates: RunUpdate;
+    }): Promise<void>;
+    abort(runId: string): void;
+  };
+  /**
+   * Inline run preflight — validates a manifest + inputs without creating a
+   * run record. Consumers inspect the result to decide whether to trigger an
+   * actual run. No durable side effects.
+   */
+  inline: {
+    preflight(params: InlinePreflightInput): Promise<InlinePreflightResult>;
+  };
+  /** Realtime SSE subscriber registry. */
+  realtime: {
+    addSubscriber(sub: RealtimeSubscriber): void;
+    removeSubscriber(id: string): void;
+  };
+  /** Module registry accessors (for cross-module lookups and event emission). */
+  modules: {
+    get(id: string): AppstrateModule | null;
+    emit<K extends keyof ModuleEvents>(
+      event: K,
+      ...args: Parameters<ModuleEvents[K]>
+    ): Promise<void>;
+  };
 }

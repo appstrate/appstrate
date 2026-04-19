@@ -13,9 +13,25 @@ import { isEmbeddedDb } from "@appstrate/db/client";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
-import type { ModuleInitContext } from "@appstrate/core/module";
+import type { ModuleInitContext, PlatformServices } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
 import { applyModuleMigrations } from "./migrate.ts";
+
+// ---- Platform service imports (for buildPlatformServices) -----------------
+import { logger } from "../logger.ts";
+import { loadModel, listOrgModels } from "../../services/org-models.ts";
+import { getPackage } from "../../services/agent-service.ts";
+import { isInlineShadowPackageId } from "../../services/inline-run.ts";
+import { runInlinePreflight } from "../../services/inline-run-preflight.ts";
+import { getDefaultApplication } from "../../services/applications.ts";
+import { listAllActorConnections } from "../../services/connection-manager/providers.ts";
+import { appendRunLog, updateRun } from "../../services/state/runs.ts";
+import { abortRun } from "../../services/run-tracker.ts";
+import { addSubscriber, removeSubscriber } from "../../services/realtime.ts";
+import { getOrchestrator } from "../../services/orchestrator/index.ts";
+import { getPubSub } from "../../infra/index.ts";
+import { hasRedis, hasExternalDb } from "../../infra/mode.ts";
+import { getModule, emitEvent } from "./module-loader.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -56,6 +72,52 @@ export function getModuleRegistry(): string[] {
 // Init context builder
 // ---------------------------------------------------------------------------
 
+/**
+ * Wire concrete platform services into the structural `PlatformServices`
+ * contract declared in `@appstrate/core/module`. All bindings pass through:
+ * the public DTO shapes in `@appstrate/core/platform-types` use open index
+ * signatures so the concrete apps/api rows (LoadedPackage, ResolvedModel,
+ * Application row, UserConnectionProviderGroup) are structurally assignable.
+ *
+ * `Actor` is re-declared in core with the same two-variant union as
+ * `@appstrate/connect` — they're nominally different types but structurally
+ * identical, hence the parameter-name-only mismatch goes through.
+ */
+function buildPlatformServices(): PlatformServices {
+  return {
+    logger,
+    orchestrator: { get: getOrchestrator },
+    pubsub: { get: getPubSub },
+    env: { hasRedis, hasExternalDb },
+    models: { load: loadModel, listForOrg: listOrgModels },
+    packages: {
+      get: getPackage,
+      isInlineShadow: isInlineShadowPackageId,
+    },
+    applications: { getDefault: getDefaultApplication },
+    connections: { listAllForActor: listAllActorConnections },
+    runs: {
+      // Adapter: positional args internally, object args at the public boundary
+      // so the published contract is non-breaking when fields are added.
+      appendLog: (a) =>
+        appendRunLog(
+          a.runId,
+          a.orgId,
+          a.type,
+          a.event ?? null,
+          a.message ?? null,
+          a.data ?? null,
+          a.level,
+        ),
+      update: (a) => updateRun(a.runId, a.orgId, a.applicationId, a.updates),
+      abort: abortRun,
+    },
+    inline: { preflight: runInlinePreflight },
+    realtime: { addSubscriber, removeSubscriber },
+    modules: { get: getModule, emit: emitEvent },
+  };
+}
+
 export function buildModuleInitContext(): ModuleInitContext {
   const env = getEnv();
   const ctx: ModuleInitContext = {
@@ -71,6 +133,7 @@ export function buildModuleInitContext(): ModuleInitContext {
       return sendMail;
     },
     getOrgAdminEmails,
+    services: buildPlatformServices(),
   };
   return ctx;
 }
