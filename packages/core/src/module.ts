@@ -489,11 +489,10 @@ export interface ModuleInitContext {
    * reference and consume services through it without importing
    * apps/api internals.
    *
-   * The shape is a loose structural contract (values returned by concrete
-   * services often have narrower types than `unknown`). Consumers cast at
-   * the call site when they need the concrete type — this is safe by
-   * construction because core's loose signatures are supertypes of the
-   * platform's concrete ones.
+   * Argument shapes and return cardinality are precise; opaque DTO payloads
+   * (model rows, loaded packages, applications, connection groups) stay
+   * `unknown` so core does not have to depend on apps/api types. Consumers
+   * cast at the call site when they need the concrete type.
    */
   services: PlatformServices;
 }
@@ -502,51 +501,82 @@ export interface ModuleInitContext {
 // PlatformServices — injected platform capabilities
 //
 // Namespaced sub-objects for discoverability. Keep the surface minimal —
-// only capabilities with stable cross-module demand belong here. Function
-// signatures use `unknown` where the concrete shape lives in apps/api; the
-// integration site casts at injection time so modules get runtime access
-// without core having to import apps/api implementation details.
+// only capabilities with stable cross-module demand belong here. Signatures
+// fix arity, argument names, and return cardinality (object vs array vs
+// void) so external modules get meaningful type-checking; opaque DTO payloads
+// stay `unknown` because their concrete shapes live in apps/api and would
+// leak internals into core.
 // ---------------------------------------------------------------------------
+
+/** Updates accepted by `runs.update`. Open shape — future fields OK. */
+export interface RunUpdate {
+  status?: string;
+  result?: Record<string, unknown>;
+  state?: Record<string, unknown>;
+  error?: string;
+  [key: string]: unknown;
+}
+
+/** Log level accepted by `runs.appendLog`. */
+export type RunLogLevel = "debug" | "info" | "warn" | "error";
 
 export interface PlatformServices {
   /** Structured JSON logger (pino). */
   logger: Logger;
-  /** Container orchestrator singleton accessor. */
+  /** Container orchestrator singleton accessor. Synchronous — instance is cached. */
   orchestrator: { get(): ContainerOrchestrator };
-  /** Pub/Sub adapter accessor. Resolves asynchronously because Redis impls load lazily. */
-  pubsub: { get(): PubSub | Promise<PubSub> };
+  /** Pub/Sub adapter accessor. Always async — Redis impl loads lazily. */
+  pubsub: { get(): Promise<PubSub> };
   /** Tier/mode detection — surfaces which optional infrastructure is present. */
   env: {
     hasRedis(): boolean;
     hasExternalDb(): boolean;
   };
-  /** Org-scoped model catalog operations. */
+  /** Org-scoped model catalog operations. Returned DTOs are opaque. */
   models: {
-    load(orgId: string, modelDbId: string): Promise<unknown>;
+    load(orgId: string, modelDbId: string): Promise<unknown | null>;
     listForOrg(orgId: string): Promise<unknown[]>;
   };
   /** Package catalog accessors. */
   packages: {
-    get(packageId: string, orgId: string, opts?: { includeEphemeral?: boolean }): Promise<unknown>;
+    get(
+      packageId: string,
+      orgId: string,
+      opts?: { includeEphemeral?: boolean },
+    ): Promise<unknown | null>;
     isInlineShadow(packageId: string): boolean;
   };
   /** Application helpers. */
   applications: {
-    getDefault(orgId: string): Promise<unknown>;
+    getDefault(orgId: string): Promise<unknown | null>;
   };
   /** Connection manager helpers. */
   connections: {
-    listAllForActor(...args: unknown[]): Promise<unknown[]>;
+    /** Returns `{ providers: [...] }` — not a bare array. */
+    listAllForActor(actor: unknown): Promise<{ providers: unknown[] }>;
   };
   /** Run lifecycle operations (append log, update, abort). */
   runs: {
-    appendLog(...args: unknown[]): Promise<void>;
-    update(...args: unknown[]): Promise<void>;
+    /** Returns the inserted log row id. */
+    appendLog(
+      runId: string,
+      orgId: string,
+      type: string,
+      event: string | null,
+      message: string | null,
+      data: Record<string, unknown> | null,
+      level?: RunLogLevel,
+    ): Promise<number>;
+    update(id: string, orgId: string, applicationId: string, updates: RunUpdate): Promise<void>;
     abort(runId: string): void;
   };
-  /** Inline run trigger. */
+  /**
+   * Inline run preflight — validates a manifest + inputs without creating a
+   * run record. Consumers inspect the result to decide whether to trigger an
+   * actual run. No durable side effects.
+   */
   inline: {
-    trigger(params: unknown): Promise<unknown>;
+    preflight(params: unknown): Promise<unknown>;
   };
   /** Realtime SSE subscriber registry. */
   realtime: {

@@ -9,6 +9,11 @@
  * @appstrate/core package without reaching into apps/api internals.
  */
 
+import type { SidecarConfig } from "./sidecar-types.ts";
+
+// Re-export sidecar config types from the dedicated module for convenience.
+export type { SidecarConfig, LlmProxyConfig } from "./sidecar-types.ts";
+
 // ---------------------------------------------------------------------------
 // Workload / orchestrator value types
 // ---------------------------------------------------------------------------
@@ -51,14 +56,9 @@ export interface CleanupReport {
 
 export type StopResult = "stopped" | "not_found" | "already_stopped";
 
-// Re-export sidecar config types from the dedicated module for convenience.
-export type { SidecarConfig, LlmProxyConfig } from "./sidecar-types.ts";
-
 // ---------------------------------------------------------------------------
 // ContainerOrchestrator — structural contract
 // ---------------------------------------------------------------------------
-
-import type { SidecarConfig } from "./sidecar-types.ts";
 
 export interface ContainerOrchestrator {
   /** Init one-shot: pool init, platform detection, etc. */

@@ -76,11 +76,10 @@ export function getModuleRegistry(): string[] {
  * Wire concrete platform services into the structural `PlatformServices`
  * contract declared in `@appstrate/core/module`.
  *
- * The `as PlatformServices[…]` casts are deliberate: concrete apps/api
- * functions have narrower types (e.g. `load(): Promise<ResolvedModel | null>`)
- * than the loose structural interface (`load(): Promise<unknown>`). This is
- * safe by construction — the loose type is a supertype of the concrete one —
- * but TypeScript cannot infer the relationship across the package boundary.
+ * Most bindings pass through because the core contract is a supertype of the
+ * concrete signatures. Remaining casts are narrow and annotated where TS's
+ * function-parameter bivariance or opaque DTO payloads (Actor, emit parameter
+ * tuples) cross the package boundary.
  */
 function buildPlatformServices(): PlatformServices {
   return {
@@ -90,21 +89,24 @@ function buildPlatformServices(): PlatformServices {
     env: { hasRedis, hasExternalDb },
     models: { load: loadModel, listForOrg: listOrgModels },
     packages: {
-      get: getPackage as PlatformServices["packages"]["get"],
+      get: getPackage,
       isInlineShadow: isInlineShadowPackageId,
     },
     applications: { getDefault: getDefaultApplication },
     connections: {
+      // `Actor` is an apps/api type — core uses `unknown` for the param.
       listAllForActor:
-        listAllActorConnections as unknown as PlatformServices["connections"]["listAllForActor"],
+        listAllActorConnections as PlatformServices["connections"]["listAllForActor"],
     },
     runs: {
-      appendLog: appendRunLog as unknown as PlatformServices["runs"]["appendLog"],
-      update: updateRun as unknown as PlatformServices["runs"]["update"],
+      appendLog: appendRunLog,
+      update: updateRun,
       abort: abortRun,
     },
-    inline: { trigger: runInlinePreflight as PlatformServices["inline"]["trigger"] },
+    inline: { preflight: runInlinePreflight },
     realtime: { addSubscriber, removeSubscriber },
+    // `emit` generic signature carries ModuleEvents tuples; identical at the
+    // type level but TS requires a cast for generic-in-generic-out parity.
     modules: { get: getModule, emit: emitEvent as PlatformServices["modules"]["emit"] },
   };
 }
