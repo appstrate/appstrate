@@ -77,6 +77,18 @@ describe("runCommand", () => {
     expect(res.ok).toBe(true);
     expect(res.stdout).toBe("hello");
   });
+
+  it("kills the child and returns ok=false when timeoutMs elapses", async () => {
+    if (platform() === "win32") return;
+    const start = Date.now();
+    const res = await runCommand("sleep", ["5"], { stdio: "ignore", timeoutMs: 150 });
+    const elapsed = Date.now() - start;
+    expect(res.ok).toBe(false);
+    expect(res.exitCode).toBe(-1);
+    // Generous upper bound — CI runners can be slow, but we MUST come
+    // back well before `sleep 5` would have exited on its own.
+    expect(elapsed).toBeLessThan(3000);
+  });
 });
 
 describe("commandExists", () => {
