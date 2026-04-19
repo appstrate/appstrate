@@ -62,9 +62,20 @@ export interface LoginDeps {
   pickOrg?: (orgs: Org[]) => Promise<Org | null>;
   /** Prompt the user for a new org name + optional slug. */
   promptCreateOrg?: () => Promise<{ name: string; slug?: string } | null>;
+  /**
+   * Launch the device-flow verification URL in the user's browser.
+   * Defaulted to the `open` npm package in production; tests inject a
+   * noop so the suite doesn't pop real browser tabs on every run.
+   */
+  openUrl?: (url: string) => Promise<void>;
+}
+
+async function defaultOpenUrl(url: string): Promise<void> {
+  await open(url);
 }
 
 const defaultDeps: Required<LoginDeps> = {
+  openUrl: defaultOpenUrl,
   pickOrg: async (orgs: Org[]): Promise<Org | null> => {
     if (!process.stdin.isTTY) {
       process.stdout.write(
@@ -142,8 +153,10 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
 
   // Step 3 — open the browser on the complete URI (pre-fills user_code).
   // If `open` fails (headless SSH / no display), the printed URL + code
-  // above keep the flow usable. Swallow the error silently.
-  open(code.verificationUriComplete).catch(() => {});
+  // above keep the flow usable. Swallow the error silently. Routed
+  // through `opts.deps.openUrl` so tests don't pop real browser tabs.
+  const openUrl = opts.deps?.openUrl ?? defaultOpenUrl;
+  openUrl(code.verificationUriComplete).catch(() => {});
 
   // Step 4 — poll until approval or terminal error.
   const pollSpinner = spinner();
