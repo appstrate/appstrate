@@ -26,9 +26,7 @@ import { apiFetchRaw, AuthError } from "../lib/api.ts";
 import { revokeCliRefreshToken } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { getProfile } from "../lib/config.ts";
-
-/** Canonical clientId for the official CLI. */
-const CLI_CLIENT_ID = "appstrate-cli";
+import { CLI_CLIENT_ID } from "../lib/cli-client.ts";
 
 export interface LogoutOptions {
   profile?: string;

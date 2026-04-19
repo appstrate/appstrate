@@ -29,14 +29,7 @@ import { getProfile, type Profile } from "./config.ts";
 import { normalizeInstance } from "./instance-url.ts";
 import { CLI_USER_AGENT } from "./version.ts";
 import { refreshCliTokens, DeviceFlowError } from "./device-flow.ts";
-
-/**
- * Canonical clientId for the official CLI. Same constant lives in
- * `commands/login.ts` — kept in sync by test coverage over both files.
- * Duplication is deliberate: `api.ts` has no dependency on `commands/`,
- * and a single shared `const.ts` would be overkill for one string.
- */
-const CLI_CLIENT_ID = "appstrate-cli";
+import { CLI_CLIENT_ID } from "./cli-client.ts";
 
 /**
  * Refresh the access token proactively when it has this long or less

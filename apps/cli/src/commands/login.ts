@@ -21,14 +21,7 @@ import { saveTokens } from "../lib/keyring.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { CLI_USER_AGENT } from "../lib/version.ts";
-
-/** Canonical clientId for the official CLI. Matches `ensureCliClient()` server-side. */
-const CLI_CLIENT_ID = "appstrate-cli";
-
-/** Fixed scope set — RFC 8628 lets any registered scope through, but the
- * server only honors the CLI client's declared set (openid, profile,
- * email, offline_access). Hard-coding here keeps the request unambiguous. */
-const CLI_SCOPE = "openid profile email offline_access";
+import { CLI_CLIENT_ID, CLI_SCOPE } from "../lib/cli-client.ts";
 
 export interface LoginOptions {
   profile?: string;
@@ -105,29 +98,29 @@ async function runLogin(profileName: string, instance: string): Promise<void> {
   // the real user id + email. `/api/profile` only exposes displayName
   // + language, so the BA `/get-session` response is authoritative here.
   //
-  // Issue #165: a server that returns no `refresh_token` is not a 2.x
-  // platform — the CLI refuses the login rather than storing a session
-  // it cannot silently renew, because the user would otherwise be
-  // asked to re-authenticate every 15 minutes (the JWT's `expires_in`)
-  // with no grace path.
+  // Issue #165: a 2.x server MUST issue both `refresh_token` and
+  // `refresh_expires_in`. A missing `refresh_token` means pre-2.x;
+  // a missing `refresh_expires_in` means a non-conforming proxy
+  // stripped the field. Either way the CLI refuses the login rather
+  // than fabricating an expiry — a hallucinated 30-day window would
+  // mask a real protocol mismatch and leak into the keyring.
   if (!token.refreshToken) {
     throw new Error(
       "Server did not issue a refresh token — the instance may be running a pre-2.x Appstrate. " +
         "Upgrade the server, or use `--instance` to target a 2.x instance.",
     );
   }
+  if (token.refreshExpiresIn === undefined) {
+    throw new Error(
+      "Server returned a refresh token without refresh_expires_in — the response is non-conforming " +
+        "(a reverse proxy may be stripping the field). Fix the server response and retry.",
+    );
+  }
   await saveTokens(profileName, {
     accessToken: token.accessToken,
     expiresAt: Date.now() + token.expiresIn * 1000,
     refreshToken: token.refreshToken,
-    refreshExpiresAt:
-      token.refreshExpiresIn !== undefined
-        ? Date.now() + token.refreshExpiresIn * 1000
-        : // Defensive default — the server MUST echo refresh_expires_in,
-          // but if a non-conforming proxy strips it we still get a
-          // usable entry with the conservative 30-day window matching
-          // the server's own default from `services/cli-tokens.ts`.
-          Date.now() + 30 * 24 * 60 * 60 * 1000,
+    refreshExpiresAt: Date.now() + token.refreshExpiresIn * 1000,
   });
   await setProfile(profileName, {
     instance,
