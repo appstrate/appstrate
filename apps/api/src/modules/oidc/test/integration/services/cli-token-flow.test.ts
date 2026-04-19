@@ -269,6 +269,57 @@ describe("POST /api/auth/cli/token — grant_type=device_code (issue #165)", () 
     const body = (await replay.json()) as { error?: string };
     expect(body.error).toBe("invalid_grant");
   });
+
+  it("serializes concurrent device_code exchanges — exactly one pair minted", async () => {
+    // Regression guard against the TOCTOU race between the `status ===
+    // "approved"` check and the one-shot `DELETE device_codes` sweep.
+    // Before `exchangeDeviceCodeForTokens` was wrapped in a
+    // `db.transaction` + `SELECT … FOR UPDATE` on the device_codes row,
+    // two concurrent polls arriving in the ms-wide window after approval
+    // could both pass the status check and mint two token pairs for the
+    // same device authorization — doubling the refresh-token family
+    // surface and silently breaking the RFC 8628 §3.5 one-shot contract.
+    //
+    // With the fix, the row lock serializes the two polls: the winner
+    // inserts its refresh-token row and deletes the device_codes row;
+    // the loser blocks on the lock, re-reads after commit, sees no row,
+    // and returns `invalid_grant`.
+    const { cookie } = await signUpPlatformUser();
+    const { deviceCodeValue } = await runDeviceFlow(cookie);
+
+    const makeReq = () =>
+      app.request("/api/auth/cli/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          device_code: deviceCodeValue,
+          client_id: "appstrate-cli",
+        }),
+      });
+
+    const [a, b] = await Promise.all([makeReq(), makeReq()]);
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual([200, 400]);
+
+    const loser = a.status === 400 ? a : b;
+    const loserBody = (await loser.json()) as { error?: string };
+    expect(loserBody.error).toBe("invalid_grant");
+
+    // Exactly ONE refresh-token row was inserted — the winner's. The
+    // loser's transaction rolled back on the status re-check, so no
+    // orphan row survives.
+    const allRefresh = await db.select().from(cliRefreshToken);
+    expect(allRefresh.length).toBe(1);
+
+    // device_codes row is gone (one-shot contract honored by the winner).
+    const [deviceRow] = await db
+      .select()
+      .from(deviceCode)
+      .where(eq(deviceCode.deviceCode, deviceCodeValue))
+      .limit(1);
+    expect(deviceRow).toBeUndefined();
+  });
 });
 
 describe("POST /api/auth/cli/token — grant_type=refresh_token", () => {

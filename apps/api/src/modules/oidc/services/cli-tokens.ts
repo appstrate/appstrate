@@ -128,6 +128,25 @@ export interface TokenPair {
  * The caller MUST have already validated `client_id` existence + the
  * device-code grant registration — this service only validates the
  * device-code row itself.
+ *
+ * ## Concurrency model
+ *
+ * Same shape as `rotateRefreshToken`: the entire validate → mint →
+ * consume cycle runs inside `db.transaction` with a `SELECT … FOR
+ * UPDATE` lock on the `device_codes` row. Two concurrent polls arriving
+ * in the ms-wide window after approval serialize on the lock — one
+ * wins, inserts the refresh-token child, deletes the device_codes row,
+ * and commits; the second blocks until the first commits, then re-reads
+ * and sees no row (the DELETE is already visible) → returns
+ * `invalid_grant` on "Unknown or already-consumed device_code". Without
+ * the lock both racers could pass the `status === "approved"` check and
+ * mint two token pairs for the same device authorization, breaking the
+ * one-shot contract RFC 8628 §3.5 requires.
+ *
+ * Side-effect commit strategy matches `rotateRefreshToken` too: we
+ * return a tagged outcome rather than throwing inside the tx, so DELETE
+ * sweeps for `denied` / `expired` states commit alongside the error
+ * tag instead of rolling back into a stale "pending-like" row.
  */
 export async function exchangeDeviceCodeForTokens(params: {
   deviceCodeValue: string;
@@ -135,80 +154,125 @@ export async function exchangeDeviceCodeForTokens(params: {
 }): Promise<TokenPair> {
   const { deviceCodeValue, clientId } = params;
 
-  const [row] = await db
-    .select()
-    .from(deviceCode)
-    .where(eq(deviceCode.deviceCode, deviceCodeValue))
-    .limit(1);
+  type ExchangeOutcome =
+    | { kind: "ok"; pair: TokenPair }
+    | { kind: "error"; code: CliTokenErrorCode; description: string };
 
-  if (!row) {
-    throw new CliTokenError("invalid_grant", "Unknown or already-consumed device_code.");
-  }
-  if (row.clientId && row.clientId !== clientId) {
-    // `client_id` swap between `/device/code` and `/cli/token` — treat
-    // as `invalid_grant` per RFC 8628 §3.5 (same rubric BA uses).
-    throw new CliTokenError("invalid_grant", "client_id does not match device_code issuer.");
-  }
+  const outcome: ExchangeOutcome = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(deviceCode)
+      .where(eq(deviceCode.deviceCode, deviceCodeValue))
+      .limit(1)
+      .for("update");
 
-  // Polling-interval guard (RFC 8628 §5.5). BA's own `/device/token`
-  // enforces this on the same row; we mirror it so a CLI cannot bypass
-  // the throttle by calling our endpoint directly.
-  if (row.lastPolledAt && row.pollingInterval) {
-    const sinceLast = Date.now() - new Date(row.lastPolledAt).getTime();
-    if (sinceLast < row.pollingInterval) {
-      throw new CliTokenError("slow_down", "Polling too frequently — back off per RFC 8628 §5.5.");
+    if (!row) {
+      return {
+        kind: "error",
+        code: "invalid_grant",
+        description: "Unknown or already-consumed device_code.",
+      };
     }
-  }
-  await db.update(deviceCode).set({ lastPolledAt: new Date() }).where(eq(deviceCode.id, row.id));
+    if (row.clientId && row.clientId !== clientId) {
+      // `client_id` swap between `/device/code` and `/cli/token` — treat
+      // as `invalid_grant` per RFC 8628 §3.5 (same rubric BA uses).
+      return {
+        kind: "error",
+        code: "invalid_grant",
+        description: "client_id does not match device_code issuer.",
+      };
+    }
 
-  if (row.expiresAt < new Date()) {
-    // Sweep the expired row so a subsequent poll doesn't linger on a
-    // dead code. BA's handler has the same sweep — mirror it.
-    await db.delete(deviceCode).where(eq(deviceCode.id, row.id));
-    throw new CliTokenError("expired_token", "Device code expired before approval.");
-  }
-  if (row.status === "pending") {
-    throw new CliTokenError("authorization_pending", "Waiting for the user to approve.");
-  }
-  if (row.status === "denied") {
-    await db.delete(deviceCode).where(eq(deviceCode.id, row.id));
-    throw new CliTokenError("access_denied", "User denied the authorization request.");
-  }
-  if (row.status !== "approved" || !row.userId) {
-    throw new CliTokenError("server_error", "Device code in unexpected state.");
-  }
+    // Polling-interval guard (RFC 8628 §5.5). BA's own `/device/token`
+    // enforces this on the same row; we mirror it so a CLI cannot bypass
+    // the throttle by calling our endpoint directly.
+    if (row.lastPolledAt && row.pollingInterval) {
+      const sinceLast = Date.now() - new Date(row.lastPolledAt).getTime();
+      if (sinceLast < row.pollingInterval) {
+        return {
+          kind: "error",
+          code: "slow_down",
+          description: "Polling too frequently — back off per RFC 8628 §5.5.",
+        };
+      }
+    }
+    await tx.update(deviceCode).set({ lastPolledAt: new Date() }).where(eq(deviceCode.id, row.id));
 
-  // Load the approving user + a lightweight `emailVerified` column read.
-  const [userRow] = await db
-    .select({
-      id: userTable.id,
-      email: userTable.email,
-      name: userTable.name,
-      emailVerified: userTable.emailVerified,
-    })
-    .from(userTable)
-    .where(eq(userTable.id, row.userId))
-    .limit(1);
-  if (!userRow) {
-    throw new CliTokenError("server_error", "Approving user no longer exists.");
-  }
+    if (row.expiresAt < new Date()) {
+      // Sweep the expired row so a subsequent poll doesn't linger on a
+      // dead code. BA's handler has the same sweep — mirror it. The
+      // DELETE commits with the tx because we return an error tag
+      // rather than throwing.
+      await tx.delete(deviceCode).where(eq(deviceCode.id, row.id));
+      return {
+        kind: "error",
+        code: "expired_token",
+        description: "Device code expired before approval.",
+      };
+    }
+    if (row.status === "pending") {
+      return {
+        kind: "error",
+        code: "authorization_pending",
+        description: "Waiting for the user to approve.",
+      };
+    }
+    if (row.status === "denied") {
+      await tx.delete(deviceCode).where(eq(deviceCode.id, row.id));
+      return {
+        kind: "error",
+        code: "access_denied",
+        description: "User denied the authorization request.",
+      };
+    }
+    if (row.status !== "approved" || !row.userId) {
+      return {
+        kind: "error",
+        code: "server_error",
+        description: "Device code in unexpected state.",
+      };
+    }
 
-  const scope = row.scope ?? "";
-  const tokens = await mintTokenPair({
-    user: userRow,
-    clientId,
-    scope,
-    // No parent — head of a fresh family.
-    parentId: null,
-    familyId: prefixedId("crf"),
+    // Load the approving user + a lightweight `emailVerified` column read.
+    const [userRow] = await tx
+      .select({
+        id: userTable.id,
+        email: userTable.email,
+        name: userTable.name,
+        emailVerified: userTable.emailVerified,
+      })
+      .from(userTable)
+      .where(eq(userTable.id, row.userId))
+      .limit(1);
+    if (!userRow) {
+      return {
+        kind: "error",
+        code: "server_error",
+        description: "Approving user no longer exists.",
+      };
+    }
+
+    const scope = row.scope ?? "";
+    const pair = await mintTokenPairInTx(tx, {
+      user: userRow,
+      clientId,
+      scope,
+      // No parent — head of a fresh family.
+      parentId: null,
+      familyId: prefixedId("crf"),
+    });
+
+    // One-shot contract: delete the device_codes row so a replay hits
+    // `invalid_grant`. Same semantics as BA's default `/device/token`
+    // handler. Committing this inside the tx alongside the refresh-token
+    // INSERT is what makes the whole exchange atomic under contention.
+    await tx.delete(deviceCode).where(eq(deviceCode.id, row.id));
+
+    return { kind: "ok", pair };
   });
 
-  // One-shot contract: delete the device_codes row so a replay hits
-  // `invalid_grant`. Same semantics as BA's default `/device/token`
-  // handler.
-  await db.delete(deviceCode).where(eq(deviceCode.id, row.id));
-
-  return tokens;
+  if (outcome.kind === "ok") return outcome.pair;
+  throw new CliTokenError(outcome.code, outcome.description);
 }
 
 /**
@@ -405,24 +469,15 @@ async function revokeFamily(familyId: string, reason: string): Promise<void> {
 
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-async function mintTokenPair(params: {
-  user: { id: string; email: string; name: string | null; emailVerified: boolean };
-  clientId: string;
-  scope: string;
-  parentId: string | null;
-  familyId: string;
-}): Promise<TokenPair> {
-  return mintTokenPairInTx(db, params);
-}
-
 /**
- * Variant of `mintTokenPair` that takes a Drizzle transaction handle so
- * the refresh-token INSERT commits atomically with whatever the caller
- * wrapped it in (in practice: the `used_at` mark on the parent row in
- * `rotateRefreshToken`). Keeping the JWT signing + insert on the same
- * transaction ensures that a concurrent reuse-detection sweep on the
- * same `family_id` either sees the child row and revokes it, or hasn't
- * started yet because it's waiting on the parent-row lock we hold.
+ * Mint a JWT access token + refresh-token row inside a caller-supplied
+ * Drizzle transaction handle. The refresh-token INSERT commits atomically
+ * with whatever the caller wrapped the tx around (`used_at` mark on the
+ * parent row in `rotateRefreshToken`, DELETE of the device_codes row in
+ * `exchangeDeviceCodeForTokens`). Both callers hold the relevant
+ * FOR-UPDATE lock so a concurrent reuse-detection or duplicate-exchange
+ * racer either sees the committed INSERT and revokes it, or hasn't
+ * started yet because it's blocked on the lock.
  */
 async function mintTokenPairInTx(
   tx: DbOrTx,
