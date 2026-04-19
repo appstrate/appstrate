@@ -33,6 +33,40 @@ import { apiCommand } from "./commands/api.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
+// Defense in depth: restore cooked mode on exit. `@clack/prompts`
+// sets raw mode via `process.stdin.setRawMode(true)` and relies on its
+// own listeners to flip it back — if the process dies while a prompt
+// is open (crash, SIGINT, the Bun macOS keypress regression in #199)
+// the terminal is left unusable and only `reset` fixes it. Registering
+// a cooked-mode restore on every exit path is cheap and catches the
+// edge cases clack's own cleanup misses. Must be registered BEFORE the
+// error handlers below so a synchronous crash in startup still runs it.
+const restoreCookedMode = (): void => {
+  try {
+    if (process.stdin.isTTY && typeof process.stdin.setRawMode === "function") {
+      process.stdin.setRawMode(false);
+    }
+  } catch {
+    // Intentional swallow: restoration is best-effort. If stdin was
+    // already detached (exec into another process, stream closed) the
+    // call throws — but we're already on the exit path, so nothing we
+    // do here matters except not masking the real exit code.
+  }
+};
+process.on("exit", restoreCookedMode);
+process.on("SIGINT", () => {
+  restoreCookedMode();
+  process.exit(130);
+});
+process.on("SIGTERM", () => {
+  restoreCookedMode();
+  process.exit(143);
+});
+process.on("SIGHUP", () => {
+  restoreCookedMode();
+  process.exit(129);
+});
+
 /**
  * Commander's idiomatic "collect repeated option into array" — needed
  * for `-H`, `-F`, `-q` on `appstrate api` where users repeat the flag
@@ -91,7 +125,15 @@ program
     "--force",
     "Bypass the 'another Compose project is already running under this name' preflight. Only use if you have already backed up the other install's data.",
   )
+  .option(
+    "-y, --yes",
+    "Skip all prompts and accept smart defaults (Docker-aware tier from #180, default directory, auto-start dev server). Required for curl|bash, CI, Dockerfile RUN, cloud-init. Equivalent to APPSTRATE_YES=1. Per-field flags (--tier, --dir, --port) still override the defaults.",
+  )
   .action(async (opts) => {
+    // Env var fallback mirrors Homebrew's NONINTERACTIVE=1 / rustup-init's
+    // RUSTUP_INIT_SKIP_PATH_CHECK pattern — useful for Dockerfile `ENV` and
+    // cloud-init `environment:` blocks where appending argv is awkward.
+    const autoConfirm = opts.yes === true || process.env.APPSTRATE_YES === "1";
     await installCommand({
       tier: typeof opts.tier === "string" ? opts.tier : undefined,
       dir: typeof opts.dir === "string" ? opts.dir : undefined,
@@ -99,6 +141,7 @@ program
       minioConsolePort:
         typeof opts.minioConsolePort === "string" ? opts.minioConsolePort : undefined,
       force: opts.force === true,
+      autoConfirm,
     });
   });
 

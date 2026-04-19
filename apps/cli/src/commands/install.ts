@@ -18,6 +18,7 @@ import { intro, outro, askText, confirm, spinner, exitWithError } from "../lib/u
 import { generateEnvForTier, renderEnvFile, type Tier } from "../lib/install/secrets.ts";
 import {
   assertDockerAvailable,
+  checkDockerNetworkBudget,
   DockerMissingError,
   dockerComposeUp,
   findRunningComposeProject as findRunningComposeProjectImport,
@@ -71,6 +72,22 @@ export interface InstallOptions {
    * common install path — see `#167`.
    */
   force?: boolean;
+  /**
+   * Skip every interactive prompt and accept the smart defaults:
+   *   - tier: Docker-aware default (3 when Docker is reachable, else 0)
+   *   - dir: DEFAULT_INSTALL_DIR (~/appstrate)
+   *   - port: 3000 (or --port / APPSTRATE_PORT)
+   *   - upgrade confirm: proceed
+   *   - Bun install confirm (Tier 0): install
+   *   - "start dev server now?" (Tier 0): yes
+   *
+   * Set by `-y/--yes` or `APPSTRATE_YES=1`. Required for the `curl|bash`
+   * bootstrap because of the Bun compile + macOS setRawMode regression
+   * (#199) — zero clack prompts = zero raw mode = the Bun runtime bug is
+   * bypassed by construction, independent of upstream fixes. Also makes
+   * the installer usable from CI, Dockerfile `RUN`, cloud-init, Ansible.
+   */
+  autoConfirm?: boolean;
 }
 
 const DEFAULT_INSTALL_DIR = join(homedir(), "appstrate");
@@ -85,13 +102,14 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
   intro("Appstrate install");
 
   try {
-    const tier = await resolveTier(opts.tier);
-    const dir = await resolveDir(opts.dir);
-    // "Non-interactive" means the caller skipped the tier prompt — in
-    // that mode we fail fast on port conflicts rather than blocking on
-    // `askText`. A `--tier` invocation is almost always scripted (CI,
-    // one-liner installer), so any prompt hangs the pipeline.
-    const nonInteractive = opts.tier !== undefined;
+    const autoConfirm = opts.autoConfirm === true;
+    const tier = await resolveTier(opts.tier, { autoConfirm });
+    const dir = await resolveDir(opts.dir, { autoConfirm });
+    // "Non-interactive" means the caller has opted out of every prompt —
+    // either via `--tier` (scripted installs) or `--yes` (curl|bash, CI,
+    // Docker). In that mode we fail fast on port conflicts rather than
+    // blocking on `askText`, and every confirm() returns its default.
+    const nonInteractive = opts.tier !== undefined || autoConfirm;
 
     // Detect install mode BEFORE port resolution. On upgrade the ports
     // we'll actually use are inherited from the existing `.env` (see
@@ -130,13 +148,14 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
         : undefined;
 
     if (tier === 0) {
-      await installTier0(dir, port);
+      await installTier0(dir, port, { autoConfirm });
     } else {
       await installDockerTier(dir, tier, port, minioConsolePort, {
         force: opts.force ?? false,
         mode: installState.mode,
         existing: installState.existing,
         project: project!,
+        autoConfirm,
       });
     }
   } catch (err) {
@@ -334,6 +353,14 @@ export interface TierResolverDeps {
   isCancel?: typeof clack.isCancel;
   note?: typeof clack.note;
   isDockerAvailable?: () => Promise<boolean>;
+  /**
+   * When true, skip the `clack.select` prompt entirely and return the
+   * Docker-aware default (3 if Docker reachable, else 0). See `#199`:
+   * clack calls `setRawMode` which trips a Bun macOS regression inside
+   * the `bun build --compile` binary — bypassing the prompt sidesteps
+   * the bug regardless of upstream Bun fix status.
+   */
+  autoConfirm?: boolean;
 }
 
 /**
@@ -363,6 +390,23 @@ export async function resolveTier(
   const isCancel = deps.isCancel ?? clack.isCancel;
   const note = deps.note ?? clack.note;
   const probe = deps.isDockerAvailable ?? isDockerAvailable;
+
+  // --yes path: bypass the clack.select call entirely (never enters raw
+  // mode → never trips the Bun macOS keypress regression from #199) and
+  // accept the Docker-aware default #180 already set for interactive
+  // picks. The note() call is still informative so the user sees which
+  // tier was chosen and how to override it on the next run.
+  if (deps.autoConfirm === true) {
+    const dockerOk = await probe();
+    const autoTier: Tier = dockerOk ? 3 : 0;
+    note(
+      dockerOk
+        ? "--yes: Tier 3 selected automatically (Docker detected). Re-run with `--tier N` to override."
+        : "--yes: Tier 0 selected automatically (Docker not detected). Install Docker and re-run with `--tier 3` for the production stack.",
+    );
+    return autoTier;
+  }
+
   // Prompting requires a TTY. If stdin isn't a TTY (CI, `curl | bash`
   // inside a Dockerfile, cron) clack would crash with no readable
   // error — surface a clear message pointing at the `--tier` escape
@@ -372,7 +416,9 @@ export async function resolveTier(
   if (select === clack.select && !process.stdin.isTTY) {
     throw new Error(
       "Cannot prompt for tier: stdin is not a TTY. " +
-        "Re-run with `--tier N` (0, 1, 2, or 3), e.g. `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3`.",
+        "Re-run with `--tier N` (0, 1, 2, or 3), or pass `--yes` to accept the Docker-aware default, " +
+        "e.g. `curl -fsSL https://get.appstrate.dev | bash -s -- --yes` " +
+        "or `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3`.",
     );
   }
   const dockerOk = await probe();
@@ -400,14 +446,32 @@ export async function resolveTier(
 }
 
 /**
+ * DI seam for `resolveDir()` — lets tests exercise the `--yes` short
+ * circuit without spawning a real askText prompt.
+ */
+export interface DirResolverDeps {
+  /** When true, accept `DEFAULT_INSTALL_DIR` without prompting. */
+  autoConfirm?: boolean;
+}
+
+/**
  * Parse `--dir` or prompt for it, then reject newlines / NUL bytes and
  * normalize to an absolute path. Exported for unit testing.
  */
-export async function resolveDir(raw: string | undefined): Promise<string> {
+export async function resolveDir(
+  raw: string | undefined,
+  deps: DirResolverDeps = {},
+): Promise<string> {
+  // --yes path: skip askText (no raw mode, no Bun bug, works in CI).
+  if (raw === undefined && deps.autoConfirm === true) {
+    return resolve(DEFAULT_INSTALL_DIR);
+  }
   if (raw === undefined && !process.stdin.isTTY) {
     throw new Error(
       "Cannot prompt for install directory: stdin is not a TTY. " +
-        "Re-run with `--dir <path>`, e.g. `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3 --dir ~/appstrate`.",
+        "Re-run with `--dir <path>` or `--yes` to accept ~/appstrate, " +
+        "e.g. `curl -fsSL https://get.appstrate.dev | bash -s -- --yes` " +
+        "or `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3 --dir ~/appstrate`.",
     );
   }
   const chosen = raw ?? (await askText("Install directory", DEFAULT_INSTALL_DIR));
@@ -424,7 +488,11 @@ export async function resolveDir(raw: string | undefined): Promise<string> {
   return resolve(chosen);
 }
 
-async function installTier0(dir: string, port: number): Promise<void> {
+async function installTier0(
+  dir: string,
+  port: number,
+  opts: { autoConfirm: boolean },
+): Promise<void> {
   const appUrl = appUrlForPort(port);
   // Bun — either already present, or install it via the upstream script.
   // We only care whether a working Bun is reachable; the actual path
@@ -433,9 +501,13 @@ async function installTier0(dir: string, port: number): Promise<void> {
   // copy is picked up by a bare `spawn("bun", ...)`.
   const bun = detectBun();
   if (!bun.found) {
-    const proceed = await confirm(
-      "Bun is not installed. Install it now via `curl https://bun.sh/install | bash`?",
-    );
+    // --yes: accept the install. Matches rustup/uv behaviour — both
+    // install their bundled toolchain without prompting under `-y`.
+    const proceed =
+      opts.autoConfirm ||
+      (await confirm(
+        "Bun is not installed. Install it now via `curl https://bun.sh/install | bash`?",
+      ));
     if (!proceed) {
       throw new Error("Tier 0 needs Bun. Install it manually from https://bun.sh and re-run.");
     }
@@ -470,8 +542,11 @@ async function installTier0(dir: string, port: number): Promise<void> {
   const env = generateEnvForTier(0, appUrl, { port });
   await writeTier0Env(dir, renderEnvFile(env));
 
-  // Run dev server?
-  const shouldStart = await confirm("Start the dev server now?");
+  // Run dev server? Under --yes, auto-start matches the "curl|bash and
+  // it just works" expectation — equivalent to how Bun's installer prints
+  // `bun --help` without asking and uv's drop-in leaves the binary
+  // immediately usable.
+  const shouldStart = opts.autoConfirm ? true : await confirm("Start the dev server now?");
   if (!shouldStart) {
     outro(
       `Ready. Start it later with:\n\n  cd ${dir}\n  bun run dev\n\nOpen ${appUrl} once it boots.`,
@@ -567,6 +642,7 @@ async function installDockerTier(
     mode: InstallMode;
     existing: ExistingInstall;
     project: { name: string; origin: "sidecar" | "legacy" | "derived" };
+    autoConfirm: boolean;
   },
 ): Promise<void> {
   const appUrl = appUrlForPort(port);
@@ -582,16 +658,47 @@ async function installDockerTier(
     throw err;
   }
 
+  // Informational pre-flight: Docker's default address pool (~31 user-defined
+  // networks) is easy to exhaust once Appstrate's stack plus per-run networks
+  // land on top of existing projects. Warn early so the user can prune or tune
+  // `daemon.json` before the first run fails with the opaque `ErrNoMoreSubnets`.
+  const budget = await checkDockerNetworkBudget();
+  if (budget) {
+    clack.note(
+      [
+        `Detected ${budget.used} Docker networks on this host (default ceiling ≈ 31).`,
+        "Appstrate consumes several networks at boot + 1 per agent run, so you may",
+        "run out of subnets shortly after install.",
+        "",
+        "  Quick fix:   docker network prune",
+        "  Permanent:   tune `default-address-pools` in daemon.json — see",
+        "               https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#docker-network-pool-tuning",
+      ].join("\n"),
+      "Docker network pool near capacity",
+    );
+  }
+
   // Upgrade detection already ran in `installCommand` (it's needed
   // earlier to skip the port preflight against our own running stack
   // on re-runs — see `resolveAppstratePort`). Reuse the result rather
   // than re-probing the filesystem.
   const { mode, existing, project } = opts;
   if (mode === "upgrade") {
-    const proceed = await confirm(
-      `An existing install was detected at ${dir}. Existing secrets (BETTER_AUTH_SECRET, CONNECTION_ENCRYPTION_KEY, POSTGRES_PASSWORD, …) will be preserved; the compose file will be replaced with the Tier ${tier} template. Continue?`,
-    );
-    if (!proceed) throw new Error("Upgrade cancelled.");
+    // Under --yes, proceed with the upgrade: secrets are preserved via
+    // `mergeEnv` and files are backed up (`backupFiles` below), so the
+    // operation is fully reversible even without the confirm. The note()
+    // makes the decision visible so a user re-running `curl|bash --yes`
+    // on a live stack isn't surprised.
+    if (opts.autoConfirm) {
+      clack.log.info(
+        `--yes: upgrading existing install at ${dir} (secrets preserved, backups written to <file>.backup).`,
+      );
+    } else {
+      const proceed = await confirm(
+        `An existing install was detected at ${dir}. Existing secrets (BETTER_AUTH_SECRET, CONNECTION_ENCRYPTION_KEY, POSTGRES_PASSWORD, …) will be preserved; the compose file will be replaced with the Tier ${tier} template. Continue?`,
+      );
+      if (!proceed) throw new Error("Upgrade cancelled.");
+    }
   }
 
   // Preflight: does another install already claim this project name?

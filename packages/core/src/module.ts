@@ -23,6 +23,8 @@ import type {
   PlatformPackage,
   PubSub,
   RealtimeSubscriber,
+  Run,
+  RunLog,
 } from "./platform-types.ts";
 
 // ---------------------------------------------------------------------------
@@ -564,6 +566,20 @@ export interface PlatformServices {
       opts?: { includeEphemeral?: boolean },
     ): Promise<PlatformPackage | null>;
     isInlineShadow(packageId: string): boolean;
+    /**
+     * Free-text search across the org catalog (system packages + the
+     * caller's org). Matches `id` and manifest fields (`name`,
+     * `displayName`, `description`) via case-insensitive substring.
+     * Ephemeral shadow rows are excluded. Callers requesting `limit`
+     * results should pass `limit + 1` to derive `hasMore` without a
+     * separate count — the service caps the returned rows at `limit`.
+     */
+    search(args: {
+      query: string;
+      orgId: string;
+      kind: "agent" | "skill" | "tool" | "provider";
+      limit?: number;
+    }): Promise<PlatformPackage[]>;
   };
   /** Application helpers. */
   applications: {
@@ -582,6 +598,22 @@ export interface PlatformServices {
    * `applicationId`) cannot be silently swapped at the call site.
    */
   runs: {
+    /**
+     * Org-scoped run snapshot read. Returns `null` on a cross-org id or
+     * a nonexistent run — 404 semantics without existence leak.
+     */
+    get(args: { runId: string; orgId: string }): Promise<Run | null>;
+    /**
+     * Log tail for a run, org-scoped. `order: "asc"` (default) is
+     * chronological insertion order (`id ASC`); `"desc"` returns the
+     * most recent entries first for tailing use cases.
+     */
+    listLogs(args: {
+      runId: string;
+      orgId: string;
+      limit?: number;
+      order?: "asc" | "desc";
+    }): Promise<RunLog[]>;
     /** Returns the inserted log row id. */
     appendLog(args: {
       runId: string;

@@ -122,6 +122,16 @@ Lives in `apps/cli/` inside the `appstrate/appstrate` monorepo. Turbo-buildable,
 - The CLI embeds the tier 1/2/3 templates via `Bun.embeddedFiles` so the binary is self-contained. At install time it writes the selected template to the install directory alongside a generated `.env` with secrets from `crypto.randomBytes`.
 - Tier-specific prompts mirror the existing `scripts/setup.ts` pattern. Healthcheck wait and `open http://localhost:3000` close the loop.
 
+### Non-interactive install (`--yes`)
+
+The `curl | bash` bootstrap always invokes `appstrate install --yes`. The flag skips every `@clack/prompts` call and accepts smart defaults: Docker-aware tier (3 if Docker reachable, else 0 — PR #180), `~/appstrate` as the install directory, and auto-start of the dev server on Tier 0. Per-field flags (`--tier`, `--dir`, `--port`) override the defaults the user cares about.
+
+**Why this is the default path rather than an opt-in flag**: `bun build --compile` + macOS + `@clack/prompts`' `setRawMode(true)` hits a recurring family of Bun runtime regressions around keypress delivery on fd 0 (oven-sh/bun #6862, #7033, #24615, #5240, #14483 — some closed, some still open, bug reappears across releases). The standalone binary freezes at the tier prompt with the terminal stuck in raw mode. `--yes` bypasses the bug by construction — zero prompts, zero `setRawMode`, no dependency on when upstream ships the next fix. Users who genuinely want the interactive flow run `appstrate install` directly after the binary drops on PATH.
+
+This matches SOTA conventions: rustup's `-y` (plus `--default-toolchain`, `--profile`, `--no-modify-path`), Homebrew's `NONINTERACTIVE=1`, apt's `-y`, npm's `--yes`. An env-var alias `APPSTRATE_YES=1` is accepted for Dockerfile `ENV` and cloud-init `environment:` blocks. The CLI also registers `SIGINT`/`SIGTERM`/`exit` handlers that call `process.stdin.setRawMode(false)` as defense-in-depth, so if a future prompt path is reintroduced and the Bun bug bites, the terminal is still restored on exit (no `reset` dance).
+
+**Second Bun macOS bug — no `</dev/tty` redirect**: local repro during PR #200 review surfaced an orthogonal regression in the same `bun build --compile` binary. Under `exec </dev/tty "$DEST" install --yes …` (the bootstrap.sh pattern inherited from rustup / bun / deno), the CLI passes the `--yes` short-circuit correctly but then crashes with `EINVAL: invalid argument, kqueue` when it later spawns a subprocess (`bun run dev` on Tier 0, `docker compose up` on Tier 3). The bug is triggered by the fd state that `exec </dev/tty` leaves behind — removing the redirect eliminates it. Since `--yes` guarantees no prompt fires, there is nothing to read from stdin, so the redirect was unnecessary to begin with. `scripts/bootstrap.sh` therefore execs the CLI without any stdin redirect, and a CI guard in `test-install.yml` fails the build if `exec </dev/tty` ever reappears. The belt-and-braces result: both the setRawMode freeze and the kqueue crash are bypassed by construction, so the `curl | bash` flow works end-to-end on macOS regardless of upstream Bun fix status.
+
 ### Audit logging
 
 Every approved device grant is logged with: `userId`, `clientId=appstrate-cli`, `ip_cli`, `ip_browser`, `userAgent_cli`, `timestamp`, `requestId`. Feeds a future "authorized devices" admin UI (v1.1, not part of this ADR).

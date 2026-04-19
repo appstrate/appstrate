@@ -54,15 +54,30 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 
 ## Self-Hosting
 
-Deploy Appstrate with a single command. The installer downloads the `appstrate` CLI and prompts for a [tier](#progressive-infrastructure) — from a zero-dependency Bun-only install (Tier 0) to a full PostgreSQL + Redis + MinIO production stack (Tier 3).
+Deploy Appstrate with a single command. The installer drops the `appstrate` CLI on PATH and runs `install --yes`, which picks a [tier](#progressive-infrastructure) based on what's available on the host — Tier 3 (PostgreSQL + Redis + MinIO) when Docker is reachable, Tier 0 (embedded Bun-only install) otherwise.
 
 ```sh
 curl -fsSL https://get.appstrate.dev | bash
 ```
 
-The CLI installs into `~/.local/bin` (no sudo) and adds it to your `PATH`. For a system-wide install, prefix the command with `APPSTRATE_BIN_DIR=/usr/local/bin` (sudo will be requested). To skip the shell profile modification, set `APPSTRATE_NO_MODIFY_PATH=1`.
+The CLI installs into `~/.local/bin` (no sudo) and adds it to your `PATH`. For a system-wide install, prefix with `APPSTRATE_BIN_DIR=/usr/local/bin` (sudo will be requested). To skip the shell profile modification, set `APPSTRATE_NO_MODIFY_PATH=1`.
 
-Once a tier is chosen, the CLI generates cryptographic secrets, writes `.env` + `docker-compose.yml` (Tiers 1/2/3) or clones the source + spawns `bun run dev` (Tier 0), waits for the healthcheck, and opens [http://localhost:3000](http://localhost:3000). Non-interactive: `curl ... | bash -s -- --tier 3 --dir ~/appstrate`.
+Once the tier is chosen, the CLI generates cryptographic secrets, writes `.env` + `docker-compose.yml` (Tiers 1/2/3) or clones the source + spawns `bun run dev` (Tier 0), waits for the healthcheck, and opens [http://localhost:3000](http://localhost:3000).
+
+**Customize the non-interactive install** by forwarding flags through bash:
+
+```sh
+curl -fsSL https://get.appstrate.dev | bash -s -- --tier 1 --dir ~/apps/appstrate --port 4000
+```
+
+`--tier`, `--dir`, and `--port` override the smart defaults. Equivalent env vars: `APPSTRATE_YES=1`, `APPSTRATE_PORT`, `APPSTRATE_BIN_DIR`.
+
+**Want the interactive prompts?** Drop the binary without auto-launching, then run `install` yourself:
+
+```sh
+curl -fsSL https://get.appstrate.dev | APPSTRATE_NO_LAUNCH=1 bash
+appstrate install  # interactive tier + directory prompts
+```
 
 See [`apps/cli/README.md`](./apps/cli/README.md) for the full CLI reference, and [`examples/self-hosting/`](./examples/self-hosting/) for manual Docker Compose setup.
 
