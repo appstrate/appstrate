@@ -244,6 +244,43 @@ program
     "PUT the contents of <path> as the request body. `-T -` streams stdin. Mutually exclusive with -d/-F.",
   )
   .option(
+    "--retry <n>",
+    "Retry on transient HTTP codes (408/429/500/502/503/504) and DNS/timeout errors (curl --retry). Incompatible with stdin body.",
+    (v) => {
+      const n = parseInt(v, 10);
+      if (!Number.isFinite(n) || n < 0) {
+        throw new InvalidArgumentError(`expected a non-negative integer, got "${v}"`);
+      }
+      return n;
+    },
+  )
+  .option(
+    "--retry-max-time <sec>",
+    "Total wall-clock budget for retries in seconds (0 = unlimited).",
+    (v) => {
+      const n = parseFloat(v);
+      if (!Number.isFinite(n) || n < 0) {
+        throw new InvalidArgumentError(`expected a non-negative number, got "${v}"`);
+      }
+      return n;
+    },
+  )
+  .option(
+    "--retry-delay <sec>",
+    "Base backoff in seconds between retries (doubled each attempt). Default: 1.",
+    (v) => {
+      const n = parseFloat(v);
+      if (!Number.isFinite(n) || n < 0) {
+        throw new InvalidArgumentError(`expected a non-negative number, got "${v}"`);
+      }
+      return n;
+    },
+  )
+  .option(
+    "--retry-connrefused",
+    "Treat ECONNREFUSED as a retryable error (off by default; matches curl).",
+  )
+  .option(
     "--connect-timeout <sec>",
     "Abort if response headers don't arrive in N seconds (curl --connect-timeout → exit 28).",
     (v) => {
@@ -311,6 +348,16 @@ program
         typeof opts.connectTimeout === "number" && !Number.isNaN(opts.connectTimeout)
           ? opts.connectTimeout
           : undefined,
+      retry: typeof opts.retry === "number" && !Number.isNaN(opts.retry) ? opts.retry : undefined,
+      retryMaxTime:
+        typeof opts.retryMaxTime === "number" && !Number.isNaN(opts.retryMaxTime)
+          ? opts.retryMaxTime
+          : undefined,
+      retryDelay:
+        typeof opts.retryDelay === "number" && !Number.isNaN(opts.retryDelay)
+          ? opts.retryDelay
+          : undefined,
+      retryConnrefused: opts.retryConnrefused === true,
       fail: opts.fail === true,
       location: opts.location === true,
       insecure: opts.insecure === true,

@@ -138,6 +138,21 @@ export interface ApiCommandOptions {
    * --data-binary` (exit 2).
    */
   uploadFile?: string;
+  /**
+   * `--retry <n>`: retry on transient HTTP codes (408, 429, 500, 502,
+   * 503, 504) and DNS / timeout errors. Exponential backoff starting
+   * at `retryDelay` seconds. ECONNREFUSED is terminal unless
+   * `retryConnrefused` is set (curl semantics). Incompatible with
+   * stdin body (`-d @-` / `-T -`) — we can't replay a consumed
+   * stream; the CLI emits a warning and disables retry in that case.
+   */
+  retry?: number;
+  /** `--retry-max-time <sec>`: total wall-clock budget for retries. */
+  retryMaxTime?: number;
+  /** `--retry-delay <sec>`: base backoff (defaults to 1s; doubled each attempt). */
+  retryDelay?: number;
+  /** `--retry-connrefused`: treat ECONNREFUSED as retryable too. */
+  retryConnrefused?: boolean;
 }
 
 /**
@@ -306,16 +321,22 @@ export async function apiCommand(
   });
 
   // 4. Build body (mutually exclusive; later modes win).
-  const { body, usesStdin } = await buildBody(effectiveOpts, io);
+  //    First build happens here so we can detect stream-backed bodies
+  //    and decide whether --retry is safe. On retry, we rebuild to
+  //    materialize a fresh FormData / BunFile handle.
+  const firstBuild = await buildBody(effectiveOpts, io);
+  const originalRetry = opts.retry ?? 0;
+  let effectiveRetry = originalRetry;
+  if (originalRetry > 0 && firstBuild.usesStdin) {
+    writeError("--retry disabled: body is consumed from stdin and cannot be replayed.\n");
+    effectiveRetry = 0;
+  }
 
   // 5. Pick method.
-  const method = pickMethod(effectiveOpts, Boolean(body));
-
-  // HEAD never sends a body.
-  const finalBody = method === "HEAD" ? undefined : body;
+  const method = pickMethod(effectiveOpts, Boolean(firstBuild.body));
 
   // Finalize the sizeUpload metric now that the body shape is known.
-  metrics.sizeUpload = sizeOfBody(finalBody);
+  metrics.sizeUpload = sizeOfBody(method === "HEAD" ? undefined : firstBuild.body);
   metrics.urlEffective = url;
 
   // 6. Abort controller for SIGINT + --max-time.
@@ -369,38 +390,70 @@ export async function apiCommand(
   // normal path; the outer finally handles exceptional ones.
   // cleanup() is idempotent (cleanedUp flag).
   try {
-    let res: Response;
-    try {
-      // `duplex: "half"` is a spec requirement whenever the body is a
-      // ReadableStream (whatwg/fetch#1254). Only set when we actually
-      // have a streaming body — passing it unconditionally trips
-      // Bun/undici's validator on older runtimes.
-      //
-      // The init object is typed loosely on purpose: our tsconfig doesn't
-      // pull in the DOM lib (so `BodyInit` / `RequestInit` aren't
-      // globals), but Bun's `fetch` accepts strings, Blobs, FormData,
-      // Bun.file, and ReadableStream bodies natively. Silencing the type
-      // here keeps the call site readable.
-      const init: Record<string, unknown> = {
-        method,
-        headers,
-        body: finalBody,
-        signal: ac.signal,
-        redirect: opts.location ? "follow" : "manual",
-      };
-      if (usesStdin) init.duplex = "half";
-      if (opts.verbose) writeVerboseRequest(io, profileName, method, url, headers);
-      res = await fetch(url, init as Parameters<typeof fetch>[1]);
-      // Response headers received — disarm connect-timeout; only
-      // --max-time keeps running through body streaming.
-      if (connectTimeoutHandle) {
-        clearTimeout(connectTimeoutHandle);
-        connectTimeoutHandle = undefined;
+    // P3a — retry loop. Each attempt rebuilds the body (first attempt
+    // reuses `firstBuild`); on retryable status / network error we
+    // sleep and retry up to `effectiveRetry` times, bounded by
+    // `--retry-max-time`. AbortSignal (SIGINT, --max-time) short-
+    // circuits the loop.
+    const retryDelay = opts.retryDelay ?? 1;
+    const retryMaxTimeMs = (opts.retryMaxTime ?? 0) * 1000;
+    const retryBudgetEnd = retryMaxTimeMs > 0 ? performance.now() + retryMaxTimeMs : Infinity;
+    const maxAttempts = 1 + effectiveRetry;
+    let res!: Response;
+    let attempt = 0;
+    while (true) {
+      attempt++;
+      const { body: attemptBody, usesStdin: attemptStdin } =
+        attempt === 1 ? firstBuild : await buildBody(effectiveOpts, io);
+      const attemptFinalBody = method === "HEAD" ? undefined : attemptBody;
+      try {
+        const init: Record<string, unknown> = {
+          method,
+          headers,
+          body: attemptFinalBody,
+          signal: ac.signal,
+          redirect: opts.location ? "follow" : "manual",
+        };
+        if (attemptStdin) init.duplex = "half";
+        if (opts.verbose) writeVerboseRequest(io, profileName, method, url, headers);
+        res = await fetch(url, init as Parameters<typeof fetch>[1]);
+        if (connectTimeoutHandle) {
+          clearTimeout(connectTimeoutHandle);
+          connectTimeoutHandle = undefined;
+        }
+        if (opts.verbose) writeVerboseResponse(io, res);
+        if (attempt < maxAttempts && isRetryableStatus(res.status)) {
+          const delayMs = computeRetryDelayMs(res, retryDelay, attempt);
+          if (performance.now() + delayMs > retryBudgetEnd) break;
+          if (opts.verbose) io.stderr.write(`* retry after ${delayMs}ms (status ${res.status})\n`);
+          // Drain the response body so the connection can be reused.
+          try {
+            await res.body?.cancel();
+          } catch {
+            /* ignore — response may already be consumed */
+          }
+          await sleepWithAbort(delayMs, ac.signal);
+          continue;
+        }
+        break;
+      } catch (err) {
+        if (ac.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
+          cleanup();
+          return handleErr(err);
+        }
+        if (attempt < maxAttempts && isRetryableError(err, opts.retryConnrefused === true)) {
+          const delayMs = retryDelay * 1000 * Math.pow(2, attempt - 1);
+          if (performance.now() + delayMs > retryBudgetEnd) {
+            cleanup();
+            return handleErr(err);
+          }
+          if (opts.verbose) io.stderr.write(`* retry after ${delayMs}ms (network error)\n`);
+          await sleepWithAbort(delayMs, ac.signal);
+          continue;
+        }
+        cleanup();
+        return handleErr(err);
       }
-      if (opts.verbose) writeVerboseResponse(io, res);
-    } catch (err) {
-      cleanup();
-      return handleErr(err);
     }
 
     // P2b — capture response-level metrics for -w
@@ -773,6 +826,91 @@ async function collectGetDataAsQuery(opts: ApiCommandOptions, io: ApiCommandIO):
   }
   // Split each value on `&` so `-d 'k=v&k2=v2'` produces two query pairs.
   return values.flatMap((v) => v.split("&")).filter(Boolean);
+}
+
+// ─── P3a — retry helpers ────────────────────────────────────────────
+
+/**
+ * HTTP status codes considered transient and therefore retryable.
+ * Matches curl's default set (408 Request Timeout, 429 Too Many
+ * Requests, plus 5xx gateway/service errors).
+ */
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
+
+function isRetryableStatus(status: number): boolean {
+  return RETRYABLE_STATUS.has(status);
+}
+
+/**
+ * Classify a fetch-time error as retryable. DNS resolution failures
+ * and timeouts always qualify; connection-refused is opt-in via
+ * `--retry-connrefused` (curl semantics — by default, refused means
+ * the service is genuinely down and retries won't help).
+ */
+function isRetryableError(err: unknown, retryConnrefused: boolean): boolean {
+  if (!err || typeof err !== "object") return false;
+  // Walk cause chain up to 3 levels (Bun wraps system errors).
+  let current: unknown = err;
+  for (let i = 0; i < 3 && current && typeof current === "object"; i++) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string") {
+      if (code === "ENOTFOUND" || code === "EAI_AGAIN") return true;
+      if (code === "ECONNREFUSED") return retryConnrefused;
+    }
+    const name = (current as { name?: unknown }).name;
+    if (name === "TimeoutError") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
+ * Compute the next retry delay in milliseconds. Honors the server's
+ * `Retry-After` header when plausible (429 / 503), otherwise falls
+ * back to exponential backoff on `baseSeconds`.
+ *
+ * `Retry-After` supports two syntaxes in the wild: delta-seconds
+ * (RFC 9110 §10.2.3) and HTTP-date. We accept the first; HTTP-date
+ * is parsed best-effort and ignored if it's in the past or invalid.
+ */
+function computeRetryDelayMs(res: Response, baseSeconds: number, attempt: number): number {
+  const hdr = res.headers.get("retry-after");
+  if (hdr) {
+    const asNumber = Number(hdr);
+    if (Number.isFinite(asNumber) && asNumber >= 0 && asNumber < 3600) {
+      return asNumber * 1000;
+    }
+    const asDate = Date.parse(hdr);
+    if (Number.isFinite(asDate)) {
+      const delta = asDate - Date.now();
+      if (delta > 0 && delta < 3600 * 1000) return delta;
+    }
+  }
+  return baseSeconds * 1000 * Math.pow(2, attempt - 1);
+}
+
+/**
+ * Sleep that resolves early on abort. Used between retry attempts so
+ * SIGINT / --max-time interrupts a long backoff without waiting for
+ * the timer to expire.
+ */
+function sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    if (signal.aborted) {
+      clearTimeout(t);
+      resolve();
+      return;
+    }
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        resolve();
+      },
+      { once: true },
+    );
+  });
 }
 
 // ─── P2b — `-w/--write-out` ─────────────────────────────────────────

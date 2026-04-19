@@ -178,6 +178,10 @@ async function runCommand(
     writeOut: opts.writeOut,
     uploadFile: opts.uploadFile,
     connectTimeout: opts.connectTimeout,
+    retry: opts.retry,
+    retryMaxTime: opts.retryMaxTime,
+    retryDelay: opts.retryDelay,
+    retryConnrefused: opts.retryConnrefused,
   };
   try {
     await apiCommand(full, io);
@@ -1204,6 +1208,101 @@ describe("apiCommand — --connect-timeout", () => {
     const { io, exitCode } = makeIO();
     await runCommand({ method: "GET", path: "/p", connectTimeout: 0.05 }, io);
     expect(exitCode.value).toBe(28);
+  });
+
+  it("--retry retries on 503 and succeeds on a later attempt", async () => {
+    let calls = 0;
+    installFetch(() => {
+      calls++;
+      if (calls < 3) return new Response("busy", { status: 503 });
+      return jsonResponse(200, { ok: true });
+    });
+    const { io, exitCode, stdout } = makeIO();
+    await runCommand({ method: "GET", path: "/p", retry: 3, retryDelay: 0 }, io);
+    expect(exitCode.value).toBe(0);
+    expect(calls).toBe(3);
+    expect(stdoutText(stdout)).toContain('"ok":true');
+  });
+
+  it("--retry honors Retry-After header (seconds)", async () => {
+    let firstCallTime = 0;
+    let secondCallTime = 0;
+    installFetch(() => {
+      if (firstCallTime === 0) {
+        firstCallTime = Date.now();
+        return new Response("slow down", {
+          status: 429,
+          headers: { "Retry-After": "0.05" },
+        });
+      }
+      secondCallTime = Date.now();
+      return jsonResponse(200, {});
+    });
+    const { io, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/p", retry: 1, retryDelay: 0 }, io);
+    expect(exitCode.value).toBe(0);
+    // Retry-After of 0.05s translates to ~50ms wait.
+    expect(secondCallTime - firstCallTime).toBeGreaterThanOrEqual(40);
+  });
+
+  it("--retry gives up after max attempts, returns last response", async () => {
+    installFetch(() => new Response("down", { status: 503 }));
+    const { io, exitCode, stdout } = makeIO();
+    await runCommand({ method: "GET", path: "/p", retry: 2, retryDelay: 0 }, io);
+    expect(exitCode.value).toBe(0); // 503 isn't failure unless -f
+    expect(fetchCalls).toHaveLength(3); // 1 + 2 retries
+    expect(stdoutText(stdout)).toBe("down");
+  });
+
+  it("--retry on ECONNREFUSED is off by default", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      throw Object.assign(new Error("nope"), { code: "ECONNREFUSED" });
+    }) as unknown as typeof fetch;
+    const { io, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/p", retry: 3, retryDelay: 0 }, io);
+    expect(exitCode.value).toBe(EXIT_CONNECT);
+    expect(calls).toBe(1);
+  });
+
+  it("--retry --retry-connrefused retries ECONNREFUSED", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      if (calls < 2) throw Object.assign(new Error("nope"), { code: "ECONNREFUSED" });
+      return jsonResponse(200, {});
+    }) as unknown as typeof fetch;
+    const { io, exitCode } = makeIO();
+    await runCommand(
+      {
+        method: "GET",
+        path: "/p",
+        retry: 3,
+        retryDelay: 0,
+        retryConnrefused: true,
+      },
+      io,
+    );
+    expect(exitCode.value).toBe(0);
+    expect(calls).toBe(2);
+  });
+
+  it("--retry disables itself on stdin body with a warning", async () => {
+    installFetch(() => new Response("down", { status: 503 }));
+    const { io, stderr, exitCode } = makeIO();
+    // stdin stream via data: "@-"
+    io.stdinStream = () =>
+      new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new TextEncoder().encode("payload"));
+          c.close();
+        },
+      });
+    await runCommand({ method: "POST", path: "/p", data: "@-", retry: 3, retryDelay: 0 }, io);
+    expect(fetchCalls).toHaveLength(1); // no retry
+    expect(stdoutText(stderr)).toContain("--retry disabled");
+    expect(exitCode.value).toBe(0);
   });
 
   it("doesn't fire once fetch resolves (body streaming ignores it)", async () => {
