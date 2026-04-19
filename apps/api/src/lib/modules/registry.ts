@@ -25,12 +25,7 @@ import { isInlineShadowPackageId } from "../../services/inline-run.ts";
 import { runInlinePreflight } from "../../services/inline-run-preflight.ts";
 import { getDefaultApplication } from "../../services/applications.ts";
 import { listAllActorConnections } from "../../services/connection-manager/providers.ts";
-import {
-  appendRunLog,
-  getRunByOrg,
-  listRunLogsOrdered,
-  updateRun,
-} from "../../services/state/runs.ts";
+import { appendRunLog, getRunByOrg, listRunLogs, updateRun } from "../../services/state/runs.ts";
 import { abortRun } from "../../services/run-tracker.ts";
 import { addSubscriber, removeSubscriber } from "../../services/realtime.ts";
 import { getOrchestrator } from "../../services/orchestrator/index.ts";
@@ -105,8 +100,8 @@ function buildPlatformServices(): PlatformServices {
     runs: {
       // Adapter: positional args internally, object args at the public boundary
       // so the published contract is non-breaking when fields are added.
-      get: (a) => getRunByOrg(a.runId, a.orgId),
-      listLogs: (a) => listRunLogsOrdered(a),
+      get: getRunByOrg,
+      listLogs: listRunLogs,
       appendLog: (a) =>
         appendRunLog(
           a.runId,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, count, sql, or, inArray } from "drizzle-orm";
+import { eq, and, count, sql, or, inArray, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
@@ -171,14 +171,52 @@ export async function getPackageWithAccess(
 }
 
 /**
+ * Select packages scoped to `orgId` (system + user) with shared projection,
+ * `notEphemeral` + type filter, and the system-first ordering. Callers pass
+ * additional `where` predicates and an optional row cap; everything else is
+ * held constant so `listPackages` and `searchPackages` stay in lockstep.
+ */
+async function selectScopedPackages(args: {
+  orgId: string;
+  type: PackageType;
+  extra?: SQL;
+  limit?: number;
+}): Promise<LoadedPackage[]> {
+  const conditions = [
+    eq(packages.type, args.type),
+    orgOrSystemFilter(args.orgId),
+    notEphemeralFilter(),
+  ];
+  if (args.extra) conditions.push(args.extra);
+
+  const q = db
+    .select({
+      id: packages.id,
+      draftManifest: packages.draftManifest,
+      draftContent: packages.draftContent,
+      source: packages.source,
+    })
+    .from(packages)
+    .where(and(...conditions))
+    .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`);
+
+  const rows = args.limit != null ? await q.limit(args.limit) : await q;
+
+  return rows.map((row) =>
+    dbRowToLoadedPackage({
+      id: row.id,
+      draftManifest: row.draftManifest,
+      draftContent: row.draftContent ?? "",
+      source: row.source,
+    }),
+  );
+}
+
+/**
  * Free-text catalog search for external modules via PlatformServices.
  * Matches `id` and manifest fields (`name`, `displayName`, `description`)
  * with Postgres `ILIKE` — fine for the few-hundred-packages-per-org
  * scale; a full-text index can be bolted on later if volume grows.
- *
- * Ephemeral shadow rows are excluded. Scoping uses the same
- * `orgOrSystemFilter()` + `notEphemeralFilter()` helpers as
- * `listPackages` so cross-org enumeration is structurally impossible.
  *
  * Callers pass their target `limit`; this function returns at most
  * `limit + 1` rows so the caller can derive `hasMore` without a
@@ -191,41 +229,20 @@ export async function searchPackages(args: {
   /** Soft-capped at 100 to keep the contract bounded. Default 10. */
   limit?: number;
 }): Promise<LoadedPackage[]> {
-  const { query, orgId, kind } = args;
   const limit = Math.min(args.limit ?? 10, 100);
-  const pattern = `%${query}%`;
+  const pattern = `%${args.query}%`;
 
-  const nameMatch = sql`${packages.draftManifest}->>'name' ILIKE ${pattern}`;
-  const displayNameMatch = sql`${packages.draftManifest}->>'displayName' ILIKE ${pattern}`;
-  const descriptionMatch = sql`${packages.draftManifest}->>'description' ILIKE ${pattern}`;
-  const idMatch = sql`${packages.id} ILIKE ${pattern}`;
-
-  const rows = await db
-    .select({
-      id: packages.id,
-      draftManifest: packages.draftManifest,
-      draftContent: packages.draftContent,
-      source: packages.source,
-    })
-    .from(packages)
-    .where(
-      and(
-        orgOrSystemFilter(orgId),
-        notEphemeralFilter(),
-        eq(packages.type, kind),
-        or(idMatch, nameMatch, displayNameMatch, descriptionMatch),
-      ),
-    )
-    .limit(limit + 1);
-
-  return rows.map((row) =>
-    dbRowToLoadedPackage({
-      id: row.id,
-      draftManifest: row.draftManifest,
-      draftContent: row.draftContent ?? "",
-      source: row.source,
-    }),
-  );
+  return selectScopedPackages({
+    orgId: args.orgId,
+    type: args.kind,
+    extra: or(
+      sql`${packages.id} ILIKE ${pattern}`,
+      sql`${packages.draftManifest}->>'name' ILIKE ${pattern}`,
+      sql`${packages.draftManifest}->>'displayName' ILIKE ${pattern}`,
+      sql`${packages.draftManifest}->>'description' ILIKE ${pattern}`,
+    ),
+    limit: limit + 1,
+  });
 }
 
 /** List packages by type: system (orgId: null) + user packages (from DB, scoped by org). Defaults to "agent". */
@@ -233,26 +250,7 @@ export async function listPackages(
   orgId: string,
   type: PackageType = "agent",
 ): Promise<LoadedPackage[]> {
-  const conditions = [eq(packages.type, type), orgOrSystemFilter(orgId), notEphemeralFilter()];
-  const rows = await db
-    .select({
-      id: packages.id,
-      draftManifest: packages.draftManifest,
-      draftContent: packages.draftContent,
-      source: packages.source,
-    })
-    .from(packages)
-    .where(and(...conditions))
-    .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`);
-
-  return rows.map((row) =>
-    dbRowToLoadedPackage({
-      id: row.id,
-      draftManifest: row.draftManifest,
-      draftContent: row.draftContent ?? "",
-      source: row.source,
-    }),
-  );
+  return selectScopedPackages({ orgId, type });
 }
 
 /** Get all package IDs (system + user, scoped by org). Used for collision checks. */

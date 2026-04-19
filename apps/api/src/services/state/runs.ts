@@ -676,22 +676,14 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
   };
 }
 
-export async function listRunLogs(runId: string, orgId: string) {
-  return db
-    .select()
-    .from(runLogs)
-    .where(and(eq(runLogs.runId, runId), eq(runLogs.orgId, orgId)))
-    .orderBy(runLogs.id);
-}
-
 /**
- * Org-scoped run snapshot read for external modules via PlatformServices.
- * Intentionally narrower than `getRun(id, orgId, applicationId)`: chat-like
- * consumers span applications within a single org, so the read scopes on
- * `orgId` alone. Returns the public `Run` DTO shape — schema internals
- * (scheduler ids, actor fields, etc.) stay inside apps/api.
+ * Org-scoped run snapshot read. Intentionally narrower than
+ * `getRun(id, orgId, applicationId)`: chat-like consumers span applications
+ * within a single org, so the read scopes on `orgId` alone. Returns the
+ * public `Run` DTO shape — schema internals (scheduler ids, actor fields,
+ * etc.) stay inside apps/api.
  */
-export async function getRunByOrg(runId: string, orgId: string) {
+export async function getRunByOrg(args: { runId: string; orgId: string }) {
   const [row] = await db
     .select({
       id: runs.id,
@@ -703,19 +695,19 @@ export async function getRunByOrg(runId: string, orgId: string) {
       error: runs.error,
     })
     .from(runs)
-    .where(and(eq(runs.id, runId), eq(runs.orgId, orgId)))
+    .where(and(eq(runs.id, args.runId), eq(runs.orgId, args.orgId)))
     .limit(1);
   return row ?? null;
 }
 
 /**
- * Optioned log tail for external modules. `order: "asc"` returns the
- * whole run history chronologically (`id ASC`); `"desc"` returns the
- * newest entries first and is cheaper when only a small tail is needed.
- * When `order: "desc"` with a `limit`, rows are reversed before return
- * so the caller always sees chronological order inside the batch.
+ * Org-scoped run log read. `order: "asc"` (default) returns entries in
+ * insertion order (`id ASC`); `"desc"` selects the most recent `limit`
+ * entries and is cheaper when only a tail is needed. The returned batch
+ * is always chronological — `desc` affects which rows are selected, not
+ * the order callers receive.
  */
-export async function listRunLogsOrdered(args: {
+export async function listRunLogs(args: {
   runId: string;
   orgId: string;
   limit?: number;
