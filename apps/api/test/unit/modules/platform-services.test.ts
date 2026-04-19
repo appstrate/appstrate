@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeAll } from "bun:test";
+import type { ModuleInitContext } from "@appstrate/core/module";
 import { buildModuleInitContext } from "../../../src/lib/modules/registry.ts";
 
 /**
@@ -11,8 +12,16 @@ import { buildModuleInitContext } from "../../../src/lib/modules/registry.ts";
  * wired and exposes the documented methods as functions.
  */
 describe("ModuleInitContext.services — platform service wiring", () => {
-  const ctx = buildModuleInitContext();
-  const services = ctx.services;
+  let ctx: ModuleInitContext;
+  let services: ModuleInitContext["services"];
+
+  beforeAll(() => {
+    // Lazy construction: if `getEnv()` throws (strict Zod validation), the
+    // failure surfaces inside a hook so each `it` still reports clearly —
+    // rather than tearing down the entire file at load time.
+    ctx = buildModuleInitContext();
+    services = ctx.services;
+  });
 
   it("wires the logger", () => {
     expect(services.logger).toBeDefined();

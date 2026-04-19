@@ -74,12 +74,14 @@ export function getModuleRegistry(): string[] {
 
 /**
  * Wire concrete platform services into the structural `PlatformServices`
- * contract declared in `@appstrate/core/module`.
+ * contract declared in `@appstrate/core/module`. All bindings pass through:
+ * the public DTO shapes in `@appstrate/core/platform-types` use open index
+ * signatures so the concrete apps/api rows (LoadedPackage, ResolvedModel,
+ * Application row, UserConnectionProviderGroup) are structurally assignable.
  *
- * Most bindings pass through because the core contract is a supertype of the
- * concrete signatures. Remaining casts are narrow and annotated where TS's
- * function-parameter bivariance or opaque DTO payloads (Actor, emit parameter
- * tuples) cross the package boundary.
+ * `Actor` is re-declared in core with the same two-variant union as
+ * `@appstrate/connect` — they're nominally different types but structurally
+ * identical, hence the parameter-name-only mismatch goes through.
  */
 function buildPlatformServices(): PlatformServices {
   return {
@@ -93,11 +95,7 @@ function buildPlatformServices(): PlatformServices {
       isInlineShadow: isInlineShadowPackageId,
     },
     applications: { getDefault: getDefaultApplication },
-    connections: {
-      // `Actor` is an apps/api type — core uses `unknown` for the param.
-      listAllForActor:
-        listAllActorConnections as PlatformServices["connections"]["listAllForActor"],
-    },
+    connections: { listAllForActor: listAllActorConnections },
     runs: {
       appendLog: appendRunLog,
       update: updateRun,
@@ -105,9 +103,7 @@ function buildPlatformServices(): PlatformServices {
     },
     inline: { preflight: runInlinePreflight },
     realtime: { addSubscriber, removeSubscriber },
-    // `emit` generic signature carries ModuleEvents tuples; identical at the
-    // type level but TS requires a cast for generic-in-generic-out parity.
-    modules: { get: getModule, emit: emitEvent as PlatformServices["modules"]["emit"] },
+    modules: { get: getModule, emit: emitEvent },
   };
 }
 

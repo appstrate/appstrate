@@ -15,6 +15,65 @@ import type { SidecarConfig } from "./sidecar-types.ts";
 export type { SidecarConfig, LlmProxyConfig } from "./sidecar-types.ts";
 
 // ---------------------------------------------------------------------------
+// Actor — who initiated an operation
+// ---------------------------------------------------------------------------
+
+/**
+ * Identifies who initiated a run or API call — a dashboard member (BA user)
+ * or an end-user impersonated via `Appstrate-User`. Kept as a thin
+ * discriminated union so modules can narrow by `type` without importing
+ * `@appstrate/connect`.
+ */
+export type Actor = { type: "member"; id: string } | { type: "end_user"; id: string };
+
+// ---------------------------------------------------------------------------
+// Public DTO shapes — stable fields of platform entities
+//
+// These types expose the minimum fields external modules can rely on at the
+// package boundary. Concrete apps/api rows carry more fields; width
+// subtyping makes them assignable to these narrower shapes. `manifest` and
+// nested payloads are typed as `unknown` — modules cast at the call site
+// when they need the richer shape.
+// ---------------------------------------------------------------------------
+
+/** Stable public fields of a loaded package (agent, skill, tool, provider). */
+export interface PlatformPackage {
+  readonly id: string;
+  readonly source: "system" | "local";
+  /** Opaque manifest — cast to `AgentManifest` or similar at the call site. */
+  readonly manifest: unknown;
+}
+
+/** Stable public fields of a resolved model — what modules need to route LLM traffic. */
+export interface PlatformModel {
+  readonly api: string;
+  readonly modelId: string;
+  readonly baseUrl: string;
+}
+
+/** Stable public fields of an application row. */
+export interface PlatformApplication {
+  readonly id: string;
+  readonly orgId: string;
+  readonly name: string;
+  readonly isDefault: boolean;
+}
+
+/** A user's connections grouped by provider, then by org — shape returned by `connections.listAllForActor`. */
+export interface PlatformConnectionProviderGroup {
+  readonly providerId: string;
+  readonly displayName: string;
+  readonly logo: string;
+  readonly totalConnections: number;
+  readonly orgs: ReadonlyArray<{
+    readonly orgId: string;
+    readonly orgName: string;
+    /** Connection entries — cast to `UserConnectionEntry` (from shared-types) at the call site. */
+    readonly connections: ReadonlyArray<unknown>;
+  }>;
+}
+
+// ---------------------------------------------------------------------------
 // Workload / orchestrator value types
 // ---------------------------------------------------------------------------
 

@@ -12,7 +12,15 @@
 
 import type { Hono } from "hono";
 import type { Logger } from "./logger.ts";
-import type { ContainerOrchestrator, PubSub } from "./platform-types.ts";
+import type {
+  Actor,
+  ContainerOrchestrator,
+  PlatformApplication,
+  PlatformConnectionProviderGroup,
+  PlatformModel,
+  PlatformPackage,
+  PubSub,
+} from "./platform-types.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -489,10 +497,18 @@ export interface ModuleInitContext {
    * reference and consume services through it without importing
    * apps/api internals.
    *
-   * Argument shapes and return cardinality are precise; opaque DTO payloads
-   * (model rows, loaded packages, applications, connection groups) stay
-   * `unknown` so core does not have to depend on apps/api types. Consumers
-   * cast at the call site when they need the concrete type.
+   * DTO payloads expose stable public fields (id, source, name, …) with an
+   * open index signature so apps/api rows remain assignable without casts
+   * while modules get meaningful types for the fields they care about.
+   *
+   * ## Security
+   *
+   * `services` grants modules privileged access to the platform — they can
+   * abort runs, emit events, subscribe to the realtime bus, talk to the
+   * container orchestrator, and read/write run state across orgs. Modules
+   * are therefore trusted code on par with `apps/api` itself. Only load
+   * modules you control or have audited — never treat `MODULES=` as a
+   * safe extension point for untrusted packages.
    */
   services: PlatformServices;
 }
@@ -503,9 +519,9 @@ export interface ModuleInitContext {
 // Namespaced sub-objects for discoverability. Keep the surface minimal —
 // only capabilities with stable cross-module demand belong here. Signatures
 // fix arity, argument names, and return cardinality (object vs array vs
-// void) so external modules get meaningful type-checking; opaque DTO payloads
-// stay `unknown` because their concrete shapes live in apps/api and would
-// leak internals into core.
+// void). DTO payloads use minimal public shapes from `platform-types.ts`
+// (PlatformPackage, PlatformModel, PlatformApplication, …) — concrete
+// apps/api rows remain assignable thanks to their open index signature.
 // ---------------------------------------------------------------------------
 
 /** Updates accepted by `runs.update`. Open shape — future fields OK. */
@@ -532,10 +548,10 @@ export interface PlatformServices {
     hasRedis(): boolean;
     hasExternalDb(): boolean;
   };
-  /** Org-scoped model catalog operations. Returned DTOs are opaque. */
+  /** Org-scoped model catalog operations. */
   models: {
-    load(orgId: string, modelDbId: string): Promise<unknown | null>;
-    listForOrg(orgId: string): Promise<unknown[]>;
+    load(orgId: string, modelDbId: string): Promise<PlatformModel | null>;
+    listForOrg(orgId: string): Promise<PlatformModel[]>;
   };
   /** Package catalog accessors. */
   packages: {
@@ -543,17 +559,17 @@ export interface PlatformServices {
       packageId: string,
       orgId: string,
       opts?: { includeEphemeral?: boolean },
-    ): Promise<unknown | null>;
+    ): Promise<PlatformPackage | null>;
     isInlineShadow(packageId: string): boolean;
   };
   /** Application helpers. */
   applications: {
-    getDefault(orgId: string): Promise<unknown | null>;
+    getDefault(orgId: string): Promise<PlatformApplication | null>;
   };
   /** Connection manager helpers. */
   connections: {
     /** Returns `{ providers: [...] }` — not a bare array. */
-    listAllForActor(actor: unknown): Promise<{ providers: unknown[] }>;
+    listAllForActor(actor: Actor): Promise<{ providers: PlatformConnectionProviderGroup[] }>;
   };
   /** Run lifecycle operations (append log, update, abort). */
   runs: {
