@@ -443,6 +443,14 @@ export async function rotateRefreshToken(params: {
  * Revoke a refresh token family. Idempotent — repeat calls are no-ops.
  * Called by `POST /api/auth/cli/revoke` (CLI logout) and by the
  * reuse-detection branch of `rotateRefreshToken`.
+ *
+ * Returns a discriminator so operators/audit logs can tell whether the
+ * revoke actually touched a family or was a no-op (unknown token /
+ * client mismatch). The `/cli/revoke` HTTP endpoint intentionally
+ * discards this distinction and returns `{ revoked: true }` on every
+ * 200 response — RFC 7009 §2.2 requires 200 even for invalid tokens,
+ * and leaking the hit/miss bit to the caller is a narrow but real
+ * oracle on a 256-bit token space.
  */
 export async function revokeRefreshToken(params: {
   refreshToken: string;
@@ -450,12 +458,30 @@ export async function revokeRefreshToken(params: {
 }): Promise<{ revoked: boolean }> {
   const tokenHash = hashRefreshToken(params.refreshToken);
   const [row] = await db
-    .select({ familyId: cliRefreshToken.familyId, clientId: cliRefreshToken.clientId })
+    .select({
+      familyId: cliRefreshToken.familyId,
+      clientId: cliRefreshToken.clientId,
+      userId: cliRefreshToken.userId,
+    })
     .from(cliRefreshToken)
     .where(eq(cliRefreshToken.tokenHash, tokenHash))
     .limit(1);
   if (!row) return { revoked: false };
-  if (row.clientId !== params.clientId) return { revoked: false };
+  if (row.clientId !== params.clientId) {
+    // Audit log the cross-client presentation so operators can still spot
+    // a compromised token surfacing from an unexpected client — the HTTP
+    // response intentionally hides the distinction, so the log is the
+    // only channel that surfaces the miss.
+    logger.warn("oidc: CLI refresh-token revoke with client mismatch — ignored", {
+      module: "oidc",
+      audit: true,
+      event: "cli.refresh_token.revoke.client_mismatch",
+      expectedClientId: row.clientId,
+      presentedClientId: params.clientId,
+      userId: row.userId,
+    });
+    return { revoked: false };
+  }
   await revokeFamily(row.familyId, "logout");
   return { revoked: true };
 }

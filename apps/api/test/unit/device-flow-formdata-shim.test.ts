@@ -3,10 +3,11 @@
 /**
  * Unit tests for `maybeTransformDeviceFlowFormBody` — the platform-level
  * shim that rewrites `application/x-www-form-urlencoded` bodies on
- * `/api/auth/device/code` and `/api/auth/device/token` into JSON before
- * Better Auth's `better-call` router (which only accepts JSON) sees the
- * request. Belt-and-braces coverage for the pure transform — the
- * end-to-end wiring is covered by the integration suite.
+ * `/api/auth/device/code`, `/api/auth/device/token`, `/api/auth/cli/token`
+ * and `/api/auth/cli/revoke` into JSON before Better Auth's `better-call`
+ * router (which only accepts JSON) sees the request. Belt-and-braces
+ * coverage for the pure transform — the end-to-end wiring is covered by
+ * the integration suite.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -87,6 +88,32 @@ describe("maybeTransformDeviceFlowFormBody", () => {
     expect(transformed.headers.get("content-type")).toBe("application/json");
     const body = (await transformed.json()) as Record<string, string>;
     expect(body.client_id).toBe("cli");
+  });
+
+  it("rewrites form-urlencoded → JSON on /api/auth/cli/token (issue #165)", async () => {
+    const original = formRequest("http://host/api/auth/cli/token", {
+      grant_type: "refresh_token",
+      refresh_token: "rt_abc",
+      client_id: "appstrate-cli",
+    });
+    const transformed = await maybeTransformDeviceFlowFormBody(original);
+    expect(transformed.headers.get("content-type")).toBe("application/json");
+    const body = (await transformed.json()) as Record<string, string>;
+    expect(body.grant_type).toBe("refresh_token");
+    expect(body.refresh_token).toBe("rt_abc");
+    expect(body.client_id).toBe("appstrate-cli");
+  });
+
+  it("rewrites form-urlencoded → JSON on /api/auth/cli/revoke (issue #165)", async () => {
+    const original = formRequest("http://host/api/auth/cli/revoke", {
+      token: "rt_abc",
+      client_id: "appstrate-cli",
+    });
+    const transformed = await maybeTransformDeviceFlowFormBody(original);
+    expect(transformed.headers.get("content-type")).toBe("application/json");
+    const body = (await transformed.json()) as Record<string, string>;
+    expect(body.token).toBe("rt_abc");
+    expect(body.client_id).toBe("appstrate-cli");
   });
 
   it("is case-insensitive on the content-type match", async () => {

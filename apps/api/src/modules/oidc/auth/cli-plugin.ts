@@ -213,15 +213,15 @@ export function cliTokenPlugin() {
           metadata: {
             openapi: {
               description:
-                "Revoke a CLI refresh token's family. Idempotent — `revoked: false` when the token was unknown or client-mismatched.",
+                "Revoke a CLI refresh token's family. Idempotent. Per RFC 7009 §2.2 the response is uniform (`{ revoked: true }`) even when the token is unknown or client-mismatched — the underlying hit/miss discriminator is kept in the audit log only, so a caller cannot probe token validity through the response shape.",
               responses: {
                 200: {
-                  description: "Revocation outcome",
+                  description: "Revocation acknowledged",
                   content: {
                     "application/json": {
                       schema: {
                         type: "object",
-                        properties: { revoked: { type: "boolean" } },
+                        properties: { revoked: { type: "boolean", const: true } },
                       },
                     },
                   },
@@ -233,11 +233,18 @@ export function cliTokenPlugin() {
         async (ctx) => {
           const { token, client_id } = ctx.body;
           await validateClientOrThrow(client_id);
-          const result = await revokeRefreshToken({
+          // Service-layer call still returns a discriminator for audit
+          // logging — but we DISCARD it here. RFC 7009 §2.2 says the
+          // endpoint MUST respond 200 for invalid tokens too, so a
+          // `{ revoked: false }` response would be a token-existence
+          // oracle on a 256-bit space that an attacker with an
+          // unlimited budget could still probe. The hit/miss distinction
+          // lives in the audit log (`cli.refresh_token.revoke.*` events).
+          await revokeRefreshToken({
             refreshToken: token,
             clientId: client_id,
           });
-          return ctx.json(result);
+          return ctx.json({ revoked: true });
         },
       ),
     },

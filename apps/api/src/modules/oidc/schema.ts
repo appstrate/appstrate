@@ -45,6 +45,7 @@ import {
   uuid,
   index,
   primaryKey,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 import { user, session, endUsers, organizations, applications } from "@appstrate/db/schema";
 
@@ -236,11 +237,14 @@ export const cliRefreshToken = pgTable(
       .references(() => oauthClient.clientId, { onDelete: "cascade" }),
     familyId: text("family_id").notNull(),
     // `parent_id` is the `id` of the row that rotated INTO this one. NULL
-    // on the head of a family (the initial device-code grant).
-    // Self-referential; Drizzle expresses this via the `.references()`
-    // target being the same table — we inline the column reference using
-    // a function that resolves post-hoist. Keeping the FK ON DELETE SET
-    // NULL preserves the family linked list even if a node is pruned.
+    // on the head of a family (the initial device-code grant). Self-
+    // referential FK — Drizzle expresses it via the `foreignKey()` helper
+    // in the table-config callback because the column reference cannot be
+    // forward-declared inline (the table identifier resolves only inside
+    // the callback). Matches the `ON DELETE SET NULL` the migration
+    // `0005_cli_refresh_tokens.sql` applies. Without this expression here
+    // `drizzle-kit generate` would emit a spurious "drop FK" migration on
+    // the next schema diff.
     parentId: text("parent_id"),
     scope: text("scope"),
     expiresAt: timestamp("expires_at").notNull(),
@@ -252,6 +256,11 @@ export const cliRefreshToken = pgTable(
   (t) => [
     index("idx_cli_refresh_tokens_family").on(t.familyId),
     index("idx_cli_refresh_tokens_user").on(t.userId),
+    foreignKey({
+      columns: [t.parentId],
+      foreignColumns: [t.id],
+      name: "cli_refresh_tokens_parent_id_fkey",
+    }).onDelete("set null"),
   ],
 );
 

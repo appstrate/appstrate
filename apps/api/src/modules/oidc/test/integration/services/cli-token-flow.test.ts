@@ -668,7 +668,7 @@ describe("POST /api/auth/cli/revoke", () => {
     expect(rotateBody.error).toBe("invalid_grant");
   });
 
-  it("is idempotent — second call returns {revoked: false} without error", async () => {
+  it("is idempotent — second call returns {revoked: true} without error (RFC 7009 §2.2)", async () => {
     const refreshToken = await loginAndGetRefresh();
     await app.request("/api/auth/cli/revoke", {
       method: "POST",
@@ -677,18 +677,20 @@ describe("POST /api/auth/cli/revoke", () => {
     });
     // The token plaintext is still the same string the client holds,
     // so the second call still finds the row — but the row is already
-    // revoked so the UPDATE is a no-op. Whether the service returns
-    // `true` or `false` here is less important than "no error" —
-    // logout must never crash.
+    // revoked so the UPDATE is a no-op. The response shape is uniform
+    // per RFC 7009 §2.2 — a caller cannot distinguish first-revoke from
+    // already-revoked through the response body.
     const second = await app.request("/api/auth/cli/revoke", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: refreshToken, client_id: "appstrate-cli" }),
     });
     expect(second.status).toBe(200);
+    const body = (await second.json()) as { revoked: boolean };
+    expect(body.revoked).toBe(true);
   });
 
-  it("returns {revoked: false} for an unknown token (no-op, does not leak)", async () => {
+  it("returns {revoked: true} uniformly for an unknown token (RFC 7009 §2.2 — no oracle)", async () => {
     const res = await app.request("/api/auth/cli/revoke", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -696,7 +698,10 @@ describe("POST /api/auth/cli/revoke", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { revoked: boolean };
-    expect(body.revoked).toBe(false);
+    // RFC 7009 §2.2: the authorization server responds 200 for invalid
+    // tokens too. We go further and return the same response shape so the
+    // caller cannot probe token existence on the 256-bit plaintext space.
+    expect(body.revoked).toBe(true);
   });
 
   it("rejects revocation of a token issued to a different client (cross-client defense)", async () => {
@@ -704,9 +709,13 @@ describe("POST /api/auth/cli/revoke", () => {
     // A malicious actor registers their own CLI-grantable client and
     // calls revoke against the victim's token. The row is found but
     // the clientId mismatch causes `revokeRefreshToken` to short-circuit
-    // with `{ revoked: false }`. (We still return 200 — callers don't
-    // get to distinguish "not yours" from "not found", preventing
-    // enumeration.)
+    // server-side. The HTTP response is uniform per RFC 7009 §2.2 —
+    // callers cannot distinguish "not yours" from "not found" or
+    // "already revoked", all return 200 + `{ revoked: true }`. The
+    // cross-client miss is only surfaced in the audit log (the
+    // `cli.refresh_token.revoke.client_mismatch` warn event), so
+    // operators can still spot a compromised token showing up from an
+    // unexpected client id.
     const { prefixedId } = await import("../../../../../lib/ids.ts");
     const { oauthClient } = await import("../../../schema.ts");
     const attackerClientId = "attacker-cli";
@@ -741,7 +750,10 @@ describe("POST /api/auth/cli/revoke", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { revoked: boolean };
-    expect(body.revoked).toBe(false);
+    // Uniform response (RFC 7009 §2.2) — the attacker gets the same
+    // shape a legitimate revoke would produce, so they cannot probe
+    // whether the token maps to a different client.
+    expect(body.revoked).toBe(true);
 
     // Legitimate row is still usable.
     const [row] = await db
