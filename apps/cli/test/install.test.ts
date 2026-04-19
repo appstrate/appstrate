@@ -85,6 +85,122 @@ describe("resolveTier", () => {
   });
 });
 
+describe("resolveTier (--yes / autoConfirm)", () => {
+  // Regression suite for #199: under --yes the Docker-aware default is
+  // returned WITHOUT calling `clack.select`. That bypass is the actual
+  // fix — it means `setRawMode` never runs, so the Bun macOS keypress
+  // regression (family of oven-sh/bun #6862, #7033, #24615, #5240,
+  // #14483) can't trip the binary regardless of upstream fix status.
+  // The tests lock that contract down: any future refactor that
+  // accidentally reintroduces `select()` on the --yes path fails here.
+
+  it("returns Tier 3 when Docker is available, without calling select", async () => {
+    let selectCalls = 0;
+    const select = (async () => {
+      selectCalls += 1;
+      return 0;
+    }) as unknown as typeof import("@clack/prompts").select;
+    let noteMsg: string | undefined;
+    const tier = await resolveTier(undefined, {
+      select,
+      isCancel: (() => false) as unknown as typeof import("@clack/prompts").isCancel,
+      note: (msg) => {
+        noteMsg = String(msg);
+      },
+      isDockerAvailable: async () => true,
+      autoConfirm: true,
+    });
+    expect(tier).toBe(3);
+    expect(selectCalls).toBe(0);
+    expect(noteMsg).toMatch(/Tier 3 selected automatically/i);
+    expect(noteMsg).toMatch(/Docker detected/i);
+  });
+
+  it("returns Tier 0 when Docker is missing, without calling select", async () => {
+    let selectCalls = 0;
+    const select = (async () => {
+      selectCalls += 1;
+      return 0;
+    }) as unknown as typeof import("@clack/prompts").select;
+    let noteMsg: string | undefined;
+    const tier = await resolveTier(undefined, {
+      select,
+      isCancel: (() => false) as unknown as typeof import("@clack/prompts").isCancel,
+      note: (msg) => {
+        noteMsg = String(msg);
+      },
+      isDockerAvailable: async () => false,
+      autoConfirm: true,
+    });
+    expect(tier).toBe(0);
+    expect(selectCalls).toBe(0);
+    expect(noteMsg).toMatch(/Tier 0 selected automatically/i);
+    expect(noteMsg).toMatch(/Docker not detected/i);
+  });
+
+  it("does not trip the stdin-is-not-a-TTY guard (curl|bash use case)", async () => {
+    // The whole point of --yes is to work under `curl | bash` where stdin
+    // is NOT a TTY. If a future refactor reintroduced the TTY guard on
+    // this path, the bootstrap script would regress to issue #184.
+    expect(process.stdin.isTTY).toBeFalsy();
+    const tier = await resolveTier(undefined, {
+      isDockerAvailable: async () => true,
+      note: () => {},
+      autoConfirm: true,
+    });
+    expect(tier).toBe(3);
+  });
+
+  it("still honors an explicit --tier argument under --yes (granular override wins)", async () => {
+    // rustup convention: `-y --default-toolchain nightly` uses the
+    // toolchain the user named, not the default. Our equivalent: the
+    // per-field flag overrides the smart default.
+    const probe = async () => {
+      throw new Error("isDockerAvailable must not be called when --tier is provided");
+    };
+    for (const raw of ["0", "1", "2", "3"] as const) {
+      const tier = await resolveTier(raw, {
+        autoConfirm: true,
+        isDockerAvailable: probe,
+        select: (async () => {
+          throw new Error("select must not be called when --tier is provided");
+        }) as unknown as typeof import("@clack/prompts").select,
+        isCancel: (() => false) as unknown as typeof import("@clack/prompts").isCancel,
+        note: () => {
+          throw new Error("note must not be called when --tier is provided");
+        },
+      });
+      expect(tier).toBe(Number(raw) as 0 | 1 | 2 | 3);
+    }
+  });
+});
+
+describe("resolveDir (--yes / autoConfirm)", () => {
+  it("returns DEFAULT_INSTALL_DIR without prompting when --dir is missing", async () => {
+    // Under --yes we must never enter askText — same setRawMode bypass
+    // story as resolveTier. The returned path must be absolute so the
+    // tier0/tier123 spawn layer gets a stable cwd.
+    expect(process.stdin.isTTY).toBeFalsy();
+    const out = await resolveDir(undefined, { autoConfirm: true });
+    expect(out).toBe(resolve(join(process.env.HOME ?? "", "appstrate")));
+    expect(out.startsWith("/")).toBe(true);
+  });
+
+  it("still honors --dir when both --dir and --yes are passed", async () => {
+    const out = await resolveDir("/tmp/appstrate-custom", { autoConfirm: true });
+    expect(out).toBe("/tmp/appstrate-custom");
+  });
+
+  it("still rejects malicious paths under --yes", async () => {
+    // --yes does not disable the validation guard — a newline in --dir
+    // is rejected regardless, so the downstream shell-safety invariants
+    // hold even in the one-liner installer path.
+    await expect(resolveDir("/tmp/bad\npath", { autoConfirm: true })).rejects.toThrow(
+      /newlines or NUL/,
+    );
+  });
+});
+
 describe("resolveTier (interactive)", () => {
   /** Captures whatever options are passed into the fake `select`. */
   type SelectOpts = {
