@@ -58,13 +58,23 @@ function httpStatusFor(code: string): 400 | 401 {
   return 400;
 }
 
+// RFC 6749 §5.2: token-endpoint error responses MUST include
+// `Cache-Control: no-store` and `Pragma: no-cache`. Intermediate proxies
+// rarely cache 4xx in practice, but the spec is explicit and the cost
+// of two header strings is zero.
+const NO_STORE_HEADERS = { "Cache-Control": "no-store", Pragma: "no-cache" };
+
 function throwApiError(err: CliTokenError): never {
   const status = httpStatusFor(err.code);
   const upper = status === 401 ? "UNAUTHORIZED" : "BAD_REQUEST";
-  throw new APIError(upper, {
-    error: err.code,
-    error_description: err.description,
-  });
+  throw new APIError(
+    upper,
+    {
+      error: err.code,
+      error_description: err.description,
+    },
+    NO_STORE_HEADERS,
+  );
 }
 
 // Union schema to accept both grant types in a single endpoint.
@@ -93,20 +103,28 @@ async function validateClientOrThrow(clientId: string): Promise<void> {
     .where(eq(oauthClient.clientId, clientId))
     .limit(1);
   if (!row || row.disabled === true) {
-    throw new APIError("UNAUTHORIZED", {
-      error: "invalid_client",
-      error_description: "Unknown or disabled client.",
-    });
+    throw new APIError(
+      "UNAUTHORIZED",
+      {
+        error: "invalid_client",
+        error_description: "Unknown or disabled client.",
+      },
+      NO_STORE_HEADERS,
+    );
   }
   const grants = row.grantTypes ?? [];
   // Accept the call if the client is registered for either the device-code
   // or refresh-token grant — the endpoint-level grant_type check below
   // enforces the actual grant being used.
   if (!grants.includes(DEVICE_CODE_GRANT) && !grants.includes(REFRESH_TOKEN_GRANT)) {
-    throw new APIError("UNAUTHORIZED", {
-      error: "invalid_client",
-      error_description: "Client is not registered for CLI grant types.",
-    });
+    throw new APIError(
+      "UNAUTHORIZED",
+      {
+        error: "invalid_client",
+        error_description: "Client is not registered for CLI grant types.",
+      },
+      NO_STORE_HEADERS,
+    );
   }
 }
 

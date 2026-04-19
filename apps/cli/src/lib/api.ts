@@ -40,6 +40,58 @@ import { CLI_CLIENT_ID } from "./cli-client.ts";
  */
 const ACCESS_TOKEN_REFRESH_MARGIN_MS = 30_000;
 
+/**
+ * Per-profile in-flight refresh dedup.
+ *
+ * When a CLI invocation issues parallel API calls (batch operations,
+ * SSE + REST, stream + poll), each call independently resolves the
+ * access token and can independently react to a 401. Without this
+ * mutex, two callers would read the same plaintext refresh token from
+ * the keyring and POST it concurrently to `/cli/token`: the server
+ * rotates the first, marks it `used_at`, and the second trips the
+ * RFC 6819 §5.2.2.3 reuse-detection branch that revokes the ENTIRE
+ * family — booting the legitimate user for what is effectively our
+ * own race.
+ *
+ * Sharing a single `Promise<string>` per profile collapses all
+ * concurrent refreshes for that profile into a single server round-
+ * trip: every caller observes the same rotated access token. The
+ * entry is cleared in `.finally()` so the next bona-fide rotation
+ * (15 min later) starts fresh.
+ */
+const inFlightRefresh = new Map<string, Promise<string>>();
+
+function withRefreshLock(profileName: string, fn: () => Promise<string>): Promise<string> {
+  const existing = inFlightRefresh.get(profileName);
+  if (existing) return existing;
+  const promise = fn().finally(() => {
+    inFlightRefresh.delete(profileName);
+  });
+  inFlightRefresh.set(profileName, promise);
+  return promise;
+}
+
+// Test-only surface: lets the unit tests assert dedup behavior without
+// exposing the map to production callers.
+export function _inFlightRefreshSizeForTesting(): number {
+  return inFlightRefresh.size;
+}
+
+/**
+ * Block until any in-flight refresh for `profileName` has settled. Used
+ * by `appstrate logout` to prevent the classic "refresh resurrects the
+ * tokens we just deleted" race: if a parallel `apiFetchRaw` is mid-
+ * rotation when logout fires, its trailing `saveTokens` would write
+ * fresh credentials onto disk AFTER `deleteTokens` ran, effectively
+ * un-logging-out the user. Awaiting the promise (error-swallowed —
+ * logout doesn't care whether the refresh succeeded) lets logout
+ * sequence its final delete after the rotation commits or bails.
+ */
+export async function _awaitRefreshQuiesce(profileName: string): Promise<void> {
+  const p = inFlightRefresh.get(profileName);
+  if (p) await p.catch(() => {});
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -104,8 +156,10 @@ async function resolveAccessToken(profileName: string, profile: Profile): Promis
   if (!needsRefresh) {
     return tokens.accessToken;
   }
-  // Access token expired or imminent. Try refresh.
-  return doRefresh(profileName, profile, tokens);
+  // Access token expired or imminent. Try refresh — dedup via the
+  // per-profile mutex so parallel callers don't race the refresh
+  // token against server-side reuse detection.
+  return withRefreshLock(profileName, () => doRefresh(profileName, profile, tokens));
 }
 
 async function doRefresh(profileName: string, profile: Profile, tokens: Tokens): Promise<string> {
@@ -220,9 +274,18 @@ export async function apiFetchRaw(
   if (!stored || !stored.refreshToken) {
     return res;
   }
+  // If a parallel caller already rotated the token between our initial
+  // resolve and this 401, the keyring now holds a newer access token.
+  // Retry with it first — we'd otherwise burn a refresh-token rotation
+  // for nothing, and in edge timing could even race the mutex into
+  // unnecessary network calls.
+  if (stored.accessToken !== token) {
+    const retry = await doFetch(stored.accessToken);
+    if (retry.status !== 401) return retry;
+  }
   let rotated: string;
   try {
-    rotated = await doRefresh(profileName, profile, stored);
+    rotated = await withRefreshLock(profileName, () => doRefresh(profileName, profile, stored));
   } catch {
     // doRefresh already wiped credentials on terminal failures and
     // surfaces an AuthError — return the original 401 so the caller

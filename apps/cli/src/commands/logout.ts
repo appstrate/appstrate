@@ -22,7 +22,7 @@
 import { intro, outro, formatError } from "../lib/ui.ts";
 import { readConfig, resolveProfileName, deleteProfile } from "../lib/config.ts";
 import { loadTokens, deleteTokens } from "../lib/keyring.ts";
-import { apiFetchRaw, AuthError } from "../lib/api.ts";
+import { apiFetchRaw, AuthError, _awaitRefreshQuiesce } from "../lib/api.ts";
 import { revokeCliRefreshToken } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { getProfile } from "../lib/config.ts";
@@ -86,6 +86,14 @@ export async function logoutCommand(opts: LogoutOptions): Promise<void> {
       }
     }
   }
+
+  // If a parallel apiFetchRaw is mid-rotation right now, its trailing
+  // `saveTokens` would otherwise write fresh credentials back to disk
+  // AFTER our deleteTokens ran. Wait for the refresh to settle — the
+  // server-side revoke above means that rotation will fail with
+  // `invalid_grant` anyway and wipe local state, but we still sequence
+  // our final delete last so the on-disk end state is deterministic.
+  await _awaitRefreshQuiesce(profileName);
 
   await deleteTokens(profileName);
   await deleteProfile(profileName);

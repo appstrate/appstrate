@@ -34,7 +34,12 @@ import {
   type KeyringHandle,
 } from "../src/lib/keyring.ts";
 import { setProfile } from "../src/lib/config.ts";
-import { apiFetchRaw, AuthError } from "../src/lib/api.ts";
+import {
+  apiFetchRaw,
+  AuthError,
+  _awaitRefreshQuiesce,
+  _inFlightRefreshSizeForTesting,
+} from "../src/lib/api.ts";
 
 class FakeKeyring implements KeyringHandle {
   static store = new Map<string, string>();
@@ -416,5 +421,149 @@ describe("apiFetchRaw — X-Org-Id header injection", () => {
     });
     await apiFetchRaw("default", "/api/data");
     expect(capturedOrg).toBe("org_42");
+  });
+});
+
+describe("apiFetchRaw — concurrent refresh dedup (PR #191 review)", () => {
+  it("collapses N parallel proactive refreshes into ONE /cli/token call", async () => {
+    // Seed with an access token that is past the 30s proactive-refresh
+    // margin so every parallel call triggers the rotate branch.
+    await seedProfile("default", {
+      access: "expiring-access",
+      accessExpiresIn: 5_000, // under 30s margin → all N callers need refresh
+      refresh: "r1",
+      refreshExpiresIn: 30 * 24 * 60 * 60 * 1000,
+    });
+
+    let rotateCalls = 0;
+    const gate = Promise.withResolvers<void>();
+    installFetch(async (url) => {
+      if (url.endsWith("/api/auth/cli/token")) {
+        rotateCalls += 1;
+        // Hold the response until we fire all parallel requests so the
+        // dedup window is maximally open.
+        await gate.promise;
+        return jsonResponse(200, {
+          access_token: "rotated",
+          refresh_token: "r2",
+          token_type: "Bearer",
+          expires_in: 900,
+          refresh_expires_in: 2592000,
+          scope: "openid",
+        });
+      }
+      return jsonResponse(200, { ok: true });
+    });
+
+    const calls = [
+      apiFetchRaw("default", "/api/a"),
+      apiFetchRaw("default", "/api/b"),
+      apiFetchRaw("default", "/api/c"),
+    ];
+    // Tiny yield so all three enter resolveAccessToken and register on the mutex.
+    await Promise.resolve();
+    gate.resolve();
+    const results = await Promise.all(calls);
+    for (const r of results) expect(r.status).toBe(200);
+    // Three real-endpoint calls + exactly one refresh.
+    expect(rotateCalls).toBe(1);
+    // Mutex map drained after completion.
+    expect(_inFlightRefreshSizeForTesting()).toBe(0);
+  });
+
+  it("does not fire a second refresh when a parallel caller already rotated during our 401", async () => {
+    // Start with an access token that is OUT of the proactive margin
+    // (so no proactive refresh) but that the server will reject with
+    // 401, forcing the reactive branch. Meanwhile simulate another
+    // caller having already refreshed: we manually flip the stored
+    // token to a "newer" access before the 401 handler reads it.
+    await seedProfile("default", {
+      access: "stale-but-fresh-enough",
+      accessExpiresIn: 5 * 60 * 1000,
+      refresh: "r1",
+      refreshExpiresIn: 30 * 24 * 60 * 60 * 1000,
+    });
+
+    let rotateCalls = 0;
+    installFetch(async (url, init) => {
+      if (url.endsWith("/api/auth/cli/token")) {
+        rotateCalls += 1;
+        return jsonResponse(200, {
+          access_token: "shouldnt-be-needed",
+          refresh_token: "r2",
+          token_type: "Bearer",
+          expires_in: 900,
+          refresh_expires_in: 2592000,
+          scope: "openid",
+        });
+      }
+      const auth = (init?.headers as Record<string, string>).Authorization ?? "";
+      if (auth.includes("stale-but-fresh-enough")) {
+        // Simulate the competing caller's successful rotation landing
+        // between our first fetch and our stored-token re-read.
+        await saveTokens("default", {
+          accessToken: "peer-rotated",
+          expiresAt: Date.now() + 15 * 60 * 1000,
+          refreshToken: "r-peer",
+          refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+        });
+        return jsonResponse(401, { error: "invalid_token" });
+      }
+      if (auth.includes("peer-rotated")) {
+        return jsonResponse(200, { ok: true });
+      }
+      return jsonResponse(500, {});
+    });
+
+    const res = await apiFetchRaw("default", "/api/x");
+    expect(res.status).toBe(200);
+    // We should have retried with the peer's rotated token WITHOUT
+    // spending a second rotate call of our own.
+    expect(rotateCalls).toBe(0);
+  });
+});
+
+describe("_awaitRefreshQuiesce (PR #191 review)", () => {
+  it("resolves immediately when no refresh is in flight", async () => {
+    const start = Date.now();
+    await _awaitRefreshQuiesce("any-profile");
+    expect(Date.now() - start).toBeLessThan(50);
+  });
+
+  it("blocks until an in-flight refresh settles, then unblocks", async () => {
+    await seedProfile("default", {
+      access: "expiring",
+      accessExpiresIn: 5_000,
+      refresh: "r1",
+      refreshExpiresIn: 30 * 24 * 60 * 60 * 1000,
+    });
+    const gate = Promise.withResolvers<void>();
+    installFetch(async (url) => {
+      if (url.endsWith("/api/auth/cli/token")) {
+        await gate.promise;
+        return jsonResponse(200, {
+          access_token: "new",
+          refresh_token: "r2",
+          token_type: "Bearer",
+          expires_in: 900,
+          refresh_expires_in: 2592000,
+          scope: "",
+        });
+      }
+      return jsonResponse(200, {});
+    });
+    const pending = apiFetchRaw("default", "/api/x");
+    // Yield so apiFetchRaw registers on the mutex.
+    await Promise.resolve();
+    let quiesceDone = false;
+    const waiter = _awaitRefreshQuiesce("default").then(() => {
+      quiesceDone = true;
+    });
+    // Quiesce must NOT resolve while refresh is pending.
+    expect(quiesceDone).toBe(false);
+    gate.resolve();
+    await pending;
+    await waiter;
+    expect(quiesceDone).toBe(true);
   });
 });

@@ -71,7 +71,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
-import { cliRefreshToken, deviceCode } from "../schema.ts";
+import { cliRefreshToken, deviceCode, oauthClient } from "../schema.ts";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
@@ -252,7 +252,24 @@ export async function exchangeDeviceCodeForTokens(params: {
       };
     }
 
-    const scope = row.scope ?? "";
+    // Defense-in-depth scope gate. BA's `deviceAuthorization()` plugin
+    // stores whatever scope string the `/device/code` request posted —
+    // there is no universal contract that it narrows the request to
+    // the client's declared scope set before approval. Narrow it here
+    // so a non-conforming (or future-regressed) plugin version cannot
+    // silently mint a JWT with an unregistered scope. Drop unknown
+    // tokens and audit the delta; DO NOT reject (RFC 6749 §3.3 permits
+    // servers to issue a narrower scope than requested as long as the
+    // response echoes what was actually granted).
+    const [clientRow] = await tx
+      .select({ scopes: oauthClient.scopes })
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, clientId))
+      .limit(1);
+    const scope = narrowScopeToClient(row.scope ?? "", clientRow?.scopes ?? null, {
+      clientId,
+      userId: userRow.id,
+    });
     const pair = await mintTokenPairInTx(tx, {
       user: userRow,
       clientId,
@@ -571,14 +588,24 @@ async function mintAccessJwt(claims: {
   clientId: string;
 }): Promise<string> {
   const env = getEnv();
-  const iss = `${env.APP_URL}/api/auth`;
+  // Strip any trailing slash from APP_URL before composing iss/aud so
+  // a misconfigured `APP_URL=https://app.example.com/` doesn't yield a
+  // double-slash issuer (`https://app.example.com//api/auth`) that
+  // fails the strict JOSE equality check downstream consumers apply.
+  const baseUrl = env.APP_URL.replace(/\/+$/, "");
+  const iss = `${baseUrl}/api/auth`;
   // Match `enduser-token.ts::verifyEndUserAccessToken` audience list —
   // it accepts either `APP_URL` or `${APP_URL}/api/auth`. Emit the more
   // specific form (matching BA's `baseURL`-derived default) so any
   // future tightening that drops the bare `APP_URL` still passes.
   const aud = iss;
   const nowSec = Math.floor(Date.now() / 1000);
-  const payload = {
+  // RFC 6749 §3.3 / RFC 9068 §3: omit the `scope` claim entirely when
+  // the grant carries no scopes rather than emitting `scope: ""`.
+  // Some RS implementations treat an empty string as "wildcard" /
+  // "default scopes" instead of "no scope" — omitting the claim is the
+  // unambiguous encoding.
+  const payload: Record<string, unknown> = {
     // RFC 7519 registered claims
     iss,
     aud,
@@ -592,13 +619,15 @@ async function mintAccessJwt(claims: {
     email: claims.email,
     email_verified: claims.emailVerified,
     name: claims.name,
-    scope: claims.scope,
   };
+  if (claims.scope.length > 0) {
+    payload.scope = claims.scope;
+  }
   const api = getOidcAuthApi();
   const result = (await api.signJWT({
     body: { payload, overrideOptions: { jwt: { issuer: iss, audience: aud } } },
     headers: new Headers(),
-  })) as { token?: string } | { token: string } | Response;
+  })) as { token?: string } | Response;
   // When called directly (not through HTTP), the BA endpoint returns the
   // JSON object. When asResponse was requested it returns a Response.
   // Handle both for safety.
@@ -606,7 +635,7 @@ async function mintAccessJwt(claims: {
     const body = (await result.json()) as { token: string };
     return body.token;
   }
-  const token = (result as { token?: string }).token;
+  const token = result.token;
   if (!token) {
     throw new Error("oidc: jwt signer returned no token");
   }
@@ -628,7 +657,69 @@ function hashRefreshToken(plain: string): string {
   return createHash("sha256").update(plain).digest("hex");
 }
 
+/**
+ * Intersect the scope string persisted on the device_code row with the
+ * scopes declared on the OAuth client row. Returns a space-separated
+ * subset in original request order (deduplicated). Unknown scopes are
+ * dropped and audit-logged so operators can spot a misconfigured
+ * upstream or a crafted `/device/code` that slipped past BA's plugin.
+ *
+ * Empty-client-scopes (NULL or `[]`) is treated as "no restriction"
+ * ONLY when the client is explicitly declared without a `scopes`
+ * column — the allowlist below defaults to the canonical CLI scope
+ * set so a misseeded client cannot accidentally widen grants. Callers
+ * that actually want unrestricted minting (admin tooling, etc.) should
+ * declare their scopes explicitly.
+ */
+function narrowScopeToClient(
+  requested: string,
+  clientScopes: string[] | null,
+  ctx: { clientId: string; userId: string },
+): string {
+  const tokens = requested.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return "";
+  // Absence of a declared scope set is surprising for any client that
+  // has made it through `/device/code` — BA's plugin writes the scope
+  // string as-posted. Fail closed (empty scope) and audit, rather than
+  // echoing an un-gated `scope` claim into the JWT.
+  if (!clientScopes || clientScopes.length === 0) {
+    logger.warn("oidc: CLI device-code exchange — client has no declared scopes, dropping all", {
+      module: "oidc",
+      audit: true,
+      event: "cli.device_code.scope.dropped",
+      clientId: ctx.clientId,
+      userId: ctx.userId,
+      requested: tokens,
+    });
+    return "";
+  }
+  const allowed = new Set(clientScopes);
+  const granted: string[] = [];
+  const dropped: string[] = [];
+  const seen = new Set<string>();
+  for (const t of tokens) {
+    if (seen.has(t)) continue;
+    seen.add(t);
+    if (allowed.has(t)) granted.push(t);
+    else dropped.push(t);
+  }
+  if (dropped.length > 0) {
+    logger.warn("oidc: CLI device-code exchange — dropped scope tokens not declared on client", {
+      module: "oidc",
+      audit: true,
+      event: "cli.device_code.scope.dropped",
+      clientId: ctx.clientId,
+      userId: ctx.userId,
+      requested: tokens,
+      granted,
+      dropped,
+    });
+  }
+  return granted.join(" ");
+}
+
 // Test-only surface. Exposed for unit tests that need to inject known
 // refresh-token plaintexts without re-deriving the hash from scratch.
 export const _hashRefreshTokenForTesting = hashRefreshToken;
 export const _generateRefreshTokenForTesting = generateRefreshToken;
+export const _narrowScopeToClientForTesting = narrowScopeToClient;

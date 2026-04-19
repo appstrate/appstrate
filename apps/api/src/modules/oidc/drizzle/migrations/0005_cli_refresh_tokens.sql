@@ -26,9 +26,11 @@
 -- (43 chars). We store SHA-256(plaintext) as `token_hash` (unique index);
 -- the plaintext is returned once to the CLI and never persisted. On
 -- lookup we recompute the hash from the presented string and match by
--- column — constant-time when equality is handled by the B-tree lookup,
--- and zero-value-leak on compromise (an attacker with SELECT privilege
--- sees only hashes, not usable tokens).
+-- column — the UNIQUE index makes the lookup O(log n), and because
+-- the comparison happens on the deterministic SHA-256 digest rather
+-- than the plaintext, any observable B-tree timing leaks hash prefixes
+-- (preimage-resistant) rather than token material. Operators with DB
+-- SELECT see only hashes, not replayable tokens.
 --
 -- `family_id`: stable lineage identifier (same across rotations). The
 -- revoke-family query is a single UPDATE WHERE family_id = $1.

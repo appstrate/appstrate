@@ -13,6 +13,7 @@ import {
   REFRESH_TOKEN_TTL_SECONDS,
   _hashRefreshTokenForTesting,
   _generateRefreshTokenForTesting,
+  _narrowScopeToClientForTesting,
 } from "../../services/cli-tokens.ts";
 
 describe("CliTokenError", () => {
@@ -91,5 +92,49 @@ describe("refresh token generation + hashing (test helpers)", () => {
     const hashA = _hashRefreshTokenForTesting("token-a");
     const hashB = _hashRefreshTokenForTesting("token-b");
     expect(hashA).not.toBe(hashB);
+  });
+});
+
+describe("narrowScopeToClient (PR #191 review — defense-in-depth scope gate)", () => {
+  const ctx = { clientId: "appstrate-cli", userId: "u_1" };
+
+  it("returns empty string when requested is empty", () => {
+    expect(_narrowScopeToClientForTesting("", ["openid", "profile"], ctx)).toBe("");
+    expect(_narrowScopeToClientForTesting("   ", ["openid"], ctx)).toBe("");
+  });
+
+  it("drops ALL scopes when client declares no scopes (fail-closed)", () => {
+    expect(_narrowScopeToClientForTesting("openid profile", null, ctx)).toBe("");
+    expect(_narrowScopeToClientForTesting("openid profile", [], ctx)).toBe("");
+  });
+
+  it("preserves scopes that appear in the client's declared set", () => {
+    expect(
+      _narrowScopeToClientForTesting(
+        "openid profile email offline_access",
+        ["openid", "profile", "email", "offline_access"],
+        ctx,
+      ),
+    ).toBe("openid profile email offline_access");
+  });
+
+  it("drops unknown scopes while keeping the allowed ones in request order", () => {
+    expect(
+      _narrowScopeToClientForTesting(
+        "openid admin:* profile evil",
+        ["openid", "profile", "email"],
+        ctx,
+      ),
+    ).toBe("openid profile");
+  });
+
+  it("deduplicates repeated tokens", () => {
+    expect(
+      _narrowScopeToClientForTesting("openid openid profile openid", ["openid", "profile"], ctx),
+    ).toBe("openid profile");
+  });
+
+  it("returns empty string when every requested scope is disallowed", () => {
+    expect(_narrowScopeToClientForTesting("admin:* root", ["openid"], ctx)).toBe("");
   });
 });

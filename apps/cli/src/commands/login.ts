@@ -112,8 +112,8 @@ async function runLogin(profileName: string, instance: string): Promise<void> {
   }
   if (token.refreshExpiresIn === undefined) {
     throw new Error(
-      "Server returned a refresh token without refresh_expires_in — the response is non-conforming " +
-        "(a reverse proxy may be stripping the field). Fix the server response and retry.",
+      "Server returned a refresh token without refresh_expires_in — the response is non-conforming. " +
+        "Check the server version and any middleware transforming the /api/auth/cli/token response, then retry.",
     );
   }
   await saveTokens(profileName, {
