@@ -278,8 +278,8 @@ _appstrate_bootstrap() {
   # to three files may be modified in a single run.
   MODIFIED_PROFILES=""
   _ci_flag="${CI:-}"
-  if [ "${APPSTRATE_NO_MODIFY_PATH:-0}" = "1" ] \
-    || [ "$_ci_flag" = "true" ] || [ "$_ci_flag" = "1" ] || [ "$_ci_flag" = "yes" ]; then
+  if [ "${APPSTRATE_NO_MODIFY_PATH:-0}" = "1" ] ||
+    [ "$_ci_flag" = "true" ] || [ "$_ci_flag" = "1" ] || [ "$_ci_flag" = "yes" ]; then
     : # explicit opt-out
   else
     case ":${PATH}:" in
