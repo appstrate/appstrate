@@ -489,71 +489,44 @@ export async function apiCommand(
   // normal path; the outer finally handles exceptional ones.
   // cleanup() is idempotent (cleanedUp flag).
   try {
-    // P3a — retry loop. Each attempt rebuilds the body (first attempt
-    // reuses `firstBuild`); on retryable status / network error we
-    // sleep and retry up to `effectiveRetry` times, bounded by
-    // `--retry-max-time`. AbortSignal (SIGINT, --max-time) short-
-    // circuits the loop.
-    const retryDelay = opts.retryDelay ?? 1;
-    const retryMaxTimeMs = (opts.retryMaxTime ?? 0) * 1000;
-    const retryBudgetEnd = retryMaxTimeMs > 0 ? performance.now() + retryMaxTimeMs : Infinity;
-    const maxAttempts = 1 + effectiveRetry;
-    let res!: Response;
-    let attempt = 0;
-    while (true) {
-      attempt++;
-      const { body: attemptBody, usesStdin: attemptStdin } =
-        attempt === 1 ? firstBuild : await buildBody(effectiveOpts, io);
-      const attemptFinalBody = method === "HEAD" ? undefined : attemptBody;
-      try {
-        const init: Record<string, unknown> = {
-          method,
-          headers,
-          body: attemptFinalBody,
-          signal: ac.signal,
-          redirect: opts.location ? "follow" : "manual",
-        };
-        if (attemptStdin) init.duplex = "half";
-        if (opts.verbose) writeVerboseRequest(io, profileName, method, url, headers);
-        res = await fetch(url, init as Parameters<typeof fetch>[1]);
-        if (connectTimeoutHandle) {
-          clearTimeout(connectTimeoutHandle);
-          connectTimeoutHandle = undefined;
-        }
-        if (opts.verbose) writeVerboseResponse(io, res);
-        if (attempt < maxAttempts && isRetryableStatus(res.status)) {
-          const delayMs = computeRetryDelayMs(res, retryDelay, attempt);
-          if (performance.now() + delayMs > retryBudgetEnd) break;
-          if (opts.verbose) io.stderr.write(`* retry after ${delayMs}ms (status ${res.status})\n`);
-          // Drain the response body so the connection can be reused.
-          try {
-            await res.body?.cancel();
-          } catch {
-            /* ignore — response may already be consumed */
-          }
-          await sleepWithAbort(delayMs, ac.signal);
-          continue;
-        }
-        break;
-      } catch (err) {
-        if (ac.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
-          cleanup();
-          return handleErr(err);
-        }
-        if (attempt < maxAttempts && isRetryableError(err, opts.retryConnrefused === true)) {
-          const delayMs = retryDelay * 1000 * Math.pow(2, attempt - 1);
-          if (performance.now() + delayMs > retryBudgetEnd) {
-            cleanup();
-            return handleErr(err);
-          }
-          if (opts.verbose) io.stderr.write(`* retry after ${delayMs}ms (network error)\n`);
-          await sleepWithAbort(delayMs, ac.signal);
-          continue;
-        }
-        cleanup();
-        return handleErr(err);
-      }
+    // P3a — retry loop extracted into `executeWithRetry`. It returns
+    // the final Response (even for retryable-but-exhausted statuses
+    // like a lingering 503 on the last attempt) or throws on a
+    // non-retryable network error / abort.
+    //
+    // `connectTimeoutHandle` is threaded via a `ref` so the retry fn
+    // can clear it the moment fetch resolves (further retries should
+    // not be subject to the initial connect budget).
+    const connectTimeoutRef = { current: connectTimeoutHandle };
+    let res: Response;
+    try {
+      res = await executeWithRetry({
+        opts,
+        effectiveOpts,
+        url,
+        method,
+        headers,
+        firstBuild,
+        ac,
+        io,
+        profileName,
+        connectTimeoutRef,
+        maxAttempts: 1 + effectiveRetry,
+        retryDelay: opts.retryDelay ?? 1,
+        retryBudgetEnd:
+          (opts.retryMaxTime ?? 0) > 0
+            ? performance.now() + (opts.retryMaxTime ?? 0) * 1000
+            : Infinity,
+      });
+    } catch (err) {
+      // Sync the local handle with whatever executeWithRetry cleared
+      // so cleanup() doesn't double-clear. (Ref pattern avoids a
+      // dangling timer if fetch threw after the handle was cleared.)
+      connectTimeoutHandle = connectTimeoutRef.current;
+      cleanup();
+      return handleErr(err);
     }
+    connectTimeoutHandle = connectTimeoutRef.current;
 
     // P2b — capture response-level metrics for -w
     metrics.httpCode = res.status;
@@ -612,28 +585,14 @@ export async function apiCommand(
       } catch {
         /* ignore — body may already be consumed */
       }
-    } else if (opts.output && !failMode) {
+    } else {
       try {
-        await streamToFile(res, opts.output, ac.signal, metrics);
-      } catch (err) {
-        cleanup();
-        return handleErr(err);
-      }
-    } else if (res.body) {
-      try {
-        const reader = res.body.getReader();
-        // Race `reader.read()` against an abort promise so SIGINT /
-        // --max-time interrupts the stream promptly even when the runtime
-        // doesn't auto-propagate the signal into the reader.
-        const abortPromise = abortAsRejection(ac.signal);
-        while (true) {
-          const chunk = await Promise.race([reader.read(), abortPromise]);
-          if (chunk.done) break;
-          if (chunk.value && chunk.value.byteLength > 0) {
-            if (metrics.tFirstByte === null) metrics.tFirstByte = performance.now();
-            metrics.sizeDownload += chunk.value.byteLength;
-            bodySink.write(chunk.value);
-          }
+        const writer =
+          opts.output && !failMode ? fileChunkSink(opts.output) : streamChunkSink(bodySink);
+        try {
+          await consumeResponseStream(res, writer.write, ac.signal, metrics);
+        } finally {
+          await writer.close();
         }
       } catch (err) {
         cleanup();
@@ -828,32 +787,58 @@ function formatStatusLine(res: Response): string {
   return `HTTP/1.1 ${res.status} ${text}\r\n`;
 }
 
-async function streamToFile(
+/**
+ * Shared byte-read loop: pull chunks from `res.body`, race each read
+ * against an abort Promise, update metrics (first-byte timing +
+ * cumulative download size), and forward non-empty chunks to `sink`.
+ * Throws if the signal aborts mid-stream (reason preserved as cause).
+ *
+ * Unified for both the inline `-o`-less stdout/stderr path and the
+ * file-output path — previously duplicated with subtly different
+ * metric handling.
+ */
+async function consumeResponseStream(
   res: Response,
-  path: string,
+  sink: (chunk: Uint8Array) => void,
   signal: AbortSignal,
-  metrics?: WriteOutMetrics,
+  metrics: WriteOutMetrics,
 ): Promise<void> {
-  const writer = Bun.file(path).writer();
-  try {
-    if (res.body) {
-      const reader = res.body.getReader();
-      const abortPromise = abortAsRejection(signal);
-      while (true) {
-        const chunk = await Promise.race([reader.read(), abortPromise]);
-        if (chunk.done) break;
-        if (chunk.value && chunk.value.byteLength > 0) {
-          if (metrics) {
-            if (metrics.tFirstByte === null) metrics.tFirstByte = performance.now();
-            metrics.sizeDownload += chunk.value.byteLength;
-          }
-          writer.write(chunk.value);
-        }
-      }
+  if (!res.body) return;
+  const reader = res.body.getReader();
+  const abortPromise = abortAsRejection(signal);
+  while (true) {
+    const chunk = await Promise.race([reader.read(), abortPromise]);
+    if (chunk.done) break;
+    if (chunk.value && chunk.value.byteLength > 0) {
+      if (metrics.tFirstByte === null) metrics.tFirstByte = performance.now();
+      metrics.sizeDownload += chunk.value.byteLength;
+      sink(chunk.value);
     }
-  } finally {
-    await writer.end();
   }
+}
+
+interface ChunkSink {
+  write(chunk: Uint8Array): void;
+  close(): Promise<void>;
+}
+
+function streamChunkSink(target: { write(chunk: Uint8Array | string): void }): ChunkSink {
+  return {
+    write: (c) => target.write(c),
+    close: async () => {
+      /* stdout/stderr not ours to close */
+    },
+  };
+}
+
+function fileChunkSink(path: string): ChunkSink {
+  const writer = Bun.file(path).writer();
+  return {
+    write: (c) => void writer.write(c),
+    close: async () => {
+      await writer.end();
+    },
+  };
 }
 
 /**
@@ -1127,6 +1112,108 @@ function sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
       { once: true },
     );
   });
+}
+
+interface RetryContext {
+  opts: ApiCommandOptions;
+  effectiveOpts: ApiCommandOptions;
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  firstBuild: BuiltBody;
+  ac: AbortController;
+  io: ApiCommandIO;
+  profileName: string;
+  connectTimeoutRef: { current: ReturnType<typeof setTimeout> | undefined };
+  maxAttempts: number;
+  retryDelay: number;
+  retryBudgetEnd: number;
+}
+
+/**
+ * Drive the fetch + retry loop. Each attempt rebuilds the body (the
+ * first reuses `firstBuild`); on a retryable HTTP status or network
+ * error we sleep and retry up to `maxAttempts - 1` extra times,
+ * bounded by `retryBudgetEnd`. Abort (SIGINT / --max-time /
+ * --connect-timeout) short-circuits immediately.
+ *
+ * Returns whichever Response the final attempt produced — even if
+ * that's a retryable status with attempts exhausted (caller decides
+ * what to do with it, e.g. `--fail` would still map 503 → exit 25).
+ * Throws the final network error when all retries have been used or
+ * the budget is blown.
+ */
+async function executeWithRetry(ctx: RetryContext): Promise<Response> {
+  const {
+    opts,
+    effectiveOpts,
+    url,
+    method,
+    headers,
+    firstBuild,
+    ac,
+    io,
+    profileName,
+    connectTimeoutRef,
+    maxAttempts,
+    retryDelay,
+    retryBudgetEnd,
+  } = ctx;
+
+  for (let attempt = 1; ; attempt++) {
+    const { body: attemptBody, usesStdin: attemptStdin } =
+      attempt === 1 ? firstBuild : await buildBody(effectiveOpts, io);
+    const finalBody = method === "HEAD" ? undefined : attemptBody;
+    const init: Record<string, unknown> = {
+      method,
+      headers,
+      body: finalBody,
+      signal: ac.signal,
+      redirect: opts.location ? "follow" : "manual",
+    };
+    if (attemptStdin) init.duplex = "half";
+    if (opts.verbose) writeVerboseRequest(io, profileName, method, url, headers);
+
+    let res: Response;
+    try {
+      res = await fetch(url, init as Parameters<typeof fetch>[1]);
+    } catch (err) {
+      if (ac.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
+        throw err;
+      }
+      if (attempt < maxAttempts && isRetryableError(err, opts.retryConnrefused === true)) {
+        const delayMs = retryDelay * 1000 * Math.pow(2, attempt - 1);
+        if (performance.now() + delayMs > retryBudgetEnd) throw err;
+        if (opts.verbose) io.stderr.write(`* retry after ${delayMs}ms (network error)\n`);
+        await sleepWithAbort(delayMs, ac.signal);
+        continue;
+      }
+      throw err;
+    }
+
+    // Response headers arrived — clear the connect-timeout timer.
+    if (connectTimeoutRef.current) {
+      clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = undefined;
+    }
+    if (opts.verbose) writeVerboseResponse(io, res);
+
+    if (attempt < maxAttempts && isRetryableStatus(res.status)) {
+      const delayMs = computeRetryDelayMs(res, retryDelay, attempt);
+      if (performance.now() + delayMs > retryBudgetEnd) return res;
+      if (opts.verbose) io.stderr.write(`* retry after ${delayMs}ms (status ${res.status})\n`);
+      // Drain so the connection can be reused before sleeping.
+      try {
+        await res.body?.cancel();
+      } catch {
+        /* ignore — body may already be consumed */
+      }
+      await sleepWithAbort(delayMs, ac.signal);
+      continue;
+    }
+
+    return res;
+  }
 }
 
 // ─── P2b — `-w/--write-out` ─────────────────────────────────────────
