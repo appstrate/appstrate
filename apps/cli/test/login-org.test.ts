@@ -31,21 +31,8 @@ import {
   type KeyringHandle,
 } from "../src/lib/keyring.ts";
 import { readConfig } from "../src/lib/config.ts";
-import { loginCommand, type LoginOptions } from "../src/commands/login.ts";
+import { loginCommand } from "../src/commands/login.ts";
 import type { Org } from "../src/lib/orgs.ts";
-
-/**
- * Always override `openUrl` so tests don't pop real browser tabs on
- * every run. Merge caller-supplied deps on top, preserving any picker
- * / promptCreateOrg override the test needs.
- */
-async function runLogin(opts: LoginOptions): Promise<void> {
-  const noopOpenUrl = async (): Promise<void> => {};
-  await loginCommand({
-    ...opts,
-    deps: { openUrl: noopOpenUrl, ...(opts.deps ?? {}) },
-  });
-}
 
 class FakeKeyring implements KeyringHandle {
   static store = new Map<string, string>();
@@ -221,7 +208,7 @@ describe("login org-pin branch", () => {
         ),
     });
 
-    await runLogin({
+    await loginCommand({
       profile: "default",
       instance: "https://app.example.com",
     });
@@ -247,7 +234,7 @@ describe("login org-pin branch", () => {
     });
 
     const orgsSeen: Org[][] = [];
-    await runLogin({
+    await loginCommand({
       profile: "default",
       instance: "https://app.example.com",
       deps: {
@@ -281,7 +268,7 @@ describe("login org-pin branch", () => {
       },
     });
 
-    await runLogin({
+    await loginCommand({
       profile: "default",
       instance: "https://app.example.com",
       deps: {
@@ -307,7 +294,7 @@ describe("login org-pin branch", () => {
         ),
     });
 
-    await runLogin({
+    await loginCommand({
       profile: "default",
       instance: "https://app.example.com",
       org: "beta",
@@ -336,7 +323,7 @@ describe("login org-pin branch", () => {
         ),
     });
 
-    await runLogin({
+    await loginCommand({
       profile: "default",
       instance: "https://app.example.com",
       org: "org_1",
@@ -359,7 +346,7 @@ describe("login org-pin branch", () => {
     });
 
     await expect(
-      runLogin({
+      loginCommand({
         profile: "default",
         instance: "https://app.example.com",
         org: "does-not-exist",
@@ -392,7 +379,7 @@ describe("login org-pin branch", () => {
       },
     });
 
-    await runLogin({
+    await loginCommand({
       profile: "default",
       instance: "https://app.example.com",
       createOrg: "Forced",
@@ -412,7 +399,7 @@ describe("login org-pin branch", () => {
       },
     });
 
-    await runLogin({
+    await loginCommand({
       profile: "default",
       instance: "https://app.example.com",
       noOrg: true,
@@ -428,7 +415,7 @@ describe("login org-pin branch", () => {
       listOrgs: () => new Response("boom", { status: 500 }),
     });
 
-    await runLogin({
+    await loginCommand({
       profile: "default",
       instance: "https://app.example.com",
     });
@@ -450,7 +437,7 @@ describe("login org-pin branch", () => {
     });
 
     await expect(
-      runLogin({
+      loginCommand({
         profile: "default",
         instance: "https://app.example.com",
         createOrg: "Acme",
@@ -477,7 +464,7 @@ describe("login org-pin branch", () => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
     });
-    await runLogin({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
     expect(await readPinnedOrgId()).toBe("org_first");
 
     // Second login — /api/orgs errors out. Without preservation we'd
@@ -485,7 +472,7 @@ describe("login org-pin branch", () => {
     installDefaultResponders({
       listOrgs: () => new Response("boom", { status: 500 }),
     });
-    await runLogin({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
 
     expect(await readPinnedOrgId()).toBe("org_first");
     expect(stderrChunks.join("")).toContain("Failed to list organizations");
@@ -504,7 +491,7 @@ describe("login org-pin branch", () => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
     });
-    await runLogin({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
     expect(await readPinnedOrgId()).toBe("org_A");
 
     // Second login — same profile name, DIFFERENT user. /api/orgs
@@ -525,7 +512,7 @@ describe("login org-pin branch", () => {
         ),
       listOrgs: () => new Response("boom", { status: 500 }),
     });
-    await runLogin({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
 
     expect(await readPinnedOrgId()).toBeUndefined();
   });
@@ -543,7 +530,7 @@ describe("login org-pin branch", () => {
         ),
     });
 
-    await runLogin({
+    await loginCommand({
       profile: "default",
       instance: "https://app.example.com",
     });

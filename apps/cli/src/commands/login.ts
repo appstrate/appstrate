@@ -62,26 +62,16 @@ export interface LoginDeps {
   pickOrg?: (orgs: Org[]) => Promise<Org | null>;
   /** Prompt the user for a new org name + optional slug. */
   promptCreateOrg?: () => Promise<{ name: string; slug?: string } | null>;
-  /**
-   * Launch the device-flow verification URL in the user's browser.
-   * Defaulted to the `open` npm package in production; tests inject a
-   * noop so the suite doesn't pop real browser tabs on every run.
-   */
-  openUrl?: (url: string) => Promise<void>;
 }
 
+// `APPSTRATE_CLI_NO_OPEN=1` disables the browser launch — the test
+// preload sets it so `bun test` never pops real tabs.
 async function defaultOpenUrl(url: string): Promise<void> {
-  // Belt-and-suspenders: even if a caller forgets to inject a noop
-  // (e.g. a new test suite copy-pastes without the wrapper), the test
-  // preload / CI environment can opt out of the tab-pop by setting
-  // `APPSTRATE_CLI_NO_OPEN=1`. No-op in production where the env is
-  // unset, so first-time human logins still launch the browser.
   if (process.env.APPSTRATE_CLI_NO_OPEN === "1") return;
   await open(url);
 }
 
 const defaultDeps: Required<LoginDeps> = {
-  openUrl: defaultOpenUrl,
   pickOrg: async (orgs: Org[]): Promise<Org | null> => {
     if (!process.stdin.isTTY) {
       process.stdout.write(
@@ -159,10 +149,8 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
 
   // Step 3 — open the browser on the complete URI (pre-fills user_code).
   // If `open` fails (headless SSH / no display), the printed URL + code
-  // above keep the flow usable. Swallow the error silently. Routed
-  // through `opts.deps.openUrl` so tests don't pop real browser tabs.
-  const openUrl = opts.deps?.openUrl ?? defaultOpenUrl;
-  openUrl(code.verificationUriComplete).catch(() => {});
+  // above keep the flow usable. Swallow the error silently.
+  defaultOpenUrl(code.verificationUriComplete).catch(() => {});
 
   // Step 4 — poll until approval or terminal error.
   const pollSpinner = spinner();
