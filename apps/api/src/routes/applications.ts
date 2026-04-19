@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import type { Context, Next } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, invalidRequest, notFound, internalError, parseBody } from "../lib/errors.ts";
+import {
+  ApiError,
+  forbidden,
+  invalidRequest,
+  notFound,
+  internalError,
+  parseBody,
+} from "../lib/errors.ts";
 import {
   createApplication,
   listApplications,
@@ -66,18 +74,42 @@ export const appProviderCredentialsSchema = z.object({
 export function createApplicationsRouter() {
   const router = new Hono<AppEnv>();
 
+  // Issue #172 (extension) — `/api/applications` is org-scoped, not
+  // application-scoped, so the same orgId-only filtering pattern that lets
+  // a key escape its org also lets it escape its app within the same org.
+  // For API key callers we pin every `:id` route to the key's bound
+  // applicationId. Sessions still see the full set (any member can manage
+  // any app in their org).
+  async function apiKeyAppScopeGuard(c: Context<AppEnv>, next: Next) {
+    if (c.get("authMethod") !== "api_key") return next();
+    const paramAppId = c.req.param("id") ?? c.req.param("appId");
+    if (paramAppId && paramAppId !== c.get("applicationId")) {
+      throw forbidden("API key scope does not include this application");
+    }
+    return next();
+  }
+
+  router.use("/:id", apiKeyAppScopeGuard);
+  router.use("/:appId/*", apiKeyAppScopeGuard);
+
   // GET /api/applications — list applications for the org
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
     const apps = await listApplications(orgId);
+    const authMethod = c.get("authMethod");
+    const keyAppId = c.get("applicationId");
+    const scoped = authMethod === "api_key" ? apps.filter((a) => a.id === keyAppId) : apps;
     return c.json({
       object: "list",
-      data: apps.map((app) => ({ object: "application", ...app })),
+      data: scoped.map((app) => ({ object: "application", ...app })),
     });
   });
 
   // POST /api/applications — create a new application
   router.post("/", requirePermission("applications", "write"), async (c) => {
+    if (c.get("authMethod") === "api_key") {
+      throw forbidden("API keys cannot create applications");
+    }
     const orgId = c.get("orgId");
     const user = c.get("user");
     const body = await c.req.json();
