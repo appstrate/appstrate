@@ -23,7 +23,7 @@
  * with user-actionable text rather than raw stack traces.
  */
 
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import { installCommand } from "./commands/install.ts";
 import { loginCommand } from "./commands/login.ts";
 import { logoutCommand } from "./commands/logout.ts";
@@ -162,7 +162,10 @@ program
   .option("-i, --include", "Include status line + response headers on stdout")
   .option("-I, --head", "Send HEAD and print headers only")
   .option("-s, --silent", "Suppress the 401 re-login hint on stderr")
-  .option("-f, --fail", "Exit 22 (4xx) / 25 (5xx) on non-2xx; body to stderr instead of stdout")
+  .option(
+    "-f, --fail",
+    "Exit 22 (4xx) / 25 (5xx) on non-2xx. Body is piped to stderr (differs from curl, which suppresses it) so agents can log failures.",
+  )
   .option(
     "-L, --location",
     "Follow redirects (cross-origin hops strip Authorization per WHATWG fetch)",
@@ -171,9 +174,16 @@ program
     "-k, --insecure",
     "Skip TLS verification for THIS request (conflicts with global --insecure)",
   )
-  .option("--max-time <sec>", "Abort the request after N seconds (curl exit code 28)", (v) =>
-    parseFloat(v),
-  )
+  .option("--max-time <sec>", "Abort the request after N seconds (curl exit code 28)", (v) => {
+    const n = parseFloat(v);
+    if (!Number.isFinite(n) || n <= 0) {
+      // Match curl's diagnostic shape so shell scripts porting from
+      // `curl --max-time` see the same class of error rather than a
+      // silent drop to "no timeout".
+      throw new InvalidArgumentError(`expected a positive number of seconds, got "${v}"`);
+    }
+    return n;
+  })
   .action(async (method: string, path: string, opts) => {
     const globalOpts = program.opts<{ profile?: string }>();
     await apiCommand({

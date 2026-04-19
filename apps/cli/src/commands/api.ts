@@ -163,94 +163,106 @@ export async function apiCommand(
     if (opts.insecure) restoreTls(prevTlsReject);
   };
 
-  let res: Response;
+  // Top-level try/finally guarantees cleanup() fires even if a sync
+  // throw escapes the output phase (e.g. `io.stdout.write` blowing up
+  // on a closed pipe). Without this the TLS env override could leak
+  // into any subsequent fetch in the same process. The inner
+  // cleanup() calls stay because `io.exit` == `process.exit` in
+  // production terminates before finally runs — they handle the
+  // normal path; the outer finally handles exceptional ones.
+  // cleanup() is idempotent (cleanedUp flag).
   try {
-    // `duplex: "half"` is a spec requirement whenever the body is a
-    // ReadableStream (whatwg/fetch#1254). Only set when we actually
-    // have a streaming body — passing it unconditionally trips
-    // Bun/undici's validator on older runtimes.
-    //
-    // The init object is typed loosely on purpose: our tsconfig doesn't
-    // pull in the DOM lib (so `BodyInit` / `RequestInit` aren't
-    // globals), but Bun's `fetch` accepts strings, Blobs, FormData,
-    // Bun.file, and ReadableStream bodies natively. Silencing the type
-    // here keeps the call site readable.
-    const init: Record<string, unknown> = {
-      method,
-      headers,
-      body: finalBody,
-      signal: ac.signal,
-      redirect: opts.location ? "follow" : "manual",
-    };
-    if (usesStdin) init.duplex = "half";
-    res = await fetch(url, init as Parameters<typeof fetch>[1]);
-  } catch (err) {
-    cleanup();
-    return handleStreamError(err, ac.signal, sigintFired, io);
-  }
-
-  // 8. Soft UX hint on 401 (agents parse exit codes — don't prompt).
-  if (res.status === 401 && !opts.silent) {
-    io.stderr.write(`Session may be expired — run: appstrate login --profile ${profileName}\n`);
-  }
-
-  // 9. Output.
-  //    --fail: non-2xx → body to STDERR, exit 22 (4xx) / 25 (5xx).
-  //            2xx     → body to STDOUT, exit 0.
-  //    plain:  body to STDOUT regardless of status, exit 0.
-  //    -i:     status line + headers on STDOUT before body.
-  //    -I:     HEAD — write headers, skip body.
-  const writeHeaders = opts.include || opts.head;
-  const failMode = Boolean(opts.fail) && !res.ok;
-  const bodySink = failMode ? io.stderr : io.stdout;
-
-  if (writeHeaders) {
-    io.stdout.write(formatStatusLine(res));
-    for (const [k, v] of res.headers) {
-      io.stdout.write(`${k}: ${v}\r\n`);
-    }
-    io.stdout.write("\r\n");
-  }
-
-  if (opts.head) {
-    // RFC 9110 §9.3.2 — HEAD responses MUST NOT have a body. Bun/undici
-    // still delivers an (empty) stream; we deliberately don't touch it.
-    cleanup();
-    return io.exit(0);
-  }
-
-  // Output to file or stdout/stderr.
-  if (opts.output && !failMode) {
+    let res: Response;
     try {
-      await streamToFile(res, opts.output, ac.signal);
+      // `duplex: "half"` is a spec requirement whenever the body is a
+      // ReadableStream (whatwg/fetch#1254). Only set when we actually
+      // have a streaming body — passing it unconditionally trips
+      // Bun/undici's validator on older runtimes.
+      //
+      // The init object is typed loosely on purpose: our tsconfig doesn't
+      // pull in the DOM lib (so `BodyInit` / `RequestInit` aren't
+      // globals), but Bun's `fetch` accepts strings, Blobs, FormData,
+      // Bun.file, and ReadableStream bodies natively. Silencing the type
+      // here keeps the call site readable.
+      const init: Record<string, unknown> = {
+        method,
+        headers,
+        body: finalBody,
+        signal: ac.signal,
+        redirect: opts.location ? "follow" : "manual",
+      };
+      if (usesStdin) init.duplex = "half";
+      res = await fetch(url, init as Parameters<typeof fetch>[1]);
     } catch (err) {
       cleanup();
       return handleStreamError(err, ac.signal, sigintFired, io);
     }
-  } else if (res.body) {
-    try {
-      const reader = res.body.getReader();
-      // Race `reader.read()` against an abort promise so SIGINT /
-      // --max-time interrupts the stream promptly even when the runtime
-      // doesn't auto-propagate the signal into the reader.
-      const abortPromise = abortAsRejection(ac.signal);
-      while (true) {
-        const chunk = await Promise.race([reader.read(), abortPromise]);
-        if (chunk.done) break;
-        if (chunk.value && chunk.value.byteLength > 0) bodySink.write(chunk.value);
+
+    // 8. Soft UX hint on 401 (agents parse exit codes — don't prompt).
+    if (res.status === 401 && !opts.silent) {
+      io.stderr.write(`Session may be expired — run: appstrate login --profile ${profileName}\n`);
+    }
+
+    // 9. Output.
+    //    --fail: non-2xx → body to STDERR, exit 22 (4xx) / 25 (5xx).
+    //            2xx     → body to STDOUT, exit 0.
+    //    plain:  body to STDOUT regardless of status, exit 0.
+    //    -i:     status line + headers on STDOUT before body.
+    //    -I:     HEAD — write headers, skip body.
+    const writeHeaders = opts.include || opts.head;
+    const failMode = Boolean(opts.fail) && !res.ok;
+    const bodySink = failMode ? io.stderr : io.stdout;
+
+    if (writeHeaders) {
+      io.stdout.write(formatStatusLine(res));
+      for (const [k, v] of res.headers) {
+        io.stdout.write(`${k}: ${v}\r\n`);
       }
-    } catch (err) {
-      cleanup();
-      return handleStreamError(err, ac.signal, sigintFired, io);
+      io.stdout.write("\r\n");
     }
-  }
 
-  cleanup();
-  // 10. Final exit code.
-  if (failMode) {
-    return io.exit(res.status >= 500 ? 25 : 22);
+    if (opts.head) {
+      // RFC 9110 §9.3.2 — HEAD responses MUST NOT have a body. Bun/undici
+      // still delivers an (empty) stream; we deliberately don't touch it.
+      cleanup();
+      return io.exit(0);
+    }
+
+    // Output to file or stdout/stderr.
+    if (opts.output && !failMode) {
+      try {
+        await streamToFile(res, opts.output, ac.signal);
+      } catch (err) {
+        cleanup();
+        return handleStreamError(err, ac.signal, sigintFired, io);
+      }
+    } else if (res.body) {
+      try {
+        const reader = res.body.getReader();
+        // Race `reader.read()` against an abort promise so SIGINT /
+        // --max-time interrupts the stream promptly even when the runtime
+        // doesn't auto-propagate the signal into the reader.
+        const abortPromise = abortAsRejection(ac.signal);
+        while (true) {
+          const chunk = await Promise.race([reader.read(), abortPromise]);
+          if (chunk.done) break;
+          if (chunk.value && chunk.value.byteLength > 0) bodySink.write(chunk.value);
+        }
+      } catch (err) {
+        cleanup();
+        return handleStreamError(err, ac.signal, sigintFired, io);
+      }
+    }
+
+    cleanup();
+    // 10. Final exit code.
+    if (failMode) {
+      return io.exit(res.status >= 500 ? 25 : 22);
+    }
+    return io.exit(0);
+  } finally {
+    cleanup();
   }
-  return io.exit(0);
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────

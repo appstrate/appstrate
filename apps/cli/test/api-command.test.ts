@@ -579,6 +579,64 @@ describe("apiCommand — redirect + TLS flags", () => {
     if (before === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
     else process.env.NODE_TLS_REJECT_UNAUTHORIZED = before;
   });
+
+  it("-k restores NODE_TLS_REJECT_UNAUTHORIZED when the output phase throws synchronously", async () => {
+    // Regression guard for the top-level try/finally: if writing to
+    // stdout blows up (closed pipe, disk full, …) after fetch resolves,
+    // cleanup() must still run or the TLS skip leaks into the rest of
+    // the process. This is the scenario a per-phase try/catch can't
+    // cover — the explicit `cleanup(); io.exit(…)` path never fires.
+    await seedLoggedIn("default");
+    const before = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "previous";
+    installFetch(() => jsonResponse(200, { ok: true }));
+
+    class BrokenPipe extends Error {
+      constructor() {
+        super("EPIPE");
+        this.name = "BrokenPipe";
+      }
+    }
+
+    const io: ApiCommandIO = {
+      stdout: {
+        write: () => {
+          throw new BrokenPipe();
+        },
+      },
+      stderr: { write: () => {} },
+      exit: () => {
+        throw new Error("should not reach exit — sync throw must bypass io.exit");
+      },
+      onSigint: () => {},
+    };
+
+    // `-i` triggers the header-write path, which is OUTSIDE any inner
+    // try/catch — that's exactly the window a per-phase try/catch
+    // cannot cover and the top-level finally must.
+    const full: ApiCommandOptions = {
+      method: "GET",
+      path: "/p",
+      header: [],
+      form: [],
+      query: [],
+      insecure: true,
+      include: true,
+    };
+
+    let caught: unknown;
+    try {
+      await apiCommand(full, io);
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(BrokenPipe);
+    expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBe("previous");
+
+    if (before === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    else process.env.NODE_TLS_REJECT_UNAUTHORIZED = before;
+  });
 });
 
 describe("apiCommand — missing credentials", () => {
