@@ -36,6 +36,7 @@ import {
   orgCurrentCommand,
   orgCreateCommand,
 } from "./commands/org.ts";
+import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
@@ -476,5 +477,7 @@ program
         typeof opts.maxTime === "number" && !Number.isNaN(opts.maxTime) ? opts.maxTime : undefined,
     });
   });
+
+registerOpenapiCommand(program, () => program.opts<{ profile?: string }>().profile);
 
 program.parseAsync(process.argv).catch((err) => exitWithError(err));

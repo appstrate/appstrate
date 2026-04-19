@@ -39,6 +39,7 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | `appstrate token`   | Print metadata about the stored access + refresh tokens (debug).               |
 | `appstrate org`     | List, switch, or create organizations pinned on the active profile.            |
 | `appstrate api`     | Authenticated HTTP passthrough to the Appstrate API.                           |
+| `appstrate openapi` | Explore the active profile's OpenAPI schema without flooding stdout.           |
 
 All commands accept `--profile <name>` to target a specific profile (see [Profiles](#profiles)).
 
@@ -231,6 +232,65 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 | `org switch [id\|slug]` | Re-pin the active org on the profile. With no argument, show an interactive picker with the current one highlighted.                     |
 | `org current`           | Print the pinned org id to stdout. Exits 1 with a hint when no org is pinned — designed for `if` / shell prompts.                        |
 | `org create [name]`     | Create a new org and pin it. With no argument, prompt for name + optional slug. Use `--slug <slug>` for an explicit kebab-case override. |
+
+---
+
+### `appstrate openapi`
+
+Explore the active profile's OpenAPI 3.1 schema without dumping the whole spec to stdout. The platform exposes ~191 endpoints — `list`, `show`, and `export` subcommands make that corpus explorable at human scale (and agent-ingestable with `--json`).
+
+The schema is fetched once per profile and cached under `~/.cache/appstrate/openapi-<profile>.json` (or `$XDG_CACHE_HOME/appstrate/…`). Each cached copy pairs with an ETag sibling — subsequent invocations send `If-None-Match` and short-circuit on a `304` response, so re-running `list` / `show` during exploration costs one conditional round-trip instead of re-downloading the full spec.
+
+```sh
+appstrate openapi list                              # all operations, one per line
+appstrate openapi list --tag runs                   # filter by tag
+appstrate openapi list --method post                # filter by HTTP method
+appstrate openapi list --path '/api/runs/*'         # filter by path glob
+appstrate openapi list --search "create run"        # fuzzy match on id / summary / path
+appstrate openapi list --json                       # machine-readable index
+
+appstrate openapi show createRun                    # by operationId
+appstrate openapi show GET /api/runs                # by METHOD + path
+appstrate openapi show createRun --json             # full dereferenced object (agent input)
+
+appstrate openapi export                            # dump raw schema to stdout
+appstrate openapi export -o schema.json             # dump to file
+```
+
+**Subcommand flags**
+
+| Subcommand | Flag             | Description                                                                      |
+| ---------- | ---------------- | -------------------------------------------------------------------------------- |
+| `list`     | `--tag <t>`      | Filter by OpenAPI tag (case-insensitive exact match).                            |
+| `list`     | `--method <m>`   | Filter by HTTP method (`GET`, `POST`, …).                                        |
+| `list`     | `--path <glob>`  | Filter by path. Supports `*` (single segment) and `**` (any). Exact match else.  |
+| `list`     | `--search <q>`   | Case-insensitive substring across operationId, summary, description, path.       |
+| `list`     | `--json`         | Emit a minimal JSON array (method, path, operationId, summary, tags) for piping. |
+| `show`     | `--json`         | Emit the full dereferenced operation as JSON instead of the text summary.        |
+| `export`   | `-o`, `--output` | Write the schema to a file (default: stdout).                                    |
+
+**Shared flags** (all three subcommands)
+
+| Flag         | Description                                                           |
+| ------------ | --------------------------------------------------------------------- |
+| `--refresh`  | Force a fresh download; still update the on-disk cache on success.    |
+| `--no-cache` | Fully ephemeral — skip both cache read and write for this invocation. |
+
+**`list` output** — one colored line per operation:
+
+```
+GET    /api/runs — List runs [runs]
+POST   /api/runs — Create a run [runs]
+GET    /api/runs/{id} — Get a run [runs]
+DELETE /api/runs/{id} — Cancel a run [runs]
+GET    /api/deprecated — Legacy endpoint [legacy] [deprecated]
+```
+
+Colors are suppressed when stdout is not a TTY, or when `NO_COLOR` is set in the environment (respects [no-color.org](https://no-color.org)).
+
+**`show` output** — a human-readable operation summary. For `--json`, the response uses `@apidevtools/swagger-parser` to dereference every `$ref` in the operation tree, so nested request/response schemas inline fully — ideal for piping into an LLM prompt or a code generator.
+
+**`export` output** — the raw schema JSON. Use `-o schema.json` for file output (mode `0600`) or stdout for shell piping (`appstrate openapi export | jq '.info'`). Equivalent to calling `appstrate api GET /api/openapi.json`, but served from the local cache when possible.
 
 ---
 
