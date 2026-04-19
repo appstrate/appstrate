@@ -87,6 +87,34 @@ function getOpenApiSpec() {
 app.get("/api/openapi.json", (c) => c.json(getOpenApiSpec()));
 app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
+// Public llms.txt — points AI coding agents at the CLI + OpenAPI entry
+// points for this instance. Served at the root so agents crawling
+// `https://<instance>/llms.txt` (the emerging /llms.txt convention) find
+// the right docs without guessing. Kept inline so the Docker image does
+// not need to ship the repo-root markdown file.
+const LLMS_TXT = `# Appstrate
+
+> Open-source platform for running autonomous AI agents in sandboxed Docker containers. This instance exposes a REST API documented in OpenAPI 3.1; the \`appstrate\` CLI is the recommended control plane for AI coding agents.
+
+## Control this instance from a coding agent
+
+Install the CLI (\`curl -fsSL https://get.appstrate.dev | bash\` or \`bunx appstrate\`), then:
+
+- \`appstrate login --instance <this-url>\` — RFC 8628 device flow, tokens land in the OS keyring
+- \`appstrate openapi list --json\` — discover endpoints without loading the full 191-operation spec
+- \`appstrate openapi show <operationId> --json\` — fully dereferenced operation schema for body construction
+- \`appstrate api <METHOD> <path>\` — authenticated HTTP passthrough (\`curl\`-compatible), bearer never exposed
+
+## Docs
+
+- [CLI agent quickstart](https://github.com/appstrate/appstrate/blob/main/apps/cli/AGENTS.md): zero-to-first-run recipe, rules of engagement
+- [Full CLI reference](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md): flags, exit codes, profile management
+- [OpenAPI spec](/api/openapi.json): live, always current for this instance
+- [Interactive API docs](/api/docs): Swagger UI
+- [Source repository](https://github.com/appstrate/appstrate): Apache-2.0
+`;
+app.get("/llms.txt", (c) => c.text(LLMS_TXT));
+
 // Shutdown gate — reject new write requests during graceful shutdown
 let shuttingDown = false;
 
