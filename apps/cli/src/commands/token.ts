@@ -62,21 +62,13 @@ export async function tokenCommand(opts: TokenOptions): Promise<void> {
       `  Expires at:      ${new Date(stored.expiresAt).toISOString()}`,
     ];
 
-    if (stored.refreshToken && stored.refreshExpiresAt !== undefined) {
-      lines.push(
-        "",
-        "Refresh token",
-        `  Status:          ${refreshStatus(stored.refreshExpiresAt, now)}`,
-        `  Expires:         ${formatExpiry(stored.refreshExpiresAt, now)}`,
-        `  Expires at:      ${new Date(stored.refreshExpiresAt).toISOString()}`,
-      );
-    } else {
-      lines.push(
-        "",
-        "Refresh token",
-        `  Status:          not stored (legacy 1.x credentials — re-run \`appstrate login\`)`,
-      );
-    }
+    lines.push(
+      "",
+      "Refresh token",
+      `  Status:          ${refreshStatus(stored.refreshExpiresAt, now)}`,
+      `  Expires:         ${formatExpiry(stored.refreshExpiresAt, now)}`,
+      `  Expires at:      ${new Date(stored.refreshExpiresAt).toISOString()}`,
+    );
 
     const claims = safeDecodeClaims(stored.accessToken);
     if (claims) {
@@ -108,10 +100,7 @@ export async function tokenCommand(opts: TokenOptions): Promise<void> {
         }
       }
     } else {
-      lines.push(
-        "",
-        `JWT claims:        unavailable (token is not a JWT — probably legacy 1.x session)`,
-      );
+      lines.push("", `JWT claims:        unavailable (token is not a JWT)`);
     }
 
     process.stdout.write(lines.join("\n") + "\n");

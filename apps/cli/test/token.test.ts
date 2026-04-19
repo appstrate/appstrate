@@ -9,11 +9,10 @@
  *   2. Expired access tokens still produce a report (status: expired)
  *      rather than surfacing a keyring scrub null. That means we must
  *      seed tokens that `loadTokens` won't auto-scrub — refresh-expiry
- *      must be in the future, or the token must be legacy (no refresh
- *      fields at all, which keys off access-expiry).
- *   3. A non-JWT access token (legacy 1.x session string) degrades
- *      gracefully: TTL lines still render, the "JWT claims" section
- *      falls back to an explanatory line rather than throwing.
+ *      must be in the future.
+ *   3. A non-JWT access token degrades gracefully: TTL lines still
+ *      render, the "JWT claims" section falls back to an explanatory
+ *      line rather than throwing.
  *   4. Clock-skew warning fires only when the JWT `exp` claim diverges
  *      from the locally stored `expiresAt` by more than 2s.
  */
@@ -92,8 +91,8 @@ async function seedProfile(
   tokens: {
     accessToken: string;
     expiresAt: number;
-    refreshToken?: string;
-    refreshExpiresAt?: number;
+    refreshToken: string;
+    refreshExpiresAt: number;
   },
 ): Promise<void> {
   await setProfile(name, {
@@ -274,12 +273,13 @@ describe("token (happy path)", () => {
     expect(out).toMatch(/JWT `exp` and stored `expiresAt` differ by \d+s/);
   });
 
-  it("falls back to a clear message when the access token is not a JWT (legacy 1.x session)", async () => {
+  it("falls back to a clear message when the access token is not a JWT", async () => {
     const accessExp = Date.now() + 15 * 60 * 1000;
     await seedProfile("default", {
-      accessToken: "legacy-session-not-a-jwt",
+      accessToken: "opaque-not-a-jwt",
       expiresAt: accessExp,
-      // Legacy row: no refresh.
+      refreshToken: "r",
+      refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
     });
 
     await tokenCommand({ profile: "default" });
@@ -289,11 +289,9 @@ describe("token (happy path)", () => {
     // TTL lines still render.
     expect(out).toContain("Access token");
     expect(out).toContain("Status:          fresh");
-    // Refresh section explicitly calls out the legacy absence.
-    expect(out).toContain("not stored (legacy 1.x credentials");
     // Claims fall back to the explanatory line, not an exception.
     expect(out).toContain("JWT claims:        unavailable");
-    expect(out).not.toContain("legacy-session-not-a-jwt"); // still no plaintext
+    expect(out).not.toContain("opaque-not-a-jwt"); // still no plaintext
   });
 });
 

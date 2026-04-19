@@ -237,6 +237,7 @@
       "dependencies": {
         "@appstrate/core": "workspace:*",
         "@appstrate/db": "workspace:*",
+        "zod": "^4.3.6",
       },
     },
     "packages/ui": {

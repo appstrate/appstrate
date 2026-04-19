@@ -1,19 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
+import { modelCostSchema } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 
 export type { ModelCost };
-
-/** Per-model pricing in $/M tokens (margin included). */
-export const modelCostSchema = z.object({
-  input: z.number().nonnegative(),
-  output: z.number().nonnegative(),
-  cacheRead: z.number().nonnegative(),
-  cacheWrite: z.number().nonnegative(),
-}) satisfies z.ZodType<ModelCost>;
+export { modelCostSchema };
 
 export const tokenUsageSchema = z.object({
   input_tokens: z.number().nonnegative(),

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for `lib/api.ts` — silent refresh + reactive 401 retry
- * (issue #165).
+ * Unit tests for `lib/api.ts` — silent refresh + reactive 401 retry.
  *
  * Contract:
  *   1. When the stored access token has >30s remaining, `apiFetchRaw`
@@ -15,12 +14,10 @@
  *   3. On 401 from the real endpoint with a valid refresh token,
  *      `apiFetchRaw` rotates once, retries the original request, and
  *      surfaces whatever the retry returns. A second 401 is terminal.
- *   4. Legacy credentials (no `refreshToken`) skip rotation entirely
- *      and raise `AuthError` with a migration-specific message.
- *   5. `invalid_grant` from the rotate endpoint wipes local state so
+ *   4. `invalid_grant` from the rotate endpoint wipes local state so
  *      the next invocation hits the "not logged in" branch instead of
  *      retrying.
- *   6. Transient refresh failures (network, 5xx) preserve local state.
+ *   5. Transient refresh failures (network, 5xx) preserve local state.
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
@@ -105,9 +102,11 @@ async function seedProfile(
   await saveTokens(name, {
     accessToken: tokens.access,
     expiresAt: now + tokens.accessExpiresIn,
-    refreshToken: tokens.refresh,
+    refreshToken: tokens.refresh ?? "rt-default",
     refreshExpiresAt:
-      tokens.refreshExpiresIn !== undefined ? now + tokens.refreshExpiresIn : undefined,
+      tokens.refreshExpiresIn !== undefined
+        ? now + tokens.refreshExpiresIn
+        : now + 30 * 24 * 60 * 60 * 1000,
   });
 }
 
@@ -171,45 +170,6 @@ describe("apiFetchRaw (issue #165) — proactive refresh", () => {
     const stored = await loadTokens("default");
     expect(stored?.accessToken).toBe("rotated-access");
     expect(stored?.refreshToken).toBe("rotated-refresh");
-  });
-
-  it("raises AuthError on legacy credentials (no refresh token) when the access token is expired", async () => {
-    await seedProfile("default", {
-      access: "stale",
-      accessExpiresIn: -60_000, // already expired
-    });
-    installFetch(async () => jsonResponse(200, { ok: true }));
-
-    // Legacy-on-expired: keyring auto-scrubs the stale entry (falls back
-    // to the legacy access-token expiry path in `isExpired`), so
-    // `loadTokens` returns null and `api.ts` raises the generic "no
-    // credentials" AuthError. A fresh-access legacy entry exercises the
-    // specific "Legacy session detected" branch — see the next test.
-    await expect(apiFetchRaw("default", "/api/data")).rejects.toMatchObject({
-      name: "AuthError",
-      message: expect.stringContaining("appstrate login"),
-    });
-    // No network call issued.
-    expect(fetchCalls).toHaveLength(0);
-  });
-
-  it("raises AuthError('Legacy session detected') when a legacy entry is fresh but within the refresh margin", async () => {
-    // A not-yet-expired legacy access token that slips INTO the 30s
-    // margin triggers the refresh branch of `doRefresh`, which has no
-    // refresh_token to use — the explicit "Legacy session detected"
-    // hint surfaces here (not on already-scrubbed stale entries).
-    await seedProfile("default", {
-      access: "expiring-legacy",
-      accessExpiresIn: 10_000, // within 30s margin
-    });
-    installFetch(async () => jsonResponse(200, { ok: true }));
-
-    await expect(apiFetchRaw("default", "/api/data")).rejects.toMatchObject({
-      name: "AuthError",
-      message: expect.stringContaining("Legacy session detected"),
-    });
-    expect(fetchCalls).toHaveLength(0);
-    expect(await loadTokens("default")).toBeNull();
   });
 
   it("raises AuthError + wipes credentials when /cli/token responds with invalid_grant (revoked / reused)", async () => {
@@ -365,20 +325,6 @@ describe("apiFetchRaw — reactive refresh on 401", () => {
     expect(res.status).toBe(401);
     // doRefresh wiped credentials because invalid_grant is terminal.
     expect(await loadTokens("default")).toBeNull();
-  });
-
-  it("does NOT attempt reactive refresh when the stored tokens lack a refresh_token (legacy)", async () => {
-    await seedProfile("default", {
-      access: "legacy",
-      accessExpiresIn: 5 * 60 * 1000,
-    });
-    installFetch(async () => jsonResponse(401, { error: "unauthorized" }));
-
-    const res = await apiFetchRaw("default", "/api/data");
-    expect(res.status).toBe(401);
-    // Single call: the original request. No rotate attempt.
-    expect(fetchCalls).toHaveLength(1);
-    expect(fetchCalls[0]!.url).toBe("https://app.example.com/api/data");
   });
 });
 

@@ -107,14 +107,9 @@ export async function updateOrganization(
   return toOrgResult(row);
 }
 
-import { z } from "zod";
-
-export const orgSettingsSchema = z.object({
-  apiVersion: z.string().optional(),
-  dashboardSsoEnabled: z.boolean().optional(),
-});
-
-export type OrgSettings = z.infer<typeof orgSettingsSchema>;
+export { orgSettingsSchema } from "@appstrate/shared-types";
+import type { OrgSettings } from "@appstrate/shared-types";
+export type { OrgSettings };
 
 export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
   const [row] = await db

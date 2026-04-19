@@ -30,19 +30,26 @@ import { scopedWhere } from "../../lib/db-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
 
-/** Maps an Actor to the runs table's `dashboardUserId`/`endUserId` columns. */
-function runActorInsert(actor: Actor | null): {
-  dashboardUserId: string | null;
-  endUserId: string | null;
-} {
-  if (!actor) return { dashboardUserId: null, endUserId: null };
-  return {
-    dashboardUserId: actor.type === "member" ? actor.id : null,
-    endUserId: actor.type === "end_user" ? actor.id : null,
-  };
-}
 import { asRecordOrNull } from "../../lib/safe-json.ts";
 import { toISO } from "../../lib/date-helpers.ts";
+
+/**
+ * Shared SELECT shape for enriched-run reads. The three callers
+ * (`listRunsWithFilter`, `listGlobalRuns`, `getRunFull`) each pair this
+ * with the same five LEFT JOINs on `profiles`/`endUsers`/`apiKeys`/
+ * `schedules`/`packages` — extracted here to keep the JOIN list inline
+ * (Drizzle's query-builder types don't compose well through a helper).
+ */
+function enrichedRunSelect() {
+  return {
+    run: runs,
+    dashboardUserName: profiles.displayName,
+    endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
+    apiKeyName: apiKeys.name,
+    scheduleName: schedules.name,
+    packageEphemeral: packages.ephemeral,
+  };
+}
 
 // --- Runs ---
 
@@ -90,7 +97,8 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
   await db.insert(runs).values({
     id,
     packageId,
-    ...runActorInsert(actor),
+    dashboardUserId: actor?.type === "member" ? actor.id : null,
+    endUserId: actor?.type === "end_user" ? actor.id : null,
     orgId: scope.orgId,
     status: "pending",
     input,
@@ -133,7 +141,8 @@ export async function createFailedRun(
   await db.insert(runs).values({
     id,
     packageId,
-    ...runActorInsert(actor),
+    dashboardUserId: actor?.type === "member" ? actor.id : null,
+    endUserId: actor?.type === "end_user" ? actor.id : null,
     orgId: scope.orgId,
     applicationId: scope.applicationId,
     status: "failed",
@@ -455,14 +464,7 @@ export async function listRunsWithFilter(
   const [countRow] = await db.select({ count: count() }).from(runs).where(filter);
 
   const rows = await db
-    .select({
-      run: runs,
-      dashboardUserName: profiles.displayName,
-      endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
-      apiKeyName: apiKeys.name,
-      scheduleName: schedules.name,
-      packageEphemeral: packages.ephemeral,
-    })
+    .select(enrichedRunSelect())
     .from(runs)
     .leftJoin(profiles, eq(runs.dashboardUserId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
@@ -567,14 +569,7 @@ export async function listGlobalRuns(
     .where(filter);
 
   const rows = await db
-    .select({
-      run: runs,
-      dashboardUserName: profiles.displayName,
-      endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
-      apiKeyName: apiKeys.name,
-      scheduleName: schedules.name,
-      packageEphemeral: packages.ephemeral,
-    })
+    .select(enrichedRunSelect())
     .from(runs)
     .leftJoin(packages, eq(packages.id, runs.packageId))
     .leftJoin(profiles, eq(runs.dashboardUserId, profiles.id))
@@ -625,12 +620,7 @@ export async function getRunFull(scope: AppScope, id: string) {
 
   const [row] = await db
     .select({
-      run: runs,
-      dashboardUserName: profiles.displayName,
-      endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
-      apiKeyName: apiKeys.name,
-      scheduleName: schedules.name,
-      packageEphemeral: packages.ephemeral,
+      ...enrichedRunSelect(),
       packageManifest: packages.draftManifest,
       packagePrompt: packages.draftContent,
     })

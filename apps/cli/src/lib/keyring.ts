@@ -13,15 +13,12 @@
  * Tokens are scoped by profile: the keyring entry key is
  * `(appstrate, <profile>)` so profiles share the service name.
  *
- * Issue #165 — the 2.x CLI stores BOTH a short-lived JWT access token
- * (15 min) AND a long-lived rotating refresh token (30 days) returned
- * by `/api/auth/cli/token`. The access token is presented as
+ * The CLI stores BOTH a short-lived JWT access token (15 min) AND a
+ * long-lived rotating refresh token (30 days) returned by
+ * `/api/auth/cli/token`. The access token is presented as
  * `Authorization: Bearer ey...` on every authenticated call; the
  * refresh token is exchanged at the same endpoint (grant_type=
  * refresh_token) to mint a fresh access token without user interaction.
- * A legacy payload without `refreshToken` is accepted for read-back
- * (so an upgraded CLI can detect a pre-#165 session and prompt the user
- * to re-login cleanly) but new logins always persist the pair.
  */
 
 import { Entry } from "@napi-rs/keyring";
@@ -48,12 +45,10 @@ function plaintextFallbackAllowed(): boolean {
 
 export interface Tokens {
   /**
-   * JWT access token (2.x) or raw BA session token (legacy 1.x — kept
-   * for upgrade-path detection only; new logins always store a JWT).
-   * Sent as `Authorization: Bearer <value>` on every authenticated
-   * request. When the JWT expires, `api.ts` silently rotates via the
-   * refresh token; when the refresh token is absent or revoked, the
-   * CLI surfaces a `re-login required` `AuthError` to the command.
+   * JWT access token. Sent as `Authorization: Bearer <value>` on every
+   * authenticated request. When the JWT expires, `api.ts` silently
+   * rotates via the refresh token; when the refresh token is revoked,
+   * the CLI surfaces a `re-login required` `AuthError` to the command.
    */
   accessToken: string;
   /** Epoch-ms at which the access token expires. */
@@ -61,18 +56,16 @@ export interface Tokens {
   /**
    * Opaque rotating refresh token (32 bytes → base64url, 43 chars).
    * Issued alongside the access token by `/api/auth/cli/token` on
-   * device-flow completion. Optional for backward compatibility with
-   * legacy 1.x credentials stored before issue #165 shipped — a
-   * missing value is treated as a re-auth trigger by `api.ts`.
+   * device-flow completion.
    */
-  refreshToken?: string;
+  refreshToken: string;
   /**
-   * Epoch-ms at which the refresh token expires. Present iff
-   * `refreshToken` is present. The CLI never sends an expired refresh
-   * token to the server (which would fail with `invalid_grant`
-   * anyway) — it clears the tokens and surfaces a re-login message.
+   * Epoch-ms at which the refresh token expires. The CLI never sends an
+   * expired refresh token to the server (which would fail with
+   * `invalid_grant` anyway) — it clears the tokens and surfaces a
+   * re-login message.
    */
-  refreshExpiresAt?: number;
+  refreshExpiresAt: number;
 }
 
 export interface KeyringHandle {
@@ -239,12 +232,10 @@ export async function saveTokens(profile: string, tokens: Tokens): Promise<void>
 
 /**
  * Tokens are considered "unrecoverably expired" — and therefore
- * eligible for auto-scrub — only when BOTH the access token AND the
- * refresh token are past their `expiresAt` (or when no refresh token is
- * stored at all). An expired access token + valid refresh token is
+ * eligible for auto-scrub — only when the refresh token is past its
+ * `refreshExpiresAt`. An expired access token + valid refresh token is
  * healthy: `api.ts` silently rotates it. Scrubbing on access expiry
- * alone would defeat the whole point of the refresh flow introduced in
- * issue #165.
+ * alone would defeat the whole point of the refresh flow.
  *
  * No clock-skew grace window — the server is authoritative, and a
  * leaked-but-expired refresh token should have the shortest possible
@@ -252,15 +243,7 @@ export async function saveTokens(profile: string, tokens: Tokens): Promise<void>
  * already elapsed).
  */
 function isExpired(tokens: Tokens): boolean {
-  const now = Date.now();
-  if (tokens.refreshExpiresAt !== undefined) {
-    return tokens.refreshExpiresAt <= now;
-  }
-  // No refresh token (legacy 1.x credentials OR malformed entry) → fall
-  // back to access-token expiry so the scrub path still eventually
-  // cleans these up. `api.ts` surfaces the "re-login required" error
-  // separately based on the missing refresh field.
-  return tokens.expiresAt <= now;
+  return tokens.refreshExpiresAt <= Date.now();
 }
 
 export async function loadTokens(profile: string): Promise<Tokens | null> {
@@ -550,16 +533,14 @@ async function loadFromFile(profile: string): Promise<Tokens | null> {
   if (!row) return null;
   if (typeof row.accessToken !== "string") return null;
   if (typeof row.expiresAt !== "number") return null;
-  // Refresh fields are optional for backward compatibility with legacy
-  // 1.x credentials (pre-#165). When absent, `api.ts` detects the
-  // missing refresh token and emits a re-login `AuthError` instead of
-  // attempting a rotate call that would definitely 400.
-  const tokens: Tokens = { accessToken: row.accessToken, expiresAt: row.expiresAt };
-  if (typeof row.refreshToken === "string" && typeof row.refreshExpiresAt === "number") {
-    tokens.refreshToken = row.refreshToken;
-    tokens.refreshExpiresAt = row.refreshExpiresAt;
-  }
-  return tokens;
+  if (typeof row.refreshToken !== "string") return null;
+  if (typeof row.refreshExpiresAt !== "number") return null;
+  return {
+    accessToken: row.accessToken,
+    expiresAt: row.expiresAt,
+    refreshToken: row.refreshToken,
+    refreshExpiresAt: row.refreshExpiresAt,
+  };
 }
 
 /**
@@ -618,16 +599,14 @@ function parseTokens(raw: string): Tokens | null {
     const row = parsed as Record<string, unknown>;
     if (typeof row.accessToken !== "string") return null;
     if (typeof row.expiresAt !== "number") return null;
-    const tokens: Tokens = { accessToken: row.accessToken, expiresAt: row.expiresAt };
-    // Optional pair for legacy-tolerance: a pre-#165 keyring entry omits
-    // both fields, and `api.ts` treats that combination as a re-login
-    // trigger. When one is present without the other, discard both so
-    // we never carry a half-refresh state forward.
-    if (typeof row.refreshToken === "string" && typeof row.refreshExpiresAt === "number") {
-      tokens.refreshToken = row.refreshToken;
-      tokens.refreshExpiresAt = row.refreshExpiresAt;
-    }
-    return tokens;
+    if (typeof row.refreshToken !== "string") return null;
+    if (typeof row.refreshExpiresAt !== "number") return null;
+    return {
+      accessToken: row.accessToken,
+      expiresAt: row.expiresAt,
+      refreshToken: row.refreshToken,
+      refreshExpiresAt: row.refreshExpiresAt,
+    };
   } catch {
     return null;
   }

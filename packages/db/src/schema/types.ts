@@ -84,3 +84,19 @@ export type Account = InferSelectModel<typeof account>;
 export type Verification = InferSelectModel<typeof verification>;
 
 export type UserAgentProviderProfile = InferSelectModel<typeof userAgentProviderProfiles>;
+
+// --- Provider snapshot types (used by runs.providerStatuses JSONB column) ---
+
+export type ConnectionStatusValue = "connected" | "not_connected" | "needs_reconnection";
+
+export type ProviderProfileSource = "app_binding" | "user_profile";
+
+/** Snapshot of a provider's connection state at run time (stored in `runs.providerStatuses`). */
+export interface RunProviderSnapshot {
+  id: string;
+  status: ConnectionStatusValue;
+  source: ProviderProfileSource | null;
+  profileName: string | null;
+  profileOwnerName: string | null;
+  scopesSufficient?: boolean;
+}

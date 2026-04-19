@@ -343,13 +343,7 @@ export function buildProviderDefinitionFromManifest(
       : {}),
     // Credential fields (from definition.credentials)
     credentialSchema: credentials?.schema as Record<string, unknown> | undefined,
-    // Canonical shape: definition.credentials.fieldName. Back-compat fallback
-    // accepts the flat `definition.credentialFieldName` briefly produced by the
-    // provider editor UI — existing rows keep working; the UI migrates them to
-    // the nested form on the next save.
-    credentialFieldName:
-      (credentials?.fieldName as string | undefined) ??
-      (rawDef.credentialFieldName as string | undefined),
+    credentialFieldName: credentials?.fieldName as string | undefined,
     // Transport fields (from definition level — cross-cutting, implementation-specific)
     credentialHeaderName: rawDef.credentialHeaderName as string | undefined,
     credentialHeaderPrefix: rawDef.credentialHeaderPrefix as string | undefined,

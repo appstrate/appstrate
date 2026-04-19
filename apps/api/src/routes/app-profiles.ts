@@ -35,8 +35,9 @@ import { getAppScope } from "../lib/scope.ts";
 
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { listConnections, listProviderCredentialIds } from "@appstrate/connect";
+import { profileNameSchema } from "../lib/common-schemas.ts";
 
-export const profileNameSchema = z.object({ name: z.string().min(1, "Name is required").max(100) });
+export { profileNameSchema };
 export const bindAppProfileSchema = z.object({
   providerId: z.string().min(1),
   sourceProfileId: z.uuid(),
