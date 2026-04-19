@@ -332,8 +332,19 @@ export async function refreshCliTokens(
 
 /**
  * Server-side revocation of a refresh-token family. Called on
- * `appstrate logout` before local credential cleanup. Failures are
- * swallowed by the caller — the local wipe still happens.
+ * `appstrate logout` before local credential cleanup.
+ *
+ * Contract: throws `DeviceFlowError` on any non-2xx response (network
+ * error, 4xx, 5xx). Callers that want best-effort revocation (e.g.
+ * `logout.ts`) MUST wrap the call in try/catch and proceed with local
+ * cleanup on failure — revocation state is advisory from the client's
+ * perspective, but surfacing the error at the call site lets the
+ * command render a clear warning rather than silently skipping it.
+ *
+ * The 200 body (`{ revoked: boolean }`) is intentionally ignored —
+ * `revoked: false` just means the token was unknown or client-mismatched
+ * on the server, which is operationally equivalent to success from the
+ * CLI's perspective (the token is dead to us either way).
  */
 export async function revokeCliRefreshToken(
   instance: string,
@@ -353,8 +364,6 @@ export async function revokeCliRefreshToken(
     const err = await parseErrorBody(res);
     throw new DeviceFlowError(err.error ?? "invalid_request", err.error_description, res.status);
   }
-  // Body intentionally ignored — the endpoint returns `{ revoked: boolean }`
-  // but the CLI's only correct action is to wipe local state regardless.
 }
 
 async function parseErrorBody(res: Response): Promise<RawErrorBody> {
