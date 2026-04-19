@@ -6,7 +6,7 @@ import { db } from "@appstrate/db/client";
 import { profiles, user } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import type { AppEnv } from "../types/index.ts";
-import { unauthorized, parseBody } from "../lib/errors.ts";
+import { forbidden, unauthorized, parseBody } from "../lib/errors.ts";
 
 export const welcomeSetupSchema = z.object({
   displayName: z.string().max(100).optional(),
@@ -16,6 +16,12 @@ const router = new Hono<AppEnv>();
 
 // POST /api/welcome/setup — set display name after invitation
 router.post("/welcome/setup", async (c) => {
+  // Issue #172 (extension) — same-class as PATCH /api/profile: this
+  // mutates the BA-owned `user.name`. API key callers (customer
+  // integrations) must not be able to rename the dashboard owner.
+  if (c.get("authMethod") === "api_key") {
+    throw forbidden("API keys cannot complete dashboard onboarding");
+  }
   const currentUser = c.get("user");
   if (!currentUser?.id) {
     throw unauthorized("Not authenticated");
