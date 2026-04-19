@@ -44,6 +44,40 @@ export interface PlatformPackage {
   readonly manifest: unknown;
 }
 
+/**
+ * Stable public fields of a run row. Narrower than the internal row —
+ * exposes what external modules need to reason about a run lifecycle
+ * without leaking scheduler/actor/api-key internals.
+ *
+ * `result` is `unknown` because the shape depends on the agent and is
+ * application-defined; consumers cast at the call site.
+ */
+export interface Run {
+  readonly id: string;
+  readonly status: string;
+  readonly orgId: string;
+  readonly applicationId: string;
+  readonly packageId: string;
+  readonly result: unknown;
+  readonly error: string | null;
+}
+
+/**
+ * Stable public fields of a run log row. `data` is the free-form JSON
+ * payload emitted alongside the line. Log-level literals are kept as
+ * `string` (rather than a union) so future extensions are non-breaking.
+ */
+export interface RunLog {
+  readonly id: number;
+  readonly runId: string;
+  readonly level: string;
+  readonly type: string;
+  readonly event: string | null;
+  readonly message: string | null;
+  readonly data: unknown;
+  readonly createdAt: Date;
+}
+
 /** Stable public fields of a resolved model — what modules need to route LLM traffic. */
 export interface PlatformModel {
   readonly api: string;

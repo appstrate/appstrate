@@ -51,6 +51,7 @@ describe("ModuleInitContext.services — platform service wiring", () => {
   it("wires the package catalog", () => {
     expect(typeof services.packages.get).toBe("function");
     expect(typeof services.packages.isInlineShadow).toBe("function");
+    expect(typeof services.packages.search).toBe("function");
     expect(services.packages.isInlineShadow("@inline/foo")).toBe(true);
     expect(services.packages.isInlineShadow("@scope/foo")).toBe(false);
   });
@@ -64,6 +65,8 @@ describe("ModuleInitContext.services — platform service wiring", () => {
   });
 
   it("wires run lifecycle operations", () => {
+    expect(typeof services.runs.get).toBe("function");
+    expect(typeof services.runs.listLogs).toBe("function");
     expect(typeof services.runs.appendLog).toBe("function");
     expect(typeof services.runs.update).toBe("function");
     expect(typeof services.runs.abort).toBe("function");

@@ -14,6 +14,8 @@ import {
   connectContainerToNetwork,
   removeNetwork,
   cleanupOrphanedContainers,
+  cleanupOrphanedNetworks,
+  cleanupOrphanedRunNetworks,
   getContainerHostPort,
 } from "../../../src/services/docker.ts";
 
@@ -603,6 +605,66 @@ describe("cleanupOrphanedContainers", () => {
 
       const result = await cleanupOrphanedContainers();
       expect(result.containers).toBe(0);
+    },
+    TIMEOUT,
+  );
+});
+
+// ─── cleanupOrphanedNetworks ─────────────────────────────────
+
+describe("cleanupOrphanedNetworks", () => {
+  it(
+    "reclaims appstrate-exec-* networks without touching unrelated networks",
+    async () => {
+      // Pre-condition: clear any leftovers from earlier tests.
+      await cleanupOrphanedNetworks();
+
+      // Three orphan run networks + one unrelated bystander that must survive.
+      const orphan1 = await createNetwork(`appstrate-exec-orphan-${uid()}`);
+      const orphan2 = await createNetwork(`appstrate-exec-orphan-${uid()}`);
+      const orphan3 = await createNetwork(`appstrate-exec-orphan-${uid()}`);
+      const bystander = await createNetwork(`appstrate-test-keepme-${uid()}`);
+      trackNetwork(bystander);
+
+      const reclaimed = await cleanupOrphanedNetworks();
+      expect(reclaimed).toBeGreaterThanOrEqual(3);
+
+      for (const id of [orphan1, orphan2, orphan3]) {
+        const res = await fetch(`${DOCKER_URL}/networks/${id}`);
+        expect(res.status).toBe(404);
+      }
+      const stillThere = await fetch(`${DOCKER_URL}/networks/${bystander}`);
+      expect(stillThere.status).toBe(200);
+    },
+    TIMEOUT,
+  );
+});
+
+// ─── cleanupOrphanedRunNetworks ──────────────────────────────
+
+describe("cleanupOrphanedRunNetworks", () => {
+  it(
+    "only reclaims appstrate-exec-* — leaves sidecar-pool and egress alone",
+    async () => {
+      await cleanupOrphanedNetworks();
+
+      const execOrphan = await createNetwork(`appstrate-exec-orphan-${uid()}`);
+      // Simulate the shared infra networks the orchestrator stands up at boot.
+      const sidecarPool = await createNetwork("appstrate-sidecar-pool");
+      trackNetwork(sidecarPool);
+      const egress = await createNetwork("appstrate-egress");
+      trackNetwork(egress);
+
+      const reclaimed = await cleanupOrphanedRunNetworks();
+      expect(reclaimed).toBeGreaterThanOrEqual(1);
+
+      const execGone = await fetch(`${DOCKER_URL}/networks/${execOrphan}`);
+      expect(execGone.status).toBe(404);
+
+      const poolStill = await fetch(`${DOCKER_URL}/networks/${sidecarPool}`);
+      expect(poolStill.status).toBe(200);
+      const egressStill = await fetch(`${DOCKER_URL}/networks/${egress}`);
+      expect(egressStill.status).toBe(200);
     },
     TIMEOUT,
   );

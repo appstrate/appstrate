@@ -25,6 +25,7 @@ import {
   writeComposeFile,
   writeEnvFile,
   assertDockerAvailable,
+  checkDockerNetworkBudget,
   findRunningComposeProject,
   waitForAppstrate,
   DockerMissingError,
@@ -223,6 +224,57 @@ describe("findRunningComposeProject", () => {
     process.env.PATH = `${shimDir}:${originalPath}`;
     const hit = await findRunningComposeProject("appstrate-dev-11111111");
     expect(hit).toBeNull();
+  });
+});
+
+describe("checkDockerNetworkBudget", () => {
+  // Shim `docker network ls --format {{.Name}}` with controlled stdout so
+  // we can drive the thresholding logic without a real Docker daemon.
+  it("returns null when the host is below the warning threshold", async () => {
+    if (platform() === "win32") return;
+    const shimDir = join(workDir, "shim-low");
+    await mkShim(
+      shimDir,
+      "docker",
+      `#!/usr/bin/env bash\ncat <<'EOF'\nbridge\nhost\nnone\nmy-app_default\ncoolify\nEOF\n`,
+    );
+    process.env.PATH = `${shimDir}:${originalPath}`;
+    const budget = await checkDockerNetworkBudget();
+    expect(budget).toBeNull();
+  });
+
+  it("returns used + threshold when the host crosses the warning line", async () => {
+    if (platform() === "win32") return;
+    const shimDir = join(workDir, "shim-high");
+    const names = ["bridge", "host", "none"];
+    for (let i = 0; i < 30; i++) names.push(`proj-${i}`);
+    await mkShim(shimDir, "docker", `#!/usr/bin/env bash\ncat <<'EOF'\n${names.join("\n")}\nEOF\n`);
+    process.env.PATH = `${shimDir}:${originalPath}`;
+    const budget = await checkDockerNetworkBudget();
+    expect(budget).not.toBeNull();
+    expect(budget?.used).toBe(30);
+    expect(budget?.threshold).toBe(25);
+  });
+
+  it("returns null when docker exits non-zero (daemon down / cli missing)", async () => {
+    if (platform() === "win32") return;
+    const shimDir = join(workDir, "shim-err");
+    await mkShim(shimDir, "docker", `#!/usr/bin/env bash\necho "daemon unreachable" >&2\nexit 1\n`);
+    process.env.PATH = `${shimDir}:${originalPath}`;
+    const budget = await checkDockerNetworkBudget();
+    expect(budget).toBeNull();
+  });
+
+  it("does not count built-in networks (bridge/host/none) toward the budget", async () => {
+    if (platform() === "win32") return;
+    const shimDir = join(workDir, "shim-builtins");
+    // 24 custom networks + 3 built-ins — total 27 lines, but only 24 count.
+    const names = ["bridge", "host", "none"];
+    for (let i = 0; i < 24; i++) names.push(`proj-${i}`);
+    await mkShim(shimDir, "docker", `#!/usr/bin/env bash\ncat <<'EOF'\n${names.join("\n")}\nEOF\n`);
+    process.env.PATH = `${shimDir}:${originalPath}`;
+    const budget = await checkDockerNetworkBudget();
+    expect(budget).toBeNull();
   });
 });
 

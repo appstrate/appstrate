@@ -617,7 +617,9 @@ export function createRunsRouter() {
     if (endUser && exec.endUserId !== endUser.id) {
       throw notFound("Run not found");
     }
-    const logs = await listRunLogs(scope, runId);
+    // Ownership was just verified via getRun(scope) above — we can hand
+    // off to the org-scoped log reader safely.
+    const logs = await listRunLogs({ runId, orgId: scope.orgId });
 
     return c.json(logs);
   });

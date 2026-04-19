@@ -667,16 +667,58 @@ export async function getRunFull(scope: AppScope, id: string) {
 }
 
 /**
- * Fetch logs for a run. Org-scoped — `run_logs` has no applicationId
- * column. App-scoped callers should verify run ownership via `getRun`
- * before calling this.
+ * Org-scoped run snapshot read. Intentionally narrower than
+ * `getRun(scope, id)`: chat-like consumers span applications within a
+ * single org, so the read scopes on `orgId` alone. Returns the public
+ * `Run` DTO shape — schema internals (scheduler ids, actor fields, etc.)
+ * stay inside apps/api.
+ *
+ * The `{ runId, orgId }` object-args shape is the module-facing public
+ * contract (registered on `PlatformServices.runs.get`) — keep it stable.
+ * App-scoped internal callers prefer `getRun(scope, runId)`.
  */
-export async function listRunLogs(scope: OrgScope, runId: string) {
-  return db
+export async function getRunByOrg(args: { runId: string; orgId: string }) {
+  const [row] = await db
+    .select({
+      id: runs.id,
+      status: runs.status,
+      orgId: runs.orgId,
+      applicationId: runs.applicationId,
+      packageId: runs.packageId,
+      result: runs.result,
+      error: runs.error,
+    })
+    .from(runs)
+    .where(and(eq(runs.id, args.runId), eq(runs.orgId, args.orgId)))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Org-scoped run log read. `order: "asc"` (default) returns entries in
+ * insertion order (`id ASC`); `"desc"` selects the most recent `limit`
+ * entries and is cheaper when only a tail is needed. The returned batch
+ * is always chronological — `desc` affects which rows are selected, not
+ * the order callers receive.
+ *
+ * Org-scoped by design — `run_logs` has no `applicationId` column, and
+ * the object-args shape is the module-facing public contract. App-scoped
+ * callers must verify run ownership via `getRun(scope, runId)` first.
+ */
+export async function listRunLogs(args: {
+  runId: string;
+  orgId: string;
+  limit?: number;
+  order?: "asc" | "desc";
+}) {
+  const { runId, orgId, limit, order = "asc" } = args;
+  const q = db
     .select()
     .from(runLogs)
-    .where(and(eq(runLogs.runId, runId), eq(runLogs.orgId, scope.orgId)))
-    .orderBy(runLogs.id);
+    .where(and(eq(runLogs.runId, runId), eq(runLogs.orgId, orgId)))
+    .orderBy(order === "desc" ? desc(runLogs.id) : runLogs.id);
+  const rows = limit ? await q.limit(limit) : await q;
+  return order === "desc" ? rows.reverse() : rows;
 }
 
 /**

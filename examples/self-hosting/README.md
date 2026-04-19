@@ -103,6 +103,62 @@ The signing keypair for `1EF2FF084226C4FA` is already provisioned. Rotate only i
 - At least 4 GB of available RAM
 - Docker socket accessible at `/var/run/docker.sock` (required for agent runs)
 
+## Docker Network Pool Tuning
+
+Appstrate is network-heavy by design: the stack creates a few long-lived
+networks at boot (`appstrate-data`, `appstrate-public`,
+`appstrate-egress`, `appstrate-sidecar-pool`) and allocates one isolated
+bridge network per agent run (`appstrate-exec-<runId>`). On a host that
+already runs several Docker projects, that pressure is often enough to
+exhaust Docker's **default address pool** and produce:
+
+```
+Docker create network appstrate-exec-… failed: 400
+{"message":"all predefined address pools have been fully subnetted"}
+```
+
+This is a host-side limit, not a bug in Appstrate. Docker's default
+configuration splits `172.17.0.0/12` into `/16` subnets, which caps the
+whole host at ~31 user-defined networks.
+
+**Diagnose**:
+
+```bash
+docker network ls --format '{{.Name}}' | wc -l
+```
+
+**Quick fix** — reclaim unused networks:
+
+```bash
+docker network prune
+```
+
+**Permanent fix** — carve smaller subnets so the host can hold hundreds
+of networks. Edit Docker's daemon configuration:
+
+- **Linux**: `/etc/docker/daemon.json`
+- **macOS / Windows**: Docker Desktop → Settings → Docker Engine
+
+```json
+{
+  "default-address-pools": [
+    { "base": "172.20.0.0/16", "size": 24 },
+    { "base": "10.200.0.0/16", "size": 24 }
+  ]
+}
+```
+
+Then restart the Docker daemon (`sudo systemctl restart docker` on
+Linux; "Apply & Restart" in Docker Desktop). Each `/16` base yields
+~256 networks at `size: 24`, so two pools give ~512 slots — ample
+headroom for a busy Appstrate host. Docker consumes pools sequentially:
+the second pool is only tapped once the first is exhausted.
+
+Appstrate will still try to recover automatically on first failure — if
+the error above appears despite tuning, the platform reclaims orphan
+`appstrate-exec-*` networks from crashed runs and retries once. The
+remediation above is the durable fix.
+
 ## Manual Setup
 
 If you prefer to set up manually (or can't use the one-liner):
