@@ -82,6 +82,15 @@ describe("resolveDir", () => {
   it("rejects paths containing a NUL byte", async () => {
     await expect(resolveDir("/tmp/bad\0path")).rejects.toThrow(/newlines or NUL/);
   });
+
+  it("throws a clear error when stdin is not a TTY and --dir is missing", async () => {
+    // Sibling of the resolveTier non-TTY case: `curl | bash -s -- --tier 3`
+    // clears the tier prompt but would still crash on the askText() for
+    // --dir. Same fail-fast contract — message must name --dir.
+    expect(process.stdin.isTTY).toBeFalsy();
+    await expect(resolveDir(undefined)).rejects.toThrow(/stdin is not a TTY/);
+    await expect(resolveDir(undefined)).rejects.toThrow(/--dir/);
+  });
 });
 
 describe("parsePort", () => {

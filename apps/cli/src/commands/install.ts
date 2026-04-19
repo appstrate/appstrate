@@ -367,6 +367,12 @@ export async function resolveTier(raw: string | undefined): Promise<Tier> {
  * normalize to an absolute path. Exported for unit testing.
  */
 export async function resolveDir(raw: string | undefined): Promise<string> {
+  if (raw === undefined && !process.stdin.isTTY) {
+    throw new Error(
+      "Cannot prompt for install directory: stdin is not a TTY. " +
+        "Re-run with `--dir <path>`, e.g. `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3 --dir ~/appstrate`.",
+    );
+  }
   const chosen = raw ?? (await askText("Install directory", DEFAULT_INSTALL_DIR));
   // `tier0.ts` passes `dir` as an argv positional to `tar`, `curl`,
   // `git`, etc. without a shell wrapper, so interpolation injection is
