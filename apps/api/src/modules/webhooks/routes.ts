@@ -12,6 +12,7 @@
  */
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -83,6 +84,15 @@ export const updateWebhookSchema = z.object({
 export function createWebhooksRouter() {
   const router = new Hono<AppEnv>();
 
+  // Issue #172 (extension) — webhooks are application-scoped (or org-level
+  // and span every app). API keys must never reach a webhook outside their
+  // bound application: this returns the key's app id so service-layer
+  // lookups can constrain by `webhooks.applicationId === scope`. For
+  // sessions we return undefined (no extra scope).
+  function apiKeyAppScope(c: Context<AppEnv>): string | undefined {
+    return c.get("authMethod") === "api_key" ? c.get("applicationId") : undefined;
+  }
+
   // POST /api/webhooks — create a webhook (returns secret once)
   router.post(
     "/api/webhooks",
@@ -93,6 +103,18 @@ export function createWebhooksRouter() {
       const orgId = c.get("orgId");
       const body = await c.req.json();
       const data = parseBody(createWebhookSchema, body);
+
+      // API keys cannot create org-level webhooks (would span foreign apps)
+      // and cannot create app-level webhooks targeting another application.
+      const keyAppScope = apiKeyAppScope(c);
+      if (keyAppScope) {
+        if (data.level !== "application") {
+          throw forbidden("API keys cannot create org-level webhooks");
+        }
+        if (data.applicationId !== keyAppScope) {
+          throw forbidden("API key scope does not include this application");
+        }
+      }
 
       if (data.level === "application") {
         await assertAppBelongsToOrg(data.applicationId, orgId);
@@ -127,6 +149,18 @@ export function createWebhooksRouter() {
   // GET /api/webhooks[?applicationId=...&all=true] — list webhooks visible to the caller
   router.get("/api/webhooks", rateLimit(300), requirePermission("webhooks", "read"), async (c) => {
     const orgId = c.get("orgId");
+    const keyAppScope = apiKeyAppScope(c);
+
+    // For API keys, force the listing to the key's bound app and ignore
+    // `all` / `applicationId` query overrides — those are session affordances.
+    if (keyAppScope) {
+      const result = await listWebhooks(orgId, { applicationId: keyAppScope });
+      // Strip any org-level webhooks that listWebhooks unions in for app
+      // scope (those span the API key's app but aren't "owned" by it).
+      const own = result.filter((w) => w.applicationId === keyAppScope);
+      return c.json({ object: "list", data: own });
+    }
+
     const all = c.req.query("all") === "true";
     const applicationId = c.req.query("applicationId") || undefined;
     if (applicationId) {
@@ -146,7 +180,7 @@ export function createWebhooksRouter() {
     requirePermission("webhooks", "read"),
     async (c) => {
       const orgId = c.get("orgId");
-      const result = await getWebhook(orgId, c.req.param("id")!);
+      const result = await getWebhook(orgId, c.req.param("id")!, apiKeyAppScope(c));
       return c.json(result);
     },
   );
@@ -161,7 +195,7 @@ export function createWebhooksRouter() {
       const body = await c.req.json();
       const data = parseBody(updateWebhookSchema, body);
 
-      const result = await updateWebhook(orgId, c.req.param("id")!, data);
+      const result = await updateWebhook(orgId, c.req.param("id")!, data, apiKeyAppScope(c));
       return c.json(result);
     },
   );
@@ -173,7 +207,7 @@ export function createWebhooksRouter() {
     requirePermission("webhooks", "delete"),
     async (c) => {
       const orgId = c.get("orgId");
-      await deleteWebhook(orgId, c.req.param("id")!);
+      await deleteWebhook(orgId, c.req.param("id")!, apiKeyAppScope(c));
       return c.body(null, 204);
     },
   );
@@ -186,7 +220,7 @@ export function createWebhooksRouter() {
     async (c) => {
       const orgId = c.get("orgId");
       const webhookId = c.req.param("id")!;
-      const wh = await getWebhook(orgId, webhookId);
+      const wh = await getWebhook(orgId, webhookId, apiKeyAppScope(c));
 
       const { eventId, payload } = buildEventEnvelope({
         eventType: "test.ping",
@@ -206,7 +240,7 @@ export function createWebhooksRouter() {
     requirePermission("webhooks", "write"),
     async (c) => {
       const orgId = c.get("orgId");
-      const result = await rotateSecret(orgId, c.req.param("id")!);
+      const result = await rotateSecret(orgId, c.req.param("id")!, apiKeyAppScope(c));
       return c.json(result);
     },
   );
@@ -219,7 +253,7 @@ export function createWebhooksRouter() {
     async (c) => {
       const orgId = c.get("orgId");
       const limit = c.req.query("limit") ? Number(c.req.query("limit")) : 20;
-      const result = await listDeliveries(orgId, c.req.param("id")!, limit);
+      const result = await listDeliveries(orgId, c.req.param("id")!, limit, apiKeyAppScope(c));
       return c.json({ object: "list", data: result });
     },
   );

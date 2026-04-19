@@ -264,11 +264,30 @@ export async function listWebhooks(
   return rows.map(toWebhookResponse);
 }
 
-export async function getWebhook(orgId: string, webhookId: string): Promise<WebhookInfo> {
+// Issue #172 (extension) — webhook routes historically filtered by orgId
+// only, letting a key in App A read/mutate App B's webhooks (or org-level
+// webhooks that span all apps). When `applicationIdScope` is provided,
+// the lookup additionally requires `webhooks.applicationId === scope`,
+// which rejects both other-app webhooks and org-level webhooks (where
+// applicationId IS NULL).
+function appScopeFilter(applicationIdScope?: string) {
+  return applicationIdScope ? [eq(webhooks.applicationId, applicationIdScope)] : [];
+}
+
+export async function getWebhook(
+  orgId: string,
+  webhookId: string,
+  applicationIdScope?: string,
+): Promise<WebhookInfo> {
   const [row] = await db
     .select()
     .from(webhooks)
-    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }))
+    .where(
+      scopedWhere(webhooks, {
+        orgId,
+        extra: [eq(webhooks.id, webhookId), ...appScopeFilter(applicationIdScope)],
+      }),
+    )
     .limit(1);
 
   if (!row) throw notFound(`Webhook '${webhookId}' not found`);
@@ -285,8 +304,9 @@ export async function updateWebhook(
     payloadMode?: string;
     enabled?: boolean;
   },
+  applicationIdScope?: string,
 ): Promise<WebhookInfo> {
-  await getWebhook(orgId, webhookId);
+  await getWebhook(orgId, webhookId, applicationIdScope);
 
   if (params.url) validateWebhookUrl(params.url);
 
@@ -295,27 +315,48 @@ export async function updateWebhook(
   const [updated] = await db
     .update(webhooks)
     .set(updates)
-    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }))
+    .where(
+      scopedWhere(webhooks, {
+        orgId,
+        extra: [eq(webhooks.id, webhookId), ...appScopeFilter(applicationIdScope)],
+      }),
+    )
     .returning();
 
   return toWebhookResponse(updated!);
 }
 
-export async function deleteWebhook(orgId: string, webhookId: string): Promise<void> {
-  await getWebhook(orgId, webhookId);
-  await db
-    .delete(webhooks)
-    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }));
+export async function deleteWebhook(
+  orgId: string,
+  webhookId: string,
+  applicationIdScope?: string,
+): Promise<void> {
+  await getWebhook(orgId, webhookId, applicationIdScope);
+  await db.delete(webhooks).where(
+    scopedWhere(webhooks, {
+      orgId,
+      extra: [eq(webhooks.id, webhookId), ...appScopeFilter(applicationIdScope)],
+    }),
+  );
 }
 
-export async function rotateSecret(orgId: string, webhookId: string): Promise<{ secret: string }> {
-  await getWebhook(orgId, webhookId);
+export async function rotateSecret(
+  orgId: string,
+  webhookId: string,
+  applicationIdScope?: string,
+): Promise<{ secret: string }> {
+  await getWebhook(orgId, webhookId, applicationIdScope);
 
   const newSecret = generateSecret();
   await db
     .update(webhooks)
     .set({ secret: newSecret, updatedAt: new Date() })
-    .where(scopedWhere(webhooks, { orgId, extra: [eq(webhooks.id, webhookId)] }));
+    .where(
+      scopedWhere(webhooks, {
+        orgId,
+        extra: [eq(webhooks.id, webhookId), ...appScopeFilter(applicationIdScope)],
+      }),
+    );
 
   return { secret: newSecret };
 }
@@ -324,8 +365,9 @@ export async function listDeliveries(
   orgId: string,
   webhookId: string,
   limit = 20,
+  applicationIdScope?: string,
 ): Promise<WebhookDeliveryInfo[]> {
-  await getWebhook(orgId, webhookId);
+  await getWebhook(orgId, webhookId, applicationIdScope);
 
   const rows = await db
     .select()
