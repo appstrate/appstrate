@@ -54,6 +54,7 @@ import {
 import { hashSecret } from "../services/oauth-admin.ts";
 import { socialOverridePlugin } from "../services/ba-social-override-plugin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
+import { cliTokenPlugin } from "./cli-plugin.ts";
 import { assertUserRealm } from "./realm-check.ts";
 import { APPSTRATE_SCOPES } from "./scopes.ts";
 
@@ -159,6 +160,14 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // every downstream hook (`requirePlatformRealm`, org membership,
     // etc.) sees the correct identity.
     bearer(),
+    // CLI token plugin (issue #165) — exposes `/api/auth/cli/token` and
+    // `/api/auth/cli/revoke` for the 2.x appstrate CLI. Runs ALONGSIDE
+    // BA's default `deviceAuthorization()` plugin below; the device-flow
+    // `/device/code`, `/device/approve`, `/device/deny` endpoints are
+    // reused unchanged (no reason to duplicate the user-facing surface).
+    // The CLI only substitutes the polling endpoint to receive JWT +
+    // rotating refresh instead of a 7-day BA session.
+    cliTokenPlugin(),
     deviceAuthorization({
       expiresIn: "10m",
       interval: "5s",

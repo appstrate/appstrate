@@ -9,8 +9,9 @@
  *   3. POST /api/auth/device/code → receive user_code + verification URL.
  *   4. Print the code in the terminal + open the browser.
  *   5. Poll /api/auth/device/token until approval.
- *   6. Store the BA session token in the keyring; GET /api/profile to
- *      capture email + orgId; persist the profile in config.toml.
+ *   6. Store the JWT access + rotating refresh pair in the keyring
+ *      (issue #165); GET /api/auth/get-session to capture email +
+ *      userId; persist the profile in config.toml.
  */
 
 import open from "open";
@@ -20,14 +21,7 @@ import { saveTokens } from "../lib/keyring.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { CLI_USER_AGENT } from "../lib/version.ts";
-
-/** Canonical clientId for the official CLI. Matches `ensureCliClient()` server-side. */
-const CLI_CLIENT_ID = "appstrate-cli";
-
-/** Fixed scope set — RFC 8628 lets any registered scope through, but the
- * server only honors the CLI client's declared set (openid, profile,
- * email, offline_access). Hard-coding here keeps the request unambiguous. */
-const CLI_SCOPE = "openid profile email offline_access";
+import { CLI_CLIENT_ID, CLI_SCOPE } from "../lib/cli-client.ts";
 
 export interface LoginOptions {
   profile?: string;
@@ -103,9 +97,30 @@ async function runLogin(profileName: string, instance: string): Promise<void> {
   // Step 6 — persist both the tokens and the profile in one pass with
   // the real user id + email. `/api/profile` only exposes displayName
   // + language, so the BA `/get-session` response is authoritative here.
+  //
+  // Issue #165: a 2.x server MUST issue both `refresh_token` and
+  // `refresh_expires_in`. A missing `refresh_token` means pre-2.x;
+  // a missing `refresh_expires_in` means a non-conforming proxy
+  // stripped the field. Either way the CLI refuses the login rather
+  // than fabricating an expiry — a hallucinated 30-day window would
+  // mask a real protocol mismatch and leak into the keyring.
+  if (!token.refreshToken) {
+    throw new Error(
+      "Server did not issue a refresh token — the instance may be running a pre-2.x Appstrate. " +
+        "Upgrade the server, or use `--instance` to target a 2.x instance.",
+    );
+  }
+  if (token.refreshExpiresIn === undefined) {
+    throw new Error(
+      "Server returned a refresh token without refresh_expires_in — the response is non-conforming. " +
+        "Check the server version and any middleware transforming the /api/auth/cli/token response, then retry.",
+    );
+  }
   await saveTokens(profileName, {
     accessToken: token.accessToken,
     expiresAt: Date.now() + token.expiresIn * 1000,
+    refreshToken: token.refreshToken,
+    refreshExpiresAt: Date.now() + token.refreshExpiresIn * 1000,
   });
   await setProfile(profileName, {
     instance,

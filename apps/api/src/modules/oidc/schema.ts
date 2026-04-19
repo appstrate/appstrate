@@ -45,6 +45,7 @@ import {
   uuid,
   index,
   primaryKey,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 import { user, session, endUsers, organizations, applications } from "@appstrate/db/schema";
 
@@ -213,6 +214,55 @@ export const oauthConsent = pgTable("oauth_consents", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+// ─── CLI refresh tokens (issue #165) ──────────────────────────────────────────
+//
+// Backs the rotating refresh tokens issued by `POST /api/auth/cli/token`
+// for the `appstrate-cli` public client. One row per token ever minted;
+// rotations link via `parent_id` and share a common `family_id`. Reuse
+// detection revokes the entire family in a single UPDATE. See
+// `drizzle/migrations/0005_cli_refresh_tokens.sql` for the full rationale
+// + threat model, and `services/cli-tokens.ts` for the callers.
+
+export const cliRefreshToken = pgTable(
+  "cli_refresh_tokens",
+  {
+    id: text("id").primaryKey(),
+    tokenHash: text("token_hash").notNull().unique(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: "cascade" }),
+    familyId: text("family_id").notNull(),
+    // `parent_id` is the `id` of the row that rotated INTO this one. NULL
+    // on the head of a family (the initial device-code grant). Self-
+    // referential FK — Drizzle expresses it via the `foreignKey()` helper
+    // in the table-config callback because the column reference cannot be
+    // forward-declared inline (the table identifier resolves only inside
+    // the callback). Matches the `ON DELETE SET NULL` the migration
+    // `0005_cli_refresh_tokens.sql` applies. Without this expression here
+    // `drizzle-kit generate` would emit a spurious "drop FK" migration on
+    // the next schema diff.
+    parentId: text("parent_id"),
+    scope: text("scope"),
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    usedAt: timestamp("used_at"),
+    revokedAt: timestamp("revoked_at"),
+    revokedReason: text("revoked_reason"),
+  },
+  (t) => [
+    index("idx_cli_refresh_tokens_family").on(t.familyId),
+    index("idx_cli_refresh_tokens_user").on(t.userId),
+    foreignKey({
+      columns: [t.parentId],
+      foreignColumns: [t.id],
+      name: "cli_refresh_tokens_parent_id_fkey",
+    }).onDelete("set null"),
+  ],
+);
 
 // ─── OIDC shadow profile (module-owned RBAC/linking layer) ───────────────────
 

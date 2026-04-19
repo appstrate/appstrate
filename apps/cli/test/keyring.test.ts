@@ -775,3 +775,127 @@ describe("fallback file: tmp path O_EXCL protection", () => {
     await expect(access(bait)).rejects.toBeDefined();
   });
 });
+
+// ─── Issue #165 — refresh-token persistence contract ────────────────────────
+//
+// New in issue #165: the 2.x CLI stores BOTH the access token and a
+// rotating 30-day refresh token. The load/save surface must:
+//   1. Round-trip the new fields.
+//   2. Preserve legacy 1.x entries that have only the access token.
+//   3. Apply expiry-based auto-scrub to the REFRESH token's lifetime
+//      when present (falling back to access-token lifetime on legacy
+//      payloads).
+
+describe("refresh-token persistence (issue #165)", () => {
+  it("round-trips the full pair through the keyring", async () => {
+    const accessExp = futureMs();
+    const refreshExp = futureMs(3_600_000);
+    await saveTokens("default", {
+      accessToken: "at",
+      expiresAt: accessExp,
+      refreshToken: "rt-opaque",
+      refreshExpiresAt: refreshExp,
+    });
+    const read = await loadTokens("default");
+    expect(read).toEqual({
+      accessToken: "at",
+      expiresAt: accessExp,
+      refreshToken: "rt-opaque",
+      refreshExpiresAt: refreshExp,
+    });
+  });
+
+  it("round-trips the full pair through the file fallback", async () => {
+    FakeKeyring.shouldThrow = true;
+    const accessExp = futureMs();
+    const refreshExp = futureMs(3_600_000);
+    await saveTokens("default", {
+      accessToken: "at",
+      expiresAt: accessExp,
+      refreshToken: "rt-opaque",
+      refreshExpiresAt: refreshExp,
+    });
+    const read = await loadTokens("default");
+    expect(read).toEqual({
+      accessToken: "at",
+      expiresAt: accessExp,
+      refreshToken: "rt-opaque",
+      refreshExpiresAt: refreshExp,
+    });
+  });
+
+  it("tolerates a legacy payload with no refresh fields", async () => {
+    // Simulate a pre-#165 keyring entry by writing the raw legacy JSON
+    // directly — saveTokens with a Tokens object always produces the
+    // new shape.
+    const legacyExp = futureMs();
+    FakeKeyring.store.set(
+      "default",
+      JSON.stringify({ accessToken: "legacy", expiresAt: legacyExp }),
+    );
+    const read = await loadTokens("default");
+    expect(read).toEqual({ accessToken: "legacy", expiresAt: legacyExp });
+    // Critical migration hint: refresh fields must NOT be synthesized —
+    // `api.ts` relies on their absence to raise the "re-run appstrate
+    // login" AuthError.
+    expect(read?.refreshToken).toBeUndefined();
+    expect(read?.refreshExpiresAt).toBeUndefined();
+  });
+
+  it("discards a half-refresh entry (one field present, the other missing)", async () => {
+    // Defensive: a corrupt payload with refreshToken but no
+    // refreshExpiresAt (or vice versa) is not a valid state. Treat as
+    // legacy — drop both fields rather than carry a half-baked pair
+    // forward into api.ts.
+    const exp = futureMs();
+    FakeKeyring.store.set(
+      "default",
+      JSON.stringify({
+        accessToken: "at",
+        expiresAt: exp,
+        refreshToken: "rt",
+        // refreshExpiresAt intentionally missing
+      }),
+    );
+    const read = await loadTokens("default");
+    expect(read).toEqual({ accessToken: "at", expiresAt: exp });
+  });
+
+  it("does NOT scrub when only the access token is expired but the refresh token is still valid", async () => {
+    // Issue #165 key invariant: an expired access token + valid
+    // refresh token is the HAPPY path for `api.ts` (it rotates via
+    // the refresh). If loadTokens scrubbed this state, silent refresh
+    // could never run.
+    const accessExp = Date.now() - 1_000; // already expired
+    const refreshExp = futureMs(3_600_000);
+    await saveTokens("default", {
+      accessToken: "expired-at",
+      expiresAt: accessExp,
+      refreshToken: "rt",
+      refreshExpiresAt: refreshExp,
+    });
+    const read = await loadTokens("default");
+    expect(read).not.toBeNull();
+    expect(read?.refreshToken).toBe("rt");
+  });
+
+  it("scrubs when both access and refresh tokens are expired", async () => {
+    const past = Date.now() - 1_000;
+    await saveTokens("default", {
+      accessToken: "expired-at",
+      expiresAt: past,
+      refreshToken: "rt",
+      refreshExpiresAt: past,
+    });
+    expect(await loadTokens("default")).toBeNull();
+  });
+
+  it("scrubs legacy payloads based on access-token expiry alone", async () => {
+    const past = Date.now() - 1_000;
+    FakeKeyring.store.set(
+      "default",
+      JSON.stringify({ accessToken: "expired-legacy", expiresAt: past }),
+    );
+    expect(await loadTokens("default")).toBeNull();
+  });
+});

@@ -3,13 +3,21 @@
 /**
  * RFC 8628 Device Authorization Grant — client side.
  *
- * Plain `fetch()` against the two BA-mounted endpoints (`/api/auth/device/code`
- * and `/api/auth/device/token`). We deliberately skip `openid-client@6`
- * because the Appstrate CLI's access token is an opaque BA session (not
- * a JWT) — the discovery + JWKS verification that `openid-client` brings
- * would be unused code. The protocol itself is ~60 lines; keeping it
- * inline lets the CLI ship without that dependency + lets us shape the
- * errors exactly how `commands/login.ts` wants to render them.
+ * Plain `fetch()` against BA-mounted endpoints:
+ *   - `/api/auth/device/code` to initiate (RFC 8628 §3.1).
+ *   - `/api/auth/cli/token`   to poll / exchange (Appstrate #165).
+ *
+ * **Token shape change (issue #165)**: since v2.x we poll
+ * `/api/auth/cli/token` (NOT `/api/auth/device/token`) and receive a
+ * **signed JWT access token (15 min) + rotating opaque refresh token
+ * (30 d)** instead of a 7-day Better Auth session. The same endpoint
+ * also serves the silent-refresh grant (`grant_type=refresh_token`) so
+ * the CLI can mint fresh access tokens without re-authenticating. The
+ * protocol stays RFC 8628 — only the response shape widens with a
+ * `refresh_token` field and the transport endpoint moves to a different
+ * path. Legacy 1.x CLI binaries continue to work against the original
+ * `/device/token` endpoint which the server keeps mounted for backward
+ * compatibility.
  *
  * Two entry points:
  *   - `startDeviceFlow(instance, clientId, scope)` → initial pair of
@@ -30,15 +38,29 @@ export interface DeviceCodeResponse {
   verificationUriComplete: string;
   /** Seconds until the device_code expires. */
   expiresIn: number;
-  /** Minimum seconds between `/device/token` polls. */
+  /** Minimum seconds between `/cli/token` polls. */
   interval: number;
 }
 
 export interface DeviceTokenResponse {
   accessToken: string;
+  /**
+   * 30-day rotating refresh token issued by `/api/auth/cli/token`
+   * alongside the JWT access. `undefined` only on servers that still
+   * host the legacy `/device/token` handler — the CLI treats a
+   * missing refresh_token as an auth-protocol downgrade and surfaces
+   * it through `commands/login.ts`.
+   */
+  refreshToken?: string;
   tokenType: string;
   /** Seconds until the access_token expires. */
   expiresIn: number;
+  /**
+   * Seconds until the refresh_token expires. `undefined` when the
+   * server did not issue a refresh token (legacy 1.x `/device/token`
+   * endpoint, or a non-conforming proxy stripped the field).
+   */
+  refreshExpiresIn?: number;
   scope: string;
 }
 
@@ -207,7 +229,11 @@ export async function pollDeviceFlow(
       throw new DeviceFlowError("access_denied", "Polling aborted by caller.", 0);
     }
 
-    const res = await fetch(`${normalizeInstance(instance)}/api/auth/device/token`, {
+    // NOTE: `/api/auth/cli/token` replaces `/api/auth/device/token` for
+    // the 2.x CLI (issue #165). The new endpoint returns JWT + rotating
+    // refresh pair; the original stays mounted server-side for 1.x
+    // binaries but we never poll it from this branch.
+    const res = await fetch(`${normalizeInstance(instance)}/api/auth/cli/token`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
@@ -216,14 +242,18 @@ export async function pollDeviceFlow(
     if (res.ok) {
       const json = (await res.json()) as {
         access_token: string;
+        refresh_token?: string;
         token_type: string;
         expires_in: number;
+        refresh_expires_in?: number;
         scope: string;
       };
       return {
         accessToken: json.access_token,
+        refreshToken: json.refresh_token,
         tokenType: json.token_type,
         expiresIn: json.expires_in,
+        refreshExpiresIn: json.refresh_expires_in,
         scope: json.scope ?? "",
       };
     }
@@ -250,6 +280,94 @@ export async function pollDeviceFlow(
     "The device code expired before the user approved it.",
     0,
   );
+}
+
+/**
+ * `grant_type=refresh_token` — exchange the stored refresh token for a
+ * fresh access + refresh pair (rotation). Issue #165. Returns the new
+ * pair; the caller must persist it atomically (the old refresh token is
+ * single-use — a second exchange of the same plaintext triggers the
+ * server-side reuse-detection sweep that revokes the whole family).
+ *
+ * On any non-2xx response, throws `DeviceFlowError(code, description,
+ * status)` — callers distinguish recoverable from terminal states:
+ *   - `invalid_grant`: refresh token expired, revoked, or already
+ *     rotated (replay). The CLI must clear local credentials and
+ *     prompt `appstrate login`.
+ *   - transient HTTP errors (network, 5xx): surfaced so the caller can
+ *     decide to retry or fall through to re-auth.
+ */
+export async function refreshCliTokens(
+  instance: string,
+  clientId: string,
+  refreshToken: string,
+): Promise<DeviceTokenResponse> {
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    client_id: clientId,
+  }).toString();
+  const res = await fetch(`${normalizeInstance(instance)}/api/auth/cli/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!res.ok) {
+    const err = await parseErrorBody(res);
+    throw new DeviceFlowError(err.error ?? "invalid_request", err.error_description, res.status);
+  }
+  const json = (await res.json()) as {
+    access_token: string;
+    refresh_token?: string;
+    token_type: string;
+    expires_in: number;
+    refresh_expires_in?: number;
+    scope: string;
+  };
+  return {
+    accessToken: json.access_token,
+    refreshToken: json.refresh_token,
+    tokenType: json.token_type,
+    expiresIn: json.expires_in,
+    refreshExpiresIn: json.refresh_expires_in,
+    scope: json.scope ?? "",
+  };
+}
+
+/**
+ * Server-side revocation of a refresh-token family. Called on
+ * `appstrate logout` before local credential cleanup.
+ *
+ * Contract: throws `DeviceFlowError` on any non-2xx response (network
+ * error, 4xx, 5xx). Callers that want best-effort revocation (e.g.
+ * `logout.ts`) MUST wrap the call in try/catch and proceed with local
+ * cleanup on failure — revocation state is advisory from the client's
+ * perspective, but surfacing the error at the call site lets the
+ * command render a clear warning rather than silently skipping it.
+ *
+ * The 200 body (`{ revoked: boolean }`) is intentionally ignored —
+ * `revoked: false` just means the token was unknown or client-mismatched
+ * on the server, which is operationally equivalent to success from the
+ * CLI's perspective (the token is dead to us either way).
+ */
+export async function revokeCliRefreshToken(
+  instance: string,
+  clientId: string,
+  refreshToken: string,
+): Promise<void> {
+  const body = new URLSearchParams({
+    token: refreshToken,
+    client_id: clientId,
+  }).toString();
+  const res = await fetch(`${normalizeInstance(instance)}/api/auth/cli/revoke`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!res.ok) {
+    const err = await parseErrorBody(res);
+    throw new DeviceFlowError(err.error ?? "invalid_request", err.error_description, res.status);
+  }
 }
 
 async function parseErrorBody(res: Response): Promise<RawErrorBody> {

@@ -6,6 +6,10 @@
  * tables with `truncateAll()` for per-test cleanup.
  */
 export default [
+  // `cli_refresh_tokens` has a self-FK on `parent_id`, so truncate before
+  // `oauth_clients` (children reference clients) but there is no cross-table
+  // dep on this row outside that one.
+  "cli_refresh_tokens",
   "oauth_access_tokens",
   "oauth_refresh_tokens",
   "oauth_consents",
