@@ -127,6 +127,12 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
     const project =
       tier === 0 ? undefined : await resolveProjectName(dir, installState.existing.hasCompose);
 
+    // Under --yes, soften port conflicts by auto-picking the next free
+    // port instead of failing fast. Rationale: the one-liner installer's
+    // user contract is "paste into terminal, get a working Appstrate"
+    // — and the single most common snag is a stale dev server still
+    // bound to :3000 from an earlier session. A strict --tier N script
+    // keeps the fail-fast semantics so CI/automation surfaces the drift.
     const port = await resolveAppstratePort(
       opts.port,
       nonInteractive,
@@ -134,6 +140,7 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
       installState.existing,
       dir,
       project?.name,
+      { autoPick: autoConfirm },
     );
     const minioConsolePort =
       tier === 3
@@ -144,6 +151,7 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
             installState.existing,
             dir,
             project?.name,
+            { autoPick: autoConfirm },
           )
         : undefined;
 
@@ -169,7 +177,31 @@ const NO_EXISTING_INSTALL: ExistingInstall = { hasEnv: false, hasCompose: false,
 /** DI seam for the cross-check with `docker compose ls` — tests inject a fake, production uses the real helper. */
 export interface PortResolverDeps {
   findRunningComposeProject?: (name: string) => Promise<RunningComposeProject | null>;
+  /**
+   * When the preferred port is busy under non-interactive mode, probe
+   * upward (port+1, port+2, …) and use the first free one instead of
+   * failing fast. Wired to `--yes` by `installCommand` so `curl | bash`
+   * re-runs that hit a stale process on :3000 just pick :3001 — matches
+   * the "it just works" contract of the bootstrap installer. Defaulting
+   * to false keeps explicit `--tier N` scripted installs strict: they
+   * surface the conflict instead of silently drifting the port.
+   *
+   * Bounded scan (`AUTO_PICK_MAX_ATTEMPTS`) so a host with dense port
+   * usage can't take us on an O(65k) walk before failing — we'd rather
+   * error cleanly and let the user pass `--port <n>` explicitly.
+   */
+  autoPick?: boolean;
 }
+
+/**
+ * Upper bound on the auto-pick scan window. 20 is deliberately small:
+ * the goal is to tolerate "a stale dev server is still on :3000",
+ * not to gracefully handle a host where the next 200 ports are busy.
+ * If 20 probes come back busy it's almost always a broader problem
+ * (port-scanning tool, misconfigured firewall, thousands of containers)
+ * that the user should see as an error rather than a silent drift.
+ */
+const AUTO_PICK_MAX_ATTEMPTS = 20;
 
 /**
  * Decide whether the inherited port belongs to OUR running stack. Only
@@ -227,7 +259,14 @@ export async function resolveAppstratePort(
       return inherited;
     }
   }
-  return ensurePortFree(requested, "APPSTRATE_PORT", "--port", "Appstrate", nonInteractive);
+  return ensurePortFree(
+    requested,
+    "APPSTRATE_PORT",
+    "--port",
+    "Appstrate",
+    nonInteractive,
+    deps.autoPick ?? false,
+  );
 }
 
 /** Resolve the MinIO console port (Tier 3); preflight-skip additionally gated on MINIO_ROOT_PASSWORD so a Tier 1/2 → 3 upgrade still probes the net-new port. */
@@ -270,6 +309,7 @@ export async function resolveMinioConsolePort(
     "--minio-console-port",
     "MinIO console",
     nonInteractive,
+    deps.autoPick ?? false,
   );
 }
 
@@ -309,9 +349,31 @@ export function parsePort(
 }
 
 /**
+ * Probe `port` upward (port+1, port+2, …) until a free one is found or
+ * the attempt budget is exhausted. Skips the input `port` itself (the
+ * caller already proved it's busy). Returns `null` when the whole
+ * window is busy or the scan walks past 65535 — the caller decides
+ * whether that's fatal or just a fallback to the strict error.
+ */
+async function findNextFreePort(startExclusive: number): Promise<number | null> {
+  for (let offset = 1; offset <= AUTO_PICK_MAX_ATTEMPTS; offset++) {
+    const candidate = startExclusive + offset;
+    if (candidate > 65535) return null;
+    if (await isPortAvailable(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
  * Probe the port; on conflict, print a best-effort "who's holding it"
- * hint and either prompt the user for a new one (interactive) or
- * throw a helpful error (non-interactive).
+ * hint and either
+ *   - pick the next free port silently-ish (non-interactive + autoPick,
+ *     i.e. the `curl|bash --yes` path — the user explicitly asked for
+ *     zero prompts, and a stale :3000 is the common failure mode),
+ *   - fail fast with a message naming both flag and env-var escape
+ *     hatches (non-interactive without autoPick — scripted installs
+ *     that want strict semantics), or
+ *   - prompt the user for a new port (interactive).
  */
 async function ensurePortFree(
   port: number,
@@ -319,15 +381,40 @@ async function ensurePortFree(
   flagName: string,
   label: string,
   nonInteractive: boolean,
+  autoPick = false,
 ): Promise<number> {
   if (await isPortAvailable(port)) return port;
 
   const holder = await describeProcessOnPort(port);
   const holderHint = holder ? ` Held by ${holder}.` : "";
 
+  if (nonInteractive && autoPick) {
+    const next = await findNextFreePort(port);
+    if (next !== null) {
+      // log.info (not warn) because this is the designed happy path of
+      // --yes — "just pick a free port". The message still names the
+      // override knobs so a user who does care can redirect on re-run.
+      clack.log.info(
+        `Port ${port} (${label}) in use.${holderHint} Auto-picked ${next} instead — pass ${flagName} <n> or pipe via \`curl … | ${envVar}=<n> bash\` to override.`,
+      );
+      return next;
+    }
+    // Fall through to the strict error below. The scan window was
+    // bounded (AUTO_PICK_MAX_ATTEMPTS), and a host with that many
+    // contiguous busy ports is almost never something the installer
+    // should be papering over silently.
+  }
+
   if (nonInteractive) {
+    // Shell gotcha: `${envVar}=<n> curl -fsSL … | bash` sets the env var
+    // for `curl` only, not for the piped `bash` that exec's this CLI.
+    // We call it out explicitly because `curl | bash` is the documented
+    // one-liner and this mistake is common enough to merit a hint in
+    // the error itself rather than buried in a support thread.
     throw new Error(
-      `Port ${port} is already in use (${label}).${holderHint} Re-run with ${flagName} <n> or set ${envVar}=<n> to pick a free port.`,
+      `Port ${port} is already in use (${label}).${holderHint} ` +
+        `Re-run with ${flagName} <n>, or pipe via \`curl -fsSL https://get.appstrate.dev | ${envVar}=<n> bash\` ` +
+        `(note: \`${envVar}=<n> curl … | bash\` sets the var for curl, not bash — use the syntax above instead).`,
     );
   }
 
