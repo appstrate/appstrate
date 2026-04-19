@@ -206,6 +206,14 @@ program
     [],
   )
   .option("-q, --query <kv>", "Query parameter 'k=v' (repeatable)", collect, [])
+  .option(
+    "-G, --get",
+    "Convert -d/--data values into query parameters and send a GET (curl -G). Incompatible with -F.",
+  )
+  .option(
+    "-v, --verbose",
+    "Trace request + response headers on stderr (curl -v). Authorization header is always [REDACTED].",
+  )
   .option("-X, --request <method>", "Override method (takes precedence over positional)")
   .option("-o, --output <file>", "Write response body to file (default: stdout)")
   .option("-i, --include", "Include status line + response headers on stdout")
@@ -276,6 +284,8 @@ program
       head: opts.head === true,
       silent: opts.silent === true,
       showError: opts.showError === true,
+      verbose: opts.verbose === true,
+      get: opts.get === true,
       fail: opts.fail === true,
       location: opts.location === true,
       insecure: opts.insecure === true,

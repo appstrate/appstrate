@@ -173,6 +173,8 @@ async function runCommand(
     location: opts.location,
     insecure: opts.insecure,
     maxTime: opts.maxTime,
+    verbose: opts.verbose,
+    get: opts.get,
   };
   try {
     await apiCommand(full, io);
@@ -912,5 +914,120 @@ describe("apiCommand — silent / show-error semantics", () => {
     expect(stderr.filter((b) => stdoutText([b]).includes("Session may be expired"))).toHaveLength(
       0,
     );
+  });
+});
+
+// ─── P2a — Verbose tracing ──────────────────────────────────────────
+
+describe("apiCommand — -v/--verbose", () => {
+  beforeEach(async () => {
+    await seedLoggedIn("default", { orgId: "org_42" });
+  });
+
+  it("writes request + response trace to stderr with redacted Authorization", async () => {
+    installFetch(
+      () =>
+        new Response("body", {
+          status: 200,
+          headers: { "Content-Type": "text/plain", "X-Custom": "yes" },
+        }),
+    );
+    const { io, stdout, stderr, exitCode } = makeIO();
+    await runCommand({ method: "POST", path: "/api/foo", verbose: true, data: "hello" }, io);
+    expect(exitCode.value).toBe(0);
+    const trace = stdoutText(stderr);
+    expect(trace).toContain("> POST /api/foo HTTP/1.1");
+    expect(trace).toContain("> Host: app.example.com");
+    expect(trace).toContain("> Authorization: Bearer [REDACTED]");
+    expect(trace).toContain("> X-Org-Id: org_42");
+    expect(trace).toContain("< HTTP/1.1 200");
+    expect(stdoutText(stdout)).toBe("body");
+    // Security: raw bearer MUST NOT appear anywhere on stderr
+    expect(trace).not.toContain("access-1");
+  });
+
+  it("-sv keeps verbose output on stderr (curl behavior)", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, stderr } = makeIO();
+    await runCommand({ method: "GET", path: "/p", silent: true, verbose: true }, io);
+    expect(stdoutText(stderr)).toContain("> GET /p HTTP/1.1");
+  });
+
+  it("redacts user-supplied Authorization header too", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, stderr } = makeIO();
+    await runCommand(
+      {
+        method: "GET",
+        path: "/p",
+        verbose: true,
+        header: ["Authorization: Bearer super-secret-override"],
+      },
+      io,
+    );
+    const trace = stdoutText(stderr);
+    expect(trace).not.toContain("super-secret-override");
+    expect(trace).toContain("[REDACTED]");
+  });
+});
+
+// ─── P2c — -G/--get ────────────────────────────────────────────────
+
+describe("apiCommand — -G/--get", () => {
+  beforeEach(async () => {
+    await seedLoggedIn("default");
+  });
+
+  it("projects -d values into query string and forces GET", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/search", get: true, data: "q=foo&sort=date" }, io);
+    expect(fetchCalls[0]!.method).toBe("GET");
+    expect(fetchCalls[0]!.url).toContain("q=foo");
+    expect(fetchCalls[0]!.url).toContain("sort=date");
+    expect(fetchCalls[0]!.body).toBeUndefined();
+  });
+
+  it("encodes spaces via URL.searchParams", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/search", get: true, data: "q=foo bar" }, io);
+    expect(fetchCalls[0]!.url).toContain("q=foo+bar");
+  });
+
+  it("-G combined with -F exits 2 with error, no fetch", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, stderr, exitCode } = makeIO();
+    await runCommand({ path: "/search", get: true, form: ["file=@x"] }, io);
+    expect(exitCode.value).toBe(2);
+    expect(fetchCalls).toHaveLength(0);
+    expect(stdoutText(stderr)).toContain("cannot combine");
+  });
+
+  it("-G -X POST keeps POST but still drops body (curl behavior)", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/search", get: true, request: "POST", data: "q=foo" }, io);
+    expect(fetchCalls[0]!.method).toBe("POST");
+    expect(fetchCalls[0]!.url).toContain("q=foo");
+    expect(fetchCalls[0]!.body).toBeUndefined();
+  });
+
+  it("merges -G data with existing -q query params", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/search", get: true, data: "q=foo", query: ["lang=fr"] }, io);
+    expect(fetchCalls[0]!.url).toContain("q=foo");
+    expect(fetchCalls[0]!.url).toContain("lang=fr");
+  });
+
+  it("-G -d @file reads query string from file", async () => {
+    const tmpFile = join(tmpDir, "qs.txt");
+    await writeFile(tmpFile, "q=from-file&n=1");
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/search", get: true, data: `@${tmpFile}` }, io);
+    expect(fetchCalls[0]!.url).toContain("q=from-file");
+    expect(fetchCalls[0]!.url).toContain("n=1");
   });
 });

@@ -100,6 +100,20 @@ export interface ApiCommandOptions {
   location?: boolean;
   insecure?: boolean;
   maxTime?: number;
+  /**
+   * `-v, --verbose`: trace request + response metadata on stderr
+   * (one `>` line per request header, one `<` line per response
+   * header, `*` for informational notes). Authorization is always
+   * redacted. Verbose output bypasses `-s` (same as curl).
+   */
+  verbose?: boolean;
+  /**
+   * `-G, --get`: treat any `-d`/`--data-raw`/`--data-binary` values
+   * as query parameters on a GET request (body is cleared). curl
+   * semantics — each value is split on `=` and appended. Multipart
+   * (`-F`) is incompatible and rejected with exit 2.
+   */
+  get?: boolean;
 }
 
 /**
@@ -167,11 +181,30 @@ export async function apiCommand(
     throw err;
   }
 
+  // P2c — `-G/--get`: move -d values into query, drop body, force GET.
+  // curl rejects -G combined with -F (multipart has no sane projection
+  // into a query string), we do the same with exit 2.
+  let effectiveOpts = opts;
+  if (opts.get) {
+    if (opts.form.length > 0) {
+      writeError("cannot combine -G/--get with -F/--form (multipart)\n");
+      return io.exit(2);
+    }
+    const extraQuery = await collectGetDataAsQuery(opts, io);
+    effectiveOpts = {
+      ...opts,
+      query: [...opts.query, ...extraQuery],
+      data: undefined,
+      dataRaw: undefined,
+      dataBinary: undefined,
+    };
+  }
+
   // 2. Build URL + query. Cross-origin target → refuse rather than
   //    leak the bearer (exit 2, curl-aligned for usage errors).
   let url: string;
   try {
-    url = buildUrl(auth.instance, opts.path, opts.query);
+    url = buildUrl(auth.instance, effectiveOpts.path, effectiveOpts.query);
   } catch (err) {
     if (err instanceof HostMismatchError) {
       writeError(`${err.message}\n`);
@@ -182,16 +215,16 @@ export async function apiCommand(
 
   // 3. Build headers (user -H last so it can override defaults).
   const headers = buildHeaders({
-    userHeaders: opts.header,
+    userHeaders: effectiveOpts.header,
     token: auth.accessToken,
     orgId: auth.orgId,
   });
 
   // 4. Build body (mutually exclusive; later modes win).
-  const { body, usesStdin } = await buildBody(opts, io);
+  const { body, usesStdin } = await buildBody(effectiveOpts, io);
 
   // 5. Pick method.
-  const method = pickMethod(opts, Boolean(body));
+  const method = pickMethod(effectiveOpts, Boolean(body));
 
   // HEAD never sends a body.
   const finalBody = method === "HEAD" ? undefined : body;
@@ -255,7 +288,11 @@ export async function apiCommand(
         redirect: opts.location ? "follow" : "manual",
       };
       if (usesStdin) init.duplex = "half";
+      // P2a — `-v/--verbose`: trace request on stderr. Always emitted
+      // (even with -s), matching curl. Authorization is always redacted.
+      if (opts.verbose) writeVerboseRequest(io, profileName, method, url, headers);
       res = await fetch(url, init as Parameters<typeof fetch>[1]);
+      if (opts.verbose) writeVerboseResponse(io, res);
     } catch (err) {
       cleanup();
       return handleStreamError(err, ac.signal, sigintFired, io, opts);
@@ -549,4 +586,85 @@ function restoreTls(prev: string | undefined): void {
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+// ─── P2a — `-v/--verbose` trace ─────────────────────────────────────
+
+/**
+ * Curl-style request trace. Always writes to stderr (bypasses `-s` —
+ * curl does the same: `-sv` keeps the trace). Authorization is always
+ * `[REDACTED]` — the whole point of this CLI is that the agent never
+ * sees the raw bearer, and `-v` output is quoted in CI logs, issues,
+ * Discord screenshots, etc.
+ */
+function writeVerboseRequest(
+  io: ApiCommandIO,
+  profileName: string,
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+): void {
+  const u = new URL(url);
+  io.stderr.write(`* Profile: "${profileName}" → ${u.origin}\n`);
+  io.stderr.write(`* Bearer injected from keyring, never exposed to caller\n`);
+  io.stderr.write(`> ${method} ${u.pathname}${u.search} HTTP/1.1\r\n`);
+  io.stderr.write(`> Host: ${u.host}\r\n`);
+  for (const [k, v] of Object.entries(headers)) {
+    // Any header named Authorization is redacted, regardless of casing
+    // (`-H authorization: …` overrides our injected default but we
+    // still hide it — the hash in the value is sensitive).
+    const display = k.toLowerCase() === "authorization" ? "Bearer [REDACTED]" : v;
+    io.stderr.write(`> ${k}: ${display}\r\n`);
+  }
+  io.stderr.write(`>\r\n`);
+}
+
+function writeVerboseResponse(io: ApiCommandIO, res: Response): void {
+  io.stderr.write(`< HTTP/1.1 ${res.status} ${res.statusText || ""}\r\n`);
+  for (const [k, v] of res.headers) {
+    io.stderr.write(`< ${k}: ${v}\r\n`);
+  }
+  io.stderr.write(`<\r\n`);
+}
+
+// ─── P2c — `-G/--get` data → query transformation ───────────────────
+
+/**
+ * Consume any body-data flags and project them into query-string
+ * pairs. curl's `-G` semantics: each value is treated as an
+ * already-encoded `k=v[&k=v]*` fragment. We split on `&` and pass
+ * each pair through `-q`-style parsing in `buildUrl` (which uses
+ * URL.searchParams for proper encoding of any embedded whitespace).
+ */
+async function collectGetDataAsQuery(opts: ApiCommandOptions, io: ApiCommandIO): Promise<string[]> {
+  const values: string[] = [];
+  const pushStr = (raw: string): void => {
+    const stripped = raw.endsWith("\n") ? raw.slice(0, -1) : raw;
+    values.push(stripped);
+  };
+  const readFromRef = async (ref: string): Promise<string> => {
+    if (ref === "-") {
+      const reader = io.stdinStream?.().getReader();
+      if (!reader) return "";
+      const chunks: Uint8Array[] = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) chunks.push(value);
+      }
+      return new TextDecoder().decode(Buffer.concat(chunks.map((c) => Buffer.from(c))));
+    }
+    return Bun.file(ref).text();
+  };
+  if (typeof opts.data === "string") {
+    if (opts.data.startsWith("@")) pushStr(await readFromRef(opts.data.slice(1)));
+    else pushStr(opts.data);
+  }
+  if (typeof opts.dataRaw === "string") values.push(opts.dataRaw);
+  if (typeof opts.dataBinary === "string") {
+    if (opts.dataBinary.startsWith("@")) values.push(await readFromRef(opts.dataBinary.slice(1)));
+    else values.push(opts.dataBinary);
+  }
+  // Split each value on `&` so `-d 'k=v&k2=v2'` produces two query pairs.
+  return values.flatMap((v) => v.split("&")).filter(Boolean);
 }
