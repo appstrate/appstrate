@@ -1,0 +1,167 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Appstrate Test API",
+    "version": "1.0.0",
+    "description": "Fixture spec for CLI tests."
+  },
+  "servers": [{ "url": "https://api.example.com" }],
+  "tags": [
+    { "name": "runs", "description": "Run lifecycle" },
+    { "name": "agents", "description": "Agent management" },
+    { "name": "legacy", "description": "Deprecated endpoints" }
+  ],
+  "paths": {
+    "/api/runs": {
+      "get": {
+        "operationId": "listRuns",
+        "summary": "List runs",
+        "description": "Return the list of runs for the current org.",
+        "tags": ["runs"],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer" },
+            "description": "Max number of runs to return."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RunList" }
+              }
+            }
+          },
+          "401": { "description": "Unauthorized" }
+        }
+      },
+      "post": {
+        "operationId": "createRun",
+        "summary": "Create a run",
+        "tags": ["runs"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateRunRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Run" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{id}": {
+      "get": {
+        "operationId": "getRun",
+        "summary": "Get a run",
+        "tags": ["runs"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Run" } }
+            }
+          },
+          "404": { "description": "Not found" }
+        }
+      },
+      "delete": {
+        "operationId": "cancelRun",
+        "summary": "Cancel a run",
+        "tags": ["runs"],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "204": { "description": "No content" } }
+      }
+    },
+    "/api/agents": {
+      "get": {
+        "operationId": "listAgents",
+        "summary": "List agents",
+        "tags": ["agents"],
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+    "/api/agents/{id}": {
+      "get": {
+        "operationId": "getAgent",
+        "summary": "Get an agent",
+        "tags": ["agents"],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "put": {
+        "operationId": "updateAgent",
+        "summary": "Update an agent",
+        "tags": ["agents"],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "type": "object" } }
+          }
+        },
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/deprecated": {
+      "get": {
+        "operationId": "legacyThing",
+        "summary": "Legacy endpoint",
+        "tags": ["legacy"],
+        "deprecated": true,
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Run": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string" }
+        }
+      },
+      "RunList": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Run" } }
+        }
+      },
+      "CreateRunRequest": {
+        "type": "object",
+        "required": ["agentId"],
+        "properties": {
+          "agentId": { "type": "string" },
+          "input": { "type": "object" }
+        }
+      }
+    }
+  }
+}
