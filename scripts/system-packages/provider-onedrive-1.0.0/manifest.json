@@ -1,0 +1,49 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/onedrive",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "OneDrive",
+  "description": "Cloud file storage and sharing by Microsoft",
+  "iconUrl": "microsoftonedrive",
+  "categories": ["storage", "productivity"],
+  "docsUrl": "https://learn.microsoft.com/en-us/graph/api/resources/onedrive",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "tokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "refreshUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "defaultScopes": [
+        "Files.Read",
+        "User.Read",
+        "offline_access"
+      ],
+      "scopeSeparator": " ",
+      "pkceEnabled": true,
+      "tokenAuthMethod": "client_secret_post"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": ["https://graph.microsoft.com/*"],
+    "availableScopes": [
+      { "value": "Files.Read", "label": "Read user files" },
+      { "value": "Files.Read.All", "label": "Read all files user can access" },
+      { "value": "Files.ReadWrite", "label": "Read and write user files" },
+      { "value": "Files.ReadWrite.All", "label": "Read and write all files" },
+      { "value": "Sites.Read.All", "label": "Read SharePoint sites" },
+      { "value": "Sites.ReadWrite.All", "label": "Read and write SharePoint sites" },
+      { "value": "User.Read", "label": "Read user profile" },
+      { "value": "offline_access", "label": "Maintain access (refresh tokens)" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
+    "steps": [
+      { "label": "Register an application in Azure AD", "url": "https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" },
+      { "label": "Add Microsoft Graph delegated permissions (Files.Read, User.Read, offline_access)" },
+      { "label": "Create a client secret under Certificates & secrets" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

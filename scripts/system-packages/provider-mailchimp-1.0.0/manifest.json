@@ -1,0 +1,34 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/mailchimp",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Mailchimp",
+  "description": "Email marketing and automation platform",
+  "iconUrl": "mailchimp",
+  "categories": ["email-marketing", "marketing"],
+  "docsUrl": "https://mailchimp.com/developer/marketing/api/",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://login.mailchimp.com/oauth2/authorize",
+      "tokenUrl": "https://login.mailchimp.com/oauth2/token",
+      "defaultScopes": [],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_post"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": ["https://*.api.mailchimp.com/*", "https://login.mailchimp.com/*"],
+    "availableScopes": []
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
+    "steps": [
+      { "label": "Register an OAuth app in Mailchimp", "url": "https://admin.mailchimp.com/account/oauth2/" },
+      { "label": "Copy your Client ID and Client Secret" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

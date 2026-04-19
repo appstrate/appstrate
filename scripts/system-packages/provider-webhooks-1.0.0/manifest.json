@@ -1,0 +1,44 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/webhooks",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Webhooks",
+  "description": "Generic webhook provider — send HTTP requests to any URL with optional authentication",
+  "iconUrl": "webhook",
+  "categories": ["integration", "automation"],
+  "docsUrl": "https://en.wikipedia.org/wiki/Webhook",
+  "definition": {
+    "authMode": "custom",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "webhook_url": {
+            "type": "string",
+            "description": "Target webhook URL"
+          },
+          "secret_header_name": {
+            "type": "string",
+            "description": "Custom authentication header name (e.g. X-Webhook-Secret) — optional"
+          },
+          "secret_header_value": {
+            "type": "string",
+            "description": "Secret value for the authentication header — optional"
+          }
+        },
+        "required": ["webhook_url"]
+      }
+    },
+    "allowAllUris": true,
+    "authorizedUris": []
+  },
+  "setupGuide": {
+    "steps": [
+      { "label": "Enter the webhook URL you want to send data to" },
+      { "label": "Optionally configure a secret header for authentication" },
+      { "label": "Test the connection by sending a test payload" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

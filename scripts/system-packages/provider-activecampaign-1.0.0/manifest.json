@@ -1,0 +1,46 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/activecampaign",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "ActiveCampaign",
+  "description": "Marketing automation and CRM platform — contacts, deals, campaigns, and automations",
+  "iconUrl": "https://api.iconify.design/logos/active-campaign.svg",
+  "categories": ["marketing", "crm"],
+  "docsUrl": "https://developers.activecampaign.com/reference/overview",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "account_name": {
+            "type": "string",
+            "description": "Your ActiveCampaign account name (subdomain from yourname.activehosted.com)"
+          },
+          "api_key": {
+            "type": "string",
+            "description": "API key from Settings → Developer"
+          }
+        },
+        "required": ["account_name", "api_key"]
+      },
+      "fieldName": "api_key"
+    },
+    "credentialHeaderName": "Api-Token",
+    "credentialHeaderPrefix": "",
+    "allowAllUris": true,
+    "authorizedUris": ["https://*.api-us1.com/*"]
+  },
+  "setupGuide": {
+    "steps": [
+      {
+        "label": "Go to Settings → Developer in your ActiveCampaign account",
+        "url": "https://www.activecampaign.com/"
+      },
+      { "label": "Copy your API URL and API Key" },
+      { "label": "Enter your account name (subdomain) and API key" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

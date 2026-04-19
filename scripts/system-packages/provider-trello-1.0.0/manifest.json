@@ -23,7 +23,7 @@
     "authorizedUris": ["https://api.trello.com/*"]
   },
   "setupGuide": {
-    "callbackUrlHint": "Set the allowed origins to include: {{callbackUrl}}",
+    "callbackUrlHint": "Set the callback URL to: {{callbackUrl}}",
     "steps": [
       {
         "label": "Create a Trello Power-Up",

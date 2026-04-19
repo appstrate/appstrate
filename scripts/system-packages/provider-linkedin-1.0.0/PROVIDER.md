@@ -232,7 +232,7 @@ LinkedIn has very low daily rate limits. Cache aggressively.
 ```
 
 ## Important Notes
-- **No refresh token** — LinkedIn tokens expire after 60 days. Users must re-authenticate when the token expires. The app will show a "needs reconnection" status.
+- **Refresh tokens** — LinkedIn supports programmatic refresh tokens for approved Marketing Developer Platform (MDP) partners. If the app is not approved for that program, users will need to re-authenticate when the access token expires.
 - **Partner verification required** — Most write permissions (`w_member_social`, `w_organization_social`, `rw_ads`) require LinkedIn Partner verification. Apply via the Products tab in your app settings.
 - **REST-Li protocol** — Always include `X-Restli-Protocol-Version: 2.0.0` header in requests.
 - **URN format** — All entity references use URNs (`urn:li:person:ABC`). URL-encode URNs when used in URL paths.

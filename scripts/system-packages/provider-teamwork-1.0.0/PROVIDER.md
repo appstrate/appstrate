@@ -7,9 +7,11 @@ Project management platform for client work. The subdomain is specific to each a
 ## Endpoints
 
 ### Get Current User
+
 `GET /projects/api/v3/me.json`
 
 **Response:**
+
 ```json
 {
   "person": {
@@ -24,9 +26,11 @@ Project management platform for client work. The subdomain is specific to each a
 ```
 
 ### List Projects
+
 `GET /projects/api/v3/projects.json`
 
 **Query parameters:**
+
 - `page` — Page number (starts at 1)
 - `pageSize` — Results per page (max 500)
 - `searchTerm` — Search by name
@@ -34,6 +38,7 @@ Project management platform for client work. The subdomain is specific to each a
 - `fields[projects]` — Fields to return (e.g. `name,description,status,startDate,endDate`)
 
 **Response:**
+
 ```json
 {
   "projects": [
@@ -60,12 +65,15 @@ Project management platform for client work. The subdomain is specific to each a
 ```
 
 ### Get Project
+
 `GET /projects/api/v3/projects/{PROJECT_ID}.json`
 
 ### Create Project
+
 `POST /projects/api/v3/projects.json`
 
 **Request body (JSON):**
+
 ```json
 {
   "project": {
@@ -79,9 +87,11 @@ Project management platform for client work. The subdomain is specific to each a
 ```
 
 ### List Task Lists
+
 `GET /projects/api/v3/projects/{PROJECT_ID}/tasklists.json`
 
 **Response:**
+
 ```json
 {
   "tasklists": [
@@ -96,9 +106,11 @@ Project management platform for client work. The subdomain is specific to each a
 ```
 
 ### Create Task List
+
 `POST /projects/api/v3/projects/{PROJECT_ID}/tasklists.json`
 
 **Request body (JSON):**
+
 ```json
 {
   "tasklist": {
@@ -108,9 +120,11 @@ Project management platform for client work. The subdomain is specific to each a
 ```
 
 ### List Tasks
+
 `GET /projects/api/v3/tasks.json`
 
 **Query parameters:**
+
 - `page`, `pageSize`
 - `projectIds` — Filter by project IDs (comma-separated)
 - `status` — `active`, `completed`, `all` (default `active`)
@@ -119,6 +133,7 @@ Project management platform for client work. The subdomain is specific to each a
 - `fields[tasks]` — e.g. `name,description,status,startDate,dueDate,priority`
 
 **Response:**
+
 ```json
 {
   "tasks": [
@@ -148,12 +163,15 @@ Project management platform for client work. The subdomain is specific to each a
 ```
 
 ### Get Task
+
 `GET /projects/api/v3/tasks/{TASK_ID}.json`
 
 ### Create Task
+
 `POST /projects/api/v3/tasklists/{TASKLIST_ID}/tasks.json`
 
 **Request body (JSON):**
+
 ```json
 {
   "task": {
@@ -169,9 +187,11 @@ Project management platform for client work. The subdomain is specific to each a
 ```
 
 ### Update Task
+
 `PUT /projects/api/v3/tasks/{TASK_ID}.json`
 
 **Request body (JSON):**
+
 ```json
 {
   "task": {
@@ -182,15 +202,19 @@ Project management platform for client work. The subdomain is specific to each a
 ```
 
 ### Delete Task
+
 `DELETE /projects/api/v3/tasks/{TASK_ID}.json`
 
 ### List Comments
+
 `GET /projects/api/v3/tasks/{TASK_ID}/comments.json`
 
 ### Add Comment
+
 `POST /projects/api/v3/tasks/{TASK_ID}/comments.json`
 
 **Request body (JSON):**
+
 ```json
 {
   "comment": {
@@ -200,9 +224,11 @@ Project management platform for client work. The subdomain is specific to each a
 ```
 
 ### Log Time
+
 `POST /projects/api/v3/tasks/{TASK_ID}/time.json`
 
 **Request body (JSON):**
+
 ```json
 {
   "timelog": {
@@ -215,41 +241,52 @@ Project management platform for client work. The subdomain is specific to each a
 ```
 
 ### List Time Entries
+
 `GET /projects/api/v3/time.json`
 
 **Query parameters:**
+
 - `page`, `pageSize`
 - `projectIds` — Filter by project
 - `fromDate`, `toDate` — Date range (YYYY-MM-DD)
 
 ### List People
+
 `GET /projects/api/v3/people.json`
 
 ### List Milestones
+
 `GET /projects/api/v3/milestones.json`
 
 **Query parameters:**
+
 - `projectIds` — Filter by project
 
 ## Common Patterns
 
 ### Pagination
+
 Page-based: `page` + `pageSize` (max 500). Check `meta.page.hasMore` for more pages.
 
 ### Included (Sideloading)
+
 Use `include` parameter to sideload related data. Related objects appear in the `included` object keyed by type and ID.
 
 ### Field Selection
+
 Use `fields[{type}]` to limit returned fields: `fields[tasks]=name,status,dueDate`
 
 ### Status Values
+
 - Tasks: `new`, `active`, `completed`, `deleted`
 - Projects: `active`, `current`, `late`, `completed`, `archived`
 
 ### Priority Values
+
 `none`, `low`, `medium`, `high`
 
 ### Error Format
+
 ```json
 {
   "status": "error",
@@ -258,9 +295,11 @@ Use `fields[{type}]` to limit returned fields: `fields[tasks]=name,status,dueDat
 ```
 
 ### Rate Limits
+
 150 requests per minute (Free/Pro), 300 per minute (Enterprise). Headers: `X-Rate-Limit-Remaining`. Returns 429 when exceeded.
 
 ## Important Notes
+
 - **Subdomain in URL** — The base URL includes the customer's subdomain. Use the `subdomain` credential field.
 - **JSON suffix** — All endpoints require `.json` suffix. Without it, you may get HTML responses.
 - **Basic auth** — Authentication is pre-encoded as `base64(api_key:X)` by the runtime.

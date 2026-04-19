@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Monday.com",
   "description": "Work operating system for project management and team collaboration",
-  "iconUrl": "https://cdn.simpleicons.org/mondaydotcom",
+  "iconUrl": "https://api.iconify.design/logos/monday-icon.svg",
   "categories": ["project-management", "collaboration"],
   "docsUrl": "https://developer.monday.com/api-reference/reference",
   "definition": {
@@ -20,9 +20,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://api.monday.com/*"
-    ],
+    "authorizedUris": ["https://api.monday.com/*"],
     "availableScopes": [
       { "value": "me:read", "label": "Read authenticated user info" },
       { "value": "boards:read", "label": "Read boards" },

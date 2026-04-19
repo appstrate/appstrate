@@ -14,7 +14,7 @@
       "authorizationUrl": "https://discord.com/oauth2/authorize",
       "tokenUrl": "https://discord.com/api/v10/oauth2/token",
       "refreshUrl": "https://discord.com/api/v10/oauth2/token",
-      "defaultScopes": ["identify", "guilds"],
+      "defaultScopes": ["identify"],
       "scopeSeparator": " ",
       "pkceEnabled": false,
       "tokenAuthMethod": "client_secret_basic",

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/fathom",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Fathom",
+  "description": "AI meeting recorder with transcripts and summaries",
+  "iconUrl": "https://cdn.simpleicons.org/fathom",
+  "categories": ["meetings", "productivity"],
+  "docsUrl": "https://developers.fathom.ai/api-overview",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "description": "Fathom API key (from Settings)"
+          }
+        },
+        "required": ["api_key"]
+      }
+    },
+    "credentialHeaderName": "X-Api-Key",
+    "authorizedUris": ["https://api.fathom.ai/*"]
+  },
+  "setupGuide": {
+    "steps": [
+      { "label": "Go to Fathom Settings → API section" },
+      { "label": "Generate an API key and copy it" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Wrike",
   "description": "Collaborative work management platform for teams and enterprises",
-  "iconUrl": "https://cdn.simpleicons.org/wrike",
+  "iconUrl": "https://www.google.com/s2/favicons?domain=wrike.com&sz=128",
   "categories": ["project-management", "collaboration"],
   "docsUrl": "https://developers.wrike.com/overview/",
   "definition": {
@@ -21,10 +21,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://www.wrike.com/api/*",
-      "https://*.wrike.com/api/*"
-    ],
+    "authorizedUris": ["https://www.wrike.com/api/*", "https://*.wrike.com/api/*"],
     "availableScopes": [
       { "value": "Default", "label": "Standard access to tasks, folders, projects" },
       { "value": "wsReadOnly", "label": "Read-only access to workspace" },

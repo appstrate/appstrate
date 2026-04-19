@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Zendesk",
   "description": "Customer service and support ticketing platform",
-  "iconUrl": "https://cdn.simpleicons.org/zendesk",
+  "iconUrl": "zendesk",
   "categories": ["crm", "support", "customer-service"],
   "docsUrl": "https://developer.zendesk.com/api-reference/",
   "definition": {

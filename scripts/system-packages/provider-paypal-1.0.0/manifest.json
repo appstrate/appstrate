@@ -1,0 +1,51 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/paypal",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "PayPal",
+  "description": "Online payment processing platform",
+  "iconUrl": "paypal",
+  "categories": ["payments", "finance"],
+  "docsUrl": "https://developer.paypal.com/docs/api/overview/",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://www.paypal.com/connect",
+      "tokenUrl": "https://api-m.paypal.com/v1/oauth2/token",
+      "refreshUrl": "https://api-m.paypal.com/v1/oauth2/token",
+      "defaultScopes": ["openid", "email", "profile"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_basic"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": ["https://api-m.paypal.com/*", "https://api-m.sandbox.paypal.com/*"],
+    "availableScopes": [
+      { "value": "openid", "label": "OpenID Connect" },
+      { "value": "email", "label": "Read email address" },
+      { "value": "profile", "label": "Read basic profile" },
+      { "value": "https://uri.paypal.com/services/payments/payment", "label": "Accept payments" },
+      { "value": "https://uri.paypal.com/services/payments/refund", "label": "Issue refunds" },
+      {
+        "value": "https://uri.paypal.com/services/reporting/search/read",
+        "label": "Search transactions"
+      },
+      { "value": "https://uri.paypal.com/services/invoicing", "label": "Manage invoices" },
+      { "value": "https://uri.paypal.com/services/subscriptions", "label": "Manage subscriptions" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the return URL to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create a PayPal app",
+        "url": "https://developer.paypal.com/dashboard/applications/live"
+      },
+      { "label": "Configure the return URL" },
+      { "label": "Copy your Client ID and Secret" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

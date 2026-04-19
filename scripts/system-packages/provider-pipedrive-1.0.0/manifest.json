@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Pipedrive",
   "description": "Sales CRM and pipeline management platform",
-  "iconUrl": "https://cdn.simpleicons.org/pipedrive",
+  "iconUrl": "https://api.iconify.design/logos/pipedrive.svg",
   "categories": ["crm", "sales"],
   "docsUrl": "https://developers.pipedrive.com/docs/api/v1",
   "definition": {
@@ -21,10 +21,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://api.pipedrive.com/*",
-      "https://*.pipedrive.com/api/*"
-    ],
+    "authorizedUris": ["https://api.pipedrive.com/*", "https://*.pipedrive.com/api/*"],
     "availableScopes": [
       { "value": "deals:read", "label": "Read deals" },
       { "value": "deals:full", "label": "Full access to deals" },

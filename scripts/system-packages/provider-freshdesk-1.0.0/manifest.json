@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Freshdesk",
   "description": "Customer support and helpdesk ticketing platform",
-  "iconUrl": "https://cdn.simpleicons.org/freshdesk",
+  "iconUrl": "https://www.google.com/s2/favicons?domain=freshdesk.com&sz=128",
   "categories": ["crm", "support", "customer-service"],
   "docsUrl": "https://developers.freshdesk.com/api/",
   "definition": {

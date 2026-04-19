@@ -7,9 +7,11 @@ Sales CRM and pipeline management platform. Manage deals, persons (contacts), or
 ## Endpoints
 
 ### Get Current User
+
 `GET /users/me`
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -25,15 +27,18 @@ Sales CRM and pipeline management platform. Manage deals, persons (contacts), or
 ```
 
 ### List Deals
+
 `GET /deals`
 
 **Query parameters:**
+
 - `start` — Pagination offset (default 0)
 - `limit` — Max results (default 100, max 500)
 - `status` — `open`, `won`, `lost`, `deleted`, `all_not_deleted`
 - `sort` — Field to sort by (e.g. `add_time DESC`)
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -65,12 +70,15 @@ Sales CRM and pipeline management platform. Manage deals, persons (contacts), or
 ```
 
 ### Get Deal
+
 `GET /deals/{DEAL_ID}`
 
 ### Create Deal
+
 `POST /deals`
 
 **Request body (JSON):**
+
 ```json
 {
   "title": "New Enterprise Deal",
@@ -84,9 +92,11 @@ Sales CRM and pipeline management platform. Manage deals, persons (contacts), or
 ```
 
 ### Update Deal
+
 `PUT /deals/{DEAL_ID}`
 
 **Request body (JSON):**
+
 ```json
 {
   "status": "won",
@@ -96,21 +106,27 @@ Sales CRM and pipeline management platform. Manage deals, persons (contacts), or
 ```
 
 ### Delete Deal
+
 `DELETE /deals/{DEAL_ID}`
 
 ### List Persons (Contacts)
+
 `GET /persons`
 
 **Query parameters:**
+
 - `start`, `limit`, `sort`
 
 ### Get Person
+
 `GET /persons/{PERSON_ID}`
 
 ### Create Person
+
 `POST /persons`
 
 **Request body (JSON):**
+
 ```json
 {
   "name": "Jane Smith",
@@ -121,18 +137,23 @@ Sales CRM and pipeline management platform. Manage deals, persons (contacts), or
 ```
 
 ### Update Person
+
 `PUT /persons/{PERSON_ID}`
 
 ### List Organizations
+
 `GET /organizations`
 
 **Query parameters:**
+
 - `start`, `limit`, `sort`
 
 ### Create Organization
+
 `POST /organizations`
 
 **Request body (JSON):**
+
 ```json
 {
   "name": "Acme Corporation",
@@ -141,18 +162,22 @@ Sales CRM and pipeline management platform. Manage deals, persons (contacts), or
 ```
 
 ### List Activities
+
 `GET /activities`
 
 **Query parameters:**
+
 - `start`, `limit`
 - `type` — Activity type (e.g. `call`, `meeting`, `email`)
 - `done` — `0` (not done) or `1` (done)
 - `user_id` — Filter by user
 
 ### Create Activity
+
 `POST /activities`
 
 **Request body (JSON):**
+
 ```json
 {
   "subject": "Follow-up call",
@@ -166,16 +191,20 @@ Sales CRM and pipeline management platform. Manage deals, persons (contacts), or
 ```
 
 ### List Leads
+
 `GET /leads`
 
 **Query parameters:**
+
 - `start`, `limit`
 - `sort` — `add_time ASC`, `update_time DESC`, etc.
 
 ### Create Lead
+
 `POST /leads`
 
 **Request body (JSON):**
+
 ```json
 {
   "title": "Potential client from webinar",
@@ -187,14 +216,17 @@ Sales CRM and pipeline management platform. Manage deals, persons (contacts), or
 ```
 
 ### Search Items
+
 `GET /itemSearch`
 
 **Query parameters:**
+
 - `term` — Search query
 - `item_types` — Comma-separated: `deal`, `person`, `organization`, `product`, `lead`
 - `start`, `limit`
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -214,36 +246,43 @@ Sales CRM and pipeline management platform. Manage deals, persons (contacts), or
 ```
 
 ### List Pipelines
+
 `GET /pipelines`
 
 ### List Stages
+
 `GET /stages`
 
 **Query parameters:**
+
 - `pipeline_id` — Filter by pipeline
 
 ## Common Patterns
 
 ### Pagination
+
 Cursor-style with offset. Responses include `additional_data.pagination` with `more_items_in_collection` (boolean) and `next_start` (next offset). Pass `start={next_start}` for the next page.
 
 ### Custom Fields
+
 Custom fields have hash IDs (e.g. `abc123def456`). Discover them with:
+
 - `GET /dealFields` — Deal custom fields
 - `GET /personFields` — Person custom fields
 - `GET /organizationFields` — Organization custom fields
 
 ### Multi-value Fields
+
 Email and phone fields are arrays of objects:
+
 ```json
 {
-  "email": [
-    { "value": "john@example.com", "primary": true, "label": "work" }
-  ]
+  "email": [{ "value": "john@example.com", "primary": true, "label": "work" }]
 }
 ```
 
 ### Error Format
+
 ```json
 {
   "success": false,
@@ -254,9 +293,11 @@ Email and phone fields are arrays of objects:
 ```
 
 ### Rate Limits
+
 80 requests per 2 seconds per OAuth user. Headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`. Returns 429 when exceeded.
 
 ## Important Notes
+
 - **Token refresh** — Access tokens expire after 1 hour. Automatic refresh via the runtime.
 - **Custom field IDs** — Custom fields use hash IDs, not human-readable names. Query the `*Fields` endpoints to get mappings.
 - **Email/phone as arrays** — Contact email and phone are arrays of objects with `value`, `primary`, `label`.

@@ -2,7 +2,7 @@
 
 Base URL: `https://api.notion.com/v1`
 
-Workspace API for pages, databases, and blocks. All requests require the `Notion-Version: 2022-06-28` header.
+Workspace API for pages, databases, and blocks. All requests require a `Notion-Version` header. This package documents `2022-06-28` for compatibility with the current provider surface, but Notion periodically advances the latest supported version and integrations should verify the current version in the official docs.
 
 ## Endpoints
 

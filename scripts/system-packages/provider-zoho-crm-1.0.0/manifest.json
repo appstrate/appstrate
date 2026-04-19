@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Zoho CRM",
   "description": "Customer relationship management platform for sales and marketing",
-  "iconUrl": "https://cdn.simpleicons.org/zoho",
+  "iconUrl": "zoho",
   "categories": ["crm", "sales", "marketing"],
   "docsUrl": "https://www.zoho.com/crm/developer/docs/api/v7/",
   "definition": {

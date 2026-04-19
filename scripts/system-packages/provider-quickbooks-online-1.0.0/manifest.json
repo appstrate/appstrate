@@ -1,0 +1,51 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/quickbooks-online",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "QuickBooks Online",
+  "description": "Cloud accounting software by Intuit — invoicing, expenses, and financial reporting",
+  "iconUrl": "quickbooks",
+  "categories": ["accounting", "finance"],
+  "docsUrl": "https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities",
+  "definition": {
+    "authMode": "oauth2",
+    "oauth2": {
+      "authorizationUrl": "https://appcenter.intuit.com/connect/oauth2",
+      "tokenUrl": "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
+      "refreshUrl": "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
+      "defaultScopes": ["com.intuit.quickbooks.accounting"],
+      "scopeSeparator": " ",
+      "pkceEnabled": false,
+      "tokenAuthMethod": "client_secret_basic"
+    },
+    "credentialHeaderName": "Authorization",
+    "credentialHeaderPrefix": "Bearer",
+    "authorizedUris": [
+      "https://quickbooks.api.intuit.com/*",
+      "https://sandbox-quickbooks.api.intuit.com/*"
+    ],
+    "availableScopes": [
+      {
+        "value": "com.intuit.quickbooks.accounting",
+        "label": "Accounting data (invoices, customers, payments)"
+      },
+      { "value": "com.intuit.quickbooks.payment", "label": "Payment processing" },
+      { "value": "openid", "label": "OpenID Connect" },
+      { "value": "profile", "label": "User profile" },
+      { "value": "email", "label": "User email" }
+    ]
+  },
+  "setupGuide": {
+    "callbackUrlHint": "Set the redirect URI to: {{callbackUrl}}",
+    "steps": [
+      {
+        "label": "Create an Intuit developer app",
+        "url": "https://developer.intuit.com/app/developer/dashboard"
+      },
+      { "label": "Configure OAuth redirect URI in Keys & credentials" },
+      { "label": "Copy Client ID and Client Secret" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

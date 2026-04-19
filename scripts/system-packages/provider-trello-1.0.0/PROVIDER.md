@@ -1,8 +1,8 @@
 # Trello API
 
-Base URL: `https://api.trello.com/1`
+Base URL: `https://api.trello.com`
 
-Project management boards API. Manage boards, lists, cards, and members. Hierarchy: Member -> Board -> List -> Card.
+Project management boards API. Manage boards, lists, cards, and members. Hierarchy: Member -> Board -> List -> Card. All REST endpoints are under the `/1` path.
 
 ## Endpoints
 
@@ -134,4 +134,5 @@ ISO 8601: `2024-12-31T00:00:00.000Z`
 - Card positions (`pos`) are floats. To insert between cards, use a value between their positions. Use `"top"` or `"bottom"` for simple placement.
 - Archived (closed) items are hidden by default. Use `filter=all` to include them.
 - `/1/search` has a stricter rate limit: 100 requests per 900 seconds.
+- Trello's standard auth flow today is API key + token for Power-Ups and scripts. This provider keeps the existing OAuth 1.0a configuration for compatibility with Appstrate's provider model.
 - Webhooks: `POST /1/webhooks` to register, requires `callbackURL` and `idModel`.

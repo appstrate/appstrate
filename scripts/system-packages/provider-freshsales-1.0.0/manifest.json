@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Freshsales",
   "description": "CRM platform for sales teams with AI-powered lead scoring",
-  "iconUrl": "https://cdn.simpleicons.org/freshworks",
+  "iconUrl": "https://www.google.com/s2/favicons?domain=freshsales.io&sz=128",
   "categories": ["crm", "sales"],
   "docsUrl": "https://developers.freshworks.com/crm/api/",
   "definition": {
@@ -29,10 +29,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Token token=",
-    "authorizedUris": [
-      "https://*.myfreshworks.com/*",
-      "https://*.freshsales.io/*"
-    ]
+    "authorizedUris": ["https://*.myfreshworks.com/*", "https://*.freshsales.io/*"]
   },
   "setupGuide": {
     "steps": [

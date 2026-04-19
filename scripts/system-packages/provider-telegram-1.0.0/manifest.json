@@ -1,0 +1,36 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/provider.schema.json",
+  "name": "@appstrate/telegram",
+  "version": "1.0.0",
+  "type": "provider",
+  "displayName": "Telegram",
+  "description": "Messaging platform — send messages, manage bots, and interact with chats via the Bot API",
+  "iconUrl": "telegram",
+  "categories": ["messaging", "communications"],
+  "docsUrl": "https://core.telegram.org/bots/api",
+  "definition": {
+    "authMode": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "bot_token": {
+            "type": "string",
+            "description": "Bot API token from @BotFather (format: 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11)"
+          }
+        },
+        "required": ["bot_token"]
+      },
+      "fieldName": "bot_token"
+    },
+    "authorizedUris": ["https://api.telegram.org/*"]
+  },
+  "setupGuide": {
+    "steps": [
+      { "label": "Open Telegram and message @BotFather", "url": "https://t.me/BotFather" },
+      { "label": "Create a new bot with the /newbot command" },
+      { "label": "Copy the bot token provided by BotFather" }
+    ]
+  },
+  "schemaVersion": "1.0"
+}

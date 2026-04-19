@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Asana",
   "description": "Work management platform for teams to organize and track projects",
-  "iconUrl": "https://cdn.simpleicons.org/asana",
+  "iconUrl": "asana",
   "categories": ["project-management", "collaboration"],
   "docsUrl": "https://developers.asana.com/docs/overview",
   "definition": {
@@ -21,9 +21,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://app.asana.com/api/*"
-    ],
+    "authorizedUris": ["https://app.asana.com/api/*"],
     "availableScopes": [
       { "value": "default", "label": "Full access to all resources" },
       { "value": "openid", "label": "OpenID Connect identity" },

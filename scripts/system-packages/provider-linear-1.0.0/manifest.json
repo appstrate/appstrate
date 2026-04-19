@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Linear",
   "description": "Modern issue tracking and project management for software teams",
-  "iconUrl": "https://cdn.simpleicons.org/linear",
+  "iconUrl": "linear",
   "categories": ["project-management", "issue-tracking", "development"],
   "docsUrl": "https://linear.app/developers",
   "definition": {
@@ -24,9 +24,7 @@
     },
     "credentialHeaderName": "Authorization",
     "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": [
-      "https://api.linear.app/*"
-    ],
+    "authorizedUris": ["https://api.linear.app/*"],
     "availableScopes": [
       { "value": "read", "label": "Read access to workspace data" },
       { "value": "write", "label": "Write access to workspace data" },

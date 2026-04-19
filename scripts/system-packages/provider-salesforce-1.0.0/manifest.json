@@ -5,7 +5,7 @@
   "type": "provider",
   "displayName": "Salesforce",
   "description": "Cloud-based CRM platform for sales, service, and marketing",
-  "iconUrl": "https://cdn.simpleicons.org/salesforce",
+  "iconUrl": "salesforce",
   "categories": ["crm", "sales", "marketing"],
   "docsUrl": "https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/intro_rest.htm",
   "definition": {
