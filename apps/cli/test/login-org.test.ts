@@ -427,6 +427,96 @@ describe("login org-pin branch", () => {
     expect(stdoutChunks.join("")).toContain("No org pinned");
   });
 
+  it("surfaces a POST /api/orgs failure when --create-org cannot proceed", async () => {
+    installDefaultResponders({
+      createOrg: () =>
+        new Response(JSON.stringify({ message: "slug_taken" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+
+    await expect(
+      loginCommand({
+        profile: "default",
+        instance: "https://app.example.com",
+        createOrg: "Acme",
+      }),
+    ).rejects.toBeInstanceOf(ExitError);
+
+    expect(await readPinnedOrgId()).toBeUndefined();
+    // Tokens ARE persisted — the user can recover via `org switch` /
+    // `org create` without re-running the device flow.
+    const tokens = await loadTokens("default");
+    expect(tokens?.accessToken).toBeTruthy();
+  });
+
+  it("preserves a prior orgId across a re-login when /api/orgs flakes (same user)", async () => {
+    // First login — pin an org.
+    installDefaultResponders({
+      listOrgs: () =>
+        new Response(
+          JSON.stringify({
+            organizations: [
+              { id: "org_first", name: "First", slug: "first", role: "owner", createdAt: "t" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    expect(await readPinnedOrgId()).toBe("org_first");
+
+    // Second login — /api/orgs errors out. Without preservation we'd
+    // drop the pin silently.
+    installDefaultResponders({
+      listOrgs: () => new Response("boom", { status: 500 }),
+    });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+
+    expect(await readPinnedOrgId()).toBe("org_first");
+    expect(stderrChunks.join("")).toContain("Failed to list organizations");
+  });
+
+  it("does NOT preserve orgId when re-logging-in as a different user", async () => {
+    // First login — user A pins an org.
+    installDefaultResponders({
+      listOrgs: () =>
+        new Response(
+          JSON.stringify({
+            organizations: [
+              { id: "org_A", name: "Alpha", slug: "alpha", role: "owner", createdAt: "t" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    expect(await readPinnedOrgId()).toBe("org_A");
+
+    // Second login — same profile name, DIFFERENT user. /api/orgs
+    // errors out so we'd fall through to preservation IF the userId
+    // matched. It doesn't, so the stale org_A must NOT leak through.
+    installDefaultResponders({
+      cliToken: () =>
+        new Response(
+          JSON.stringify({
+            access_token: makeJwt("u_OTHER", "bob@example.com"),
+            refresh_token: "rt-xyz",
+            token_type: "Bearer",
+            expires_in: 900,
+            refresh_expires_in: 30 * 24 * 60 * 60,
+            scope: "cli",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      listOrgs: () => new Response("boom", { status: 500 }),
+    });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+
+    expect(await readPinnedOrgId()).toBeUndefined();
+  });
+
   it("writes orgId in addition to the pre-existing profile fields", async () => {
     installDefaultResponders({
       listOrgs: () =>

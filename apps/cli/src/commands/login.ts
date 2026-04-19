@@ -64,6 +64,13 @@ export interface LoginDeps {
   promptCreateOrg?: () => Promise<{ name: string; slug?: string } | null>;
 }
 
+// `APPSTRATE_CLI_NO_OPEN=1` disables the browser launch — the test
+// preload sets it so `bun test` never pops real tabs.
+async function defaultOpenUrl(url: string): Promise<void> {
+  if (process.env.APPSTRATE_CLI_NO_OPEN === "1") return;
+  await open(url);
+}
+
 const defaultDeps: Required<LoginDeps> = {
   pickOrg: async (orgs: Org[]): Promise<Org | null> => {
     if (!process.stdin.isTTY) {
@@ -143,7 +150,7 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
   // Step 3 — open the browser on the complete URI (pre-fills user_code).
   // If `open` fails (headless SSH / no display), the printed URL + code
   // above keep the flow usable. Swallow the error silently.
-  open(code.verificationUriComplete).catch(() => {});
+  defaultOpenUrl(code.verificationUriComplete).catch(() => {});
 
   // Step 4 — poll until approval or terminal error.
   const pollSpinner = spinner();
@@ -192,10 +199,24 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
     refreshToken: token.refreshToken,
     refreshExpiresAt: Date.now() + token.refreshExpiresIn * 1000,
   });
+
+  // Preserve the previous `orgId` when re-logging-in as the SAME user.
+  // Without this, a re-login whose step-7 `/api/orgs` call happens to
+  // flake (network, server blip) would silently drop the pin the user
+  // had carefully set — surprising regression. Only carry it over when
+  // `userId` matches: re-logging-in as a different user on the same
+  // profile must NOT inherit the previous account's org id.
+  const existingProfile = (await readConfig()).profiles[profileName];
+  const preservedOrgId =
+    existingProfile?.userId === identity.userId && existingProfile?.orgId
+      ? existingProfile.orgId
+      : undefined;
+
   await setProfile(profileName, {
     instance,
     userId: identity.userId,
     email: identity.email,
+    ...(preservedOrgId ? { orgId: preservedOrgId } : {}),
   });
 
   // Step 7 — pin an organization. Issue #209. Credentials are already
