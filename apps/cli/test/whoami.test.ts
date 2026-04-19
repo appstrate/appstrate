@@ -183,6 +183,57 @@ describe("whoami (happy path)", () => {
     expect(stderrChunks.join("")).toBe("");
   });
 
+  it("falls back to server `name` when `displayName` is null (fresh signup, no dashboard customization)", async () => {
+    // A user who just signed up has `user.name` populated from the
+    // signup form but has never set a `profiles.display_name`. Whoami
+    // must still surface a Name line — the JWT carries `name`, but the
+    // source of truth is the server response, so we read it back from
+    // `/api/profile` rather than decoding the JWT a second time.
+    await seedLoggedInProfile("default");
+    installFetch(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "u_1",
+            displayName: null,
+            language: "fr",
+            email: "fresh@example.com",
+            name: "Fresh User",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+
+    await whoamiCommand({ profile: "default" });
+
+    const out = stdoutChunks.join("");
+    expect(out).toContain("Name:     Fresh User");
+  });
+
+  it("omits the Name line entirely when both displayName and name are null", async () => {
+    await seedLoggedInProfile("default");
+    installFetch(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "u_1",
+            displayName: null,
+            language: "fr",
+            email: "anon@example.com",
+            name: null,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+
+    await whoamiCommand({ profile: "default" });
+
+    const out = stdoutChunks.join("");
+    expect(out).not.toContain("Name:");
+    // User line is still present — email is the stronger identity.
+    expect(out).toContain("User:     anon@example.com");
+  });
+
   it("sends the stored Bearer token on /api/profile (JWT path, not cookies)", async () => {
     await seedLoggedInProfile("default");
     installFetch(

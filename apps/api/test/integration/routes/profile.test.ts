@@ -29,6 +29,11 @@ describe("Profile API", () => {
       // Email is the authoritative "current identity" — surfaced to the
       // CLI so `whoami` reflects dashboard-side email changes.
       expect(body.email).toBe(ctx.user.email);
+      // `name` comes from BA's `user.name` column (set at signup) so
+      // whoami has a fallback when the user never customized their
+      // `profiles.displayName`. Kept server-authoritative for the same
+      // reason as `email`.
+      expect(body.name).toBe(ctx.user.name);
     });
 
     it("returns 401 without auth", async () => {

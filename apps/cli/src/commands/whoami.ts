@@ -29,6 +29,7 @@ interface ProfileResponse {
   displayName: string | null;
   language: string | null;
   email: string | null;
+  name: string | null;
 }
 
 export async function whoamiCommand(opts: WhoamiOptions): Promise<void> {
@@ -46,12 +47,17 @@ export async function whoamiCommand(opts: WhoamiOptions): Promise<void> {
   try {
     const me = await apiFetch<ProfileResponse>(profileName, "/api/profile");
 
+    // Name fallback: `displayName` (profile-owned, dashboard-editable) →
+    // `name` (BA-owned `user.name`, set at signup). Both come from the
+    // server in the same response so whoami always reflects dashboard
+    // state, never the stale copy cached in config.toml.
+    const nameLine = me.displayName ?? me.name;
     process.stdout.write(
       [
         `Profile:  ${profileName}`,
         `Instance: ${profile.instance}`,
         me.email ? `User:     ${me.email}` : null,
-        me.displayName ? `Name:     ${me.displayName}` : null,
+        nameLine ? `Name:     ${nameLine}` : null,
         profile.orgId ? `Org:      ${profile.orgId}` : null,
       ]
         .filter(Boolean)

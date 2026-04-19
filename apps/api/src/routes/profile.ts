@@ -35,6 +35,7 @@ profileRouter.get("/profile", async (c) => {
       displayName: profiles.displayName,
       language: profiles.language,
       email: userTable.email,
+      name: userTable.name,
     })
     .from(profiles)
     .innerJoin(userTable, eq(userTable.id, profiles.id))
@@ -50,6 +51,7 @@ profileRouter.get("/profile", async (c) => {
     displayName: rows[0].displayName,
     language: rows[0].language,
     email: rows[0].email,
+    name: rows[0].name,
   });
 });
 
