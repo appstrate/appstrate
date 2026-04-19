@@ -278,6 +278,27 @@ describe("apiCommand — method defaulting", () => {
     expect(fetchCalls[0]!.method).toBe("POST");
   });
 
+  it("no positional method + body → POST (hasBody fallback)", async () => {
+    // Exercises the `hasBody ? "POST" : "GET"` default branch in
+    // pickMethod — positional method empty, no -X, body present.
+    const { io } = makeIO();
+    await runCommand({ method: "", path: "/p", data: "{}" }, io);
+    expect(fetchCalls[0]!.method).toBe("POST");
+  });
+
+  it("no positional method + no body → GET", async () => {
+    const { io } = makeIO();
+    await runCommand({ method: "", path: "/p" }, io);
+    expect(fetchCalls[0]!.method).toBe("GET");
+  });
+
+  it("-I strips body even when -d is provided", async () => {
+    const { io } = makeIO();
+    await runCommand({ method: "GET", path: "/p", head: true, data: "ignored" }, io);
+    expect(fetchCalls[0]!.method).toBe("HEAD");
+    expect(fetchCalls[0]!.body).toBeUndefined();
+  });
+
   it("-X PUT wins over positional", async () => {
     const { io } = makeIO();
     await runCommand({ method: "GET", path: "/p", request: "PUT" }, io);
@@ -537,6 +558,26 @@ describe("apiCommand — redirect + TLS flags", () => {
     expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined();
     // Restore whatever env we found at the top of the test.
     if (before !== undefined) process.env.NODE_TLS_REJECT_UNAUTHORIZED = before;
+  });
+
+  it("-k still restores NODE_TLS_REJECT_UNAUTHORIZED when fetch throws", async () => {
+    // The cleanup() funnel is supposed to run on every exit path —
+    // including network errors. If we leak "0" into the process env on
+    // failure, subsequent fetches in the same process would silently
+    // skip TLS verification.
+    const before = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "previous";
+    globalThis.fetch = (async () => {
+      throw Object.assign(new Error("boom"), { code: "ECONNREFUSED" });
+    }) as unknown as typeof fetch;
+
+    const { io, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/p", insecure: true }, io);
+    expect(exitCode.value).toBe(EXIT_CONNECT);
+    expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBe("previous");
+
+    if (before === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    else process.env.NODE_TLS_REJECT_UNAUTHORIZED = before;
   });
 });
 
