@@ -425,10 +425,29 @@ export async function rotateRefreshToken(params: {
       .set({ usedAt: new Date() })
       .where(eq(cliRefreshToken.id, row.id));
 
+    // Re-narrow the stored scope against the client's CURRENT scopes
+    // (PR #191 review). The scope persisted on the parent row reflects
+    // what was granted at the initial device-code exchange; if an
+    // operator has since removed a scope from the client definition,
+    // the rotated JWT must not continue to advertise it. `narrowScope-
+    // ToClient` drops any scope token no longer declared on the client
+    // and audit-logs the delta (`cli.refresh_token.scope.dropped`
+    // event via the shared helper).
+    const [clientRow] = await tx
+      .select({ scopes: oauthClient.scopes })
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, clientId))
+      .limit(1);
+    const narrowedScope = narrowScopeToClient(row.scope ?? "", clientRow?.scopes ?? null, {
+      clientId,
+      userId: userRow.id,
+      phase: "refresh_token",
+    });
+
     const pair = await mintTokenPairInTx(tx, {
       user: userRow,
       clientId,
-      scope: row.scope ?? "",
+      scope: narrowedScope,
       parentId: row.id,
       familyId: row.familyId,
     });
@@ -674,19 +693,25 @@ function hashRefreshToken(plain: string): string {
 function narrowScopeToClient(
   requested: string,
   clientScopes: string[] | null,
-  ctx: { clientId: string; userId: string },
+  ctx: { clientId: string; userId: string; phase?: "device_code" | "refresh_token" },
 ): string {
   const tokens = requested.split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return "";
+  // Audit event discriminates where the drop fired — at the initial
+  // device-code exchange (possible crafted `/device/code` request) or
+  // at a later refresh-token rotation (operator narrowed the client's
+  // scopes after a grant was issued).
+  const phase = ctx.phase ?? "device_code";
+  const event = `cli.${phase}.scope.dropped`;
   // Absence of a declared scope set is surprising for any client that
   // has made it through `/device/code` — BA's plugin writes the scope
   // string as-posted. Fail closed (empty scope) and audit, rather than
   // echoing an un-gated `scope` claim into the JWT.
   if (!clientScopes || clientScopes.length === 0) {
-    logger.warn("oidc: CLI device-code exchange — client has no declared scopes, dropping all", {
+    logger.warn(`oidc: CLI ${phase} — client has no declared scopes, dropping all`, {
       module: "oidc",
       audit: true,
-      event: "cli.device_code.scope.dropped",
+      event,
       clientId: ctx.clientId,
       userId: ctx.userId,
       requested: tokens,
@@ -704,10 +729,10 @@ function narrowScopeToClient(
     else dropped.push(t);
   }
   if (dropped.length > 0) {
-    logger.warn("oidc: CLI device-code exchange — dropped scope tokens not declared on client", {
+    logger.warn(`oidc: CLI ${phase} — dropped scope tokens not declared on client`, {
       module: "oidc",
       audit: true,
-      event: "cli.device_code.scope.dropped",
+      event,
       clientId: ctx.clientId,
       userId: ctx.userId,
       requested: tokens,

@@ -55,7 +55,11 @@ export interface DeviceTokenResponse {
   tokenType: string;
   /** Seconds until the access_token expires. */
   expiresIn: number;
-  /** Seconds until the refresh_token expires. 0 when none issued. */
+  /**
+   * Seconds until the refresh_token expires. `undefined` when the
+   * server did not issue a refresh token (legacy 1.x `/device/token`
+   * endpoint, or a non-conforming proxy stripped the field).
+   */
   refreshExpiresIn?: number;
   scope: string;
 }

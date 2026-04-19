@@ -159,6 +159,22 @@ describe("POST /api/auth/cli/token — grant_type=device_code (issue #165)", () 
     expect(claims?.email).toBe("cli-token@example.com");
     expect(claims?.scope).toBe("openid profile email offline_access");
 
+    // PR #191 review — guard against BA's `jwt()` plugin silently
+    // overriding the `exp`/`iat` we set in the payload. The server
+    // promises a 15-minute TTL via `expires_in`; if the signed JWT
+    // actually carries a different window, downstream RS-side
+    // verification would either reject early or accept a too-long
+    // replay window. Decode the raw JWT (no signature check needed —
+    // `verifyToken` already passed) and assert the invariant.
+    const [, payloadB64] = body.access_token.split(".");
+    const rawPayload = JSON.parse(Buffer.from(payloadB64!, "base64url").toString("utf8")) as {
+      iat: number;
+      exp: number;
+    };
+    expect(typeof rawPayload.iat).toBe("number");
+    expect(typeof rawPayload.exp).toBe("number");
+    expect(rawPayload.exp - rawPayload.iat).toBe(15 * 60);
+
     // Refresh token row is persisted with the expected shape.
     const hash = _hashRefreshTokenForTesting(body.refresh_token);
     const [row] = await db
@@ -403,6 +419,47 @@ describe("POST /api/auth/cli/token — grant_type=refresh_token", () => {
     // New access token verifies cleanly.
     const claims = await verifyToken(body.access_token);
     expect(claims?.authUserId).toBe(userId);
+  });
+
+  it("re-narrows scope against the client's current scopes on rotation (PR #191 review)", async () => {
+    // Scenario: a CLI login completes while the client declares four
+    // scopes; an operator later removes `email` from the client
+    // definition. The next refresh-token rotation MUST NOT continue to
+    // emit `email` in the rotated JWT — the persisted row's scope
+    // string reflects the old grant, but the JWT is authoritative at
+    // mint time and must match the client's CURRENT surface.
+    const { refreshToken: first } = await loginAndGetPair();
+
+    const { oauthClient } = await import("../../../schema.ts");
+    await db
+      .update(oauthClient)
+      .set({ scopes: ["openid", "profile", "offline_access"] }) // email removed
+      .where(eq(oauthClient.clientId, "appstrate-cli"));
+
+    const rotate = await app.request("/api/auth/cli/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        refresh_token: first,
+        client_id: "appstrate-cli",
+      }),
+    });
+    expect(rotate.status).toBe(200);
+    const body = (await rotate.json()) as { access_token: string; scope: string };
+
+    // Response echoes the narrowed grant (RFC 6749 §3.3: responses
+    // MUST reflect what was actually granted when it differs from the
+    // request).
+    expect(body.scope).toBe("openid profile offline_access");
+    expect(body.scope).not.toContain("email");
+
+    // JWT payload carries the narrowed scope claim.
+    const [, payloadB64] = body.access_token.split(".");
+    const payload = JSON.parse(Buffer.from(payloadB64!, "base64url").toString("utf8")) as {
+      scope?: string;
+    };
+    expect(payload.scope).toBe("openid profile offline_access");
   });
 
   it("detects reuse and revokes the entire family (RFC 6819 §5.2.2.3)", async () => {

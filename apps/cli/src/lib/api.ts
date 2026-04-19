@@ -58,6 +58,31 @@ const ACCESS_TOKEN_REFRESH_MARGIN_MS = 30_000;
  * trip: every caller observes the same rotated access token. The
  * entry is cleared in `.finally()` so the next bona-fide rotation
  * (15 min later) starts fresh.
+ *
+ * ## Known limitation — cross-process races (PR #191 review)
+ *
+ * This mutex is in-process only. Two CLI invocations running in
+ * PARALLEL PROCESSES (e.g. `xargs -P N appstrate …`, concurrent CI
+ * jobs sharing a keyring, a user running two commands in separate
+ * shells) each maintain their own empty `inFlightRefresh` map. If
+ * both enter their proactive-refresh window at the same time, each
+ * reads the same plaintext refresh token from the keyring and POSTs
+ * it to `/cli/token` — one wins, the other trips reuse detection,
+ * and the family gets revoked (RFC 6819 §5.2.2.3). The legitimate
+ * user is then booted and has to re-run `appstrate login`.
+ *
+ * A file lock around the resolve+save sequence in `loadTokens` /
+ * `saveTokens` (advisory `flock()` on the fallback file, or
+ * process-local locking on the keyring entry) would close this
+ * window. Left as a follow-up because:
+ *   1. The common CLI use case is sequential — each command finishes
+ *      before the next starts.
+ *   2. When it does fire, the user sees a clean re-auth prompt (the
+ *      reactive 401 branch wipes local credentials), not a silent
+ *      security incident.
+ *   3. The family revocation IS the correct defense if the token was
+ *      ever actually leaked; degrading to "accept predecessor" would
+ *      trade cross-process ergonomics for a real replay window.
  */
 const inFlightRefresh = new Map<string, Promise<string>>();
 
