@@ -264,23 +264,35 @@ _appstrate_bootstrap() {
   #
   # Skipped when:
   #   - APPSTRATE_NO_MODIFY_PATH=1 (explicit opt-out, like UV_NO_MODIFY_PATH)
-  #   - CI=true (CIs don't restart shells; they set PATH explicitly)
+  #   - CI is truthy: 1/true/yes (covers GHA, GitLab, CircleCI, Travis,
+  #     Jenkins and anything else that exports a boolean-ish CI flag —
+  #     CIs don't restart shells; they set PATH explicitly)
   #   - BIN_DIR is already on PATH (common for /usr/local/bin — no-op needed)
   #
   # Idempotent: a marker comment (APPSTRATE_PATH_MARKER) is grep'd before
   # appending, so re-running the installer doesn't duplicate lines.
   APPSTRATE_PATH_MARKER="# added by appstrate installer"
-  MODIFIED_PROFILE=""
-  if [ "${APPSTRATE_NO_MODIFY_PATH:-0}" = "1" ] || [ "${CI:-}" = "true" ]; then
+  # Newline-separated list of rc files we touched. Accumulated (not
+  # overwritten) so the final restart-your-shell hint reports every file,
+  # not just the last one — critical for the bash shotgun case where up
+  # to three files may be modified in a single run.
+  MODIFIED_PROFILES=""
+  _ci_flag="${CI:-}"
+  if [ "${APPSTRATE_NO_MODIFY_PATH:-0}" = "1" ] \
+    || [ "$_ci_flag" = "true" ] || [ "$_ci_flag" = "1" ] || [ "$_ci_flag" = "yes" ]; then
     : # explicit opt-out
   else
     case ":${PATH}:" in
       *":${BIN_DIR}:"*) : ;; # already on PATH, nothing to do
       *)
         _shell_name=$(basename "${SHELL:-}")
-        # The exact export line written to rc files. Quoted so variable
-        # expansion happens at shell-startup time, not now — keeps the rc
-        # file portable if HOME ever changes (it shouldn't, but).
+        # The exact export line written to POSIX rc files. The `$PATH` ref
+        # is escaped (`\$PATH`) so it expands at shell-startup time, not
+        # now — the rc file stays portable if the user ever moves $HOME.
+        # (The fish branch below doesn't use this line; it writes a
+        # fish-native `fish_add_path` invocation instead, which resolves
+        # BIN_DIR eagerly — acceptable because fish re-evaluates conf.d
+        # on every shell start and $HOME rewrites are vanishingly rare.)
         _path_line="export PATH=\"${BIN_DIR}:\$PATH\""
 
         # Append `$marker` + `$line` to `$file` if the marker isn't already
@@ -294,7 +306,8 @@ _appstrate_bootstrap() {
           # `>> "$file"` creates the file if absent — matches uv's behavior
           # of writing .profile/.zshrc even on fresh systems.
           printf '\n%s\n%s\n' "$APPSTRATE_PATH_MARKER" "$_line" >>"$_file"
-          MODIFIED_PROFILE="$_file"
+          MODIFIED_PROFILES="${MODIFIED_PROFILES}${_file}
+"
         }
 
         case "$_shell_name" in
@@ -309,11 +322,15 @@ _appstrate_bootstrap() {
             _append_path "$HOME/.bash_profile" "$_path_line"
             ;;
           zsh)
-            # zsh only loads .zshrc for interactive shells and .zshenv for
-            # all invocations. .zshrc is the common case; .zshenv is only
-            # touched if it already exists (avoid polluting non-interactive
-            # environments for users who haven't opted in).
+            # zsh loads .zshrc (interactive), .zprofile (login), and
+            # .zshenv (all invocations). .zshrc + .zprofile are written
+            # unconditionally — between them they cover every interactive
+            # zsh session on macOS (default login shell) and Linux.
+            # .zshenv is only touched if already present, to avoid
+            # polluting non-interactive environments for users who
+            # haven't opted in.
             _append_path "$HOME/.zshrc" "$_path_line"
+            _append_path "$HOME/.zprofile" "$_path_line"
             if [ -f "$HOME/.zshenv" ]; then
               _append_path "$HOME/.zshenv" "$_path_line"
             fi
@@ -337,9 +354,17 @@ _appstrate_bootstrap() {
     esac
   fi
 
-  if [ -n "$MODIFIED_PROFILE" ]; then
-    warn "Added ${BIN_DIR} to PATH in ${MODIFIED_PROFILE}."
-    warn "Restart your shell or run: source ${MODIFIED_PROFILE}"
+  if [ -n "$MODIFIED_PROFILES" ]; then
+    # Informational output (not a warning — the action succeeded). Uses
+    # `log` rather than `warn` so users don't mistake it for an error,
+    # and lists every touched file so the shotgun bash case doesn't hide
+    # the .profile / .bashrc writes behind the last one.
+    log "Added ${BIN_DIR} to PATH in:"
+    # Trim trailing newline so the loop doesn't emit a blank entry.
+    printf '%s' "$MODIFIED_PROFILES" | while IFS= read -r _profile; do
+      [ -n "$_profile" ] && log "  - ${_profile}"
+    done
+    log "Restart your shell to pick up the new PATH."
   fi
 
   log "Launching \`appstrate install\`"

@@ -467,6 +467,19 @@ jobs:
             || { echo "::error::.zshrc missing install marker"; exit 1; }
           grep -q "export PATH=\"$H8/.local/bin:\$PATH\"" "$H8/.zshrc" \
             || { echo "::error::.zshrc missing PATH export"; exit 1; }
+          # .zprofile covers login shells — macOS default for zsh is a login
+          # shell, so missing this would leave PATH broken in Terminal.app
+          # until the first interactive sub-shell.
+          test -f "$H8/.zprofile" \
+            || { echo "::error::.zprofile was not created (login-shell coverage)"; exit 1; }
+          grep -qF "$MARKER" "$H8/.zprofile" \
+            || { echo "::error::.zprofile missing install marker"; exit 1; }
+          # The hint output must list every touched file, not just the last
+          # one — regression guard for the MODIFIED_PROFILE-overwritten bug.
+          echo "$OUT8" | grep -qF ".zshrc" \
+            || { echo "::error::hint output missing .zshrc"; exit 1; }
+          echo "$OUT8" | grep -qF ".zprofile" \
+            || { echo "::error::hint output missing .zprofile"; exit 1; }
           echo "::endgroup::"
           echo "✓ rootless-zsh OK"
 
@@ -537,22 +550,29 @@ jobs:
           echo "::endgroup::"
           echo "✓ no-modify-path opt-out OK"
 
-          # ── Scenario 13: CI=true auto-skips PATH modification ───────
-          echo "::group::CI=true auto-skip"
-          H13="$GITHUB_WORKSPACE/home-13"
-          rm -rf "$H13"; mkdir -p "$H13/.local/bin"
-          env -i \
-            HOME="$H13" \
-            SHELL="/bin/zsh" \
-            CI=true \
-            PATH="/usr/local/bin:/usr/bin:/bin" \
-            bash /tmp/bootstrap.sh >/dev/null 2>&1 || {
-            echo "::error::bootstrap failed with CI=true"; exit 1
-          }
-          test ! -f "$H13/.zshrc" \
-            || { echo "::error::CI=true did not auto-skip PATH modification"; exit 1; }
-          echo "::endgroup::"
-          echo "✓ CI=true auto-skip OK"
+          # ── Scenario 13: CI=<truthy> auto-skips PATH modification ───
+          # Iterate over the accepted truthy values (true / 1 / yes) — not
+          # every CI exports CI=true verbatim (some use 1), so all three
+          # must short-circuit the rc modification path.
+          for _ci_val in true 1 yes; do
+            echo "::group::CI=${_ci_val} auto-skip"
+            H13="$GITHUB_WORKSPACE/home-13-${_ci_val}"
+            rm -rf "$H13"; mkdir -p "$H13/.local/bin"
+            env -i \
+              HOME="$H13" \
+              SHELL="/bin/zsh" \
+              CI="$_ci_val" \
+              PATH="/usr/local/bin:/usr/bin:/bin" \
+              bash /tmp/bootstrap.sh >/dev/null 2>&1 || {
+              echo "::error::bootstrap failed with CI=${_ci_val}"; exit 1
+            }
+            test ! -f "$H13/.zshrc" \
+              || { echo "::error::CI=${_ci_val} did not auto-skip PATH modification"; exit 1; }
+            test ! -f "$H13/.zprofile" \
+              || { echo "::error::CI=${_ci_val} did not auto-skip .zprofile"; exit 1; }
+            echo "::endgroup::"
+            echo "✓ CI=${_ci_val} auto-skip OK"
+          done
 
           # ── Scenario 14: BIN_DIR already in PATH → skip rc ──────────
           echo "::group::BIN_DIR already on PATH"
