@@ -44,6 +44,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
+    "@apidevtools/swagger-parser": "^12.1.0",
     "@clack/prompts": "^1.2.0",
     "@napi-rs/keyring": "^1.2.0",
     "async-mutex": "^0.5.0",
