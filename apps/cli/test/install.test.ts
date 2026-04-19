@@ -49,6 +49,29 @@ describe("resolveTier", () => {
     await expect(resolveTier("1.5")).rejects.toThrow(/Invalid --tier/);
     await expect(resolveTier("NaN")).rejects.toThrow(/Invalid --tier/);
   });
+
+  it("never invokes the Docker probe when --tier is provided", async () => {
+    // Locks down the contract that the CI one-liner (`--tier 3`) never
+    // spawns `docker info` — a regression here would change the byte-
+    // identical CI install path into something that depends on daemon
+    // availability (or daemon latency, via the probe's 3 s timeout).
+    const probe = async () => {
+      throw new Error("isDockerAvailable must not be called when --tier is provided");
+    };
+    for (const raw of ["0", "1", "2", "3"] as const) {
+      const tier = await resolveTier(raw, {
+        isDockerAvailable: probe,
+        select: (async () => {
+          throw new Error("select must not be called when --tier is provided");
+        }) as unknown as typeof import("@clack/prompts").select,
+        isCancel: (() => false) as unknown as typeof import("@clack/prompts").isCancel,
+        note: () => {
+          throw new Error("note must not be called when --tier is provided");
+        },
+      });
+      expect(tier).toBe(Number(raw) as 0 | 1 | 2 | 3);
+    }
+  });
 });
 
 describe("resolveTier (interactive)", () => {

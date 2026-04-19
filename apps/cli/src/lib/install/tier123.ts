@@ -51,9 +51,16 @@ export async function assertDockerAvailable(): Promise<void> {
  * Non-throwing sibling of `assertDockerAvailable()`. Used by the tier
  * prompt to decide which tier to highlight as the default — failure
  * here is informational, not fatal.
+ *
+ * Capped at 3 s because `docker info` can hang 10–30 s while Docker
+ * Desktop's daemon is starting up (common on macOS/Windows post-reboot),
+ * and we don't want a first-time user to sit on a frozen prompt. A
+ * timeout → "Docker unavailable" is the right UX: either the user
+ * accepts Tier 0 as the default, or explicitly picks Tier 3 and the
+ * fatal `DockerMissingError` in `installDockerTier` catches the case.
  */
 export async function isDockerAvailable(): Promise<boolean> {
-  const res = await runCommand("docker", ["info"], { stdio: "ignore" });
+  const res = await runCommand("docker", ["info"], { stdio: "ignore", timeoutMs: 3000 });
   return res.ok;
 }
 
