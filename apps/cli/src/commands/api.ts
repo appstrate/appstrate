@@ -153,6 +153,39 @@ export interface ApiCommandOptions {
   retryDelay?: number;
   /** `--retry-connrefused`: treat ECONNREFUSED as retryable too. */
   retryConnrefused?: boolean;
+  /**
+   * `--compressed`: advertise Accept-Encoding gzip/deflate/br. Bun's
+   * fetch transparently decompresses the response body.
+   */
+  compressed?: boolean;
+  /**
+   * `-r, --range <spec>`: send a `Range: bytes=<spec>` header. Passes
+   * through verbatim (e.g. `0-1023`, `-500`, `1000-`).
+   */
+  range?: string;
+  /**
+   * `-A, --user-agent <ua>`: override the default User-Agent. An
+   * explicit `-H User-Agent: …` still wins (merge order).
+   */
+  userAgent?: string;
+  /**
+   * `-e, --referer <url>`: set the Referer request header. Shortcut
+   * for `-H "Referer: <url>"`. curl's `;auto` variant is not supported.
+   */
+  referer?: string;
+  /**
+   * `-b, --cookie <data>`: literal cookie string `"k=v; k2=v2"`. File
+   * paths (curl cookie jars) are NOT supported — the CLI rejects
+   * anything that looks like a path with exit 2.
+   */
+  cookie?: string;
+  /**
+   * `--fail-with-body`: curl 7.76+ shape. When combined with a non-2xx,
+   * exit 22/25 like `-f` but keep the response body going to stdout
+   * (instead of suppressing it). Agents that need the error payload
+   * for logging use this.
+   */
+  failWithBody?: boolean;
 }
 
 /**
@@ -313,11 +346,28 @@ export async function apiCommand(
     throw err;
   }
 
+  // Reject cookie-jar syntax (curl `-b file.txt`). The heuristic is
+  // "starts with `./` / `/` / `~/`" — common path prefixes. We could
+  // stat the path to be certain, but a false positive (user has a
+  // literal cookie starting with `/`) is better than quietly reading
+  // a random file and putting its contents in the Cookie header.
+  if (opts.cookie && /^(\.?\.?\/|~)/.test(opts.cookie)) {
+    writeError(
+      "cookie jars are not supported (curl `-b file.txt`). Use a literal `k=v` string or set `-H Cookie: ...`.\n",
+    );
+    return exit(2);
+  }
+
   // 3. Build headers (user -H last so it can override defaults).
   const headers = buildHeaders({
     userHeaders: effectiveOpts.header,
     token: auth.accessToken,
     orgId: auth.orgId,
+    userAgent: opts.userAgent,
+    referer: opts.referer,
+    cookie: opts.cookie,
+    range: opts.range,
+    compressed: opts.compressed,
   });
 
   // 4. Build body (mutually exclusive; later modes win).
@@ -470,14 +520,21 @@ export async function apiCommand(
     }
 
     // 9. Output.
-    //    --fail: non-2xx → body to STDERR, exit 22 (4xx) / 25 (5xx).
-    //            2xx     → body to STDOUT, exit 0.
-    //    plain:  body to STDOUT regardless of status, exit 0.
-    //    -i:     status line + headers on STDOUT before body.
-    //    -I:     HEAD — write headers, skip body.
+    //    -f,  --fail (curl-aligned): non-2xx → body suppressed,
+    //         exit 22 (4xx) / 25 (5xx).
+    //    --fail-with-body: non-2xx → body still on stdout, exit 22/25.
+    //    default: body on stdout regardless of status, exit 0.
+    //    -i: status line + headers on stdout before body.
+    //    -I: HEAD — headers only, no body.
     const writeHeaders = opts.include || opts.head;
-    const failMode = Boolean(opts.fail) && !res.ok;
-    const bodySink = failMode ? io.stderr : io.stdout;
+    const failStrict = Boolean(opts.fail) && !res.ok;
+    const failWithBody = Boolean(opts.failWithBody) && !res.ok;
+    const failMode = failStrict || failWithBody;
+    // `-f` (strict) suppresses the body entirely (curl behavior).
+    // `--fail-with-body` keeps body on stdout for logging.
+    // Without either: body always to stdout.
+    const suppressBody = failStrict;
+    const bodySink = io.stdout;
 
     if (writeHeaders) {
       io.stdout.write(formatStatusLine(res));
@@ -494,8 +551,16 @@ export async function apiCommand(
       return exit(0);
     }
 
-    // Output to file or stdout/stderr.
-    if (opts.output && !failMode) {
+    // Output to file or stdout. Strict -f suppresses body entirely.
+    if (suppressBody) {
+      // Still need to drain the body so the connection releases + metrics
+      // reflect the (suppressed) payload size.
+      try {
+        await res.body?.cancel();
+      } catch {
+        /* ignore */
+      }
+    } else if (opts.output && !failMode) {
       try {
         await streamToFile(res, opts.output, ac.signal, metrics);
       } catch (err) {
@@ -565,13 +630,23 @@ function buildHeaders(args: {
   userHeaders: string[];
   token: string;
   orgId?: string;
+  userAgent?: string;
+  referer?: string;
+  cookie?: string;
+  range?: string;
+  compressed?: boolean;
 }): Record<string, string> {
-  // Merge order matters — user headers win.
+  // Merge order matters — defaults first, shortcut flags next (they
+  // override defaults), user `-H` headers last (override everything).
   const out: Record<string, string> = {
-    "User-Agent": CLI_USER_AGENT,
+    "User-Agent": args.userAgent ?? CLI_USER_AGENT,
     Authorization: `Bearer ${args.token}`,
   };
   if (args.orgId) out["X-Org-Id"] = args.orgId;
+  if (args.compressed) out["Accept-Encoding"] = "gzip, deflate, br";
+  if (args.range) out["Range"] = `bytes=${args.range}`;
+  if (args.referer) out["Referer"] = args.referer;
+  if (args.cookie) out["Cookie"] = args.cookie;
   for (const raw of args.userHeaders) {
     const colon = raw.indexOf(":");
     if (colon === -1) continue; // silently ignore malformed — matches curl

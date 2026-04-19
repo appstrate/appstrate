@@ -229,7 +229,28 @@ program
   .option("-S, --show-error", "Restore error messages when combined with -s (curl -sS pattern).")
   .option(
     "-f, --fail",
-    "Exit 22 (4xx) / 25 (5xx) on non-2xx. Body is piped to stderr (differs from curl, which suppresses it) so agents can log failures.",
+    "Exit 22 (4xx) / 25 (5xx) on non-2xx and suppress the body entirely (curl-aligned).",
+  )
+  .option(
+    "--fail-with-body",
+    "Like -f but keep the response body on stdout (curl 7.76+). Use when agents need the error payload for logging.",
+  )
+  .option(
+    "--compressed",
+    "Advertise Accept-Encoding gzip/deflate/br (Bun fetch decompresses automatically).",
+  )
+  .option(
+    "-r, --range <spec>",
+    "Send a Range: bytes=<spec> header (e.g. '0-1023', '-500', '1000-').",
+  )
+  .option(
+    "-A, --user-agent <ua>",
+    "Override the default User-Agent (shortcut for -H 'User-Agent: …'). A later -H still wins.",
+  )
+  .option("-e, --referer <url>", "Set the Referer header (shortcut for -H 'Referer: …').")
+  .option(
+    "-b, --cookie <data>",
+    "Literal cookie string 'k=v; k2=v2'. Cookie-jar files (curl -b file) are NOT supported.",
   )
   .option(
     "-L, --location",
@@ -358,6 +379,12 @@ program
           ? opts.retryDelay
           : undefined,
       retryConnrefused: opts.retryConnrefused === true,
+      compressed: opts.compressed === true,
+      range: typeof opts.range === "string" ? opts.range : undefined,
+      userAgent: typeof opts.userAgent === "string" ? opts.userAgent : undefined,
+      referer: typeof opts.referer === "string" ? opts.referer : undefined,
+      cookie: typeof opts.cookie === "string" ? opts.cookie : undefined,
+      failWithBody: opts.failWithBody === true,
       fail: opts.fail === true,
       location: opts.location === true,
       insecure: opts.insecure === true,

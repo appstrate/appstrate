@@ -182,6 +182,12 @@ async function runCommand(
     retryMaxTime: opts.retryMaxTime,
     retryDelay: opts.retryDelay,
     retryConnrefused: opts.retryConnrefused,
+    compressed: opts.compressed,
+    range: opts.range,
+    userAgent: opts.userAgent,
+    referer: opts.referer,
+    cookie: opts.cookie,
+    failWithBody: opts.failWithBody,
   };
   try {
     await apiCommand(full, io);
@@ -486,21 +492,31 @@ describe("apiCommand — --fail", () => {
     expect(stdoutText(stderr)).toBe("");
   });
 
-  it("404 under --fail → body to stderr, exit 22", async () => {
+  it("404 under --fail → body SUPPRESSED (curl-aligned), exit 22", async () => {
     installFetch(() => new Response("not found", { status: 404 }));
     const { io, stdout, stderr, exitCode } = makeIO();
     await runCommand({ method: "GET", path: "/p", fail: true }, io);
     expect(exitCode.value).toBe(22);
-    expect(stdoutText(stderr)).toContain("not found");
+    // curl `-f`: no body output at all on failure.
     expect(stdoutText(stdout)).toBe("");
+    expect(stdoutText(stderr)).toBe("");
   });
 
-  it("500 under --fail → body to stderr, exit 25", async () => {
+  it("500 under --fail → body suppressed, exit 25", async () => {
     installFetch(() => new Response("boom", { status: 500 }));
-    const { io, stderr, exitCode } = makeIO();
+    const { io, stdout, stderr, exitCode } = makeIO();
     await runCommand({ method: "GET", path: "/p", fail: true }, io);
     expect(exitCode.value).toBe(25);
-    expect(stdoutText(stderr)).toContain("boom");
+    expect(stdoutText(stdout)).toBe("");
+    expect(stdoutText(stderr)).toBe("");
+  });
+
+  it("404 under --fail-with-body → body on stdout, exit 22", async () => {
+    installFetch(() => new Response("not found", { status: 404 }));
+    const { io, stdout, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/p", failWithBody: true }, io);
+    expect(exitCode.value).toBe(22);
+    expect(stdoutText(stdout)).toContain("not found");
   });
 
   it("without --fail, non-2xx still goes to stdout with exit 0", async () => {
@@ -1103,12 +1119,12 @@ describe("apiCommand — -w/--write-out", () => {
 
   it("%{exitcode} reflects --fail exit code (22 on 4xx)", async () => {
     installFetch(() => new Response("nope", { status: 404 }));
-    const { io, stderr, exitCode } = makeIO();
-    // body goes to stderr on failure (current appstrate semantics),
-    // -w output still goes to stdout.
+    const { io, stdout, exitCode } = makeIO();
+    // Under curl-aligned `-f`, the body is suppressed — only the
+    // write-out format string lands on stdout.
     await runCommand({ method: "GET", path: "/p", fail: true, writeOut: "[%{exitcode}]" }, io);
     expect(exitCode.value).toBe(22);
-    expect(stdoutText(stderr)).toContain("nope");
+    expect(stdoutText(stdout)).toBe("[22]");
   });
 
   it("%{exitcode} on connect failure (no response)", async () => {
@@ -1325,5 +1341,64 @@ describe("apiCommand — --connect-timeout", () => {
     // Short connect-timeout should have been cleared before it
     // could fire, so we get a clean success.
     expect(exitCode.value).toBe(0);
+  });
+});
+
+// ─── P3b+c + P4 — header shortcuts + compression + range ────────────
+
+describe("apiCommand — header shortcuts + --compressed + -r", () => {
+  beforeEach(async () => {
+    await seedLoggedIn("default");
+  });
+
+  it("--compressed sends Accept-Encoding", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ method: "GET", path: "/p", compressed: true }, io);
+    expect(fetchCalls[0]!.headers["Accept-Encoding"]).toBe("gzip, deflate, br");
+  });
+
+  it("-r/--range sets Range: bytes=<spec>", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ method: "GET", path: "/p", range: "0-1023" }, io);
+    expect(fetchCalls[0]!.headers.Range).toBe("bytes=0-1023");
+  });
+
+  it("-A overrides the default User-Agent", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ method: "GET", path: "/p", userAgent: "MyAgent/1.0" }, io);
+    expect(fetchCalls[0]!.headers["User-Agent"]).toBe("MyAgent/1.0");
+  });
+
+  it("-H User-Agent still wins over -A", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ method: "GET", path: "/p", userAgent: "A", header: ["User-Agent: B"] }, io);
+    expect(fetchCalls[0]!.headers["User-Agent"]).toBe("B");
+  });
+
+  it("-e sets Referer header", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ method: "GET", path: "/p", referer: "https://origin" }, io);
+    expect(fetchCalls[0]!.headers.Referer).toBe("https://origin");
+  });
+
+  it("-b literal sets Cookie header", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ method: "GET", path: "/p", cookie: "k=v; k2=v2" }, io);
+    expect(fetchCalls[0]!.headers.Cookie).toBe("k=v; k2=v2");
+  });
+
+  it("-b with path-shaped value is rejected (no cookie-jar support)", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, exitCode, stderr } = makeIO();
+    await runCommand({ method: "GET", path: "/p", cookie: "./cookies.txt" }, io);
+    expect(exitCode.value).toBe(2);
+    expect(fetchCalls).toHaveLength(0);
+    expect(stdoutText(stderr)).toContain("cookie jars");
   });
 });

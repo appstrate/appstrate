@@ -163,6 +163,7 @@ async function run(
     head: opts.head,
     silent: opts.silent,
     fail: opts.fail,
+    failWithBody: opts.failWithBody,
     location: opts.location,
     insecure: opts.insecure,
     maxTime: opts.maxTime,
@@ -337,18 +338,24 @@ describe("apiCommand integration — redirect + Authorization", () => {
 });
 
 describe("apiCommand integration — --fail", () => {
-  it("--fail on real 404 → exit 22, body on stderr", async () => {
+  it("--fail on real 404 → exit 22, body SUPPRESSED (curl-aligned)", async () => {
     const captured = makeIO();
     await run({ method: "GET", path: "/404", fail: true }, captured);
     expect(captured.exitCode.value).toBe(22);
-    expect(decode(captured.stderr)).toContain("not found");
     expect(decode(captured.stdout)).toBe("");
+    expect(decode(captured.stderr)).toBe("");
   });
   it("--fail on real 500 → exit 25", async () => {
     const captured = makeIO();
     await run({ method: "GET", path: "/500", fail: true }, captured);
     expect(captured.exitCode.value).toBe(25);
-    expect(decode(captured.stderr)).toContain("boom");
+    expect(decode(captured.stdout)).toBe("");
+  });
+  it("--fail-with-body on real 404 → exit 22, body on stdout", async () => {
+    const captured = makeIO();
+    await run({ method: "GET", path: "/404", failWithBody: true }, captured);
+    expect(captured.exitCode.value).toBe(22);
+    expect(decode(captured.stdout)).toContain("not found");
   });
 });
 
