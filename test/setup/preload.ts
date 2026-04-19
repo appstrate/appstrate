@@ -75,6 +75,19 @@ delete process.env.GOOGLE_CLIENT_SECRET;
 process.env.SIDECAR_POOL_SIZE = "0"; // Disable sidecar pool in tests
 process.env.DOCKER_SOCKET = "http://localhost:2375";
 
+// Belt-and-suspenders: when `bun test` runs from the monorepo root, the
+// CLI's own bunfig preload (which sets these) is ignored in favour of this
+// one. Without them, tests launched from a real terminal (not CI) inherit
+// isTTY=true and diverge: login pops real browser tabs, openapi emits ANSI
+// colors the snapshots don't expect, and the non-TTY prompt guards block
+// waiting for input. Force non-TTY + no-color + no-open so bun:test behaves
+// identically whether launched from a TTY shell or CI.
+process.env.APPSTRATE_CLI_NO_OPEN = "1";
+process.env.NO_COLOR = "1";
+Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: true });
+
 // ─── MinIO bucket creation ───────────────────────────────────
 // Create the test bucket via mc inside the MinIO container (idempotent).
 const mcAlias = Bun.spawnSync(
