@@ -16,12 +16,7 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from
 import { mkdtemp, rm, readFile, stat, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import {
-  clearCache,
-  fetchOpenApi,
-  getCacheDir,
-  type OpenApiDocument,
-} from "../src/lib/openapi-cache.ts";
+import { fetchOpenApi, getCacheDir, type OpenApiDocument } from "../src/lib/openapi-cache.ts";
 import { AuthError } from "../src/lib/api.ts";
 
 type StubCall = { headers: Record<string, string>; path: string };
@@ -344,32 +339,6 @@ describe("fetchOpenApi — flags (noCache, refresh)", () => {
     expect(refresh.calls[0]!.headers["If-None-Match"]).toBeUndefined();
     const etag = await readFile(join(getCacheDir(), "openapi-default.etag"), "utf-8");
     expect(etag).toBe('"v2"');
-  });
-});
-
-describe("clearCache", () => {
-  it("removes both cache files when they exist", async () => {
-    const { fetcher } = stubFetcher(
-      () =>
-        new Response(JSON.stringify(SAMPLE_DOC), {
-          status: 200,
-          headers: { ETag: '"v1"' },
-        }),
-    );
-    await fetchOpenApi("default", {}, fetcher);
-    await clearCache("default");
-    const cacheExists = await stat(join(getCacheDir(), "openapi-default.json"))
-      .then(() => true)
-      .catch(() => false);
-    expect(cacheExists).toBe(false);
-    const etagExists = await stat(join(getCacheDir(), "openapi-default.etag"))
-      .then(() => true)
-      .catch(() => false);
-    expect(etagExists).toBe(false);
-  });
-
-  it("is a no-op on an empty cache (does not throw)", async () => {
-    await expect(clearCache("nonexistent")).resolves.toBeUndefined();
   });
 });
 

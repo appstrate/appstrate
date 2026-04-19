@@ -216,6 +216,26 @@ export async function openapiExportCommand(opts: OpenapiExportOptions): Promise<
 }
 
 /**
+ * Attach the cache-control flags shared by every subcommand. Keeps the
+ * flag strings and their descriptions in one place so a rename lands
+ * uniformly across `list` / `show` / `export`.
+ */
+function addCacheFlags(cmd: Command): Command {
+  return cmd
+    .option("--no-cache", "Skip the on-disk cache entirely (no read, no write).")
+    .option("--refresh", "Force a fresh fetch; still update the cache on success.");
+}
+
+/**
+ * Commander turns `--no-cache` into `cache: false` and leaves `--refresh`
+ * either `true` or undefined. Centralized here so the three action
+ * handlers only translate the subcommand-specific flags.
+ */
+function readCacheFlags(opts: Record<string, unknown>): OpenapiCommandBaseOptions {
+  return { noCache: opts.cache === false, refresh: opts.refresh === true };
+}
+
+/**
  * Register the `openapi` command on a Commander `program` instance.
  * Exported for `cli.ts` — avoids making `cli.ts` aware of the three
  * subcommands individually.
@@ -231,71 +251,64 @@ export function registerOpenapiCommand(
         "Subcommands: list (filterable index), show (single operation), export (raw dump).",
     );
 
-  openapi
-    .command("list")
-    .description("List operations. Filter with --tag, --method, --path (glob), --search.")
-    .option("--tag <tag>", "Filter by OpenAPI tag (case-insensitive).")
-    .option("--method <m>", "Filter by HTTP method (GET/POST/...).")
-    .option(
-      "--path <pattern>",
-      "Filter by path. Supports `*` (single segment) and `**` (any). Exact match otherwise.",
-    )
-    .option(
-      "--search <query>",
-      "Substring match across operationId, summary, description, path, method.",
-    )
-    .option("--json", "Emit a minimal JSON array instead of text.")
-    .option("--no-cache", "Skip the on-disk cache entirely (no read, no write).")
-    .option("--refresh", "Force a fresh fetch; still update the cache on success.")
-    .action(async (opts: Record<string, unknown>) => {
-      await openapiListCommand({
+  addCacheFlags(
+    openapi
+      .command("list")
+      .description("List operations. Filter with --tag, --method, --path (glob), --search.")
+      .option("--tag <tag>", "Filter by OpenAPI tag (case-insensitive).")
+      .option("--method <m>", "Filter by HTTP method (GET/POST/...).")
+      .option(
+        "--path <pattern>",
+        "Filter by path. Supports `*` (single segment) and `**` (any). Exact match otherwise.",
+      )
+      .option(
+        "--search <query>",
+        "Substring match across operationId, summary, description, path, method.",
+      )
+      .option("--json", "Emit a minimal JSON array instead of text."),
+  ).action(async (opts: Record<string, unknown>) => {
+    await openapiListCommand({
+      profile: globalProfile(),
+      tag: typeof opts.tag === "string" ? opts.tag : undefined,
+      method: typeof opts.method === "string" ? opts.method : undefined,
+      path: typeof opts.path === "string" ? opts.path : undefined,
+      search: typeof opts.search === "string" ? opts.search : undefined,
+      json: opts.json === true,
+      ...readCacheFlags(opts),
+    });
+  });
+
+  addCacheFlags(
+    openapi
+      .command("show <identifier> [path]")
+      .description(
+        "Show one operation by `operationId` OR `METHOD /path`.\n" +
+          "Examples: appstrate openapi show createRun\n" +
+          "          appstrate openapi show GET /api/runs",
+      )
+      .option("--json", "Emit the full dereferenced operation as JSON."),
+  ).action(
+    async (identifier: string, pathArg: string | undefined, opts: Record<string, unknown>) => {
+      await openapiShowCommand(identifier, pathArg, {
         profile: globalProfile(),
-        tag: typeof opts.tag === "string" ? opts.tag : undefined,
-        method: typeof opts.method === "string" ? opts.method : undefined,
-        path: typeof opts.path === "string" ? opts.path : undefined,
-        search: typeof opts.search === "string" ? opts.search : undefined,
         json: opts.json === true,
-        // Commander turns `--no-cache` into `cache: false`. Normalize.
-        noCache: opts.cache === false,
-        refresh: opts.refresh === true,
+        ...readCacheFlags(opts),
       });
-    });
+    },
+  );
 
-  openapi
-    .command("show <identifier> [path]")
-    .description(
-      "Show one operation by `operationId` OR `METHOD /path`.\n" +
-        "Examples: appstrate openapi show createRun\n" +
-        "          appstrate openapi show GET /api/runs",
-    )
-    .option("--json", "Emit the full dereferenced operation as JSON.")
-    .option("--no-cache", "Skip the on-disk cache entirely (no read, no write).")
-    .option("--refresh", "Force a fresh fetch; still update the cache on success.")
-    .action(
-      async (identifier: string, pathArg: string | undefined, opts: Record<string, unknown>) => {
-        await openapiShowCommand(identifier, pathArg, {
-          profile: globalProfile(),
-          json: opts.json === true,
-          noCache: opts.cache === false,
-          refresh: opts.refresh === true,
-        });
-      },
-    );
-
-  openapi
-    .command("export")
-    .description("Dump the raw OpenAPI schema. Writes to <file> with -o, else stdout.")
-    .option("-o, --output <file>", "Write the schema to this file (default: stdout).")
-    .option("--no-cache", "Skip the on-disk cache entirely (no read, no write).")
-    .option("--refresh", "Force a fresh fetch; still update the cache on success.")
-    .action(async (opts: Record<string, unknown>) => {
-      await openapiExportCommand({
-        profile: globalProfile(),
-        output: typeof opts.output === "string" ? opts.output : undefined,
-        noCache: opts.cache === false,
-        refresh: opts.refresh === true,
-      });
+  addCacheFlags(
+    openapi
+      .command("export")
+      .description("Dump the raw OpenAPI schema. Writes to <file> with -o, else stdout.")
+      .option("-o, --output <file>", "Write the schema to this file (default: stdout)."),
+  ).action(async (opts: Record<string, unknown>) => {
+    await openapiExportCommand({
+      profile: globalProfile(),
+      output: typeof opts.output === "string" ? opts.output : undefined,
+      ...readCacheFlags(opts),
     });
+  });
 
   return openapi;
 }

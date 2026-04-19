@@ -173,16 +173,6 @@ async function writeCache(
 }
 
 /**
- * Remove the cached schema + ETag for a profile, if present. Exposed
- * for tests and for a future `appstrate openapi --clear-cache` flag.
- */
-export async function clearCache(profileName: string): Promise<void> {
-  const { json, etag } = cachePaths(profileName);
-  await unlink(json).catch(() => {});
-  await unlink(etag).catch(() => {});
-}
-
-/**
  * Fetch the OpenAPI schema for `profileName`, honoring the per-profile
  * ETag cache. Authenticated via `apiFetchRaw` so the request reuses
  * the profile's bearer + silent refresh + X-Org-Id wiring — the same
@@ -197,9 +187,7 @@ export async function clearCache(profileName: string): Promise<void> {
  * controlled Response objects so we can cover hit / miss / 304 /
  * no-ETag / corruption / auth error paths without a live server.
  */
-export interface OpenApiFetcher {
-  (profileName: string, path: string, init: RequestInit): Promise<Response>;
-}
+type OpenApiFetcher = (profileName: string, path: string, init: RequestInit) => Promise<Response>;
 
 const defaultFetcher: OpenApiFetcher = (profileName, path, init) =>
   apiFetchRaw(profileName, path, init as Parameters<typeof apiFetchRaw>[2]);
