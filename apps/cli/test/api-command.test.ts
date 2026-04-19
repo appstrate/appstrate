@@ -175,6 +175,7 @@ async function runCommand(
     maxTime: opts.maxTime,
     verbose: opts.verbose,
     get: opts.get,
+    writeOut: opts.writeOut,
   };
   try {
     await apiCommand(full, io);
@@ -1029,5 +1030,109 @@ describe("apiCommand — -G/--get", () => {
     await runCommand({ path: "/search", get: true, data: `@${tmpFile}` }, io);
     expect(fetchCalls[0]!.url).toContain("q=from-file");
     expect(fetchCalls[0]!.url).toContain("n=1");
+  });
+});
+
+// ─── P2b — -w/--write-out ───────────────────────────────────────────
+
+describe("apiCommand — -w/--write-out", () => {
+  beforeEach(async () => {
+    await seedLoggedIn("default");
+  });
+
+  it("writes %{http_code} with trailing newline to stdout after body", async () => {
+    installFetch(
+      () =>
+        new Response("hello", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    );
+    const { io, stdout, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/p", writeOut: "%{http_code}\\n" }, io);
+    expect(exitCode.value).toBe(0);
+    expect(stdoutText(stdout)).toBe("hello200\n");
+  });
+
+  it("interpolates %{size_download} and %{url_effective}", async () => {
+    installFetch(() => new Response("abcd", { status: 200 }));
+    const { io, stdout } = makeIO();
+    await runCommand(
+      {
+        method: "GET",
+        path: "/p",
+        writeOut: "size=%{size_download} url=%{url_effective}",
+      },
+      io,
+    );
+    const out = stdoutText(stdout);
+    expect(out).toContain("size=4");
+    expect(out).toContain("url=https://app.example.com/p");
+  });
+
+  it("%{header_json} returns valid JSON of response headers", async () => {
+    installFetch(
+      () =>
+        new Response("body", {
+          status: 200,
+          headers: { "X-Custom": "yes", "Content-Type": "text/plain" },
+        }),
+    );
+    const { io, stdout } = makeIO();
+    await runCommand({ method: "GET", path: "/p", writeOut: "%{header_json}" }, io);
+    const out = stdoutText(stdout);
+    const jsonPart = out.slice("body".length);
+    const parsed = JSON.parse(jsonPart);
+    expect(parsed["x-custom"]).toBe("yes");
+    expect(parsed["content-type"]).toBe("text/plain");
+  });
+
+  it("%{exitcode} reflects the final exit code (0 on 200)", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, stdout, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/p", writeOut: "[%{exitcode}]" }, io);
+    expect(exitCode.value).toBe(0);
+    expect(stdoutText(stdout)).toContain("[0]");
+  });
+
+  it("%{exitcode} reflects --fail exit code (22 on 4xx)", async () => {
+    installFetch(() => new Response("nope", { status: 404 }));
+    const { io, stderr, exitCode } = makeIO();
+    // body goes to stderr on failure (current appstrate semantics),
+    // -w output still goes to stdout.
+    await runCommand({ method: "GET", path: "/p", fail: true, writeOut: "[%{exitcode}]" }, io);
+    expect(exitCode.value).toBe(22);
+    expect(stdoutText(stderr)).toContain("nope");
+  });
+
+  it("%{exitcode} on connect failure (no response)", async () => {
+    globalThis.fetch = (async () => {
+      throw Object.assign(new Error("nope"), { code: "ECONNREFUSED" });
+    }) as unknown as typeof fetch;
+    const { io, stdout, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/p", writeOut: "%{http_code}|%{exitcode}" }, io);
+    expect(exitCode.value).toBe(EXIT_CONNECT);
+    expect(stdoutText(stdout)).toBe(`0|${EXIT_CONNECT}`);
+  });
+
+  it("unknown variable is passed through verbatim", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, stdout } = makeIO();
+    await runCommand({ method: "GET", path: "/p", writeOut: "%{bogus}!" }, io);
+    expect(stdoutText(stdout)).toContain("%{bogus}!");
+  });
+
+  it("%{time_total} is non-negative and finite", async () => {
+    installFetch(
+      () => new Promise<Response>((r) => setTimeout(() => r(jsonResponse(200, {})), 20)),
+    );
+    const { io, stdout } = makeIO();
+    await runCommand({ method: "GET", path: "/p", writeOut: "t=%{time_total}" }, io);
+    const out = stdoutText(stdout);
+    const match = out.match(/t=([\d.]+)/);
+    expect(match).not.toBeNull();
+    const t = parseFloat(match![1]!);
+    expect(t).toBeGreaterThanOrEqual(0);
+    expect(Number.isFinite(t)).toBe(true);
   });
 });

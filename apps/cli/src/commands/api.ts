@@ -114,6 +114,15 @@ export interface ApiCommandOptions {
    * (`-F`) is incompatible and rejected with exit 2.
    */
   get?: boolean;
+  /**
+   * `-w, --write-out <fmt>`: after the body, write a curl-style format
+   * string with `%{variable}` interpolation to stdout. Supported vars
+   * documented on `formatWriteOut`. Unknown vars are passed through
+   * verbatim (matches curl). Escape sequences `\n \r \t` are expanded
+   * in the format string itself so shells that don't pre-interpolate
+   * (zsh `echo` vs bash) produce the same output.
+   */
+  writeOut?: string;
 }
 
 /**
@@ -166,6 +175,52 @@ export async function apiCommand(
     io.stderr.write(msg);
   };
 
+  // P2b — `-w/--write-out` metrics are allocated up-front so even the
+  // pre-fetch early-exit paths (auth error, host mismatch, -G+-F)
+  // can emit the format string with zeroed timings / sizes, matching
+  // curl's behavior on connect failure.
+  const metrics: WriteOutMetrics = {
+    tStart: performance.now(),
+    tFirstByte: null,
+    tEnd: null,
+    sizeDownload: 0,
+    sizeUpload: null, // filled in after body is built
+    httpCode: 0,
+    urlEffective: opts.path,
+    numRedirects: 0,
+    responseHeaders: {},
+    exitCode: 0,
+  };
+  const emitWriteOut = (code: number): void => {
+    if (!opts.writeOut) return;
+    metrics.exitCode = code;
+    metrics.tEnd ??= performance.now();
+    io.stdout.write(formatWriteOut(opts.writeOut, metrics));
+  };
+  const exit = (code: number): never => {
+    emitWriteOut(code);
+    return io.exit(code);
+  };
+  // Single source for stream/network error classification. Replaces
+  // the former free-standing `handleStreamError` — inlined as a
+  // closure so it can funnel through `exit(code)` and emit `-w`
+  // output with the right exit code.
+  const handleErr = (err: unknown): never => {
+    if (ac.signal.aborted || sigintFired || (err instanceof Error && err.name === "AbortError")) {
+      const reason = ac.signal.reason ?? (err as { cause?: unknown })?.cause;
+      const isTimeout = reason instanceof Error && reason.name === "TimeoutError" && !sigintFired;
+      if (isTimeout) {
+        const code = classifyNetworkError(reason);
+        writeError(`${labelForExitCode(code)}\n`);
+        return exit(code);
+      }
+      return exit(130);
+    }
+    const code = classifyNetworkError(err);
+    writeError(`${labelForExitCode(code)}: ${errorMessage(err)}\n`);
+    return exit(code);
+  };
+
   // 1. Resolve auth profile + fresh access token.
   const config = await readConfig();
   const profileName = resolveProfileName(opts.profile, config);
@@ -176,7 +231,7 @@ export async function apiCommand(
   } catch (err) {
     if (err instanceof AuthError || err instanceof ApiError) {
       writeError(`${err.message}\n`);
-      return io.exit(1);
+      return exit(1);
     }
     throw err;
   }
@@ -188,7 +243,7 @@ export async function apiCommand(
   if (opts.get) {
     if (opts.form.length > 0) {
       writeError("cannot combine -G/--get with -F/--form (multipart)\n");
-      return io.exit(2);
+      return exit(2);
     }
     const extraQuery = await collectGetDataAsQuery(opts, io);
     effectiveOpts = {
@@ -208,7 +263,7 @@ export async function apiCommand(
   } catch (err) {
     if (err instanceof HostMismatchError) {
       writeError(`${err.message}\n`);
-      return io.exit(2);
+      return exit(2);
     }
     throw err;
   }
@@ -228,6 +283,10 @@ export async function apiCommand(
 
   // HEAD never sends a body.
   const finalBody = method === "HEAD" ? undefined : body;
+
+  // Finalize the sizeUpload metric now that the body shape is known.
+  metrics.sizeUpload = sizeOfBody(finalBody);
+  metrics.urlEffective = url;
 
   // 6. Abort controller for SIGINT + --max-time.
   const ac = new AbortController();
@@ -288,15 +347,19 @@ export async function apiCommand(
         redirect: opts.location ? "follow" : "manual",
       };
       if (usesStdin) init.duplex = "half";
-      // P2a — `-v/--verbose`: trace request on stderr. Always emitted
-      // (even with -s), matching curl. Authorization is always redacted.
       if (opts.verbose) writeVerboseRequest(io, profileName, method, url, headers);
       res = await fetch(url, init as Parameters<typeof fetch>[1]);
       if (opts.verbose) writeVerboseResponse(io, res);
     } catch (err) {
       cleanup();
-      return handleStreamError(err, ac.signal, sigintFired, io, opts);
+      return handleErr(err);
     }
+
+    // P2b — capture response-level metrics for -w
+    metrics.httpCode = res.status;
+    metrics.urlEffective = res.url || url;
+    metrics.numRedirects = res.redirected ? 1 : 0;
+    for (const [k, v] of res.headers) metrics.responseHeaders[k] = v;
 
     // 8. Soft UX hint on 401 (agents parse exit codes — don't prompt).
     //    Silenced by `-s`; `-sS` doesn't restore it (it's a UX hint,
@@ -327,16 +390,16 @@ export async function apiCommand(
       // RFC 9110 §9.3.2 — HEAD responses MUST NOT have a body. Bun/undici
       // still delivers an (empty) stream; we deliberately don't touch it.
       cleanup();
-      return io.exit(0);
+      return exit(0);
     }
 
     // Output to file or stdout/stderr.
     if (opts.output && !failMode) {
       try {
-        await streamToFile(res, opts.output, ac.signal);
+        await streamToFile(res, opts.output, ac.signal, metrics);
       } catch (err) {
         cleanup();
-        return handleStreamError(err, ac.signal, sigintFired, io, opts);
+        return handleErr(err);
       }
     } else if (res.body) {
       try {
@@ -348,20 +411,22 @@ export async function apiCommand(
         while (true) {
           const chunk = await Promise.race([reader.read(), abortPromise]);
           if (chunk.done) break;
-          if (chunk.value && chunk.value.byteLength > 0) bodySink.write(chunk.value);
+          if (chunk.value && chunk.value.byteLength > 0) {
+            if (metrics.tFirstByte === null) metrics.tFirstByte = performance.now();
+            metrics.sizeDownload += chunk.value.byteLength;
+            bodySink.write(chunk.value);
+          }
         }
       } catch (err) {
         cleanup();
-        return handleStreamError(err, ac.signal, sigintFired, io, opts);
+        return handleErr(err);
       }
     }
 
     cleanup();
     // 10. Final exit code.
-    if (failMode) {
-      return io.exit(res.status >= 500 ? 25 : 22);
-    }
-    return io.exit(0);
+    const code = failMode ? (res.status >= 500 ? 25 : 22) : 0;
+    return exit(code);
   } finally {
     cleanup();
   }
@@ -510,7 +575,12 @@ function formatStatusLine(res: Response): string {
   return `HTTP/1.1 ${res.status} ${text}\r\n`;
 }
 
-async function streamToFile(res: Response, path: string, signal: AbortSignal): Promise<void> {
+async function streamToFile(
+  res: Response,
+  path: string,
+  signal: AbortSignal,
+  metrics?: WriteOutMetrics,
+): Promise<void> {
   const writer = Bun.file(path).writer();
   try {
     if (res.body) {
@@ -519,7 +589,13 @@ async function streamToFile(res: Response, path: string, signal: AbortSignal): P
       while (true) {
         const chunk = await Promise.race([reader.read(), abortPromise]);
         if (chunk.done) break;
-        if (chunk.value && chunk.value.byteLength > 0) writer.write(chunk.value);
+        if (chunk.value && chunk.value.byteLength > 0) {
+          if (metrics) {
+            if (metrics.tFirstByte === null) metrics.tFirstByte = performance.now();
+            metrics.sizeDownload += chunk.value.byteLength;
+          }
+          writer.write(chunk.value);
+        }
       }
     }
   } finally {
@@ -547,35 +623,6 @@ function abortAsRejection(signal: AbortSignal): Promise<never> {
 
 function abortError(reason: unknown): Error {
   return Object.assign(new Error("aborted"), { name: "AbortError", cause: reason });
-}
-
-function handleStreamError(
-  err: unknown,
-  signal: AbortSignal,
-  sigintFired: boolean,
-  io: ApiCommandIO,
-  opts: ApiCommandOptions,
-): never {
-  // Same silence gate as the main writeError helper — duplicated here
-  // because this fn lives outside the apiCommand closure.
-  const writeError = (msg: string): void => {
-    if (opts.silent && !opts.showError) return;
-    io.stderr.write(msg);
-  };
-  if (signal.aborted || sigintFired || (err instanceof Error && err.name === "AbortError")) {
-    // Distinguish timeout vs SIGINT via the abort reason we set.
-    const reason = signal.reason ?? (err as { cause?: unknown })?.cause;
-    const isTimeout = reason instanceof Error && reason.name === "TimeoutError" && !sigintFired;
-    if (isTimeout) {
-      const code = classifyNetworkError(reason);
-      writeError(`${labelForExitCode(code)}\n`);
-      return io.exit(code);
-    }
-    return io.exit(130);
-  }
-  const code = classifyNetworkError(err);
-  writeError(`${labelForExitCode(code)}: ${errorMessage(err)}\n`);
-  return io.exit(code);
 }
 
 function restoreTls(prev: string | undefined): void {
@@ -667,4 +714,99 @@ async function collectGetDataAsQuery(opts: ApiCommandOptions, io: ApiCommandIO):
   }
   // Split each value on `&` so `-d 'k=v&k2=v2'` produces two query pairs.
   return values.flatMap((v) => v.split("&")).filter(Boolean);
+}
+
+// ─── P2b — `-w/--write-out` ─────────────────────────────────────────
+
+/**
+ * Subset of curl's `-w` metrics that we can derive from Web fetch.
+ *
+ *  tStart / tFirstByte / tEnd are `performance.now()` timestamps
+ *    (milliseconds since CLI launch). Converted to seconds in the
+ *    formatter — curl emits seconds with 6-decimal precision.
+ *  sizeUpload is `null` when the body shape doesn't expose a length
+ *    (FormData, ReadableStream) — we render that as `0` rather than
+ *    making up a number.
+ */
+export interface WriteOutMetrics {
+  tStart: number;
+  tFirstByte: number | null;
+  tEnd: number | null;
+  sizeDownload: number;
+  sizeUpload: number | null;
+  httpCode: number;
+  urlEffective: string;
+  numRedirects: number;
+  responseHeaders: Record<string, string>;
+  exitCode: number;
+}
+
+/**
+ * Best-effort synchronous size of a request body. Matches the
+ * shapes `buildBody()` produces:
+ *   - `undefined` → 0
+ *   - `string`    → UTF-8 byte length
+ *   - Bun.file(...) handle → `.size` getter
+ *   - FormData / ReadableStream → unknown (null)
+ */
+function sizeOfBody(body: unknown): number | null {
+  if (body === undefined || body === null) return 0;
+  if (typeof body === "string") return new TextEncoder().encode(body).length;
+  if (body && typeof body === "object" && "size" in body) {
+    const s = (body as { size: unknown }).size;
+    if (typeof s === "number") return s;
+  }
+  return null;
+}
+
+/**
+ * Expand a curl `-w` format string. Supported variables:
+ *   %{http_code}            Final response status (0 on connect failure)
+ *   %{http_version}         Hardcoded "1.1" — fetch doesn't expose the real version
+ *   %{size_download}        Body bytes received
+ *   %{size_upload}          Body bytes sent (0 when unknown)
+ *   %{time_total}           Total request time, seconds, 6 decimals
+ *   %{time_starttransfer}   Time until first response byte, seconds
+ *   %{url_effective}        Final URL (after redirects with `-L`)
+ *   %{num_redirects}        1 if -L followed a redirect, else 0
+ *   %{header_json}          Response headers as a JSON object
+ *   %{exitcode}             Our process exit code (0 on success)
+ *
+ * Escape sequences `\n \r \t` are expanded in the format string
+ * itself — agents that embed `-w "%{http_code}\n"` should get a
+ * trailing newline regardless of shell quoting rules.
+ * Unknown variables are passed through verbatim (matches curl).
+ */
+function formatWriteOut(fmt: string, m: WriteOutMetrics): string {
+  const expanded = fmt.replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\t/g, "\t");
+  const secondsSince = (t: number | null): string => {
+    if (t === null) return "0.000000";
+    return ((t - m.tStart) / 1000).toFixed(6);
+  };
+  return expanded.replace(/%\{([a-z_]+)\}/g, (match, name: string) => {
+    switch (name) {
+      case "http_code":
+        return String(m.httpCode);
+      case "http_version":
+        return "1.1";
+      case "size_download":
+        return String(m.sizeDownload);
+      case "size_upload":
+        return String(m.sizeUpload ?? 0);
+      case "time_total":
+        return secondsSince(m.tEnd);
+      case "time_starttransfer":
+        return secondsSince(m.tFirstByte);
+      case "url_effective":
+        return m.urlEffective;
+      case "num_redirects":
+        return String(m.numRedirects);
+      case "header_json":
+        return JSON.stringify(m.responseHeaders);
+      case "exitcode":
+        return String(m.exitCode);
+      default:
+        return match;
+    }
+  });
 }

@@ -214,6 +214,10 @@ program
     "-v, --verbose",
     "Trace request + response headers on stderr (curl -v). Authorization header is always [REDACTED].",
   )
+  .option(
+    "-w, --write-out <fmt>",
+    "After the body, write a format string to stdout. Supports %{http_code}, %{size_download}, %{time_total}, %{url_effective}, %{header_json}, %{exitcode}, and escape sequences \\n \\r \\t.",
+  )
   .option("-X, --request <method>", "Override method (takes precedence over positional)")
   .option("-o, --output <file>", "Write response body to file (default: stdout)")
   .option("-i, --include", "Include status line + response headers on stdout")
@@ -286,6 +290,7 @@ program
       showError: opts.showError === true,
       verbose: opts.verbose === true,
       get: opts.get === true,
+      writeOut: typeof opts.writeOut === "string" ? opts.writeOut : undefined,
       fail: opts.fail === true,
       location: opts.location === true,
       insecure: opts.insecure === true,
