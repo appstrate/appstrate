@@ -60,6 +60,7 @@
     "./schemas": "./src/schemas.ts",
     "./form": "./src/form.ts",
     "./module": "./src/module.ts",
+    "./platform-types": "./src/platform-types.ts",
     "./sidecar-types": "./src/sidecar-types.ts"
   },
   "dependencies": {

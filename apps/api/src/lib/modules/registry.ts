@@ -13,9 +13,25 @@ import { isEmbeddedDb } from "@appstrate/db/client";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
-import type { ModuleInitContext } from "@appstrate/core/module";
+import type { ModuleInitContext, PlatformServices } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
 import { applyModuleMigrations } from "./migrate.ts";
+
+// ---- Platform service imports (for buildPlatformServices) -----------------
+import { logger } from "../logger.ts";
+import { loadModel, listOrgModels } from "../../services/org-models.ts";
+import { getPackage } from "../../services/agent-service.ts";
+import { isInlineShadowPackageId } from "../../services/inline-run.ts";
+import { runInlinePreflight } from "../../services/inline-run-preflight.ts";
+import { getDefaultApplication } from "../../services/applications.ts";
+import { listAllActorConnections } from "../../services/connection-manager/providers.ts";
+import { appendRunLog, updateRun } from "../../services/state/runs.ts";
+import { abortRun } from "../../services/run-tracker.ts";
+import { addSubscriber, removeSubscriber } from "../../services/realtime.ts";
+import { getOrchestrator } from "../../services/orchestrator/index.ts";
+import { getPubSub } from "../../infra/index.ts";
+import { hasRedis, hasExternalDb } from "../../infra/mode.ts";
+import { getModule, emitEvent } from "./module-loader.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -56,6 +72,43 @@ export function getModuleRegistry(): string[] {
 // Init context builder
 // ---------------------------------------------------------------------------
 
+/**
+ * Wire concrete platform services into the structural `PlatformServices`
+ * contract declared in `@appstrate/core/module`.
+ *
+ * The `as PlatformServices[…]` casts are deliberate: concrete apps/api
+ * functions have narrower types (e.g. `load(): Promise<ResolvedModel | null>`)
+ * than the loose structural interface (`load(): Promise<unknown>`). This is
+ * safe by construction — the loose type is a supertype of the concrete one —
+ * but TypeScript cannot infer the relationship across the package boundary.
+ */
+function buildPlatformServices(): PlatformServices {
+  return {
+    logger,
+    orchestrator: { get: getOrchestrator },
+    pubsub: { get: getPubSub },
+    env: { hasRedis, hasExternalDb },
+    models: { load: loadModel, listForOrg: listOrgModels },
+    packages: {
+      get: getPackage as PlatformServices["packages"]["get"],
+      isInlineShadow: isInlineShadowPackageId,
+    },
+    applications: { getDefault: getDefaultApplication },
+    connections: {
+      listAllForActor:
+        listAllActorConnections as unknown as PlatformServices["connections"]["listAllForActor"],
+    },
+    runs: {
+      appendLog: appendRunLog as unknown as PlatformServices["runs"]["appendLog"],
+      update: updateRun as unknown as PlatformServices["runs"]["update"],
+      abort: abortRun,
+    },
+    inline: { trigger: runInlinePreflight as PlatformServices["inline"]["trigger"] },
+    realtime: { addSubscriber, removeSubscriber },
+    modules: { get: getModule, emit: emitEvent as PlatformServices["modules"]["emit"] },
+  };
+}
+
 export function buildModuleInitContext(): ModuleInitContext {
   const env = getEnv();
   const ctx: ModuleInitContext = {
@@ -71,6 +124,7 @@ export function buildModuleInitContext(): ModuleInitContext {
       return sendMail;
     },
     getOrgAdminEmails,
+    services: buildPlatformServices(),
   };
   return ctx;
 }

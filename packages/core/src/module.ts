@@ -11,6 +11,8 @@
  */
 
 import type { Hono } from "hono";
+import type { Logger } from "./logger.ts";
+import type { ContainerOrchestrator, PubSub } from "./platform-types.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -482,4 +484,81 @@ export interface ModuleInitContext {
   getSendMail: () => Promise<(to: string, subject: string, html: string) => void>;
   /** Query helper: get org admin emails. */
   getOrgAdminEmails: (orgId: string) => Promise<string[]>;
+  /**
+   * Typed platform capabilities injected at init. Modules capture this
+   * reference and consume services through it without importing
+   * apps/api internals.
+   *
+   * The shape is a loose structural contract (values returned by concrete
+   * services often have narrower types than `unknown`). Consumers cast at
+   * the call site when they need the concrete type — this is safe by
+   * construction because core's loose signatures are supertypes of the
+   * platform's concrete ones.
+   */
+  services: PlatformServices;
+}
+
+// ---------------------------------------------------------------------------
+// PlatformServices — injected platform capabilities
+//
+// Namespaced sub-objects for discoverability. Keep the surface minimal —
+// only capabilities with stable cross-module demand belong here. Function
+// signatures use `unknown` where the concrete shape lives in apps/api; the
+// integration site casts at injection time so modules get runtime access
+// without core having to import apps/api implementation details.
+// ---------------------------------------------------------------------------
+
+export interface PlatformServices {
+  /** Structured JSON logger (pino). */
+  logger: Logger;
+  /** Container orchestrator singleton accessor. */
+  orchestrator: { get(): ContainerOrchestrator };
+  /** Pub/Sub adapter accessor. Resolves asynchronously because Redis impls load lazily. */
+  pubsub: { get(): PubSub | Promise<PubSub> };
+  /** Tier/mode detection — surfaces which optional infrastructure is present. */
+  env: {
+    hasRedis(): boolean;
+    hasExternalDb(): boolean;
+  };
+  /** Org-scoped model catalog operations. */
+  models: {
+    load(orgId: string, modelDbId: string): Promise<unknown>;
+    listForOrg(orgId: string): Promise<unknown[]>;
+  };
+  /** Package catalog accessors. */
+  packages: {
+    get(packageId: string, orgId: string, opts?: { includeEphemeral?: boolean }): Promise<unknown>;
+    isInlineShadow(packageId: string): boolean;
+  };
+  /** Application helpers. */
+  applications: {
+    getDefault(orgId: string): Promise<unknown>;
+  };
+  /** Connection manager helpers. */
+  connections: {
+    listAllForActor(...args: unknown[]): Promise<unknown[]>;
+  };
+  /** Run lifecycle operations (append log, update, abort). */
+  runs: {
+    appendLog(...args: unknown[]): Promise<void>;
+    update(...args: unknown[]): Promise<void>;
+    abort(runId: string): void;
+  };
+  /** Inline run trigger. */
+  inline: {
+    trigger(params: unknown): Promise<unknown>;
+  };
+  /** Realtime SSE subscriber registry. */
+  realtime: {
+    addSubscriber(sub: unknown): void;
+    removeSubscriber(id: string): void;
+  };
+  /** Module registry accessors (for cross-module lookups and event emission). */
+  modules: {
+    get(id: string): AppstrateModule | null;
+    emit<K extends keyof ModuleEvents>(
+      event: K,
+      ...args: Parameters<ModuleEvents[K]>
+    ): Promise<void>;
+  };
 }

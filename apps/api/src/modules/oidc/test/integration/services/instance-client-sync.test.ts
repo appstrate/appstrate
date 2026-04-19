@@ -382,6 +382,7 @@ describe("oidcModule.init() — boot wiring", () => {
       applyMigrations: async () => {},
       getSendMail: async () => () => {},
       getOrgAdminEmails: async () => [],
+      services: {} as import("@appstrate/core/module").PlatformServices,
     };
 
     await oidcModule.init!(initCtx);
@@ -421,6 +422,7 @@ describe("oidcModule.init() — boot wiring", () => {
       applyMigrations: async () => {},
       getSendMail: async () => () => {},
       getOrgAdminEmails: async () => [],
+      services: {} as import("@appstrate/core/module").PlatformServices,
     };
 
     let caught: unknown;
