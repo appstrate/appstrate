@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import type { Context, Next } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import {
@@ -75,13 +76,33 @@ async function requireOrgRole(
 
 const router = new Hono<AppEnv>();
 
+// Issue #172 — API keys carry an `orgId` scope but `/api/orgs/*` handlers
+// historically resolved membership from the creator's `user.id`, letting a
+// key issued in org A read/mutate other orgs the creator is a member of.
+// This guard pins every `:orgId` route to the key's bound org. Sessions
+// are unaffected (they legitimately see every org they belong to).
+async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
+  if (c.get("authMethod") !== "api_key") return next();
+  const paramOrgId = c.req.param("orgId");
+  if (paramOrgId && paramOrgId !== c.get("orgId")) {
+    throw forbidden("API key scope does not include this organization");
+  }
+  return next();
+}
+
+router.use("/:orgId", apiKeyOrgScopeGuard);
+router.use("/:orgId/*", apiKeyOrgScopeGuard);
+
 // GET /api/orgs — list orgs for the current user (no org context needed)
 router.get("/", async (c) => {
   const user = c.get("user");
   const orgs = await getUserOrganizations(user.id);
+  const authMethod = c.get("authMethod");
+  const keyOrgId = c.get("orgId");
+  const scoped = authMethod === "api_key" ? orgs.filter((o) => o.id === keyOrgId) : orgs;
 
   return c.json({
-    organizations: orgs.map((o) => ({
+    organizations: scoped.map((o) => ({
       id: o.id,
       name: o.name,
       slug: o.slug,
@@ -93,6 +114,9 @@ router.get("/", async (c) => {
 
 // POST /api/orgs — create an organization (no org context needed)
 router.post("/", async (c) => {
+  if (c.get("authMethod") === "api_key") {
+    throw forbidden("API keys cannot create organizations");
+  }
   const user = c.get("user");
   const body = await c.req.json();
   const data = parseBody(createOrgSchema, body);
