@@ -11,6 +11,8 @@ import type {
   StopResult,
 } from "./types.ts";
 import * as docker from "../docker.ts";
+import { createNetworkWithPoolRetry } from "../docker-errors.ts";
+import { logger } from "../../lib/logger.ts";
 import * as sidecarPool from "../sidecar-pool.ts";
 import { getSidecarImage, startSidecarAndHealthCheck } from "../sidecar-pool.ts";
 import {
@@ -64,7 +66,11 @@ export class DockerOrchestrator implements ContainerOrchestrator {
 
   async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
     const name = `appstrate-exec-${runId}`;
-    const id = await docker.createNetwork(name, { internal: true });
+    const id = await createNetworkWithPoolRetry(
+      () => docker.createNetwork(name, { internal: true }),
+      () => docker.cleanupOrphanedNetworks(),
+      logger,
+    );
     return { id, name };
   }
 

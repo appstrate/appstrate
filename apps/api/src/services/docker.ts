@@ -3,6 +3,7 @@
 import { hostname } from "node:os";
 import { logger } from "../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
+import { classifyDockerNetworkError } from "./docker-errors.ts";
 
 const DOCKER_SOCKET = getEnv().DOCKER_SOCKET;
 const DOCKER_API_TIMEOUT_MS = 30_000;
@@ -19,6 +20,13 @@ async function assertDockerOk(
 ): Promise<void> {
   if (res.ok || allowedStatuses.includes(res.status)) return;
   const body = await res.text();
+  // Promote known pool-exhaustion failures on network creation to a typed
+  // error so the orchestrator can trigger opportunistic cleanup + retry
+  // before surfacing the raw Docker body to the user.
+  if (operation.startsWith("create network")) {
+    const typed = classifyDockerNetworkError(res.status, body);
+    if (typed) throw typed;
+  }
   throw new Error(`Docker ${operation} failed: ${res.status} ${body}`);
 }
 
@@ -485,9 +493,12 @@ export async function cleanupOrphanedContainers(): Promise<{
 
 /**
  * List all Docker networks matching `appstrate-exec-*` or `appstrate-sidecar-pool` and remove them.
- * This is safe to call at startup because no runs should be running.
+ * This is safe to call at startup because no runs should be running. Exported so the
+ * orchestrator can call it opportunistically when network creation hits address-pool
+ * exhaustion mid-operation — orphan leaks from crashed runs keep consuming pool slots
+ * until reclaimed, and reclaiming them is often enough to unblock the next `createNetwork`.
  */
-async function cleanupOrphanedNetworks(): Promise<number> {
+export async function cleanupOrphanedNetworks(): Promise<number> {
   const res = await dockerFetch("/networks");
   if (!res.ok) return 0;
 

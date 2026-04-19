@@ -14,6 +14,7 @@ import {
   connectContainerToNetwork,
   removeNetwork,
   cleanupOrphanedContainers,
+  cleanupOrphanedNetworks,
   getContainerHostPort,
 } from "../../../src/services/docker.ts";
 
@@ -603,6 +604,36 @@ describe("cleanupOrphanedContainers", () => {
 
       const result = await cleanupOrphanedContainers();
       expect(result.containers).toBe(0);
+    },
+    TIMEOUT,
+  );
+});
+
+// ─── cleanupOrphanedNetworks ─────────────────────────────────
+
+describe("cleanupOrphanedNetworks", () => {
+  it(
+    "reclaims appstrate-exec-* networks without touching unrelated networks",
+    async () => {
+      // Pre-condition: clear any leftovers from earlier tests.
+      await cleanupOrphanedNetworks();
+
+      // Three orphan run networks + one unrelated bystander that must survive.
+      const orphan1 = await createNetwork(`appstrate-exec-orphan-${uid()}`);
+      const orphan2 = await createNetwork(`appstrate-exec-orphan-${uid()}`);
+      const orphan3 = await createNetwork(`appstrate-exec-orphan-${uid()}`);
+      const bystander = await createNetwork(`appstrate-test-keepme-${uid()}`);
+      trackNetwork(bystander);
+
+      const reclaimed = await cleanupOrphanedNetworks();
+      expect(reclaimed).toBeGreaterThanOrEqual(3);
+
+      for (const id of [orphan1, orphan2, orphan3]) {
+        const res = await fetch(`${DOCKER_URL}/networks/${id}`);
+        expect(res.status).toBe(404);
+      }
+      const stillThere = await fetch(`${DOCKER_URL}/networks/${bystander}`);
+      expect(stillThere.status).toBe(200);
     },
     TIMEOUT,
   );
