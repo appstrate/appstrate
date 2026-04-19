@@ -72,11 +72,11 @@ curl -fsSL https://get.appstrate.dev | bash -s -- --tier 1 --dir ~/apps/appstrat
 
 `--tier`, `--dir`, and `--port` override the smart defaults. Equivalent env vars: `APPSTRATE_YES=1`, `APPSTRATE_PORT`, `APPSTRATE_BIN_DIR`.
 
-**Want the interactive prompts?** Install first, then configure:
+**Want the interactive prompts?** Drop the binary without auto-launching, then run `install` yourself:
 
 ```sh
-curl -fsSL https://get.appstrate.dev | bash -s -- --dir /tmp/noop  # drops the binary
-appstrate install                                                   # interactive flow
+curl -fsSL https://get.appstrate.dev | APPSTRATE_NO_LAUNCH=1 bash
+appstrate install  # interactive tier + directory prompts
 ```
 
 See [`apps/cli/README.md`](./apps/cli/README.md) for the full CLI reference, and [`examples/self-hosting/`](./examples/self-hosting/) for manual Docker Compose setup.

@@ -60,6 +60,10 @@ process.on("SIGTERM", () => {
   restoreCookedMode();
   process.exit(143);
 });
+process.on("SIGHUP", () => {
+  restoreCookedMode();
+  process.exit(129);
+});
 
 // Catch stray unhandled rejections + uncaughts before Bun's default
 // stack-trace dump kicks in — commands are async and may throw after

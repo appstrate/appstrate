@@ -367,6 +367,17 @@ _appstrate_bootstrap() {
     log "Restart your shell to pick up the new PATH."
   fi
 
+  # APPSTRATE_NO_LAUNCH=1 drops the binary and stops, leaving the user in
+  # control of the next step (e.g. run `appstrate install` interactively
+  # once the Bun macOS setRawMode regression in #199 is fixed, or chain
+  # the binary into their own tooling). Same pattern as rustup's
+  # `--no-modify-path` + skip-default-toolchain combo used for scripted
+  # provisioning where install is a separate concern.
+  if [ "${APPSTRATE_NO_LAUNCH:-0}" = "1" ]; then
+    log "APPSTRATE_NO_LAUNCH=1: skipping \`appstrate install\`. Binary ready at $DEST."
+    exit 0
+  fi
+
   log "Launching \`appstrate install\`"
   # Exec by absolute path, NOT by `appstrate` on PATH. A different
   # `appstrate` binary earlier in PATH (dev machine with `bun link`,

@@ -395,11 +395,11 @@ export async function resolveTier(
   // accept the Docker-aware default #180 already set for interactive
   // picks. The note() call is still informative so the user sees which
   // tier was chosen and how to override it on the next run.
-  const dockerOkForAuto = deps.autoConfirm === true ? await probe() : undefined;
   if (deps.autoConfirm === true) {
-    const autoTier: Tier = dockerOkForAuto ? 3 : 0;
+    const dockerOk = await probe();
+    const autoTier: Tier = dockerOk ? 3 : 0;
     note(
-      dockerOkForAuto
+      dockerOk
         ? "--yes: Tier 3 selected automatically (Docker detected). Re-run with `--tier N` to override."
         : "--yes: Tier 0 selected automatically (Docker not detected). Install Docker and re-run with `--tier 3` for the production stack.",
     );

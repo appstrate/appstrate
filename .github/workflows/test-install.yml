@@ -285,6 +285,31 @@ jobs:
           echo "::endgroup::"
           echo "✓ happy path OK"
 
+          # ── Scenario 1b: APPSTRATE_NO_LAUNCH=1 (binary drop, no install) ─
+          # Users who want the interactive `appstrate install` flow (once
+          # the Bun macOS setRawMode regression is fixed upstream) opt out
+          # of the auto-launch via this env var. Assert the binary lands
+          # on PATH but the fake CLI is NOT exec'd.
+          echo "::group::APPSTRATE_NO_LAUNCH=1"
+          set +e
+          NOLAUNCH_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-nolaunch" \
+            APPSTRATE_NO_LAUNCH=1 \
+            bash /tmp/bootstrap.sh 2>&1)
+          rc=$?
+          set -e
+          echo "$NOLAUNCH_OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap exited $rc under APPSTRATE_NO_LAUNCH=1"; exit 1; }
+          test -x "$GITHUB_WORKSPACE/bin-nolaunch/appstrate" \
+            || { echo "::error::APPSTRATE_NO_LAUNCH=1 did not drop the binary"; exit 1; }
+          echo "$NOLAUNCH_OUT" | grep -q "APPSTRATE_NO_LAUNCH=1" \
+            || { echo "::error::APPSTRATE_NO_LAUNCH=1 did not emit the skip banner"; exit 1; }
+          echo "$NOLAUNCH_OUT" | grep -q "FAKE_CLI_RAN" \
+            && { echo "::error::APPSTRATE_NO_LAUNCH=1 still exec'd the CLI"; exit 1; }
+          # grep -q exit code 1 means no match — guard asserted.
+          echo "::endgroup::"
+          echo "✓ APPSTRATE_NO_LAUNCH=1 path OK"
+
           # ── Scenario 2: tampered binary ───────────────────────────────
           echo "::group::tampered binary"
           cp "$ROOT/release/appstrate-linux-x64" "$ROOT/release/appstrate-linux-x64.bak"
