@@ -10,6 +10,7 @@
  *   - `appstrate logout`:  revoke the session + wipe local storage.
  *   - `appstrate whoami`:  server-authoritative identity check.
  *   - `appstrate token`:   print access + refresh token metadata (debug).
+ *   - `appstrate api`:     authenticated HTTP passthrough for coding agents.
  *
  * Global flags:
  *   - `--profile <name>` selects which profile (keyring entry + TOML
@@ -22,12 +23,13 @@
  * with user-actionable text rather than raw stack traces.
  */
 
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import { installCommand } from "./commands/install.ts";
 import { loginCommand } from "./commands/login.ts";
 import { logoutCommand } from "./commands/logout.ts";
 import { whoamiCommand } from "./commands/whoami.ts";
 import { tokenCommand } from "./commands/token.ts";
+import { apiCommand, isHttpMethod } from "./commands/api.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
@@ -64,6 +66,15 @@ process.on("SIGHUP", () => {
   restoreCookedMode();
   process.exit(129);
 });
+
+/**
+ * Commander's idiomatic "collect repeated option into array" — needed
+ * for `-H`, `-F`, `-q` on `appstrate api` where users repeat the flag
+ * (curl-compatible).
+ */
+function collect(val: string, prev: string[]): string[] {
+  return [...prev, val];
+}
 
 // Catch stray unhandled rejections + uncaughts before Bun's default
 // stack-trace dump kicks in — commands are async and may throw after
@@ -168,6 +179,225 @@ program
   .action(async () => {
     const globalOpts = program.opts<{ profile?: string }>();
     await tokenCommand({ profile: globalOpts.profile });
+  });
+
+program
+  .command("api <target> [extra]")
+  .description(
+    "Authenticated HTTP passthrough to the Appstrate API. Injects the active profile's bearer token + X-Org-Id so coding agents (Claude Code, Cursor, Aider, …) can call the API without ever seeing the raw token.\n" +
+      "\n" +
+      "Invocation forms (all curl-compatible):\n" +
+      "  appstrate api GET /api/x             # explicit method + path\n" +
+      "  appstrate api /api/x                 # method inferred (GET / POST / PUT)\n" +
+      "  appstrate api https://instance/api/x # absolute URL, must match active profile\n" +
+      "  appstrate api POST /api/x -d @body   # body via -d / --data-raw / --data-binary / -F",
+  )
+  .option("-H, --header <kv>", "Request header 'Name: value' (repeatable)", collect, [])
+  .option("-d, --data <str>", "Request body — literal, @file, or @- for stdin")
+  .option("--data-raw <str>", "Request body — literal, no @ interpretation")
+  .option(
+    "--data-binary <str>",
+    "Request body — literal or @file, no content-type guess, no newline stripping",
+  )
+  .option(
+    "--data-urlencode <data>",
+    "URL-encoded body part (repeatable). Forms: 'content' | '=content' | 'name=content' | '@file' | 'name@file'. Combine with -G to build a query string.",
+    collect,
+    [],
+  )
+  .option(
+    "-F, --form <kv>",
+    "Multipart field 'k=v' or 'k=@path[;type=mime]' (repeatable)",
+    collect,
+    [],
+  )
+  .option("-q, --query <kv>", "Query parameter 'k=v' (repeatable)", collect, [])
+  .option(
+    "-G, --get",
+    "Convert -d/--data values into query parameters and send a GET (curl -G). Incompatible with -F.",
+  )
+  .option(
+    "-v, --verbose",
+    "Trace request + response headers on stderr (curl -v). Authorization header is always [REDACTED].",
+  )
+  .option(
+    "-w, --write-out <fmt>",
+    "After the body, write a format string to stdout. Supports %{http_code}, %{size_download}, %{time_total}, %{url_effective}, %{header_json}, %{exitcode}, and escape sequences \\n \\r \\t.",
+  )
+  .option("-X, --request <method>", "Override method (takes precedence over positional)")
+  .option("-o, --output <file>", "Write response body to file (default: stdout)")
+  .option("-i, --include", "Include status line + response headers on stdout")
+  .option("-I, --head", "Send HEAD and print headers only")
+  .option(
+    "-s, --silent",
+    "Suppress UX hints and error messages on stderr (curl -s). Combine with -S to restore errors.",
+  )
+  .option("-S, --show-error", "Restore error messages when combined with -s (curl -sS pattern).")
+  .option(
+    "-f, --fail",
+    "Exit 22 (4xx) / 25 (5xx) on non-2xx and suppress the body entirely (curl-aligned).",
+  )
+  .option(
+    "--fail-with-body",
+    "Like -f but keep the response body on stdout (curl 7.76+). Use when agents need the error payload for logging.",
+  )
+  .option(
+    "--compressed",
+    "Advertise Accept-Encoding gzip/deflate/br (Bun fetch decompresses automatically).",
+  )
+  .option(
+    "-r, --range <spec>",
+    "Send a Range: bytes=<spec> header (e.g. '0-1023', '-500', '1000-').",
+  )
+  .option(
+    "-A, --user-agent <ua>",
+    "Override the default User-Agent (shortcut for -H 'User-Agent: …'). A later -H still wins.",
+  )
+  .option("-e, --referer <url>", "Set the Referer header (shortcut for -H 'Referer: …').")
+  .option(
+    "-b, --cookie <data>",
+    "Literal cookie string 'k=v; k2=v2'. Cookie-jar files (curl -b file) are NOT supported.",
+  )
+  .option(
+    "-L, --location",
+    "Follow redirects (cross-origin hops strip Authorization per WHATWG fetch)",
+  )
+  .option(
+    "-k, --insecure",
+    "Skip TLS verification for THIS request (conflicts with global --insecure)",
+  )
+  .option(
+    "-T, --upload-file <path>",
+    "PUT the contents of <path> as the request body. `-T -` streams stdin. Mutually exclusive with -d/-F.",
+  )
+  .option(
+    "--retry <n>",
+    "Retry on transient HTTP codes (408/429/500/502/503/504) and DNS/timeout errors (curl --retry). Incompatible with stdin body.",
+    (v) => {
+      const n = parseInt(v, 10);
+      if (!Number.isFinite(n) || n < 0) {
+        throw new InvalidArgumentError(`expected a non-negative integer, got "${v}"`);
+      }
+      return n;
+    },
+  )
+  .option(
+    "--retry-max-time <sec>",
+    "Total wall-clock budget for retries in seconds (0 = unlimited).",
+    (v) => {
+      const n = parseFloat(v);
+      if (!Number.isFinite(n) || n < 0) {
+        throw new InvalidArgumentError(`expected a non-negative number, got "${v}"`);
+      }
+      return n;
+    },
+  )
+  .option(
+    "--retry-delay <sec>",
+    "Base backoff in seconds between retries (doubled each attempt). Default: 1.",
+    (v) => {
+      const n = parseFloat(v);
+      if (!Number.isFinite(n) || n < 0) {
+        throw new InvalidArgumentError(`expected a non-negative number, got "${v}"`);
+      }
+      return n;
+    },
+  )
+  .option(
+    "--retry-connrefused",
+    "Treat ECONNREFUSED as a retryable error (off by default; matches curl).",
+  )
+  .option(
+    "--connect-timeout <sec>",
+    "Abort if response headers don't arrive in N seconds (curl --connect-timeout → exit 28).",
+    (v) => {
+      const n = parseFloat(v);
+      if (!Number.isFinite(n) || n <= 0) {
+        throw new InvalidArgumentError(`expected a positive number, got "${v}"`);
+      }
+      return n;
+    },
+  )
+  .option("--max-time <sec>", "Abort the request after N seconds (curl exit code 28)", (v) => {
+    const n = parseFloat(v);
+    if (!Number.isFinite(n) || n <= 0) {
+      // Match curl's diagnostic shape so shell scripts porting from
+      // `curl --max-time` see the same class of error rather than a
+      // silent drop to "no timeout".
+      throw new InvalidArgumentError(`expected a positive number of seconds, got "${v}"`);
+    }
+    return n;
+  })
+  .action(async (target: string, extra: string | undefined, opts) => {
+    // Resolve `<target> [extra]` → {method, path}. Two shapes:
+    //   api POST /x   → arg1=HTTP method, arg2=path (curl -X style)
+    //   api /x        → method inferred (GET/POST/PUT per flags + body)
+    //   api https://…/x → absolute URL (origin validated downstream)
+    // If arg2 is present but arg1 isn't a known verb, refuse — the
+    // user probably mistyped a method and we'd otherwise silently try
+    // to GET the word "fetchh".
+    let method: string | undefined;
+    let path: string;
+    if (extra !== undefined) {
+      if (!isHttpMethod(target)) {
+        throw new InvalidArgumentError(
+          `expected HTTP method as first argument, got "${target}" (did you mean GET/POST/PUT/…?)`,
+        );
+      }
+      method = target.toUpperCase();
+      path = extra;
+    } else {
+      method = undefined; // let apiCommand infer from flags + body
+      path = target;
+    }
+    const globalOpts = program.opts<{ profile?: string }>();
+    await apiCommand({
+      profile: globalOpts.profile,
+      method,
+      path,
+      header: Array.isArray(opts.header) ? opts.header : [],
+      form: Array.isArray(opts.form) ? opts.form : [],
+      query: Array.isArray(opts.query) ? opts.query : [],
+      data: typeof opts.data === "string" ? opts.data : undefined,
+      dataRaw: typeof opts.dataRaw === "string" ? opts.dataRaw : undefined,
+      dataBinary: typeof opts.dataBinary === "string" ? opts.dataBinary : undefined,
+      dataUrlencode: Array.isArray(opts.dataUrlencode) ? opts.dataUrlencode : undefined,
+      request: typeof opts.request === "string" ? opts.request : undefined,
+      output: typeof opts.output === "string" ? opts.output : undefined,
+      include: opts.include === true,
+      head: opts.head === true,
+      silent: opts.silent === true,
+      showError: opts.showError === true,
+      verbose: opts.verbose === true,
+      get: opts.get === true,
+      writeOut: typeof opts.writeOut === "string" ? opts.writeOut : undefined,
+      uploadFile: typeof opts.uploadFile === "string" ? opts.uploadFile : undefined,
+      connectTimeout:
+        typeof opts.connectTimeout === "number" && !Number.isNaN(opts.connectTimeout)
+          ? opts.connectTimeout
+          : undefined,
+      retry: typeof opts.retry === "number" && !Number.isNaN(opts.retry) ? opts.retry : undefined,
+      retryMaxTime:
+        typeof opts.retryMaxTime === "number" && !Number.isNaN(opts.retryMaxTime)
+          ? opts.retryMaxTime
+          : undefined,
+      retryDelay:
+        typeof opts.retryDelay === "number" && !Number.isNaN(opts.retryDelay)
+          ? opts.retryDelay
+          : undefined,
+      retryConnrefused: opts.retryConnrefused === true,
+      compressed: opts.compressed === true,
+      range: typeof opts.range === "string" ? opts.range : undefined,
+      userAgent: typeof opts.userAgent === "string" ? opts.userAgent : undefined,
+      referer: typeof opts.referer === "string" ? opts.referer : undefined,
+      cookie: typeof opts.cookie === "string" ? opts.cookie : undefined,
+      failWithBody: opts.failWithBody === true,
+      fail: opts.fail === true,
+      location: opts.location === true,
+      insecure: opts.insecure === true,
+      maxTime:
+        typeof opts.maxTime === "number" && !Number.isNaN(opts.maxTime) ? opts.maxTime : undefined,
+    });
   });
 
 program.parseAsync(process.argv).catch((err) => exitWithError(err));

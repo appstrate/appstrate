@@ -169,6 +169,33 @@ export async function _resolveAccessTokenForTesting(
   return resolveAccessToken(profileName, profile);
 }
 
+export interface AuthContext {
+  instance: string;
+  accessToken: string;
+  orgId?: string;
+}
+
+/**
+ * One-shot resolver used by pass-through commands (`appstrate api`) that
+ * need the instance URL + a fresh bearer but cannot go through
+ * `apiFetchRaw` — typically because they own their own redirect / TLS /
+ * body-stream semantics and would be broken by `apiFetchRaw`'s reactive
+ * 401 retry (which replays a body that may have already been consumed).
+ *
+ * All the silent-refresh machinery (per-profile mutex, proactive margin,
+ * keyring scrub on invalid_grant) is reused — this is purely a composer
+ * over the existing internals.
+ */
+export async function resolveAuthContext(profileName: string): Promise<AuthContext> {
+  const profile = await resolveProfileOrThrow(profileName);
+  const token = await resolveAccessToken(profileName, profile);
+  return {
+    instance: normalizeInstance(profile.instance),
+    accessToken: token,
+    orgId: profile.orgId,
+  };
+}
+
 async function resolveAccessToken(profileName: string, profile: Profile): Promise<string> {
   const tokens = await loadTokens(profileName);
   if (!tokens) {
