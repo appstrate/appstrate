@@ -1,16 +1,23 @@
 name: Publish Installer
 
-# Triggered AFTER `release.yml` succeeds for a `v*` tag — NOT directly
-# on the tag push. This ordering matters: `install.sh` pinned to vX.Y.Z
-# tells `curl get.appstrate.dev | bash` to fetch CLI binaries from the
-# vX.Y.Z GH Release. If the installer publishes before `release.yml`
-# finishes signing & uploading those binaries, users hit a 404 in the
-# 10-15 min window between the two workflows. `workflow_run` chains
-# them so the installer only updates once the release artifacts exist.
+# Triggered on `v*` tag push, but the FIRST step polls release.yml
+# until it succeeds before publishing install.sh. This guarantees the
+# installer only updates after the CLI binaries it points to have been
+# signed and uploaded to the GH Release — closing the 10-15 min 404
+# window on `curl get.appstrate.dev | bash`.
+#
+# Why polling instead of `workflow_run` chain:
+# We tried `workflow_run` (PR #183) but observed that GitHub does not
+# reliably fire workflow_run listeners when the upstream workflow was
+# triggered by a tag push (the listener was never queued for v1.0.0-
+# alpha.59 despite release.yml succeeding 9 minutes after the listener
+# was merged to main). Polling the upstream run via `gh run list` is
+# noisier but deterministic, easy to reason about, and survives any
+# workflow_run quirks GitHub throws at us.
 on:
-  workflow_run:
-    workflows: ["Release Docker Images + CLI Binaries"]
-    types: [completed]
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
@@ -30,30 +37,21 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    # Skip when:
-    #   - `release.yml` did not succeed (failure / cancelled / skipped)
-    #     → publishing an installer pointing at a missing release would
-    #       brick `get.appstrate.dev`.
-    #   - `release.yml` was triggered by something other than a v* tag
-    #     push (defensive — the workflow currently only triggers on v*
-    #     tags, but `workflow_run.head_branch` is the cleanest filter
-    #     in case that ever changes).
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-        startsWith(github.event.workflow_run.head_branch, 'v'))
+    # 30m caps the worst case: 25-minute release.yml poll budget +
+    # ~3 min for sign / commit / push. release.yml steady state is
+    # ~10-15 min, so we have generous headroom for slow CI weather.
+    timeout-minutes: 30
     steps:
+      - name: Checkout source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
       - name: Resolve version
         id: ver
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ inputs.version }}"
           else
-            # `workflow_run.head_branch` carries the tag name (e.g.
-            # `v1.0.0-alpha.59`) when the upstream workflow was tag-
-            # triggered — per GitHub webhook payload docs.
-            VERSION="${{ github.event.workflow_run.head_branch }}"
+            VERSION="${GITHUB_REF_NAME}"
           fi
           if ! echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$'; then
             echo "Invalid version format: $VERSION (expected vMAJOR.MINOR.PATCH[-prerelease])" >&2
@@ -61,15 +59,43 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout source at tag
-        # `workflow_run` runs in the context of the default branch
-        # (so `github.ref` is `refs/heads/main`, NOT the tag). Check
-        # out the resolved tag explicitly so we render `bootstrap.sh`,
-        # `verify.sh`, and `appstrate.pub` from the exact commit that
-        # was released — not whatever happens to be on main right now.
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ steps.ver.outputs.version }}
+      - name: Wait for release.yml to succeed for this tag
+        # Polls every 30s until release.yml for the same tag completes.
+        # If release.yml fails or is cancelled, we abort — publishing an
+        # installer pointing at a missing release would brick
+        # `get.appstrate.dev`. Skip the poll when manually dispatched
+        # (operator already verified release exists before re-running).
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.version }}
+        run: |
+          DEADLINE=$(($(date +%s) + 1500))  # 25 min budget
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            RUN=$(gh run list \
+              --workflow=release.yml \
+              --branch="$TAG" \
+              --limit=1 \
+              --json status,conclusion,databaseId \
+              --jq '.[0]')
+            if [ -z "$RUN" ] || [ "$RUN" = "null" ]; then
+              echo "release.yml has not started yet for $TAG, waiting…"
+            else
+              STATUS=$(jq -r '.status' <<<"$RUN")
+              CONCL=$(jq -r '.conclusion' <<<"$RUN")
+              ID=$(jq -r '.databaseId' <<<"$RUN")
+              echo "release.yml run $ID for $TAG: status=$STATUS conclusion=$CONCL"
+              case "$CONCL" in
+                success) echo "✓ release.yml succeeded — proceeding"; exit 0 ;;
+                failure|cancelled|timed_out|action_required)
+                  echo "::error::release.yml ended with conclusion=$CONCL — refusing to publish installer"
+                  exit 1 ;;
+              esac
+            fi
+            sleep 30
+          done
+          echo "::error::Timeout waiting for release.yml after 25 minutes"
+          exit 1
 
       - name: Render installer with pinned version
         run: |
