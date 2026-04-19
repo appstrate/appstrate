@@ -239,6 +239,21 @@ program
     "-k, --insecure",
     "Skip TLS verification for THIS request (conflicts with global --insecure)",
   )
+  .option(
+    "-T, --upload-file <path>",
+    "PUT the contents of <path> as the request body. `-T -` streams stdin. Mutually exclusive with -d/-F.",
+  )
+  .option(
+    "--connect-timeout <sec>",
+    "Abort if response headers don't arrive in N seconds (curl --connect-timeout → exit 28).",
+    (v) => {
+      const n = parseFloat(v);
+      if (!Number.isFinite(n) || n <= 0) {
+        throw new InvalidArgumentError(`expected a positive number, got "${v}"`);
+      }
+      return n;
+    },
+  )
   .option("--max-time <sec>", "Abort the request after N seconds (curl exit code 28)", (v) => {
     const n = parseFloat(v);
     if (!Number.isFinite(n) || n <= 0) {
@@ -291,6 +306,11 @@ program
       verbose: opts.verbose === true,
       get: opts.get === true,
       writeOut: typeof opts.writeOut === "string" ? opts.writeOut : undefined,
+      uploadFile: typeof opts.uploadFile === "string" ? opts.uploadFile : undefined,
+      connectTimeout:
+        typeof opts.connectTimeout === "number" && !Number.isNaN(opts.connectTimeout)
+          ? opts.connectTimeout
+          : undefined,
       fail: opts.fail === true,
       location: opts.location === true,
       insecure: opts.insecure === true,

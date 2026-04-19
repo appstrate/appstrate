@@ -123,6 +123,21 @@ export interface ApiCommandOptions {
    * (zsh `echo` vs bash) produce the same output.
    */
   writeOut?: string;
+  /**
+   * `--connect-timeout <sec>`: abort if fetch() doesn't resolve its
+   * response-headers Promise in N seconds. Approximates curl's
+   * "time spent in DNS + TCP + TLS handshake" — Bun fetch doesn't
+   * expose separate phases, but timing out before the server starts
+   * streaming is the same user-visible behavior. Exit 28.
+   */
+  connectTimeout?: number;
+  /**
+   * `-T, --upload-file <path-or-->`: send the contents of a file as
+   * the request body with default method PUT (curl semantics). `-T -`
+   * streams stdin. Mutually exclusive with `-d / -F / --data-raw /
+   * --data-binary` (exit 2).
+   */
+  uploadFile?: string;
 }
 
 /**
@@ -236,6 +251,21 @@ export async function apiCommand(
     throw err;
   }
 
+  // P2e — `-T/--upload-file` is mutually exclusive with the other
+  // body-producing flags. Reject up front (exit 2) rather than
+  // silently letting one of them win.
+  if (opts.uploadFile !== undefined) {
+    const hasOther =
+      opts.data !== undefined ||
+      opts.dataRaw !== undefined ||
+      opts.dataBinary !== undefined ||
+      opts.form.length > 0;
+    if (hasOther) {
+      writeError("cannot combine -T/--upload-file with -d / --data-raw / --data-binary / -F\n");
+      return exit(2);
+    }
+  }
+
   // P2c — `-G/--get`: move -d values into query, drop body, force GET.
   // curl rejects -G combined with -F (multipart has no sane projection
   // into a query string), we do the same with exit 2.
@@ -301,6 +331,17 @@ export async function apiCommand(
       ac.abort(new DOMException("Request timed out", "TimeoutError"));
     }, opts.maxTime * 1000);
   }
+  // P2d — `--connect-timeout`: separate timer that aborts if fetch()
+  // hasn't resolved (i.e. response headers haven't arrived) within N
+  // seconds. Cleared as soon as the response starts, so body streaming
+  // is bounded only by --max-time. curl treats this as exit 28, same
+  // TimeoutError flavor.
+  let connectTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  if (typeof opts.connectTimeout === "number" && opts.connectTimeout > 0) {
+    connectTimeoutHandle = setTimeout(() => {
+      ac.abort(new DOMException("Connect timed out", "TimeoutError"));
+    }, opts.connectTimeout * 1000);
+  }
 
   // 7. TLS skip (process-wide; restored in finally).
   const prevTlsReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
@@ -315,6 +356,7 @@ export async function apiCommand(
     if (cleanedUp) return;
     cleanedUp = true;
     if (timeoutHandle) clearTimeout(timeoutHandle);
+    if (connectTimeoutHandle) clearTimeout(connectTimeoutHandle);
     if (opts.insecure) restoreTls(prevTlsReject);
   };
 
@@ -349,6 +391,12 @@ export async function apiCommand(
       if (usesStdin) init.duplex = "half";
       if (opts.verbose) writeVerboseRequest(io, profileName, method, url, headers);
       res = await fetch(url, init as Parameters<typeof fetch>[1]);
+      // Response headers received — disarm connect-timeout; only
+      // --max-time keeps running through body streaming.
+      if (connectTimeoutHandle) {
+        clearTimeout(connectTimeoutHandle);
+        connectTimeoutHandle = undefined;
+      }
       if (opts.verbose) writeVerboseResponse(io, res);
     } catch (err) {
       cleanup();
@@ -489,6 +537,16 @@ type BuiltBody = {
 };
 
 async function buildBody(opts: ApiCommandOptions, io: ApiCommandIO): Promise<BuiltBody> {
+  // P2e — `-T path` uploads the raw file contents as the body. `-T -`
+  // streams stdin. Mutual exclusion with -d/-F is enforced at the
+  // apiCommand level before we get here.
+  if (opts.uploadFile !== undefined) {
+    if (opts.uploadFile === "-") {
+      return { body: io.stdinStream?.(), usesStdin: true };
+    }
+    return { body: Bun.file(opts.uploadFile), usesStdin: false };
+  }
+
   // Multipart wins if present.
   if (opts.form.length > 0) {
     const fd = new FormData();
@@ -564,6 +622,7 @@ function pickMethod(opts: ApiCommandOptions, hasBody: boolean): string {
   if (opts.head) return "HEAD";
   if (opts.request) return opts.request.toUpperCase();
   if (opts.method) return opts.method.toUpperCase();
+  if (opts.uploadFile !== undefined) return "PUT";
   return hasBody ? "POST" : "GET";
 }
 

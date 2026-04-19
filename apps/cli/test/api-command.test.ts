@@ -176,6 +176,8 @@ async function runCommand(
     verbose: opts.verbose,
     get: opts.get,
     writeOut: opts.writeOut,
+    uploadFile: opts.uploadFile,
+    connectTimeout: opts.connectTimeout,
   };
   try {
     await apiCommand(full, io);
@@ -1134,5 +1136,95 @@ describe("apiCommand — -w/--write-out", () => {
     const t = parseFloat(match![1]!);
     expect(t).toBeGreaterThanOrEqual(0);
     expect(Number.isFinite(t)).toBe(true);
+  });
+});
+
+// ─── P2e — -T/--upload-file ─────────────────────────────────────────
+
+describe("apiCommand — -T/--upload-file", () => {
+  beforeEach(async () => {
+    await seedLoggedIn("default");
+  });
+
+  it("infers PUT when -T is set and no method/-X is given", async () => {
+    const tmpFile = join(tmpDir, "payload.bin");
+    await writeFile(tmpFile, "uploaded-bytes");
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/files", uploadFile: tmpFile }, io);
+    expect(fetchCalls[0]!.method).toBe("PUT");
+    expect(fetchCalls[0]!.body).toBeDefined();
+  });
+
+  it("-X POST overrides the PUT default", async () => {
+    const tmpFile = join(tmpDir, "payload.bin");
+    await writeFile(tmpFile, "x");
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/files", uploadFile: tmpFile, request: "POST" }, io);
+    expect(fetchCalls[0]!.method).toBe("POST");
+  });
+
+  it("-T combined with -d exits 2, no fetch", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, exitCode, stderr } = makeIO();
+    await runCommand({ path: "/files", uploadFile: "/x", data: "y" }, io);
+    expect(exitCode.value).toBe(2);
+    expect(fetchCalls).toHaveLength(0);
+    expect(stdoutText(stderr)).toContain("cannot combine -T");
+  });
+
+  it("-T combined with -F exits 2", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, exitCode } = makeIO();
+    await runCommand({ path: "/files", uploadFile: "/x", form: ["a=b"] }, io);
+    expect(exitCode.value).toBe(2);
+  });
+});
+
+// ─── P2d — --connect-timeout ────────────────────────────────────────
+
+describe("apiCommand — --connect-timeout", () => {
+  beforeEach(async () => {
+    await seedLoggedIn("default");
+  });
+
+  it("aborts with exit 28 when fetch() doesn't resolve in time", async () => {
+    // Pending forever until signal fires
+    globalThis.fetch = ((_u: string, init?: { signal?: AbortSignal }) =>
+      new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(
+            init.signal!.reason instanceof Error
+              ? init.signal!.reason
+              : Object.assign(new Error("aborted"), { name: "AbortError" }),
+          );
+        });
+      })) as unknown as typeof fetch;
+    const { io, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/p", connectTimeout: 0.05 }, io);
+    expect(exitCode.value).toBe(28);
+  });
+
+  it("doesn't fire once fetch resolves (body streaming ignores it)", async () => {
+    // fetch resolves quickly; body streams forever. Connect timeout
+    // cleared on fetch resolve, so only --max-time would apply.
+    installFetch(
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            async start(c) {
+              c.enqueue(new TextEncoder().encode("hi"));
+              await new Promise((r) => setTimeout(r, 20));
+              c.close();
+            },
+          }),
+        ),
+    );
+    const { io, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/p", connectTimeout: 0.01 }, io);
+    // Short connect-timeout should have been cleared before it
+    // could fire, so we get a clean success.
+    expect(exitCode.value).toBe(0);
   });
 });
