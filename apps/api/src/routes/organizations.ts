@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
-import type { Context, Next } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
+import { apiKeyOrgScopeGuard } from "../middleware/guards.ts";
 import {
   createOrganization,
   getUserOrganizations,
@@ -76,33 +76,20 @@ async function requireOrgRole(
 
 const router = new Hono<AppEnv>();
 
-// Issue #172 — API keys carry an `orgId` scope but `/api/orgs/*` handlers
-// historically resolved membership from the creator's `user.id`, letting a
-// key issued in org A read/mutate other orgs the creator is a member of.
-// This guard pins every `:orgId` route to the key's bound org. Sessions
-// are unaffected (they legitimately see every org they belong to).
-async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
-  if (c.get("authMethod") !== "api_key") return next();
-  const paramOrgId = c.req.param("orgId");
-  if (paramOrgId && paramOrgId !== c.get("orgId")) {
-    throw forbidden("API key scope does not include this organization");
-  }
-  return next();
-}
-
 router.use("/:orgId", apiKeyOrgScopeGuard);
 router.use("/:orgId/*", apiKeyOrgScopeGuard);
 
 // GET /api/orgs — list orgs for the current user (no org context needed)
 router.get("/", async (c) => {
   const user = c.get("user");
-  const orgs = await getUserOrganizations(user.id);
-  const authMethod = c.get("authMethod");
-  const keyOrgId = c.get("orgId");
-  const scoped = authMethod === "api_key" ? orgs.filter((o) => o.id === keyOrgId) : orgs;
+  // API keys see only their bound org — filter at the DB level so a
+  // compromised key cannot cause enumeration queries across every org the
+  // creator belongs to.
+  const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
+  const orgs = await getUserOrganizations(user.id, orgIdFilter);
 
   return c.json({
-    organizations: scoped.map((o) => ({
+    organizations: orgs.map((o) => ({
       id: o.id,
       name: o.name,
       slug: o.slug,

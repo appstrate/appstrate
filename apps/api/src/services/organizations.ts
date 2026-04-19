@@ -13,7 +13,7 @@ import {
   packages,
   orgInvitations,
 } from "@appstrate/db/schema";
-import { eq, inArray, count, sql } from "drizzle-orm";
+import { and, eq, inArray, count, sql } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 
@@ -66,6 +66,7 @@ export async function createOrganization(
 
 export async function getUserOrganizations(
   userId: string,
+  orgIdFilter?: string,
 ): Promise<(OrgResult & { role: OrgRole })[]> {
   const rows = await db
     .select({
@@ -74,7 +75,11 @@ export async function getUserOrganizations(
     })
     .from(organizationMembers)
     .innerJoin(organizations, eq(organizationMembers.orgId, organizations.id))
-    .where(eq(organizationMembers.userId, userId));
+    .where(
+      orgIdFilter
+        ? and(eq(organizationMembers.userId, userId), eq(organizationMembers.orgId, orgIdFilter))
+        : eq(organizationMembers.userId, userId),
+    );
 
   return rows.map((row) => ({
     ...toOrgResult(row.org),

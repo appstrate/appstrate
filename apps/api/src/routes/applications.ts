@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
-import type { Context, Next } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
+import { apiKeyAppScopeGuard } from "../middleware/guards.ts";
 import {
   ApiError,
   forbidden,
@@ -73,21 +73,6 @@ export const appProviderCredentialsSchema = z.object({
 
 export function createApplicationsRouter() {
   const router = new Hono<AppEnv>();
-
-  // Issue #172 (extension) — `/api/applications` is org-scoped, not
-  // application-scoped, so the same orgId-only filtering pattern that lets
-  // a key escape its org also lets it escape its app within the same org.
-  // For API key callers we pin every `:id` route to the key's bound
-  // applicationId. Sessions still see the full set (any member can manage
-  // any app in their org).
-  async function apiKeyAppScopeGuard(c: Context<AppEnv>, next: Next) {
-    if (c.get("authMethod") !== "api_key") return next();
-    const paramAppId = c.req.param("id") ?? c.req.param("appId");
-    if (paramAppId && paramAppId !== c.get("applicationId")) {
-      throw forbidden("API key scope does not include this application");
-    }
-    return next();
-  }
 
   router.use("/:id", apiKeyAppScopeGuard);
   router.use("/:appId/*", apiKeyAppScopeGuard);
