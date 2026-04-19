@@ -492,27 +492,46 @@ export async function cleanupOrphanedContainers(): Promise<{
 }
 
 /**
- * List all Docker networks matching `appstrate-exec-*` or `appstrate-sidecar-pool` and remove them.
- * This is safe to call at startup because no runs should be running. Exported so the
- * orchestrator can call it opportunistically when network creation hits address-pool
- * exhaustion mid-operation — orphan leaks from crashed runs keep consuming pool slots
- * until reclaimed, and reclaiming them is often enough to unblock the next `createNetwork`.
+ * List all Docker networks matching `appstrate-exec-*` or the shared infra
+ * networks (`appstrate-sidecar-pool`, `appstrate-egress`) and remove them.
+ * Only safe to call at startup because no runs should be running — the infra
+ * networks it targets are actively reused across runs, so tearing them down
+ * mid-operation can strand the sidecar pool or break egress routing.
+ *
+ * For opportunistic recovery during a live operation, use
+ * {@link cleanupOrphanedRunNetworks} instead, which is strictly scoped to
+ * per-run networks.
  */
 export async function cleanupOrphanedNetworks(): Promise<number> {
+  return removeNetworksMatching(
+    (name) =>
+      name.startsWith("appstrate-exec-") ||
+      name === "appstrate-sidecar-pool" ||
+      name === "appstrate-egress",
+  );
+}
+
+/**
+ * Remove orphan per-run networks (`appstrate-exec-*`) without touching the
+ * shared infra networks. Safe to call mid-operation: Docker refuses to delete
+ * networks that still have attached endpoints (live runs), so only truly
+ * abandoned networks from crashed runs get reclaimed. Used as the opportunistic
+ * recovery path when `createNetwork` hits address-pool exhaustion —
+ * reclaiming even one orphan is often enough to unblock the retry.
+ */
+export async function cleanupOrphanedRunNetworks(): Promise<number> {
+  return removeNetworksMatching((name) => name.startsWith("appstrate-exec-"));
+}
+
+async function removeNetworksMatching(predicate: (name: string) => boolean): Promise<number> {
   const res = await dockerFetch("/networks");
   if (!res.ok) return 0;
 
   const networks = (await res.json()) as Array<{ Id: string; Name: string }>;
-  const orphaned = networks.filter(
-    (n) =>
-      n.Name.startsWith("appstrate-exec-") ||
-      n.Name === "appstrate-sidecar-pool" ||
-      n.Name === "appstrate-egress",
-  );
+  const targets = networks.filter((n) => predicate(n.Name));
+  if (targets.length === 0) return 0;
 
-  if (orphaned.length === 0) return 0;
-
-  const results = await Promise.allSettled(orphaned.map((n) => removeNetwork(n.Id)));
+  const results = await Promise.allSettled(targets.map((n) => removeNetwork(n.Id)));
   return results.filter((r) => r.status === "fulfilled").length;
 }
 

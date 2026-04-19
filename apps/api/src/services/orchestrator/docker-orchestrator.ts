@@ -68,7 +68,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
     const name = `appstrate-exec-${runId}`;
     const id = await createNetworkWithPoolRetry(
       () => docker.createNetwork(name, { internal: true }),
-      () => docker.cleanupOrphanedNetworks(),
+      () => docker.cleanupOrphanedRunNetworks(),
       logger,
     );
     return { id, name };
