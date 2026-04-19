@@ -1,0 +1,53 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/flow.schema.json",
+  "name": "@SCOPE/CHANGE-ME",
+  "version": "1.0.0",
+  "type": "agent",
+  "schemaVersion": "1.0",
+  "displayName": "Agent Display Name",
+  "description": "One-line description",
+  "author": "author-name",
+  "keywords": [],
+
+  "dependencies": {
+    "providers": {},
+    "skills": {},
+    "tools": {}
+  },
+
+  "providersConfiguration": {},
+
+  "input": {
+    "schema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "propertyOrder": []
+    }
+  },
+
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "propertyOrder": []
+    }
+  },
+
+  "output": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "Execution summary"
+        }
+      },
+      "required": ["summary"]
+    }
+  },
+
+  "timeout": 300,
+  "x-outputRetries": 2
+}

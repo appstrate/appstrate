@@ -1,0 +1,23 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/tool.schema.json",
+  "name": "@SCOPE/CHANGE-ME",
+  "version": "1.0.0",
+  "type": "tool",
+  "displayName": "Tool Display Name",
+  "description": "What this tool does",
+  "entrypoint": "index.ts",
+  "tool": {
+    "name": "my_tool",
+    "description": "Description shown to the agent for tool selection",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "param": {
+          "type": "string",
+          "description": "Parameter description"
+        }
+      },
+      "required": ["param"]
+    }
+  }
+}

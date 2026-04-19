@@ -1,0 +1,8 @@
+{
+  "$schema": "https://afps.appstrate.dev/schema/v1/skill.schema.json",
+  "name": "@SCOPE/CHANGE-ME",
+  "version": "1.0.0",
+  "type": "skill",
+  "displayName": "Skill Display Name",
+  "description": "What this skill provides to the agent"
+}
