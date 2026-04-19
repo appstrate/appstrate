@@ -264,6 +264,19 @@ export async function apiCommand(
     emitWriteOut(code);
     return io.exit(code);
   };
+
+  // AbortController wires together SIGINT, `--max-time`, and
+  // `--connect-timeout`. Declared up-front (before `handleErr`) so the
+  // closure below can reference `ac` / `sigintFired` without hitting a
+  // TDZ. Timers are armed later, right before the retry loop, so they
+  // don't count keyring access / token refresh against the budget.
+  const ac = new AbortController();
+  let sigintFired = false;
+  io.onSigint?.(() => {
+    sigintFired = true;
+    ac.abort();
+  });
+
   // Single source for stream/network error classification. Replaces
   // the former free-standing `handleStreamError` — inlined as a
   // closure so it can funnel through `exit(code)` and emit `-w`
@@ -389,13 +402,9 @@ export async function apiCommand(
   metrics.sizeUpload = sizeOfBody(method === "HEAD" ? undefined : firstBuild.body);
   metrics.urlEffective = url;
 
-  // 6. Abort controller for SIGINT + --max-time.
-  const ac = new AbortController();
-  let sigintFired = false;
-  io.onSigint?.(() => {
-    sigintFired = true;
-    ac.abort();
-  });
+  // 6. Arm timers against the shared AbortController. SIGINT wiring
+  //    already happened at the top of the function; timers start now
+  //    so auth/keyring time doesn't eat into the user's budget.
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   if (typeof opts.maxTime === "number" && opts.maxTime > 0) {
     timeoutHandle = setTimeout(() => {
@@ -553,12 +562,15 @@ export async function apiCommand(
 
     // Output to file or stdout. Strict -f suppresses body entirely.
     if (suppressBody) {
-      // Still need to drain the body so the connection releases + metrics
-      // reflect the (suppressed) payload size.
+      // curl's `-f` discards the body without reading it, and reports
+      // `%{size_download} = 0`. We match: `cancel()` releases the
+      // underlying connection without pulling bytes, so `sizeDownload`
+      // stays at its initial 0 (accurate — we did not download the
+      // body). Use `--fail-with-body` if you need the payload.
       try {
         await res.body?.cancel();
       } catch {
-        /* ignore */
+        /* ignore — body may already be consumed */
       }
     } else if (opts.output && !failMode) {
       try {
