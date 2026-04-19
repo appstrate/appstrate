@@ -71,6 +71,12 @@ export interface LoginDeps {
 }
 
 async function defaultOpenUrl(url: string): Promise<void> {
+  // Belt-and-suspenders: even if a caller forgets to inject a noop
+  // (e.g. a new test suite copy-pastes without the wrapper), the test
+  // preload / CI environment can opt out of the tab-pop by setting
+  // `APPSTRATE_CLI_NO_OPEN=1`. No-op in production where the env is
+  // unset, so first-time human logins still launch the browser.
+  if (process.env.APPSTRATE_CLI_NO_OPEN === "1") return;
   await open(url);
 }
 
