@@ -30,6 +30,13 @@ export interface RunCommandOptions {
    * captures into the returned `stdout` / `stderr`.
    */
   stdio?: "inherit" | "ignore" | "pipe";
+  /**
+   * Kill the child after this many ms and resolve with `ok: false`
+   * (exitCode `-1`, stderr `"timeout"`). Intended for probes that must
+   * not block the UI — e.g. `docker info` when the daemon is starting
+   * up can hang for 10–30 s. Undefined = no timeout (legacy behaviour).
+   */
+  timeoutMs?: number;
 }
 
 /** Run `cmd args...` and await its exit. Never throws on non-zero — returns `ok: false` instead. */
@@ -58,6 +65,35 @@ export async function runCommand(
 
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    const settle = (r: CommandResult) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(r);
+    };
+    if (opts.timeoutMs !== undefined) {
+      timer = setTimeout(() => {
+        // SIGTERM first, then SIGKILL shortly after in case the child
+        // ignores the term. We don't await — the `close` listener below
+        // is already short-circuited by `settled`.
+        try {
+          child.kill("SIGTERM");
+          setTimeout(() => {
+            try {
+              child.kill("SIGKILL");
+            } catch {
+              // already gone
+            }
+          }, 500).unref();
+        } catch {
+          // already gone
+        }
+        settle({ ok: false, exitCode: -1, stdout, stderr: stderr || "timeout" });
+      }, opts.timeoutMs);
+      timer.unref?.();
+    }
     child.stdout?.on("data", (d) => {
       stdout += d.toString();
     });
@@ -66,11 +102,11 @@ export async function runCommand(
     });
     child.on("error", () => {
       // ENOENT when `cmd` is not on PATH — surface as ok:false.
-      resolve({ ok: false, exitCode: -1, stdout, stderr });
+      settle({ ok: false, exitCode: -1, stdout, stderr });
     });
     child.on("close", (code) => {
       const exitCode = code ?? -1;
-      resolve({ ok: exitCode === 0, exitCode, stdout, stderr });
+      settle({ ok: exitCode === 0, exitCode, stdout, stderr });
     });
   });
 }
