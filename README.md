@@ -81,6 +81,27 @@ appstrate install  # interactive tier + directory prompts
 
 See [`apps/cli/README.md`](./apps/cli/README.md) for the full CLI reference, and [`examples/self-hosting/`](./examples/self-hosting/) for manual Docker Compose setup.
 
+## Control from coding agents
+
+The `appstrate` CLI is a first-class control plane for AI coding agents — Claude Code, Cursor, Codex, Gemini CLI, etc. Agents never see a raw bearer: the CLI injects `Authorization: Bearer …` + `X-Org-Id` from the OS keyring on every call, and the OpenAPI schema is explorable at human scale so the agent can discover the 191 endpoints on demand instead of flooding its context with the full spec.
+
+```sh
+# 1. Authenticate once — RFC 8628 device flow, tokens land in the OS keyring
+appstrate login --instance https://app.example.com
+
+# 2. Discover the API — filter, search, render as JSON for the agent to ingest
+appstrate openapi list --tag runs --json
+appstrate openapi show createRun --json      # fully dereferenced operation
+
+# 3. Call the API — curl-compatible, bearer stays in the keyring
+appstrate api POST /api/agents/:id/run -d @input.json
+
+# 4. Scope to an org (auto-pinned on login when possible)
+appstrate org switch acme                     # X-Org-Id sent on every subsequent call
+```
+
+Full recipe and flag reference: [`apps/cli/AGENTS.md`](./apps/cli/AGENTS.md). See [`apps/cli/README.md`](./apps/cli/README.md) for the complete CLI documentation, including the full `curl` → `appstrate api` mapping and profile management for multi-instance setups.
+
 ## Quick Start (Development)
 
 Prerequisites: [Bun](https://bun.sh/) (v1.3+). Docker is optional.

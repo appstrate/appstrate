@@ -4,6 +4,8 @@
 
 Lives at [`apps/cli/`](./) in the monorepo; versioned in lockstep with the platform ([ADR-006](../../docs/adr/ADR-006-cli-device-flow-monorepo.md)).
 
+> **Driving this CLI from an AI coding agent?** Read [`AGENTS.md`](./AGENTS.md) first — it distills this reference into a zero-to-first-run recipe, rules of engagement, and a `curl` → `appstrate api` cheat sheet sized for an agent's context window.
+
 ## Install
 
 ### One-liner (recommended)
