@@ -85,6 +85,21 @@ export interface ApiCommandOptions {
   data?: string;
   dataRaw?: string;
   dataBinary?: string;
+  /**
+   * `--data-urlencode <data>`: repeatable. Five curl parse forms are
+   * supported:
+   *   `content`         → URL-encoded value, no name
+   *   `=content`        → URL-encoded value, no name (leading `=` stripped)
+   *   `name=content`    → `name=<urlencoded content>`
+   *   `@file`           → URL-encoded file contents, no name
+   *   `name@file`       → `name=<urlencoded file contents>`
+   * Combines with `-G` (values go to the query string) and acts as the
+   * request body otherwise. Mutually exclusive with `-d / --data-raw /
+   * --data-binary / -F / -T` (exit 2). Unlike curl we do NOT set a
+   * default `Content-Type` — add `-H 'Content-Type: application/x-www-
+   * form-urlencoded'` if the server expects it.
+   */
+  dataUrlencode?: string[];
   request?: string;
   output?: string;
   include?: boolean;
@@ -312,6 +327,8 @@ export async function apiCommand(
     throw err;
   }
 
+  const hasUrlencode = Array.isArray(opts.dataUrlencode) && opts.dataUrlencode.length > 0;
+
   // P2e — `-T/--upload-file` is mutually exclusive with the other
   // body-producing flags. Reject up front (exit 2) rather than
   // silently letting one of them win.
@@ -320,16 +337,38 @@ export async function apiCommand(
       opts.data !== undefined ||
       opts.dataRaw !== undefined ||
       opts.dataBinary !== undefined ||
-      opts.form.length > 0;
+      opts.form.length > 0 ||
+      hasUrlencode;
     if (hasOther) {
-      writeError("cannot combine -T/--upload-file with -d / --data-raw / --data-binary / -F\n");
+      writeError(
+        "cannot combine -T/--upload-file with -d / --data-raw / --data-binary / --data-urlencode / -F\n",
+      );
       return exit(2);
     }
   }
 
-  // P2c — `-G/--get`: move -d values into query, drop body, force GET.
-  // curl rejects -G combined with -F (multipart has no sane projection
-  // into a query string), we do the same with exit 2.
+  // `--data-urlencode` treats as its own body mode, mutually exclusive
+  // with `-d / --data-raw / --data-binary / -F`. `-T` was already
+  // rejected above. Multiple `--data-urlencode` flags accumulate into
+  // a `&`-joined body (curl default).
+  if (hasUrlencode) {
+    const hasOtherBody =
+      opts.data !== undefined ||
+      opts.dataRaw !== undefined ||
+      opts.dataBinary !== undefined ||
+      opts.form.length > 0;
+    if (hasOtherBody) {
+      writeError(
+        "cannot combine --data-urlencode with -d / --data-raw / --data-binary / -F (use repeated --data-urlencode for multiple pairs)\n",
+      );
+      return exit(2);
+    }
+  }
+
+  // P2c — `-G/--get`: move -d / --data-urlencode values into query,
+  // drop body, force GET. curl rejects -G combined with -F (multipart
+  // has no sane projection into a query string), we do the same with
+  // exit 2.
   let effectiveOpts = opts;
   if (opts.get) {
     if (opts.form.length > 0) {
@@ -343,6 +382,7 @@ export async function apiCommand(
       data: undefined,
       dataRaw: undefined,
       dataBinary: undefined,
+      dataUrlencode: undefined,
     };
   }
 
@@ -687,6 +727,20 @@ async function buildBody(opts: ApiCommandOptions, io: ApiCommandIO): Promise<Bui
     return { body: Bun.file(opts.uploadFile), usesStdin: false };
   }
 
+  // --data-urlencode: repeat-merge into a `k=v&k=v` body. Non-`-G`
+  // path only — `-G` already projected these into the query string
+  // upstream and cleared `dataUrlencode` on `effectiveOpts`. If any
+  // entry reads from stdin (`@-` / `name@-`) we flag `usesStdin` so
+  // the outer retry logic disables retry (stdin can't be replayed).
+  if (Array.isArray(opts.dataUrlencode) && opts.dataUrlencode.length > 0) {
+    const usesStdin = opts.dataUrlencode.some((v) => v === "@-" || v.endsWith("@-"));
+    const parts: string[] = [];
+    for (const raw of opts.dataUrlencode) {
+      parts.push(await parseUrlencodePair(raw, io));
+    }
+    return { body: parts.join("&"), usesStdin };
+  }
+
   // Multipart wins if present.
   if (opts.form.length > 0) {
     const fd = new FormData();
@@ -911,8 +965,83 @@ async function collectGetDataAsQuery(opts: ApiCommandOptions, io: ApiCommandIO):
     if (opts.dataBinary.startsWith("@")) values.push(await readFromRef(opts.dataBinary.slice(1)));
     else values.push(opts.dataBinary);
   }
-  // Split each value on `&` so `-d 'k=v&k2=v2'` produces two query pairs.
-  return values.flatMap((v) => v.split("&")).filter(Boolean);
+  // -d / --data-raw / --data-binary: curl treats the value as an
+  // already-encoded `k=v[&k=v]*` fragment, so we split on `&` before
+  // handing each pair to buildUrl (which in turn hands each to
+  // searchParams.append for proper percent-encoding of stray bytes).
+  const split = values.flatMap((v) => v.split("&")).filter(Boolean);
+
+  // `--data-urlencode` is different: each entry is ONE pair whose
+  // content portion may contain literal `&` / `=`. We must NOT split
+  // on `&` (would corrupt `q=a&b` into two pairs), and we hand raw
+  // content to searchParams so it percent-encodes exactly once.
+  if (Array.isArray(opts.dataUrlencode)) {
+    for (const raw of opts.dataUrlencode) {
+      const { name, content } = await extractUrlencodeParts(raw, io);
+      // `name=content` pair goes through buildUrl's split-on-first-`=`.
+      // If content contains `=`, searchParams.append receives the full
+      // post-`=` remainder — that's what we want (`q=a=b` → value "a=b").
+      split.push(name === "" ? content : `${name}=${content}`);
+    }
+  }
+  return split;
+}
+
+/**
+ * Parse a `--data-urlencode` argument into its raw (un-encoded) name
+ * and content parts. Supports curl's five forms:
+ *
+ *   `content`      → name="", content=raw
+ *   `=content`     → name="", content=raw (leading `=` stripped)
+ *   `name=content` → name, content=raw
+ *   `@file`        → name="", content=read(file)
+ *   `name@file`    → name, content=read(file)
+ *
+ * Selection rule: the first `=` or `@` is the separator (matches curl).
+ * `@-` reads stdin. Callers responsible for encoding the `content`
+ * (directly via `encodeURIComponent` for a body, or by handing it to
+ * `URL.searchParams.append` for a query pair).
+ */
+async function extractUrlencodeParts(
+  raw: string,
+  io: ApiCommandIO,
+): Promise<{ name: string; content: string }> {
+  const readFile = async (ref: string): Promise<string> => {
+    if (ref === "-") {
+      const reader = io.stdinStream?.().getReader();
+      if (!reader) return "";
+      const chunks: Uint8Array[] = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) chunks.push(value);
+      }
+      return new TextDecoder().decode(Buffer.concat(chunks.map((c) => Buffer.from(c))));
+    }
+    return Bun.file(ref).text();
+  };
+  const eqIdx = raw.indexOf("=");
+  const atIdx = raw.indexOf("@");
+  if (eqIdx === -1 && atIdx === -1) {
+    return { name: "", content: raw };
+  }
+  const firstIdx = eqIdx === -1 ? atIdx : atIdx === -1 ? eqIdx : Math.min(eqIdx, atIdx);
+  const sep = raw[firstIdx];
+  const name = raw.slice(0, firstIdx);
+  const rest = raw.slice(firstIdx + 1);
+  const content = sep === "@" ? await readFile(rest) : rest;
+  return { name, content };
+}
+
+/**
+ * Percent-encode a `--data-urlencode` entry for body use. Content is
+ * URL-encoded; the name (if any) stays literal — curl documents it
+ * as "expected to be URL-encoded already".
+ */
+async function parseUrlencodePair(raw: string, io: ApiCommandIO): Promise<string> {
+  const { name, content } = await extractUrlencodeParts(raw, io);
+  const encoded = encodeURIComponent(content);
+  return name === "" ? encoded : `${name}=${encoded}`;
 }
 
 // ─── P3a — retry helpers ────────────────────────────────────────────

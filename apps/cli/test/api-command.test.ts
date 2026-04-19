@@ -163,6 +163,7 @@ async function runCommand(
     data: opts.data,
     dataRaw: opts.dataRaw,
     dataBinary: opts.dataBinary,
+    dataUrlencode: opts.dataUrlencode,
     request: opts.request,
     output: opts.output,
     include: opts.include,
@@ -1400,5 +1401,110 @@ describe("apiCommand — header shortcuts + --compressed + -r", () => {
     expect(exitCode.value).toBe(2);
     expect(fetchCalls).toHaveLength(0);
     expect(stdoutText(stderr)).toContain("cookie jars");
+  });
+});
+
+describe("apiCommand — --data-urlencode", () => {
+  beforeEach(async () => {
+    await seedLoggedIn("default");
+  });
+
+  it("plain content: encodes value, no name", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/p", dataUrlencode: ["hello world"] }, io);
+    expect(fetchCalls[0]!.method).toBe("POST"); // body present → POST
+    expect(fetchCalls[0]!.body).toBe("hello%20world");
+  });
+
+  it("=content: strips leading '=' and encodes", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/p", dataUrlencode: ["=p@ss&word"] }, io);
+    expect(fetchCalls[0]!.body).toBe("p%40ss%26word");
+  });
+
+  it("name=content: name stays literal, value is encoded", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/p", dataUrlencode: ["password=p@ss&with spaces"] }, io);
+    expect(fetchCalls[0]!.body).toBe("password=p%40ss%26with%20spaces");
+  });
+
+  it("@file: loads file contents and encodes them", async () => {
+    const f = join(tmpDir, "body.txt");
+    await writeFile(f, "hello world & co");
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/p", dataUrlencode: [`@${f}`] }, io);
+    expect(fetchCalls[0]!.body).toBe("hello%20world%20%26%20co");
+  });
+
+  it("name@file: prefixes with name, encodes file contents", async () => {
+    const f = join(tmpDir, "body.txt");
+    await writeFile(f, "éléphant");
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/p", dataUrlencode: [`note@${f}`] }, io);
+    expect(fetchCalls[0]!.body).toBe("note=%C3%A9l%C3%A9phant");
+  });
+
+  it("repeats: joins with '&'", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand(
+      {
+        path: "/p",
+        dataUrlencode: ["a=1", "b=hello world", "c@missing-but-not-read"].slice(0, 2),
+      },
+      io,
+    );
+    expect(fetchCalls[0]!.body).toBe("a=1&b=hello%20world");
+  });
+
+  it("-G --data-urlencode: projects into query, no body, method GET", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/p", get: true, dataUrlencode: ["q=hello world"] }, io);
+    expect(fetchCalls[0]!.method).toBe("GET");
+    expect(fetchCalls[0]!.body).toBeFalsy();
+    // searchParams does the encoding (no double-encode of `%20` → `%2520`).
+    expect(fetchCalls[0]!.url).toBe("https://app.example.com/p?q=hello+world");
+  });
+
+  it("-G --data-urlencode does not double-encode reserved chars", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/p", get: true, dataUrlencode: ["q=a+b&c=d"] }, io);
+    // Raw content "a+b&c=d" — `+` means literal plus, `&` is in value.
+    // searchParams.append('q', 'a+b&c=d') → 'q=a%2Bb%26c%3Dd'
+    expect(fetchCalls[0]!.url).toBe("https://app.example.com/p?q=a%2Bb%26c%3Dd");
+  });
+
+  it("--data-urlencode combined with -d exits 2, no fetch", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, exitCode, stderr } = makeIO();
+    await runCommand({ path: "/p", data: "a=b", dataUrlencode: ["c=d"] }, io);
+    expect(exitCode.value).toBe(2);
+    expect(fetchCalls).toHaveLength(0);
+    expect(stdoutText(stderr)).toContain("cannot combine --data-urlencode");
+  });
+
+  it("--data-urlencode combined with -F exits 2", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, exitCode } = makeIO();
+    await runCommand({ path: "/p", form: ["k=v"], dataUrlencode: ["a=b"] }, io);
+    expect(exitCode.value).toBe(2);
+    expect(fetchCalls).toHaveLength(0);
+  });
+
+  it("--data-urlencode combined with -T exits 2", async () => {
+    const f = join(tmpDir, "up");
+    await writeFile(f, "x");
+    installFetch(() => jsonResponse(200, {}));
+    const { io, exitCode } = makeIO();
+    await runCommand({ path: "/p", uploadFile: f, dataUrlencode: ["a=b"] }, io);
+    expect(exitCode.value).toBe(2);
+    expect(fetchCalls).toHaveLength(0);
   });
 });

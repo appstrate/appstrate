@@ -200,6 +200,12 @@ program
     "Request body — literal or @file, no content-type guess, no newline stripping",
   )
   .option(
+    "--data-urlencode <data>",
+    "URL-encoded body part (repeatable). Forms: 'content' | '=content' | 'name=content' | '@file' | 'name@file'. Combine with -G to build a query string.",
+    collect,
+    [],
+  )
+  .option(
     "-F, --form <kv>",
     "Multipart field 'k=v' or 'k=@path[;type=mime]' (repeatable)",
     collect,
@@ -355,6 +361,7 @@ program
       data: typeof opts.data === "string" ? opts.data : undefined,
       dataRaw: typeof opts.dataRaw === "string" ? opts.dataRaw : undefined,
       dataBinary: typeof opts.dataBinary === "string" ? opts.dataBinary : undefined,
+      dataUrlencode: Array.isArray(opts.dataUrlencode) ? opts.dataUrlencode : undefined,
       request: typeof opts.request === "string" ? opts.request : undefined,
       output: typeof opts.output === "string" ? opts.output : undefined,
       include: opts.include === true,
