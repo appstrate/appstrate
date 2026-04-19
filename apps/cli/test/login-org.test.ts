@@ -359,7 +359,7 @@ describe("login org-pin branch", () => {
     });
 
     await expect(
-      loginCommand({
+      runLogin({
         profile: "default",
         instance: "https://app.example.com",
         org: "does-not-exist",
@@ -450,7 +450,7 @@ describe("login org-pin branch", () => {
     });
 
     await expect(
-      loginCommand({
+      runLogin({
         profile: "default",
         instance: "https://app.example.com",
         createOrg: "Acme",
