@@ -418,6 +418,61 @@ describe("POST /api/auth/cli/token — grant_type=refresh_token", () => {
     expect(retryBody.error).toBe("invalid_grant");
   });
 
+  it("serializes concurrent rotations — only one winner, family revoked on the loser", async () => {
+    // Regression guard against the TOCTOU race between SELECT (used_at
+    // IS NULL) and UPDATE (SET used_at = now()). Before the atomic
+    // `WHERE used_at IS NULL` + `.returning()` check, two concurrent
+    // rotations of the same refresh token could both pass the
+    // `if (row.usedAt)` guard, both issue fresh pairs, and leave two
+    // usable child rows in the family — silently breaking the
+    // one-time-use invariant RFC 6819 §5.2.2.3 mandates.
+    //
+    // With the fix, the DB serializes the UPDATE: the loser sees zero
+    // affected rows, revokes the family, and the next rotation
+    // (including the winner's child) fails — forcing re-login. That's
+    // stricter than strictly necessary for a benign same-session retry
+    // but indistinguishable from a real stolen-token race, and the
+    // safer default.
+    const { refreshToken: first } = await loginAndGetPair();
+
+    const makeReq = () =>
+      app.request("/api/auth/cli/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "refresh_token",
+          refresh_token: first,
+          client_id: "appstrate-cli",
+        }),
+      });
+
+    const [a, b] = await Promise.all([makeReq(), makeReq()]);
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual([200, 400]);
+
+    const loser = a.status === 400 ? a : b;
+    const loserBody = (await loser.json()) as { error?: string };
+    expect(loserBody.error).toBe("invalid_grant");
+
+    // Exactly ONE child row should exist in the family (the winner's),
+    // and the parent (presented) row must be marked used_at.
+    const allInFamily = await db.select().from(cliRefreshToken);
+    // All rows share the same family_id (single login).
+    const familyIds = new Set(allInFamily.map((r) => r.familyId));
+    expect(familyIds.size).toBe(1);
+    // Two rows total: parent (presented, now used_at set) + one child.
+    expect(allInFamily.length).toBe(2);
+
+    // Family MUST be revoked with reason=reuse so neither the winner's
+    // child nor any other race participant can rotate going forward.
+    const reuseRow = allInFamily.find((r) => r.revokedReason === "reuse");
+    expect(reuseRow).toBeDefined();
+    for (const r of allInFamily) {
+      expect(r.revokedAt).not.toBeNull();
+      expect(r.revokedReason).toBe("reuse");
+    }
+  });
+
   it("rejects an unknown refresh token with invalid_grant", async () => {
     const res = await app.request("/api/auth/cli/token", {
       method: "POST",

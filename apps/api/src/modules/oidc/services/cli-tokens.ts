@@ -215,88 +215,164 @@ export async function exchangeDeviceCodeForTokens(params: {
  * Rotate a refresh token. On success returns a fresh pair and marks
  * the presented token `used_at`. On reuse detection, revokes the
  * entire family and throws `invalid_grant`.
+ *
+ * ## Concurrency model
+ *
+ * Rotations of the same refresh token are serialized through a
+ * `SELECT … FOR UPDATE` row lock on the parent inside a transaction.
+ * Two concurrent requests with the same plaintext token land on the
+ * same row → one wins the lock, performs `UPDATE used_at` + `INSERT
+ * child`, commits; the second waits, sees `used_at` set after the
+ * first commits, and enters the reuse branch which revokes the entire
+ * family INCLUDING the winner's freshly-inserted child.
+ *
+ * Why the row lock (not just a conditional UPDATE): without the lock,
+ * a loser could enter `revokeFamily` *before* the winner's child INSERT
+ * commits. The revoke UPDATE targets rows with `revoked_at IS NULL`,
+ * so a child inserted after that sweep would survive with usable
+ * state — breaking RFC 6819 §5.2.2.3. The lock closes that window by
+ * forcing the loser to wait until the winner's INSERT is visible.
+ *
+ * The reuse branch MUST NOT leak the reuse-vs-explicit-revoke
+ * distinction to the presenter: an attacker replaying a stolen token
+ * should get the same user-visible response as a legitimate CLI
+ * presenting a token revoked server-side for some other reason
+ * (logout elsewhere, reuse already detected by a peer, user deletion).
+ * Only operators — via the audit log + the `revoked_reason` DB column
+ * — see which branch fired. Expiry remains distinct because `exp` is
+ * public information the CLI already computed at login time.
  */
 export async function rotateRefreshToken(params: {
   refreshToken: string;
   clientId: string;
 }): Promise<TokenPair> {
   const { refreshToken, clientId } = params;
-
   const tokenHash = hashRefreshToken(refreshToken);
-  const [row] = await db
-    .select()
-    .from(cliRefreshToken)
-    .where(eq(cliRefreshToken.tokenHash, tokenHash))
-    .limit(1);
 
-  if (!row) {
-    throw new CliTokenError("invalid_grant", "Unknown refresh token.");
-  }
-  if (row.clientId !== clientId) {
-    throw new CliTokenError("invalid_grant", "Refresh token was issued to a different client.");
-  }
-  if (row.revokedAt) {
-    // Already revoked — could be the result of a prior reuse-detection
-    // sweep. Stay silent about the reason (don't leak reuse-vs-explicit
-    // distinction to the presenter).
-    throw new CliTokenError("invalid_grant", "Refresh token has been revoked.");
-  }
-  if (row.expiresAt < new Date()) {
-    throw new CliTokenError("invalid_grant", "Refresh token has expired.");
-  }
-  if (row.usedAt) {
-    // Reuse detection — RFC 6819 §5.2.2.3. Revoke the entire family so
-    // neither the legitimate holder (who raced) nor the attacker (who
-    // stole a pre-rotation copy) retains access. The user must re-run
-    // `appstrate login`.
-    await revokeFamily(row.familyId, "reuse");
-    logger.warn("oidc: CLI refresh-token reuse detected — family revoked", {
-      module: "oidc",
-      audit: true,
-      event: "cli.refresh_token.reuse",
+  // The rotation transaction returns a tagged result rather than
+  // throwing, because throwing inside `db.transaction(...)` rolls back
+  // every statement inside — including the reuse-branch family revoke.
+  // A rolled-back revoke would leave a stolen token reusable on retry.
+  // We commit the tx with whatever state it determined, then decide
+  // outside whether that outcome needs an exception or a second
+  // (committed) revoke sweep.
+  type RotationOutcome =
+    | { kind: "ok"; pair: TokenPair }
+    | {
+        kind: "error";
+        code: CliTokenErrorCode;
+        description: string;
+      }
+    | {
+        kind: "reuse";
+        familyId: string;
+        userId: string;
+        clientId: string;
+      };
+
+  const outcome: RotationOutcome = await db.transaction(async (tx) => {
+    // Lock the parent row for the duration of the transaction. Any
+    // concurrent rotation of the same plaintext token blocks here
+    // until we commit or rollback, at which point it re-reads the row
+    // and sees our `used_at` mutation. This serialization closes the
+    // TOCTOU window between the SELECT and the mark-UPDATE that
+    // would otherwise let two racers both pass the `usedAt` guard.
+    const [row] = await tx
+      .select()
+      .from(cliRefreshToken)
+      .where(eq(cliRefreshToken.tokenHash, tokenHash))
+      .limit(1)
+      .for("update");
+
+    if (!row) {
+      return { kind: "error", code: "invalid_grant", description: "Unknown refresh token." };
+    }
+    if (row.clientId !== clientId) {
+      return {
+        kind: "error",
+        code: "invalid_grant",
+        description: "Refresh token was issued to a different client.",
+      };
+    }
+    if (row.revokedAt) {
+      return {
+        kind: "error",
+        code: "invalid_grant",
+        description: "Refresh token has been revoked.",
+      };
+    }
+    if (row.expiresAt < new Date()) {
+      return {
+        kind: "error",
+        code: "invalid_grant",
+        description: "Refresh token has expired.",
+      };
+    }
+    if (row.usedAt) {
+      // Signal reuse to the outer scope. The family-wide revoke runs
+      // in a fresh transaction so a thrown error here (or an abort of
+      // THIS tx for any reason) can't undo the revoke. See
+      // RFC 6819 §5.2.2.3.
+      return {
+        kind: "reuse",
+        familyId: row.familyId,
+        userId: row.userId,
+        clientId: row.clientId,
+      };
+    }
+
+    const [userRow] = await tx
+      .select({
+        id: userTable.id,
+        email: userTable.email,
+        name: userTable.name,
+        emailVerified: userTable.emailVerified,
+      })
+      .from(userTable)
+      .where(eq(userTable.id, row.userId))
+      .limit(1);
+    if (!userRow) {
+      return { kind: "error", code: "invalid_grant", description: "User no longer exists." };
+    }
+
+    // Mark-before-mint ordering: a crash between the UPDATE and the
+    // INSERT leaves `used_at` set without a child row. A retry of the
+    // same refresh token then trips the reuse branch and revokes the
+    // family. Safe failure — no duplicated-usable state.
+    await tx
+      .update(cliRefreshToken)
+      .set({ usedAt: new Date() })
+      .where(eq(cliRefreshToken.id, row.id));
+
+    const pair = await mintTokenPairInTx(tx, {
+      user: userRow,
+      clientId,
+      scope: row.scope ?? "",
+      parentId: row.id,
       familyId: row.familyId,
-      userId: row.userId,
-      clientId: row.clientId,
     });
-    throw new CliTokenError(
-      "invalid_grant",
-      "Refresh token reuse detected — all sessions in this family have been revoked.",
-    );
-  }
-
-  // Load approving user to mint a fresh access token.
-  const [userRow] = await db
-    .select({
-      id: userTable.id,
-      email: userTable.email,
-      name: userTable.name,
-      emailVerified: userTable.emailVerified,
-    })
-    .from(userTable)
-    .where(eq(userTable.id, row.userId))
-    .limit(1);
-  if (!userRow) {
-    throw new CliTokenError("invalid_grant", "User no longer exists.");
-  }
-
-  // Mark old row used BEFORE minting the new one so a crash between
-  // mint + mark would result in a "new token present + old not used",
-  // which then racing the legitimate CLI would trip reuse detection on
-  // the attacker's side — still safe. The opposite order (mint after
-  // mark) would occasionally leak an unusable new token if mint failed,
-  // forcing a fresh login; less bad than duplicated-usable state.
-  await db
-    .update(cliRefreshToken)
-    .set({ usedAt: new Date() })
-    .where(eq(cliRefreshToken.id, row.id));
-
-  return mintTokenPair({
-    user: userRow,
-    clientId,
-    scope: row.scope ?? "",
-    parentId: row.id,
-    familyId: row.familyId,
+    return { kind: "ok", pair };
   });
+
+  if (outcome.kind === "ok") return outcome.pair;
+  if (outcome.kind === "error") {
+    throw new CliTokenError(outcome.code, outcome.description);
+  }
+  // outcome.kind === "reuse". Revoke the family in a fresh transaction
+  // so it commits independently of the rotation tx. Because the
+  // parent-row lock above serialized us with any concurrent winner,
+  // their child row (if any) is already committed and visible to this
+  // sweep → the `family_id` UPDATE covers it.
+  await revokeFamily(outcome.familyId, "reuse");
+  logger.warn("oidc: CLI refresh-token reuse detected — family revoked", {
+    module: "oidc",
+    audit: true,
+    event: "cli.refresh_token.reuse",
+    familyId: outcome.familyId,
+    userId: outcome.userId,
+    clientId: outcome.clientId,
+  });
+  throw new CliTokenError("invalid_grant", "Refresh token has been revoked.");
 }
 
 /**
@@ -327,6 +403,8 @@ async function revokeFamily(familyId: string, reason: string): Promise<void> {
     .where(and(eq(cliRefreshToken.familyId, familyId), isNull(cliRefreshToken.revokedAt)));
 }
 
+type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 async function mintTokenPair(params: {
   user: { id: string; email: string; name: string | null; emailVerified: boolean };
   clientId: string;
@@ -334,6 +412,28 @@ async function mintTokenPair(params: {
   parentId: string | null;
   familyId: string;
 }): Promise<TokenPair> {
+  return mintTokenPairInTx(db, params);
+}
+
+/**
+ * Variant of `mintTokenPair` that takes a Drizzle transaction handle so
+ * the refresh-token INSERT commits atomically with whatever the caller
+ * wrapped it in (in practice: the `used_at` mark on the parent row in
+ * `rotateRefreshToken`). Keeping the JWT signing + insert on the same
+ * transaction ensures that a concurrent reuse-detection sweep on the
+ * same `family_id` either sees the child row and revokes it, or hasn't
+ * started yet because it's waiting on the parent-row lock we hold.
+ */
+async function mintTokenPairInTx(
+  tx: DbOrTx,
+  params: {
+    user: { id: string; email: string; name: string | null; emailVerified: boolean };
+    clientId: string;
+    scope: string;
+    parentId: string | null;
+    familyId: string;
+  },
+): Promise<TokenPair> {
   const { user, clientId, scope, parentId, familyId } = params;
 
   // 1. Mint JWT access token.
@@ -350,7 +450,7 @@ async function mintTokenPair(params: {
   const refreshPlain = generateRefreshToken();
   const refreshHash = hashRefreshToken(refreshPlain);
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000);
-  await db.insert(cliRefreshToken).values({
+  await tx.insert(cliRefreshToken).values({
     id: prefixedId("crf"),
     tokenHash: refreshHash,
     userId: user.id,
