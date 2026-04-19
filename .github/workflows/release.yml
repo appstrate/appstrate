@@ -1,9 +1,24 @@
-name: Release Docker Images
+name: Release Docker Images + CLI Binaries
 
 on:
   push:
     tags:
       - "v*"
+
+# Serialize ALL release runs (single global group, NOT per-tag).
+# Two different tags pushed in rapid succession would otherwise race
+# on shared cross-tag state:
+#   - `metadata-action` with `flavor: latest=auto` (line ~82) pushes
+#     the GHCR `:latest` tag based on highest-semver-seen — if v1.0.0
+#     finishes after v1.0.1, `:latest` ends up pointing at v1.0.0.
+#   - GH Release marking (which tag is `latest`) has the same hazard.
+# `cancel-in-progress: false` because once a release has started
+# publishing to GHCR / signing binaries / creating the GH Release,
+# cancelling mid-flight leaves registries inconsistent — better to
+# let it finish, then run the queued tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -12,6 +27,11 @@ env:
 permissions:
   contents: write
   packages: write
+  # SLSA build provenance via `actions/attest-build-provenance` runs on
+  # the CLI binaries in `sign-cli` — keeps the supply-chain attestation
+  # attached to the release alongside the minisign-signed checksums.
+  id-token: write
+  attestations: write
 
 jobs:
   build-and-push:
@@ -32,13 +52,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
       - name: Log in to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
@@ -49,17 +69,29 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+          # `flavor: latest=auto` makes metadata-action add `latest` for
+          # the highest non-prerelease semver tag seen — so `v1.0.0`
+          # gets `latest`, but `v1.0.0-alpha.50` does NOT. Replaces a
+          # previous `type=raw,value=latest,enable={{is_default_branch}}`
+          # which never fired on tag-triggered runs (`is_default_branch`
+          # is only true for pushes to the default branch, not tags) —
+          # leaving `get.appstrate.dev` bootstrap users pulling `:latest`
+          # against an image that was never tagged. The CLI now pins
+          # `APPSTRATE_VERSION` in the generated `.env` for a belt-and-
+          # braces guarantee (ADR-006 lockstep), so `latest` is the
+          # compat fallback for consumers that skip the CLI.
+          flavor: |
+            latest=auto
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -70,15 +102,248 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  release:
-    needs: build-and-push
+  # ─── CLI single-binary builds (per-target, native runners) ────────────────
+  #
+  # `bun build --compile --target=bun-<os>-<arch>` cross-compiles the JS
+  # bundle + embeds a Bun runtime, but it does NOT cross-install N-API
+  # native modules — `@napi-rs/keyring`'s platform-specific binding is
+  # resolved at `bun install` time against the host's `process.platform`.
+  # Preflight PF-1 confirmed that compiling for linux-x64 from macOS
+  # produces a binary that fails at runtime with "Cannot find native
+  # binding" on Linux. So each target must build on its own native
+  # runner: macOS arm64 on `macos-14` (M1), macOS x64 on `macos-15-intel`
+  # (last remaining Intel-macOS runner since GitHub retired macos-13),
+  # Linux x64 on `ubuntu-latest`, Linux arm64 on `ubuntu-24.04-arm`
+  # (GitHub's free ARM runner tier).
+  #
+  # Artifact asset names match the pattern `bootstrap.sh` downloads
+  # (`appstrate-${OS}-${ARCH}`) — do NOT rename without also updating
+  # `scripts/bootstrap.sh`.
+  build-cli:
+    name: CLI binary (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: bun-darwin-arm64
+            asset: appstrate-darwin-arm64
+          # `macos-15-intel` is GitHub's last Intel-mac runner (macos-13
+          # retired 2025-12). When it follows, drop the darwin-x64 row
+          # and ship only darwin-arm64 — Intel Macs are a rounding error
+          # on the CLI install curve by then. Tracked in ADR-006.
+          - runner: macos-15-intel
+            target: bun-darwin-x64
+            asset: appstrate-darwin-x64
+          - runner: ubuntu-latest
+            target: bun-linux-x64
+            asset: appstrate-linux-x64
+          - runner: ubuntu-24.04-arm
+            target: bun-linux-arm64
+            asset: appstrate-linux-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.11"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Stamp release version into CLI package.json
+        working-directory: apps/cli
+        run: |
+          # `lib/version.ts` imports `package.json` statically so
+          # `bun build --compile` bakes whatever version is on disk at
+          # build time. Repo default is `0.0.0` (dev). Overwrite with
+          # the tag being released so the shipped binary reports the
+          # matching semver on `appstrate --version`. jq is installed
+          # on both ubuntu-latest and macos-14/macos-15-intel runner
+          # images by default.
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
+          mv package.json.tmp package.json
+          grep '"version"' package.json
+
+      - name: Compile CLI binary
+        working-directory: apps/cli
+        run: |
+          bun build --compile \
+            --target=${{ matrix.target }} \
+            src/cli.ts \
+            --outfile=${{ matrix.asset }}
+
+      - name: Smoke-test binary (--help + --version)
+        working-directory: apps/cli
+        run: |
+          ./${{ matrix.asset }} --help
+          REPORTED=$(./${{ matrix.asset }} --version)
+          EXPECTED="${GITHUB_REF_NAME#v}"
+          echo "Binary reports: $REPORTED / expected: $EXPECTED"
+          if [ "$REPORTED" != "$EXPECTED" ]; then
+            echo "::error::Version mismatch — compiled binary reports '$REPORTED', tag is '$EXPECTED'."
+            echo "::error::Check that the 'Stamp release version' step ran before 'Compile CLI binary'."
+            exit 1
+          fi
+
+      # `--help` and `--version` do not exercise the `@napi-rs/keyring`
+      # native module. A cross-compile misconfiguration or a future Bun
+      # regression could ship a binary whose `require()` of the `.node`
+      # has been silently replaced by a throw stub — it would pass the
+      # checks above and crash the first time a user runs `login`. Build
+      # and run a tiny probe against the same `--target` to force the
+      # native binding to load.
+      - name: Smoke-test keyring native binding
+        working-directory: apps/cli
+        run: |
+          bun build --compile \
+            --target=${{ matrix.target }} \
+            scripts/ci-keyring-probe.ts \
+            --outfile=ci-keyring-probe
+          ./ci-keyring-probe
+          rm -f ci-keyring-probe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.asset }}
+          path: apps/cli/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # ─── CLI supply-chain: minisign-signed checksums + SLSA provenance ────────
+  #
+  # Closes the trust chain from `get.appstrate.dev` down to the running
+  # CLI binary. The published `bootstrap.sh` downloads the binary from
+  # this release + the `checksums.txt` + `checksums.txt.minisig` produced
+  # here, verifies the signature against `scripts/appstrate.pub` (shipped
+  # alongside), and refuses to exec the binary unless its SHA-256
+  # matches. Without this job the bootstrapper has no cryptographic
+  # anchor and the whole curl | bash path degrades to TLS-only trust.
+  sign-cli:
+    name: Sign CLI binaries
+    needs: build-cli
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download CLI binaries
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          # `docker/build-push-action` auto-uploads
+          # `<name>~<name>~<id>.dockerbuild` summary artifacts to the
+          # same run; without a pattern filter, download-artifact pulls
+          # them too — and they're large enough to flake the 5-retry
+          # blob download budget. Restrict to the binary asset names.
+          pattern: appstrate-*
+          path: cli-binaries
+          merge-multiple: false
+
+      - name: Stage binaries
+        id: stage
+        run: |
+          # Each artifact extracts into its own subdir — flatten into a
+          # single directory so checksum + signing steps see one tree.
+          mkdir -p out
+          find cli-binaries -type f -name 'appstrate-*' -exec cp {} out/ \;
+          ls -la out/
+          # Fail fast if any expected target is missing — the release
+          # should not ship with a partial binary set.
+          for asset in appstrate-darwin-arm64 appstrate-darwin-x64 \
+                       appstrate-linux-x64 appstrate-linux-arm64; do
+            if [ ! -f "out/$asset" ]; then
+              echo "::error::Missing CLI binary: $asset"
+              exit 1
+            fi
+          done
+
+      - name: Generate checksums
+        run: |
+          cd out
+          # `shasum -a 256` output format matches what `sha256sum -c`
+          # expects, so `bootstrap.sh` can verify with either tool.
+          sha256sum appstrate-* > checksums.txt
+          cat checksums.txt
+
+      - name: Sign checksums with minisign
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          # Secrets are required: we intentionally fail rather than ship
+          # a release with unsigned binaries. Mixed signed/unsigned
+          # releases would force `bootstrap.sh` to tolerate missing
+          # signatures, which defeats the whole verification flow.
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ] || [ -z "${MINISIGN_PASSWORD:-}" ]; then
+            echo "::error::MINISIGN_SECRET_KEY + MINISIGN_PASSWORD secrets must be set."
+            echo "::error::Rotation SOP: docs/adr/ADR-006-cli-device-flow-monorepo.md"
+            exit 1
+          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          umask 077
+          printf '%s' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
+          printf '%s\n' "$MINISIGN_PASSWORD" | \
+            minisign -S -s /tmp/minisign.key \
+              -t "appstrate CLI $VERSION" \
+              -m out/checksums.txt
+          rm -f /tmp/minisign.key
+          # Ship the public key next to the signed checksums so air-gapped
+          # users and second-party mirrors have everything they need in
+          # one place. `scripts/appstrate.pub` is the source of truth;
+          # copying to `out/` just avoids a second checkout on the
+          # consumer side.
+          cp scripts/appstrate.pub out/appstrate.pub
+
+      - name: Attest CLI binary provenance (SLSA)
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: out/appstrate-*
+
+      - name: Upload signed bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cli-signed-bundle
+          path: |
+            out/checksums.txt
+            out/checksums.txt.minisig
+            out/appstrate.pub
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [build-and-push, build-cli, sign-cli]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+
+      - name: Download CLI binaries
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          # Same filter as the sign job — skip the docker-buildx summary
+          # artifacts that share the run.
+          pattern: appstrate-*
+          path: cli-binaries
+          # Each artifact is extracted into its own subdir under `path`;
+          # flatten by globbing in the release step below.
+          merge-multiple: false
+
+      - name: Download signed bundle
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: cli-signed-bundle
+          path: cli-signed
 
       - name: Generate release notes
         id: notes
@@ -102,10 +367,25 @@ jobs:
             echo "docker pull ghcr.io/${{ github.repository_owner }}/appstrate-pi:${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
             echo "docker pull ghcr.io/${{ github.repository_owner }}/appstrate-sidecar:${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
             echo '```' >> "$GITHUB_OUTPUT"
+            echo "" >> "$GITHUB_OUTPUT"
+            echo "## Install the CLI" >> "$GITHUB_OUTPUT"
+            echo "" >> "$GITHUB_OUTPUT"
+            echo '```sh' >> "$GITHUB_OUTPUT"
+            echo "curl -fsSL https://get.appstrate.dev | bash" >> "$GITHUB_OUTPUT"
+            echo '```' >> "$GITHUB_OUTPUT"
             echo "$EOF" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           body: ${{ steps.notes.outputs.body }}
+          # Flatten the per-artifact subdirs into a single glob so every
+          # CLI binary lands as a top-level asset on the release, then
+          # append the signed checksum bundle so `bootstrap.sh` can
+          # verify integrity + provenance before chmod+x on a fresh host.
+          files: |
+            cli-binaries/*/appstrate-*
+            cli-signed/checksums.txt
+            cli-signed/checksums.txt.minisig
+            cli-signed/appstrate.pub

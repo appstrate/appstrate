@@ -34,6 +34,14 @@ import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
+import { getInlineRunLimits } from "../services/run-limits.ts";
+import {
+  insertShadowPackage,
+  buildShadowLoadedPackage,
+  deleteOrphanShadowPackage,
+  isInlineShadowPackageId,
+} from "../services/inline-run.ts";
+import { runInlinePreflight, type InlineRunBody } from "../services/inline-run-preflight.ts";
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens;
   total.output_tokens += addition.output_tokens;
@@ -73,6 +81,8 @@ export async function executeAgentInBackground(
   const startTime = Date.now();
   const controller = trackRun(runId);
   const { signal } = controller;
+  // Derived once — cheap string test used to decorate every lifecycle event.
+  const packageEphemeral = isInlineShadowPackageId(agent.id);
 
   let accumulatedCost = 0;
 
@@ -85,6 +95,7 @@ export async function executeAgentInBackground(
       packageId: agent.id,
       applicationId,
       status: "started",
+      packageEphemeral,
     });
 
     // Execute via adapter
@@ -217,6 +228,7 @@ export async function executeAgentInBackground(
           cost: accumulatedCost,
           duration,
           modelSource: modelSource ?? null,
+          packageEphemeral,
         });
         return;
       }
@@ -275,6 +287,7 @@ export async function executeAgentInBackground(
         cost: accumulatedCost,
         duration,
         modelSource: modelSource ?? null,
+        packageEphemeral,
         extra: { error },
       });
     } else {
@@ -361,6 +374,7 @@ export async function executeAgentInBackground(
         cost: accumulatedCost,
         duration,
         modelSource: modelSource ?? null,
+        packageEphemeral,
         extra: { result },
       });
     }
@@ -410,6 +424,7 @@ export async function executeAgentInBackground(
       cost: accumulatedCost,
       duration,
       modelSource: modelSource ?? null,
+      packageEphemeral,
       extra: { error: errorMessage },
     });
   } finally {
@@ -464,7 +479,6 @@ export function createRunsRouter() {
             effectiveAgent.manifest.input?.schema
               ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
               : undefined,
-            effectiveAgent.manifest.input?.fileConstraints,
           ),
         ]);
 
@@ -571,6 +585,10 @@ export function createRunsRouter() {
     return c.json(result);
   });
 
+  // GET /api/runs — served by the notifications router (registered first
+  // in index.ts so `/runs` matches the collection, not the {id} detail).
+  // See apps/api/src/routes/notifications.ts.
+
   // GET /api/runs/:id — get a single run
   router.get("/runs/:id", async (c) => {
     const runId = c.req.param("id");
@@ -653,10 +671,134 @@ export function createRunsRouter() {
       packageId: run.packageId,
       applicationId: c.get("applicationId"),
       status: "cancelled",
+      packageEphemeral: isInlineShadowPackageId(run.packageId),
     });
 
     return c.json({ ok: true });
   });
+
+  // POST /api/runs/inline — execute an inline (no persisted package) agent.
+  // See docs/specs/INLINE_RUNS.md. The manifest + prompt travel in the
+  // request body; the platform creates a transient shadow package
+  // (ephemeral = true), runs it through the existing pipeline, and
+  // returns 202 { runId } immediately. The client streams progress via
+  // GET /api/realtime/runs/:id (existing SSE endpoint).
+  router.post(
+    "/runs/inline",
+    // Dedicated rate limit — the cap is loaded from INLINE_RUN_LIMITS
+    // each time the middleware is constructed. We read it at route-build
+    // time; changes to the env require a reboot.
+    rateLimit(getInlineRunLimits().rate_per_min),
+    idempotency(),
+    requirePermission("agents", "run"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const applicationId = c.get("applicationId");
+      const actor = getActor(c);
+
+      const body = await c.req.json<InlineRunBody>();
+
+      // ----- 1. Preflight — shape + providers + readiness (no side effects). -----
+      // Running this BEFORE insertShadowPackage means invalid manifests no
+      // longer leave orphan shadow rows that we'd have to clean up.
+      const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
+      const {
+        manifest,
+        prompt,
+        effectiveConfig,
+        effectiveInput,
+        providerProfiles,
+        modelIdOverride,
+        proxyIdOverride,
+        resolvedDeps,
+      } = preflight;
+
+      // ----- 2. Insert shadow row (now that we know the manifest is valid). -----
+      const createdBy = actor?.type === "member" ? actor.id : null;
+      const shadowId = await insertShadowPackage({ orgId, createdBy, manifest, prompt });
+      const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, prompt, resolvedDeps);
+
+      // ----- 3. Fire the pipeline. -----
+      const runId = `run_${crypto.randomUUID()}`;
+      let pipelineResult;
+      try {
+        pipelineResult = await prepareAndExecuteRun({
+          runId,
+          agent: shadowAgent,
+          providerProfiles,
+          orgId,
+          actor,
+          input: effectiveInput,
+          config: effectiveConfig,
+          modelId: modelIdOverride,
+          proxyId: proxyIdOverride,
+          applicationId,
+          apiKeyId: c.get("apiKeyId") ?? undefined,
+        });
+      } catch (err) {
+        await deleteOrphanShadowPackage(shadowId);
+        throw err;
+      }
+
+      if (!pipelineResult.ok) {
+        await deleteOrphanShadowPackage(shadowId);
+        const { error } = pipelineResult;
+        if (error.code === "model_not_configured") {
+          throw new ApiError({
+            status: 400,
+            code: "model_not_configured",
+            title: "Bad Request",
+            detail: error.message,
+          });
+        }
+        if ("status" in error && typeof error.status === "number") {
+          throw new ApiError({
+            status: error.status,
+            code: error.code,
+            title: error.message,
+            detail: error.message,
+          });
+        }
+        throw new ApiError({
+          status: 500,
+          code: "inline_run_failed",
+          title: "Inline run failed",
+          detail: error.message,
+        });
+      }
+
+      c.status(202);
+      return c.json({ runId, packageId: shadowId });
+    },
+  );
+
+  // POST /api/runs/inline/validate — dry-run validator for inline manifests.
+  // Runs the full preflight (manifest + config + input + provider readiness)
+  // WITHOUT inserting a shadow package or firing a pipeline. Lets developers
+  // iterate on a manifest without creating phantom runs or burning credits.
+  // Shares 100% of its validation with POST /api/runs/inline via
+  // runInlinePreflight().
+  //
+  // NOTE: intentionally shares the SAME rate-limit bucket as /runs/inline
+  // (method+path+identity → different key, same rate_per_min cap). Validation
+  // exercises the same provider-resolution / AJV machinery as an actual run,
+  // so guarding against tight validation loops matters. Documented in the
+  // OpenAPI description.
+  router.post(
+    "/runs/inline/validate",
+    rateLimit(getInlineRunLimits().rate_per_min),
+    requirePermission("agents", "run"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const applicationId = c.get("applicationId");
+      const actor = getActor(c);
+      const body = await c.req.json<InlineRunBody>();
+
+      await runInlinePreflight({ orgId, applicationId, actor, body, mode: "accumulate" });
+
+      return c.json({ ok: true });
+    },
+  );
 
   // DELETE /api/agents/:scope/:name/runs — delete all runs for an agent
   router.delete(

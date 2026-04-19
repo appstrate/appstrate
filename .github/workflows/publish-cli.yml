@@ -1,0 +1,142 @@
+name: Publish appstrate CLI to npm
+
+# The CLI keeps `version: "0.0.0"` in the repo as a dev-build sentinel
+# (see `apps/cli/src/lib/version.ts::DEV_CLI_VERSION`). This workflow
+# rewrites `package.json` from the tag immediately before publishing so
+# a released tarball carries the real version, while source checkouts
+# keep tripping the dev guard that refuses to pull untagged GHCR images.
+
+on:
+  push:
+    tags:
+      - "cli@*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (manual dispatch only, e.g. 1.0.0-alpha.53)"
+        required: true
+
+permissions:
+  contents: write
+  id-token: write
+
+# Serialize ALL CLI publishes — `npm publish` updates the `latest`
+# dist-tag on every non-prerelease publish. Two tags pushed in rapid
+# succession (cli@1.0.0 then cli@1.0.1) would race: if 1.0.0 finishes
+# last, `latest` points back to the older version. `cancel-in-progress:
+# false` because a cancelled publish mid-flight leaves the registry
+# inconsistent (provenance attestation orphaned, etc).
+concurrency:
+  group: publish-cli
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Quality, Tests & Publish
+    runs-on: ubuntu-latest
+    # 15m caps the worst case: install + tsc + tests + pack + install
+    # smoke + publish + 6×20s post-publish CDN retry (~120s) + GH
+    # Release. Steady state is ~4-6m. A hang past 15m means npm/CDN
+    # is wedged — fail loud rather than burn the GH Actions minutes
+    # quota until the 6h hard ceiling.
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/cli
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.3.11"
+
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: .
+
+      - name: TypeScript type-check
+        run: bun run typecheck
+
+      - name: Tests
+        run: bun run test
+
+      - name: Resolve publish version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#cli@}"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not resolve publish version"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Write tag version into package.json
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
+          mv package.json.tmp package.json
+          echo "Publishing appstrate@$VERSION"
+          jq '.version' package.json
+
+      - name: Pre-publish smoke test (pack + install + run locally)
+        # Build the tarball with `npm pack` (triggers `prepack` →
+        # `bun run build`), install it into a throwaway directory, and
+        # invoke the bin. This mirrors exactly what a consumer gets from
+        # `bunx appstrate`. If the bundle is broken or missing
+        # inlined assets (the #175 regression), we fail BEFORE polluting
+        # the npm registry — unlike a post-publish smoke test, this
+        # failure mode is recoverable without `npm deprecate`.
+        run: |
+          npm pack
+          # `npm pack` names the tarball `<package>-<version>.tgz` deterministically;
+          # constructing the path is safer than globbing (shellcheck SC2012).
+          TARBALL="appstrate-${{ steps.version.outputs.version }}.tgz"
+          WORK="$(mktemp -d)"
+          (cd "$WORK" && npm init -y >/dev/null && npm install "${GITHUB_WORKSPACE}/apps/cli/$TARBALL")
+          "$WORK/node_modules/.bin/appstrate" --help
+          rm -rf "$WORK" "$TARBALL" dist
+
+      - name: Publish to npm
+        # Unscoped packages are public by default — no `--access public` needed.
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Post-publish smoke test (registry → bunx)
+        # Belt-and-suspenders check: pull from the actual registry and
+        # run via bunx. Catches cases where the tarball is correct but
+        # npm registry metadata is wrong (bin field dropped, etc).
+        #
+        # `npm publish` returns as soon as the registry accepts the
+        # tarball, but the version may take 30-90s to appear in the
+        # public CDN that `bunx` queries — alpha.55 saw a 404 from
+        # bunx ~10s after publish. Retry with backoff so a propagation
+        # delay doesn't fail the workflow.
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          for attempt in 1 2 3 4 5 6; do
+            if bunx -y "appstrate@${VERSION}" --help; then
+              echo "Smoke test passed on attempt $attempt"
+              exit 0
+            fi
+            echo "Attempt $attempt failed (registry propagation?), retrying in 20s…"
+            sleep 20
+          done
+          echo "::error::Post-publish smoke test failed after 6 attempts (~120s of backoff)."
+          exit 1
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          generate_release_notes: true

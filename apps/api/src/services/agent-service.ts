@@ -7,7 +7,7 @@ import type { Manifest } from "@appstrate/core/validation";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import { asRecord } from "../lib/safe-json.ts";
-import { orgOrSystemFilter } from "../lib/package-helpers.ts";
+import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { extractDepsFromManifest } from "../lib/manifest-utils.ts";
 import { hasPackageAccess } from "./application-packages.ts";
 
@@ -42,24 +42,24 @@ function mapDependencies(
     });
 }
 
+function pickSkillsAndTools(
+  depRefs: NonNullable<DbPackageRow["depRefs"]>,
+  manifest: AgentManifest,
+): Pick<LoadedPackage, "skills" | "tools"> {
+  const deps = manifest.dependencies ?? {};
+  return {
+    skills: mapDependencies(depRefs, "skill", (deps.skills ?? {}) as Record<string, string>),
+    tools: mapDependencies(depRefs, "tool", (deps.tools ?? {}) as Record<string, string>),
+  };
+}
+
 function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
   const manifest = asRecord(row.draftManifest) as AgentManifest;
-  const deps = row.depRefs ?? [];
-
   return {
     id: row.id,
     manifest,
     prompt: row.draftContent,
-    skills: mapDependencies(
-      deps,
-      "skill",
-      (manifest.dependencies?.skills ?? {}) as Record<string, string>,
-    ),
-    tools: mapDependencies(
-      deps,
-      "tool",
-      (manifest.dependencies?.tools ?? {}) as Record<string, string>,
-    ),
+    ...pickSkillsAndTools(row.depRefs ?? [], manifest),
     source: (row.source as "system" | "local") ?? "local",
     updatedAt: row.updatedAt,
   };
@@ -93,9 +93,37 @@ async function resolveDepRefs(
   }));
 }
 
-/** Get a single package by ID. Queries DB filtered by orgId (includes system packages via orgId: null). */
-export async function getPackage(id: string, orgId: string): Promise<LoadedPackage | null> {
+/**
+ * Resolve the skills + tools declared in an inline manifest's `dependencies`
+ * against the org/system catalog. Inline manifests only embed ID refs
+ * (`"@scope/name": "^1.0.0"`), so the shadow LoadedPackage needs the same
+ * mapped-dep shape as a persisted package before it reaches
+ * `validateAgentReadiness`. Returns empty arrays when the manifest declares
+ * no skill/tool deps — no DB read happens in that case.
+ */
+export async function resolveManifestCatalogDeps(
+  manifest: AgentManifest,
+  orgId: string,
+): Promise<Pick<LoadedPackage, "skills" | "tools">> {
+  const depRefs = await resolveDepRefs(manifest, orgId);
+  return pickSkillsAndTools(depRefs, manifest);
+}
+
+/**
+ * Get a single package by ID. Filters orgId (includes system packages via
+ * orgId: null) AND excludes ephemeral shadow packages by default.
+ *
+ * Set `opts.includeEphemeral` to load an inline-run shadow row directly
+ * (used only by the compaction worker and test fixtures — never by
+ * user-facing paths).
+ */
+export async function getPackage(
+  id: string,
+  orgId: string,
+  opts: { includeEphemeral?: boolean } = {},
+): Promise<LoadedPackage | null> {
   const conditions = [eq(packages.id, id), orgOrSystemFilter(orgId)];
+  if (!opts.includeEphemeral) conditions.push(notEphemeralFilter());
 
   const pkgRows = await db
     .select({
@@ -147,7 +175,7 @@ export async function listPackages(
   orgId: string,
   type: PackageType = "agent",
 ): Promise<LoadedPackage[]> {
-  const conditions = [eq(packages.type, type), orgOrSystemFilter(orgId)];
+  const conditions = [eq(packages.type, type), orgOrSystemFilter(orgId), notEphemeralFilter()];
   const rows = await db
     .select({
       id: packages.id,
@@ -171,7 +199,7 @@ export async function listPackages(
 
 /** Get all package IDs (system + user, scoped by org). Used for collision checks. */
 export async function getAllPackageIds(orgId?: string, type?: string): Promise<string[]> {
-  const conditions = [];
+  const conditions = [notEphemeralFilter()];
   if (orgId) {
     conditions.push(orgOrSystemFilter(orgId));
   }
@@ -181,13 +209,19 @@ export async function getAllPackageIds(orgId?: string, type?: string): Promise<s
   const rows = await db
     .select({ id: packages.id })
     .from(packages)
-    .where(conditions.length > 0 ? and(...conditions) : undefined);
+    .where(and(...conditions));
 
   return rows.map((r) => r.id);
 }
 
-/** Check if a package exists (system or user). */
+/**
+ * Check if a package exists (system or user). Ignores ephemeral shadow
+ * packages — callers (scheduler, imports) never legitimately target one.
+ */
 export async function packageExists(id: string): Promise<boolean> {
-  const rows = await db.select({ cnt: count() }).from(packages).where(eq(packages.id, id));
+  const rows = await db
+    .select({ cnt: count() })
+    .from(packages)
+    .where(and(eq(packages.id, id), notEphemeralFilter()));
   return (rows[0]?.cnt ?? 0) > 0;
 }

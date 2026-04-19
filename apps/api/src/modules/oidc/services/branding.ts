@@ -78,7 +78,7 @@ const DEFAULT_ACCENT = "#4338ca";
 
 export const PLATFORM_DEFAULT_BRANDING: ResolvedAppBranding = {
   name: "Appstrate",
-  logoUrl: "/logo-dark.svg",
+  logoUrl: "/logo-light.svg",
   primaryColor: DEFAULT_PRIMARY,
   accentColor: DEFAULT_ACCENT,
   supportEmail: null,

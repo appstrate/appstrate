@@ -20,6 +20,12 @@ export type EnrichedRun = Run & {
   endUserName: string | null;
   apiKeyName: string | null;
   scheduleName: string | null;
+  /** True if the run's source package is an inline/ephemeral shadow (POST /api/runs/inline). */
+  packageEphemeral?: boolean;
+  /** For inline runs only — snapshot of the manifest submitted at run time. Null after compaction. */
+  inlineManifest?: Record<string, unknown> | null;
+  /** For inline runs only — snapshot of the prompt submitted at run time. Null after compaction. */
+  inlinePrompt?: string | null;
 };
 
 // --- App Config Types ---
@@ -31,8 +37,8 @@ export type EnrichedRun = Run & {
  * environment variables owned by the core platform (opt-in integrations
  * like Google/GitHub OAuth, SMTP).
  *
- * Module-owned flags (e.g. `billing` from @appstrate/cloud, `webhooks`
- * from the webhooks module, future `oidc`) are contributed at boot via
+ * Module-owned flags (e.g. `webhooks` from the webhooks module, `oidc`)
+ * are contributed at boot via
  * `AppstrateModule.features` and flow through the index signature —
  * adding a new module never requires editing shared-types.
  */
@@ -91,6 +97,11 @@ export type EnrichedSchedule = Schedule & {
 
 import { orgRoleEnum } from "@appstrate/db/schema";
 export type OrgRole = (typeof orgRoleEnum.enumValues)[number];
+
+export interface OrgSettings {
+  apiVersion?: string;
+  dashboardSsoEnabled?: boolean;
+}
 
 export interface OrganizationMember {
   orgId: string;

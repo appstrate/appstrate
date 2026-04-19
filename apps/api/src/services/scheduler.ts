@@ -11,7 +11,11 @@ import { logger } from "../lib/logger.ts";
 import type { Schedule, EnrichedSchedule, ScheduleReadiness } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/index.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
-import { prepareAndExecuteRun, resolveRunPreflight } from "./run-pipeline.ts";
+import {
+  prepareAndExecuteRun,
+  resolveRunPreflight,
+  extractRunAgentDenorm,
+} from "./run-pipeline.ts";
 import { asRecordOrNull } from "../lib/safe-json.ts";
 import { getPackage, packageExists } from "./agent-service.ts";
 import type { ConnectionProfile } from "@appstrate/db/schema";
@@ -181,6 +185,10 @@ async function triggerScheduledRun(
   applicationId: string,
   input: Record<string, unknown> | undefined,
 ) {
+  // Populated once the agent loads so every failSchedule() call can
+  // denormalize `agent_scope` / `agent_name` onto the failed run row.
+  let agentDenorm: { scope: string | null; name: string | null } | null = null;
+
   /** Create a failed run record + emit onRunStatusChange so modules (webhooks, …) can notify. */
   async function failSchedule(error: string, actor: Actor | null = null): Promise<void> {
     const runId = `run_${crypto.randomUUID()}`;
@@ -194,6 +202,7 @@ async function triggerScheduledRun(
         error,
         scheduleId,
         connectionProfileId,
+        agentDenorm ?? undefined,
       );
       void emitEvent("onRunStatusChange", {
         orgId,
@@ -219,6 +228,7 @@ async function triggerScheduledRun(
       await failSchedule(`Package '${packageId}' not found`);
       return;
     }
+    agentDenorm = extractRunAgentDenorm(agent);
 
     // Resolve actor from connection profile (null for app profiles)
     const profile = await getProfileByIdUnsafe(connectionProfileId);

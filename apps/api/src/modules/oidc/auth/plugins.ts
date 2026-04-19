@@ -29,15 +29,21 @@
  * Client secret storage matches the `oauth-admin` service hash (SHA-256 hex).
  */
 
-import { timingSafeEqual } from "node:crypto";
+import { randomInt, timingSafeEqual } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { oauthProvider } from "@better-auth/oauth-provider";
-import { jwt } from "better-auth/plugins";
+import { bearer, jwt } from "better-auth/plugins";
+import { deviceAuthorization } from "better-auth/plugins/device-authorization";
 import { APIError } from "better-auth/api";
 import { getEnv } from "@appstrate/env";
+import { db } from "@appstrate/db/client";
+import { oauthClient } from "../schema.ts";
 import { logger } from "../../../lib/logger.ts";
+import { getOrgSettings } from "../../../services/organizations.ts";
 import {
   resolveOrCreateEndUser,
   UnverifiedEmailConflictError,
+  AppSignupClosedError,
   loadAppById,
 } from "../services/enduser-mapping.ts";
 import {
@@ -46,7 +52,9 @@ import {
   resolveOrCreateOrgMembership,
 } from "../services/orgmember-mapping.ts";
 import { hashSecret } from "../services/oauth-admin.ts";
+import { socialOverridePlugin } from "../services/ba-social-override-plugin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
+import { assertUserRealm } from "./realm-check.ts";
 import { APPSTRATE_SCOPES } from "./scopes.ts";
 
 export type ActorType = "dashboard_user" | "end_user" | "user";
@@ -66,6 +74,8 @@ export interface ClientMetadata {
   clientId?: string;
 }
 
+const SHA256_HEX_LENGTH = 64;
+
 /**
  * Constant-time comparison of the SHA-256 hex digest of `clientSecret`
  * against the stored hash. Uses `crypto.timingSafeEqual` on raw buffers
@@ -75,10 +85,38 @@ export interface ClientMetadata {
  * `timingSafeEqual` requires equal-length buffers — we early-return on
  * length mismatch, which is safe because the stored hash length is a
  * public constant (64 hex chars) and does not leak secret material.
+ *
+ * Exported for unit testing — not part of the module's public surface.
  */
-async function sha256HexVerify(clientSecret: string, storedHash: string): Promise<boolean> {
+export async function sha256HexVerify(clientSecret: string, storedHash: string): Promise<boolean> {
   const computed = await hashSecret(clientSecret);
-  if (computed.length !== storedHash.length) return false;
+  // Invariant: hashSecret() produces SHA-256 hex (64 chars) and stored
+  // hashes were written by the same function. A length mismatch here
+  // means either the hash algorithm was changed without re-hashing
+  // existing rows (migration bug) or storedHash is corrupt/truncated —
+  // both are states that must not silently deny-all. Fail loud so the
+  // operator sees the incident.
+  if (computed.length !== SHA256_HEX_LENGTH) {
+    logger.error("oidc: hashSecret() returned unexpected length — possible algorithm drift", {
+      module: "oidc",
+      audit: true,
+      event: "oauth.client_secret.hash_length_drift",
+      expected: SHA256_HEX_LENGTH,
+      actual: computed.length,
+    });
+    throw new Error("OAuth client secret verification is misconfigured — contact the operator.");
+  }
+  if (storedHash.length !== SHA256_HEX_LENGTH) {
+    logger.warn("oidc: stored client secret hash has unexpected length — rejecting", {
+      module: "oidc",
+      audit: true,
+      event: "oauth.client_secret.stored_hash_length_mismatch",
+      expected: SHA256_HEX_LENGTH,
+      actual: storedHash.length,
+    });
+    return false;
+  }
+  // Both lengths are the known constant — safe to use timingSafeEqual.
   const a = Buffer.from(computed, "utf8");
   const b = Buffer.from(storedHash, "utf8");
   return timingSafeEqual(a, b);
@@ -106,8 +144,37 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       : undefined;
   return [
     oidcGuardsPlugin({ validAudiences }),
+    socialOverridePlugin(),
     jwt({
       jwks: { keyPairConfig: { alg: "ES256" } },
+    }),
+    // Accept `Authorization: Bearer <raw_session_token>` as a session
+    // credential. The Appstrate CLI stores the raw token returned by
+    // `/api/auth/device/token` in the OS keyring and presents it as a
+    // Bearer header on subsequent calls — without this plugin, BA would
+    // only honor the signed cookie form (`<token>.<signature>`) which
+    // the CLI cannot produce without the auth secret. The plugin reads
+    // the token, looks up the session via the internal adapter, and
+    // populates the request context identically to a cookie session so
+    // every downstream hook (`requirePlatformRealm`, org membership,
+    // etc.) sees the correct identity.
+    bearer(),
+    deviceAuthorization({
+      expiresIn: "10m",
+      interval: "5s",
+      userCodeLength: 8,
+      generateUserCode: generateAppstrateUserCode,
+      // Full URL so the CLI displays a click-through link. Relative paths
+      // are resolved against BA's baseURL (`/api/auth`) which is not where
+      // the `/activate` SSR page lives — mounted at the HTTP origin root
+      // alongside the other OIDC pages.
+      verificationUri: `${env.APP_URL}/activate`,
+      // Gate: only OAuth clients registered with the device-flow grant are
+      // allowed to hit `/device/code`. BA itself does NOT consult
+      // `oauth_clients`, so we bridge the check via a direct DB lookup.
+      // Realm/audience enforcement is a separate concern layered in
+      // `oidcGuardsPlugin.hooks.before` on `/device/approve`.
+      validateClient: validateDeviceFlowClient,
     }),
     oauthProvider({
       loginPage: "/api/oauth/login",
@@ -172,6 +239,54 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
   ];
 }
 
+/**
+ * User code alphabet — GitHub's convention. Excludes vowels (prevents
+ * accidental dictionary words from forming), `0/O` and `1/I/L` (visually
+ * ambiguous), and digits (we want an all-letter code). 20 chars × 8
+ * positions = 20^8 ≈ 2.56e10 ≈ 34.6 bits of entropy before the one-time
+ * user-code rate limiter ever kicks in.
+ */
+const USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
+
+/**
+ * Cryptographically random 8-character user code. Returned WITHOUT the
+ * `XXXX-XXXX` separator because BA's `/device/verify` and `/device/approve`
+ * strip dashes from the user-typed code before looking up the record
+ * (see `better-auth/plugins/device-authorization/routes.mjs`) — if we
+ * stored the formatted version, the lookup would miss. The separator is
+ * a pure display concern and is re-inserted by the CLI output and the
+ * `/activate` SSR page when showing the code to humans.
+ */
+function generateAppstrateUserCode(): string {
+  let raw = "";
+  for (let i = 0; i < 8; i++) {
+    raw += USER_CODE_ALPHABET[randomInt(USER_CODE_ALPHABET.length)];
+  }
+  return raw;
+}
+
+/**
+ * Allowlist callback invoked by BA's deviceAuthorization plugin at both
+ * `/device/code` (initial request) and `/device/token` (polling). Returns
+ * `true` only for OAuth clients whose registered `grantTypes` include the
+ * RFC 8628 device-code grant. The instance-level `appstrate-cli` client
+ * (auto-provisioned by `ensureCliClient()`) is the canonical holder. Other
+ * clients can opt in by declaring the grant, but the realm/level guard on
+ * `/device/approve` still governs who can approve — this function only
+ * answers "is this client allowed to use device flow at all?".
+ */
+async function validateDeviceFlowClient(clientId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ grantTypes: oauthClient.grantTypes, disabled: oauthClient.disabled })
+    .from(oauthClient)
+    .where(eq(oauthClient.clientId, clientId))
+    .limit(1);
+  if (!row) return false;
+  if (row.disabled === true) return false;
+  const grants = row.grantTypes ?? [];
+  return grants.includes("urn:ietf:params:oauth:grant-type:device_code");
+}
+
 function str(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
@@ -214,6 +329,10 @@ async function buildInstanceLevelClaims(user: {
   name?: string | null;
   emailVerified?: boolean;
 }): Promise<Record<string, unknown>> {
+  // Instance clients serve platform audiences — dashboard SPA + satellite
+  // admin tools. Reject end-user realm sessions so an OIDC token minted
+  // under app A's scope cannot be replayed to mint an instance token.
+  await assertUserRealm(user.id, "platform", { clientLevel: "instance" });
   // Instance tokens carry NO org or application context. The user is a
   // Better Auth user who may belong to multiple organizations — org is
   // resolved per-request via X-Org-Id after authentication.
@@ -240,31 +359,37 @@ async function buildOrgLevelClaims(
     });
   }
 
-  // Load the mutable signup policy via the short-TTL client cache. Falls
-  // back to the "closed" default if the lookup fails for any reason —
-  // better to reject a legitimate mint than silently auto-join to a wrong
-  // role because the cache is cold.
-  let policy: { allowSignup: boolean; signupRole: "admin" | "member" | "viewer" } = {
-    allowSignup: false,
-    signupRole: "member",
-  };
-  if (metadata.clientId) {
-    const loaded = await loadClientSignupPolicy(metadata.clientId);
-    if (loaded && loaded.level === "org" && loaded.orgId === orgId) {
-      policy = { allowSignup: loaded.allowSignup, signupRole: loaded.signupRole };
-    } else if (!loaded) {
-      logger.warn("oidc: could not load policy for org-level client — defaulting to closed", {
-        module: "oidc",
-        clientId: metadata.clientId,
-      });
-    }
-  } else {
-    logger.warn("oidc: org-level client metadata missing clientId — defaulting to closed", {
+  // Dashboard SSO gate: org must have opted in via
+  // orgSettings.dashboardSsoEnabled. Mirrors the interactive-flow gate in
+  // routes.ts/loadPageContext — this is the authoritative token-mint check
+  // that also catches non-interactive flows (refresh, client_credentials).
+  const orgSettings = await getOrgSettings(orgId);
+  if (orgSettings.dashboardSsoEnabled !== true) {
+    logger.warn("oidc: dashboard SSO disabled for org — rejecting token", {
       module: "oidc",
       userId: user.id,
       orgId,
     });
+    throw new APIError("FORBIDDEN", {
+      error: "access_denied",
+      error_description: "Dashboard SSO is disabled for this organization.",
+    });
   }
+
+  // Org-level clients serve platform audiences (dashboard users mapped to
+  // org_members). Reject end-user realm sessions — an end-user of app A
+  // cannot become a dashboard user of org X by OIDC replay.
+  await assertUserRealm(user.id, "platform", { clientLevel: "org", orgId });
+
+  // Load the mutable signup policy via the short-TTL client cache. Falls
+  // back to the "closed" default if the client was deleted/disabled or its
+  // metadata drifted — better to reject a legitimate mint than silently
+  // auto-join to a wrong role.
+  const loaded = metadata.clientId ? await loadClientSignupPolicy(metadata.clientId) : null;
+  const policy: { allowSignup: boolean; signupRole: "admin" | "member" | "viewer" } =
+    loaded && loaded.level === "org" && loaded.orgId === orgId
+      ? { allowSignup: loaded.allowSignup, signupRole: loaded.signupRole }
+      : { allowSignup: false, signupRole: "member" };
 
   // Resolve or create the membership. For existing members this is a
   // single SELECT (the proactive call in routes.ts already created the row
@@ -338,6 +463,27 @@ async function buildApplicationLevelClaims(
     });
     throw new Error("oidc: referenced application not found");
   }
+
+  // Application-level tokens are end-user tokens. Enforce that the
+  // authenticating BA user was provisioned for THIS application — reject
+  // platform admins (realm="platform") and end-users of a different app
+  // (realm="end_user:B"). Per decision #2 (no cross-audience sharing),
+  // a platform admin wanting to test their own app as an end-user must
+  // re-signup with a separate account.
+  await assertUserRealm(user.id, `end_user:${applicationId}`, {
+    clientLevel: "application",
+    applicationId,
+  });
+  // Load the signup policy via the short-TTL cache — closed default on any
+  // lookup failure. Same rationale as `buildOrgLevelClaims`.
+  const loaded = metadata.clientId ? await loadClientSignupPolicy(metadata.clientId) : null;
+  const signupPolicy = {
+    allowSignup:
+      loaded?.level === "application" &&
+      loaded.applicationId === applicationId &&
+      loaded.allowSignup,
+  };
+
   // NOTE: this call may be the SECOND invocation for a given login —
   // `routes.ts` POST /api/oauth/login pre-resolves the end-user to surface
   // `UnverifiedEmailConflictError` as a 409 before the redirect chain. That
@@ -354,6 +500,7 @@ async function buildApplicationLevelClaims(
         emailVerified: user.emailVerified === true,
       },
       app,
+      signupPolicy,
     );
     return {
       actor_type: "end_user",
@@ -371,6 +518,20 @@ async function buildApplicationLevelClaims(
         email: err.email,
       });
       throw err;
+    }
+    if (err instanceof AppSignupClosedError) {
+      logger.warn("oidc: end-user signup blocked by client policy", {
+        module: "oidc",
+        applicationId: err.applicationId,
+        authUserId: err.authUserId,
+      });
+      // Map to a structured OAuth2 error so downstream satellites (portal)
+      // can render a "contact your admin" page instead of a generic 500.
+      throw new APIError("FORBIDDEN", {
+        error: "access_denied",
+        error_description:
+          "Sign-up is disabled for this application. Ask your administrator to create your account before signing in.",
+      });
     }
     logger.error("oidc: end-user resolution failed during token issuance", {
       module: "oidc",

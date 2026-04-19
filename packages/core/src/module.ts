@@ -3,8 +3,8 @@
 /**
  * Appstrate Module System — contract types.
  *
- * Published in @appstrate/core so that external modules (e.g. @appstrate/cloud)
- * can implement the interface without depending on the API package.
+ * Published in @appstrate/core so that external modules can implement
+ * the interface without depending on the API package.
  *
  * Hono is the only framework dependency — all Appstrate modules must provide
  * Hono routers. It is declared as an optional peer dependency.
@@ -178,9 +178,9 @@ export interface AppstrateModule {
    * Naming: `beforeX` (gates), `afterX` (post-lifecycle patches).
    *
    * Priority order: topological order from `manifest.dependencies`. Modules
-   * without dependencies keep the order they appear in `APPSTRATE_MODULES`.
+   * without dependencies keep the order they appear in `MODULES`.
    *
-   * Example: `APPSTRATE_MODULES=cloud,quota` — if both provide `beforeRun`,
+   * Example: `MODULES=cloud,quota` — if both provide `beforeRun`,
    * cloud runs first. To force ordering, add `dependencies: ["cloud"]` on
    * quota so the topo sort always places cloud earlier.
    */
@@ -435,6 +435,14 @@ export interface RunStatusChangeParams {
   duration?: number;
   /** Model source: "system" or "org" (only on terminal status). */
   modelSource?: string | null;
+  /**
+   * Whether the underlying `packages` row is a shadow package (inline run).
+   * Omitted for classic runs (treat as false). Consumers — e.g. the
+   * webhooks module — surface this to subscribers so downstream systems
+   * can distinguish inline vs cataloged executions without an extra DB
+   * round-trip.
+   */
+  packageEphemeral?: boolean;
   /** Additional data for webhook payloads (result, error, etc.). */
   extra?: Record<string, unknown>;
 }

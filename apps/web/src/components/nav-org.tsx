@@ -13,12 +13,13 @@ import {
   Webhook,
   Loader2,
   Users,
-  KeyRound,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
+import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
+import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -36,7 +37,16 @@ export function NavOrg() {
   const { isAdmin } = usePermissions();
   const { features } = useAppConfig();
 
-  const hasRunning = agents?.some((f) => f.runningRuns > 0) ?? false;
+  // Inline runs live on ephemeral shadow packages that are not in `agents`,
+  // so they don't contribute to `runningRuns`. Check them separately.
+  const { data: runningInline } = usePaginatedRuns({
+    kind: "inline",
+    status: "running",
+    limit: 1,
+    offset: 0,
+  });
+  const hasRunning =
+    (agents?.some((f) => f.runningRuns > 0) ?? false) || (runningInline?.total ?? 0) > 0;
   const unread = unreadCount ?? 0;
 
   const automationItems = [
@@ -56,25 +66,19 @@ export function NavOrg() {
       ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
       : []),
     ...(isAdmin ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }] : []),
-    ...(isAdmin ? [{ path: "/api-keys", label: t("nav.apiKeys"), icon: KeyRound }] : []),
   ];
 
   const renderItems = (items: typeof automationItems) =>
     items.map((item) => (
-      <SidebarMenuItem key={item.path}>
-        <SidebarMenuButton
-          asChild
-          isActive={
-            item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path)
-          }
-          tooltip={item.label}
-        >
-          <Link to={item.path}>
-            <item.icon />
-            <span>{item.label}</span>
-          </Link>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
+      <SidebarNavLink
+        key={item.path}
+        to={item.path}
+        icon={item.icon}
+        label={item.label}
+        isActive={
+          item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path)
+        }
+      />
     ));
 
   return (

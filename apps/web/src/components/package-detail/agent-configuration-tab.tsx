@@ -10,7 +10,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { InputFields } from "../input-fields";
+import { SchemaForm } from "@appstrate/ui/schema-form";
+import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
+import { UPLOADS_PATH } from "../../api";
 import { PROVIDER_ICONS } from "../icons";
 import { findProviderByApiAndBaseUrl } from "@/lib/model-presets";
 import { useModels, useAgentModel, useSetAgentModel } from "../../hooks/use-models";
@@ -18,12 +20,7 @@ import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-pro
 import { useAppProfiles, useSetAgentAppProfile } from "../../hooks/use-connection-profiles";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveConfig } from "../../hooks/use-mutations";
-import {
-  initFormValues,
-  buildPayload,
-  type JSONSchemaObject,
-  type SchemaWrapper,
-} from "@appstrate/core/form";
+import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 
 // ─── Config Section ─────────────────────────────────────────────────
 
@@ -39,28 +36,28 @@ function ConfigSection({
   const { t } = useTranslation(["agents", "common"]);
   const { data: detail } = usePackageDetail("agent", packageId);
 
-  const current = detail?.config?.current || {};
+  const current = (detail?.config?.current ?? {}) as Record<string, unknown>;
   const mutation = useSaveConfig(detail?.id ?? "");
   const wrapper: SchemaWrapper = { schema };
 
-  const [values, setValues] = useState<Record<string, unknown>>(() =>
-    initFormValues(schema, current),
-  );
+  const [values, setValues] = useState<Record<string, unknown>>(() => current);
+  const labels = useSchemaFormLabels();
 
   if (!schema?.properties || Object.keys(schema.properties).length === 0) return null;
 
   const handleSave = () => {
-    mutation.mutate(buildPayload(schema, values));
+    mutation.mutate(values);
   };
 
   return (
     <div className="border-border bg-card space-y-3 rounded-lg border p-4">
       <h3 className="text-sm font-medium">{t("editor.configTitle")}</h3>
-      <InputFields
-        schema={wrapper}
-        values={values}
-        onChange={(key, v) => setValues((prev) => ({ ...prev, [key]: v }))}
-        idPrefix="config"
+      <SchemaForm
+        wrapper={wrapper}
+        formData={values}
+        uploadPath={UPLOADS_PATH}
+        labels={labels}
+        onChange={(e) => setValues(e.formData as Record<string, unknown>)}
       />
       <div className="flex justify-end pt-2">
         <Button onClick={handleSave} disabled={mutation.isPending || isHistorical} size="sm">

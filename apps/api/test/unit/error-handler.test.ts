@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../../src/types/index.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
+import { z } from "zod";
 import {
   ApiError,
   invalidRequest,
@@ -13,6 +14,8 @@ import {
   unauthorized,
   conflict,
   gone,
+  parseBody,
+  validationFailed,
 } from "../../src/lib/errors.ts";
 
 function createApp() {
@@ -43,6 +46,97 @@ describe("errorHandler middleware", () => {
     expect(typeof body.requestId).toBe("string");
     expect((body.requestId as string).startsWith("req_")).toBe(true);
     expect((body.instance as string).startsWith("urn:appstrate:request:req_")).toBe(true);
+  });
+
+  it("parseBody does not double-prefix the field when Zod has a resolved path", async () => {
+    // Regression guard: the `param` argument is a FALLBACK for empty paths,
+    // not a prefix. Historically callers passed e.g. `parseBody(schema, body,
+    // "apiKey")` expecting `body.param === "apiKey"`. Concatenating the arg
+    // onto the Zod path would yield `"apiKey.apiKey"` for every such call.
+    const app = createApp();
+    const schema = z.object({ apiKey: z.string().min(1) });
+    app.post("/test", async (c) => {
+      parseBody(schema, await c.req.json(), "apiKey");
+      return c.json({ ok: true });
+    });
+    const res = await app.request("/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    const fields = (body.errors as { field: string }[]).map((e) => e.field);
+    expect(fields).toContain("apiKey");
+    expect(fields).not.toContain("apiKey.apiKey");
+  });
+
+  it("parseBody uses the fallback field when Zod reports an empty path", async () => {
+    // When the whole body fails to parse (e.g. not an object), Zod's path
+    // is empty — the caller-provided `param` acts as the field name so the
+    // error still points somewhere meaningful.
+    const app = createApp();
+    const schema = z.string().min(1);
+    app.post("/test", async (c) => {
+      parseBody(schema, await c.req.json(), "name");
+      return c.json({ ok: true });
+    });
+    const res = await app.request("/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(123),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    const fields = (body.errors as { field: string }[]).map((e) => e.field);
+    expect(fields).toContain("name");
+  });
+
+  it("parseBody surfaces every Zod issue in errors[]", async () => {
+    const app = createApp();
+    const schema = z.object({
+      name: z.string(),
+      email: z.email(),
+      age: z.number().int(),
+    });
+    app.post("/test", async (c) => {
+      const body = await c.req.json();
+      parseBody(schema, body);
+      return c.json({ ok: true });
+    });
+
+    const res = await app.request("/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "not-an-email", age: "oops" }),
+    });
+    expect(res.status).toBe(400);
+
+    const body = (await res.json()) as any;
+    expect(body.code).toBe("validation_failed");
+    const errors = body.errors as { field: string; code: string; message: string }[];
+    const fields = errors.map((e) => e.field);
+    expect(fields).toContain("name");
+    expect(fields).toContain("email");
+    expect(fields).toContain("age");
+    expect(errors.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("validationFailed helper composes summary and preserves entries", async () => {
+    const app = createApp();
+    app.get("/test", () => {
+      throw validationFailed([
+        { field: "a", code: "required", message: "a is required" },
+        { field: "b", code: "required", message: "b is required" },
+      ]);
+    });
+
+    const res = await app.request("/test");
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.code).toBe("validation_failed");
+    expect(body.detail).toContain("+1 more");
+    expect((body.errors as unknown[]).length).toBe(2);
   });
 
   it("errors array via ApiError constructor", async () => {

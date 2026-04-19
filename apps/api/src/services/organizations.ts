@@ -13,7 +13,7 @@ import {
   packages,
   orgInvitations,
 } from "@appstrate/db/schema";
-import { eq, inArray, count } from "drizzle-orm";
+import { eq, inArray, count, sql } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 
@@ -106,6 +106,7 @@ import { z } from "zod";
 
 export const orgSettingsSchema = z.object({
   apiVersion: z.string().optional(),
+  dashboardSsoEnabled: z.boolean().optional(),
 });
 
 export type OrgSettings = z.infer<typeof orgSettingsSchema>;
@@ -124,12 +125,14 @@ export async function updateOrgSettings(
   orgId: string,
   updates: Partial<OrgSettings>,
 ): Promise<OrgSettings> {
-  const current = await getOrgSettings(orgId);
-  const merged = { ...current, ...updates };
-
+  // Merge server-side via JSONB concatenation so concurrent admins toggling
+  // different keys don't clobber each other (read-modify-write would race).
   const [row] = await db
     .update(organizations)
-    .set({ orgSettings: merged, updatedAt: new Date() })
+    .set({
+      orgSettings: sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || ${JSON.stringify(updates)}::jsonb`,
+      updatedAt: new Date(),
+    })
     .where(eq(organizations.id, orgId))
     .returning({ orgSettings: organizations.orgSettings });
 
@@ -198,13 +201,32 @@ export async function addMember(
       role,
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("duplicate key") || message.includes("unique constraint")) {
+    // Drizzle wraps the postgres driver error in `DrizzleQueryError` whose
+    // `message` only says "Failed query: …" — the unique-violation details
+    // live on `err.cause` (with PG `code === "23505"`). Walk the cause chain
+    // so we match both the wrapped and the raw error shape.
+    if (isUniqueViolation(err)) {
       // User is already a member — idempotent, silently ignore
       return;
     }
     throw err;
   }
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  // Cap depth to defend against pathological / circular `cause` chains.
+  // Drizzle wraps once, postgres.js wraps once — 8 hops is generous.
+  let cur: unknown = err;
+  for (let depth = 0; cur != null && depth < 8; depth++) {
+    if (typeof cur === "object") {
+      const e = cur as { code?: unknown; message?: unknown };
+      if (e.code === "23505") return true;
+      const msg = typeof e.message === "string" ? e.message : "";
+      if (msg.includes("duplicate key") || msg.includes("unique constraint")) return true;
+    }
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 export async function removeMember(orgId: string, userId: string): Promise<void> {

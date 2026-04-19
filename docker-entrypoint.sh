@@ -9,12 +9,17 @@ SOCKET="${DOCKER_SOCKET:-/var/run/docker.sock}"
 
 if [ -S "$SOCKET" ] && [ "$(id -u)" = "0" ]; then
   SOCK_GID=$(stat -c '%g' "$SOCKET" 2>/dev/null)
-  if [ -n "$SOCK_GID" ] && [ "$SOCK_GID" != "0" ]; then
-    # Create a group with the socket's GID if it doesn't exist
-    if ! getent group "$SOCK_GID" >/dev/null 2>&1; then
-      addgroup -g "$SOCK_GID" -S dockersock 2>/dev/null || true
+  if [ -n "$SOCK_GID" ]; then
+    # GID 0 = root (macOS Docker Desktop / OrbStack rewrite the socket to root).
+    # Otherwise, ensure a group with the socket's GID exists.
+    if [ "$SOCK_GID" = "0" ]; then
+      SOCK_GROUP=root
+    else
+      if ! getent group "$SOCK_GID" >/dev/null 2>&1; then
+        addgroup -g "$SOCK_GID" -S dockersock 2>/dev/null || true
+      fi
+      SOCK_GROUP=$(getent group "$SOCK_GID" | cut -d: -f1)
     fi
-    SOCK_GROUP=$(getent group "$SOCK_GID" | cut -d: -f1)
     addgroup bun "$SOCK_GROUP" 2>/dev/null || true
   fi
   exec su-exec bun "$@"

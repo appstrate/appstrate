@@ -56,7 +56,13 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-muted-foreground max-w-xl text-sm">{t("settings:oauthClients.intro")}</p>
+        <p className="text-muted-foreground max-w-xl text-sm">
+          {t(
+            level === "application"
+              ? "settings:oauthClients.introApp"
+              : "settings:oauthClients.introOrg",
+          )}
+        </p>
         <Button size="sm" onClick={openCreate}>
           <Plus className="h-4 w-4" /> {t("settings:oauthClients.createBtn")}
         </Button>

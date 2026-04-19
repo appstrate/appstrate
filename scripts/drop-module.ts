@@ -181,4 +181,4 @@ if (psql.error || psql.status === null || psql.status !== 0) {
 }
 
 console.log(`\n✓ Module "${moduleId}" dropped. Backup: ${backupPath}`);
-console.log(`  Next: remove "${moduleId}" from APPSTRATE_MODULES and restart.`);
+console.log(`  Next: remove "${moduleId}" from MODULES and restart.`);

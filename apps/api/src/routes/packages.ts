@@ -15,7 +15,7 @@ import { installPackage, hasPackageAccess } from "../services/application-packag
 import { parseManifestBytesSafe } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/agent-service.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
-import { orgOrSystemFilter } from "../lib/package-helpers.ts";
+import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { getVersionForDownload, replaceVersionContent } from "../services/package-versions.ts";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -69,7 +69,18 @@ import {
   conflict,
   internalError,
   parseBody,
+  validationFailed,
+  type ValidationFieldError,
 } from "../lib/errors.ts";
+import { parsePathMessages } from "../lib/field-errors.ts";
+
+function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
+  return parsePathMessages(errors, {
+    code: "invalid_manifest",
+    title: "Invalid Manifest",
+    fieldPrefix: "manifest.",
+  });
+}
 
 // ═══════════════════════════════════════════════
 // Shared helpers for package CRUD routes
@@ -396,12 +407,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       // Validate manifest
       const manifestResult = validateManifest(manifest);
       if (!manifestResult.valid) {
-        throw new ApiError({
-          status: 400,
-          code: "invalid_manifest",
-          title: "Invalid Manifest",
-          detail: manifestResult.errors[0] ?? "Invalid manifest",
-        });
+        throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
       }
       const validatedManifest = manifestResult.manifest;
 
@@ -412,7 +418,14 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       if (rcfg.validateContent) {
         const validation = rcfg.validateContent(content);
         if (!validation.valid) {
-          throw invalidRequest(validation.errors[0] ?? "Validation failed");
+          throw validationFailed(
+            validation.errors.map((message) => ({
+              field: "content",
+              code: "invalid_content",
+              title: "Invalid Content",
+              message,
+            })),
+          );
         }
       }
 
@@ -423,7 +436,14 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       if (rcfg.validateSource && sourceCode) {
         const validation = rcfg.validateSource(sourceCode);
         if (!validation.valid) {
-          throw invalidRequest(validation.errors[0] ?? "Validation failed");
+          throw validationFailed(
+            validation.errors.map((message) => ({
+              field: "sourceCode",
+              code: "invalid_source",
+              title: "Invalid Source",
+              message,
+            })),
+          );
         }
       }
 
@@ -509,12 +529,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     if (parsed.manifest) {
       const manifestResult = validateManifest(parsed.manifest);
       if (!manifestResult.valid) {
-        throw new ApiError({
-          status: 400,
-          code: "invalid_manifest",
-          title: "Invalid Manifest",
-          detail: manifestResult.errors[0] ?? "Invalid manifest",
-        });
+        throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
       }
     }
 
@@ -522,7 +537,14 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     if (rcfg.validateContent) {
       const validation = rcfg.validateContent(parsed.content);
       if (!validation.valid) {
-        throw invalidRequest(validation.errors[0] ?? "Validation failed");
+        throw validationFailed(
+          validation.errors.map((message) => ({
+            field: "content",
+            code: "invalid_content",
+            title: "Invalid Content",
+            message,
+          })),
+        );
       }
       warnings = validation.warnings;
     }
@@ -688,12 +710,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // Validate manifest
     const manifestResult = validateManifest(manifest);
     if (!manifestResult.valid) {
-      throw new ApiError({
-        status: 400,
-        code: "invalid_manifest",
-        title: "Invalid Manifest",
-        detail: manifestResult.errors[0] ?? "Invalid manifest",
-      });
+      throw validationFailed(manifestErrorsToFieldErrors(manifestResult.errors));
     }
 
     // Ensure ID immutability (all types)
@@ -712,7 +729,14 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     if (rcfg.validateContent && content) {
       const validation = rcfg.validateContent(content);
       if (!validation.valid) {
-        throw invalidRequest(validation.errors[0] ?? "Validation failed");
+        throw validationFailed(
+          validation.errors.map((message) => ({
+            field: "content",
+            code: "invalid_content",
+            title: "Invalid Content",
+            message,
+          })),
+        );
       }
       warnings = validation.warnings;
     }
@@ -725,7 +749,14 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       if (rcfg.validateSource) {
         const validation = rcfg.validateSource(sourceCode);
         if (!validation.valid) {
-          throw invalidRequest(validation.errors[0] ?? "Validation failed");
+          throw validationFailed(
+            validation.errors.map((message) => ({
+              field: "sourceCode",
+              code: "invalid_source",
+              title: "Invalid Source",
+              message,
+            })),
+          );
         }
       }
     }
@@ -1439,11 +1470,11 @@ export function createPackagesRouter() {
     const orgId = c.get("orgId");
     const versionQuery = c.req.param("version")!;
 
-    // Verify org ownership (or system package)
+    // Verify org ownership (or system package). Ephemeral shadows are hidden.
     const [pkg] = await db
       .select({ id: packages.id })
       .from(packages)
-      .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
+      .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
       .limit(1);
     if (!pkg) {
       throw notFound("Package not found");

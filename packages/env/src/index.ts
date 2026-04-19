@@ -21,10 +21,18 @@ const envSchema = z
     // PGlite data directory (used when DATABASE_URL is absent)
     PGLITE_DATA_DIR: z.string().default("./data/pglite"),
     BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
+    // Dedicated HMAC secret for FS upload-sink tokens. Separate from
+    // BETTER_AUTH_SECRET so the two can be rotated independently and a
+    // compromise of one does not affect the other.
+    UPLOAD_SIGNING_SECRET: z.string().min(16, "UPLOAD_SIGNING_SECRET must be at least 16 chars"),
     // S3 storage (optional — falls back to filesystem when S3_BUCKET is absent)
     S3_BUCKET: z.string().optional(),
     S3_REGION: z.string().optional(),
     S3_ENDPOINT: z.string().optional(),
+    // Public-facing S3 endpoint used only for presigned URLs served to browsers.
+    // Falls back to S3_ENDPOINT when unset. Set this when S3_ENDPOINT points at
+    // an internal Docker hostname unreachable from the browser (e.g. MinIO).
+    S3_PUBLIC_ENDPOINT: z.string().optional(),
     // Filesystem storage path (used when S3_BUCKET is absent)
     FS_STORAGE_PATH: z.string().default("./data/storage"),
 
@@ -53,8 +61,26 @@ const envSchema = z
       .default("[]")
       .transform((s) => JSON.parse(s) as unknown[]),
 
-    // Modules (comma-separated specifiers, empty = OSS mode)
-    APPSTRATE_MODULES: z.string().default(""),
+    // Platform-wide run limits (applied to EVERY run — classic + inline).
+    // Empty object means defaults apply. Validated strictly inside the API
+    // layer (apps/api/src/services/run-limits.ts); defaults are designed to
+    // be non-breaking for existing deployments.
+    PLATFORM_RUN_LIMITS: z
+      .string()
+      .default("{}")
+      .transform((s) => JSON.parse(s) as Record<string, unknown>),
+
+    // Inline-run specific limits (caps on manifest size, skills/tools count,
+    // authorized URIs, retention). See docs/specs/INLINE_RUNS.md §6.
+    INLINE_RUN_LIMITS: z
+      .string()
+      .default("{}")
+      .transform((s) => JSON.parse(s) as Record<string, unknown>),
+
+    // Modules (comma-separated specifiers).
+    // Default loads built-in OSS modules (oidc, webhooks).
+    // Append external specifiers (npm package names) to extend.
+    MODULES: z.string().default("oidc,webhooks"),
 
     // App
     APP_URL: z.string().default("http://localhost:3000"),
@@ -70,7 +96,13 @@ const envSchema = z
     PORT: z.coerce.number().int().positive().default(3000),
     COOKIE_DOMAIN: z.string().optional(),
     DOCKER_SOCKET: z.string().default("/var/run/docker.sock"),
-    PLATFORM_API_URL: z.string().optional(),
+    // Empty string → undefined so downstream `??` fallbacks (and the sidecar
+    // platform-network auto-detection) kick in when the var is forwarded empty
+    // by Docker Compose / Coolify.
+    PLATFORM_API_URL: z
+      .string()
+      .optional()
+      .transform((v) => (v === "" ? undefined : v)),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
     // Run — execution backend: "docker" (isolated containers) or "process" (default, Bun subprocesses, no isolation)
@@ -111,10 +143,16 @@ const envSchema = z
     message: "S3_REGION is required when S3_BUCKET is set",
     path: ["S3_REGION"],
   })
-  .refine((env) => env.NODE_ENV !== "production" || env.APP_URL.startsWith("https://"), {
-    message: "APP_URL must use https:// when NODE_ENV=production",
-    path: ["APP_URL"],
-  });
+  .refine(
+    (env) =>
+      env.NODE_ENV !== "production" ||
+      env.APP_URL.startsWith("https://") ||
+      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(env.APP_URL),
+    {
+      message: "APP_URL must use https:// when NODE_ENV=production (http://localhost is allowed)",
+      path: ["APP_URL"],
+    },
+  );
 
 // ─── Getter ──────────────────────────────────────────────────
 

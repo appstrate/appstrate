@@ -172,17 +172,17 @@ async function findMembership(
  * pass-through, not a gate). Otherwise returns the client's level + its
  * `allowSignup` flag, plus the org-specific fields when the level is `org`.
  *
- * Semantics by level:
- *   - `instance` — `allowSignup` is honored (the auto-provisioned platform
- *     client defaults to `true`; env-declared satellites default to `false`).
- *     No org context.
- *   - `org` — `allowSignup` is honored; `orgId` + `signupRole` drive the
- *     post-signup auto-join in `oidcAfterSignupHandler`.
- *   - `application` — the Better Auth user path does not apply. End-user
- *     provisioning happens out-of-band via the headless API at token-mint
- *     time (see `enduser-mapping.ts`). The `allowSignup` field is persisted
- *     as `false` for parity but the guard explicitly short-circuits on this
- *     level so the pending-client cookie cannot block a legitimate end-user.
+ * Semantics by level (unified — matches Auth0/Keycloak/Okta):
+ *   - `instance` — `allowSignup=true` lets a brand-new BA user sign up
+ *     platform-wide. Auto-provisioned platform client defaults to `true`;
+ *     env-declared satellites default to `false`.
+ *   - `org` — `allowSignup=true` lets a brand-new BA user sign up AND be
+ *     auto-joined to `orgId` with `signupRole` by `oidcAfterSignupHandler`.
+ *   - `application` — `allowSignup=true` lets a brand-new BA user sign up
+ *     AND triggers JIT creation of the matching `end_users` row at
+ *     token-mint time (see `enduser-mapping.ts`). When `false`, the signup
+ *     guard blocks BA user creation and `resolveOrCreateEndUser` refuses to
+ *     create a fresh `end_users` row (token-mint returns `access_denied`).
  *
  * Backed by the short-TTL `getClientCached` so a single call covers both
  * the `beforeSignup` / `afterSignup` guards and `buildOrgLevelClaims` in
@@ -194,6 +194,8 @@ export interface ClientSignupPolicy {
   allowSignup: boolean;
   /** Set only when `level === "org"`. */
   orgId: string | null;
+  /** Set only when `level === "application"`. */
+  applicationId: string | null;
   signupRole: Exclude<OrgRole, "owner">;
 }
 
@@ -205,6 +207,7 @@ export async function loadClientSignupPolicy(clientId: string): Promise<ClientSi
     level: client.level,
     allowSignup: client.allowSignup,
     orgId: client.level === "org" ? (client.referencedOrgId ?? null) : null,
+    applicationId: client.level === "application" ? (client.referencedApplicationId ?? null) : null,
     signupRole: client.signupRole,
   };
 }

@@ -23,6 +23,13 @@ export interface LayoutProps {
   bodyHtml: RawHtml;
   /** Column width in pixels — 400 for login, 440 for consent. */
   maxWidth: number;
+  /**
+   * Opt into `<meta name="referrer" content="no-referrer">` to prevent the
+   * browser from leaking sensitive query-string material (e.g. magic-link
+   * tokens) in the `Referer` header when the user navigates away. Defense-
+   * in-depth for the handful of pages that render token-bearing URLs.
+   */
+  noReferrer?: boolean;
 }
 
 export function renderLayout(props: LayoutProps): RawHtml {
@@ -32,6 +39,7 @@ export function renderLayout(props: LayoutProps): RawHtml {
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        ${props.noReferrer ? html`<meta name="referrer" content="no-referrer" />` : null}
         <title>${props.title}</title>
         <style>
           body {

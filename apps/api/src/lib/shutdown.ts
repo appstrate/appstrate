@@ -11,7 +11,9 @@ import {
   stopCancelSubscriber,
 } from "../services/run-tracker.ts";
 import { shutdownScheduleWorker } from "../services/scheduler.ts";
+import { shutdownInlineCompactionWorker } from "../services/inline-compaction.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
+import { stopUploadGc } from "../services/uploads.ts";
 
 const SHUTDOWN_TIMEOUT_MS = 30_000;
 
@@ -24,6 +26,7 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     setShuttingDown();
 
     logger.info("Shutdown initiated, stopping sidecar pool...");
+    stopUploadGc();
     await getOrchestrator().shutdown();
 
     // Unsubscribe from cancel channel before draining to avoid processing
@@ -46,6 +49,9 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
 
     logger.info("Shutting down schedule worker...");
     await shutdownScheduleWorker();
+
+    logger.info("Shutting down inline compaction worker...");
+    await shutdownInlineCompactionWorker();
 
     logger.info("Shutting down modules...");
     await shutdownModules();

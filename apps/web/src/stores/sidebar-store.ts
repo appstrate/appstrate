@@ -7,6 +7,7 @@ const STORAGE_KEY = "appstrate-sidebar";
 interface SidebarState {
   open: boolean;
   setOpen: (open: boolean) => void;
+  setOpenTransient: (open: boolean) => void;
   toggle: () => void;
 }
 
@@ -19,6 +20,7 @@ export const useSidebarStore = create<SidebarState>()((set, get) => ({
     localStorage.setItem(STORAGE_KEY, String(open));
     set({ open });
   },
+  setOpenTransient: (open) => set({ open }),
   toggle: () => {
     const next = !get().open;
     localStorage.setItem(STORAGE_KEY, String(next));

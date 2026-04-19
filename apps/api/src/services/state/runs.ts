@@ -1,8 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, ne, desc, isNotNull, inArray, count, max, type SQL, sql } from "drizzle-orm";
+import {
+  eq,
+  and,
+  ne,
+  desc,
+  isNotNull,
+  inArray,
+  count,
+  gte,
+  lte,
+  max,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, runLogs, profiles, endUsers, apiKeys, schedules } from "@appstrate/db/schema";
+import {
+  runs,
+  runLogs,
+  packages,
+  profiles,
+  endUsers,
+  apiKeys,
+  schedules,
+} from "@appstrate/db/schema";
 import type { RunProviderSnapshot } from "@appstrate/shared-types";
 import { logger } from "../../lib/logger.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
@@ -59,6 +80,12 @@ interface CreateRunParams {
   providerProfileIds?: Record<string, string>;
   providerStatuses?: RunProviderSnapshot[];
   apiKeyId?: string;
+  /** Snapshot of the agent's @scope (e.g. "@acme") at run creation. */
+  agentScope?: string | null;
+  /** Snapshot of the agent's display name (manifest.displayName ?? name). */
+  agentName?: string | null;
+  /** Snapshot of the effective agent config (merged overrides) at run creation. */
+  config?: Record<string, unknown> | null;
 }
 
 export async function createRun(params: CreateRunParams): Promise<void> {
@@ -85,6 +112,9 @@ export async function createRun(params: CreateRunParams): Promise<void> {
     providerStatuses: params.providerStatuses,
     apiKeyId: params.apiKeyId,
     runNumber,
+    agentScope: params.agentScope ?? null,
+    agentName: params.agentName ?? null,
+    config: params.config ?? null,
   });
 }
 
@@ -101,6 +131,7 @@ export async function createFailedRun(
   error: string,
   scheduleId?: string,
   connectionProfileId?: string,
+  agentDenorm?: { scope?: string | null; name?: string | null },
 ): Promise<void> {
   const runNumber = await nextRunNumber(packageId, orgId, applicationId);
   const now = new Date();
@@ -121,6 +152,8 @@ export async function createFailedRun(
     connectionProfileId,
     scheduleId,
     runNumber,
+    agentScope: agentDenorm?.scope ?? null,
+    agentName: agentDenorm?.name ?? null,
   });
 }
 
@@ -427,12 +460,14 @@ export async function listRunsWithFilter(
       endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
       apiKeyName: apiKeys.name,
       scheduleName: schedules.name,
+      packageEphemeral: packages.ephemeral,
     })
     .from(runs)
     .leftJoin(profiles, eq(runs.dashboardUserId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
     .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
     .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
+    .leftJoin(packages, eq(packages.id, runs.packageId))
     .where(filter)
     .orderBy(desc(runs.startedAt))
     .limit(limit)
@@ -445,6 +480,7 @@ export async function listRunsWithFilter(
       endUserName: r.endUserName ?? null,
       apiKeyName: r.apiKeyName ?? null,
       scheduleName: r.scheduleName ?? null,
+      packageEphemeral: r.packageEphemeral ?? false,
     })) as unknown as Record<string, unknown>[],
     total: countRow?.count ?? 0,
   };
@@ -470,6 +506,107 @@ export async function listPackageRuns(
     conditions.push(eq(runs.endUserId, endUserId));
   }
   return listRunsWithFilter(and(...conditions)!, limit, offset);
+}
+
+/**
+ * List runs across all packages in an org+application, paginated, with
+ * optional kind / status / date / end-user filters. Powers the global
+ * `GET /api/runs` view. Joins `packages.ephemeral` so the response carries
+ * the inline flag — UI uses it for the "Inline" badge.
+ */
+export type GlobalRunKind = "all" | "package" | "inline";
+
+type RunStatus = "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
+const KNOWN_RUN_STATUSES: readonly RunStatus[] = [
+  "pending",
+  "running",
+  "success",
+  "failed",
+  "timeout",
+  "cancelled",
+];
+function isRunStatus(value: string): value is RunStatus {
+  return (KNOWN_RUN_STATUSES as readonly string[]).includes(value);
+}
+
+export interface ListGlobalRunsOptions {
+  applicationId: string;
+  limit?: number;
+  offset?: number;
+  kind?: GlobalRunKind;
+  status?: string;
+  startDate?: Date;
+  endDate?: Date;
+  endUserId?: string | null;
+}
+
+export async function listGlobalRuns(
+  orgId: string,
+  options: ListGlobalRunsOptions,
+): Promise<{
+  runs: Record<string, unknown>[];
+  total: number;
+}> {
+  const {
+    applicationId,
+    limit = 50,
+    offset = 0,
+    kind,
+    status,
+    startDate,
+    endDate,
+    endUserId,
+  } = options;
+
+  const conditions = [eq(runs.orgId, orgId), eq(runs.applicationId, applicationId)];
+  if (status && isRunStatus(status)) conditions.push(eq(runs.status, status));
+  if (startDate) conditions.push(gte(runs.startedAt, startDate));
+  if (endDate) conditions.push(lte(runs.startedAt, endDate));
+  if (endUserId) conditions.push(eq(runs.endUserId, endUserId));
+
+  // Kind filter via JOINed `packages.ephemeral`.
+  if (kind === "inline") conditions.push(eq(packages.ephemeral, true));
+  else if (kind === "package") conditions.push(eq(packages.ephemeral, false));
+
+  const filter = and(...conditions)!;
+
+  const [countRow] = await db
+    .select({ count: count() })
+    .from(runs)
+    .leftJoin(packages, eq(packages.id, runs.packageId))
+    .where(filter);
+
+  const rows = await db
+    .select({
+      run: runs,
+      dashboardUserName: profiles.displayName,
+      endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
+      apiKeyName: apiKeys.name,
+      scheduleName: schedules.name,
+      packageEphemeral: packages.ephemeral,
+    })
+    .from(runs)
+    .leftJoin(packages, eq(packages.id, runs.packageId))
+    .leftJoin(profiles, eq(runs.dashboardUserId, profiles.id))
+    .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
+    .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
+    .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
+    .where(filter)
+    .orderBy(desc(runs.startedAt))
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    runs: rows.map((r) => ({
+      ...r.run,
+      dashboardUserName: r.dashboardUserName ?? null,
+      endUserName: r.endUserName ?? null,
+      apiKeyName: r.apiKeyName ?? null,
+      scheduleName: r.scheduleName ?? null,
+      packageEphemeral: r.packageEphemeral ?? false,
+    })) as unknown as Record<string, unknown>[],
+    total: countRow?.count ?? 0,
+  };
 }
 
 export async function listScheduleRuns(
@@ -503,22 +640,39 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
       endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
       apiKeyName: apiKeys.name,
       scheduleName: schedules.name,
+      packageEphemeral: packages.ephemeral,
+      packageManifest: packages.draftManifest,
+      packagePrompt: packages.draftContent,
     })
     .from(runs)
     .leftJoin(profiles, eq(runs.dashboardUserId, profiles.id))
     .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
     .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
     .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
+    .leftJoin(packages, eq(packages.id, runs.packageId))
     .where(and(...conditions))
     .limit(1);
 
   if (!row) return null;
+
+  // For inline runs, expose manifest + prompt directly (shadow package is
+  // filtered from catalog endpoints so the UI can't fetch them separately).
+  // After compaction, draftManifest is `{}` and draftContent is `""` — we
+  // normalize both to null so the frontend can show "Details expired".
+  const isInline = row.packageEphemeral === true;
+  const manifest = row.packageManifest as Record<string, unknown> | null;
+  const inlineManifest = isInline && manifest && Object.keys(manifest).length > 0 ? manifest : null;
+  const inlinePrompt = isInline && row.packagePrompt ? row.packagePrompt : null;
+
   return {
     ...row.run,
     dashboardUserName: row.dashboardUserName ?? null,
     endUserName: row.endUserName ?? null,
     apiKeyName: row.apiKeyName ?? null,
     scheduleName: row.scheduleName ?? null,
+    packageEphemeral: row.packageEphemeral ?? false,
+    inlineManifest,
+    inlinePrompt,
   };
 }
 

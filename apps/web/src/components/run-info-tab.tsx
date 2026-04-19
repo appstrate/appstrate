@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Coins } from "lucide-react";
+import { Coins, FileCode2 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { JsonView } from "./json-view";
 import { SectionCard } from "./section-card";
@@ -29,6 +29,7 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
   const { data: providersData } = useProviders();
   const providerStatuses = run.providerStatuses as RunProviderSnapshot[] | null;
   const input = run.input as Record<string, unknown> | null;
+  const config = run.config as Record<string, unknown> | null;
   const usage = run.tokenUsage as {
     input_tokens?: number;
     output_tokens?: number;
@@ -41,18 +42,21 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
 
   return (
     <div className="space-y-4">
-      {/* Version + Trigger */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <InfoCard
-          label="Version"
-          value={
-            <span className={cn("font-mono", !run.versionLabel && "italic")}>
-              {run.versionLabel
-                ? `v${run.versionLabel}${run.versionDirty ? ` ${t("exec.versionDirty")}` : ""}`
-                : t("exec.draft")}
-            </span>
-          }
-        />
+      {/* Version + Trigger — inline runs are not versioned, so the grid
+          collapses to a single column when the Version card is hidden. */}
+      <div className={cn("grid gap-4", !run.packageEphemeral && "sm:grid-cols-2")}>
+        {!run.packageEphemeral && (
+          <InfoCard
+            label="Version"
+            value={
+              <span className={cn("font-mono", !run.versionLabel && "italic")}>
+                {run.versionLabel
+                  ? `v${run.versionLabel}${run.versionDirty ? ` ${t("exec.versionDirty")}` : ""}`
+                  : t("exec.draft")}
+              </span>
+            }
+          />
+        )}
         <InfoCard label={t("exec.infoTrigger")} value={<RunTrigger run={run} />} />
       </div>
 
@@ -87,9 +91,16 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
         </SectionCard>
       )}
 
-      {/* Configuration */}
+      {/* Config */}
+      {config && Object.keys(config).length > 0 && (
+        <SectionCard title={t("exec.infoConfig")}>
+          <JsonView data={config} />
+        </SectionCard>
+      )}
+
+      {/* Execution — model / proxy / provider bindings actually used at run time */}
       {hasConfig && (
-        <SectionCard title={t("exec.infoConfiguration")}>
+        <SectionCard title={t("exec.infoExecution")}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {run.modelLabel != null && (
               <InfoCard label={t("exec.usageModel")} value={run.modelLabel} />
@@ -143,6 +154,27 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
         <SectionCard title="Metadata">
           <JsonView data={metadata} />
         </SectionCard>
+      )}
+
+      {/* Inline run — prompt + manifest snapshot (null after compaction) */}
+      {run.packageEphemeral && (
+        <>
+          {run.inlinePrompt ? (
+            <SectionCard title={t("exec.tabPrompt")}>
+              <pre className="bg-muted/30 overflow-x-auto rounded-md p-4 font-mono text-xs whitespace-pre-wrap">
+                {run.inlinePrompt}
+              </pre>
+            </SectionCard>
+          ) : null}
+          {run.inlineManifest ? (
+            <SectionCard title={t("exec.tabManifest")}>
+              <JsonView data={run.inlineManifest} />
+            </SectionCard>
+          ) : null}
+          {!run.inlinePrompt && !run.inlineManifest && (
+            <EmptyState message={t("runs.detailsExpired")} icon={FileCode2} compact />
+          )}
+        </>
       )}
     </div>
   );

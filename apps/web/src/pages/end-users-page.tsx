@@ -101,7 +101,7 @@ export function EndUsersPage() {
   if (error) return <ErrorState message={error.message} />;
 
   return (
-    <>
+    <div className="p-6">
       <PageHeader
         title={t("endUsers.pageTitle")}
         emoji="👥"
@@ -224,6 +224,6 @@ export function EndUsersPage() {
         onClose={() => setSelectedUser(null)}
         endUser={selectedUser}
       />
-    </>
+    </div>
   );
 }

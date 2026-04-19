@@ -1,18 +1,16 @@
--- OIDC module: org-level auto-provisioning policy.
+-- OIDC module: unified signup opt-in policy (all client levels).
 --
--- Adds two columns on `oauth_clients` so admins can opt-in to auto-join for
--- org-level clients and pick the role assigned on first sign-in.
---
--- Defaults (`allow_signup=false`, `signup_role='member'`) preserve the
--- pre-migration behavior: non-members continue to be rejected. Admins opt in
--- from the OAuth client admin UI.
+-- Adds two columns on `oauth_clients`:
+--   - `allow_signup` — honored on every level (instance / org / application).
+--     Unified semantic matches Auth0 "Disable Sign-Ups" / Keycloak "User
+--     Registration" / Okta JIT toggle. Secure-by-default (`false`): unknown
+--     users / end-users are rejected until explicitly opted in.
+--   - `signup_role` — role assigned on auto-join (org-level only; ignored on
+--     instance/application).
 --
 -- `owner` is excluded from `signup_role` on purpose: self-promotion to owner
 -- through a misconfigured client is an unacceptable risk. The role allowlist
 -- is mirrored in Zod (`createOrgClientSchema`) and the admin UI.
---
--- Application/instance clients ignore these columns — end-user provisioning
--- for application-level flows is handled by `resolveOrCreateEndUser`.
 
 ALTER TABLE "oauth_clients"
   ADD COLUMN "allow_signup" boolean NOT NULL DEFAULT false,

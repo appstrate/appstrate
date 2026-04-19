@@ -1,5 +1,5 @@
 # ── Stage 1: Install dependencies ──────────────────────────────────
-FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.9-alpine AS deps
+FROM oven/bun:1.3.11-alpine AS deps
 
 LABEL org.opencontainers.image.source="https://github.com/appstrate/appstrate"
 LABEL org.opencontainers.image.description="Appstrate — Open-source platform for running autonomous AI agents in sandboxed Docker containers"
@@ -10,6 +10,7 @@ WORKDIR /app
 # Copy workspace structure for dependency resolution
 COPY package.json bun.lock turbo.json ./
 COPY apps/api/package.json apps/api/
+COPY apps/cli/package.json apps/cli/
 COPY apps/web/package.json apps/web/
 COPY packages/core/package.json packages/core/
 COPY packages/shared-types/package.json packages/shared-types/
@@ -17,6 +18,7 @@ COPY packages/connect/package.json packages/connect/
 COPY packages/db/package.json packages/db/
 COPY packages/emails/package.json packages/emails/
 COPY packages/env/package.json packages/env/
+COPY packages/ui/package.json packages/ui/
 COPY runtime-pi/package.json runtime-pi/
 COPY runtime-pi/sidecar/package.json runtime-pi/sidecar/
 COPY e2e/package.json e2e/
@@ -25,7 +27,7 @@ COPY patches/ patches/
 RUN bun install --frozen-lockfile
 
 # ── Stage 2: Build ────────────────────────────────────────────────
-FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.9-alpine AS build
+FROM oven/bun:1.3.11-alpine AS build
 
 WORKDIR /app
 
@@ -38,13 +40,19 @@ COPY --from=deps /app/packages/connect/node_modules ./packages/connect/node_modu
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps /app/packages/env/node_modules ./packages/env/node_modules
 COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
+COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 
 COPY . .
+
+# Re-link workspace packages after COPY overwrites symlinks. Without this,
+# Rolldown (Vite 8) can't resolve transitive deps like i18next via the broken
+# apps/web/node_modules/i18next → /app/node_modules/.bun/i18next@X symlink.
+RUN bun install --frozen-lockfile
 
 RUN bun run build
 
 # ── Stage 3: Production image ─────────────────────────────────────
-FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.9-alpine
+FROM oven/bun:1.3.11-alpine
 
 WORKDIR /app
 

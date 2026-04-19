@@ -5,11 +5,11 @@
     "": {
       "name": "appstrate-sidecar",
       "dependencies": {
-        "hono": "^4.0.0",
+        "hono": "^4.12.14",
       },
     },
   },
   "packages": {
-    "hono": ["hono@4.12.0", "", {}, "sha512-NekXntS5M94pUfiVZ8oXXK/kkri+5WpX2/Ik+LVsl+uvw+soj4roXIsPqO+XsWrAw20mOzaXOZf3Q7PfB9A/IA=="],
+    "hono": ["hono@4.12.14", "", {}, "sha512-am5zfg3yu6sqn5yjKBNqhnTX7Cv+m00ox+7jbaKkrLMRJ4rAdldd1xPd/JzbBWspqaQv6RSTrgFN95EsfhC+7w=="],
   }
 }

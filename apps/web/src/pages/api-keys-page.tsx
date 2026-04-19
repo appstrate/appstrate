@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { useApiKeys, useAvailableScopes, useRevokeApiKey } from "../hooks/use-api-keys";
-import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
@@ -48,28 +47,18 @@ export function ApiKeysPage() {
   };
 
   return (
-    <>
-      <PageHeader
-        title={t("settings:apiKeys.pageTitle")}
-        emoji="🔑"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("settings:apiKeys.pageTitle") },
-        ]}
-        actions={
-          <>
-            <a
-              href="/api/docs"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary text-sm no-underline hover:underline"
-            >
-              {t("settings:apiKeys.swaggerLink")}
-            </a>
-            <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
-          </>
-        }
-      />
+    <div>
+      <div className="mb-4 flex items-center justify-end gap-4">
+        <a
+          href="/api/docs"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary text-sm no-underline hover:underline"
+        >
+          {t("settings:apiKeys.swaggerLink")}
+        </a>
+        <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
+      </div>
 
       {apiKeys && apiKeys.length > 0 ? (
         <div className="flex flex-col gap-3">
@@ -164,6 +153,6 @@ export function ApiKeysPage() {
           });
         }}
       />
-    </>
+    </div>
   );
 }

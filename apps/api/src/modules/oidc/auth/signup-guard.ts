@@ -26,9 +26,12 @@
  *   - `instance` → `allowSignup` gates the guard; auto-provisioned platform
  *                  client is `true`, env-declared satellites are `false`.
  *                  No post-signup action.
- *   - `application` → pass-through. End-users are created via the headless
- *                     API, not through Better Auth; the pending-client
- *                     cookie should never block a legitimate flow.
+ *   - `application` → `allowSignup` gates the guard (unified semantic per
+ *                     `a2aae3af`). When `false`, end-users must be
+ *                     pre-provisioned via the headless API; the BA-user
+ *                     creation that backs the OIDC end-user mapping is
+ *                     blocked here. `enduser-mapping.ts` surfaces the
+ *                     same gate as `AppSignupClosedError` for direct calls.
  *
  * Safe fallthrough: the guard is a no-op when no cookie is present, its
  * signature is invalid/expired, or the client is unknown / disabled.
@@ -73,9 +76,9 @@ export async function oidcBeforeSignupGuard(input: BeforeSignupGuardInput): Prom
   const policy = await loadClientSignupPolicy(pendingClientId);
   // Pass-through cases:
   //   - no policy (unknown/disabled client) → let core handle default signup
-  //   - application-level → end-users don't go through BA; unrelated signup
-  //   - open policy → afterSignup may auto-join for org-level
-  if (!policy || policy.level === "application" || policy.allowSignup) return;
+  //   - open policy → afterSignup may auto-join for org-level, and the
+  //     enduser-mapping layer handles JIT provisioning for application-level
+  if (!policy || policy.allowSignup) return;
 
   // Closed policy: block the BA user creation outright. The browser ends
   // up on `errorCallbackURL` (/api/oauth/login?...) for social flows, or

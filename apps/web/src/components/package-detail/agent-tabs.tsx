@@ -314,7 +314,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
               <span className="text-muted-foreground shrink-0 text-xs">{t("api.keyMasked")}</span>
             )}
           </div>
-          <Link to="/org-settings#api-keys" className="text-primary text-xs hover:underline">
+          <Link to="/org-settings/app/api-keys" className="text-primary text-xs hover:underline">
             {t("api.manageKeys")}
           </Link>
         </div>

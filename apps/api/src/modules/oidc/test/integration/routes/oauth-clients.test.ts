@@ -15,6 +15,7 @@ import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
   createTestContext,
   authHeaders,
+  enableDashboardSso,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import oidcModule from "../../../index.ts";
@@ -48,6 +49,11 @@ describe("OAuth clients admin routes (polymorphic)", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "oauthroutes" });
+    // These tests predate the per-org dashboardSsoEnabled gate and cover
+    // admin CRUD mechanics for both levels. Enable the flag so org-level
+    // creation / patch / rotate aren't blocked — gate behavior itself is
+    // covered in oauth-dashboard-sso-gate.test.ts.
+    await enableDashboardSso(ctx.orgId);
   });
 
   it("POST creates an end_user client and returns the plaintext secret once", async () => {
@@ -124,11 +130,11 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("POST rejects signup policy fields on application-level clients (400)", async () => {
+  it("POST rejects signupRole on application-level clients (400)", async () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx, { allowSignup: true })),
+      body: JSON.stringify(applicationLevelBody(ctx, { signupRole: "admin" })),
     });
     expect(res.status).toBe(400);
   });
@@ -151,7 +157,50 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(updated.signupRole).toBe("viewer");
   });
 
-  it("PATCH rejects signup policy fields on application-level clients (400)", async () => {
+  it("POST defaults allowSignup=false on application-level create (secure-by-default)", async () => {
+    const res = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(applicationLevelBody(ctx)),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { allowSignup: boolean };
+    expect(body.allowSignup).toBe(false);
+  });
+
+  it("POST accepts allowSignup=true on application-level create", async () => {
+    const res = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(applicationLevelBody(ctx, { allowSignup: true })),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { allowSignup: boolean };
+    expect(body.allowSignup).toBe(true);
+  });
+
+  it("PATCH flips allowSignup on an application-level client", async () => {
+    const createRes = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(applicationLevelBody(ctx)),
+    });
+    const created = (await createRes.json()) as {
+      clientId: string;
+      allowSignup: boolean;
+    };
+    expect(created.allowSignup).toBe(false);
+    const patchRes = await app.request(`/api/oauth/clients/${created.clientId}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ allowSignup: true }),
+    });
+    expect(patchRes.status).toBe(200);
+    const updated = (await patchRes.json()) as { allowSignup: boolean };
+    expect(updated.allowSignup).toBe(true);
+  });
+
+  it("PATCH rejects signupRole on an application-level client (400)", async () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -161,7 +210,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const patchRes = await app.request(`/api/oauth/clients/${created.clientId}`, {
       method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ allowSignup: true }),
+      body: JSON.stringify({ signupRole: "admin" }),
     });
     expect(patchRes.status).toBe(400);
   });

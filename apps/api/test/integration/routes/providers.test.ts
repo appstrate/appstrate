@@ -126,10 +126,10 @@ describe("Providers API", () => {
           authMode: "api_key",
           credentialSchema: {
             type: "object",
-            properties: { apiKey: { type: "string" } },
-            required: ["apiKey"],
+            properties: { api_key: { type: "string" } },
+            required: ["api_key"],
           },
-          credentialFieldName: "apiKey",
+          credentialFieldName: "api_key",
           credentialHeaderName: "X-API-Key",
         }),
       });
@@ -137,6 +137,42 @@ describe("Providers API", () => {
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
       expect(body.id).toBe(`@${ctx.org.slug}/new-api-provider`);
+    });
+
+    it("rejects credential schemas with non-canonical keys (hyphen)", async () => {
+      const res = await app.request("/api/providers", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          id: `@${ctx.org.slug}/hyphen-provider`,
+          displayName: "Hyphen",
+          authMode: "api_key",
+          credentialSchema: {
+            type: "object",
+            properties: { "api-key": { type: "string" } },
+          },
+          credentialFieldName: "api-key",
+        }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects credentialFieldName not declared in credentialSchema", async () => {
+      const res = await app.request("/api/providers", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          id: `@${ctx.org.slug}/mismatch-provider`,
+          displayName: "Mismatch",
+          authMode: "api_key",
+          credentialSchema: {
+            type: "object",
+            properties: { api_key: { type: "string" } },
+          },
+          credentialFieldName: "token",
+        }),
+      });
+      expect(res.status).toBe(400);
     });
 
     it("returns 400 for invalid body (missing displayName)", async () => {
@@ -278,6 +314,60 @@ describe("Providers API", () => {
       });
 
       expect(res.status).toBe(404);
+    });
+
+    it("rejects credential schemas with non-canonical keys (hyphen)", async () => {
+      await app.request("/api/providers", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          id: `@${ctx.org.slug}/put-hyphen`,
+          displayName: "Put Hyphen",
+          authMode: "api_key",
+        }),
+      });
+
+      const res = await app.request(`/api/providers/@${ctx.org.slug}/put-hyphen`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          displayName: "Put Hyphen",
+          authMode: "api_key",
+          credentialSchema: {
+            type: "object",
+            properties: { "api-key": { type: "string" } },
+          },
+          credentialFieldName: "api-key",
+        }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects credentialFieldName not declared in credentialSchema", async () => {
+      await app.request("/api/providers", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          id: `@${ctx.org.slug}/put-mismatch`,
+          displayName: "Put Mismatch",
+          authMode: "api_key",
+        }),
+      });
+
+      const res = await app.request(`/api/providers/@${ctx.org.slug}/put-mismatch`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          displayName: "Put Mismatch",
+          authMode: "api_key",
+          credentialSchema: {
+            type: "object",
+            properties: { api_key: { type: "string" } },
+          },
+          credentialFieldName: "token",
+        }),
+      });
+      expect(res.status).toBe(400);
     });
   });
 

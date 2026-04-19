@@ -5,6 +5,29 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.1] — 2026-04-18
+
+### Changed
+
+- `validateManifest(raw)` — when the input has no `type` field, validation
+  now falls through to the base `manifestSchema` and returns every
+  missing/invalid field Zod reports, instead of short-circuiting on a
+  single `"type: Required field is missing"` string. Consumers that
+  aggregate `result.errors` (e.g. joining with `"; "`) are unaffected.
+  Consumers that asserted on the exact single-string output must update
+  their expectations.
+
+## [2.10.8] — 2026-04-15
+
+### Added
+
+- `form` export — AFPS `SchemaWrapper` to RJSF mapper (`mapAfpsToRjsf`), file-field detection helpers (`isFileField`, `isMultipleFileField`), `asJSONSchemaObject` cast helper. Used by the new `@appstrate/ui/schema-form` package.
+- `storage-s3`: support `S3_PUBLIC_ENDPOINT` for presigned URLs served behind a public domain distinct from the internal S3 endpoint.
+
+### Changed
+
+- Internal cleanup of `validation.ts` / `storage.ts` test surface.
+
 ## [2.10.7] — 2026-04-11
 
 ### Changed

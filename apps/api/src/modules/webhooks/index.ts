@@ -80,6 +80,10 @@ const webhooksModule: AppstrateModule = {
         {
           ...params.extra,
           ...(params.duration != null ? { duration: params.duration } : {}),
+          // Surface the inline flag so downstream consumers can branch
+          // without an extra DB round-trip. Absent in classic runs —
+          // receivers treat missing as `false`.
+          ...(params.packageEphemeral ? { package: { ephemeral: true } } : {}),
         },
       );
     },

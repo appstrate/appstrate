@@ -35,16 +35,32 @@ import { logger } from "../../lib/logger.ts";
 import { oidcAuthStrategy } from "./auth/strategy.ts";
 import { oidcBetterAuthPlugins } from "./auth/plugins.ts";
 import { oidcBeforeSignupGuard, oidcAfterSignupHandler } from "./auth/signup-guard.ts";
-import { createOidcRouter, createOAuthClientSchema, updateOAuthClientSchema } from "./routes.ts";
+import {
+  createOidcRouter,
+  createOAuthClientSchema,
+  updateOAuthClientSchema,
+  smtpConfigUpsertSchema,
+  socialProviderUpsertSchema,
+} from "./routes.ts";
 import { oidcPaths } from "./openapi/paths.ts";
 import { oidcSchemas } from "./openapi/schemas.ts";
-import { jwks, oauthClient, oauthAccessToken, oauthRefreshToken, oauthConsent } from "./schema.ts";
+import {
+  deviceCode,
+  jwks,
+  oauthClient,
+  oauthAccessToken,
+  oauthRefreshToken,
+  oauthConsent,
+} from "./schema.ts";
 import {
   ensureInstanceClient,
   getInstanceClientId,
   listFirstPartyClientIds,
 } from "./services/oauth-admin.ts";
+import { ensureCliClient } from "./services/ensure-cli-client.ts";
 import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
+import { oidcRealmResolver } from "./services/oidc-realm-resolver.ts";
+import { setRealmResolver } from "@appstrate/db/auth";
 
 // Snapshot of first-party clientIds captured at `init()` time and forwarded
 // to `oauthProvider({ cachedTrustedClients })` when `betterAuthPlugins()` is
@@ -59,11 +75,24 @@ const oidcModule: AppstrateModule = {
     await ctx.applyMigrations("oidc", resolve(import.meta.dir, "drizzle/migrations"), {
       requireCoreTables: ["end_users", "user", "session", "organizations", "applications"],
     });
+    // Install the realm resolver so the BA user-create hook tags new
+    // end-user rows with `realm="end_user:<applicationId>"`. Platform-side
+    // signups (dashboard, org invitation, instance/org-level OIDC clients)
+    // keep the default "platform" realm. See the resolver file header and
+    // `packages/db/src/auth.ts::setRealmResolver` for the full contract.
+    setRealmResolver(oidcRealmResolver);
     // Auto-provision the instance-level first-party OIDC client for the
     // platform dashboard SPA. Idempotent — skips if one already exists.
     const env = getEnv();
     const clientId = await ensureInstanceClient(env.APP_URL);
     logger.info("OIDC platform client ready", { module: "oidc", clientId });
+    // Auto-provision the instance-level OAuth client for the official
+    // `appstrate` CLI (device-flow login). Deterministic clientId
+    // (`appstrate-cli`) so the distributed binary is zero-config per
+    // install. Idempotent. Runs before env-declared satellites for the
+    // same `created_at`-ordering rationale as the platform client.
+    const cliClientId = await ensureCliClient();
+    logger.info("OIDC CLI client ready", { module: "oidc", clientId: cliClientId });
     // Reconcile env-declared satellite instance clients (admin dashboards,
     // second-party web apps). Runs AFTER `ensureInstanceClient` so the
     // platform client always has the earliest `created_at` — see
@@ -97,9 +126,17 @@ const oidcModule: AppstrateModule = {
     "/api/oauth/consent",
     "/api/oauth/logout",
     "/api/oauth/magic-link",
+    "/api/oauth/magic-link/confirm",
     "/api/oauth/forgot-password",
     "/api/oauth/reset-password",
     "/api/oauth/assets/social-sign-in.js",
+    // Device-flow verification pages. `GET /activate` must be publicly
+    // reachable so an unauthenticated user lands on the entry form and
+    // gets redirected to `/auth/login?returnTo=...` with the user_code
+    // preserved. `POST /activate*` are CSRF-gated internally.
+    "/activate",
+    "/activate/approve",
+    "/activate/deny",
     "/.well-known/openid-configuration",
     "/.well-known/oauth-authorization-server",
   ],
@@ -113,15 +150,17 @@ const oidcModule: AppstrateModule = {
   },
 
   drizzleSchemas() {
-    // Names must match the camelCase model ids Better Auth's oauth-provider
-    // and jwt plugins use internally (see `@better-auth/oauth-provider`
-    // `schema` + `better-auth/plugins/jwt/schema`).
+    // Names must match the camelCase model ids Better Auth's oauth-provider,
+    // jwt, and device-authorization plugins use internally (see
+    // `@better-auth/oauth-provider` `schema`, `better-auth/plugins/jwt/schema`,
+    // and `better-auth/plugins/device-authorization/schema`).
     return {
       jwks,
       oauthClient,
       oauthAccessToken,
       oauthRefreshToken,
       oauthConsent,
+      deviceCode,
     };
   },
 
@@ -134,7 +173,18 @@ const oidcModule: AppstrateModule = {
   },
 
   openApiTags() {
-    return [{ name: "OAuth Clients", description: "OAuth 2.1 client registry for end-user auth" }];
+    return [
+      { name: "OAuth Clients", description: "OAuth 2.1 client registry for end-user auth" },
+      {
+        name: "Application Auth Config",
+        description:
+          "Per-application SMTP + social OAuth App configuration for `level: application` OIDC clients",
+      },
+      {
+        name: "Device Authorization",
+        description: "RFC 8628 device-authorization grant for CLI and other browserless clients",
+      },
+    ];
   },
 
   openApiSchemas() {
@@ -150,6 +200,18 @@ const oidcModule: AppstrateModule = {
         path: "/api/oauth/clients/{clientId}",
         jsonSchema: z.toJSONSchema(updateOAuthClientSchema) as Record<string, unknown>,
         description: "Update OAuth client",
+      },
+      {
+        method: "PUT",
+        path: "/api/applications/{id}/smtp-config",
+        jsonSchema: z.toJSONSchema(smtpConfigUpsertSchema) as Record<string, unknown>,
+        description: "Upsert per-application SMTP configuration",
+      },
+      {
+        method: "PUT",
+        path: "/api/applications/{id}/social-providers/{provider}",
+        jsonSchema: z.toJSONSchema(socialProviderUpsertSchema) as Record<string, unknown>,
+        description: "Upsert per-application social auth provider",
       },
     ];
   },

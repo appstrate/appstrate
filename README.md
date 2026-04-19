@@ -4,6 +4,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![Docker Image](https://img.shields.io/badge/Docker-ghcr.io%2Fappstrate%2Fappstrate-blue)](https://github.com/appstrate/appstrate/pkgs/container/appstrate)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
+[![Discord](https://img.shields.io/discord/1492939551495426169?logo=discord&logoColor=white&label=community&color=5865F2)](https://discord.gg/5Js2CKWNnh)
 
 An open-source platform for running autonomous AI agents in sandboxed Docker containers. Each agent receives its full context (prompt, config, input, credentials) and runs to completion without human interaction — then returns structured results. Connect OAuth/API key services, click "Run" or schedule via cron, and let the AI handle the rest.
 
@@ -51,7 +52,19 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 - **Connection profiles** — Share connection sets across agents
 - **Proxy system** — Org-level and agent-level outbound HTTP proxy support
 
-## Quick Start
+## Self-Hosting
+
+Deploy Appstrate with a single command. The installer downloads the `appstrate` CLI and prompts for a [tier](#progressive-infrastructure) — from a zero-dependency Bun-only install (Tier 0) to a full PostgreSQL + Redis + MinIO production stack (Tier 3).
+
+```sh
+curl -fsSL https://get.appstrate.dev | bash
+```
+
+Once a tier is chosen, the CLI generates cryptographic secrets, writes `.env` + `docker-compose.yml` (Tiers 1/2/3) or clones the source + spawns `bun run dev` (Tier 0), waits for the healthcheck, and opens [http://localhost:3000](http://localhost:3000). Non-interactive: `curl ... | bash -s -- --tier 3 --dir ~/appstrate`.
+
+See [`apps/cli/README.md`](./apps/cli/README.md) for the full CLI reference, and [`examples/self-hosting/`](./examples/self-hosting/) for manual Docker Compose setup.
+
+## Quick Start (Development)
 
 Prerequisites: [Bun](https://bun.sh/) (v1.3+). Docker is optional.
 
@@ -65,7 +78,7 @@ bun run dev       # → http://localhost:3000
 
 No Docker, no PostgreSQL, no Redis — just Bun. Appstrate uses **progressive infrastructure**: it starts with an embedded database (PGlite) and local storage, then scales up to PostgreSQL, Redis, and S3 as you need them.
 
-First signup creates an organization automatically. See [Contributing](./CONTRIBUTING.md) for the full development guide.
+After signup, the onboarding flow guides you to create your first organization. See [Contributing](./CONTRIBUTING.md) for the full development guide.
 
 ### Progressive Infrastructure
 
@@ -287,7 +300,7 @@ Test infrastructure (PostgreSQL, Redis, MinIO, DinD) is started automatically by
 ## FAQ
 
 **Can I self-host Appstrate?**
-Yes. `docker compose up -d` with the provided `docker-compose.yml` pulls images from GHCR and starts everything. See [Environment Variables](#environment-variables) for configuration.
+Yes. Run `curl -fsSL https://get.appstrate.dev | bash` to install with automatic secret generation and Docker Compose setup. See [Self-Hosting](#self-hosting) and [`examples/self-hosting/`](./examples/self-hosting/) for configuration.
 
 **What LLM providers are supported?**
 Any provider compatible with the Pi Coding Agent SDK. Configure via `SYSTEM_PROVIDER_KEYS` or the org-level model settings UI.
@@ -298,9 +311,16 @@ Appstrate runs autonomous AI agents in isolated containers, not predefined step-
 **Is this production-ready?**
 The platform is actively used in production. See [SECURITY.md](./SECURITY.md) for the threat model and defense layers, and [CHANGELOG.md](./CHANGELOG.md) for release history.
 
+## Community
+
+- 💬 [Discord](https://discord.gg/5Js2CKWNnh) — chat, questions, showcase what you're building
+- 💡 [GitHub Discussions](https://github.com/appstrate/appstrate/discussions) — long-form Q&A and proposals
+- 🐛 [GitHub Issues](https://github.com/appstrate/appstrate/issues) — bugs and feature requests
+
 ## Support
 
 - **Bug reports**: [GitHub Issues](https://github.com/appstrate/appstrate/issues)
+- **Questions**: [Discord](https://discord.gg/5Js2CKWNnh) or [GitHub Discussions](https://github.com/appstrate/appstrate/discussions)
 - **Security vulnerabilities**: See [SECURITY.md](./SECURITY.md) for responsible disclosure
 - **Developer guide**: See [CLAUDE.md](./CLAUDE.md) for architecture, testing, and conventions
 - **Email**: hello@appstrate.dev

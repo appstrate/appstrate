@@ -59,8 +59,9 @@ export function useCreateOAuthClient(level?: "org" | "application") {
       postLogoutRedirectUris?: string[];
       scopes?: string[];
       isFirstParty?: boolean;
-      /** Org-level only — auto-join policy. `owner` forbidden. */
+      /** Unified signup opt-in (instance/org/application). */
       allowSignup?: boolean;
+      /** Org-level only — role assigned on auto-join. `owner` forbidden. */
       signupRole?: SignupRole;
     }) =>
       api<OAuthClientWithSecret>("/oauth/clients", {
@@ -91,8 +92,9 @@ export function useUpdateOAuthClient() {
         scopes?: string[];
         disabled?: boolean;
         isFirstParty?: boolean;
-        /** Org-level only — auto-join policy. `owner` forbidden. */
+        /** Unified signup opt-in (instance/org/application). */
         allowSignup?: boolean;
+        /** Org-level only — role assigned on auto-join. `owner` forbidden. */
         signupRole?: SignupRole;
       };
     }) =>

@@ -54,7 +54,7 @@ Members and viewers have no access — webhooks are considered developer tooling
 
 ## Disable behavior
 
-Remove `webhooks` from `APPSTRATE_MODULES`:
+Remove `webhooks` from `MODULES`:
 
 - `/api/webhooks` and sub-routes → 404.
 - `onRunStatusChange` is still emitted by core, but with no listener attached it is a no-op.

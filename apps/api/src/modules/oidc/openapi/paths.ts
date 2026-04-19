@@ -64,6 +64,11 @@ const applicationLevelClientRequest = {
     scopes: { type: "array", items: { type: "string" } },
     referencedApplicationId: { type: "string" },
     isFirstParty: { type: "boolean" },
+    allowSignup: {
+      type: "boolean",
+      description:
+        "When `true`, a successful OIDC login creates the `end_users` row on the fly (JIT provisioning). When `false` (default, secure-by-default), unknown end-users are rejected with an OAuth `access_denied` error — admins must pre-create them via `POST /api/end-users` first.",
+    },
   },
 };
 
@@ -96,12 +101,13 @@ const updateClientRequest = {
     allowSignup: {
       type: "boolean",
       description:
-        "Org-level only. When `true`, users signing in for the first time through this client are auto-joined to the referenced org with `signupRole`. Rejected with 400 on application/instance clients.",
+        "Unified signup opt-in. Instance: allows brand-new BA users platform-wide. Org: brand-new BA users + auto-join to the referenced org with `signupRole`. Application: brand-new BA users + JIT `end_users` provisioning.",
     },
     signupRole: {
       type: "string",
       enum: ["admin", "member", "viewer"],
-      description: "Org-level only. Role assigned on auto-join. `owner` forbidden.",
+      description:
+        "Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/application clients.",
     },
   },
 };
@@ -526,6 +532,465 @@ export const oidcPaths = {
       responses: {
         "200": { description: "Not typically returned — logout always redirects." },
         "302": { description: "Redirect to validated URI or `/`." },
+      },
+    },
+  },
+  "/api/applications/{id}/smtp-config": {
+    get: {
+      tags: ["Application Auth Config"],
+      operationId: "getApplicationSmtpConfig",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      summary: "Get per-application SMTP configuration",
+      description:
+        "Returns the SMTP configuration for an application. Password is NEVER returned. Drives email features (verification, magic-link, reset-password) for OAuth clients with `level: application` scoped to this app.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      responses: {
+        "200": {
+          description: "SMTP configuration",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SmtpConfigView" },
+            },
+          },
+        },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+    put: {
+      tags: ["Application Auth Config"],
+      operationId: "upsertApplicationSmtpConfig",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      summary: "Upsert per-application SMTP configuration",
+      description:
+        "Creates or replaces the SMTP configuration for an application. The `pass` field is encrypted at rest and never returned in any response.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["host", "port", "username", "pass", "fromAddress"],
+              properties: {
+                host: { type: "string", minLength: 1, maxLength: 253 },
+                port: { type: "integer", minimum: 1, maximum: 65535 },
+                username: { type: "string", minLength: 1, maxLength: 320 },
+                pass: { type: "string", writeOnly: true, minLength: 1, maxLength: 1024 },
+                fromAddress: { type: "string", format: "email" },
+                fromName: {
+                  type: "string",
+                  maxLength: 200,
+                  pattern: '^[^"\\r\\n]*$',
+                  description:
+                    "Rejects quotes and CRLF to prevent email-header injection at send time.",
+                },
+                secureMode: { type: "string", enum: ["auto", "tls", "starttls", "none"] },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "SMTP configuration saved",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SmtpConfigView" },
+            },
+          },
+        },
+        "400": { description: "Validation error (invalid host / SSRF block)" },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+    delete: {
+      tags: ["Application Auth Config"],
+      operationId: "deleteApplicationSmtpConfig",
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      summary: "Delete per-application SMTP configuration",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      responses: {
+        "204": { description: "Deleted" },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+  },
+  "/api/applications/{id}/smtp-config/test": {
+    post: {
+      tags: ["Application Auth Config"],
+      operationId: "testApplicationSmtpConfig",
+      summary: "Send a test email using the stored per-app SMTP configuration",
+      description:
+        "Rate-limited. Uses the persisted config — upsert first, then test. SMTP server errors are surfaced verbatim so DKIM/SPF/auth issues reach the operator.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["to"],
+              properties: { to: { type: "string", format: "email" } },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Test email sent",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  ok: { type: "boolean" },
+                  messageId: { type: "string" },
+                  error: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+  },
+  "/api/applications/{id}/social-providers/{provider}": {
+    get: {
+      tags: ["Application Auth Config"],
+      operationId: "getApplicationSocialProvider",
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "provider",
+          in: "path",
+          required: true,
+          schema: { type: "string", enum: ["google", "github"] },
+        },
+      ],
+      summary: "Get per-application social auth provider configuration",
+      description:
+        "Returns the stored OAuth App credentials for a given provider on this application. The client secret is NEVER returned. When absent, the provider's button is hidden on the tenant's login/register pages for `level: application` OAuth clients — no fallback to the instance env OAuth App.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      responses: {
+        "200": {
+          description: "Social provider configuration",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SocialProviderView" },
+            },
+          },
+        },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+    put: {
+      tags: ["Application Auth Config"],
+      operationId: "upsertApplicationSocialProvider",
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "provider",
+          in: "path",
+          required: true,
+          schema: { type: "string", enum: ["google", "github"] },
+        },
+      ],
+      summary: "Upsert per-application social auth provider configuration",
+      description:
+        "Creates or replaces the OAuth App credentials for a given provider on this application. The `clientSecret` field is encrypted at rest and never returned in any response.",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["clientId", "clientSecret"],
+              properties: {
+                clientId: { type: "string", minLength: 1, maxLength: 512 },
+                clientSecret: {
+                  type: "string",
+                  writeOnly: true,
+                  minLength: 1,
+                  maxLength: 2048,
+                },
+                scopes: {
+                  type: "array",
+                  items: { type: "string", minLength: 1, maxLength: 128 },
+                  maxItems: 32,
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Social provider configuration saved",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SocialProviderView" },
+            },
+          },
+        },
+        "400": { description: "Validation error" },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+    delete: {
+      tags: ["Application Auth Config"],
+      operationId: "deleteApplicationSocialProvider",
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "provider",
+          in: "path",
+          required: true,
+          schema: { type: "string", enum: ["google", "github"] },
+        },
+      ],
+      summary: "Delete per-application social auth provider configuration",
+      security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
+      responses: {
+        "204": { description: "Deleted" },
+        "404": { description: "Application or configuration not found" },
+      },
+    },
+  },
+  "/api/auth/device/code": {
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "deviceAuthorizationCode",
+      summary: "Request a device + user code (RFC 8628 §3.2)",
+      description:
+        "Initiates a device-authorization grant. The CLI calls this first and receives a short `user_code` to display plus an opaque `device_code` to poll `/api/auth/device/token` with. Accepts both `application/x-www-form-urlencoded` (RFC 8628 §3.2, preferred) and `application/json` — the server normalizes form-urlencoded bodies to JSON before Better Auth's `deviceAuthorization()` plugin sees them. Clients are gated by `validateClient` — only OAuth clients registered with the device-code grant are accepted.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/x-www-form-urlencoded": {
+            schema: {
+              type: "object",
+              required: ["client_id"],
+              properties: {
+                client_id: { type: "string", description: "Public client identifier." },
+                scope: {
+                  type: "string",
+                  description: "Space-separated scopes. Defaults to the client's registered set.",
+                },
+              },
+            },
+          },
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["client_id"],
+              properties: {
+                client_id: { type: "string", description: "Public client identifier." },
+                scope: {
+                  type: "string",
+                  description: "Space-separated scopes. Defaults to the client's registered set.",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Device + user codes issued.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: [
+                  "device_code",
+                  "user_code",
+                  "verification_uri",
+                  "verification_uri_complete",
+                  "expires_in",
+                  "interval",
+                ],
+                properties: {
+                  device_code: { type: "string" },
+                  user_code: { type: "string" },
+                  verification_uri: { type: "string", format: "uri" },
+                  verification_uri_complete: { type: "string", format: "uri" },
+                  expires_in: { type: "integer" },
+                  interval: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        "400": {
+          description: "Invalid client or request.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  error: { type: "string", enum: ["invalid_client", "invalid_request"] },
+                  error_description: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/auth/device/token": {
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "deviceAuthorizationToken",
+      summary: "Exchange approved device_code for an access token (RFC 8628 §3.4)",
+      description:
+        "Polled by the CLI until the user approves or the code expires. On success, returns a BA session token as `access_token`. The token is opaque (not a JWT) and must be sent back as `Authorization: Bearer <token>` on subsequent requests. Accepts both `application/x-www-form-urlencoded` (RFC 8628 §3.4, preferred) and `application/json` — the server normalizes form-urlencoded bodies to JSON before Better Auth's `deviceAuthorization()` plugin sees them.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/x-www-form-urlencoded": {
+            schema: {
+              type: "object",
+              required: ["grant_type", "device_code", "client_id"],
+              properties: {
+                grant_type: {
+                  type: "string",
+                  enum: ["urn:ietf:params:oauth:grant-type:device_code"],
+                },
+                device_code: { type: "string" },
+                client_id: { type: "string" },
+              },
+            },
+          },
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["grant_type", "device_code", "client_id"],
+              properties: {
+                grant_type: {
+                  type: "string",
+                  enum: ["urn:ietf:params:oauth:grant-type:device_code"],
+                },
+                device_code: { type: "string" },
+                client_id: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "User approved — access token issued.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["access_token", "token_type", "expires_in"],
+                properties: {
+                  access_token: { type: "string" },
+                  token_type: { type: "string", enum: ["Bearer"] },
+                  expires_in: { type: "integer" },
+                  scope: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        "400": {
+          description: "Authorization pending, slow down, or terminal error.",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  error: {
+                    type: "string",
+                    enum: [
+                      "authorization_pending",
+                      "slow_down",
+                      "expired_token",
+                      "access_denied",
+                      "invalid_request",
+                      "invalid_grant",
+                    ],
+                  },
+                  error_description: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/activate": {
+    get: {
+      tags: ["Device Authorization"],
+      operationId: "deviceActivateGet",
+      summary: "User-facing verification page",
+      description:
+        "Server-rendered HTML page where the user types the short `user_code` shown by the CLI. When called with `?user_code=...` and a valid session, resolves to a consent panel; otherwise shows the entry form or redirects to `/auth/login` with a `returnTo` that preserves the code.",
+      parameters: [
+        {
+          name: "user_code",
+          in: "query",
+          required: false,
+          schema: {
+            type: "string",
+            // Mirrors the HTML form `pattern` in `pages/activate.ts` +
+            // the generator's alphabet in `auth/plugins.ts::USER_CODE_ALPHABET`
+            // (GitHub-style: no vowels, no visually-ambiguous pairs, no
+            // digits). The server accepts either casing (it uppercases
+            // before lookup) and the optional `-` inside `XXXX-XXXX` is
+            // stripped. 8 or 9 chars lets us accept the dash-separated
+            // display form AND the raw form in the same schema.
+            pattern: "^[BCDFGHJKLMNPQRSTVWXZbcdfghjklmnpqrstvwxz-]{8,9}$",
+          },
+        },
+      ],
+      responses: {
+        "200": { description: "HTML page rendered." },
+        "302": { description: "Redirect to `/auth/login` when unauthenticated." },
+        "400": { description: "Invalid code format." },
+        "404": { description: "Code not found or already used." },
+      },
+    },
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "deviceActivateSubmit",
+      summary: "Normalize a submitted user_code and redirect to the consent panel",
+      responses: {
+        "303": { description: "Redirect to `GET /activate?user_code=...`." },
+        "400": { description: "Empty user_code." },
+        "403": { description: "CSRF check failed." },
+      },
+    },
+  },
+  "/activate/approve": {
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "deviceActivateApprove",
+      summary: "Approve a pending device authorization",
+      description:
+        "Delegates to Better Auth's `/api/auth/device/approve`. The realm/level guard registered by `oidcGuardsPlugin` enforces that the approving user's realm matches the target client's level — a cross-audience approval is rejected with 403.",
+      responses: {
+        "200": { description: "Approved — renders the success page." },
+        "400": { description: "Approval failed (expired, already processed, realm mismatch)." },
+        "403": { description: "CSRF check failed." },
+      },
+    },
+  },
+  "/activate/deny": {
+    post: {
+      tags: ["Device Authorization"],
+      operationId: "deviceActivateDeny",
+      summary: "Deny a pending device authorization",
+      responses: {
+        "200": { description: "Denied — renders the refusal page." },
+        "403": { description: "CSRF check failed." },
       },
     },
   },

@@ -1,0 +1,250 @@
+name: Publish Installer
+
+# Triggered on `v*` tag push, but the FIRST step polls release.yml
+# until it succeeds before publishing install.sh. This guarantees the
+# installer only updates after the CLI binaries it points to have been
+# signed and uploaded to the GH Release — closing the 10-15 min 404
+# window on `curl get.appstrate.dev | bash`.
+#
+# Why polling instead of `workflow_run` chain:
+# We tried `workflow_run` (PR #183) but observed that GitHub does not
+# reliably fire workflow_run listeners when the upstream workflow was
+# triggered by a tag push (the listener was never queued for v1.0.0-
+# alpha.59 despite release.yml succeeding 9 minutes after the listener
+# was merged to main). Polling the upstream run via `gh run list` is
+# noisier but deterministic, easy to reason about, and survives any
+# workflow_run quirks GitHub throws at us.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Tag to publish (e.g. v0.5.2)
+        required: true
+
+concurrency:
+  group: publish-installer
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  # SLSA provenance via Sigstore / GitHub OIDC (attest-build-provenance@v2).
+  id-token: write
+  attestations: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # 30m caps the worst case: 25-minute release.yml poll budget +
+    # ~3 min for sign / commit / push. release.yml steady state is
+    # ~10-15 min, so we have generous headroom for slow CI weather.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME}"
+          fi
+          if ! echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._]+)?$'; then
+            echo "Invalid version format: $VERSION (expected vMAJOR.MINOR.PATCH[-prerelease])" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for release.yml to succeed for this tag
+        # Polls every 30s until release.yml for the same tag completes.
+        # If release.yml fails or is cancelled, we abort — publishing an
+        # installer pointing at a missing release would brick
+        # `get.appstrate.dev`. Skip the poll when manually dispatched
+        # (operator already verified release exists before re-running).
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.version }}
+        run: |
+          DEADLINE=$(($(date +%s) + 1500))  # 25 min budget
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            RUN=$(gh run list \
+              --workflow=release.yml \
+              --branch="$TAG" \
+              --limit=1 \
+              --json status,conclusion,databaseId \
+              --jq '.[0]')
+            if [ -z "$RUN" ] || [ "$RUN" = "null" ]; then
+              echo "release.yml has not started yet for $TAG, waiting…"
+            else
+              STATUS=$(jq -r '.status' <<<"$RUN")
+              CONCL=$(jq -r '.conclusion' <<<"$RUN")
+              ID=$(jq -r '.databaseId' <<<"$RUN")
+              echo "release.yml run $ID for $TAG: status=$STATUS conclusion=$CONCL"
+              case "$CONCL" in
+                success) echo "✓ release.yml succeeded — proceeding"; exit 0 ;;
+                failure|cancelled|timed_out|action_required)
+                  echo "::error::release.yml ended with conclusion=$CONCL — refusing to publish installer"
+                  exit 1 ;;
+              esac
+            fi
+            sleep 30
+          done
+          echo "::error::Timeout waiting for release.yml after 25 minutes"
+          exit 1
+
+      - name: Render installer with pinned version
+        run: |
+          # `scripts/bootstrap.sh` is the published entry point — a thin
+          # downloader that fetches the per-platform CLI binary from the
+          # release matching this tag, then execs `appstrate install`.
+          # Pin its default `APPSTRATE_VERSION` to this tag so
+          # `curl get.appstrate.dev | bash` is reproducible (same tag →
+          # same binary). Users can still override via env var. Published
+          # filename remains `install.sh` so legacy URLs and docs that
+          # reference `get.appstrate.dev/install.sh` keep resolving.
+          mkdir -p out/${{ steps.ver.outputs.version }}
+          sed "s|__APPSTRATE_VERSION__|${{ steps.ver.outputs.version }}|g" \
+            scripts/bootstrap.sh > out/install.sh
+          # Verify all placeholders were replaced.
+          if grep -q "__APPSTRATE_VERSION__" out/install.sh; then
+            echo "::error::Placeholder __APPSTRATE_VERSION__ was not fully replaced"
+            exit 1
+          fi
+          cp out/install.sh out/${{ steps.ver.outputs.version }}/install.sh
+          ( cd out && sha256sum install.sh > install.sh.sha256 )
+          ( cd out/${{ steps.ver.outputs.version }} && sha256sum install.sh > install.sh.sha256 )
+
+      - name: Generate SLSA build provenance
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: |
+            out/install.sh
+            out/${{ steps.ver.outputs.version }}/install.sh
+
+      - name: Sign installer with minisign
+        id: minisign
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          # Fail-close: the installer published at get.appstrate.dev is the
+          # only thing between the user's shell and arbitrary code execution
+          # (`curl ... | bash`). Publishing it unsigned would mean the
+          # user's only verification option (`scripts/verify.sh`) silently
+          # succeeds against a missing signature — worse than no verify
+          # step at all. Mirror the guard in `release.yml`: if the secret
+          # is absent we refuse to publish rather than fan out `signed=false`
+          # through the rest of the workflow.
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
+            echo "::error::MINISIGN_SECRET_KEY secret is not set — refusing to publish an unsigned installer."
+            echo "::error::  Configure the secret in repo settings, or dispatch a build that rotates the key."
+            exit 1
+          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          umask 077
+          printf '%s' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
+          # Sign once — the two rendered copies (out/install.sh and
+          # out/${VERSION}/install.sh) contain identical bytes (same sed
+          # output) so one signature verifies both. Sync step copies it to
+          # both publish locations. Passphrase via stdin (no TTY),
+          # -t = signed trusted comment.
+          printf '%s\n' "$MINISIGN_PASSWORD" | \
+            minisign -S -s /tmp/minisign.key \
+              -t "appstrate $VERSION" \
+              -m out/install.sh
+          rm -f /tmp/minisign.key
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout installer-pages branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: installer-pages
+          path: pages
+          fetch-depth: 1
+        continue-on-error: true
+        id: checkout-pages
+
+      - name: Initialize installer-pages branch (first run only)
+        if: steps.checkout-pages.outcome == 'failure'
+        run: |
+          mkdir -p pages
+          cd pages
+          # actions/checkout may have partially initialized .git and origin
+          # before failing — make both steps idempotent.
+          if [ ! -d .git ]; then
+            git init -b installer-pages
+          else
+            git checkout -B installer-pages 2>/dev/null || true
+          fi
+          REPO_URL="https://github.com/${{ github.repository }}.git"
+          if git remote get-url origin >/dev/null 2>&1; then
+            git remote set-url origin "$REPO_URL"
+          else
+            git remote add origin "$REPO_URL"
+          fi
+
+      - name: Sync rendered files
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          SIGNED: ${{ steps.minisign.outputs.signed }}
+        run: |
+          # Latest (overwrite)
+          cp out/install.sh        pages/install.sh
+          cp out/install.sh.sha256 pages/install.sh.sha256
+          # Versioned (immutable — refuse overwrite)
+          if [ -e "pages/${VERSION}/install.sh" ]; then
+            echo "::error::Version ${VERSION} already published — refusing to overwrite"
+            exit 1
+          fi
+          mkdir -p "pages/${VERSION}"
+          cp "out/${VERSION}/install.sh"        "pages/${VERSION}/install.sh"
+          cp "out/${VERSION}/install.sh.sha256" "pages/${VERSION}/install.sh.sha256"
+
+          # Minisign signature (if step ran — controlled by presence of MINISIGN_SECRET_KEY secret).
+          # Only one signature is produced (both installer copies are byte-identical);
+          # fan it out to both publish locations here.
+          if [ "$SIGNED" = "true" ]; then
+            cp out/install.sh.minisig pages/install.sh.minisig
+            cp out/install.sh.minisig "pages/${VERSION}/install.sh.minisig"
+          fi
+
+          # Publish verify.sh wrapper. If the public key is committed under
+          # scripts/appstrate.pub, substitute its value into verify.sh so users
+          # don't need a second round-trip. Minisign public keys contain a
+          # comment line + a single base64 line — extract the base64 line.
+          if [ -f scripts/appstrate.pub ]; then
+            PUBKEY=$(grep -v '^untrusted' scripts/appstrate.pub | head -1 | tr -d '\n')
+            sed "s|__APPSTRATE_MINISIGN_PUBKEY__|${PUBKEY}|" scripts/verify.sh > pages/verify.sh
+            cp scripts/appstrate.pub pages/appstrate.pub
+          else
+            cp scripts/verify.sh pages/verify.sh
+          fi
+
+          # Serve the installer at the root (curl -fsSL https://get.appstrate.dev | bash).
+          # GitHub Pages serves index.html at /, so we point it at the script content.
+          # Browsers see the script in plain text, same pattern as get.docker.com / sh.rustup.rs.
+          cp out/install.sh pages/index.html
+
+          # Custom domain for GitHub Pages
+          echo "get.appstrate.dev" > pages/CNAME
+
+      - name: Commit & push
+        working-directory: pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"; exit 0
+          fi
+          git commit -m "publish: ${{ steps.ver.outputs.version }}"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
+            HEAD:installer-pages

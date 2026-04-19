@@ -43,6 +43,7 @@ import { db } from "@appstrate/db/client";
 import { applications } from "@appstrate/db/schema";
 import { oauthClient } from "../schema.ts";
 import { prefixedId } from "../../../lib/ids.ts";
+import { logger } from "../../../lib/logger.ts";
 import { APPSTRATE_SCOPES } from "../auth/scopes.ts";
 import { isValidRedirectUri } from "./redirect-uri.ts";
 
@@ -138,7 +139,14 @@ export interface OAuthClientRecord {
   scopes: string[];
   disabled: boolean;
   isFirstParty: boolean;
-  /** Org-level: whether non-members are auto-joined on first sign-in. Defaults to `false`. */
+  /**
+   * Unified signup opt-in across all levels (mirrors Auth0 "Disable Sign-Ups",
+   * Keycloak "User Registration", Okta JIT toggle):
+   *   - `instance`: brand-new Better Auth user may be created platform-wide.
+   *   - `org`: brand-new BA user + auto-join to `referencedOrgId` with `signupRole`.
+   *   - `application`: brand-new BA user + JIT `end_users` provisioning.
+   * Defaults to `false` (secure-by-default) on every level.
+   */
   allowSignup: boolean;
   /** Org-level: role assigned on auto-join. `owner` forbidden. Defaults to `"member"`. */
   signupRole: SignupRole;
@@ -302,6 +310,8 @@ export interface CreateApplicationClientInput {
   scopes?: string[];
   referencedApplicationId: string;
   isFirstParty?: boolean;
+  /** Defaults to `false`. When `true`, a first OIDC login JIT-creates a BA user + `end_users` row. */
+  allowSignup?: boolean;
 }
 
 export interface CreateInstanceClientInput {
@@ -313,7 +323,6 @@ export interface CreateInstanceClientInput {
   isFirstParty?: boolean;
   /** Defaults to `false`. Set explicitly by `ensureInstanceClient()`. */
   allowSignup?: boolean;
-  signupRole?: SignupRole;
 }
 
 export type CreateClientInput =
@@ -345,33 +354,21 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
   }
   // instance: no FK fields in metadata
 
-  // Signup policy (`allowSignup` + `signupRole`). Mutable — unlike the rest
-  // of `metadata` — so it lives only in dedicated SQL columns and is read by
-  // the signup guard + plugin at token-mint time via `loadClientSignupPolicy`
-  // (backed by `getClientCached`). Valid for org + instance; rejected on
-  // application clients where end-user provisioning is out-of-band via the
-  // headless API and the flag has no effect.
-  if (input.level === "application") {
-    if (
-      (input as { allowSignup?: unknown }).allowSignup !== undefined ||
-      (input as { signupRole?: unknown }).signupRole !== undefined
-    ) {
-      throw new OAuthAdminValidationError(
-        "signupPolicy",
-        "OIDC: allowSignup / signupRole are only valid for org- or instance-level clients",
-      );
-    }
+  // `signupRole` is only meaningful on org-level clients (role assigned on
+  // auto-join). Application clients have no org membership to attach to;
+  // instance clients have no fixed org to attach to either. Reject loudly
+  // on the non-org levels to surface configuration mistakes.
+  if (input.level !== "org" && (input as { signupRole?: unknown }).signupRole !== undefined) {
+    throw new OAuthAdminValidationError(
+      "signupPolicy",
+      "OIDC: signupRole is only valid for org-level clients",
+    );
   }
-  // Default signup policy: closed (`allowSignup: false`) for every level.
-  // Opt-in is explicit at the call site — notably `ensureInstanceClient()`
-  // passes `allowSignup: true` at boot so the first-party platform client
-  // keeps the Appstrate signup page open on a fresh install. Org tenant
-  // dashboards and env-declared satellite instance clients keep the closed
-  // default unless the operator flips the flag. Application clients ignore
-  // the flag entirely (end-user provisioning happens via the headless API).
-  const allowSignup = input.level === "application" ? false : (input.allowSignup ?? false);
-  const signupRole: SignupRole =
-    input.level === "application" ? "member" : (input.signupRole ?? "member");
+  // `allowSignup` is honored on every level (unified Auth0/Keycloak/Okta
+  // semantic). Defaults to `false` (secure-by-default); `ensureInstanceClient()`
+  // opts in at boot to keep the fresh-install signup page open.
+  const allowSignup = input.allowSignup ?? false;
+  const signupRole: SignupRole = input.level === "org" ? (input.signupRole ?? "member") : "member";
 
   const inserted = await db
     .insert(oauthClient)
@@ -432,9 +429,9 @@ export interface UpdateClientInput {
   scopes?: string[];
   disabled?: boolean;
   isFirstParty?: boolean;
-  /** Honored for org + instance clients; rejected on application. */
+  /** Honored on every level (unified semantic). */
   allowSignup?: boolean;
-  /** Honored for org + instance clients; rejected on application. `owner` forbidden. */
+  /** Honored only on org-level clients; rejected on instance/application. `owner` forbidden. */
   signupRole?: SignupRole;
 }
 
@@ -449,17 +446,15 @@ export async function updateClient(
     assertValidScopes(input.scopes);
   }
 
-  // Reject signup policy updates on application-level clients early —
-  // application clients provision end-users out-of-band via the headless
-  // API, so the flag has no effect and the caller probably meant a
-  // different client. Silently ignoring would hide configuration
-  // mistakes. Org and instance levels both honor the flag.
-  if (input.allowSignup !== undefined || input.signupRole !== undefined) {
+  // `signupRole` is only meaningful on org-level clients — reject updates
+  // targeting instance/application levels loudly so configuration mistakes
+  // surface. `allowSignup` is valid on every level.
+  if (input.signupRole !== undefined) {
     const existing = await getClient(clientId);
-    if (existing && existing.level === "application") {
+    if (existing && existing.level !== "org") {
       throw new OAuthAdminValidationError(
         "signupPolicy",
-        "OIDC: allowSignup / signupRole are only valid for org- or instance-level clients",
+        "OIDC: signupRole is only valid for org-level clients",
       );
     }
   }
@@ -563,30 +558,148 @@ export async function getInstanceClientId(): Promise<string | null> {
   return row?.clientId ?? null;
 }
 
+function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  for (const v of b) {
+    if (!set.has(v)) return false;
+  }
+  return true;
+}
+
 /**
  * Auto-provision the instance-level OIDC client for the platform SPA.
- * Idempotent — returns the existing clientId if one already exists.
+ *
+ * Idempotent on presence AND reconciles `redirectUris` /
+ * `postLogoutRedirectUris` against the current `APP_URL` on every boot.
+ * When the operator changes `APP_URL` (domain move, placeholder → real
+ * URL on first setup), the existing row is updated in place — same
+ * `client_id`, so outstanding tokens and live sessions remain valid.
+ *
+ * Without this reconciliation the dashboard SPA would loop on
+ * `/api/auth/oauth2/authorize` after a URL change and eventually hit
+ * the per-IP rate limit (see `auth/guards.ts` `AUTHORIZE_RL_POINTS`),
+ * forcing operators to wipe the DB to recover.
+ *
+ * ## Concurrency
+ *
+ * The SELECT+UPDATE is not transactional. Under multi-replica boot, both
+ * replicas may detect drift and both issue the UPDATE — benign, since
+ * both compute the exact same `expectedRedirectUris` from the same
+ * `APP_URL` env var (last-write-wins with identical payloads). No
+ * coordination primitive required.
+ *
+ * ## Cache propagation across replicas
+ *
+ * `cacheInvalidate()` only clears the local per-process cache (see
+ * `CLIENT_CACHE_TTL_MS`). Other replicas may serve stale URIs from
+ * their local cache for up to one TTL window (~30s). Acceptable in
+ * practice because reconciliation only happens at boot, and all
+ * replicas boot with the same `APP_URL` and therefore reconcile
+ * independently — the old cached value never gets exercised.
+ *
  * Called from `oidcModule.init()` at boot.
+ *
+ * The platform SPA is a **public** OAuth client: it runs in a browser
+ * and cannot hold a `client_secret` (any value shipped in the JS bundle
+ * is publicly readable, so OAuth 2.1 RFC 9700 § 2.2 mandates treating
+ * SPAs as public clients). PKCE is the proof-of-possession. We bypass
+ * `createClient` here because that helper hard-codes `client_secret_basic`
+ * + a hashed secret for confidential clients — the SPA has no way to
+ * send the Basic header, so the token exchange would 400 on
+ * `invalid_client`. Direct insert keeps the confidential defaults
+ * correct for every other caller.
+ *
+ * The platform auto-provisioned instance client also opts into open
+ * signup at boot so a fresh Appstrate install can register its first
+ * user. Every other client (env-declared satellites, org tenants,
+ * application clients) keeps the closed `allowSignup: false` default.
  */
 export async function ensureInstanceClient(appUrl: string): Promise<string> {
-  const existing = await getInstanceClientId();
-  if (existing) return existing;
+  // Normalize: strip trailing slash(es) so `APP_URL=https://x.com/` does
+  // not produce `https://x.com//auth/callback`. Reconciliation on an
+  // already-created-with-trailing-slash row will also now converge to
+  // the normalized form.
+  const normalizedAppUrl = appUrl.replace(/\/+$/, "");
+  const expectedRedirectUris = [`${normalizedAppUrl}/auth/callback`];
+  const expectedPostLogoutRedirectUris = [normalizedAppUrl, `${normalizedAppUrl}/login`];
 
-  // The platform auto-provisioned instance client is the ONE OAuth client
-  // that opts into open signup: without it, a fresh Appstrate install has
-  // no way to register the first user. Every other client — env-declared
-  // satellite instance clients, org tenant dashboards — keeps the closed
-  // `allowSignup: false` default from `createClient()`.
-  const created = await createClient({
-    level: "instance",
+  // Same validation policy as the create path below (and as every other
+  // callsite of `assertValidRedirectUris`): reject loopback-in-prod,
+  // bad schemes, etc. Keeps the update path from silently writing a
+  // value the create path would refuse, should `isValidRedirectUri`
+  // ever tighten its rules.
+  assertValidRedirectUris(expectedRedirectUris);
+
+  const [existing] = await db
+    .select({
+      clientId: oauthClient.clientId,
+      redirectUris: oauthClient.redirectUris,
+      postLogoutRedirectUris: oauthClient.postLogoutRedirectUris,
+    })
+    .from(oauthClient)
+    .where(eq(oauthClient.level, "instance"))
+    .orderBy(asc(oauthClient.createdAt))
+    .limit(1);
+
+  if (existing) {
+    const storedPostLogout = existing.postLogoutRedirectUris ?? [];
+    const redirectDrift = !sameStringSet(existing.redirectUris, expectedRedirectUris);
+    const postLogoutDrift = !sameStringSet(storedPostLogout, expectedPostLogoutRedirectUris);
+    if (redirectDrift || postLogoutDrift) {
+      await db
+        .update(oauthClient)
+        .set({
+          redirectUris: expectedRedirectUris,
+          postLogoutRedirectUris: expectedPostLogoutRedirectUris,
+          updatedAt: new Date(),
+        })
+        .where(eq(oauthClient.clientId, existing.clientId));
+      cacheInvalidate(existing.clientId);
+      logger.warn("OIDC platform client redirect URIs updated to match APP_URL", {
+        module: "oidc",
+        clientId: existing.clientId,
+        appUrl: normalizedAppUrl,
+        redirectUrisFrom: existing.redirectUris,
+        redirectUrisTo: expectedRedirectUris,
+        postLogoutRedirectUrisFrom: storedPostLogout,
+        postLogoutRedirectUrisTo: expectedPostLogoutRedirectUris,
+      });
+    }
+    return existing.clientId;
+  }
+
+  const id = prefixedId("oac");
+  const clientId = `oauth_${randomSecret().slice(0, 24)}`;
+  const now = new Date();
+  const metadata = { level: "instance" as const, clientId };
+
+  await db.insert(oauthClient).values({
+    id,
+    clientId,
+    clientSecret: null,
     name: "Appstrate Platform",
-    redirectUris: [`${appUrl}/auth/callback`],
-    postLogoutRedirectUris: [appUrl, `${appUrl}/login`],
+    redirectUris: expectedRedirectUris,
+    postLogoutRedirectUris: expectedPostLogoutRedirectUris,
     scopes: ["openid", "profile", "email", "offline_access"],
-    isFirstParty: true,
+    level: "instance",
+    referencedOrgId: null,
+    referencedApplicationId: null,
+    metadata: JSON.stringify(metadata),
+    skipConsent: true,
     allowSignup: true,
+    signupRole: "member",
+    disabled: false,
+    type: "web",
+    public: true,
+    tokenEndpointAuthMethod: "none",
+    grantTypes: ["authorization_code", "refresh_token"],
+    responseTypes: ["code"],
+    requirePKCE: true,
+    createdAt: now,
+    updatedAt: now,
   });
-  return created.clientId;
+  return clientId;
 }
 
 // ─── Env-provisioned instance clients ─────────────────────────────────────────

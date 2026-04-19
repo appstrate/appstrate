@@ -61,6 +61,12 @@ export const packages = pgTable(
     draftManifest: jsonb("draft_manifest"),
     draftContent: text("draft_content"),
     autoInstalled: boolean("auto_installed").notNull().default(false),
+    // Inline-run shadow packages (transient manifests submitted via
+    // POST /api/runs/inline). Hidden from all package/agent list, search,
+    // and detail endpoints. NEVER hard-delete an ephemeral row: cascade
+    // would wipe the associated `runs` history. Compaction NULLs the
+    // content after retention (see inline-compaction worker).
+    ephemeral: boolean("ephemeral").notNull().default(false),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -71,6 +77,11 @@ export const packages = pgTable(
     index("idx_packages_org_id").on(table.orgId),
     index("idx_packages_type").on(table.type),
     index("idx_packages_org_type").on(table.orgId, table.type),
+    // Partial index sized for the compaction sweep (`ephemeral = true AND
+    // created_at < now() - interval '30 days'`). Keeps the hot set tiny.
+    index("idx_packages_ephemeral_created")
+      .on(table.createdAt)
+      .where(sql`${table.ephemeral} = true`),
     check("packages_id_format", sql`${table.id} ~ '^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$'`),
   ],
 );

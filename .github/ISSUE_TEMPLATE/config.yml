@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: 💬 Discord Community
+    url: https://discord.gg/5Js2CKWNnh
+    about: Chat with the community, ask questions, and share what you're building.
   - name: Questions & Discussions
     url: https://github.com/appstrate/appstrate/discussions
-    about: Ask questions and discuss ideas.
+    about: Ask questions and discuss ideas in long-form.

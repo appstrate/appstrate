@@ -48,7 +48,7 @@ export function LibraryPage() {
   if (!data) return null;
 
   return (
-    <>
+    <div className="p-6">
       <PageHeader title={t("library.title")} />
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as Tab)}>
         <TabsList>
@@ -71,7 +71,7 @@ export function LibraryPage() {
           </TabsContent>
         ))}
       </Tabs>
-    </>
+    </div>
   );
 }
 

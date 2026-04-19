@@ -18,10 +18,14 @@
 
 import type { Hono } from "hono";
 import type { AuthStrategy } from "@appstrate/core/module";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { user as userTable } from "@appstrate/db/schema";
 import { getAuth } from "@appstrate/db/auth";
 import { validateApiKey } from "../services/api-keys.ts";
 import { ensureDefaultProfile } from "../services/connection-profiles.ts";
 import { requireOrgContext } from "../middleware/org-context.ts";
+import { requirePlatformRealm } from "../middleware/realm-guard.ts";
 import { isEndUserInApp } from "../services/end-users.ts";
 import { ApiError, unauthorized } from "./errors.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "./permissions.ts";
@@ -59,8 +63,17 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   const { publicPaths, authStrategies } = opts;
 
   // Mount Better Auth handler — handles signup, signin, session, etc.
-  app.on(["POST", "GET"], "/api/auth/*", (c) => {
-    return getAuth().handler(c.req.raw);
+  //
+  // Device-flow shim: RFC 8628 §3.2 + §3.4 specify
+  // `application/x-www-form-urlencoded` as the required content type for
+  // `/device/code` + `/device/token`, but Better Auth's `better-call`
+  // router currently accepts only JSON. We rewrite form-urlencoded bodies
+  // into JSON on the fly so the server is tolerant of BOTH content types
+  // (RFC-compliant clients succeed, older JSON-sending binaries keep
+  // working). Tracked in https://github.com/appstrate/appstrate/issues/166.
+  app.on(["POST", "GET"], "/api/auth/*", async (c) => {
+    const req = await maybeTransformDeviceFlowFormBody(c.req.raw);
+    return getAuth().handler(req);
   });
 
   // Auth middleware: module strategies → Bearer API key → session cookie.
@@ -182,6 +195,22 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       name: session.user.name ?? "",
     });
     c.set("authMethod", "session");
+    // Look up the user's realm so the realm guard middleware below can
+    // reject cookie sessions minted for a non-platform audience (OIDC
+    // end-users) from hitting platform routes. We query the DB rather
+    // than read `session.user.realm` because BA's `cookieCache` serializes
+    // only the standard user fields into the cookie — custom columns
+    // like `realm` are not reliably exposed on cached session objects
+    // across BA versions. One indexed lookup on the user PK per
+    // authenticated request is an acceptable cost for audience
+    // enforcement; the platform route guards run after this so the
+    // query cost is only paid on session-backed requests.
+    const [userRow] = await db
+      .select({ realm: userTable.realm })
+      .from(userTable)
+      .where(eq(userTable.id, session.user.id))
+      .limit(1);
+    if (userRow?.realm) c.set("sessionRealm", userRow.realm);
 
     // Ensure the user has a default connection profile (fire-and-forget)
     ensureDefaultProfile({ type: "member", id: session.user.id }).catch((err) => {
@@ -192,6 +221,19 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     });
 
     return next();
+  });
+
+  // Realm guard: reject BA cookie sessions belonging to a non-platform
+  // audience (OIDC end-users) from hitting platform routes. Runs after
+  // the auth middleware has resolved the session and set `sessionRealm`,
+  // but before org-context + permission resolution (both of which are
+  // meaningless for end-user sessions). OIDC/BA paths are exempt — see
+  // `requirePlatformRealm` for the allowlist rationale.
+  const realmGuard = requirePlatformRealm();
+  app.use("*", async (c, next) => {
+    if (skipAuth(c.req.path, publicPaths())) return next();
+    if (!c.get("user")) return next();
+    return realmGuard(c, next);
   });
 
   // Org context middleware: require X-Org-Id for org-scoped /api/* routes.
@@ -236,9 +278,50 @@ export function skipAuth(path: string, publicPaths: Set<string>): boolean {
   if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
   if (path === "/api/connections/callback") return true; // OAuth redirect — no session
+  if (path === "/api/uploads/_content") return true; // FS direct-upload sink — auth via HMAC token
   if (path === "/api/docs" || path === "/api/openapi.json") return true;
   if (publicPaths.has(path)) return true; // module-contributed public paths
   return false;
+}
+
+/**
+ * Device-flow content-type shim.
+ *
+ * RFC 8628 specifies `application/x-www-form-urlencoded` at `/device/code`
+ * and `/device/token`, but Better Auth's `better-call` router only accepts
+ * JSON. If the incoming request targets one of those two paths with a
+ * form-urlencoded body, we parse the body, rewrite it as JSON, and return
+ * a fresh Request with `Content-Type: application/json`. All other
+ * requests (including the existing JSON clients) pass through unchanged.
+ *
+ * Exported for unit testing — the transform has no side effects.
+ */
+export async function maybeTransformDeviceFlowFormBody(req: Request): Promise<Request> {
+  if (req.method !== "POST") return req;
+  const url = new URL(req.url);
+  if (url.pathname !== "/api/auth/device/code" && url.pathname !== "/api/auth/device/token") {
+    return req;
+  }
+  const contentType = req.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().startsWith("application/x-www-form-urlencoded")) {
+    return req;
+  }
+  const raw = await req.text();
+  const params = new URLSearchParams(raw);
+  const body: Record<string, string> = {};
+  for (const [key, value] of params.entries()) body[key] = value;
+  const headers = new Headers(req.headers);
+  headers.set("content-type", "application/json");
+  // Let fetch/BA recompute the length from the new body.
+  headers.delete("content-length");
+  return new Request(req.url, {
+    method: req.method,
+    headers,
+    body: JSON.stringify(body),
+    // Preserve non-body fields. Request has no `duplex` reflection, but we
+    // already consumed the original body so the replacement is a complete
+    // new request — no streaming to preserve.
+  });
 }
 
 /** Paths that need auth but not org-context (user-scoped or self-resolving). */

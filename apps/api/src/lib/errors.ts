@@ -31,6 +31,12 @@ export interface ValidationFieldError {
   field: string;
   code: string;
   message: string;
+  /**
+   * Human-readable title. Preserved so throwing wrappers can surface the
+   * historical title (e.g. "Empty Prompt") in fail-fast mode instead of the
+   * machine code. Optional — Zod-originated entries don't carry one.
+   */
+  title?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +115,29 @@ export function invalidRequest(detail: string, param?: string): ApiError {
   });
 }
 
+/**
+ * Aggregate multiple validation errors into a single 400 response.
+ * Sets `code: "validation_failed"` and populates the RFC 9457 `errors[]` array,
+ * so clients can surface every problem in one round-trip. `detail` defaults to
+ * a human-readable summary derived from the first entry plus a count.
+ */
+export function validationFailed(errors: ValidationFieldError[], detail?: string): ApiError {
+  const summary =
+    detail ??
+    (errors.length === 0
+      ? "Validation failed"
+      : errors.length === 1
+        ? `${errors[0]!.field}: ${errors[0]!.message}`
+        : `${errors[0]!.field}: ${errors[0]!.message} (+${errors.length - 1} more)`);
+  return new ApiError({
+    status: 400,
+    code: "validation_failed",
+    title: "Validation Failed",
+    detail: summary,
+    errors,
+  });
+}
+
 export function unauthorized(detail: string): ApiError {
   return new ApiError({
     status: 401,
@@ -178,7 +207,105 @@ export function systemEntityForbidden(type: string, id: string, verb = "modify")
 
 import type { z } from "zod";
 
-/** Parse a request body with a Zod schema, throwing invalidRequest on failure. */
+/**
+ * Closed set of public field-error codes. We deliberately do NOT propagate
+ * raw Zod codes (which are internal to the validation library and may change
+ * between major versions) — instead every Zod issue is mapped to one of
+ * these stable codes. Clients can safely branch on them.
+ */
+export type FieldErrorCode =
+  | "required"
+  | "invalid_type"
+  | "invalid_format"
+  | "out_of_range"
+  | "unknown_field"
+  | "invalid_value"
+  | "invalid_union"
+  | "invalid_key"
+  | "invalid_element"
+  | "invalid_request";
+
+function mapZodCode(issue: z.core.$ZodIssue): FieldErrorCode {
+  // `invalid_type` with `received: undefined` is the Zod way of saying
+  // "missing required field" — surface a dedicated `required` code so
+  // clients don't have to inspect the `received` property to tell the two
+  // cases apart.
+  if (issue.code === "invalid_type" && (issue as { received?: unknown }).received === "undefined") {
+    return "required";
+  }
+  switch (issue.code) {
+    case "invalid_type":
+      return "invalid_type";
+    case "too_big":
+    case "too_small":
+    case "not_multiple_of":
+      return "out_of_range";
+    case "invalid_format":
+      return "invalid_format";
+    case "unrecognized_keys":
+      return "unknown_field";
+    case "invalid_union":
+      return "invalid_union";
+    case "invalid_key":
+      return "invalid_key";
+    case "invalid_element":
+      return "invalid_element";
+    case "invalid_value":
+    case "custom":
+      return "invalid_value";
+    default:
+      return "invalid_request";
+  }
+}
+
+/**
+ * Render a path segment array using bracket notation for numeric indices
+ * (`items[0].name`) so consumers can disambiguate array indices from string
+ * keys that happen to be all-digits. Mirrors Stripe's `param` convention.
+ */
+function renderFieldPath(path: readonly PropertyKey[]): string {
+  let out = "";
+  for (const seg of path) {
+    if (typeof seg === "number" || (typeof seg === "string" && /^\d+$/.test(seg))) {
+      out += `[${seg}]`;
+    } else {
+      out += out === "" ? String(seg) : `.${String(seg)}`;
+    }
+  }
+  return out;
+}
+
+/**
+ * Convert Zod issues to the RFC 9457 `errors[]` entries we expose to clients.
+ *
+ * The Zod issue path fully identifies the offending field. `fallbackField` is
+ * only used when Zod reports an empty path (i.e. the root body failed before
+ * any key could be inspected) — it matches the historical semantic of
+ * `parseBody`'s third argument, which named the primary field being parsed.
+ * Concatenating the fallback with the Zod path would double-up names
+ * (`"apiKey.apiKey"`) for every parseBody caller, so we deliberately don't.
+ *
+ * When neither a path nor a fallback is available the field defaults to
+ * `"body"` rather than the empty string, so clients always receive a usable
+ * pointer.
+ */
+export function zodIssuesToFieldErrors(
+  issues: readonly z.core.$ZodIssue[],
+  fallbackField?: string,
+): ValidationFieldError[] {
+  return issues.map((issue) => {
+    const path = renderFieldPath(issue.path);
+    const field = path || fallbackField || "body";
+    return { field, code: mapZodCode(issue), message: issue.message };
+  });
+}
+
+/**
+ * Parse a request body with a Zod schema. On failure throws a 400 with every
+ * issue populated in `errors[]` so clients receive all problems in one call.
+ * The optional `param` is a fallback used when Zod reports an empty path —
+ * never as a prefix on top of a resolved path.
+ */
 export function parseBody<T extends z.ZodType>(
   schema: T,
   body: unknown,
@@ -186,7 +313,7 @@ export function parseBody<T extends z.ZodType>(
 ): z.output<T> {
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    throw invalidRequest(parsed.error.issues[0]!.message, param);
+    throw validationFailed(zodIssuesToFieldErrors(parsed.error.issues, param));
   }
   return parsed.data;
 }

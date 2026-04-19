@@ -5,6 +5,9 @@ import { getCurrentApplicationId } from "./stores/app-store";
 
 const API_BASE = "/api";
 
+/** Direct-upload endpoint consumed by `<SchemaForm uploadPath={...} />`. */
+export const UPLOADS_PATH = `${API_BASE}/uploads`;
+
 export class ApiError extends Error {
   constructor(
     public code: string,

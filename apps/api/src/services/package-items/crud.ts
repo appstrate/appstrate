@@ -10,7 +10,11 @@ import { AFPS_SCHEMA_URLS, type Manifest } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
 import { deletePackageFiles } from "./storage.ts";
 import { asRecord } from "../../lib/safe-json.ts";
-import { orgOrSystemFilter, getPackageDisplayName } from "../../lib/package-helpers.ts";
+import {
+  orgOrSystemFilter,
+  getPackageDisplayName,
+  notEphemeralFilter,
+} from "../../lib/package-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 
@@ -47,7 +51,7 @@ async function findDependentPackages(
   const orgPkgs = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
-    .where(scopedWhere(packages, { orgId }));
+    .where(and(scopedWhere(packages, { orgId }), notEphemeralFilter()));
 
   const dependents: { id: string; displayName: string }[] = [];
   for (const pkg of orgPkgs) {
@@ -201,6 +205,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, applic
       and(
         orgOrSystemFilter(orgId),
         eq(packages.type, cfg.type),
+        notEphemeralFilter(),
         or(eq(packages.source, "system"), isNotNull(applicationPackages.packageId)),
       ),
     )
@@ -209,12 +214,14 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, applic
       desc(packages.createdAt),
     );
 
-  // Count usage by scanning all org packages' manifests
+  // Count usage by scanning all org packages' manifests. Ephemeral shadow
+  // packages are transient and never referenced by other packages, so
+  // filtering them out also skips their (empty) dependencies.
   const countMap = new Map<string, number>();
   const allOrgPkgs = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
-    .where(scopedWhere(packages, { orgId }));
+    .where(and(scopedWhere(packages, { orgId }), notEphemeralFilter()));
   for (const pkg of allOrgPkgs) {
     if (!pkg.draftManifest) continue;
     const deps = extractDependencies(asRecord(pkg.draftManifest) as Partial<Manifest>);
@@ -250,7 +257,9 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
   const [data] = await db
     .select()
     .from(packages)
-    .where(and(orgFilter, eq(packages.id, itemId), eq(packages.type, cfg.type)))
+    .where(
+      and(orgFilter, eq(packages.id, itemId), eq(packages.type, cfg.type), notEphemeralFilter()),
+    )
     .limit(1);
 
   if (!data) return null;
@@ -293,10 +302,12 @@ export async function deleteOrgItem(
     return { ok: false, error: "IN_USE", dependents };
   }
 
+  // Scope delete to non-ephemeral rows only: deleting a shadow package
+  // here would cascade-wipe its runs history.
   await db.delete(packages).where(
     scopedWhere(packages, {
       orgId,
-      extra: [eq(packages.id, itemId), eq(packages.type, cfg.type)],
+      extra: [eq(packages.id, itemId), eq(packages.type, cfg.type), notEphemeralFilter()],
     }),
   );
 

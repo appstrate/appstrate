@@ -53,7 +53,7 @@ export function ScheduleEditPage() {
   const scheduleName = schedule.name || t("schedule.unnamed");
 
   return (
-    <>
+    <div className="p-6">
       <PageHeader
         title={t("schedule.titleEdit")}
         emoji="📅"
@@ -93,6 +93,6 @@ export function ScheduleEditPage() {
         onCancel={() => navigate(-1)}
         foreignProfile={foreignProfile}
       />
-    </>
+    </div>
   );
 }

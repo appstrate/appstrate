@@ -1,5 +1,5 @@
 # ── Stage 1: Install dependencies ─────────────────────────────────
-FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.9-alpine AS deps
+FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.11-alpine AS deps
 
 LABEL org.opencontainers.image.source="https://github.com/appstrate/appstrate"
 LABEL org.opencontainers.image.description="Appstrate Pi — AI agent runtime for ephemeral agent runs"
@@ -16,7 +16,7 @@ RUN bun install --production && \
     rm -rf node_modules/@types
 
 # ── Stage 2: Runtime ─────────────────────────────────────────────
-FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.9-alpine
+FROM --platform=${TARGETPLATFORM:-linux/amd64} oven/bun:1.3.11-alpine
 
 RUN apk add --no-cache git curl ca-certificates unzip python3 py3-pip bash
 

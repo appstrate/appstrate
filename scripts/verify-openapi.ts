@@ -11,7 +11,7 @@
  *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas
  *
  * Module-owned paths and schemas are loaded dynamically from built-in modules.
- * The set of modules validated matches `APPSTRATE_MODULES` (default: all built-in).
+ * The set of modules validated matches `MODULES` (default: all built-in).
  *
  * Usage: bun scripts/verify-openapi.ts
  */
@@ -29,8 +29,8 @@ import { collectModuleOpenApi } from "./lib/module-openapi.ts";
 // ---------------------------------------------------------------------------
 //
 // Discovery scans `apps/api/src/modules/*/index.ts` — no hardcoded list.
-// External modules (e.g. @appstrate/cloud) are not validated here; they're
-// loaded at runtime via APPSTRATE_MODULES and can't be imported without full boot.
+// External modules (npm-published) are not validated here; they're
+// loaded at runtime via MODULES and can't be imported without full boot.
 
 const {
   paths: modulePaths,
@@ -279,6 +279,8 @@ const expectedEndpoints = [
   "PUT /api/notifications/read/{runId}",
   "PUT /api/notifications/read-all",
   "GET /api/runs",
+  "POST /api/runs/inline",
+  "POST /api/runs/inline/validate",
 
   // Packages
   "POST /api/packages/import",
@@ -315,6 +317,10 @@ const expectedEndpoints = [
   "GET /api/end-users/{id}",
   "PATCH /api/end-users/{id}",
   "DELETE /api/end-users/{id}",
+
+  // Uploads
+  "POST /api/uploads",
+  "PUT /api/uploads/_content",
 ];
 
 // Module-contributed endpoints are sourced directly from each module's
@@ -422,7 +428,26 @@ try {
     return value;
   });
   const source = JSON.stringify(strippedSpec, null, 2);
-  const problems = await lintFromString({ source, config });
+  const rawProblems = await lintFromString({ source, config });
+
+  // Allow-list: individual (ruleId, pointer) pairs that are intentional
+  // deviations from best practice. Prefer keeping rules globally ON and
+  // listing narrow exceptions here so any NEW violation still surfaces.
+  // Format: `${ruleId}@${pointer}`.
+  const LINT_ALLOWLIST = new Set<string>([
+    // OIDC device-flow entry form follows Post-Redirect-Get: happy path
+    // is 303 to `GET /activate?user_code=...`, error paths re-render HTML
+    // with 400/403. Redocly's `operation-2xx-response` rule doesn't
+    // treat 3xx as success, but a 2xx here would be a lie — the endpoint
+    // never returns content directly. This exception is intentional and
+    // scoped to POST /activate only; all other routes must still have a
+    // 2xx response.
+    "operation-2xx-response@#/paths/~1activate/post/responses",
+  ]);
+  const problems = rawProblems.filter((p) => {
+    const pointer = p.location?.[0]?.pointer ?? "";
+    return !LINT_ALLOWLIST.has(`${p.ruleId}@${pointer}`);
+  });
 
   const errors = problems.filter((p) => p.severity === "error");
   const warnings = problems.filter((p) => p.severity === "warn");
