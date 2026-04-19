@@ -209,32 +209,33 @@ appstrate api https://app.example.com/api/health  # absolute URL ok if origin ma
 
 Every row below is a direct drop-in: an agent can replace `curl` with `appstrate api` and strip the hostname. All flags work identically.
 
-| curl                           | `appstrate api`                      | Notes                                             |
-| ------------------------------ | ------------------------------------ | ------------------------------------------------- |
-| `curl https://app/api/x`       | `appstrate api /api/x`               | method defaults to GET                            |
-| `curl -X POST -d @body …`      | `appstrate api POST /api/x -d @body` | literal `/ @file / @-` for stdin                  |
-| `curl -F 'file=@pkg.zip'`      | `appstrate api -F 'file=@pkg.zip'`   | `;type=mime` supported                            |
-| `curl -H 'X-Foo: bar'`         | `appstrate api -H 'X-Foo: bar'`      | repeatable; wins over defaults                    |
-| `curl -G --data-urlencode k=v` | `appstrate api /x -G -d 'k=v'`       | splits on `&`, URL-encodes                        |
-| `curl -T file`                 | `appstrate api -T file /x`           | PUT by default; `-T -` for stdin                  |
-| `curl -i`                      | `appstrate api -i`                   | status line + headers on stdout                   |
-| `curl -I`                      | `appstrate api -I`                   | HEAD only                                         |
-| `curl -L`                      | `appstrate api -L`                   | cross-origin hops strip `Authorization`           |
-| `curl -k`                      | `appstrate api -k`                   | skip TLS verification (this request)              |
-| `curl -o out`                  | `appstrate api -o out`               | body → file                                       |
-| `curl -s` / `-sS`              | `appstrate api -s` / `-sS`           | silence / silence-but-errors                      |
-| `curl -f` / `--fail-with-body` | same                                 | `-f` suppresses body; `--fail-with-body` keeps it |
-| `curl -v`                      | `appstrate api -v`                   | `Authorization` always `[REDACTED]`               |
-| `curl -w '%{http_code}\n'`     | `appstrate api -w '%{http_code}\n'`  | see write-out vars below                          |
-| `curl --connect-timeout N`     | `appstrate api --connect-timeout N`  | exit 28 on timeout                                |
-| `curl --max-time N`            | `appstrate api --max-time N`         | exit 28                                           |
-| `curl --retry N`               | `appstrate api --retry N`            | 408/429/5xx; exp. backoff; Retry-After honored    |
-| `curl --retry-connrefused`     | same                                 | off by default (matches curl)                     |
-| `curl --compressed`            | `appstrate api --compressed`         | advertise gzip/deflate/br                         |
-| `curl -r 0-1023`               | `appstrate api -r 0-1023`            | `Range: bytes=…`                                  |
-| `curl -A 'UA'`                 | `appstrate api -A 'UA'`              | shortcut; `-H` still wins                         |
-| `curl -e https://ref`          | `appstrate api -e https://ref`       | Referer shortcut                                  |
-| `curl -b 'k=v'`                | `appstrate api -b 'k=v'`             | literal only; cookie-jar files rejected           |
+| curl                            | `appstrate api`                       | Notes                                             |
+| ------------------------------- | ------------------------------------- | ------------------------------------------------- |
+| `curl https://app/api/x`        | `appstrate api /api/x`                | method defaults to GET                            |
+| `curl -X POST -d @body …`       | `appstrate api POST /api/x -d @body`  | literal `/ @file / @-` for stdin                  |
+| `curl -F 'file=@pkg.zip'`       | `appstrate api -F 'file=@pkg.zip'`    | `;type=mime` supported                            |
+| `curl -H 'X-Foo: bar'`          | `appstrate api -H 'X-Foo: bar'`       | repeatable; wins over defaults                    |
+| `curl --data-urlencode 'k=v w'` | same                                  | repeatable; 5 curl forms incl. `@file` / `@-`     |
+| `curl -G --data-urlencode …`    | `appstrate api -G --data-urlencode …` | `-G` projects values into the query string        |
+| `curl -T file`                  | `appstrate api -T file /x`            | PUT by default; `-T -` for stdin                  |
+| `curl -i`                       | `appstrate api -i`                    | status line + headers on stdout                   |
+| `curl -I`                       | `appstrate api -I`                    | HEAD only                                         |
+| `curl -L`                       | `appstrate api -L`                    | cross-origin hops strip `Authorization`           |
+| `curl -k`                       | `appstrate api -k`                    | skip TLS verification (this request)              |
+| `curl -o out`                   | `appstrate api -o out`                | body → file                                       |
+| `curl -s` / `-sS`               | `appstrate api -s` / `-sS`            | silence / silence-but-errors                      |
+| `curl -f` / `--fail-with-body`  | same                                  | `-f` suppresses body; `--fail-with-body` keeps it |
+| `curl -v`                       | `appstrate api -v`                    | `Authorization` always `[REDACTED]`               |
+| `curl -w '%{http_code}\n'`      | `appstrate api -w '%{http_code}\n'`   | see write-out vars below                          |
+| `curl --connect-timeout N`      | `appstrate api --connect-timeout N`   | exit 28 on timeout                                |
+| `curl --max-time N`             | `appstrate api --max-time N`          | exit 28                                           |
+| `curl --retry N`                | `appstrate api --retry N`             | 408/429/5xx; exp. backoff; Retry-After honored    |
+| `curl --retry-connrefused`      | same                                  | off by default (matches curl)                     |
+| `curl --compressed`             | `appstrate api --compressed`          | advertise gzip/deflate/br                         |
+| `curl -r 0-1023`                | `appstrate api -r 0-1023`             | `Range: bytes=…`                                  |
+| `curl -A 'UA'`                  | `appstrate api -A 'UA'`               | shortcut; `-H` still wins                         |
+| `curl -e https://ref`           | `appstrate api -e https://ref`        | Referer shortcut                                  |
+| `curl -b 'k=v'`                 | `appstrate api -b 'k=v'`              | literal only; cookie-jar files rejected           |
 
 #### Write-out variables (`-w`)
 
@@ -273,7 +274,15 @@ Subset of curl's format string. Unknown variables pass through verbatim; `\n \r 
 - **No `-u / --user`**: the whole point is that agents never see the bearer. Use `-H Authorization: …` if you really need to override (it's still `[REDACTED]` under `-v`).
 - **Cross-origin `<url>` refused**: the bearer must not leave the profile's instance. Explicit exit 2 with a pointer at plain `curl`.
 - **Cookie jars rejected**: `-b file.txt` is refused (exit 2). An attacker-controlled path would otherwise silently end up in the Cookie header.
-- **`%{http_version}` always reports `1.1`**: Web fetch doesn't expose the negotiated protocol. All other variables are accurate.
+- **No default `Content-Type`**: `-d` / `--data-urlencode` don't auto-set `application/x-www-form-urlencoded` the way curl does. Add `-H 'Content-Type: …'` explicitly when the server expects it (avoids corrupting multipart / binary payloads elsewhere in the API).
+
+#### Behavioral divergences worth knowing
+
+- **`%{http_version}` always reports `1.1`**: Web fetch doesn't expose the negotiated protocol. All other `-w` variables are accurate.
+- **`%{header_json}` emits lowercase header names**: WHATWG fetch normalizes response header casing; curl preserves the wire casing. Parsers that key on lowercase are unaffected; case-sensitive parsers need adjustment.
+- **`--connect-timeout` is wall-clock, not per-attempt under `--retry`**: the timer starts once at the first fetch and aborts the whole run if response headers haven't arrived. curl resets it per attempt. In practice this only differs when the first attempt partially succeeds then fails mid-body (rare); retries on DNS / network errors that never touch the socket are unaffected.
+- **`--retry` disabled automatically on stdin bodies**: `-d @-`, `-T -`, `--data-urlencode @-` can't be replayed after the stream is consumed. The CLI warns on stderr and falls back to a single attempt instead of silently replaying an empty body.
+- **`Retry-After` delta-seconds values capped at 1 hour**: server-suggested delays above 3600 seconds are ignored and fall back to exponential backoff. A hostile / misconfigured origin can't stall a CI job overnight.
 
 ## Profiles
 
