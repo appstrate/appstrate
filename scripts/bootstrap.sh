@@ -252,7 +252,15 @@ _appstrate_bootstrap() {
   # shell) with no prompt ever shown. Redirecting stdin to /dev/tty is
   # the same pattern used by rustup-init, bun, deno, and Homebrew. The
   # `$@` forwarding is preserved — redirections come before argv.
-  if [ -e /dev/tty ] && [ -r /dev/tty ]; then
+  #
+  # Detection: `[ -r /dev/tty ]` only checks permission bits (world-
+  # readable on Linux: `crw-rw-rw-`), not whether this process has a
+  # controlling terminal. In CI / command substitutions the permission
+  # check passes but `open("/dev/tty")` still returns ENXIO, which would
+  # make the `exec </dev/tty …` below fail and kill the install. So we
+  # *actually* try to open /dev/tty in a subshell — if that succeeds,
+  # the redirect on the real exec will succeed too.
+  if (exec </dev/tty) >/dev/null 2>&1; then
     exec </dev/tty "$DEST" install "$@"
   else
     # No controlling terminal (CI, Dockerfile `RUN curl | bash`, cron).
