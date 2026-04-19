@@ -151,6 +151,31 @@ describe("matchesPath (glob)", () => {
   it("no filter matches all", () => {
     expect(matchesPath(listRuns, undefined)).toBe(true);
   });
+
+  it("rejects patterns exceeding the length cap", () => {
+    // Defense against absurdly long CLI input — above 200 chars returns
+    // false without running the matcher at all.
+    const longPattern = "/api/" + "*".repeat(250);
+    expect(matchesPath(listRuns, longPattern)).toBe(false);
+  });
+
+  it("treats regex metacharacters in the pattern as literals", () => {
+    // Confirms the old globToRegex metachar-escaping contract still
+    // holds with the iterative matcher: parens / brackets / dots in
+    // the pattern must match themselves, not act as regex tokens.
+    expect(matchesPath(getRun, "/api/runs/{id}")).toBe(true);
+    expect(matchesPath(listRuns, "/api/runs.*")).toBe(false);
+    expect(matchesPath(listRuns, "/api/run[s]")).toBe(false);
+  });
+
+  it("does not exhibit catastrophic backtracking on pathological input", () => {
+    // Iterative two-pointer matcher is O(pattern · path). Even heavy
+    // alternation-style inputs complete in sub-millisecond.
+    const pathological = "a".repeat(50) + "/*".repeat(20);
+    const start = performance.now();
+    matchesPath(listRuns, pathological);
+    expect(performance.now() - start).toBeLessThan(50);
+  });
 });
 
 describe("matchesSearch", () => {

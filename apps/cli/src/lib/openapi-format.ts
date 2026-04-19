@@ -120,49 +120,79 @@ export function matchesMethod(entry: OperationEntry, method: string | undefined)
   return entry.method.toLowerCase() === method.toLowerCase();
 }
 
+/** Hard cap on pattern length — guards against absurdly long CLI input. */
+const GLOB_MAX_LENGTH = 200;
+
 /**
- * Path glob matcher — supports `*` (single segment) and `**` (any
- * number of segments). No regex characters are exposed beyond that;
- * the caller can pass plain prefixes (`/api/runs`) or explicit globs
- * (`/api/runs/*`). A bare path (no glob char) matches only exactly —
- * this is the principle-of-least-surprise behavior tested by e.g.
- * `--path /api/runs` not accidentally matching `/api/runs/cancel`.
+ * Path glob matcher — supports `*` (single segment, no `/`) and `**`
+ * (any number of chars including `/`). No regex compilation: an
+ * iterative two-pointer matcher with a single backtrack anchor runs in
+ * O(pattern · path) and is inherently ReDoS-safe. We previously used
+ * `new RegExp()` built from user input, which CodeQL flagged as
+ * regex-injection even though every metacharacter was escaped —
+ * replaced to remove both the false-positive and any residual concern.
+ *
+ * A bare path (no glob char) matches only exactly — principle of least
+ * surprise so `--path /api/runs` doesn't accidentally pick up
+ * `/api/runs/cancel`.
  */
 export function matchesPath(entry: OperationEntry, pattern: string | undefined): boolean {
   if (!pattern) return true;
   if (!pattern.includes("*")) {
     return entry.path === pattern;
   }
-  const regex = globToRegex(pattern);
-  return regex.test(entry.path);
+  if (pattern.length > GLOB_MAX_LENGTH) return false;
+  return matchGlob(pattern, entry.path);
 }
 
-function globToRegex(pattern: string): RegExp {
-  // Escape everything that isn't `*`, then re-expand glob tokens.
-  // Order matters: `**` → `.*` FIRST so we don't double-expand the
-  // inner `*`. `{` / `}` are also escaped (no brace expansion support).
-  let out = "";
-  let i = 0;
-  while (i < pattern.length) {
-    const c = pattern[i]!;
-    if (c === "*") {
-      if (pattern[i + 1] === "*") {
-        out += ".*";
-        i += 2;
+/**
+ * Iterative glob matcher. Single backtrack anchor (`starPi` / `starSi`)
+ * remembers the last `*` position so a mismatch can extend the star's
+ * consumption by one char and retry. For `**` the matcher allows `/`
+ * to be consumed; for `*` a `/` at the extension boundary aborts the
+ * backtrack. Worst-case O(pattern · path), no recursion, no regex.
+ */
+function matchGlob(pattern: string, path: string): boolean {
+  let pi = 0;
+  let si = 0;
+  let starPi = -1;
+  let starSi = -1;
+  let starIsDouble = false;
+
+  while (si < path.length) {
+    if (pi < pattern.length && pattern[pi] === "*") {
+      if (pattern[pi + 1] === "*") {
+        starIsDouble = true;
+        pi += 2;
       } else {
-        out += "[^/]*";
-        i += 1;
+        starIsDouble = false;
+        pi += 1;
       }
+      starPi = pi;
+      starSi = si;
       continue;
     }
-    if (/[.+?^${}()|[\]\\]/.test(c)) {
-      out += `\\${c}`;
-    } else {
-      out += c;
+    if (pi < pattern.length && pattern[pi] === path[si]) {
+      pi += 1;
+      si += 1;
+      continue;
     }
-    i += 1;
+    if (starPi !== -1) {
+      // Extend the star's consumption by one char. For single `*`, the
+      // consumed char cannot be `/` — segment boundary.
+      if (!starIsDouble && path[starSi] === "/") {
+        return false;
+      }
+      starSi += 1;
+      si = starSi;
+      pi = starPi;
+      continue;
+    }
+    return false;
   }
-  return new RegExp(`^${out}$`);
+  // Trailing stars in the pattern still match the empty suffix.
+  while (pi < pattern.length && pattern[pi] === "*") pi += 1;
+  return pi === pattern.length;
 }
 
 /**

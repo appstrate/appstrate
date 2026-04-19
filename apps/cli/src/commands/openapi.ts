@@ -135,17 +135,21 @@ export async function openapiShowCommand(
       return;
     }
     // Dereference $refs so parameter/request/response schemas are
-    // inlined. SwaggerParser mutates a copy; we feed it the doc and
-    // it returns the dereferenced tree. Failures fall back to the raw
+    // inlined. SwaggerParser mutates its input in place, which would
+    // corrupt our pristine `doc` (and therefore `entry`) — and for
+    // self-referential schemas, inlining produces real JS cycles that
+    // later break JSON.stringify. Clone first so `entry` stays safe
+    // regardless of what happens below. Failures fall back to the raw
     // operation (the summary renderer handles $ref stubs gracefully).
     let dereferenced: OpenApiDocument = doc;
     try {
+      const clone = JSON.parse(JSON.stringify(doc)) as OpenApiDocument;
       // SwaggerParser.dereference accepts `string | OpenAPI.Document`;
       // we pass our own narrower OpenApiDocument through `unknown` to
       // satisfy its openapi-types signature without pulling the
       // openapi-types package into our type surface.
       const result = (await SwaggerParser.dereference(
-        doc as unknown as Parameters<typeof SwaggerParser.dereference>[0],
+        clone as unknown as Parameters<typeof SwaggerParser.dereference>[0],
       )) as unknown;
       if (result && typeof result === "object") {
         dereferenced = result as OpenApiDocument;
@@ -158,17 +162,34 @@ export async function openapiShowCommand(
     const derefEntry = findOperation(dereferenced, identifier, pathArg) ?? entry;
 
     if (opts.json) {
-      process.stdout.write(
-        JSON.stringify(
+      // Dereferenced operations can contain mutually-recursive $refs
+      // (e.g. a Category schema that contains Category children).
+      // `SwaggerParser.dereference` inlines them into real cycles,
+      // which `JSON.stringify` would throw on. Fall back to the raw
+      // (non-dereferenced) entry so the user still gets a usable JSON
+      // shape rather than a crash.
+      const payload = {
+        method: derefEntry.method.toUpperCase(),
+        path: derefEntry.path,
+        operation: derefEntry.op,
+      };
+      let serialized: string;
+      try {
+        serialized = JSON.stringify(payload, null, 2);
+      } catch {
+        serialized = JSON.stringify(
           {
-            method: derefEntry.method.toUpperCase(),
-            path: derefEntry.path,
-            operation: derefEntry.op,
+            method: entry.method.toUpperCase(),
+            path: entry.path,
+            operation: entry.op,
+            _warning:
+              "Dereferenced schema contained circular references; returning non-dereferenced operation.",
           },
           null,
           2,
-        ) + "\n",
-      );
+        );
+      }
+      process.stdout.write(serialized + "\n");
       return;
     }
     process.stdout.write(formatShow(derefEntry, detectColor()));

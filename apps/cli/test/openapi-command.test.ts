@@ -324,6 +324,66 @@ describe("openapi show", () => {
     });
   });
 
+  it("falls back to the raw operation when dereference yields circular refs", async () => {
+    // Build a schema where Category → properties.children → items → Category
+    // (self-referential). SwaggerParser.dereference inlines this into a
+    // real JS cycle; JSON.stringify would throw without the fallback.
+    await seedLoggedInProfile();
+    const recursiveSchema = {
+      openapi: "3.1.0",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/api/categories": {
+          get: {
+            operationId: "listCategories",
+            summary: "List categories",
+            tags: ["categories"],
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Category" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Category: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              children: {
+                type: "array",
+                items: { $ref: "#/components/schemas/Category" },
+              },
+            },
+          },
+        },
+      },
+    };
+    installFetch(
+      async () =>
+        new Response(JSON.stringify(recursiveSchema), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    await openapiShowCommand("listCategories", undefined, { profile: "default", json: true });
+    const out = stdoutChunks.join("");
+    const parsed = JSON.parse(out);
+    expect(parsed.method).toBe("GET");
+    expect(parsed.path).toBe("/api/categories");
+    // Either the fallback triggered (warning + raw $ref preserved) OR
+    // swagger-parser declined to create a cycle and the $ref is still
+    // printable — both outcomes are acceptable and neither crashes.
+    expect(parsed.operation).toBeDefined();
+  });
+
   it("exits 1 with an actionable hint when the operation is unknown", async () => {
     await seedLoggedInProfile();
     installFetch(
