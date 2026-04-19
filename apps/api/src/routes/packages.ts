@@ -501,7 +501,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       // Auto-install in the current application (non-fatal)
       const applicationId = c.get("applicationId");
       if (applicationId) {
-        await installPackage(applicationId, orgId, packageId).catch((e: unknown) =>
+        await installPackage({ orgId, applicationId }, packageId).catch((e: unknown) =>
           logger.debug("auto-install skipped", { packageId, applicationId, err: String(e) }),
         );
       }
@@ -605,7 +605,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     // Auto-install in the current application (non-fatal)
     const applicationId = c.get("applicationId");
     if (applicationId) {
-      await installPackage(applicationId, orgId, item.id).catch((e: unknown) =>
+      await installPackage({ orgId, applicationId }, item.id).catch((e: unknown) =>
         logger.debug("auto-install skipped", { packageId: item.id, applicationId, err: String(e) }),
       );
     }
@@ -646,7 +646,7 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     }
 
     // Enforce app-level access: all apps can only access installed packages
-    if (!(await hasPackageAccess(applicationId, itemId))) {
+    if (!(await hasPackageAccess({ orgId, applicationId }, itemId))) {
       throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
     }
 
@@ -1194,7 +1194,7 @@ export function createPackagesRouter() {
     // Auto-install the forked package in the current application (non-fatal)
     const applicationId = c.get("applicationId");
     if (applicationId) {
-      await installPackage(applicationId, orgId, result.packageId).catch((e: unknown) =>
+      await installPackage({ orgId, applicationId }, result.packageId).catch((e: unknown) =>
         logger.debug("auto-install skipped", {
           packageId: result.packageId,
           applicationId,
@@ -1390,7 +1390,7 @@ export function createPackagesRouter() {
     // Auto-install in the current application (non-fatal, skip if already installed)
     const applicationId = c.get("applicationId");
     if (applicationId) {
-      await installPackage(applicationId, orgId, packageId).catch((e: unknown) =>
+      await installPackage({ orgId, applicationId }, packageId).catch((e: unknown) =>
         logger.debug("auto-install skipped", { packageId, applicationId, err: String(e) }),
       );
     }

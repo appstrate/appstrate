@@ -120,12 +120,12 @@ describe("scheduler app-profile readiness", () => {
       },
     });
 
-    await createSchedule(agent.id, appProfile.id, orgId, defaultAppId, {
+    await createSchedule({ orgId: orgId, applicationId: defaultAppId }, agent.id, appProfile.id, {
       name: "App Bound Schedule",
       cronExpression: "0 * * * *",
     });
 
-    const schedules = await listSchedules(orgId, defaultAppId);
+    const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
     const s = schedules.find((s) => s.name === "App Bound Schedule")!;
 
     expect(s.profileType).toBe("app");
@@ -155,12 +155,12 @@ describe("scheduler app-profile readiness", () => {
       },
     });
 
-    await createSchedule(agent.id, appProfile.id, orgId, defaultAppId, {
+    await createSchedule({ orgId: orgId, applicationId: defaultAppId }, agent.id, appProfile.id, {
       name: "App Unbound Schedule",
       cronExpression: "0 * * * *",
     });
 
-    const schedules = await listSchedules(orgId, defaultAppId);
+    const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
     const s = schedules.find((s) => s.name === "App Unbound Schedule")!;
 
     expect(s.profileType).toBe("app");

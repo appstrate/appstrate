@@ -31,6 +31,7 @@ import {
   getBindingOwner,
 } from "../services/state/index.ts";
 import { getActor } from "../lib/actor.ts";
+import { getAppScope } from "../lib/scope.ts";
 
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { listConnections, listProviderCredentialIds } from "@appstrate/connect";
@@ -41,8 +42,8 @@ export const bindAppProfileSchema = z.object({
   sourceProfileId: z.uuid(),
 });
 
-async function requireAppProfile(profileId: string, applicationId: string) {
-  const profile = await getAppProfile(profileId, applicationId);
+async function requireAppProfile(scope: import("../lib/scope.ts").AppScope, profileId: string) {
+  const profile = await getAppProfile(scope, profileId);
   if (!profile) throw notFound("Profile not found");
   return profile;
 }
@@ -67,63 +68,71 @@ export function createAppProfilesRouter() {
 
   // GET /api/app-profiles/my-bindings — list app profiles where current user has bindings
   router.get("/my-bindings", async (c) => {
+    const scope = getAppScope(c);
     const userId = c.get("user").id;
-    const applicationId = c.get("applicationId");
-    const profiles = await listAppProfilesWithUserBindings(userId, applicationId);
+    const profiles = await listAppProfilesWithUserBindings(scope, userId);
     return c.json({ profiles });
   });
 
   // GET /api/app-profiles — list app profiles
   router.get("/", async (c) => {
-    const applicationId = c.get("applicationId");
-    const profiles = await listAppProfiles(applicationId);
+    const scope = getAppScope(c);
+    const profiles = await listAppProfiles(scope);
     return c.json({ profiles });
   });
 
   // POST /api/app-profiles — create an app profile
   router.post("/", rateLimit(10), requirePermission("app-profiles", "write"), async (c) => {
-    const applicationId = c.get("applicationId");
+    const scope = getAppScope(c);
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
-    const profile = await createAppProfile(applicationId, data.name.trim());
+    const profile = await createAppProfile(scope, data.name.trim());
     return c.json({ profile }, 201);
   });
 
   // PUT /api/app-profiles/:id — rename an app profile
   router.put("/:id", requirePermission("app-profiles", "write"), async (c) => {
-    const applicationId = c.get("applicationId");
+    const scope = getAppScope(c);
     const profileId = c.req.param("id")!;
     const body = await c.req.json();
     const data = parseBody(profileNameSchema, body, "name");
     try {
-      await renameAppProfile(profileId, applicationId, data.name.trim());
+      await renameAppProfile(scope, profileId, data.name.trim());
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to rename profile";
-      logger.warn("Failed to rename app profile", { profileId, applicationId, error: message });
+      logger.warn("Failed to rename app profile", {
+        profileId,
+        applicationId: scope.applicationId,
+        error: message,
+      });
       throw invalidRequest(message);
     }
   });
 
   // DELETE /api/app-profiles/:id — delete an app profile
   router.delete("/:id", requirePermission("app-profiles", "delete"), async (c) => {
-    const applicationId = c.get("applicationId");
+    const scope = getAppScope(c);
     const profileId = c.req.param("id")!;
     try {
-      await deleteAppProfile(profileId, applicationId);
+      await deleteAppProfile(scope, profileId);
       return c.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete profile";
-      logger.warn("Failed to delete app profile", { profileId, applicationId, error: message });
+      logger.warn("Failed to delete app profile", {
+        profileId,
+        applicationId: scope.applicationId,
+        error: message,
+      });
       throw invalidRequest(message);
     }
   });
 
   // GET /api/app-profiles/:id/agents — list agents using this app profile
   router.get("/:id/agents", async (c) => {
-    const applicationId = c.get("applicationId");
+    const scope = getAppScope(c);
     const profileId = c.req.param("id")!;
-    await requireAppProfile(profileId, applicationId);
+    await requireAppProfile(scope, profileId);
 
     const rows = await db
       .select({
@@ -139,20 +148,19 @@ export function createAppProfilesRouter() {
 
   // GET /api/app-profiles/:id/bindings — list provider bindings for an app profile
   router.get("/:id/bindings", async (c) => {
-    const applicationId = c.get("applicationId");
+    const scope = getAppScope(c);
     const profileId = c.req.param("id")!;
-    await requireAppProfile(profileId, applicationId);
-    const bindings = await getAppProfileBindingsEnriched(profileId, applicationId);
+    await requireAppProfile(scope, profileId);
+    const bindings = await getAppProfileBindingsEnriched(profileId, scope.applicationId);
     return c.json({ bindings });
   });
 
   // POST /api/app-profiles/:id/bind — bind a provider to a user's connection
   router.post("/:id/bind", rateLimit(10), requirePermission("app-profiles", "bind"), async (c) => {
-    const applicationId = c.get("applicationId");
-    const orgId = c.get("orgId");
+    const scope = getAppScope(c);
     const userId = c.get("user").id;
     const profileId = c.req.param("id")!;
-    await requireAppProfile(profileId, applicationId);
+    await requireAppProfile(scope, profileId);
 
     const body = await c.req.json();
     const data = parseBody(bindAppProfileSchema, body);
@@ -177,8 +185,8 @@ export function createAppProfilesRouter() {
     const connected = await hasActiveConnection(
       data.providerId,
       data.sourceProfileId,
-      orgId,
-      applicationId,
+      scope.orgId,
+      scope.applicationId,
     );
     if (!connected) {
       throw invalidRequest(
@@ -195,11 +203,11 @@ export function createAppProfilesRouter() {
     "/:id/bind/:providerScope{@[^/]+}/:providerName",
     requirePermission("app-profiles", "bind"),
     async (c) => {
-      const applicationId = c.get("applicationId");
+      const scope = getAppScope(c);
       const userId = c.get("user").id;
       const profileId = c.req.param("id")!;
       const providerId = `${c.req.param("providerScope")}/${c.req.param("providerName")}`;
-      await requireAppProfile(profileId, applicationId);
+      await requireAppProfile(scope, profileId);
 
       // Ownership check: can't unbind another user's binding without app-profiles:write
       const existingOwner = await getBindingOwner(profileId, providerId);
@@ -217,21 +225,20 @@ export function createAppProfilesRouter() {
 
   // GET /api/app-profiles/:id/connections — list connections for a profile
   router.get("/:id/connections", async (c) => {
+    const scope = getAppScope(c);
     const actor = getActor(c);
     const profileId = c.req.param("id")!;
-    const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
     // Allow access if: own profile, app profile, or profile of another org member (read-only view)
     const profile =
       (await getProfileForActor(profileId, actor)) ??
-      (await getAppProfile(profileId, applicationId)) ??
-      (await getOrgMemberProfile(profileId, orgId));
+      (await getAppProfile(scope, profileId)) ??
+      (await getOrgMemberProfile(profileId, scope.orgId));
     if (!profile) {
       throw notFound("Profile not found");
     }
     // Scope connections to the application's credentials
-    const credentialIds = applicationId ? await listProviderCredentialIds(db, applicationId) : [];
-    const rawConnections = await listConnections(db, profileId, orgId, credentialIds);
+    const credentialIds = await listProviderCredentialIds(db, scope.applicationId);
+    const rawConnections = await listConnections(db, profileId, scope.orgId, credentialIds);
     // Strip sensitive fields — never expose encrypted credentials to the client
     const connections = rawConnections.map(
       ({ credentialsEncrypted: _ce, providerCredentialId: _pc, expiresAt: _ex, ...c }) => c,

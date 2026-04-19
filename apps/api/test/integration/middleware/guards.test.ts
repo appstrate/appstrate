@@ -24,7 +24,10 @@ describe("requireAgent (via agent config route)", () => {
 
   it("loads agent when it exists", async () => {
     await seedPackage({ id: "@testorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage(ctx.defaultAppId, ctx.orgId, "@testorg/my-agent");
+    await installPackage(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      "@testorg/my-agent",
+    );
 
     const res = await app.request("/api/agents/@testorg/my-agent/config", {
       method: "PUT",
@@ -54,7 +57,10 @@ describe("requireMutableAgent (via agent skills route)", () => {
 
   it("allows modification of local agent with no running runs", async () => {
     await seedPackage({ id: "@testorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage(ctx.defaultAppId, ctx.orgId, "@testorg/my-agent");
+    await installPackage(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      "@testorg/my-agent",
+    );
 
     const res = await app.request("/api/agents/@testorg/my-agent/skills", {
       method: "PUT",
@@ -66,7 +72,10 @@ describe("requireMutableAgent (via agent skills route)", () => {
 
   it("rejects modification of agent with running runs (409)", async () => {
     await seedPackage({ id: "@testorg/busy-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage(ctx.defaultAppId, ctx.orgId, "@testorg/busy-agent");
+    await installPackage(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      "@testorg/busy-agent",
+    );
 
     await seedRun({
       packageId: "@testorg/busy-agent",

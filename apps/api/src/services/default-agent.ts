@@ -67,7 +67,7 @@ export async function provisionDefaultAgentForOrg(
     );
 
     // Install in the default app so it's visible immediately
-    await installPackage(defaultAppId, orgId, packageId).catch((e: unknown) =>
+    await installPackage({ orgId, applicationId: defaultAppId }, packageId).catch((e: unknown) =>
       logger.warn("Failed to auto-install hello-world in default app", {
         packageId,
         defaultAppId,

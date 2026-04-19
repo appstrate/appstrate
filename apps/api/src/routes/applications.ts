@@ -208,8 +208,9 @@ export function createApplicationsRouter() {
   // GET /api/applications/:appId/packages — list installed packages
   router.get("/:appId/packages", async (c) => {
     const appId = c.req.param("appId")!;
+    const orgId = c.get("orgId");
     const type = c.req.query("type") as PackageType | undefined;
-    const rows = await listInstalledPackages(appId, type);
+    const rows = await listInstalledPackages({ orgId, applicationId: appId }, type);
     return c.json({
       object: "list",
       data: rows.map((row) => ({ object: "application_package", ...row })),
@@ -224,15 +225,16 @@ export function createApplicationsRouter() {
     const body = await c.req.json();
     const data = parseBody(installPackageSchema, body);
 
-    const row = await installPackage(appId, orgId, data.packageId, data.config);
+    const row = await installPackage({ orgId, applicationId: appId }, data.packageId, data.config);
     return c.json({ object: "application_package", ...row }, 201);
   });
 
   // GET /api/applications/:appId/packages/:packageId — get installed package detail
   router.get("/:appId/packages/:scope{@[^/]+}/:name", async (c) => {
     const appId = c.req.param("appId")!;
+    const orgId = c.get("orgId");
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-    const row = await getInstalledPackage(appId, packageId);
+    const row = await getInstalledPackage({ orgId, applicationId: appId }, packageId);
     if (!row) {
       throw new ApiError({
         status: 404,
@@ -250,12 +252,14 @@ export function createApplicationsRouter() {
     requirePermission("applications", "write"),
     async (c) => {
       const appId = c.req.param("appId")!;
+      const orgId = c.get("orgId");
+      const scope = { orgId, applicationId: appId };
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
       const body = await c.req.json();
       const data = parseBody(updatePackageSchema, body);
 
-      await updateInstalledPackage(appId, packageId, data);
-      const updated = await getInstalledPackage(appId, packageId);
+      await updateInstalledPackage(scope, packageId, data);
+      const updated = await getInstalledPackage(scope, packageId);
       return c.json({ object: "application_package", ...updated });
     },
   );
@@ -266,8 +270,9 @@ export function createApplicationsRouter() {
     requirePermission("applications", "write"),
     async (c) => {
       const appId = c.req.param("appId")!;
+      const orgId = c.get("orgId");
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-      await uninstallPackage(appId, packageId);
+      await uninstallPackage({ orgId, applicationId: appId }, packageId);
       return c.body(null, 204);
     },
   );

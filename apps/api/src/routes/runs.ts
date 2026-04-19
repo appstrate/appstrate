@@ -472,7 +472,7 @@ export function createRunsRouter() {
       // Resolve app profile, actor profile context, and input in parallel
       const [agentAppProfile, { defaultUserProfileId, userProviderOverrides }, inputResult] =
         await Promise.all([
-          getAgentAppProfile(c.get("applicationId"), packageId),
+          getAgentAppProfile({ orgId, applicationId: c.get("applicationId")! }, packageId),
           resolveActorProfileContext(actor, packageId),
           parseRequestInput(
             c,

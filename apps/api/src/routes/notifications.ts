@@ -14,39 +14,41 @@ import {
   type GlobalRunKind,
 } from "../services/state/index.ts";
 import { invalidRequest } from "../lib/errors.ts";
+import { getAppScope } from "../lib/scope.ts";
+
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/notifications/unread-count
   router.get("/notifications/unread-count", async (c) => {
     const actor = getActor(c);
-    const orgId = c.get("orgId");
-    const count = await getUnreadNotificationCount(actor.id, orgId, c.get("applicationId"));
+    const scope = getAppScope(c);
+    const count = await getUnreadNotificationCount(scope, actor.id);
     return c.json({ count });
   });
 
   // GET /api/notifications/unread-counts-by-agent
   router.get("/notifications/unread-counts-by-agent", async (c) => {
     const actor = getActor(c);
-    const orgId = c.get("orgId");
-    const counts = await getUnreadCountsByAgent(actor.id, orgId, c.get("applicationId"));
+    const scope = getAppScope(c);
+    const counts = await getUnreadCountsByAgent(scope, actor.id);
     return c.json({ counts });
   });
 
   // PUT /api/notifications/read/:runId
   router.put("/notifications/read/:runId", async (c) => {
     const actor = getActor(c);
-    const orgId = c.get("orgId");
+    const scope = getAppScope(c);
     const runId = c.req.param("runId");
-    const ok = await markNotificationRead(runId, actor.id, orgId, c.get("applicationId"));
+    const ok = await markNotificationRead(scope, runId, actor.id);
     return c.json({ ok });
   });
 
   // PUT /api/notifications/read-all
   router.put("/notifications/read-all", async (c) => {
     const actor = getActor(c);
-    const orgId = c.get("orgId");
-    const updated = await markAllNotificationsRead(actor.id, orgId, c.get("applicationId"));
+    const scope = getAppScope(c);
+    const updated = await markAllNotificationsRead(scope, actor.id);
     return c.json({ updated });
   });
 
@@ -75,7 +77,7 @@ export function createNotificationsRouter() {
 
     // End-users always see only their own runs — same semantic as before.
     if (userFilter === "me" || endUser) {
-      return c.json(await listUserRuns(actor.id, orgId, { limit, offset, applicationId }));
+      return c.json(await listUserRuns({ orgId, applicationId }, actor.id, { limit, offset }));
     }
 
     const rawKind = c.req.query("kind");

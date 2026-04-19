@@ -31,8 +31,8 @@ describe("Cross-app run isolation (service layer)", () => {
     appBId = appB.id;
 
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage(ctx.defaultAppId, ctx.orgId, agentId);
-    await installPackage(appBId, ctx.orgId, agentId);
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, agentId);
+    await installPackage({ orgId: ctx.orgId, applicationId: appBId }, agentId);
   });
 
   describe("getLastRunState", () => {

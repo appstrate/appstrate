@@ -41,7 +41,10 @@ describe("ephemeral filter — catalog endpoints hide inline shadows", () => {
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
     });
-    await installPackage(ctx.defaultAppId, ctx.orgId, "@ephemfilter/real-agent");
+    await installPackage(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      "@ephemfilter/real-agent",
+    );
 
     // Seed a shadow package that MUST be invisible.
     await insertShadowPackage({
@@ -86,7 +89,9 @@ describe("ephemeral filter — catalog endpoints hide inline shadows", () => {
     const [shadow] = await db.select().from(packages).where(eq(packages.ephemeral, true));
     expect(shadow).toBeDefined();
 
-    await expect(installPackage(ctx.defaultAppId, ctx.orgId, shadow!.id)).rejects.toMatchObject({
+    await expect(
+      installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, shadow!.id),
+    ).rejects.toMatchObject({
       status: 404,
     });
   });

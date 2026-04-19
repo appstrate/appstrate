@@ -65,7 +65,7 @@ export function createConnectionsRouter() {
     const profileId = await resolveProfileId(c, actor);
 
     // Validate ownership — user can use their own profiles or app profiles
-    const profile = await getAccessibleProfile(profileId, actor, applicationId);
+    const profile = await getAccessibleProfile(profileId, actor, { orgId, applicationId });
     if (!profile) {
       throw forbidden("Cannot view connections for a profile you do not own");
     }
@@ -95,7 +95,10 @@ export function createConnectionsRouter() {
         const effectiveProfileId = profileId ?? (await resolveProfileId(c, actor));
 
         // Validate ownership — user can use their own profiles or app profiles
-        const profile = await getAccessibleProfile(effectiveProfileId, actor, applicationId);
+        const profile = await getAccessibleProfile(effectiveProfileId, actor, {
+          orgId,
+          applicationId,
+        });
         if (!profile) {
           throw forbidden("Cannot connect on a profile you do not own");
         }
@@ -136,7 +139,7 @@ export function createConnectionsRouter() {
         const profileId = data.profileId ?? (await getDefaultProfileId(actor));
 
         // Validate ownership — user can use their own profiles or app profiles
-        const ownedProfile = await getAccessibleProfile(profileId, actor, applicationId);
+        const ownedProfile = await getAccessibleProfile(profileId, actor, { orgId, applicationId });
         if (!ownedProfile) {
           throw forbidden("Cannot connect on a profile you do not own");
         }
@@ -175,7 +178,7 @@ export function createConnectionsRouter() {
         const profileId = data.profileId ?? (await getDefaultProfileId(actor));
 
         // Validate ownership — user can use their own profiles or app profiles
-        const ownedProfile = await getAccessibleProfile(profileId, actor, applicationId);
+        const ownedProfile = await getAccessibleProfile(profileId, actor, { orgId, applicationId });
         if (!ownedProfile) {
           throw forbidden("Cannot connect on a profile you do not own");
         }
@@ -258,7 +261,7 @@ export function createConnectionsRouter() {
     const profileId = await resolveProfileId(c, actor);
 
     // Validate ownership — user can use their own profiles or app profiles
-    const profile = await getAccessibleProfile(profileId, actor, applicationId);
+    const profile = await getAccessibleProfile(profileId, actor, { orgId, applicationId });
     if (!profile) {
       throw forbidden("Cannot view integrations for a profile you do not own");
     }
@@ -287,7 +290,7 @@ export function createConnectionsRouter() {
           // Validate ownership — user can use their own profiles or app profiles
           const orgId = c.get("orgId");
           const applicationId = c.get("applicationId");
-          const profile = await getAccessibleProfile(profileId, actor, applicationId);
+          const profile = await getAccessibleProfile(profileId, actor, { orgId, applicationId });
           if (!profile) {
             throw forbidden("Cannot disconnect from a profile you do not own");
           }
