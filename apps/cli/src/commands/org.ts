@@ -11,10 +11,17 @@
  *   org switch [ref]  — re-pin (interactive if no arg)
  *   org current       — print pinned org id (scripts / prompts)
  *   org create [name] — create + auto-pin
+ *
+ * Cascade invariant (issue #217): the pinned `appId` is always scoped to
+ * the pinned `orgId`. `org switch` and `org create` therefore clear the
+ * stale app pin and re-pin the new org's default application in the same
+ * atomic operation — otherwise the next `appstrate api` call would 404
+ * with "Application not found in this organization".
  */
 
-import { readConfig, resolveProfileName, setProfile, type Profile } from "../lib/config.ts";
+import { resolveActiveProfile, requireLoggedIn, updateProfile } from "../lib/config.ts";
 import { listOrgs, createOrg, resolveOrgRef, type Org } from "../lib/orgs.ts";
+import { listApplications, findDefaultApplication, type Application } from "../lib/applications.ts";
 import { askText, select, exitWithError } from "../lib/ui.ts";
 
 export interface OrgBaseOptions {
@@ -64,7 +71,7 @@ const defaultDeps: Required<OrgCommandDeps> = {
 };
 
 export async function orgListCommand(opts: OrgBaseOptions): Promise<void> {
-  const { profileName, profile } = await resolveActive(opts.profile);
+  const { profileName, profile } = await resolveActiveProfile(opts.profile);
   requireLoggedIn(profileName, profile);
 
   try {
@@ -83,7 +90,7 @@ export async function orgListCommand(opts: OrgBaseOptions): Promise<void> {
 }
 
 export async function orgCurrentCommand(opts: OrgBaseOptions): Promise<void> {
-  const { profile } = await resolveActive(opts.profile);
+  const { profile } = await resolveActiveProfile(opts.profile);
   if (!profile) {
     process.stderr.write("Not logged in. Run: appstrate login\n");
     process.exit(1);
@@ -99,7 +106,7 @@ export async function orgSwitchCommand(
   opts: OrgSwitchOptions,
   deps: OrgCommandDeps = {},
 ): Promise<void> {
-  const { profileName, profile } = await resolveActive(opts.profile);
+  const { profileName, profile } = await resolveActiveProfile(opts.profile);
   requireLoggedIn(profileName, profile);
   const picker = { ...defaultDeps, ...deps };
 
@@ -124,8 +131,15 @@ export async function orgSwitchCommand(
       chosen = picked;
     }
 
-    await setProfile(profileName, { ...profile, orgId: chosen.id });
-    process.stdout.write(`Pinned "${chosen.name}" (${chosen.id}) on profile "${profileName}".\n`);
+    // Clear the stale app pin first: it belongs to the previous org and
+    // would immediately 404 on the next app-scoped call. Re-pin the new
+    // org's default app in the same commit below.
+    await updateProfile(profileName, { orgId: chosen.id, appId: undefined });
+    const repinned = await repinAppAfterOrgChange(profileName);
+    const appSuffix = repinned ? ` / app "${repinned.name}" (${repinned.id})` : "";
+    process.stdout.write(
+      `Pinned "${chosen.name}" (${chosen.id})${appSuffix} on profile "${profileName}".\n`,
+    );
   } catch (err) {
     exitWithError(err);
   }
@@ -135,7 +149,7 @@ export async function orgCreateCommand(
   opts: OrgCreateOptions,
   deps: OrgCommandDeps = {},
 ): Promise<void> {
-  const { profileName, profile } = await resolveActive(opts.profile);
+  const { profileName, profile } = await resolveActiveProfile(opts.profile);
   requireLoggedIn(profileName, profile);
   const picker = { ...defaultDeps, ...deps };
 
@@ -155,36 +169,38 @@ export async function orgCreateCommand(
       input = prompted;
     }
     const created = await createOrg(profileName, input);
-    await setProfile(profileName, { ...profile, orgId: created.id });
+    // Server auto-provisions a default application on org creation — clear
+    // any stale app pin from the previous org and re-pin the new default.
+    await updateProfile(profileName, { orgId: created.id, appId: undefined });
+    const repinned = await repinAppAfterOrgChange(profileName);
+    const appSuffix = repinned ? ` / app "${repinned.name}" (${repinned.id})` : "";
     process.stdout.write(
-      `Created "${created.name}" (${created.id}) and pinned it on profile "${profileName}".\n`,
+      `Created "${created.name}" (${created.id})${appSuffix} and pinned it on profile "${profileName}".\n`,
     );
   } catch (err) {
     exitWithError(err);
   }
 }
 
-// ─── helpers ──────────────────────────────────────────────────────────
-
-interface Active {
-  profileName: string;
-  profile: Profile | undefined;
-}
-
-async function resolveActive(explicit: string | undefined): Promise<Active> {
-  const config = await readConfig();
-  const profileName = resolveProfileName(explicit, config);
-  return { profileName, profile: config.profiles[profileName] };
-}
-
-function requireLoggedIn(
-  profileName: string,
-  profile: Profile | undefined,
-): asserts profile is Profile {
-  if (!profile) {
-    process.stderr.write(
-      `Profile "${profileName}" not configured. Run: appstrate login --profile ${profileName}\n`,
-    );
-    process.exit(1);
+/**
+ * After the org pin changes, pick the new org's default application
+ * and pin it on the profile. Returns the pinned app, or null when there
+ * is nothing sensible to pin (no apps, or ≥2 without a default) — the
+ * command continues regardless; the user can run `app switch` manually.
+ *
+ * Swallows network errors: the org pin already succeeded and forcing the
+ * user to re-run `org switch` over a transient `/api/applications` blip
+ * would be a worse UX than an unpinned app.
+ */
+async function repinAppAfterOrgChange(profileName: string): Promise<Application | null> {
+  try {
+    const apps = await listApplications(profileName);
+    if (apps.length === 0) return null;
+    const chosen = findDefaultApplication(apps) ?? (apps.length === 1 ? apps[0]! : null);
+    if (!chosen) return null;
+    await updateProfile(profileName, { appId: chosen.id });
+    return chosen;
+  } catch {
+    return null;
   }
 }

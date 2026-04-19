@@ -237,6 +237,7 @@ export async function apiCommand(
     userHeaders: effectiveOpts.header,
     token: auth.accessToken,
     orgId: auth.orgId,
+    appId: auth.appId,
     userAgent: opts.userAgent,
     referer: opts.referer,
     cookie: opts.cookie,

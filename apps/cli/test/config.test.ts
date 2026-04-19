@@ -15,6 +15,7 @@ import {
   writeConfig,
   getProfile,
   setProfile,
+  updateProfile,
   deleteProfile,
   listProfiles,
   resolveProfileName,
@@ -50,13 +51,43 @@ describe("readConfig", () => {
     const input: Config = {
       defaultProfile: "prod",
       profiles: {
-        prod: { instance: "https://app.example.com", userId: "u1", email: "a@b.c", orgId: "o1" },
+        prod: {
+          instance: "https://app.example.com",
+          userId: "u1",
+          email: "a@b.c",
+          orgId: "o1",
+          appId: "a1",
+        },
         dev: { instance: "http://localhost:3000", userId: "u2", email: "x@y.z" },
       },
     };
     await writeConfig(input);
     const read = await readConfig();
     expect(read).toEqual(input);
+  });
+
+  it("round-trips a profile without appId unchanged (forward-compat)", async () => {
+    // Legacy profiles predating #217 have `orgId` but no `appId`. They
+    // must parse cleanly and write back without materializing a phantom
+    // `appId = ""` entry in the TOML file.
+    const input: Config = {
+      defaultProfile: "legacy",
+      profiles: {
+        legacy: {
+          instance: "https://app.example.com",
+          userId: "u1",
+          email: "a@b.c",
+          orgId: "o1",
+        },
+      },
+    };
+    await writeConfig(input);
+    const read = await readConfig();
+    expect(read).toEqual(input);
+    expect(read.profiles.legacy!.appId).toBeUndefined();
+    const { readFile } = await import("node:fs/promises");
+    const raw = await readFile(join(tmpDir, "appstrate", "config.toml"), "utf-8");
+    expect(raw).not.toContain("appId");
   });
 
   it("skips malformed profile rows without throwing", async () => {
@@ -158,6 +189,78 @@ describe("setProfile + getProfile + deleteProfile", () => {
     const config = await readConfig();
     expect(config.defaultProfile).toBe("default");
     expect(await listProfiles()).toEqual([]);
+  });
+});
+
+describe("updateProfile", () => {
+  it("merges a partial patch into an existing profile", async () => {
+    await setProfile("dev", {
+      instance: "http://localhost:3000",
+      userId: "u",
+      email: "e",
+      orgId: "org_1",
+    });
+    await updateProfile("dev", { appId: "app_1" });
+    const after = await getProfile("dev");
+    expect(after).toEqual({
+      instance: "http://localhost:3000",
+      userId: "u",
+      email: "e",
+      orgId: "org_1",
+      appId: "app_1",
+    });
+  });
+
+  it("treats `undefined` in the patch as 'clear this key'", async () => {
+    await setProfile("dev", {
+      instance: "http://localhost:3000",
+      userId: "u",
+      email: "e",
+      orgId: "org_1",
+      appId: "app_1",
+    });
+    // Clearing appId should drop the key entirely — not leave an explicit
+    // `appId: undefined` that TOML would serialize as `appId = ""`.
+    await updateProfile("dev", { appId: undefined });
+    const after = await getProfile("dev");
+    expect(after!.appId).toBeUndefined();
+    const { readFile } = await import("node:fs/promises");
+    const raw = await readFile(join(tmpDir, "appstrate", "config.toml"), "utf-8");
+    expect(raw).not.toContain("appId");
+  });
+
+  it("rewrites multiple fields atomically — orgId + appId in one call", async () => {
+    await setProfile("dev", {
+      instance: "http://localhost:3000",
+      userId: "u",
+      email: "e",
+      orgId: "org_old",
+      appId: "app_old",
+    });
+    // Simulates `org switch` cascade: swap org and clear app pin in one write.
+    await updateProfile("dev", { orgId: "org_new", appId: undefined });
+    const after = await getProfile("dev");
+    expect(after!.orgId).toBe("org_new");
+    expect(after!.appId).toBeUndefined();
+  });
+
+  it("throws when the profile is missing (invariant: runLogin writes first)", async () => {
+    await expect(updateProfile("ghost", { orgId: "o" })).rejects.toThrow(/missing/);
+  });
+
+  it("preserves unrelated fields", async () => {
+    await setProfile("dev", {
+      instance: "http://localhost:3000",
+      userId: "u",
+      email: "e",
+      orgId: "org_1",
+    });
+    await updateProfile("dev", { appId: "app_1" });
+    const after = await getProfile("dev");
+    expect(after!.instance).toBe("http://localhost:3000");
+    expect(after!.userId).toBe("u");
+    expect(after!.email).toBe("e");
+    expect(after!.orgId).toBe("org_1");
   });
 });
 

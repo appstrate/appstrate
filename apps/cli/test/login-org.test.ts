@@ -33,6 +33,7 @@ import {
 import { readConfig } from "../src/lib/config.ts";
 import { loginCommand } from "../src/commands/login.ts";
 import type { Org } from "../src/lib/orgs.ts";
+import type { Application } from "../src/lib/applications.ts";
 
 class FakeKeyring implements KeyringHandle {
   static store = new Map<string, string>();
@@ -98,6 +99,19 @@ interface ResponderMap {
   cliToken?: () => Response;
   listOrgs?: () => Response;
   createOrg?: (body: unknown) => Response;
+  listApplications?: () => Response;
+  createApplication?: (body: unknown) => Response;
+}
+
+function appRow(overrides: Partial<Application> = {}): Application {
+  return {
+    id: "app_default",
+    orgId: "org_created",
+    name: "Default",
+    isDefault: true,
+    createdAt: "t",
+    ...overrides,
+  };
 }
 
 function installDefaultResponders(overrides: ResponderMap = {}): void {
@@ -142,6 +156,21 @@ function installDefaultResponders(overrides: ResponderMap = {}): void {
         }),
         { status: 201, headers: { "Content-Type": "application/json" } },
       ),
+    // By default, the app cascade sees a single default app — mirrors
+    // the real server behavior where `POST /api/orgs` provisions one.
+    // NOTE: the cascade only runs when an org is pinned. Test suites that
+    // need the cascade to fire must either override `listOrgs` to return
+    // a non-empty list, or pass `--create-org <name>`.
+    listApplications: () =>
+      new Response(JSON.stringify({ object: "list", data: [appRow()] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    createApplication: () =>
+      new Response(JSON.stringify(appRow({ id: "app_forced", name: "Forced" })), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
   };
   const resolved = { ...defaults, ...overrides };
 
@@ -157,6 +186,11 @@ function installDefaultResponders(overrides: ResponderMap = {}): void {
       return resolved.createOrg(parsed);
     }
     if (url.endsWith("/api/orgs")) return resolved.listOrgs();
+    if (url.endsWith("/api/applications") && method === "POST") {
+      const parsed = body ? JSON.parse(body) : {};
+      return resolved.createApplication(parsed);
+    }
+    if (url.endsWith("/api/applications")) return resolved.listApplications();
     return new Response("not mocked: " + url, { status: 501 });
   };
   globalThis.fetch = stub as unknown as typeof fetch;
@@ -192,6 +226,11 @@ afterEach(async () => {
 async function readPinnedOrgId(profile = "default"): Promise<string | undefined> {
   const cfg = await readConfig();
   return cfg.profiles[profile]?.orgId;
+}
+
+async function readPinnedAppId(profile = "default"): Promise<string | undefined> {
+  const cfg = await readConfig();
+  return cfg.profiles[profile]?.appId;
 }
 
 describe("login org-pin branch", () => {
@@ -542,5 +581,372 @@ describe("login org-pin branch", () => {
     expect(profile!.email).toBe("alice@example.com");
     expect(profile!.userId).toBe("u_test");
     expect(profile!.orgId).toBe("org_only");
+  });
+});
+
+// ─── App cascade (issue #217) ─────────────────────────────────────────
+//
+// Every org-pin outcome that leaves an `orgId` on the profile triggers
+// a second fetch to `/api/applications` and re-pins the default app.
+// The coverage below pairs with `login org-pin branch` above — it
+// asserts the SAME flows, plus the app-specific escapes.
+
+describe("login app-pin cascade", () => {
+  // Shared: `listOrgs` returning exactly one org so the cascade has an
+  // `orgId` to work with. Every test in this block inherits it unless it
+  // overrides explicitly.
+  const oneOrg = () =>
+    new Response(
+      JSON.stringify({
+        organizations: [{ id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" }],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+
+  it("auto-pins the default application after org pin (one app)", async () => {
+    installDefaultResponders({
+      listOrgs: oneOrg,
+      listApplications: () =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            data: [appRow({ id: "app_only", name: "Only", isDefault: true })],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+
+    await loginCommand({
+      profile: "default",
+      instance: "https://app.example.com",
+    });
+
+    expect(await readPinnedAppId()).toBe("app_only");
+    const out = stdoutChunks.join("");
+    expect(out).toContain('/ app "Only"');
+    expect(out).toContain("app_only");
+  });
+
+  it("pins the isDefault app when ≥2 applications exist", async () => {
+    installDefaultResponders({
+      listOrgs: oneOrg,
+      listApplications: () =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            data: [
+              appRow({ id: "app_staging", name: "Staging", isDefault: false }),
+              appRow({ id: "app_default", name: "Default", isDefault: true }),
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+
+    expect(await readPinnedAppId()).toBe("app_default");
+  });
+
+  it("warns on stderr and leaves appId unset when ≥2 apps but no default", async () => {
+    installDefaultResponders({
+      listOrgs: oneOrg,
+      listApplications: () =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            data: [
+              appRow({ id: "app_a", name: "A", isDefault: false }),
+              appRow({ id: "app_b", name: "B", isDefault: false }),
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+
+    expect(await readPinnedAppId()).toBeUndefined();
+    expect(stderrChunks.join("")).toContain("none marked default");
+    expect(stdoutChunks.join("")).toContain("No app pinned");
+  });
+
+  it("warns on stderr when the org has zero applications", async () => {
+    installDefaultResponders({
+      listOrgs: () =>
+        new Response(
+          JSON.stringify({
+            organizations: [
+              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      listApplications: () =>
+        new Response(JSON.stringify({ object: "list", data: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+
+    expect(await readPinnedAppId()).toBeUndefined();
+    expect(stderrChunks.join("")).toContain("No applications found");
+  });
+
+  it("honors --app <id> for non-interactive pinning", async () => {
+    installDefaultResponders({
+      listOrgs: () =>
+        new Response(
+          JSON.stringify({
+            organizations: [
+              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      listApplications: () =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            data: [
+              appRow({ id: "app_1", name: "One", isDefault: true }),
+              appRow({ id: "app_2", name: "Two", isDefault: false }),
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+
+    await loginCommand({
+      profile: "default",
+      instance: "https://app.example.com",
+      app: "app_2",
+    });
+
+    expect(await readPinnedAppId()).toBe("app_2");
+  });
+
+  it("exits with an actionable error when --app <id> does not match", async () => {
+    installDefaultResponders({
+      listOrgs: () =>
+        new Response(
+          JSON.stringify({
+            organizations: [
+              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      listApplications: () =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            data: [appRow({ id: "app_1", isDefault: true })],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+
+    await expect(
+      loginCommand({
+        profile: "default",
+        instance: "https://app.example.com",
+        app: "app_does_not_exist",
+      }),
+    ).rejects.toBeInstanceOf(ExitError);
+  });
+
+  it("honors --create-app <name> and skips the list fetch", async () => {
+    let createBody: unknown;
+    let listCalled = false;
+    installDefaultResponders({
+      listOrgs: () =>
+        new Response(
+          JSON.stringify({
+            organizations: [
+              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      listApplications: () => {
+        listCalled = true;
+        return new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 });
+      },
+      createApplication: (body) => {
+        createBody = body;
+        return new Response(
+          JSON.stringify(appRow({ id: "app_forced", name: "Forced", isDefault: false })),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    });
+
+    await loginCommand({
+      profile: "default",
+      instance: "https://app.example.com",
+      createApp: "Forced",
+    });
+
+    expect(listCalled).toBe(false);
+    expect(createBody).toEqual({ name: "Forced" });
+    expect(await readPinnedAppId()).toBe("app_forced");
+  });
+
+  it("with --no-app skips the app cascade entirely (no fetch, no hint)", async () => {
+    let appsCalled = false;
+    installDefaultResponders({
+      listApplications: () => {
+        appsCalled = true;
+        return new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 });
+      },
+    });
+
+    await loginCommand({
+      profile: "default",
+      instance: "https://app.example.com",
+      noApp: true,
+    });
+
+    expect(appsCalled).toBe(false);
+    expect(await readPinnedAppId()).toBeUndefined();
+    // No "No app pinned" hint when the user opted out.
+    expect(stdoutChunks.join("")).not.toContain("No app pinned");
+  });
+
+  it("skips the app cascade when no org was pinned (no X-Org-Id to fetch with)", async () => {
+    let appsCalled = false;
+    installDefaultResponders({
+      listApplications: () => {
+        appsCalled = true;
+        return new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 });
+      },
+    });
+
+    await loginCommand({
+      profile: "default",
+      instance: "https://app.example.com",
+      noOrg: true,
+    });
+
+    expect(appsCalled).toBe(false);
+    expect(await readPinnedAppId()).toBeUndefined();
+    // The "No org pinned" hint fires; the app hint does not (skipped upstream).
+    expect(stdoutChunks.join("")).toContain("No org pinned");
+    expect(stdoutChunks.join("")).not.toContain("No app pinned");
+  });
+
+  it("tolerates a failing /api/applications call — login succeeds org-pinned but app-unpinned", async () => {
+    installDefaultResponders({
+      listOrgs: () =>
+        new Response(
+          JSON.stringify({
+            organizations: [
+              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      listApplications: () => new Response("boom", { status: 500 }),
+    });
+
+    await loginCommand({
+      profile: "default",
+      instance: "https://app.example.com",
+    });
+
+    expect(await readPinnedOrgId()).toBe("org_1");
+    expect(await readPinnedAppId()).toBeUndefined();
+    expect(stderrChunks.join("")).toContain("Failed to list applications");
+  });
+
+  it("preserves a prior appId across same-user re-login when /api/applications flakes", async () => {
+    // First login — default-path cascade pins app_default via the
+    // shared responder defaults.
+    installDefaultResponders({
+      listOrgs: () =>
+        new Response(
+          JSON.stringify({
+            organizations: [
+              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      listApplications: () =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            data: [appRow({ id: "app_pinned", name: "Pinned", isDefault: true })],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    expect(await readPinnedAppId()).toBe("app_pinned");
+
+    // Second login — app fetch flakes. Without preservation we'd drop
+    // the pin silently.
+    installDefaultResponders({
+      listOrgs: () =>
+        new Response(
+          JSON.stringify({
+            organizations: [
+              { id: "org_1", name: "One", slug: "one", role: "owner", createdAt: "t" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      listApplications: () => new Response("boom", { status: 500 }),
+    });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+
+    expect(await readPinnedAppId()).toBe("app_pinned");
+  });
+
+  it("does NOT preserve appId when re-logging-in as a different user", async () => {
+    // First login — user A pins.
+    installDefaultResponders({
+      listOrgs: () =>
+        new Response(
+          JSON.stringify({
+            organizations: [{ id: "org_A", name: "A", slug: "a", role: "owner", createdAt: "t" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      listApplications: () =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            data: [appRow({ id: "app_A", isDefault: true })],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    expect(await readPinnedAppId()).toBe("app_A");
+
+    // Second login — different user, network flakes. Preservation must not kick in.
+    installDefaultResponders({
+      cliToken: () =>
+        new Response(
+          JSON.stringify({
+            access_token: makeJwt("u_OTHER", "bob@example.com"),
+            refresh_token: "rt-xyz",
+            token_type: "Bearer",
+            expires_in: 900,
+            refresh_expires_in: 30 * 24 * 60 * 60,
+            scope: "cli",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      listOrgs: () => new Response("boom", { status: 500 }),
+      listApplications: () => new Response("boom", { status: 500 }),
+    });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+
+    expect(await readPinnedAppId()).toBeUndefined();
   });
 });
