@@ -195,10 +195,13 @@ jobs:
           mkdir -p "$ROOT/release"
 
           # Fake CLI binary: prints a marker so we can assert bootstrap
-          # actually exec'd it at the tail of the trust chain.
+          # actually exec'd it at the tail of the trust chain. Echoes all
+          # argv so we can also assert the `--yes` contract (#199): the
+          # bootstrap MUST pass --yes to sidestep the Bun macOS setRawMode
+          # regression in the compiled binary.
           cat > "$ROOT/release/appstrate-linux-x64" <<'CLI'
           #!/usr/bin/env bash
-          echo "FAKE_CLI_RAN subcommand=$1"
+          echo "FAKE_CLI_RAN subcommand=$1 argv=$*"
           exit 0
           CLI
           chmod +x "$ROOT/release/appstrate-linux-x64"
@@ -272,6 +275,12 @@ jobs:
             || { echo "::error::bootstrap did not emit the verified banner"; exit 1; }
           echo "$OUT" | grep -q "FAKE_CLI_RAN subcommand=install" \
             || { echo "::error::bootstrap did not exec the installed binary"; exit 1; }
+          # #199: bootstrap MUST pass --yes so the Bun compile + macOS
+          # setRawMode regression can't hang the install. A future refactor
+          # that drops `--yes` from the exec line regresses the whole
+          # curl|bash flow on macOS — fail the CI before it ships.
+          echo "$OUT" | grep -qE "FAKE_CLI_RAN .* argv=install --yes" \
+            || { echo "::error::bootstrap did not forward --yes to the CLI (regression for #199)"; exit 1; }
           test -x "$APPSTRATE_BIN_DIR/appstrate"
           echo "::endgroup::"
           echo "✓ happy path OK"

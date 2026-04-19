@@ -390,15 +390,25 @@ _appstrate_bootstrap() {
   # make the `exec </dev/tty …` below fail and kill the install. So we
   # *actually* try to open /dev/tty in a subshell — if that succeeds,
   # the redirect on the real exec will succeed too.
+  # Always pass `--yes` so the CLI never enters `@clack/prompts` raw
+  # mode. See #199: a `bun build --compile` binary on macOS hangs in the
+  # tier select because Bun's runtime fails to deliver keypress events
+  # via the kqueue/poll path on fd 0 (family of oven-sh/bun issues
+  # #6862, #7033, #24615, #5240, #14483 — some closed, some open, the
+  # bug regularly reappears). Zero prompts = zero `setRawMode` = the bug
+  # is bypassed by construction, independent of upstream fix status.
+  # Per-field flags the user forwards via `-s -- --tier 1 --dir ~/foo`
+  # still win: --yes only supplies defaults for fields the user did not
+  # specify (Docker-aware tier, DEFAULT_INSTALL_DIR, auto-start). A user
+  # who genuinely wants the interactive prompts can run
+  # `appstrate install` directly after bootstrap drops the binary.
   if (exec </dev/tty) >/dev/null 2>&1; then
-    exec </dev/tty "$DEST" install "$@"
+    exec </dev/tty "$DEST" install --yes "$@"
   else
     # No controlling terminal (CI, Dockerfile `RUN curl | bash`, cron).
-    # Exec without the redirect and let the CLI surface a clear "stdin
-    # is not a TTY, pass --tier N" error instead of being SIGKILL'd.
-    # The CLI already supports `--tier` as a non-interactive escape
-    # hatch (see `apps/cli/src/commands/install.ts`).
-    exec "$DEST" install "$@"
+    # `--yes` is doubly critical here — without it the CLI would throw
+    # "stdin is not a TTY" even though the user's intent is clear.
+    exec "$DEST" install --yes "$@"
   fi
 
 }
