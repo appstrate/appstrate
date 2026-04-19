@@ -35,22 +35,24 @@ describe("nextRunNumber isolation per application", () => {
   it("assigns run number 1 to the first run in each application independently", async () => {
     const actor = { type: "member" as const, id: ctx.user.id };
 
-    await createRun({
-      id: "exec_aaaabbbbcccc0001",
-      packageId: agentId,
-      actor,
-      orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
-      input: null,
-    });
-    await createRun({
-      id: "exec_aaaabbbbcccc0002",
-      packageId: agentId,
-      actor,
-      orgId: ctx.orgId,
-      applicationId: appBId,
-      input: null,
-    });
+    await createRun(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      {
+        id: "exec_aaaabbbbcccc0001",
+        packageId: agentId,
+        actor,
+        input: null,
+      },
+    );
+    await createRun(
+      { orgId: ctx.orgId, applicationId: appBId },
+      {
+        id: "exec_aaaabbbbcccc0002",
+        packageId: agentId,
+        actor,
+        input: null,
+      },
+    );
 
     const [runA] = await db
       .select({ runNumber: runs.runNumber })
@@ -69,45 +71,37 @@ describe("nextRunNumber isolation per application", () => {
   it("increments run numbers independently per application", async () => {
     const actor = { type: "member" as const, id: ctx.user.id };
 
+    const appAScope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const appBScope = { orgId: ctx.orgId, applicationId: appBId };
     // 3 runs in AppA, 2 runs in AppB
-    await createRun({
+    await createRun(appAScope, {
       id: "exec_aaaa000000000001",
       packageId: agentId,
       actor,
-      orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
       input: null,
     });
-    await createRun({
+    await createRun(appAScope, {
       id: "exec_aaaa000000000002",
       packageId: agentId,
       actor,
-      orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
       input: null,
     });
-    await createRun({
+    await createRun(appBScope, {
       id: "exec_bbbb000000000001",
       packageId: agentId,
       actor,
-      orgId: ctx.orgId,
-      applicationId: appBId,
       input: null,
     });
-    await createRun({
+    await createRun(appAScope, {
       id: "exec_aaaa000000000003",
       packageId: agentId,
       actor,
-      orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
       input: null,
     });
-    await createRun({
+    await createRun(appBScope, {
       id: "exec_bbbb000000000002",
       packageId: agentId,
       actor,
-      orgId: ctx.orgId,
-      applicationId: appBId,
       input: null,
     });
 

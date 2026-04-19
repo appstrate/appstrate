@@ -71,10 +71,9 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   );
 
   const providerStatuses = await resolveProviderStatuses(
+    scope,
     manifestProviders,
     providerProfiles,
-    orgId,
-    applicationId,
   );
 
   // Build populatedProviders: ProviderConfig keyed by provider ID
@@ -125,8 +124,8 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   }
 
   const [lastRun, runningCount] = await Promise.all([
-    getLastRun(agent.id, null, orgId, applicationId),
-    getRunningRunsForPackage(agent.id, orgId, applicationId),
+    getLastRun(scope, agent.id, null),
+    getRunningRunsForPackage(scope, agent.id),
   ]);
 
   const configWithDefaults = m.config?.schema

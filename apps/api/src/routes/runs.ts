@@ -34,6 +34,7 @@ import { callHook, emitEvent } from "../lib/modules/module-loader.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import { getActor } from "../lib/actor.ts";
+import { getAppScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
 import {
   insertShadowPackage,
@@ -78,6 +79,7 @@ export async function executeAgentInBackground(
   inputFiles?: UploadedFile[],
   modelSource?: string | null,
 ) {
+  const scope = { orgId, applicationId };
   const startTime = Date.now();
   const controller = trackRun(runId);
   const { signal } = controller;
@@ -88,7 +90,7 @@ export async function executeAgentInBackground(
 
   try {
     // Update status to running
-    await updateRun(runId, orgId, applicationId, { status: "running" });
+    await updateRun(scope, runId, { status: "running" });
     void emitEvent("onRunStatusChange", {
       orgId,
       runId,
@@ -124,8 +126,8 @@ export async function executeAgentInBackground(
         switch (msg.type) {
           case "progress":
             await appendRunLog(
+              scope,
               runId,
-              orgId,
               "progress",
               "progress",
               msg.message ?? null,
@@ -137,8 +139,8 @@ export async function executeAgentInBackground(
           case "error":
             lastAdapterError = msg.message ?? null;
             await appendRunLog(
+              scope,
               runId,
-              orgId,
               "system",
               "adapter_error",
               msg.message ?? null,
@@ -149,7 +151,7 @@ export async function executeAgentInBackground(
 
           case "output":
             if (msg.data) Object.assign(structuredOutput, msg.data);
-            await appendRunLog(runId, orgId, "result", "output", null, msg.data ?? null, "info");
+            await appendRunLog(scope, runId, "result", "output", null, msg.data ?? null, "info");
             break;
 
           case "set_state":
@@ -165,8 +167,8 @@ export async function executeAgentInBackground(
               reportContent += (reportContent ? "\n\n" : "") + msg.content;
             }
             await appendRunLog(
+              scope,
               runId,
-              orgId,
               "result",
               "report",
               null,
@@ -194,7 +196,7 @@ export async function executeAgentInBackground(
           duration,
           modelSource: modelSource ?? null,
         });
-        await updateRun(runId, orgId, applicationId, {
+        await updateRun(scope, runId, {
           status: "timeout",
           error: `Run timed out after ${timeout}s`,
           completedAt: new Date().toISOString(),
@@ -208,8 +210,8 @@ export async function executeAgentInBackground(
           ...(metadata ? { metadata } : {}),
         });
         await appendRunLog(
+          scope,
           runId,
-          orgId,
           "system",
           "run_completed",
           null,
@@ -261,7 +263,7 @@ export async function executeAgentInBackground(
         duration,
         modelSource: modelSource ?? null,
       });
-      await updateRun(runId, orgId, applicationId, {
+      await updateRun(scope, runId, {
         status: "failed",
         error,
         completedAt: new Date().toISOString(),
@@ -270,8 +272,8 @@ export async function executeAgentInBackground(
         ...(metadata ? { metadata } : {}),
       });
       await appendRunLog(
+        scope,
         runId,
-        orgId,
         "system",
         "run_completed",
         null,
@@ -304,8 +306,8 @@ export async function executeAgentInBackground(
           );
           if (!outputValidation.valid) {
             await appendRunLog(
+              scope,
               runId,
-              orgId,
               "system",
               "output_validation",
               null,
@@ -341,7 +343,7 @@ export async function executeAgentInBackground(
         modelSource: modelSource ?? null,
       });
 
-      await updateRun(runId, orgId, applicationId, {
+      await updateRun(scope, runId, {
         status: "success",
         result,
         ...(state ? { state } : {}),
@@ -354,11 +356,11 @@ export async function executeAgentInBackground(
       });
 
       if (hasOutput) {
-        await appendRunLog(runId, orgId, "result", "result", null, result, "info");
+        await appendRunLog(scope, runId, "result", "result", null, result, "info");
       }
       await appendRunLog(
+        scope,
         runId,
-        orgId,
         "system",
         "run_completed",
         null,
@@ -394,7 +396,7 @@ export async function executeAgentInBackground(
       duration,
       modelSource: modelSource ?? null,
     });
-    await updateRun(runId, orgId, applicationId, {
+    await updateRun(scope, runId, {
       status: "failed",
       error: errorMessage,
       completedAt: new Date().toISOString(),
@@ -403,8 +405,8 @@ export async function executeAgentInBackground(
       ...(metadata ? { metadata } : {}),
     });
     await appendRunLog(
+      scope,
       runId,
-      orgId,
       "system",
       "run_completed",
       null,
@@ -561,7 +563,7 @@ export function createRunsRouter() {
   // GET /api/agents/:scope/:name/runs — list runs for an agent
   router.get("/agents/:scope{@[^/]+}/:name/runs", requireAgent(), async (c) => {
     const agent = c.get("agent");
-    const orgId = c.get("orgId");
+    const scope = getAppScope(c);
     const limit = z.coerce
       .number()
       .int()
@@ -576,10 +578,9 @@ export function createRunsRouter() {
       .catch(0)
       .parse(c.req.query("offset") ?? 0);
     const endUser = c.get("endUser");
-    const result = await listPackageRuns(agent.id, orgId, {
+    const result = await listPackageRuns(scope, agent.id, {
       limit,
       offset,
-      applicationId: c.get("applicationId"),
       endUserId: endUser?.id,
     });
     return c.json(result);
@@ -592,8 +593,8 @@ export function createRunsRouter() {
   // GET /api/runs/:id — get a single run
   router.get("/runs/:id", async (c) => {
     const runId = c.req.param("id");
-    const orgId = c.get("orgId");
-    const row = await getRunFull(runId, orgId, c.get("applicationId"));
+    const scope = getAppScope(c);
+    const row = await getRunFull(scope, runId);
     if (!row) {
       throw notFound("Run not found");
     }
@@ -607,8 +608,8 @@ export function createRunsRouter() {
   // GET /api/runs/:id/logs — get run logs
   router.get("/runs/:id/logs", async (c) => {
     const runId = c.req.param("id");
-    const orgId = c.get("orgId");
-    const exec = await getRun(runId, orgId, c.get("applicationId"));
+    const scope = getAppScope(c);
+    const exec = await getRun(scope, runId);
     if (!exec) {
       throw notFound("Run not found");
     }
@@ -616,7 +617,7 @@ export function createRunsRouter() {
     if (endUser && exec.endUserId !== endUser.id) {
       throw notFound("Run not found");
     }
-    const logs = await listRunLogs(runId, orgId);
+    const logs = await listRunLogs(scope, runId);
 
     return c.json(logs);
   });
@@ -624,9 +625,9 @@ export function createRunsRouter() {
   // POST /api/runs/:id/cancel — cancel a running/pending run
   router.post("/runs/:id/cancel", requirePermission("runs", "cancel"), async (c) => {
     const runId = c.req.param("id")!;
-    const orgId = c.get("orgId");
+    const scope = getAppScope(c);
 
-    const run = await getRun(runId, orgId, c.get("applicationId"));
+    const run = await getRun(scope, runId);
     if (!run) {
       throw notFound("Run not found");
     }
@@ -638,7 +639,7 @@ export function createRunsRouter() {
 
     // Update DB
     const now = new Date().toISOString();
-    await updateRun(runId, orgId, c.get("applicationId"), {
+    await updateRun(scope, runId, {
       status: "cancelled",
       error: "Cancelled by user",
       completedAt: now,
@@ -647,8 +648,8 @@ export function createRunsRouter() {
 
     // Log the cancellation
     await appendRunLog(
+      scope,
       runId,
-      orgId,
       "system",
       "run_completed",
       null,
@@ -666,10 +667,10 @@ export function createRunsRouter() {
       .catch(() => {});
 
     void emitEvent("onRunStatusChange", {
-      orgId,
+      orgId: scope.orgId,
       runId,
       packageId: run.packageId,
-      applicationId: c.get("applicationId"),
+      applicationId: scope.applicationId,
       status: "cancelled",
       packageEphemeral: isInlineShadowPackageId(run.packageId),
     });
@@ -807,15 +808,14 @@ export function createRunsRouter() {
     requirePermission("runs", "delete"),
     async (c) => {
       const agent = c.get("agent");
-      const orgId = c.get("orgId");
+      const scope = getAppScope(c);
 
-      const applicationId = c.get("applicationId");
-      const running = await getRunningRunsForPackage(agent.id, orgId, applicationId);
+      const running = await getRunningRunsForPackage(scope, agent.id);
       if (running > 0) {
         throw conflict("run_in_progress", `${running} run(s) still running`);
       }
 
-      const deleted = await deletePackageRuns(agent.id, orgId, applicationId);
+      const deleted = await deletePackageRuns(scope, agent.id);
       return c.json({ deleted });
     },
   );

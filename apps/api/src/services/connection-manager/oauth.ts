@@ -16,46 +16,46 @@ import {
 import type { Actor } from "../../lib/actor.ts";
 import { resolveProviderCredentialId } from "./helpers.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
+import type { AppScope } from "../../lib/scope.ts";
 
 export function getOAuthCallbackUrl(): string {
   return `${getEnv().APP_URL}/api/connections/callback`;
 }
 
 export async function initiateConnection(
+  scope: AppScope,
   provider: string,
-  orgId: string,
   actor: Actor,
   profileId: string,
-  applicationId: string,
   requestedScopes?: string[],
 ): Promise<{ authUrl: string; state: string }> {
   const redirectUri = getOAuthCallbackUrl();
 
   // Route to OAuth1 if the provider uses it
-  const providerDef = await getProvider(db, orgId, provider);
+  const providerDef = await getProvider(db, scope.orgId, provider);
   if (providerDef?.authMode === "oauth1") {
     return initiateOAuth1(
       db,
       oauthStateStore,
-      orgId,
+      scope.orgId,
       actor,
       profileId,
       provider,
       redirectUri,
-      applicationId,
+      scope.applicationId,
     );
   }
 
   return initiateOAuth(
     db,
     oauthStateStore,
-    orgId,
+    scope.orgId,
     actor,
     profileId,
     provider,
     redirectUri,
     requestedScopes,
-    applicationId,
+    scope.applicationId,
   );
 }
 

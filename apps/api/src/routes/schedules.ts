@@ -170,7 +170,7 @@ export function createSchedulesRouter() {
   // GET /api/schedules/:id/runs — list runs for a schedule
   router.get("/schedules/:id/runs", async (c) => {
     const scheduleId = c.req.param("id");
-    const orgId = c.get("orgId");
+    const scope = getAppScope(c);
     const limit = z.coerce
       .number()
       .int()
@@ -184,10 +184,9 @@ export function createSchedulesRouter() {
       .min(0)
       .catch(0)
       .parse(c.req.query("offset") ?? 0);
-    const result = await listScheduleRuns(scheduleId, orgId, {
+    const result = await listScheduleRuns(scope, scheduleId, {
       limit,
       offset,
-      applicationId: c.get("applicationId"),
     });
     return c.json(result);
   });

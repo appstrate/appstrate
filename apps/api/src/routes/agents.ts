@@ -45,12 +45,11 @@ export function createAgentsRouter() {
   // GET /api/agents — list agents accessible to the current application
   router.get("/", async (c) => {
     const scope = getAppScope(c);
-    const { orgId, applicationId } = scope;
 
     // Single query: system packages + installed packages via LEFT JOIN
     const [rows, runningCounts] = await Promise.all([
       listAccessiblePackages(scope, "agent"),
-      getRunningRunCounts(orgId, applicationId),
+      getRunningRunCounts(scope),
     ]);
 
     const agentList = rows.map((row) => {

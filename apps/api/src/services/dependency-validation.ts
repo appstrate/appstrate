@@ -30,7 +30,8 @@ export interface DependencyValidationDeps {
 const defaultDeps: DependencyValidationDeps = {
   isProviderEnabled: (providerId, applicationId) =>
     isProviderEnabled(db, providerId, applicationId),
-  getConnectionStatus,
+  getConnectionStatus: (provider, connectionProfileId, orgId, providerCredentialId) =>
+    getConnectionStatus({ orgId }, provider, connectionProfileId, providerCredentialId),
   getProviderCredentialId: (applicationId, providerId) =>
     getProviderCredentialId(db, applicationId, providerId),
   validateScopes,

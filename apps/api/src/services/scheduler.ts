@@ -195,11 +195,10 @@ async function triggerScheduledRun(
     const runId = `run_${crypto.randomUUID()}`;
     try {
       await createFailedRun(
+        { orgId, applicationId },
         runId,
         packageId,
         actor,
-        orgId,
-        applicationId,
         error,
         scheduleId,
         connectionProfileId,
@@ -483,10 +482,9 @@ async function computeScheduleReadiness(
 
   // Reuse the shared provider status resolution (batch-fetches connections)
   const statuses = await resolveProviderStatuses(
+    { orgId, applicationId: schedule.applicationId },
     providers,
     providerProfiles,
-    orgId,
-    schedule.applicationId,
   );
 
   const missing = statuses.filter((s) => s.status !== "connected").map((s) => s.id);

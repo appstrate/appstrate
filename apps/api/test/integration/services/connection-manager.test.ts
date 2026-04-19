@@ -121,11 +121,10 @@ describe("connection-manager", () => {
       });
       await seedProviderCredentials({ applicationId, providerId: "@system/test-provider" });
       await saveApiKeyConnection(
+        { orgId, applicationId },
         "@system/test-provider",
         "sk-test-key-12345",
         profileId,
-        orgId,
-        applicationId,
       );
 
       const rows = await db
@@ -169,18 +168,16 @@ describe("connection-manager", () => {
       });
       await seedProviderCredentials({ applicationId, providerId: "@system/test-provider" });
       await saveApiKeyConnection(
+        { orgId, applicationId },
         "@system/test-provider",
         "key-v1",
         profileId,
-        orgId,
-        applicationId,
       );
       await saveApiKeyConnection(
+        { orgId, applicationId },
         "@system/test-provider",
         "key-v2",
         profileId,
-        orgId,
-        applicationId,
       );
 
       const rows = await db
@@ -207,12 +204,11 @@ describe("connection-manager", () => {
       });
       await seedProviderCredentials({ applicationId, providerId: "@system/basic-provider" });
       await saveCredentialsConnection(
+        { orgId, applicationId },
         "@system/basic-provider",
         "basic",
         { username: "admin", password: "secret123" },
         profileId,
-        orgId,
-        applicationId,
       );
 
       const rows = await db
@@ -237,12 +233,11 @@ describe("connection-manager", () => {
       });
       await seedProviderCredentials({ applicationId, providerId: "@system/custom-provider" });
       await saveCredentialsConnection(
+        { orgId, applicationId },
         "@system/custom-provider",
         "custom",
         { token: "abc", workspace_id: "ws-1" },
         profileId,
-        orgId,
-        applicationId,
       );
 
       const rows = await db
@@ -265,7 +260,10 @@ describe("connection-manager", () => {
       await seedConnection(profileId, "gmail", orgId, applicationId);
       await seedConnection(profileId, "clickup", orgId, applicationId);
 
-      const connections = await listActorConnections(profileId, orgId, applicationId);
+      const connections = await listActorConnections(
+        { orgId: orgId, applicationId: applicationId },
+        profileId,
+      );
 
       expect(connections).toHaveLength(2);
       const providers = connections.map((c) => c.provider);
@@ -280,7 +278,10 @@ describe("connection-manager", () => {
     });
 
     it("returns empty array for a profile with no connections", async () => {
-      const connections = await listActorConnections(profileId, orgId, applicationId);
+      const connections = await listActorConnections(
+        { orgId: orgId, applicationId: applicationId },
+        profileId,
+      );
       expect(connections).toBeArray();
       expect(connections).toHaveLength(0);
     });
@@ -294,7 +295,10 @@ describe("connection-manager", () => {
 
       await seedConnection(otherProfile.id, "gmail", orgId, applicationId);
 
-      const connections = await listActorConnections(profileId, orgId, applicationId);
+      const connections = await listActorConnections(
+        { orgId: orgId, applicationId: applicationId },
+        profileId,
+      );
       expect(connections).toHaveLength(0);
     });
 
@@ -306,7 +310,10 @@ describe("connection-manager", () => {
 
       await seedConnection(profileId, "gmail", otherOrg.id, otherAppId);
 
-      const connections = await listActorConnections(profileId, orgId, applicationId);
+      const connections = await listActorConnections(
+        { orgId: orgId, applicationId: applicationId },
+        profileId,
+      );
       expect(connections).toHaveLength(0);
     });
   });
@@ -318,22 +325,28 @@ describe("connection-manager", () => {
       const gmail = await seedConnection(profileId, "gmail", orgId, applicationId);
       await seedConnection(profileId, "clickup", orgId, applicationId);
 
-      await disconnectProvider("@system/gmail", profileId, orgId, gmail.credentialId);
+      await disconnectProvider({ orgId: orgId }, "@system/gmail", profileId, gmail.credentialId);
 
-      const connections = await listActorConnections(profileId, orgId, applicationId);
+      const connections = await listActorConnections(
+        { orgId: orgId, applicationId: applicationId },
+        profileId,
+      );
       expect(connections).toHaveLength(1);
       expect(connections[0]!.provider).toBe("@system/clickup");
     });
 
     it("does not throw when provider has no connection", async () => {
       await disconnectProvider(
+        { orgId: orgId },
         "nonexistent",
         profileId,
-        orgId,
         "00000000-0000-0000-0000-000000000000",
       );
 
-      const connections = await listActorConnections(profileId, orgId, applicationId);
+      const connections = await listActorConnections(
+        { orgId: orgId, applicationId: applicationId },
+        profileId,
+      );
       expect(connections).toHaveLength(0);
     });
   });
@@ -346,9 +359,12 @@ describe("connection-manager", () => {
       await seedConnection(profileId, "clickup", orgId, applicationId);
 
       const actor: Actor = { type: "member", id: userId };
-      await disconnectConnectionById(connectionId, actor, applicationId);
+      await disconnectConnectionById({ orgId, applicationId: applicationId }, connectionId, actor);
 
-      const connections = await listActorConnections(profileId, orgId, applicationId);
+      const connections = await listActorConnections(
+        { orgId: orgId, applicationId: applicationId },
+        profileId,
+      );
       expect(connections).toHaveLength(1);
       expect(connections[0]!.provider).toBe("@system/clickup");
     });
@@ -359,18 +375,18 @@ describe("connection-manager", () => {
       const otherUser = await createTestUser({ email: "hacker@test.com" });
       const actor: Actor = { type: "member", id: otherUser.id };
 
-      await expect(disconnectConnectionById(connectionId, actor, applicationId)).rejects.toThrow(
-        "Connection not found or not owned by actor",
-      );
+      await expect(
+        disconnectConnectionById({ orgId, applicationId: applicationId }, connectionId, actor),
+      ).rejects.toThrow("Connection not found or not owned by actor");
     });
 
     it("throws when connection ID does not exist", async () => {
       const actor: Actor = { type: "member", id: userId };
       const fakeId = "00000000-0000-0000-0000-000000000000";
 
-      await expect(disconnectConnectionById(fakeId, actor, applicationId)).rejects.toThrow(
-        "Connection not found or not owned by actor",
-      );
+      await expect(
+        disconnectConnectionById({ orgId, applicationId: applicationId }, fakeId, actor),
+      ).rejects.toThrow("Connection not found or not owned by actor");
     });
   });
 
@@ -386,10 +402,13 @@ describe("connection-manager", () => {
       await seedConnection(profile2.id, "slack", orgId, applicationId);
 
       const actor: Actor = { type: "member", id: userId };
-      await deleteAllActorConnections(actor, applicationId);
+      await deleteAllActorConnections({ orgId, applicationId: applicationId }, actor);
 
-      const conn1 = await listActorConnections(profileId, orgId, applicationId);
-      const conn2 = await listActorConnections(profile2.id, orgId, applicationId);
+      const conn1 = await listActorConnections(
+        { orgId: orgId, applicationId: applicationId },
+        profileId,
+      );
+      const conn2 = await listActorConnections({ orgId, applicationId }, profile2.id);
 
       expect(conn1).toHaveLength(0);
       expect(conn2).toHaveLength(0);
@@ -409,14 +428,20 @@ describe("connection-manager", () => {
       await seedConnection(otherProfile.id, "clickup", otherOrg.id, otherAppId);
 
       const actor: Actor = { type: "member", id: userId };
-      await deleteAllActorConnections(actor, applicationId);
+      await deleteAllActorConnections({ orgId, applicationId: applicationId }, actor);
 
       // Actor's connections are gone
-      const actorConns = await listActorConnections(profileId, orgId, applicationId);
+      const actorConns = await listActorConnections(
+        { orgId: orgId, applicationId: applicationId },
+        profileId,
+      );
       expect(actorConns).toHaveLength(0);
 
       // Other user's connections are intact
-      const otherConns = await listActorConnections(otherProfile.id, otherOrg.id, otherAppId);
+      const otherConns = await listActorConnections(
+        { orgId: otherOrg.id, applicationId: otherAppId },
+        otherProfile.id,
+      );
       expect(otherConns).toHaveLength(1);
       expect(otherConns[0]!.provider).toBe("@system/clickup");
     });
@@ -426,7 +451,7 @@ describe("connection-manager", () => {
       const actor: Actor = { type: "member", id: otherUser.id };
 
       // Should not throw
-      await deleteAllActorConnections(actor, applicationId);
+      await deleteAllActorConnections({ orgId, applicationId: applicationId }, actor);
     });
   });
 
@@ -448,13 +473,19 @@ describe("connection-manager", () => {
       await seedConnection(profileId, "gmail", orgId, app2Id);
 
       // App 1 should only see its own connections
-      const app1Conns = await listActorConnections(profileId, orgId, applicationId);
+      const app1Conns = await listActorConnections(
+        { orgId: orgId, applicationId: applicationId },
+        profileId,
+      );
       expect(app1Conns).toHaveLength(2);
       expect(app1Conns.map((c) => c.provider)).toContain("@system/gmail");
       expect(app1Conns.map((c) => c.provider)).toContain("@system/clickup");
 
       // App 2 should only see its own connection
-      const app2Conns = await listActorConnections(profileId, orgId, app2Id);
+      const app2Conns = await listActorConnections(
+        { orgId: orgId, applicationId: app2Id },
+        profileId,
+      );
       expect(app2Conns).toHaveLength(1);
       expect(app2Conns[0]!.provider).toBe("@system/gmail");
     });
@@ -471,14 +502,20 @@ describe("connection-manager", () => {
       await seedConnection(profileId, "gmail", orgId, app2Id);
 
       // Disconnect gmail from app 1 only
-      await disconnectProvider("@system/gmail", profileId, orgId, conn1.credentialId);
+      await disconnectProvider({ orgId: orgId }, "@system/gmail", profileId, conn1.credentialId);
 
       // App 1: no connections
-      const app1Conns = await listActorConnections(profileId, orgId, applicationId);
+      const app1Conns = await listActorConnections(
+        { orgId: orgId, applicationId: applicationId },
+        profileId,
+      );
       expect(app1Conns).toHaveLength(0);
 
       // App 2: still has gmail
-      const app2Conns = await listActorConnections(profileId, orgId, app2Id);
+      const app2Conns = await listActorConnections(
+        { orgId: orgId, applicationId: app2Id },
+        profileId,
+      );
       expect(app2Conns).toHaveLength(1);
       expect(app2Conns[0]!.provider).toBe("@system/gmail");
     });

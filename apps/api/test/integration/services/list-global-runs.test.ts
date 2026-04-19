@@ -66,7 +66,7 @@ describe("listGlobalRuns", () => {
   }
 
   it("returns empty list when no runs exist", async () => {
-    const result = await listGlobalRuns(ctx.orgId, { applicationId: ctx.defaultAppId });
+    const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
     expect(result.runs).toEqual([]);
     expect(result.total).toBe(0);
   });
@@ -75,7 +75,7 @@ describe("listGlobalRuns", () => {
     const inline = await seedInlineRun();
     const pkg = await seedPackageRun();
 
-    const result = await listGlobalRuns(ctx.orgId, { applicationId: ctx.defaultAppId });
+    const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
     expect(result.total).toBe(2);
 
     const byId = Object.fromEntries(result.runs.map((r) => [r.id, r]));
@@ -88,10 +88,10 @@ describe("listGlobalRuns", () => {
     await seedInlineRun();
     await seedPackageRun();
 
-    const result = await listGlobalRuns(ctx.orgId, {
-      applicationId: ctx.defaultAppId,
-      kind: "inline",
-    });
+    const result = await listGlobalRuns(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { kind: "inline" },
+    );
     expect(result.total).toBe(2);
     for (const run of result.runs) {
       expect(run.packageEphemeral).toBe(true);
@@ -103,10 +103,10 @@ describe("listGlobalRuns", () => {
     await seedPackageRun();
     await seedPackageRun();
 
-    const result = await listGlobalRuns(ctx.orgId, {
-      applicationId: ctx.defaultAppId,
-      kind: "package",
-    });
+    const result = await listGlobalRuns(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { kind: "package" },
+    );
     expect(result.total).toBe(2);
     for (const run of result.runs) {
       expect(run.packageEphemeral).toBe(false);
@@ -117,10 +117,10 @@ describe("listGlobalRuns", () => {
     await seedInlineRun();
     await seedPackageRun();
 
-    const all = await listGlobalRuns(ctx.orgId, {
-      applicationId: ctx.defaultAppId,
-      kind: "all",
-    });
+    const all = await listGlobalRuns(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { kind: "all" },
+    );
     expect(all.total).toBe(2);
   });
 
@@ -128,10 +128,10 @@ describe("listGlobalRuns", () => {
     await seedInlineRun("success");
     await seedPackageRun("failed");
 
-    const result = await listGlobalRuns(ctx.orgId, {
-      applicationId: ctx.defaultAppId,
-      status: "failed",
-    });
+    const result = await listGlobalRuns(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { status: "failed" },
+    );
     expect(result.total).toBe(1);
     expect(result.runs[0]?.status).toBe("failed");
   });
@@ -151,16 +151,16 @@ describe("listGlobalRuns", () => {
 
     const recent = await seedPackageRun();
 
-    const since2024 = await listGlobalRuns(ctx.orgId, {
-      applicationId: ctx.defaultAppId,
-      startDate: new Date("2024-01-01"),
-    });
+    const since2024 = await listGlobalRuns(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { startDate: new Date("2024-01-01") },
+    );
     expect(since2024.runs.map((r) => r.id)).toEqual([recent.id]);
 
-    const until2023 = await listGlobalRuns(ctx.orgId, {
-      applicationId: ctx.defaultAppId,
-      endDate: new Date("2023-01-01"),
-    });
+    const until2023 = await listGlobalRuns(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { endDate: new Date("2023-01-01") },
+    );
     expect(until2023.runs.map((r) => r.id)).toEqual([old.id]);
   });
 
@@ -178,26 +178,24 @@ describe("listGlobalRuns", () => {
       })
       .returning();
 
-    const result = await listGlobalRuns(ctx.orgId, { applicationId: otherApp!.id });
+    const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: otherApp!.id });
     expect(result.total).toBe(0);
   });
 
   it("orders by startedAt DESC and paginates", async () => {
     for (let i = 0; i < 5; i++) await seedPackageRun();
 
-    const page1 = await listGlobalRuns(ctx.orgId, {
-      applicationId: ctx.defaultAppId,
-      limit: 2,
-      offset: 0,
-    });
+    const page1 = await listGlobalRuns(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { limit: 2, offset: 0 },
+    );
     expect(page1.runs).toHaveLength(2);
     expect(page1.total).toBe(5);
 
-    const page2 = await listGlobalRuns(ctx.orgId, {
-      applicationId: ctx.defaultAppId,
-      limit: 2,
-      offset: 2,
-    });
+    const page2 = await listGlobalRuns(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { limit: 2, offset: 2 },
+    );
     expect(page2.runs).toHaveLength(2);
     expect(page2.runs[0]?.id).not.toBe(page1.runs[0]?.id);
   });

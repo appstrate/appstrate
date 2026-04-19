@@ -24,25 +24,25 @@ import { authModeLabel } from "./helpers.ts";
 import { asRecord } from "../../lib/safe-json.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { getPackageDisplayName } from "../../lib/package-helpers.ts";
+import type { AppScope, OrgScope } from "../../lib/scope.ts";
 
 export async function getProviderAuthMode(
+  scope: OrgScope,
   provider: string,
-  orgId: string,
 ): Promise<string | undefined> {
-  return getProviderAuthModeRaw(db, orgId, provider);
+  return getProviderAuthModeRaw(db, scope.orgId, provider);
 }
 
 export async function getAvailableProvidersWithStatus(
+  scope: AppScope,
   profileId: string,
-  orgId: string,
-  applicationId: string,
 ): Promise<AvailableProvider[]> {
   const [providers, credentialIds, configuredProviderIds] = await Promise.all([
-    listProviders(db, orgId),
-    listProviderCredentialIds(db, applicationId),
-    listConfiguredProviderIds(db, applicationId),
+    listProviders(db, scope.orgId),
+    listProviderCredentialIds(db, scope.applicationId),
+    listConfiguredProviderIds(db, scope.applicationId),
   ]);
-  const connections = await listConnectionsRaw(db, profileId, orgId, credentialIds);
+  const connections = await listConnectionsRaw(db, profileId, scope.orgId, credentialIds);
   const configuredSet = new Set(configuredProviderIds);
 
   return providers

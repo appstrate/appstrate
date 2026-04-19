@@ -57,8 +57,7 @@ export function createNotificationsRouter() {
   // for inline-run filtering, ?status, ?startDate/?endDate.
   router.get("/runs", async (c) => {
     const actor = getActor(c);
-    const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const scope = getAppScope(c);
     const limit = z.coerce
       .number()
       .int()
@@ -77,7 +76,7 @@ export function createNotificationsRouter() {
 
     // End-users always see only their own runs — same semantic as before.
     if (userFilter === "me" || endUser) {
-      return c.json(await listUserRuns({ orgId, applicationId }, actor.id, { limit, offset }));
+      return c.json(await listUserRuns(scope, actor.id, { limit, offset }));
     }
 
     const rawKind = c.req.query("kind");
@@ -98,8 +97,7 @@ export function createNotificationsRouter() {
     }
 
     return c.json(
-      await listGlobalRuns(orgId, {
-        applicationId,
+      await listGlobalRuns(scope, {
         limit,
         offset,
         kind,

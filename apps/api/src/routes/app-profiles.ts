@@ -61,8 +61,8 @@ export function createAppProfilesRouter() {
   // DELETE /api/app-profiles/connections — delete all actor connections (app-scoped)
   router.delete("/connections", async (c) => {
     const actor = getActor(c);
-    const applicationId = c.get("applicationId");
-    await deleteAllActorConnections(actor, applicationId);
+    const scope = getAppScope(c);
+    await deleteAllActorConnections(scope, actor);
     return c.json({ ok: true });
   });
 
@@ -182,12 +182,7 @@ export function createAppProfilesRouter() {
     }
 
     // Verify the source profile has an active connection for this provider in this application
-    const connected = await hasActiveConnection(
-      data.providerId,
-      data.sourceProfileId,
-      scope.orgId,
-      scope.applicationId,
-    );
+    const connected = await hasActiveConnection(scope, data.providerId, data.sourceProfileId);
     if (!connected) {
       throw invalidRequest(
         `No active connection for '${data.providerId}' on the source profile in this application`,
