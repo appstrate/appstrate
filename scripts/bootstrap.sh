@@ -243,7 +243,25 @@ _appstrate_bootstrap() {
   # stale install in /usr/local/bin shadowed by ~/.local/bin, etc.)
   # would silently shadow the one we just verified — defeating the
   # whole trust chain. `$DEST` is the exact file we wrote + chmod'd.
-  exec "$DEST" install "$@"
+  #
+  # Reopen stdin from the controlling terminal before exec'ing the CLI.
+  # Under `curl … | bash`, bash's stdin is the pipe from curl; once the
+  # download is done the pipe is closed, and `exec` inherits that closed
+  # pipe as stdin. `appstrate install` is interactive (`@clack/prompts`
+  # for tier + directory), so it would die silently (SIGKILL'd by the
+  # shell) with no prompt ever shown. Redirecting stdin to /dev/tty is
+  # the same pattern used by rustup-init, bun, deno, and Homebrew. The
+  # `$@` forwarding is preserved — redirections come before argv.
+  if [ -e /dev/tty ] && [ -r /dev/tty ]; then
+    exec </dev/tty "$DEST" install "$@"
+  else
+    # No controlling terminal (CI, Dockerfile `RUN curl | bash`, cron).
+    # Exec without the redirect and let the CLI surface a clear "stdin
+    # is not a TTY, pass --tier N" error instead of being SIGKILL'd.
+    # The CLI already supports `--tier` as a non-interactive escape
+    # hatch (see `apps/cli/src/commands/install.ts`).
+    exec "$DEST" install "$@"
+  fi
 
 }
 

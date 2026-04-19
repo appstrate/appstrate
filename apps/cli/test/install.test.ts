@@ -49,6 +49,17 @@ describe("resolveTier", () => {
     await expect(resolveTier("1.5")).rejects.toThrow(/Invalid --tier/);
     await expect(resolveTier("NaN")).rejects.toThrow(/Invalid --tier/);
   });
+
+  it("throws a clear error when stdin is not a TTY and --tier is missing", async () => {
+    // Regression for issue #184: `curl … | bash` bootstrap inherited a
+    // closed pipe as stdin, so clack's `select` crashed silently. The
+    // CLI now fails fast with an actionable message pointing at --tier.
+    // bun:test runs with stdin.isTTY === false, matching the non-TTY
+    // install path exactly — no mocking needed.
+    expect(process.stdin.isTTY).toBeFalsy();
+    await expect(resolveTier(undefined)).rejects.toThrow(/stdin is not a TTY/);
+    await expect(resolveTier(undefined)).rejects.toThrow(/--tier/);
+  });
 });
 
 describe("resolveDir", () => {

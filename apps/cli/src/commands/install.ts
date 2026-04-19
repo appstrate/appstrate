@@ -336,6 +336,16 @@ export async function resolveTier(raw: string | undefined): Promise<Tier> {
     if (parsed === 0 || parsed === 1 || parsed === 2 || parsed === 3) return parsed as Tier;
     throw new Error(`Invalid --tier value "${raw}". Expected 0, 1, 2, or 3.`);
   }
+  // Prompting requires a TTY. If stdin isn't a TTY (CI, `curl | bash`
+  // inside a Dockerfile, cron) clack would crash with no readable
+  // error — surface a clear message pointing at the `--tier` escape
+  // hatch instead. See `scripts/bootstrap.sh` for the matching branch.
+  if (!process.stdin.isTTY) {
+    throw new Error(
+      "Cannot prompt for tier: stdin is not a TTY. " +
+        "Re-run with `--tier N` (0, 1, 2, or 3), e.g. `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3`.",
+    );
+  }
   const chosen = await clack.select<Tier>({
     message: "Which tier do you want to install?",
     options: [
