@@ -317,14 +317,3 @@ export function parseBody<T extends z.ZodType>(
   }
   return parsed.data;
 }
-
-// ---------------------------------------------------------------------------
-// JSONB narrowing helpers
-// ---------------------------------------------------------------------------
-
-/** Safely narrow a JSONB value to a record, returning {} if null/non-object/array. */
-export function asRecord(val: unknown): Record<string, unknown> {
-  return val !== null && typeof val === "object" && !Array.isArray(val)
-    ? (val as Record<string, unknown>)
-    : {};
-}

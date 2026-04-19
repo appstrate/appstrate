@@ -43,6 +43,7 @@
     "./env": "./src/env.ts",
     "./ajv": "./src/ajv.ts",
     "./api-errors": "./src/api-errors.ts",
+    "./safe-json": "./src/safe-json.ts",
     "./storage": "./src/storage.ts",
     "./storage-s3": "./src/storage-s3.ts",
     "./storage-fs": "./src/storage-fs.ts",
