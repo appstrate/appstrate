@@ -188,12 +188,24 @@ export async function listApiKeys(orgId: string, applicationId?: string): Promis
   }));
 }
 
-/** Revoke (soft-delete) an API key. */
-export async function revokeApiKey(keyId: string, orgId: string): Promise<boolean> {
+// Issue #172 (extension) — `applicationIdScope`, when provided, additionally
+// constrains the revoke to keys belonging to that application. Required for
+// API-key callers so a key in App A can only revoke keys within App A; left
+// undefined for session callers (admins manage keys org-wide via dashboard).
+export async function revokeApiKey(
+  keyId: string,
+  orgId: string,
+  applicationIdScope?: string,
+): Promise<boolean> {
+  const conditions = [eq(apiKeys.id, keyId), eq(apiKeys.orgId, orgId), isNull(apiKeys.revokedAt)];
+  if (applicationIdScope) {
+    conditions.push(eq(apiKeys.applicationId, applicationIdScope));
+  }
+
   const rows = await db
     .update(apiKeys)
     .set({ revokedAt: new Date() })
-    .where(and(eq(apiKeys.id, keyId), eq(apiKeys.orgId, orgId), isNull(apiKeys.revokedAt)))
+    .where(and(...conditions))
     .returning({ id: apiKeys.id });
 
   return rows.length > 0;

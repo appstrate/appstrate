@@ -91,9 +91,12 @@ export function createApiKeysRouter() {
   router.delete("/:id", requirePermission("api-keys", "revoke"), async (c) => {
     const orgId = c.get("orgId");
     const keyId = c.req.param("id")!;
+    // Issue #172 (extension): API keys may only revoke keys within their
+    // own bound application. Sessions remain unscoped (admins manage all).
+    const appScope = c.get("authMethod") === "api_key" ? c.get("applicationId") : undefined;
 
     try {
-      const revoked = await revokeApiKey(keyId, orgId);
+      const revoked = await revokeApiKey(keyId, orgId, appScope);
       if (!revoked) {
         throw notFound("API key not found or already revoked");
       }
