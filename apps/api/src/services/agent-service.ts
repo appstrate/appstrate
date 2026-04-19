@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, count, sql, inArray } from "drizzle-orm";
+import { eq, and, count, sql, or, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import type { Manifest } from "@appstrate/core/validation";
@@ -168,6 +168,64 @@ export async function getPackageWithAccess(
   if (!(await hasPackageAccess(applicationId, id))) return null;
 
   return agent;
+}
+
+/**
+ * Free-text catalog search for external modules via PlatformServices.
+ * Matches `id` and manifest fields (`name`, `displayName`, `description`)
+ * with Postgres `ILIKE` — fine for the few-hundred-packages-per-org
+ * scale; a full-text index can be bolted on later if volume grows.
+ *
+ * Ephemeral shadow rows are excluded. Scoping uses the same
+ * `orgOrSystemFilter()` + `notEphemeralFilter()` helpers as
+ * `listPackages` so cross-org enumeration is structurally impossible.
+ *
+ * Callers pass their target `limit`; this function returns at most
+ * `limit + 1` rows so the caller can derive `hasMore` without a
+ * separate COUNT. Default limit is capped to keep the contract bounded.
+ */
+export async function searchPackages(args: {
+  query: string;
+  orgId: string;
+  kind: PackageType;
+  /** Soft-capped at 100 to keep the contract bounded. Default 10. */
+  limit?: number;
+}): Promise<LoadedPackage[]> {
+  const { query, orgId, kind } = args;
+  const limit = Math.min(args.limit ?? 10, 100);
+  const pattern = `%${query}%`;
+
+  const nameMatch = sql`${packages.draftManifest}->>'name' ILIKE ${pattern}`;
+  const displayNameMatch = sql`${packages.draftManifest}->>'displayName' ILIKE ${pattern}`;
+  const descriptionMatch = sql`${packages.draftManifest}->>'description' ILIKE ${pattern}`;
+  const idMatch = sql`${packages.id} ILIKE ${pattern}`;
+
+  const rows = await db
+    .select({
+      id: packages.id,
+      draftManifest: packages.draftManifest,
+      draftContent: packages.draftContent,
+      source: packages.source,
+    })
+    .from(packages)
+    .where(
+      and(
+        orgOrSystemFilter(orgId),
+        notEphemeralFilter(),
+        eq(packages.type, kind),
+        or(idMatch, nameMatch, displayNameMatch, descriptionMatch),
+      ),
+    )
+    .limit(limit + 1);
+
+  return rows.map((row) =>
+    dbRowToLoadedPackage({
+      id: row.id,
+      draftManifest: row.draftManifest,
+      draftContent: row.draftContent ?? "",
+      source: row.source,
+    }),
+  );
 }
 
 /** List packages by type: system (orgId: null) + user packages (from DB, scoped by org). Defaults to "agent". */

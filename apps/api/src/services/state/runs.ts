@@ -685,6 +685,53 @@ export async function listRunLogs(runId: string, orgId: string) {
 }
 
 /**
+ * Org-scoped run snapshot read for external modules via PlatformServices.
+ * Intentionally narrower than `getRun(id, orgId, applicationId)`: chat-like
+ * consumers span applications within a single org, so the read scopes on
+ * `orgId` alone. Returns the public `Run` DTO shape — schema internals
+ * (scheduler ids, actor fields, etc.) stay inside apps/api.
+ */
+export async function getRunByOrg(runId: string, orgId: string) {
+  const [row] = await db
+    .select({
+      id: runs.id,
+      status: runs.status,
+      orgId: runs.orgId,
+      applicationId: runs.applicationId,
+      packageId: runs.packageId,
+      result: runs.result,
+      error: runs.error,
+    })
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.orgId, orgId)))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Optioned log tail for external modules. `order: "asc"` returns the
+ * whole run history chronologically (`id ASC`); `"desc"` returns the
+ * newest entries first and is cheaper when only a small tail is needed.
+ * When `order: "desc"` with a `limit`, rows are reversed before return
+ * so the caller always sees chronological order inside the batch.
+ */
+export async function listRunLogsOrdered(args: {
+  runId: string;
+  orgId: string;
+  limit?: number;
+  order?: "asc" | "desc";
+}) {
+  const { runId, orgId, limit, order = "asc" } = args;
+  const q = db
+    .select()
+    .from(runLogs)
+    .where(and(eq(runLogs.runId, runId), eq(runLogs.orgId, orgId)))
+    .orderBy(order === "desc" ? desc(runLogs.id) : runLogs.id);
+  const rows = limit ? await q.limit(limit) : await q;
+  return order === "desc" ? rows.reverse() : rows;
+}
+
+/**
  * Mark all in-flight runs as failed on server restart.
  * ⚠️ Single-instance only — in multi-instance deployments, this will fail ALL
  * instances' in-flight runs. Multi-instance support requires per-instance run tracking.
