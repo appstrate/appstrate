@@ -676,12 +676,51 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
   };
 }
 
-export async function listRunLogs(runId: string, orgId: string) {
-  return db
+/**
+ * Org-scoped run snapshot read. Intentionally narrower than
+ * `getRun(id, orgId, applicationId)`: chat-like consumers span applications
+ * within a single org, so the read scopes on `orgId` alone. Returns the
+ * public `Run` DTO shape — schema internals (scheduler ids, actor fields,
+ * etc.) stay inside apps/api.
+ */
+export async function getRunByOrg(args: { runId: string; orgId: string }) {
+  const [row] = await db
+    .select({
+      id: runs.id,
+      status: runs.status,
+      orgId: runs.orgId,
+      applicationId: runs.applicationId,
+      packageId: runs.packageId,
+      result: runs.result,
+      error: runs.error,
+    })
+    .from(runs)
+    .where(and(eq(runs.id, args.runId), eq(runs.orgId, args.orgId)))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Org-scoped run log read. `order: "asc"` (default) returns entries in
+ * insertion order (`id ASC`); `"desc"` selects the most recent `limit`
+ * entries and is cheaper when only a tail is needed. The returned batch
+ * is always chronological — `desc` affects which rows are selected, not
+ * the order callers receive.
+ */
+export async function listRunLogs(args: {
+  runId: string;
+  orgId: string;
+  limit?: number;
+  order?: "asc" | "desc";
+}) {
+  const { runId, orgId, limit, order = "asc" } = args;
+  const q = db
     .select()
     .from(runLogs)
     .where(and(eq(runLogs.runId, runId), eq(runLogs.orgId, orgId)))
-    .orderBy(runLogs.id);
+    .orderBy(order === "desc" ? desc(runLogs.id) : runLogs.id);
+  const rows = limit ? await q.limit(limit) : await q;
+  return order === "desc" ? rows.reverse() : rows;
 }
 
 /**

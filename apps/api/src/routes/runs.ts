@@ -616,7 +616,7 @@ export function createRunsRouter() {
     if (endUser && exec.endUserId !== endUser.id) {
       throw notFound("Run not found");
     }
-    const logs = await listRunLogs(runId, orgId);
+    const logs = await listRunLogs({ runId, orgId });
 
     return c.json(logs);
   });
