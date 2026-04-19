@@ -14,6 +14,7 @@ import {
 } from "@appstrate/connect";
 import { authModeLabel } from "./helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
+import type { AppScope, OrgScope } from "../../lib/scope.ts";
 
 export interface ConnectionStatus {
   provider: string;
@@ -24,12 +25,18 @@ export interface ConnectionStatus {
 }
 
 export async function getConnectionStatus(
+  scope: OrgScope,
   provider: string,
   connectionProfileId: string,
-  orgId: string,
   providerCredentialId: string,
 ): Promise<ConnectionStatus> {
-  const conn = await getConnection(db, connectionProfileId, provider, orgId, providerCredentialId);
+  const conn = await getConnection(
+    db,
+    connectionProfileId,
+    provider,
+    scope.orgId,
+    providerCredentialId,
+  );
   if (conn) {
     return {
       provider,
@@ -52,12 +59,11 @@ export async function getConnectionStatus(
  * which would pass validation but fail at runtime.
  */
 export async function hasActiveConnection(
+  scope: AppScope,
   provider: string,
   connectionProfileId: string,
-  orgId: string,
-  applicationId: string,
 ): Promise<boolean> {
-  const credentialId = await getProviderCredentialId(db, applicationId, provider);
+  const credentialId = await getProviderCredentialId(db, scope.applicationId, provider);
   if (!credentialId) return false;
 
   const rows = await db
@@ -67,7 +73,7 @@ export async function hasActiveConnection(
       and(
         eq(userProviderConnections.profileId, connectionProfileId),
         eq(userProviderConnections.providerId, provider),
-        eq(userProviderConnections.orgId, orgId),
+        eq(userProviderConnections.orgId, scope.orgId),
         eq(userProviderConnections.providerCredentialId, credentialId),
         eq(userProviderConnections.needsReconnection, false),
       ),
@@ -190,10 +196,9 @@ async function batchGetConnectionStatuses(
  * applicationId is required to resolve per-app provider credentials.
  */
 export async function resolveProviderStatuses(
+  scope: AppScope,
   providers: AgentProviderRequirement[],
   providerProfiles: ProviderProfileMap,
-  orgId: string,
-  applicationId: string,
 ): Promise<ProviderStatus[]> {
   const profileIds = [
     ...new Set(
@@ -208,7 +213,7 @@ export async function resolveProviderStatuses(
   const providerIds = [...new Set(providers.map((p) => p.id))];
   await Promise.all(
     providerIds.map(async (providerId) => {
-      const credId = await getProviderCredentialId(db, applicationId, providerId);
+      const credId = await getProviderCredentialId(db, scope.applicationId, providerId);
       if (credId) credentialIdMap.set(providerId, credId);
     }),
   );
@@ -216,8 +221,8 @@ export async function resolveProviderStatuses(
   // Batch-fetch profile info, connection statuses, and auth modes in parallel
   const [profileInfoMap, connectionMap, allProviders] = await Promise.all([
     buildProfileInfoMap(profileIds),
-    batchGetConnectionStatuses(profileIds, orgId, credentialIdMap),
-    listProviders(db, orgId),
+    batchGetConnectionStatuses(profileIds, scope.orgId, credentialIdMap),
+    listProviders(db, scope.orgId),
   ]);
 
   // Build auth mode lookup from batch-fetched providers

@@ -28,6 +28,7 @@ import type { RunProviderSnapshot } from "@appstrate/shared-types";
 import { logger } from "../../lib/logger.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
+import type { AppScope, OrgScope } from "../../lib/scope.ts";
 
 /** Maps an Actor to the runs table's `dashboardUserId`/`endUserId` columns. */
 function runActorInsert(actor: Actor | null): {
@@ -45,18 +46,14 @@ import { toISO } from "../../lib/date-helpers.ts";
 
 // --- Runs ---
 
-async function nextRunNumber(
-  packageId: string,
-  orgId: string,
-  applicationId: string,
-): Promise<number> {
+async function nextRunNumber(scope: AppScope, packageId: string): Promise<number> {
   const [maxRow] = await db
     .select({ maxNum: max(runs.runNumber) })
     .from(runs)
     .where(
       scopedWhere(runs, {
-        orgId,
-        applicationId,
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
         extra: [eq(runs.packageId, packageId)],
       }),
     );
@@ -67,8 +64,6 @@ interface CreateRunParams {
   id: string;
   packageId: string;
   actor: Actor | null;
-  orgId: string;
-  applicationId: string;
   input: Record<string, unknown> | null;
   scheduleId?: string;
   connectionProfileId?: string;
@@ -88,15 +83,15 @@ interface CreateRunParams {
   config?: Record<string, unknown> | null;
 }
 
-export async function createRun(params: CreateRunParams): Promise<void> {
-  const { id, packageId, actor, orgId, applicationId, input } = params;
-  const runNumber = await nextRunNumber(packageId, orgId, applicationId);
+export async function createRun(scope: AppScope, params: CreateRunParams): Promise<void> {
+  const { id, packageId, actor, input } = params;
+  const runNumber = await nextRunNumber(scope, packageId);
 
   await db.insert(runs).values({
     id,
     packageId,
     ...runActorInsert(actor),
-    orgId,
+    orgId: scope.orgId,
     status: "pending",
     input,
     startedAt: new Date(),
@@ -107,7 +102,7 @@ export async function createRun(params: CreateRunParams): Promise<void> {
     proxyLabel: params.proxyLabel,
     modelLabel: params.modelLabel,
     modelSource: params.modelSource,
-    applicationId,
+    applicationId: scope.applicationId,
     providerProfileIds: params.providerProfileIds,
     providerStatuses: params.providerStatuses,
     apiKeyId: params.apiKeyId,
@@ -123,25 +118,24 @@ export async function createRun(params: CreateRunParams): Promise<void> {
  * Single INSERT with status=failed — triggers one pg_notify for realtime.
  */
 export async function createFailedRun(
+  scope: AppScope,
   id: string,
   packageId: string,
   actor: Actor | null,
-  orgId: string,
-  applicationId: string,
   error: string,
   scheduleId?: string,
   connectionProfileId?: string,
   agentDenorm?: { scope?: string | null; name?: string | null },
 ): Promise<void> {
-  const runNumber = await nextRunNumber(packageId, orgId, applicationId);
+  const runNumber = await nextRunNumber(scope, packageId);
   const now = new Date();
 
   await db.insert(runs).values({
     id,
     packageId,
     ...runActorInsert(actor),
-    orgId,
-    applicationId,
+    orgId: scope.orgId,
+    applicationId: scope.applicationId,
     status: "failed",
     input: null,
     error,
@@ -158,9 +152,8 @@ export async function createFailedRun(
 }
 
 export async function updateRun(
+  scope: AppScope,
   id: string,
-  orgId: string,
-  applicationId: string,
   updates: {
     status?: string;
     result?: Record<string, unknown>;
@@ -191,7 +184,13 @@ export async function updateRun(
     await db
       .update(runs)
       .set(set)
-      .where(scopedWhere(runs, { orgId, applicationId, extra: [eq(runs.id, id)] }));
+      .where(
+        scopedWhere(runs, {
+          orgId: scope.orgId,
+          applicationId: scope.applicationId,
+          extra: [eq(runs.id, id)],
+        }),
+      );
   } catch (err) {
     logger.error("Failed to update run", {
       runId: id,
@@ -201,15 +200,14 @@ export async function updateRun(
 }
 
 export async function getLastRunState(
+  scope: AppScope,
   packageId: string,
   actor: Actor | null,
-  orgId: string,
-  applicationId: string,
 ): Promise<Record<string, unknown> | null> {
   const conditions = [
     eq(runs.packageId, packageId),
-    eq(runs.orgId, orgId),
-    eq(runs.applicationId, applicationId),
+    eq(runs.orgId, scope.orgId),
+    eq(runs.applicationId, scope.applicationId),
     isNotNull(runs.state),
   ];
   if (actor) {
@@ -228,10 +226,9 @@ export async function getLastRunState(
 }
 
 export async function getRecentRuns(
+  scope: AppScope,
   packageId: string,
   actor: Actor | null,
-  orgId: string,
-  applicationId: string,
   options: {
     limit?: number;
     fields?: ("state" | "result")[];
@@ -243,8 +240,8 @@ export async function getRecentRuns(
 
   const conditions = [
     eq(runs.packageId, packageId),
-    eq(runs.orgId, orgId),
-    eq(runs.applicationId, applicationId),
+    eq(runs.orgId, scope.orgId),
+    eq(runs.applicationId, scope.applicationId),
     eq(runs.status, "success"),
   ];
   if (actor) {
@@ -284,16 +281,11 @@ export async function getRecentRuns(
   });
 }
 
-export async function getLastRun(
-  packageId: string,
-  actor: Actor | null,
-  orgId: string,
-  applicationId: string,
-) {
+export async function getLastRun(scope: AppScope, packageId: string, actor: Actor | null) {
   const conditions = [
     eq(runs.packageId, packageId),
-    eq(runs.orgId, orgId),
-    eq(runs.applicationId, applicationId),
+    eq(runs.orgId, scope.orgId),
+    eq(runs.applicationId, scope.applicationId),
   ];
   if (actor) {
     conditions.push(
@@ -315,9 +307,15 @@ export async function getLastRun(
   return row ?? null;
 }
 
+/**
+ * Append a log entry for a run. Only org-scoped — `run_logs` is keyed on
+ * `runId` (unique globally) + `orgId` only; no application column exists.
+ * Callers that hold an `AppScope` can still pass it — `OrgScope` is the
+ * structural supertype so `AppScope` flows through naturally.
+ */
 export async function appendRunLog(
+  scope: OrgScope,
   runId: string,
-  orgId: string,
   type: string,
   event: string | null,
   message: string | null,
@@ -329,7 +327,7 @@ export async function appendRunLog(
       .insert(runLogs)
       .values({
         runId,
-        orgId,
+        orgId: scope.orgId,
         type,
         event,
         message,
@@ -348,18 +346,17 @@ export async function appendRunLog(
 }
 
 export async function getRunningRunsForPackage(
+  scope: AppScope,
   packageId: string,
-  orgId: string,
-  applicationId: string,
   actor?: Actor,
 ): Promise<number> {
   const conditions = [
     eq(runs.packageId, packageId),
-    eq(runs.orgId, orgId),
+    eq(runs.orgId, scope.orgId),
     inArray(runs.status, ["running", "pending"]),
   ];
 
-  conditions.push(eq(runs.applicationId, applicationId));
+  conditions.push(eq(runs.applicationId, scope.applicationId));
 
   if (actor) {
     conditions.push(
@@ -374,25 +371,33 @@ export async function getRunningRunsForPackage(
   return row?.count ?? 0;
 }
 
-export async function getRunningRunCountForOrg(orgId: string): Promise<number> {
+/**
+ * Count in-flight runs across ALL applications in an org. Used by the
+ * per-org concurrency limiter — genuinely org-scoped, no applicationId
+ * filter. Signature stays org-scoped so the caller can't accidentally
+ * scope it narrower.
+ */
+export async function getRunningRunCountForOrg(scope: OrgScope): Promise<number> {
   const [row] = await db
     .select({ count: count() })
     .from(runs)
-    .where(scopedWhere(runs, { orgId, extra: [inArray(runs.status, ["running", "pending"])] }));
+    .where(
+      scopedWhere(runs, {
+        orgId: scope.orgId,
+        extra: [inArray(runs.status, ["running", "pending"])],
+      }),
+    );
   return row?.count ?? 0;
 }
 
-export async function getRunningRunCounts(
-  orgId: string,
-  applicationId: string,
-): Promise<Record<string, number>> {
+export async function getRunningRunCounts(scope: AppScope): Promise<Record<string, number>> {
   const rows = await db
     .select({ packageId: runs.packageId, count: count() })
     .from(runs)
     .where(
       scopedWhere(runs, {
-        orgId,
-        applicationId,
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
         extra: [inArray(runs.status, ["running", "pending"])],
       }),
     )
@@ -405,11 +410,11 @@ export async function getRunningRunCounts(
   return counts;
 }
 
-export async function getRun(id: string, orgId: string, applicationId: string) {
+export async function getRun(scope: AppScope, id: string) {
   const conditions = [
     eq(runs.id, id),
-    eq(runs.orgId, orgId),
-    eq(runs.applicationId, applicationId),
+    eq(runs.orgId, scope.orgId),
+    eq(runs.applicationId, scope.applicationId),
   ];
 
   const [row] = await db
@@ -428,17 +433,13 @@ export async function getRun(id: string, orgId: string, applicationId: string) {
   return row ?? null;
 }
 
-export async function deletePackageRuns(
-  packageId: string,
-  orgId: string,
-  applicationId: string,
-): Promise<number> {
+export async function deletePackageRuns(scope: AppScope, packageId: string): Promise<number> {
   const deleted = await db
     .delete(runs)
     .where(
       scopedWhere(runs, {
-        orgId,
-        applicationId,
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
         extra: [eq(runs.packageId, packageId)],
       }),
     )
@@ -487,20 +488,19 @@ export async function listRunsWithFilter(
 }
 
 export async function listPackageRuns(
+  scope: AppScope,
   packageId: string,
-  orgId: string,
   options: {
     limit?: number;
     offset?: number;
-    applicationId: string;
     endUserId?: string | null;
-  },
+  } = {},
 ) {
-  const { limit = 50, offset = 0, applicationId, endUserId } = options;
+  const { limit = 50, offset = 0, endUserId } = options;
   const conditions = [
     eq(runs.packageId, packageId),
-    eq(runs.orgId, orgId),
-    eq(runs.applicationId, applicationId),
+    eq(runs.orgId, scope.orgId),
+    eq(runs.applicationId, scope.applicationId),
   ];
   if (endUserId) {
     conditions.push(eq(runs.endUserId, endUserId));
@@ -530,7 +530,6 @@ function isRunStatus(value: string): value is RunStatus {
 }
 
 export interface ListGlobalRunsOptions {
-  applicationId: string;
   limit?: number;
   offset?: number;
   kind?: GlobalRunKind;
@@ -541,24 +540,15 @@ export interface ListGlobalRunsOptions {
 }
 
 export async function listGlobalRuns(
-  orgId: string,
-  options: ListGlobalRunsOptions,
+  scope: AppScope,
+  options: ListGlobalRunsOptions = {},
 ): Promise<{
   runs: Record<string, unknown>[];
   total: number;
 }> {
-  const {
-    applicationId,
-    limit = 50,
-    offset = 0,
-    kind,
-    status,
-    startDate,
-    endDate,
-    endUserId,
-  } = options;
+  const { limit = 50, offset = 0, kind, status, startDate, endDate, endUserId } = options;
 
-  const conditions = [eq(runs.orgId, orgId), eq(runs.applicationId, applicationId)];
+  const conditions = [eq(runs.orgId, scope.orgId), eq(runs.applicationId, scope.applicationId)];
   if (status && isRunStatus(status)) conditions.push(eq(runs.status, status));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
@@ -610,15 +600,15 @@ export async function listGlobalRuns(
 }
 
 export async function listScheduleRuns(
+  scope: AppScope,
   scheduleId: string,
-  orgId: string,
-  options: { limit?: number; offset?: number; applicationId: string },
+  options: { limit?: number; offset?: number } = {},
 ) {
-  const { limit = 20, offset = 0, applicationId } = options;
+  const { limit = 20, offset = 0 } = options;
   return listRunsWithFilter(
     scopedWhere(runs, {
-      orgId,
-      applicationId,
+      orgId: scope.orgId,
+      applicationId: scope.applicationId,
       extra: [eq(runs.scheduleId, scheduleId)],
     })!,
     limit,
@@ -626,11 +616,11 @@ export async function listScheduleRuns(
   );
 }
 
-export async function getRunFull(id: string, orgId: string, applicationId: string) {
+export async function getRunFull(scope: AppScope, id: string) {
   const conditions = [
     eq(runs.id, id),
-    eq(runs.orgId, orgId),
-    eq(runs.applicationId, applicationId),
+    eq(runs.orgId, scope.orgId),
+    eq(runs.applicationId, scope.applicationId),
   ];
 
   const [row] = await db
@@ -676,11 +666,16 @@ export async function getRunFull(id: string, orgId: string, applicationId: strin
   };
 }
 
-export async function listRunLogs(runId: string, orgId: string) {
+/**
+ * Fetch logs for a run. Org-scoped — `run_logs` has no applicationId
+ * column. App-scoped callers should verify run ownership via `getRun`
+ * before calling this.
+ */
+export async function listRunLogs(scope: OrgScope, runId: string) {
   return db
     .select()
     .from(runLogs)
-    .where(and(eq(runLogs.runId, runId), eq(runLogs.orgId, orgId)))
+    .where(and(eq(runLogs.runId, runId), eq(runLogs.orgId, scope.orgId)))
     .orderBy(runLogs.id);
 }
 

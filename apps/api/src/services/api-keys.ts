@@ -13,6 +13,7 @@ import { logger } from "../lib/logger.ts";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
 import type { OrgRole } from "../types/index.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
+import type { AppScope, OrgScope } from "../lib/scope.ts";
 
 const API_KEY_PREFIX = "ask_";
 
@@ -123,8 +124,7 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
 
 /** Create a new API key record. Returns the record ID. */
 export async function createApiKeyRecord(params: {
-  orgId: string;
-  applicationId: string;
+  scope: AppScope;
   name: string;
   keyHash: string;
   keyPrefix: string;
@@ -135,8 +135,8 @@ export async function createApiKeyRecord(params: {
   const id = crypto.randomUUID();
   await db.insert(apiKeys).values({
     id,
-    orgId: params.orgId,
-    applicationId: params.applicationId,
+    orgId: params.scope.orgId,
+    applicationId: params.scope.applicationId,
     name: params.name,
     keyHash: params.keyHash,
     keyPrefix: params.keyPrefix,
@@ -147,11 +147,23 @@ export async function createApiKeyRecord(params: {
   return id;
 }
 
-/** List active (non-revoked) API keys for an org, optionally filtered by application. */
-export async function listApiKeys(orgId: string, applicationId?: string): Promise<ApiKeyInfo[]> {
-  const conditions = [eq(apiKeys.orgId, orgId), isNull(apiKeys.revokedAt)];
-  if (applicationId) {
-    conditions.push(eq(apiKeys.applicationId, applicationId));
+/**
+ * List active (non-revoked) API keys.
+ *
+ * Session callers typically pass `OrgScope` — admins manage keys org-wide
+ * from the dashboard, optionally narrowing via the `applicationId` option.
+ * API-key callers pass their own `AppScope`: the listing is forced to the
+ * key's bound app so a key in App A cannot enumerate sibling apps' keys.
+ */
+export async function listApiKeys(
+  scope: OrgScope | AppScope,
+  opts: { applicationId?: string } = {},
+): Promise<ApiKeyInfo[]> {
+  const conditions = [eq(apiKeys.orgId, scope.orgId), isNull(apiKeys.revokedAt)];
+  const appFilter =
+    "applicationId" in scope ? scope.applicationId : (opts.applicationId ?? undefined);
+  if (appFilter) {
+    conditions.push(eq(apiKeys.applicationId, appFilter));
   }
 
   const rows = await db
@@ -188,18 +200,22 @@ export async function listApiKeys(orgId: string, applicationId?: string): Promis
   }));
 }
 
-// Issue #172 (extension) — `applicationIdScope`, when provided, additionally
-// constrains the revoke to keys belonging to that application. Required for
-// API-key callers so a key in App A can only revoke keys within App A; left
-// undefined for session callers (admins manage keys org-wide via dashboard).
-export async function revokeApiKey(
-  keyId: string,
-  orgId: string,
-  applicationIdScope?: string,
-): Promise<boolean> {
-  const conditions = [eq(apiKeys.id, keyId), eq(apiKeys.orgId, orgId), isNull(apiKeys.revokedAt)];
-  if (applicationIdScope) {
-    conditions.push(eq(apiKeys.applicationId, applicationIdScope));
+/**
+ * Revoke (soft-delete) an API key.
+ *
+ * Session callers (admins) pass `OrgScope` for org-wide reach; API-key
+ * callers pass their own `AppScope` so a key in App A can only revoke keys
+ * within App A. Issue #172 (extension): passing the wrong scope type is
+ * now a compile-time error instead of a missing argument.
+ */
+export async function revokeApiKey(scope: OrgScope | AppScope, keyId: string): Promise<boolean> {
+  const conditions = [
+    eq(apiKeys.id, keyId),
+    eq(apiKeys.orgId, scope.orgId),
+    isNull(apiKeys.revokedAt),
+  ];
+  if ("applicationId" in scope) {
+    conditions.push(eq(apiKeys.applicationId, scope.applicationId));
   }
 
   const rows = await db

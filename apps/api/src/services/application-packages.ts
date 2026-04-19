@@ -7,28 +7,46 @@
 
 import { eq, and, or, sql, isNotNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applicationPackages, packages } from "@appstrate/db/schema";
+import { applicationPackages, packages, applications } from "@appstrate/db/schema";
 import { notFound, conflict } from "../lib/errors.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "../lib/safe-json.ts";
 import type { PackageType } from "@appstrate/core/validation";
+import type { AppScope } from "../lib/scope.ts";
+
+// ---------------------------------------------------------------------------
+// Internal helper — verify the scope's application belongs to the scope's org.
+// Used by install which mutates installation state.
+// ---------------------------------------------------------------------------
+
+async function assertAppBelongsToOrg(scope: AppScope): Promise<void> {
+  const [app] = await db
+    .select({ id: applications.id })
+    .from(applications)
+    .where(and(eq(applications.id, scope.applicationId), eq(applications.orgId, scope.orgId)))
+    .limit(1);
+  if (!app) {
+    throw notFound(`Application '${scope.applicationId}' not found in this organization`);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Install / Uninstall
 // ---------------------------------------------------------------------------
 
 export async function installPackage(
-  applicationId: string,
-  orgId: string,
+  scope: AppScope,
   packageId: string,
   config?: Record<string, unknown>,
 ) {
+  await assertAppBelongsToOrg(scope);
+
   // Verify the package exists in the org catalog (or is a system package).
   // Ephemeral shadow packages are never installable.
   const [pkg] = await db
     .select({ id: packages.id, type: packages.type })
     .from(packages)
-    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
     .limit(1);
 
   if (!pkg) {
@@ -41,7 +59,7 @@ export async function installPackage(
     .from(applicationPackages)
     .where(
       and(
-        eq(applicationPackages.applicationId, applicationId),
+        eq(applicationPackages.applicationId, scope.applicationId),
         eq(applicationPackages.packageId, packageId),
       ),
     )
@@ -57,7 +75,7 @@ export async function installPackage(
   const [row] = await db
     .insert(applicationPackages)
     .values({
-      applicationId,
+      applicationId: scope.applicationId,
       packageId,
       config: config ?? {},
     })
@@ -66,12 +84,12 @@ export async function installPackage(
   return row!;
 }
 
-export async function uninstallPackage(applicationId: string, packageId: string): Promise<void> {
+export async function uninstallPackage(scope: AppScope, packageId: string): Promise<void> {
   const deleted = await db
     .delete(applicationPackages)
     .where(
       and(
-        eq(applicationPackages.applicationId, applicationId),
+        eq(applicationPackages.applicationId, scope.applicationId),
         eq(applicationPackages.packageId, packageId),
       ),
     )
@@ -101,8 +119,8 @@ const installedPackageSelect = {
   draftManifest: packages.draftManifest,
 };
 
-export async function listInstalledPackages(applicationId: string, type?: PackageType) {
-  const conditions = [eq(applicationPackages.applicationId, applicationId)];
+export async function listInstalledPackages(scope: AppScope, type?: PackageType) {
+  const conditions = [eq(applicationPackages.applicationId, scope.applicationId)];
   if (type) {
     conditions.push(eq(packages.type, type));
   }
@@ -114,14 +132,14 @@ export async function listInstalledPackages(applicationId: string, type?: Packag
     .where(and(...conditions));
 }
 
-export async function getInstalledPackage(applicationId: string, packageId: string) {
+export async function getInstalledPackage(scope: AppScope, packageId: string) {
   const [row] = await db
     .select(installedPackageSelect)
     .from(applicationPackages)
     .innerJoin(packages, eq(packages.id, applicationPackages.packageId))
     .where(
       and(
-        eq(applicationPackages.applicationId, applicationId),
+        eq(applicationPackages.applicationId, scope.applicationId),
         eq(applicationPackages.packageId, packageId),
       ),
     )
@@ -139,11 +157,7 @@ export async function getInstalledPackage(applicationId: string, packageId: stri
  * Accessible = system packages (always visible) + explicitly installed in application_packages.
  * Single query via LEFT JOIN — no N+1.
  */
-export async function listAccessiblePackages(
-  orgId: string,
-  applicationId: string,
-  type: PackageType,
-) {
+export async function listAccessiblePackages(scope: AppScope, type: PackageType) {
   return db
     .select({
       id: packages.id,
@@ -163,13 +177,13 @@ export async function listAccessiblePackages(
       applicationPackages,
       and(
         eq(applicationPackages.packageId, packages.id),
-        eq(applicationPackages.applicationId, applicationId),
+        eq(applicationPackages.applicationId, scope.applicationId),
       ),
     )
     .where(
       and(
         eq(packages.type, type),
-        orgOrSystemFilter(orgId),
+        orgOrSystemFilter(scope.orgId),
         notEphemeralFilter(),
         // system packages always visible, local packages only if installed
         or(eq(packages.source, "system"), isNotNull(applicationPackages.packageId)),
@@ -182,7 +196,7 @@ export async function listAccessiblePackages(
  * Check if an application has access to a specific package.
  * System packages are always accessible; local packages require installation.
  */
-export async function hasPackageAccess(applicationId: string, packageId: string): Promise<boolean> {
+export async function hasPackageAccess(scope: AppScope, packageId: string): Promise<boolean> {
   const [row] = await db
     .select({ id: packages.id })
     .from(packages)
@@ -190,7 +204,7 @@ export async function hasPackageAccess(applicationId: string, packageId: string)
       applicationPackages,
       and(
         eq(applicationPackages.packageId, packages.id),
-        eq(applicationPackages.applicationId, applicationId),
+        eq(applicationPackages.applicationId, scope.applicationId),
       ),
     )
     .where(
@@ -246,7 +260,7 @@ export async function getPackageConfig(
 // ---------------------------------------------------------------------------
 
 export async function updateInstalledPackage(
-  applicationId: string,
+  scope: AppScope,
   packageId: string,
   updates: {
     config?: Record<string, unknown>;
@@ -268,7 +282,7 @@ export async function updateInstalledPackage(
   await db
     .insert(applicationPackages)
     .values({
-      applicationId,
+      applicationId: scope.applicationId,
       packageId,
       config: updates.config ?? {},
       ...(updates.modelId !== undefined ? { modelId: updates.modelId } : {}),

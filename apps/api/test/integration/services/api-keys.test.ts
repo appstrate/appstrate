@@ -90,8 +90,7 @@ describe("api-keys service", () => {
       const hash = await hashApiKey(rawKey);
 
       const id = await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "Test Key",
         keyHash: hash,
         keyPrefix: extractKeyPrefix(rawKey),
@@ -109,8 +108,7 @@ describe("api-keys service", () => {
       const hash = await hashApiKey(rawKey);
 
       await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "Listed Key",
         keyHash: hash,
         keyPrefix: extractKeyPrefix(rawKey),
@@ -118,7 +116,7 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      const keys = await listApiKeys(ctx.orgId);
+      const keys = await listApiKeys({ orgId: ctx.orgId });
       expect(keys).toHaveLength(1);
       expect(keys[0]!.name).toBe("Listed Key");
     });
@@ -132,8 +130,7 @@ describe("api-keys service", () => {
       const hash = await hashApiKey(rawKey);
 
       await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "Valid Key",
         keyHash: hash,
         keyPrefix: extractKeyPrefix(rawKey),
@@ -171,8 +168,7 @@ describe("api-keys service", () => {
       const hash = await hashApiKey(rawKey);
 
       const keyId = await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "Revoked Key",
         keyHash: hash,
         keyPrefix: extractKeyPrefix(rawKey),
@@ -180,7 +176,7 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      await revokeApiKey(keyId, ctx.orgId);
+      await revokeApiKey({ orgId: ctx.orgId }, keyId);
 
       const result = await validateApiKey(rawKey);
       expect(result).toBeNull();
@@ -194,8 +190,7 @@ describe("api-keys service", () => {
       const pastDate = new Date(Date.now() - 60_000);
 
       await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "Expired Key",
         keyHash: hash,
         keyPrefix: extractKeyPrefix(rawKey),
@@ -214,8 +209,7 @@ describe("api-keys service", () => {
       const futureDate = new Date(Date.now() + 86_400_000); // +1 day
 
       await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "Future Expiry Key",
         keyHash: hash,
         keyPrefix: extractKeyPrefix(rawKey),
@@ -238,8 +232,7 @@ describe("api-keys service", () => {
       const rawKey2 = generateApiKey();
 
       await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "Key One",
         keyHash: await hashApiKey(rawKey1),
         keyPrefix: extractKeyPrefix(rawKey1),
@@ -248,8 +241,7 @@ describe("api-keys service", () => {
       });
 
       await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "Key Two",
         keyHash: await hashApiKey(rawKey2),
         keyPrefix: extractKeyPrefix(rawKey2),
@@ -257,7 +249,7 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      const keys = await listApiKeys(ctx.orgId);
+      const keys = await listApiKeys({ orgId: ctx.orgId });
 
       expect(keys).toHaveLength(2);
       const names = keys.map((k) => k.name);
@@ -270,8 +262,7 @@ describe("api-keys service", () => {
 
       const rawKey = generateApiKey();
       await createApiKeyRecord({
-        orgId: otherCtx.orgId,
-        applicationId: otherCtx.defaultAppId,
+        scope: { orgId: otherCtx.orgId, applicationId: otherCtx.defaultAppId },
         name: "Other Org Key",
         keyHash: await hashApiKey(rawKey),
         keyPrefix: extractKeyPrefix(rawKey),
@@ -279,7 +270,7 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      const keys = await listApiKeys(ctx.orgId);
+      const keys = await listApiKeys({ orgId: ctx.orgId });
 
       expect(keys).toHaveLength(0);
     });
@@ -287,8 +278,7 @@ describe("api-keys service", () => {
     it("does not return revoked keys", async () => {
       const rawKey = generateApiKey();
       const keyId = await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "Soon Revoked",
         keyHash: await hashApiKey(rawKey),
         keyPrefix: extractKeyPrefix(rawKey),
@@ -296,9 +286,9 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      await revokeApiKey(keyId, ctx.orgId);
+      await revokeApiKey({ orgId: ctx.orgId }, keyId);
 
-      const keys = await listApiKeys(ctx.orgId);
+      const keys = await listApiKeys({ orgId: ctx.orgId });
 
       expect(keys).toHaveLength(0);
     });
@@ -306,8 +296,7 @@ describe("api-keys service", () => {
     it("includes creator info from profiles/user join", async () => {
       const rawKey = generateApiKey();
       await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "Creator Info Key",
         keyHash: await hashApiKey(rawKey),
         keyPrefix: extractKeyPrefix(rawKey),
@@ -315,7 +304,7 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      const keys = await listApiKeys(ctx.orgId);
+      const keys = await listApiKeys({ orgId: ctx.orgId });
 
       expect(keys).toHaveLength(1);
       expect(keys[0]!.createdBy).toBe(ctx.user.id);
@@ -328,8 +317,7 @@ describe("api-keys service", () => {
       const prefix = extractKeyPrefix(rawKey);
 
       await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "Shape Test Key",
         keyHash: await hashApiKey(rawKey),
         keyPrefix: prefix,
@@ -337,7 +325,7 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      const keys = await listApiKeys(ctx.orgId);
+      const keys = await listApiKeys({ orgId: ctx.orgId });
 
       expect(keys).toHaveLength(1);
       const key = keys[0]!;
@@ -357,8 +345,7 @@ describe("api-keys service", () => {
       const rawKey2 = generateApiKey();
 
       await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "Default App Key",
         keyHash: await hashApiKey(rawKey1),
         keyPrefix: extractKeyPrefix(rawKey1),
@@ -379,8 +366,7 @@ describe("api-keys service", () => {
       });
 
       await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: otherAppId,
+        scope: { orgId: ctx.orgId, applicationId: otherAppId },
         name: "Other App Key",
         keyHash: await hashApiKey(rawKey2),
         keyPrefix: extractKeyPrefix(rawKey2),
@@ -388,16 +374,19 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      const defaultAppKeys = await listApiKeys(ctx.orgId, ctx.defaultAppId);
+      const defaultAppKeys = await listApiKeys(
+        { orgId: ctx.orgId },
+        { applicationId: ctx.defaultAppId },
+      );
       expect(defaultAppKeys).toHaveLength(1);
       expect(defaultAppKeys[0]!.name).toBe("Default App Key");
 
-      const otherAppKeys = await listApiKeys(ctx.orgId, otherAppId);
+      const otherAppKeys = await listApiKeys({ orgId: ctx.orgId }, { applicationId: otherAppId });
       expect(otherAppKeys).toHaveLength(1);
       expect(otherAppKeys[0]!.name).toBe("Other App Key");
 
       // Without filter returns all
-      const allKeys = await listApiKeys(ctx.orgId);
+      const allKeys = await listApiKeys({ orgId: ctx.orgId });
       expect(allKeys).toHaveLength(2);
     });
   });
@@ -408,8 +397,7 @@ describe("api-keys service", () => {
     it("soft-deletes the key and returns true", async () => {
       const rawKey = generateApiKey();
       const keyId = await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "To Revoke",
         keyHash: await hashApiKey(rawKey),
         keyPrefix: extractKeyPrefix(rawKey),
@@ -417,17 +405,17 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      const result = await revokeApiKey(keyId, ctx.orgId);
+      const result = await revokeApiKey({ orgId: ctx.orgId }, keyId);
 
       expect(result).toBe(true);
 
       // Key should no longer appear in active list
-      const keys = await listApiKeys(ctx.orgId);
+      const keys = await listApiKeys({ orgId: ctx.orgId });
       expect(keys).toHaveLength(0);
     });
 
     it("returns false for a non-existent key ID", async () => {
-      const result = await revokeApiKey(crypto.randomUUID(), ctx.orgId);
+      const result = await revokeApiKey({ orgId: ctx.orgId }, crypto.randomUUID());
 
       expect(result).toBe(false);
     });
@@ -437,8 +425,7 @@ describe("api-keys service", () => {
 
       const rawKey = generateApiKey();
       const keyId = await createApiKeyRecord({
-        orgId: otherCtx.orgId,
-        applicationId: otherCtx.defaultAppId,
+        scope: { orgId: otherCtx.orgId, applicationId: otherCtx.defaultAppId },
         name: "Other Org Key",
         keyHash: await hashApiKey(rawKey),
         keyPrefix: extractKeyPrefix(rawKey),
@@ -447,20 +434,19 @@ describe("api-keys service", () => {
       });
 
       // Attempt to revoke with the wrong orgId
-      const result = await revokeApiKey(keyId, ctx.orgId);
+      const result = await revokeApiKey({ orgId: ctx.orgId }, keyId);
 
       expect(result).toBe(false);
 
       // Key should still be active for the owning org
-      const keys = await listApiKeys(otherCtx.orgId);
+      const keys = await listApiKeys({ orgId: otherCtx.orgId });
       expect(keys).toHaveLength(1);
     });
 
     it("returns false when revoking an already-revoked key", async () => {
       const rawKey = generateApiKey();
       const keyId = await createApiKeyRecord({
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         name: "Double Revoke",
         keyHash: await hashApiKey(rawKey),
         keyPrefix: extractKeyPrefix(rawKey),
@@ -468,10 +454,10 @@ describe("api-keys service", () => {
         expiresAt: null,
       });
 
-      const first = await revokeApiKey(keyId, ctx.orgId);
+      const first = await revokeApiKey({ orgId: ctx.orgId }, keyId);
       expect(first).toBe(true);
 
-      const second = await revokeApiKey(keyId, ctx.orgId);
+      const second = await revokeApiKey({ orgId: ctx.orgId }, keyId);
       expect(second).toBe(false);
     });
   });

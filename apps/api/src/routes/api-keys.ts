@@ -15,6 +15,7 @@ import {
   listApiKeys,
   revokeApiKey,
 } from "../services/api-keys.ts";
+import { getAppScope, getOrgScope } from "../lib/scope.ts";
 
 export const createApiKeySchema = z.object({
   name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
@@ -38,22 +39,20 @@ export function createApiKeysRouter() {
     return c.json({ scopes: available });
   });
 
-  // GET /api/api-keys — list active keys for the org
+  // GET /api/api-keys — list active keys for the current application
   router.get("/", requirePermission("api-keys", "read"), async (c) => {
-    const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
-    const keys = await listApiKeys(orgId, applicationId);
+    const scope = getAppScope(c);
+    const keys = await listApiKeys(scope);
     return c.json({ apiKeys: keys });
   });
 
   // POST /api/api-keys — create a new key (returns raw key ONCE)
   router.post("/", requirePermission("api-keys", "create"), async (c) => {
-    const orgId = c.get("orgId");
+    const scope = getAppScope(c);
     const user = c.get("user");
     const body = await c.req.json();
     const data = parseBody(createApiKeySchema, body);
 
-    const applicationId = c.get("applicationId");
     const { name, expiresAt } = data;
     const orgRole = c.get("orgRole");
     // If scopes omitted or empty, grant all API-key-allowed scopes for the creator's role
@@ -68,8 +67,7 @@ export function createApiKeysRouter() {
 
     try {
       const id = await createApiKeyRecord({
-        orgId,
-        applicationId,
+        scope,
         name,
         keyHash,
         keyPrefix,
@@ -89,14 +87,15 @@ export function createApiKeysRouter() {
 
   // DELETE /api/api-keys/:id — revoke a key (soft-delete)
   router.delete("/:id", requirePermission("api-keys", "revoke"), async (c) => {
-    const orgId = c.get("orgId");
     const keyId = c.req.param("id")!;
     // Issue #172 (extension): API keys may only revoke keys within their
-    // own bound application. Sessions remain unscoped (admins manage all).
-    const appScope = c.get("authMethod") === "api_key" ? c.get("applicationId") : undefined;
+    // own bound application. Sessions retain org-wide reach (admins manage
+    // all apps from the dashboard) — the scope's shape encodes the intent
+    // at the type level.
+    const scope = c.get("authMethod") === "api_key" ? getAppScope(c) : getOrgScope(c);
 
     try {
-      const revoked = await revokeApiKey(keyId, orgId, appScope);
+      const revoked = await revokeApiKey(scope, keyId);
       if (!revoked) {
         throw notFound("API key not found or already revoked");
       }

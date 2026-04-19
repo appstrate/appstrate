@@ -16,8 +16,10 @@ import {
   updateEndUser,
   deleteEndUser,
 } from "../services/end-users.ts";
-import { invalidRequest, notFound, parseBody } from "../lib/errors.ts";
+import { invalidRequest, parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
+import { getAppScope } from "../lib/scope.ts";
+
 export const createEndUserSchema = z.object({
   name: z.string().max(200).nullable().optional(),
   email: z.string().email().nullable().optional(),
@@ -54,12 +56,11 @@ export function createEndUsersRouter() {
     idempotency(),
     requirePermission("end-users", "write"),
     async (c) => {
-      const orgId = c.get("orgId");
+      const scope = getAppScope(c);
       const body = await c.req.json();
       const data = parseBody(createEndUserSchema, body);
 
-      const applicationId = c.get("applicationId");
-      const created = await createEndUser(orgId, applicationId, {
+      const created = await createEndUser(scope, {
         name: data.name ?? undefined,
         email: data.email ?? undefined,
         externalId: data.externalId ?? undefined,
@@ -69,13 +70,12 @@ export function createEndUsersRouter() {
     },
   );
 
-  // GET /api/end-users — list end-users in the org (cursor-based pagination)
+  // GET /api/end-users — list end-users in the application (cursor-based pagination)
   router.get("/", rateLimit(300), async (c) => {
-    const orgId = c.get("orgId");
+    const scope = getAppScope(c);
     const limit = c.req.query("limit") ? Number(c.req.query("limit")) : undefined;
     const startingAfter = c.req.query("startingAfter");
     const endingBefore = c.req.query("endingBefore");
-    const applicationId = c.get("applicationId");
     const externalId = c.req.query("externalId");
     const email = c.req.query("email");
 
@@ -83,8 +83,7 @@ export function createEndUsersRouter() {
       throw invalidRequest("startingAfter and endingBefore are mutually exclusive");
     }
 
-    const result = await listEndUsers(orgId, {
-      applicationId,
+    const result = await listEndUsers(scope, {
       externalId: externalId ?? undefined,
       email: email ?? undefined,
       limit,
@@ -97,31 +96,20 @@ export function createEndUsersRouter() {
 
   // GET /api/end-users/:id — get a single end-user
   router.get("/:id", rateLimit(300), async (c) => {
-    const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const scope = getAppScope(c);
     const endUserId = c.req.param("id")!;
-    const result = await getEndUser(orgId, endUserId);
-    if (result.applicationId !== applicationId) {
-      throw notFound(`End-user '${endUserId}' not found`);
-    }
+    const result = await getEndUser(scope, endUserId);
     return c.json(result);
   });
 
   // PATCH /api/end-users/:id — update an end-user
   router.patch("/:id", rateLimit(60), requirePermission("end-users", "write"), async (c) => {
-    const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const scope = getAppScope(c);
     const endUserId = c.req.param("id")!;
-
-    // Verify end-user belongs to the current application
-    const existing = await getEndUser(orgId, endUserId);
-    if (existing.applicationId !== applicationId) {
-      throw notFound(`End-user '${endUserId}' not found`);
-    }
 
     const body = await c.req.json();
     const data = parseBody(updateEndUserSchema, body);
-    const result = await updateEndUser(orgId, endUserId, {
+    const result = await updateEndUser(scope, endUserId, {
       name: data.name ?? undefined,
       email: data.email ?? undefined,
       externalId: data.externalId ?? undefined,
@@ -132,17 +120,10 @@ export function createEndUsersRouter() {
 
   // DELETE /api/end-users/:id — delete an end-user and all connections
   router.delete("/:id", rateLimit(60), requirePermission("end-users", "delete"), async (c) => {
-    const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const scope = getAppScope(c);
     const endUserId = c.req.param("id")!;
 
-    // Verify end-user belongs to the current application
-    const existing = await getEndUser(orgId, endUserId);
-    if (existing.applicationId !== applicationId) {
-      throw notFound(`End-user '${endUserId}' not found`);
-    }
-
-    await deleteEndUser(orgId, endUserId);
+    await deleteEndUser(scope, endUserId);
     return c.body(null, 204);
   });
 

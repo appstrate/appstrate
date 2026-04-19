@@ -189,7 +189,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   }
 
   // 0b. Max concurrent runs per org.
-  const runningCount = await getRunningRunCountForOrg(orgId);
+  const runningCount = await getRunningRunCountForOrg({ orgId });
   if (runningCount >= platformLimits.max_concurrent_per_org) {
     return {
       ok: false,
@@ -258,10 +258,9 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   const manifestProviders = resolveManifestProviders(agent.manifest);
   if (manifestProviders.length > 0) {
     const statuses = await resolveProviderStatuses(
+      { orgId, applicationId },
       manifestProviders,
       providerProfiles,
-      orgId,
-      applicationId,
     );
     providerStatusSnapshots = statuses.map((s) => ({
       id: s.id,
@@ -291,27 +290,28 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
 
   // --- Step 5: Create run record ---
   const agentDenorm = extractRunAgentDenorm(agent);
-  await createRun({
-    id: runId,
-    packageId: agent.id,
-    actor,
-    orgId,
-    applicationId,
-    input: input ?? null,
-    scheduleId,
-    connectionProfileId,
-    versionLabel: versionLabel ?? undefined,
-    versionDirty,
-    proxyLabel: proxyLabel ?? undefined,
-    modelLabel: modelLabel ?? undefined,
-    modelSource: modelSource ?? undefined,
-    providerProfileIds: profileIdMap,
-    providerStatuses: providerStatusSnapshots,
-    apiKeyId,
-    agentScope: agentDenorm.scope,
-    agentName: agentDenorm.name,
-    config,
-  });
+  await createRun(
+    { orgId, applicationId },
+    {
+      id: runId,
+      packageId: agent.id,
+      actor,
+      input: input ?? null,
+      scheduleId,
+      connectionProfileId,
+      versionLabel: versionLabel ?? undefined,
+      versionDirty,
+      proxyLabel: proxyLabel ?? undefined,
+      modelLabel: modelLabel ?? undefined,
+      modelSource: modelSource ?? undefined,
+      providerProfileIds: profileIdMap,
+      providerStatuses: providerStatusSnapshots,
+      apiKeyId,
+      agentScope: agentDenorm.scope,
+      agentName: agentDenorm.name,
+      config,
+    },
+  );
 
   // --- Step 6: Fire-and-forget execution ---
   executeAgentInBackground(

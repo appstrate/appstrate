@@ -82,8 +82,7 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
     // cross-module path fired.
     const webhook = await createWebhook({
       level: "application",
-      orgId,
-      applicationId,
+      scope: { orgId, applicationId },
       url: "https://no-such-domain-xyz123.test/hook",
       events: ["run.success"],
     });
@@ -108,8 +107,7 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
   it("does not deliver when the registered event does not match", async () => {
     const webhook = await createWebhook({
       level: "application",
-      orgId,
-      applicationId,
+      scope: { orgId, applicationId },
       url: "https://no-such-domain-xyz123.test/hook",
       events: ["run.failed"],
     });

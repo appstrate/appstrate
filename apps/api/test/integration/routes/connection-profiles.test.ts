@@ -282,7 +282,10 @@ describe("Connection Profiles API", () => {
           displayName: "Linked Agent",
         },
       });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@testorg/linked-agent");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@testorg/linked-agent",
+      );
 
       // Set app profile on the agent
       const setRes = await app.request("/api/agents/@testorg/linked-agent/app-profile", {

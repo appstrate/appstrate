@@ -72,8 +72,7 @@ const webhooksModule: AppstrateModule = {
   events: {
     onRunStatusChange: (params: RunStatusChangeParams) => {
       dispatchRunWebhook(
-        params.orgId,
-        params.applicationId,
+        { orgId: params.orgId, applicationId: params.applicationId },
         params.status,
         params.runId,
         params.packageId,

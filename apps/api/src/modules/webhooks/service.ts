@@ -27,6 +27,7 @@ type WebhookDeliveryRow = InferSelectModel<typeof webhookDeliveries>;
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { buildUpdateSet, scopedWhere } from "../../lib/db-helpers.ts";
+import type { AppScope, OrgScope } from "../../lib/scope.ts";
 import { createQueue, PermanentJobError } from "../../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../../infra/queue/index.ts";
 import { isDevEnvironment, LOCALHOST_HOSTS } from "../../services/redirect-validation.ts";
@@ -177,10 +178,17 @@ async function buildSignedHeaders(
 // `applicationId` is nullable — the CHECK constraint in the initial
 // migration enforces exactly one shape per row.
 
+/**
+ * Webhook creation input. The scope type on the route side determines which
+ * variant is used: org-level webhooks require only an `OrgScope` (they span
+ * every app in the org), while application-level webhooks require the
+ * stricter `AppScope` — preventing a session from minting an app-level
+ * webhook without first pinning an application.
+ */
 export type CreateWebhookInput =
   | {
       level: "org";
-      orgId: string;
+      scope: OrgScope;
       url: string;
       events: string[];
       packageId?: string | null;
@@ -189,8 +197,7 @@ export type CreateWebhookInput =
     }
   | {
       level: "application";
-      orgId: string;
-      applicationId: string;
+      scope: AppScope;
       url: string;
       events: string[];
       packageId?: string | null;
@@ -202,8 +209,14 @@ export async function createWebhook(params: CreateWebhookInput): Promise<Webhook
   // Per-scope limit (per app for app-level, per org for org-level).
   const scopeFilter =
     params.level === "application"
-      ? scopedWhere(webhooks, { orgId: params.orgId, applicationId: params.applicationId })
-      : scopedWhere(webhooks, { orgId: params.orgId, extra: [isNull(webhooks.applicationId)] });
+      ? scopedWhere(webhooks, {
+          orgId: params.scope.orgId,
+          applicationId: params.scope.applicationId,
+        })
+      : scopedWhere(webhooks, {
+          orgId: params.scope.orgId,
+          extra: [isNull(webhooks.applicationId)],
+        });
   const existing = await db.select({ id: webhooks.id }).from(webhooks).where(scopeFilter);
   if (existing.length >= MAX_WEBHOOKS_PER_SCOPE) {
     throw new ApiError({
@@ -224,8 +237,8 @@ export async function createWebhook(params: CreateWebhookInput): Promise<Webhook
     .values({
       id,
       level: params.level,
-      orgId: params.orgId,
-      applicationId: params.level === "application" ? params.applicationId : null,
+      orgId: params.scope.orgId,
+      applicationId: params.level === "application" ? params.scope.applicationId : null,
       url: params.url,
       events: params.events,
       packageId: params.packageId ?? null,
@@ -239,53 +252,70 @@ export async function createWebhook(params: CreateWebhookInput): Promise<Webhook
 }
 
 /**
+ * Build the SQL extra-conditions list from the caller's scope. An `AppScope`
+ * narrows the query to webhooks pinned to that application (and rejects
+ * org-level webhooks, whose `applicationId IS NULL`); an `OrgScope` adds no
+ * app-level constraint — the session caller can see the whole org.
+ *
+ * Issue #172 (extension): this is the compile-time replacement for the
+ * original `applicationIdScope?: string` parameter. Taking a `Scope` union
+ * forces every caller to construct a scope object (via `getAppScope(c)` or
+ * `getOrgScope(c)`), and the type system now rejects the old bug of
+ * forgetting to pass the applicationId from an API-key-authenticated route.
+ */
+function scopeExtras(scope: OrgScope | AppScope) {
+  return "applicationId" in scope ? [eq(webhooks.applicationId, scope.applicationId)] : [];
+}
+
+/**
  * List webhooks visible to the caller.
  *
- * - `all: true`: returns every webhook in the org (org-level + all app-level).
- * - `applicationId` set: returns org-level webhooks AND app-level webhooks
- *   pinned to that app (mirrors dispatch semantics).
- * - Neither: returns org-level webhooks only.
+ * With `AppScope` (API key caller): returns only webhooks pinned to that
+ * application. `opts` is ignored — a scoped key cannot escape its app.
+ *
+ * With `OrgScope` (session caller): behaviour is filtered by `opts`:
+ * - `all: true`: every webhook in the org (org-level + all app-level).
+ * - `applicationId` set: org-level + webhooks pinned to that app.
+ * - Neither: org-level only.
  */
 export async function listWebhooks(
-  orgId: string,
+  scope: OrgScope | AppScope,
   opts: { applicationId?: string; all?: boolean } = {},
 ): Promise<WebhookInfo[]> {
+  if ("applicationId" in scope) {
+    const filter = scopedWhere(webhooks, {
+      orgId: scope.orgId,
+      applicationId: scope.applicationId,
+    });
+    const rows = await db.select().from(webhooks).where(filter).orderBy(desc(webhooks.createdAt));
+    return rows.map(toWebhookResponse);
+  }
+
   const { applicationId, all } = opts;
   const filter = all
-    ? scopedWhere(webhooks, { orgId })
+    ? scopedWhere(webhooks, { orgId: scope.orgId })
     : applicationId
       ? scopedWhere(webhooks, {
-          orgId,
+          orgId: scope.orgId,
           extra: [or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId))],
         })
-      : scopedWhere(webhooks, { orgId, extra: [isNull(webhooks.applicationId)] });
+      : scopedWhere(webhooks, { orgId: scope.orgId, extra: [isNull(webhooks.applicationId)] });
 
   const rows = await db.select().from(webhooks).where(filter).orderBy(desc(webhooks.createdAt));
   return rows.map(toWebhookResponse);
 }
 
-// Issue #172 (extension) — webhook routes historically filtered by orgId
-// only, letting a key in App A read/mutate App B's webhooks (or org-level
-// webhooks that span all apps). When `applicationIdScope` is provided,
-// the lookup additionally requires `webhooks.applicationId === scope`,
-// which rejects both other-app webhooks and org-level webhooks (where
-// applicationId IS NULL).
-function appScopeFilter(applicationIdScope?: string) {
-  return applicationIdScope ? [eq(webhooks.applicationId, applicationIdScope)] : [];
-}
-
 export async function getWebhook(
-  orgId: string,
+  scope: OrgScope | AppScope,
   webhookId: string,
-  applicationIdScope?: string,
 ): Promise<WebhookInfo> {
   const [row] = await db
     .select()
     .from(webhooks)
     .where(
       scopedWhere(webhooks, {
-        orgId,
-        extra: [eq(webhooks.id, webhookId), ...appScopeFilter(applicationIdScope)],
+        orgId: scope.orgId,
+        extra: [eq(webhooks.id, webhookId), ...scopeExtras(scope)],
       }),
     )
     .limit(1);
@@ -295,7 +325,7 @@ export async function getWebhook(
 }
 
 export async function updateWebhook(
-  orgId: string,
+  scope: OrgScope | AppScope,
   webhookId: string,
   params: {
     url?: string;
@@ -304,9 +334,8 @@ export async function updateWebhook(
     payloadMode?: string;
     enabled?: boolean;
   },
-  applicationIdScope?: string,
 ): Promise<WebhookInfo> {
-  await getWebhook(orgId, webhookId, applicationIdScope);
+  await getWebhook(scope, webhookId);
 
   if (params.url) validateWebhookUrl(params.url);
 
@@ -317,8 +346,8 @@ export async function updateWebhook(
     .set(updates)
     .where(
       scopedWhere(webhooks, {
-        orgId,
-        extra: [eq(webhooks.id, webhookId), ...appScopeFilter(applicationIdScope)],
+        orgId: scope.orgId,
+        extra: [eq(webhooks.id, webhookId), ...scopeExtras(scope)],
       }),
     )
     .returning();
@@ -326,26 +355,21 @@ export async function updateWebhook(
   return toWebhookResponse(updated!);
 }
 
-export async function deleteWebhook(
-  orgId: string,
-  webhookId: string,
-  applicationIdScope?: string,
-): Promise<void> {
-  await getWebhook(orgId, webhookId, applicationIdScope);
+export async function deleteWebhook(scope: OrgScope | AppScope, webhookId: string): Promise<void> {
+  await getWebhook(scope, webhookId);
   await db.delete(webhooks).where(
     scopedWhere(webhooks, {
-      orgId,
-      extra: [eq(webhooks.id, webhookId), ...appScopeFilter(applicationIdScope)],
+      orgId: scope.orgId,
+      extra: [eq(webhooks.id, webhookId), ...scopeExtras(scope)],
     }),
   );
 }
 
 export async function rotateSecret(
-  orgId: string,
+  scope: OrgScope | AppScope,
   webhookId: string,
-  applicationIdScope?: string,
 ): Promise<{ secret: string }> {
-  await getWebhook(orgId, webhookId, applicationIdScope);
+  await getWebhook(scope, webhookId);
 
   const newSecret = generateSecret();
   await db
@@ -353,8 +377,8 @@ export async function rotateSecret(
     .set({ secret: newSecret, updatedAt: new Date() })
     .where(
       scopedWhere(webhooks, {
-        orgId,
-        extra: [eq(webhooks.id, webhookId), ...appScopeFilter(applicationIdScope)],
+        orgId: scope.orgId,
+        extra: [eq(webhooks.id, webhookId), ...scopeExtras(scope)],
       }),
     );
 
@@ -362,12 +386,11 @@ export async function rotateSecret(
 }
 
 export async function listDeliveries(
-  orgId: string,
+  scope: OrgScope | AppScope,
   webhookId: string,
   limit = 20,
-  applicationIdScope?: string,
 ): Promise<WebhookDeliveryInfo[]> {
-  await getWebhook(orgId, webhookId, applicationIdScope);
+  await getWebhook(scope, webhookId);
 
   const rows = await db
     .select()
@@ -445,10 +468,9 @@ async function getDeliveryQueue(): Promise<JobQueue<DeliveryJobData>> {
  * and **application-level** webhooks pinned to the run's application.
  */
 export async function dispatchWebhookEvents(
-  orgId: string,
+  scope: AppScope,
   eventType: WebhookEventType,
   run: Record<string, unknown>,
-  applicationId: string,
 ): Promise<void> {
   const rows = await db
     .select({
@@ -460,10 +482,10 @@ export async function dispatchWebhookEvents(
     .from(webhooks)
     .where(
       scopedWhere(webhooks, {
-        orgId,
+        orgId: scope.orgId,
         extra: [
           eq(webhooks.enabled, true),
-          or(isNull(webhooks.applicationId), eq(webhooks.applicationId, applicationId)),
+          or(isNull(webhooks.applicationId), eq(webhooks.applicationId, scope.applicationId)),
         ],
       }),
     );
@@ -611,20 +633,19 @@ export async function shutdownWebhookWorker(): Promise<void> {
  * Shared by the run route (POST /run) and the scheduler (triggerScheduledRun).
  */
 export function dispatchRunWebhook(
-  orgId: string,
-  applicationId: string,
+  scope: AppScope,
   status: string,
   runId: string,
   packageId: string,
   extra?: Record<string, unknown>,
 ): void {
   const eventType = `run.${status}` as WebhookEventType;
-  dispatchWebhookEvents(
-    orgId,
-    eventType,
-    { id: runId, packageId, status, ...extra },
-    applicationId,
-  ).catch((err) => {
+  dispatchWebhookEvents(scope, eventType, {
+    id: runId,
+    packageId,
+    status,
+    ...extra,
+  }).catch((err) => {
     logger.warn("Webhook dispatch failed", {
       runId,
       error: err instanceof Error ? err.message : String(err),

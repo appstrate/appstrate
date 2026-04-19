@@ -155,11 +155,16 @@ export function createInternalRouter() {
 
     try {
       const actor: Actor | null = actorFromIds(run.dashboardUserId, run.endUserId);
-      const recentRuns = await getRecentRuns(run.packageId, actor, run.orgId, run.applicationId, {
-        limit,
-        fields,
-        excludeRunId: runId,
-      });
+      const recentRuns = await getRecentRuns(
+        { orgId: run.orgId, applicationId: run.applicationId },
+        run.packageId,
+        actor,
+        {
+          limit,
+          fields,
+          excludeRunId: runId,
+        },
+      );
 
       return c.json({ runs: recentRuns });
     } catch (err) {

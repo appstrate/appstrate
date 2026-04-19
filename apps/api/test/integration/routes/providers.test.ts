@@ -68,7 +68,10 @@ describe("Providers API", () => {
           },
         },
       });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@provorg/my-provider");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@provorg/my-provider",
+      );
 
       const res = await app.request("/api/providers", {
         headers: authHeaders(ctx),

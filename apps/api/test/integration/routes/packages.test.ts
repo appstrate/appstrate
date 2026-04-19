@@ -43,7 +43,10 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/list-agent");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@pkgorg/list-agent",
+      );
 
       const res = await app.request("/api/packages/agents", {
         headers: authHeaders(ctx),
@@ -108,7 +111,10 @@ describe("Packages API", () => {
         },
         draftContent: "# My Skill\nDo something useful.",
       });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/my-skill");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@pkgorg/my-skill",
+      );
 
       const res = await app.request("/api/packages/skills", {
         headers: authHeaders(ctx),
@@ -137,7 +143,10 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/detail-agent");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@pkgorg/detail-agent",
+      );
 
       const res = await app.request("/api/packages/agents/@pkgorg/detail-agent", {
         headers: authHeaders(ctx),
@@ -157,7 +166,10 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/versioned-agent");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@pkgorg/versioned-agent",
+      );
 
       // Create a version with a createdAt in the future to ensure updatedAt < createdAt
       await seedPackageVersion({
@@ -224,7 +236,10 @@ describe("Packages API", () => {
         },
         draftContent: "# Detail Skill",
       });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/detail-skill");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@pkgorg/detail-skill",
+      );
 
       const res = await app.request("/api/packages/skills/@pkgorg/detail-skill", {
         headers: authHeaders(ctx),
@@ -292,7 +307,10 @@ describe("Packages API", () => {
         name: "Skill Installed",
         createdBy: ctx.user.id,
       });
-      await installPackage(customApp.id, ctx.orgId, "@pkgorg/installed-skill");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: customApp.id },
+        "@pkgorg/installed-skill",
+      );
 
       const res = await app.request("/api/packages/skills/@pkgorg/installed-skill", {
         headers: { ...authHeaders(ctx), "X-App-Id": customApp.id },
@@ -779,13 +797,19 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@pkgorg/my-agent");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@pkgorg/my-agent",
+      );
       await seedAgent({
         id: "@isolatedorg/their-agent",
         orgId: otherCtx.orgId,
         createdBy: otherCtx.user.id,
       });
-      await installPackage(otherCtx.defaultAppId, otherCtx.orgId, "@isolatedorg/their-agent");
+      await installPackage(
+        { orgId: otherCtx.orgId, applicationId: otherCtx.defaultAppId },
+        "@isolatedorg/their-agent",
+      );
 
       // User from pkgorg should only see their own agents
       const res1 = await app.request("/api/packages/agents", {

@@ -165,7 +165,7 @@ export async function getPackageWithAccess(
   const agent = await getPackage(id, orgId);
   if (!agent) return null;
 
-  if (!(await hasPackageAccess(applicationId, id))) return null;
+  if (!(await hasPackageAccess({ orgId, applicationId }, id))) return null;
 
   return agent;
 }

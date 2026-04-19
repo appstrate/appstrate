@@ -330,8 +330,10 @@ describe("Run with provider profiles", () => {
       await bindAppProfileProvider(appProfile.id, "@system/gmail", boundProfile.id, userId);
 
       // Install the agent in the application, then set app profile
-      await installPackage(appId, orgId, agentId);
-      await updateInstalledPackage(appId, agentId, { appProfileId: appProfile.id });
+      await installPackage({ orgId: orgId, applicationId: appId }, agentId);
+      await updateInstalledPackage({ orgId, applicationId: appId }, agentId, {
+        appProfileId: appProfile.id,
+      });
 
       const { providerProfiles } = await runPreflight({
         agent,
@@ -355,8 +357,10 @@ describe("Run with provider profiles", () => {
 
       // Create app profile with no bindings
       const appProfile = await seedConnectionProfile({ applicationId: appId, name: "Empty App" });
-      await installPackage(appId, orgId, agentId);
-      await updateInstalledPackage(appId, agentId, { appProfileId: appProfile.id });
+      await installPackage({ orgId: orgId, applicationId: appId }, agentId);
+      await updateInstalledPackage({ orgId, applicationId: appId }, agentId, {
+        appProfileId: appProfile.id,
+      });
 
       const { providerProfiles } = await runPreflight({
         agent,

@@ -29,6 +29,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { z } from "zod";
 import { forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
+import { getAppScope } from "../lib/scope.ts";
 export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 export const modelIdSchema = z.object({ modelId: z.string().nullable() });
 export const appProfileIdSchema = z.object({ appProfileId: z.uuid().nullable() });
@@ -43,13 +44,12 @@ export function createAgentsRouter() {
 
   // GET /api/agents — list agents accessible to the current application
   router.get("/", async (c) => {
-    const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const scope = getAppScope(c);
 
     // Single query: system packages + installed packages via LEFT JOIN
     const [rows, runningCounts] = await Promise.all([
-      listAccessiblePackages(orgId, applicationId, "agent"),
-      getRunningRunCounts(orgId, applicationId),
+      listAccessiblePackages(scope, "agent"),
+      getRunningRunCounts(scope),
     ]);
 
     const agentList = rows.map((row) => {
@@ -97,8 +97,8 @@ export function createAgentsRouter() {
 
       const config = mergeWithDefaults(asJSONSchemaObject(schema), body);
 
-      const applicationId = c.get("applicationId");
-      await updateInstalledPackage(applicationId, agent.id, { config });
+      const scope = getAppScope(c);
+      await updateInstalledPackage(scope, agent.id, { config });
 
       return c.json({
         config,
@@ -128,7 +128,10 @@ export function createAgentsRouter() {
       const data = parseBody(setProviderProfileSchema, body);
 
       // Validate ownership — user can only set overrides to their own profiles
-      const profile = await getAccessibleProfile(data.profileId, actor, c.get("applicationId"));
+      const profile = await getAccessibleProfile(data.profileId, actor, {
+        orgId: c.get("orgId"),
+        applicationId: c.get("applicationId")!,
+      });
       if (!profile) {
         throw forbidden("Cannot use a profile you do not own");
       }
@@ -170,11 +173,11 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("agent");
-      const applicationId = c.get("applicationId");
+      const scope = getAppScope(c);
       const body = await c.req.json();
       const data = parseBody(proxyIdSchema, body);
 
-      await updateInstalledPackage(applicationId, agent.id, { proxyId: data.proxyId });
+      await updateInstalledPackage(scope, agent.id, { proxyId: data.proxyId });
 
       return c.json({ success: true });
     },
@@ -196,11 +199,11 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("agent");
-      const applicationId = c.get("applicationId");
+      const scope = getAppScope(c);
       const body = await c.req.json();
       const data = parseBody(modelIdSchema, body);
 
-      await updateInstalledPackage(applicationId, agent.id, { modelId: data.modelId });
+      await updateInstalledPackage(scope, agent.id, { modelId: data.modelId });
 
       return c.json({ success: true });
     },
@@ -213,11 +216,11 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("agent");
-      const applicationId = c.get("applicationId");
+      const scope = getAppScope(c);
       const body = await c.req.json();
       const data = parseBody(appProfileIdSchema, body);
 
-      await updateInstalledPackage(applicationId, agent.id, { appProfileId: data.appProfileId });
+      await updateInstalledPackage(scope, agent.id, { appProfileId: data.appProfileId });
 
       return c.json({ success: true });
     },

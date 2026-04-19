@@ -309,7 +309,7 @@ describe("manifest-based dependency resolution", () => {
         },
       });
 
-      await installPackage(appId, orgId, `@${orgSlug}/counted-tool`);
+      await installPackage({ orgId: orgId, applicationId: appId }, `@${orgSlug}/counted-tool`);
       const items = await listOrgItems(orgId, TOOL_CONFIG, appId);
       const tool = items.find((i) => i.id === `@${orgSlug}/counted-tool`);
 
@@ -330,7 +330,7 @@ describe("manifest-based dependency resolution", () => {
         },
       });
 
-      await installPackage(appId, orgId, `@${orgSlug}/unused-skill`);
+      await installPackage({ orgId: orgId, applicationId: appId }, `@${orgSlug}/unused-skill`);
       const items = await listOrgItems(orgId, SKILL_CONFIG, appId);
       const skill = items.find((i) => i.id === `@${orgSlug}/unused-skill`);
 

@@ -121,9 +121,8 @@ export function requireMutableAgent() {
       throw forbidden("Cannot modify a system agent");
     }
     const running = await getRunningRunsForPackage(
+      { orgId: c.get("orgId"), applicationId: c.get("applicationId") },
       agent.id,
-      c.get("orgId"),
-      c.get("applicationId"),
     );
     if (running > 0) {
       throw conflict("agent_in_use", `${running} run(s) running for this agent`);
