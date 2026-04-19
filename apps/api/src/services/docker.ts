@@ -8,6 +8,15 @@ import { classifyDockerNetworkError } from "./docker-errors.ts";
 const DOCKER_SOCKET = getEnv().DOCKER_SOCKET;
 const DOCKER_API_TIMEOUT_MS = 30_000;
 
+/**
+ * Naming prefix for per-run isolation networks. The orchestrator creates
+ * `${EXEC_NETWORK_PREFIX}${runId}` for every run, and the cleanup helpers
+ * match on this prefix to reclaim orphans from crashed runs. Kept in one
+ * place so creator and cleaner can never drift apart — a mismatch would
+ * silently leak networks until the address pool is exhausted.
+ */
+export const EXEC_NETWORK_PREFIX = "appstrate-exec-";
+
 // Support both unix socket (/var/run/docker.sock) and TCP (http://host:port).
 // Bun supports fetch() with unix: option for Unix sockets.
 // Pass timeoutMs=false for long-running calls (streamLogs, waitForExit).
@@ -505,7 +514,7 @@ export async function cleanupOrphanedContainers(): Promise<{
 export async function cleanupOrphanedNetworks(): Promise<number> {
   return removeNetworksMatching(
     (name) =>
-      name.startsWith("appstrate-exec-") ||
+      name.startsWith(EXEC_NETWORK_PREFIX) ||
       name === "appstrate-sidecar-pool" ||
       name === "appstrate-egress",
   );
@@ -520,7 +529,7 @@ export async function cleanupOrphanedNetworks(): Promise<number> {
  * reclaiming even one orphan is often enough to unblock the retry.
  */
 export async function cleanupOrphanedRunNetworks(): Promise<number> {
-  return removeNetworksMatching((name) => name.startsWith("appstrate-exec-"));
+  return removeNetworksMatching((name) => name.startsWith(EXEC_NETWORK_PREFIX));
 }
 
 async function removeNetworksMatching(predicate: (name: string) => boolean): Promise<number> {

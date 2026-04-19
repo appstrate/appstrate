@@ -65,7 +65,7 @@ export class DockerOrchestrator implements ContainerOrchestrator {
   }
 
   async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
-    const name = `appstrate-exec-${runId}`;
+    const name = `${docker.EXEC_NETWORK_PREFIX}${runId}`;
     const id = await createNetworkWithPoolRetry(
       () => docker.createNetwork(name, { internal: true }),
       () => docker.cleanupOrphanedRunNetworks(),
