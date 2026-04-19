@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { truncateAll, db } from "../../helpers/db.ts";
 import {
   createTestContext,
   createTestUser,
@@ -10,6 +11,8 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
+import { seedApiKey, seedApplication } from "../../helpers/seed.ts";
+import { apiKeys } from "@appstrate/db/schema";
 
 const app = getTestApp();
 
@@ -262,6 +265,77 @@ describe("API Keys API", () => {
         headers: authHeaders(memberCtx),
       });
       expect(res.status).toBe(403);
+    });
+  });
+
+  // Issue #172 (extension) — `revokeApiKey(keyId, orgId)` filtered by org
+  // only, letting an API key in App A revoke any key in the org (other
+  // apps included). The fix passes the caller's bound applicationId for
+  // API-key auth; sessions stay org-wide.
+  describe("API key cross-app revoke (issue #172 extension)", () => {
+    it("API key in App A cannot revoke a key in App B (same org)", async () => {
+      const otherApp = await seedApplication({ orgId: ctx.orgId, name: "Other App" });
+      const callerKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+        scopes: ["api-keys:revoke"],
+      });
+      const victimKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: otherApp.id,
+        createdBy: ctx.user.id,
+        name: "Victim Key",
+      });
+
+      const res = await app.request(`/api/api-keys/${victimKey.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${callerKey.rawKey}` },
+      });
+      expect(res.status).toBe(404);
+
+      const [row] = await db
+        .select({ revokedAt: apiKeys.revokedAt })
+        .from(apiKeys)
+        .where(eq(apiKeys.id, victimKey.id));
+      expect(row?.revokedAt).toBeNull();
+    });
+
+    it("API key can still revoke another key in its own application", async () => {
+      const callerKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+        scopes: ["api-keys:revoke"],
+      });
+      const peerKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+        name: "Peer Key",
+      });
+
+      const res = await app.request(`/api/api-keys/${peerKey.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${callerKey.rawKey}` },
+      });
+      expect(res.status).toBe(204);
+    });
+
+    it("session admin can revoke any key in the org (regression guard)", async () => {
+      const otherApp = await seedApplication({ orgId: ctx.orgId, name: "Other App 2" });
+      const victimKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: otherApp.id,
+        createdBy: ctx.user.id,
+        name: "Victim Key Session",
+      });
+
+      const res = await app.request(`/api/api-keys/${victimKey.id}`, {
+        method: "DELETE",
+        headers: { ...authHeaders(ctx) },
+      });
+      expect(res.status).toBe(204);
     });
   });
 });

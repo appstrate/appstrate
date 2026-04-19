@@ -3,13 +3,15 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { truncateAll, db } from "../../helpers/db.ts";
 import {
   createTestUser,
   createTestContext,
+  createTestOrg,
   addOrgMember,
   authHeaders,
 } from "../../helpers/auth.ts";
+import { seedApiKey } from "../../helpers/seed.ts";
 import { assertDbHas } from "../../helpers/assertions.ts";
 import { organizations, orgInvitations, organizationMembers } from "@appstrate/db/schema";
 import { CURRENT_API_VERSION } from "../../../src/lib/api-versions.ts";
@@ -239,6 +241,162 @@ describe("Organizations API", () => {
 
       // addMember is idempotent — duplicate silently ignored, returns 201
       expect(res.status).toBe(201);
+    });
+  });
+
+  // Issue #172 — API keys must stay confined to their bound organization.
+  // Setup: a user belongs to two orgs (A + B); a key issued in A must
+  // never be able to read, enumerate, or mutate B.
+  describe("API key org scope (issue #172)", () => {
+    async function setupTwoOrgKey() {
+      const ctxA = await createTestContext({ orgSlug: "org-a-172" });
+      const orgB = await createTestOrg(ctxA.user.id, { slug: "org-b-172" });
+      const apiKey = await seedApiKey({
+        orgId: ctxA.orgId,
+        applicationId: ctxA.defaultAppId,
+        createdBy: ctxA.user.id,
+        scopes: ["agents:read", "applications:read", "applications:write", "applications:delete"],
+      });
+      return {
+        ctxA,
+        orgB: orgB.org,
+        bearer: { Authorization: `Bearer ${apiKey.rawKey}` },
+      };
+    }
+
+    it("GET /api/orgs returns only the key's org", async () => {
+      const { ctxA, orgB, bearer } = await setupTwoOrgKey();
+
+      const res = await app.request("/api/orgs", { headers: bearer });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { organizations: { id: string }[] };
+      const ids = body.organizations.map((o) => o.id);
+      expect(ids).toContain(ctxA.orgId);
+      expect(ids).not.toContain(orgB.id);
+      expect(body.organizations).toHaveLength(1);
+    });
+
+    it("GET /api/orgs/:keyOrgId still works", async () => {
+      const { ctxA, bearer } = await setupTwoOrgKey();
+      const res = await app.request(`/api/orgs/${ctxA.orgId}`, { headers: bearer });
+      expect(res.status).toBe(200);
+    });
+
+    it("GET /api/orgs/:otherOrgId returns 403", async () => {
+      const { orgB, bearer } = await setupTwoOrgKey();
+      const res = await app.request(`/api/orgs/${orgB.id}`, { headers: bearer });
+      expect(res.status).toBe(403);
+    });
+
+    it("PUT /api/orgs/:otherOrgId returns 403 and does not mutate", async () => {
+      const { orgB, bearer } = await setupTwoOrgKey();
+      const res = await app.request(`/api/orgs/${orgB.id}`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "PWNED" }),
+      });
+      expect(res.status).toBe(403);
+      const [row] = await db
+        .select({ name: organizations.name })
+        .from(organizations)
+        .where(eq(organizations.id, orgB.id));
+      expect(row?.name).not.toBe("PWNED");
+    });
+
+    it("DELETE /api/orgs/:otherOrgId returns 403 and org B still exists", async () => {
+      const { orgB, bearer } = await setupTwoOrgKey();
+      const res = await app.request(`/api/orgs/${orgB.id}`, {
+        method: "DELETE",
+        headers: bearer,
+      });
+      expect(res.status).toBe(403);
+      await assertDbHas(organizations, eq(organizations.id, orgB.id));
+    });
+
+    it("POST /api/orgs returns 403 — API keys cannot create orgs", async () => {
+      const { bearer } = await setupTwoOrgKey();
+      const res = await app.request("/api/orgs", {
+        method: "POST",
+        headers: { ...bearer, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Pwn Org", slug: "pwn-org" }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("POST /api/orgs/:otherOrgId/members returns 403", async () => {
+      const { orgB, bearer } = await setupTwoOrgKey();
+      const res = await app.request(`/api/orgs/${orgB.id}/members`, {
+        method: "POST",
+        headers: { ...bearer, "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "attacker@test.com", role: "admin" }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("PUT /api/orgs/:otherOrgId/members/:userId returns 403", async () => {
+      const { orgB, bearer, ctxA } = await setupTwoOrgKey();
+      const res = await app.request(`/api/orgs/${orgB.id}/members/${ctxA.user.id}`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "admin" }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("DELETE /api/orgs/:otherOrgId/members/:userId returns 403", async () => {
+      const { orgB, bearer, ctxA } = await setupTwoOrgKey();
+      const res = await app.request(`/api/orgs/${orgB.id}/members/${ctxA.user.id}`, {
+        method: "DELETE",
+        headers: bearer,
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("PUT /api/orgs/:otherOrgId/invitations/:invId returns 403", async () => {
+      const { orgB, bearer } = await setupTwoOrgKey();
+      const res = await app.request(`/api/orgs/${orgB.id}/invitations/inv_x`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "owner" }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("DELETE /api/orgs/:otherOrgId/invitations/:invId returns 403", async () => {
+      const { orgB, bearer } = await setupTwoOrgKey();
+      const res = await app.request(`/api/orgs/${orgB.id}/invitations/inv_x`, {
+        method: "DELETE",
+        headers: bearer,
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("GET /api/orgs/:otherOrgId/settings returns 403", async () => {
+      const { orgB, bearer } = await setupTwoOrgKey();
+      const res = await app.request(`/api/orgs/${orgB.id}/settings`, { headers: bearer });
+      expect(res.status).toBe(403);
+    });
+
+    it("PUT /api/orgs/:otherOrgId/settings returns 403", async () => {
+      const { orgB, bearer } = await setupTwoOrgKey();
+      const res = await app.request(`/api/orgs/${orgB.id}/settings`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "application/json" },
+        body: JSON.stringify({ apiVersion: "2026-03-21" }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("session cookie still sees both orgs (regression guard)", async () => {
+      const { ctxA, orgB } = await setupTwoOrgKey();
+      const res = await app.request("/api/orgs", {
+        headers: { Cookie: ctxA.cookie },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { organizations: { id: string }[] };
+      const ids = body.organizations.map((o) => o.id);
+      expect(ids).toContain(ctxA.orgId);
+      expect(ids).toContain(orgB.id);
     });
   });
 });

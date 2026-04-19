@@ -31,8 +31,8 @@ describe("Cross-app run isolation (service layer)", () => {
     appBId = appB.id;
 
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage(ctx.defaultAppId, ctx.orgId, agentId);
-    await installPackage(appBId, ctx.orgId, agentId);
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, agentId);
+    await installPackage({ orgId: ctx.orgId, applicationId: appBId }, agentId);
   });
 
   describe("getLastRunState", () => {
@@ -60,10 +60,18 @@ describe("Cross-app run isolation (service layer)", () => {
       });
 
       // AppA should get its own state, not AppB's (even though AppB's is more recent)
-      const stateA = await getLastRunState(agentId, null, ctx.orgId, ctx.defaultAppId);
+      const stateA = await getLastRunState(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        agentId,
+        null,
+      );
       expect(stateA).toEqual({ source: "appA" });
 
-      const stateB = await getLastRunState(agentId, null, ctx.orgId, appBId);
+      const stateB = await getLastRunState(
+        { orgId: ctx.orgId, applicationId: appBId },
+        agentId,
+        null,
+      );
       expect(stateB).toEqual({ source: "appB" });
     });
 
@@ -77,7 +85,11 @@ describe("Cross-app run isolation (service layer)", () => {
         state: { source: "appB" },
       });
 
-      const state = await getLastRunState(agentId, null, ctx.orgId, ctx.defaultAppId);
+      const state = await getLastRunState(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        agentId,
+        null,
+      );
       expect(state).toBeNull();
     });
   });
@@ -102,10 +114,14 @@ describe("Cross-app run isolation (service layer)", () => {
         startedAt: new Date("2025-01-02"),
       });
 
-      const runsA = await getRecentRuns(agentId, null, ctx.orgId, ctx.defaultAppId);
+      const runsA = await getRecentRuns(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        agentId,
+        null,
+      );
       expect(runsA).toHaveLength(1);
 
-      const runsB = await getRecentRuns(agentId, null, ctx.orgId, appBId);
+      const runsB = await getRecentRuns({ orgId: ctx.orgId, applicationId: appBId }, agentId, null);
       expect(runsB).toHaveLength(1);
     });
   });
@@ -136,10 +152,13 @@ describe("Cross-app run isolation (service layer)", () => {
         status: "running",
       });
 
-      const countsA = await getRunningRunCounts(ctx.orgId, ctx.defaultAppId);
+      const countsA = await getRunningRunCounts({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+      });
       expect(countsA[agentId]).toBe(1);
 
-      const countsB = await getRunningRunCounts(ctx.orgId, appBId);
+      const countsB = await getRunningRunCounts({ orgId: ctx.orgId, applicationId: appBId });
       expect(countsB[agentId]).toBe(2);
     });
   });
@@ -162,11 +181,14 @@ describe("Cross-app run isolation (service layer)", () => {
         status: "success",
       });
 
-      const deleted = await deletePackageRuns(agentId, ctx.orgId, ctx.defaultAppId);
+      const deleted = await deletePackageRuns(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        agentId,
+      );
       expect(deleted).toBe(1);
 
       // AppB run should survive
-      const runsB = await getRecentRuns(agentId, null, ctx.orgId, appBId);
+      const runsB = await getRecentRuns({ orgId: ctx.orgId, applicationId: appBId }, agentId, null);
       expect(runsB).toHaveLength(1);
     });
   });

@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
-import { createTestUser } from "../../helpers/auth.ts";
+import { truncateAll, db } from "../../helpers/db.ts";
+import { createTestContext, createTestUser } from "../../helpers/auth.ts";
+import { seedApiKey } from "../../helpers/seed.ts";
+import { user as userTable } from "@appstrate/db/schema";
 
 const app = getTestApp();
 
@@ -160,6 +163,33 @@ describe("Welcome API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.ok).toBe(true);
+    });
+
+    // Issue #172 (extension) — same-class as PATCH /api/profile.
+    it("returns 403 for API key auth and does not rename the user", async () => {
+      const ctx = await createTestContext();
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+      });
+      const originalName = ctx.user.name;
+
+      const res = await app.request("/api/welcome/setup", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey.rawKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ displayName: "Pwned via Welcome" }),
+      });
+      expect(res.status).toBe(403);
+
+      const [row] = await db
+        .select({ name: userTable.name })
+        .from(userTable)
+        .where(eq(userTable.id, ctx.user.id));
+      expect(row?.name).toBe(originalName);
     });
   });
 });

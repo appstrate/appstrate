@@ -104,15 +104,16 @@ function buildPlatformServices(): PlatformServices {
       listLogs: listRunLogs,
       appendLog: (a) =>
         appendRunLog(
+          { orgId: a.orgId },
           a.runId,
-          a.orgId,
           a.type,
           a.event ?? null,
           a.message ?? null,
           a.data ?? null,
           a.level,
         ),
-      update: (a) => updateRun(a.runId, a.orgId, a.applicationId, a.updates),
+      update: (a) =>
+        updateRun({ orgId: a.orgId, applicationId: a.applicationId }, a.runId, a.updates),
       abort: abortRun,
     },
     inline: { preflight: runInlinePreflight },

@@ -7,7 +7,7 @@ import { db } from "@appstrate/db/client";
 import { profiles, user as userTable, organizationMembers } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
-import { internalError, notFound, parseBody } from "../lib/errors.ts";
+import { forbidden, internalError, notFound, parseBody } from "../lib/errors.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 
 export const profileUpdateSchema = z.object({
@@ -21,7 +21,15 @@ export const batchLookupSchema = z.object({
 
 const profileRouter = new Hono<AppEnv>();
 
+// Issue #172 (extension) — `/api/profile` is the dashboard user's own
+// identity record (Better Auth-owned `user.name` is mutated by PATCH).
+// API keys must not be able to read or rewrite the human creator's
+// account: a customer integration shouldn't get the platform user's
+// PII via GET, nor be able to rename the dashboard owner via PATCH.
 profileRouter.get("/profile", async (c) => {
+  if (c.get("authMethod") === "api_key") {
+    throw forbidden("API keys cannot access the dashboard user profile");
+  }
   const user = c.get("user");
   // Intentionally joins `profiles` with `user` so the response carries
   // the authoritative (BA-owned) email — the CLI's `whoami` surfaces
@@ -56,6 +64,9 @@ profileRouter.get("/profile", async (c) => {
 });
 
 profileRouter.patch("/profile", async (c) => {
+  if (c.get("authMethod") === "api_key") {
+    throw forbidden("API keys cannot modify the dashboard user profile");
+  }
   const user = c.get("user");
   const body = await c.req.json();
 

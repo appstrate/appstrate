@@ -70,11 +70,16 @@ describe("scheduler service", () => {
 
   describe("createSchedule", () => {
     it("creates a record with correct fields", async () => {
-      const schedule = await createSchedule(packageId, profileId, orgId, defaultAppId, {
-        name: "Every hour",
-        cronExpression: "0 * * * *",
-        timezone: "UTC",
-      });
+      const schedule = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          name: "Every hour",
+          cronExpression: "0 * * * *",
+          timezone: "UTC",
+        },
+      );
 
       expect(schedule.id).toMatch(/^sched_/);
       expect(schedule.packageId).toBe(packageId);
@@ -91,27 +96,42 @@ describe("scheduler service", () => {
     it("stores JSON input when provided", async () => {
       const inputData = { query: "test search", limit: 10 };
 
-      const schedule = await createSchedule(packageId, profileId, orgId, defaultAppId, {
-        cronExpression: "*/5 * * * *",
-        input: inputData,
-      });
+      const schedule = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          cronExpression: "*/5 * * * *",
+          input: inputData,
+        },
+      );
 
       expect(schedule.input).toEqual(inputData);
     });
 
     it("defaults timezone to UTC when not specified", async () => {
-      const schedule = await createSchedule(packageId, profileId, orgId, defaultAppId, {
-        cronExpression: "0 9 * * *",
-      });
+      const schedule = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          cronExpression: "0 9 * * *",
+        },
+      );
 
       expect(schedule.timezone).toBe("UTC");
     });
 
     it("computes nextRunAt in the future", async () => {
-      const schedule = await createSchedule(packageId, profileId, orgId, defaultAppId, {
-        cronExpression: "0 * * * *",
-        timezone: "UTC",
-      });
+      const schedule = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          cronExpression: "0 * * * *",
+          timezone: "UTC",
+        },
+      );
 
       expect(schedule.nextRunAt).not.toBeNull();
       expect(schedule.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
@@ -122,16 +142,16 @@ describe("scheduler service", () => {
 
   describe("listSchedules", () => {
     it("returns schedules for the org", async () => {
-      await createSchedule(packageId, profileId, orgId, defaultAppId, {
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, profileId, {
         name: "Schedule A",
         cronExpression: "0 * * * *",
       });
-      await createSchedule(packageId, profileId, orgId, defaultAppId, {
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, profileId, {
         name: "Schedule B",
         cronExpression: "*/30 * * * *",
       });
 
-      const schedules = await listSchedules(orgId, defaultAppId);
+      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
 
       expect(schedules).toHaveLength(2);
       const names = schedules.map((s) => s.name);
@@ -140,7 +160,7 @@ describe("scheduler service", () => {
     });
 
     it("does not return schedules from other orgs", async () => {
-      await createSchedule(packageId, profileId, orgId, defaultAppId, {
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, profileId, {
         name: "My Schedule",
         cronExpression: "0 * * * *",
       });
@@ -160,22 +180,30 @@ describe("scheduler service", () => {
         },
       });
       const otherProfile = await seedConnectionProfile({ userId: otherUser.id, name: "Default" });
-      await createSchedule(otherPkg.id, otherProfile.id, otherOrg.id, otherDefaultAppId, {
-        name: "Other Schedule",
-        cronExpression: "0 * * * *",
-      });
+      await createSchedule(
+        { orgId: otherOrg.id, applicationId: otherDefaultAppId },
+        otherPkg.id,
+        otherProfile.id,
+        {
+          name: "Other Schedule",
+          cronExpression: "0 * * * *",
+        },
+      );
 
-      const schedules = await listSchedules(orgId, defaultAppId);
+      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
       expect(schedules).toHaveLength(1);
       expect(schedules[0]!.name).toBe("My Schedule");
 
-      const otherSchedules = await listSchedules(otherOrg.id, otherDefaultAppId);
+      const otherSchedules = await listSchedules({
+        orgId: otherOrg.id,
+        applicationId: otherDefaultAppId,
+      });
       expect(otherSchedules).toHaveLength(1);
       expect(otherSchedules[0]!.name).toBe("Other Schedule");
     });
 
     it("returns an empty array when no schedules exist", async () => {
-      const schedules = await listSchedules(orgId, defaultAppId);
+      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
       expect(schedules).toBeArray();
       expect(schedules).toHaveLength(0);
     });
@@ -196,26 +224,35 @@ describe("scheduler service", () => {
         },
       });
 
-      await createSchedule(packageId, profileId, orgId, defaultAppId, {
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, profileId, {
         name: "Agent 1 Schedule",
         cronExpression: "0 * * * *",
       });
-      await createSchedule(pkg2.id, profileId, orgId, defaultAppId, {
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, pkg2.id, profileId, {
         name: "Agent 2 Schedule",
         cronExpression: "*/15 * * * *",
       });
 
-      const schedules = await listPackageSchedules(packageId, orgId, defaultAppId);
+      const schedules = await listPackageSchedules(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+      );
       expect(schedules).toHaveLength(1);
       expect(schedules[0]!.name).toBe("Agent 1 Schedule");
 
-      const schedules2 = await listPackageSchedules(pkg2.id, orgId, defaultAppId);
+      const schedules2 = await listPackageSchedules(
+        { orgId: orgId, applicationId: defaultAppId },
+        pkg2.id,
+      );
       expect(schedules2).toHaveLength(1);
       expect(schedules2[0]!.name).toBe("Agent 2 Schedule");
     });
 
     it("returns empty array for package with no schedules", async () => {
-      const schedules = await listPackageSchedules(packageId, orgId, defaultAppId);
+      const schedules = await listPackageSchedules(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+      );
       expect(schedules).toBeArray();
       expect(schedules).toHaveLength(0);
     });
@@ -225,11 +262,16 @@ describe("scheduler service", () => {
 
   describe("getSchedule", () => {
     it("returns an existing schedule", async () => {
-      const created = await createSchedule(packageId, profileId, orgId, defaultAppId, {
-        name: "Hourly Run",
-        cronExpression: "0 * * * *",
-        timezone: "America/New_York",
-      });
+      const created = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          name: "Hourly Run",
+          cronExpression: "0 * * * *",
+          timezone: "America/New_York",
+        },
+      );
 
       const found = await getSchedule(created.id);
 
@@ -251,13 +293,22 @@ describe("scheduler service", () => {
 
   describe("updateSchedule", () => {
     it("updates cronExpression and recomputes nextRunAt", async () => {
-      const created = await createSchedule(packageId, profileId, orgId, defaultAppId, {
-        cronExpression: "0 * * * *",
-      });
+      const created = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          cronExpression: "0 * * * *",
+        },
+      );
 
-      const updated = await updateSchedule(created.id, orgId, defaultAppId, {
-        cronExpression: "*/5 * * * *",
-      });
+      const updated = await updateSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        created.id,
+        {
+          cronExpression: "*/5 * * * *",
+        },
+      );
 
       expect(updated).not.toBeNull();
       expect(updated!.cronExpression).toBe("*/5 * * * *");
@@ -266,30 +317,48 @@ describe("scheduler service", () => {
     });
 
     it("updates name", async () => {
-      const created = await createSchedule(packageId, profileId, orgId, defaultAppId, {
-        name: "Original Name",
-        cronExpression: "0 * * * *",
-      });
+      const created = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          name: "Original Name",
+          cronExpression: "0 * * * *",
+        },
+      );
 
-      const updated = await updateSchedule(created.id, orgId, defaultAppId, {
-        name: "Updated Name",
-      });
+      const updated = await updateSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        created.id,
+        {
+          name: "Updated Name",
+        },
+      );
 
       expect(updated).not.toBeNull();
       expect(updated!.name).toBe("Updated Name");
     });
 
     it("sets nextRunAt to null when enabled is false", async () => {
-      const created = await createSchedule(packageId, profileId, orgId, defaultAppId, {
-        cronExpression: "0 * * * *",
-      });
+      const created = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          cronExpression: "0 * * * *",
+        },
+      );
 
       expect(created.enabled).toBe(true);
       expect(created.nextRunAt).not.toBeNull();
 
-      const updated = await updateSchedule(created.id, orgId, defaultAppId, {
-        enabled: false,
-      });
+      const updated = await updateSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        created.id,
+        {
+          enabled: false,
+        },
+      );
 
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(false);
@@ -297,13 +366,24 @@ describe("scheduler service", () => {
     });
 
     it("re-enables and recomputes nextRunAt", async () => {
-      const created = await createSchedule(packageId, profileId, orgId, defaultAppId, {
-        cronExpression: "0 * * * *",
+      const created = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          cronExpression: "0 * * * *",
+        },
+      );
+
+      await updateSchedule({ orgId: orgId, applicationId: defaultAppId }, created.id, {
+        enabled: false,
       });
 
-      await updateSchedule(created.id, orgId, defaultAppId, { enabled: false });
-
-      const updated = await updateSchedule(created.id, orgId, defaultAppId, { enabled: true });
+      const updated = await updateSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        created.id,
+        { enabled: true },
+      );
 
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(true);
@@ -312,23 +392,36 @@ describe("scheduler service", () => {
     });
 
     it("updates input data", async () => {
-      const created = await createSchedule(packageId, profileId, orgId, defaultAppId, {
-        cronExpression: "0 * * * *",
-        input: { key: "original" },
-      });
+      const created = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          cronExpression: "0 * * * *",
+          input: { key: "original" },
+        },
+      );
 
-      const updated = await updateSchedule(created.id, orgId, defaultAppId, {
-        input: { key: "updated", extra: true },
-      });
+      const updated = await updateSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        created.id,
+        {
+          input: { key: "updated", extra: true },
+        },
+      );
 
       expect(updated).not.toBeNull();
       expect(updated!.input).toEqual({ key: "updated", extra: true });
     });
 
     it("returns null for a non-existent ID", async () => {
-      const updated = await updateSchedule("sched_nonexistent", orgId, defaultAppId, {
-        cronExpression: "*/5 * * * *",
-      });
+      const updated = await updateSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        "sched_nonexistent",
+        {
+          cronExpression: "*/5 * * * *",
+        },
+      );
       expect(updated).toBeNull();
     });
   });
@@ -337,11 +430,19 @@ describe("scheduler service", () => {
 
   describe("deleteSchedule", () => {
     it("removes the record and returns true", async () => {
-      const created = await createSchedule(packageId, profileId, orgId, defaultAppId, {
-        cronExpression: "0 * * * *",
-      });
+      const created = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          cronExpression: "0 * * * *",
+        },
+      );
 
-      const deleted = await deleteSchedule(created.id, orgId, defaultAppId);
+      const deleted = await deleteSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        created.id,
+      );
       expect(deleted).toBe(true);
 
       const found = await getSchedule(created.id);
@@ -349,23 +450,36 @@ describe("scheduler service", () => {
     });
 
     it("returns false for a non-existent ID", async () => {
-      const deleted = await deleteSchedule("sched_nonexistent", orgId, defaultAppId);
+      const deleted = await deleteSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        "sched_nonexistent",
+      );
       expect(deleted).toBe(false);
     });
 
     it("does not affect other schedules", async () => {
-      const schedule1 = await createSchedule(packageId, profileId, orgId, defaultAppId, {
-        name: "Keep This",
-        cronExpression: "0 * * * *",
-      });
-      const schedule2 = await createSchedule(packageId, profileId, orgId, defaultAppId, {
-        name: "Delete This",
-        cronExpression: "*/30 * * * *",
-      });
+      const schedule1 = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          name: "Keep This",
+          cronExpression: "0 * * * *",
+        },
+      );
+      const schedule2 = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        profileId,
+        {
+          name: "Delete This",
+          cronExpression: "*/30 * * * *",
+        },
+      );
 
-      await deleteSchedule(schedule2.id, orgId, defaultAppId);
+      await deleteSchedule({ orgId: orgId, applicationId: defaultAppId }, schedule2.id);
 
-      const remaining = await listSchedules(orgId, defaultAppId);
+      const remaining = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
       expect(remaining).toHaveLength(1);
       expect(remaining[0]!.id).toBe(schedule1.id);
       expect(remaining[0]!.name).toBe("Keep This");
@@ -398,12 +512,12 @@ describe("scheduler service", () => {
     }
 
     it("returns profileName and readiness 'ready' when agent has no providers", async () => {
-      await createSchedule(packageId, profileId, orgId, defaultAppId, {
+      await createSchedule({ orgId: orgId, applicationId: defaultAppId }, packageId, profileId, {
         name: "No Providers",
         cronExpression: "0 * * * *",
       });
 
-      const schedules = await listSchedules(orgId, defaultAppId);
+      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
 
       expect(schedules).toHaveLength(1);
       const s = schedules[0]!;
@@ -433,12 +547,17 @@ describe("scheduler service", () => {
         },
       });
 
-      await createSchedule(agentWithProvider.id, profileId, orgId, defaultAppId, {
-        name: "Missing Connection",
-        cronExpression: "0 * * * *",
-      });
+      await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        agentWithProvider.id,
+        profileId,
+        {
+          name: "Missing Connection",
+          cronExpression: "0 * * * *",
+        },
+      );
 
-      const schedules = await listSchedules(orgId, defaultAppId);
+      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
       const s = schedules.find((s) => s.name === "Missing Connection")!;
 
       expect(s.readiness.status).toBe("not_ready");
@@ -464,12 +583,17 @@ describe("scheduler service", () => {
         },
       });
 
-      await createSchedule(agentConnected.id, profileId, orgId, defaultAppId, {
-        name: "Connected Schedule",
-        cronExpression: "0 * * * *",
-      });
+      await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        agentConnected.id,
+        profileId,
+        {
+          name: "Connected Schedule",
+          cronExpression: "0 * * * *",
+        },
+      );
 
-      const schedules = await listSchedules(orgId, defaultAppId);
+      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
       const s = schedules.find((s) => s.name === "Connected Schedule")!;
 
       expect(s.readiness.status).toBe("ready");
@@ -484,17 +608,22 @@ describe("scheduler service", () => {
     it("cascade-deletes schedule when profile is deleted", async () => {
       const tempProfile = await seedConnectionProfile({ userId, name: "Temp" });
 
-      const schedule = await createSchedule(packageId, tempProfile.id, orgId, defaultAppId, {
-        name: "Deleted Profile",
-        cronExpression: "0 * * * *",
-      });
+      const schedule = await createSchedule(
+        { orgId: orgId, applicationId: defaultAppId },
+        packageId,
+        tempProfile.id,
+        {
+          name: "Deleted Profile",
+          cronExpression: "0 * * * *",
+        },
+      );
 
       await db.delete(connectionProfiles).where(eq(connectionProfiles.id, tempProfile.id));
 
       const found = await getSchedule(schedule.id);
       expect(found).toBeNull();
 
-      const schedules = await listSchedules(orgId, defaultAppId);
+      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
       expect(schedules.find((s) => s.name === "Deleted Profile")).toBeUndefined();
     });
   });

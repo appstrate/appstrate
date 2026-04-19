@@ -113,6 +113,39 @@ export function checkScopeMatch(c: Context<AppEnv>, packageId: string): ApiError
   return null;
 }
 
+/** Middleware: for API key callers, reject with 403 when the `:orgId` route
+ *  param does not match the key's bound org. Sessions are passed through
+ *  unchanged — they legitimately see every org they belong to.
+ *
+ *  Why: issue #172. API keys carry an `orgId` scope but `/api/orgs/*`
+ *  handlers historically resolved membership from the creator's `user.id`,
+ *  letting a key issued in org A read/mutate other orgs the creator is a
+ *  member of. Pin every `:orgId` route to the key's bound org. */
+export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
+  if (c.get("authMethod") !== "api_key") return next();
+  const paramOrgId = c.req.param("orgId");
+  if (paramOrgId && paramOrgId !== c.get("orgId")) {
+    throw forbidden("API key scope does not include this organization");
+  }
+  return next();
+}
+
+/** Middleware: for API key callers, reject with 403 when the `:id`/`:appId`
+ *  route param does not match the key's bound application. Sessions are
+ *  passed through unchanged — any member can manage any app in their org.
+ *
+ *  Why: `/api/applications` is org-scoped, not application-scoped, so the
+ *  same orgId-only filtering pattern that lets a key escape its org also
+ *  lets it escape its app within the same org. */
+export async function apiKeyAppScopeGuard(c: Context<AppEnv>, next: Next) {
+  if (c.get("authMethod") !== "api_key") return next();
+  const paramAppId = c.req.param("id") ?? c.req.param("appId");
+  if (paramAppId && paramAppId !== c.get("applicationId")) {
+    throw forbidden("API key scope does not include this application");
+  }
+  return next();
+}
+
 /** Middleware: reject if agent is system (403) or has running runs (409). */
 export function requireMutableAgent() {
   return async (c: Context<AppEnv>, next: Next) => {
@@ -121,9 +154,8 @@ export function requireMutableAgent() {
       throw forbidden("Cannot modify a system agent");
     }
     const running = await getRunningRunsForPackage(
+      { orgId: c.get("orgId"), applicationId: c.get("applicationId") },
       agent.id,
-      c.get("orgId"),
-      c.get("applicationId"),
     );
     if (running > 0) {
       throw conflict("agent_in_use", `${running} run(s) running for this agent`);

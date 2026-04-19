@@ -127,7 +127,12 @@ describe("OAuth2 flows", () => {
 
   describe("initiateConnection", () => {
     it("returns an auth URL with required OAuth2 params", async () => {
-      const result = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const result = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
 
       expect(result.authUrl).toBeString();
       expect(result.state).toBeString();
@@ -141,7 +146,12 @@ describe("OAuth2 flows", () => {
     });
 
     it("includes PKCE code_challenge and method when pkce is enabled", async () => {
-      const result = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const result = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
 
       const url = new URL(result.authUrl);
       expect(url.searchParams.get("code_challenge")).toBeString();
@@ -149,7 +159,12 @@ describe("OAuth2 flows", () => {
     });
 
     it("includes scopes in the auth URL", async () => {
-      const result = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const result = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
 
       const url = new URL(result.authUrl);
       const scope = url.searchParams.get("scope");
@@ -158,10 +173,13 @@ describe("OAuth2 flows", () => {
     });
 
     it("merges default and requested scopes", async () => {
-      const result = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId, [
-        "admin",
-        "read",
-      ]);
+      const result = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+        ["admin", "read"],
+      );
 
       const url = new URL(result.authUrl);
       const scope = url.searchParams.get("scope");
@@ -171,7 +189,12 @@ describe("OAuth2 flows", () => {
     });
 
     it("stores state in the oauth state store", async () => {
-      const result = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const result = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
 
       const row = await oauthStateStore.get(result.state);
       expect(row).not.toBeNull();
@@ -186,15 +209,30 @@ describe("OAuth2 flows", () => {
     });
 
     it("stores a unique state per invocation", async () => {
-      const r1 = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
-      const r2 = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const r1 = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
+      const r2 = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
 
       expect(r1.state).not.toBe(r2.state);
     });
 
     it("throws when provider does not exist", async () => {
       await expect(
-        initiateConnection("@testorg/nonexistent", orgId, actor, profileId, appId),
+        initiateConnection(
+          { orgId: orgId, applicationId: appId },
+          "@testorg/nonexistent",
+          actor,
+          profileId,
+        ),
       ).rejects.toThrow("not found");
     });
 
@@ -203,7 +241,12 @@ describe("OAuth2 flows", () => {
       await seedOAuth2Provider(orgId, "@testorg/no-creds-provider");
 
       await expect(
-        initiateConnection("@testorg/no-creds-provider", orgId, actor, profileId, appId),
+        initiateConnection(
+          { orgId: orgId, applicationId: appId },
+          "@testorg/no-creds-provider",
+          actor,
+          profileId,
+        ),
       ).rejects.toThrow("No OAuth credentials configured");
     });
   });
@@ -213,7 +256,12 @@ describe("OAuth2 flows", () => {
   describe("handleCallback", () => {
     it("exchanges code for tokens and stores the connection", async () => {
       // Step 1: Initiate to create the state
-      const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
 
       // Step 2: Handle callback with a mock code
       const result = await handleCallback("mock-auth-code-123", state);
@@ -228,7 +276,12 @@ describe("OAuth2 flows", () => {
     });
 
     it("sends correct token exchange request to the provider", async () => {
-      const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
       mockServer.clearRequests(); // Clear the initiate-phase requests
 
       await handleCallback("the-auth-code", state);
@@ -249,7 +302,12 @@ describe("OAuth2 flows", () => {
     });
 
     it("saves encrypted credentials in user_provider_connections", async () => {
-      const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
       await handleCallback("mock-code", state);
 
       const rows = await db
@@ -272,7 +330,12 @@ describe("OAuth2 flows", () => {
     });
 
     it("cleans up oauth state after successful callback", async () => {
-      const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
       await handleCallback("mock-code", state);
 
       const row = await oauthStateStore.get(state);
@@ -286,7 +349,12 @@ describe("OAuth2 flows", () => {
     });
 
     it("throws on expired state", async () => {
-      const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
 
       // Evict from the store to simulate TTL expiry
       await oauthStateStore.delete(state);
@@ -298,7 +366,12 @@ describe("OAuth2 flows", () => {
       mockServer.setTokenStatus(400);
       mockServer.setTokenResponse({ error: "invalid_grant" });
 
-      const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
 
       await expect(handleCallback("bad-code", state)).rejects.toThrow("Token exchange failed");
     });
@@ -306,7 +379,12 @@ describe("OAuth2 flows", () => {
     it("throws when token response has no access_token", async () => {
       mockServer.setTokenResponse({ token_type: "Bearer" });
 
-      const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
 
       await expect(handleCallback("mock-code", state)).rejects.toThrow("No access_token");
     });
@@ -318,7 +396,12 @@ describe("OAuth2 flows", () => {
         expires_in: 7200,
       });
 
-      const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
       const result = await handleCallback("mock-code", state);
 
       expect(result.accessToken).toBe("only_access_token");
@@ -334,7 +417,12 @@ describe("OAuth2 flows", () => {
         scope: "read",
       });
 
-      const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
       const result = await handleCallback("mock-code", state);
 
       // scopesGranted reflects what the token endpoint returned, not what was requested
@@ -346,7 +434,12 @@ describe("OAuth2 flows", () => {
 
   describe("PKCE flow", () => {
     it("sends the stored code_verifier in the token exchange", async () => {
-      const { state } = await initiateConnection(PROVIDER_ID, orgId, actor, profileId, appId);
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        PROVIDER_ID,
+        actor,
+        profileId,
+      );
 
       const stateRow = await oauthStateStore.get(state);
       const storedVerifier = stateRow!.codeVerifier;
@@ -368,11 +461,10 @@ describe("OAuth2 flows", () => {
       });
 
       const { authUrl, state } = await initiateConnection(
+        { orgId, applicationId: appId },
         noPkceProvider,
-        orgId,
         actor,
         profileId,
-        appId,
       );
 
       // Auth URL should not have code_challenge
@@ -403,7 +495,12 @@ describe("OAuth2 flows", () => {
         clientSecret: CLIENT_SECRET,
       });
 
-      const { state } = await initiateConnection(basicProvider, orgId, actor, profileId, appId);
+      const { state } = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        basicProvider,
+        actor,
+        profileId,
+      );
 
       mockServer.clearRequests();
       await handleCallback("mock-code", state);
@@ -438,7 +535,12 @@ describe("OAuth2 flows", () => {
         clientSecret: CLIENT_SECRET,
       });
 
-      const result = await initiateConnection(systemProvider, orgId, actor, profileId, appId);
+      const result = await initiateConnection(
+        { orgId: orgId, applicationId: appId },
+        systemProvider,
+        actor,
+        profileId,
+      );
       expect(result.authUrl).toContain("/authorize");
       expect(result.state).toBeString();
     });

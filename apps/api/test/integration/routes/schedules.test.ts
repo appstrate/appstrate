@@ -84,7 +84,7 @@ describe("Schedules API", () => {
         },
         draftContent: "Process {{email}}",
       });
-      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
       return agent;
     }
 
@@ -162,7 +162,7 @@ describe("Schedules API", () => {
     it("creates a schedule for an agent", async () => {
       const fid = agentId("cron-agent");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -185,7 +185,7 @@ describe("Schedules API", () => {
     it("rejects invalid cron expression", async () => {
       const fid = agentId("bad-cron");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -364,7 +364,7 @@ describe("Schedules API", () => {
       });
       const fid = agentId("org-sched");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -413,7 +413,7 @@ describe("Schedules API", () => {
       });
       const fid = agentId("foreign-org");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(ctx.defaultAppId, ctx.orgId, fid);
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",

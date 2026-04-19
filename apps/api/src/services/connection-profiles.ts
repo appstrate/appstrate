@@ -20,6 +20,7 @@ import { getAppProfileBindings } from "./state/index.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import type { AgentProviderRequirement, ProviderProfileMap } from "../types/index.ts";
 import { notFound, invalidRequest } from "../lib/errors.ts";
+import type { AppScope } from "../lib/scope.ts";
 
 const PROFILE_ACTOR_COLUMNS = {
   userId: connectionProfiles.userId,
@@ -112,11 +113,9 @@ export async function getProfileForActor(
 export async function getAccessibleProfile(
   profileId: string,
   actor: Actor,
-  applicationId: string,
+  scope: AppScope,
 ): Promise<ConnectionProfile | null> {
-  return (
-    (await getProfileForActor(profileId, actor)) ?? (await getAppProfile(profileId, applicationId))
-  );
+  return (await getProfileForActor(profileId, actor)) ?? (await getAppProfile(scope, profileId));
 }
 
 /**
@@ -179,13 +178,13 @@ export async function deleteProfile(profileId: string, actor: Actor): Promise<vo
 // ─── App Profile CRUD ───────────────────────────────────────
 
 export async function listAppProfiles(
-  applicationId: string,
+  scope: AppScope,
 ): Promise<(ConnectionProfile & { bindingCount: number; boundProviderIds: string[] })[]> {
   // Fetch profiles
   const profileRows = await db
     .select()
     .from(connectionProfiles)
-    .where(eq(connectionProfiles.applicationId, applicationId));
+    .where(eq(connectionProfiles.applicationId, scope.applicationId));
 
   if (profileRows.length === 0) return [];
 
@@ -213,20 +212,17 @@ export async function listAppProfiles(
   });
 }
 
-export async function createAppProfile(
-  applicationId: string,
-  name: string,
-): Promise<ConnectionProfile> {
+export async function createAppProfile(scope: AppScope, name: string): Promise<ConnectionProfile> {
   const [created] = await db
     .insert(connectionProfiles)
-    .values({ applicationId, name, isDefault: false })
+    .values({ applicationId: scope.applicationId, name, isDefault: false })
     .returning();
   return created!;
 }
 
 export async function getAppProfile(
+  scope: AppScope,
   profileId: string,
-  applicationId: string,
 ): Promise<ConnectionProfile | null> {
   const [row] = await db
     .select()
@@ -234,7 +230,7 @@ export async function getAppProfile(
     .where(
       and(
         eq(connectionProfiles.id, profileId),
-        eq(connectionProfiles.applicationId, applicationId),
+        eq(connectionProfiles.applicationId, scope.applicationId),
       ),
     )
     .limit(1);
@@ -246,18 +242,18 @@ export async function getAppProfile(
  * or if the referenced profile was deleted.
  */
 export async function getAgentAppProfile(
-  applicationId: string,
+  scope: AppScope,
   packageId: string,
 ): Promise<{ id: string; name: string } | null> {
-  const { appProfileId } = await getPackageConfig(applicationId, packageId);
+  const { appProfileId } = await getPackageConfig(scope.applicationId, packageId);
   if (!appProfileId) return null;
-  const profile = await getAppProfile(appProfileId, applicationId);
+  const profile = await getAppProfile(scope, appProfileId);
   return profile ? { id: appProfileId, name: profile.name } : null;
 }
 
 export async function renameAppProfile(
+  scope: AppScope,
   profileId: string,
-  applicationId: string,
   name: string,
 ): Promise<void> {
   const [updated] = await db
@@ -266,7 +262,7 @@ export async function renameAppProfile(
     .where(
       and(
         eq(connectionProfiles.id, profileId),
-        eq(connectionProfiles.applicationId, applicationId),
+        eq(connectionProfiles.applicationId, scope.applicationId),
       ),
     )
     .returning({ id: connectionProfiles.id });
@@ -274,14 +270,14 @@ export async function renameAppProfile(
   if (!updated) throw notFound("Profile not found");
 }
 
-export async function deleteAppProfile(profileId: string, applicationId: string): Promise<void> {
+export async function deleteAppProfile(scope: AppScope, profileId: string): Promise<void> {
   const [profile] = await db
     .select()
     .from(connectionProfiles)
     .where(
       and(
         eq(connectionProfiles.id, profileId),
-        eq(connectionProfiles.applicationId, applicationId),
+        eq(connectionProfiles.applicationId, scope.applicationId),
       ),
     )
     .limit(1);
@@ -300,7 +296,7 @@ export async function deleteAppProfile(profileId: string, applicationId: string)
     .where(
       and(
         eq(connectionProfiles.id, profileId),
-        eq(connectionProfiles.applicationId, applicationId),
+        eq(connectionProfiles.applicationId, scope.applicationId),
       ),
     );
 }
@@ -310,8 +306,8 @@ export async function deleteAppProfile(profileId: string, applicationId: string)
  * Used to show users which app profiles depend on their credentials.
  */
 export async function listAppProfilesWithUserBindings(
+  scope: AppScope,
   userId: string,
-  applicationId: string,
 ): Promise<{ profile: ConnectionProfile; providerIds: string[] }[]> {
   const rows = await db
     .select({
@@ -329,7 +325,7 @@ export async function listAppProfilesWithUserBindings(
     .where(
       and(
         eq(appProfileProviderBindings.boundByUserId, userId),
-        eq(connectionProfiles.applicationId, applicationId),
+        eq(connectionProfiles.applicationId, scope.applicationId),
       ),
     );
 
@@ -353,7 +349,7 @@ export async function listAppProfilesWithUserBindings(
       id: profileId,
       userId: null,
       endUserId: null,
-      applicationId,
+      applicationId: scope.applicationId,
       name: data.profileName,
       isDefault: false,
       createdAt: data.createdAt,

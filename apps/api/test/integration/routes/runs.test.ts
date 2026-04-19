@@ -52,7 +52,10 @@ describe("Runs API", () => {
         },
         draftContent: "Process the email: {{email}}",
       });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/input-agent");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@runorg/input-agent",
+      );
       return agent;
     }
 
@@ -112,7 +115,10 @@ describe("Runs API", () => {
   describe("GET /api/agents/:scope/:name/runs", () => {
     it("returns empty array when no runs exist", async () => {
       await seedAgent({ id: "@runorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/my-agent");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@runorg/my-agent",
+      );
 
       const res = await app.request("/api/agents/@runorg/my-agent/runs", {
         headers: authHeaders(ctx),
@@ -127,7 +133,10 @@ describe("Runs API", () => {
 
     it("returns runs for an agent", async () => {
       await seedAgent({ id: "@runorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/my-agent");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@runorg/my-agent",
+      );
       const run = await seedRun({
         packageId: "@runorg/my-agent",
         orgId: ctx.orgId,
@@ -408,7 +417,10 @@ describe("Runs API", () => {
   describe("DELETE /api/agents/:scope/:name/runs", () => {
     it("deletes all runs for an agent (admin)", async () => {
       await seedAgent({ id: "@runorg/del-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/del-agent");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@runorg/del-agent",
+      );
       await seedRun({
         packageId: "@runorg/del-agent",
         orgId: ctx.orgId,
@@ -436,7 +448,10 @@ describe("Runs API", () => {
 
     it("returns 409 when running runs exist", async () => {
       await seedAgent({ id: "@runorg/running-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/running-agent");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@runorg/running-agent",
+      );
       await seedRun({
         packageId: "@runorg/running-agent",
         orgId: ctx.orgId,
@@ -465,8 +480,11 @@ describe("Runs API", () => {
       const appB = await seedApplication({ orgId: ctx.orgId, name: "AppB" });
 
       await seedAgent({ id: "@runorg/iso-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/iso-agent");
-      await installPackage(appB.id, ctx.orgId, "@runorg/iso-agent");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@runorg/iso-agent",
+      );
+      await installPackage({ orgId: ctx.orgId, applicationId: appB.id }, "@runorg/iso-agent");
 
       // Seed runs in AppA
       await seedRun({
@@ -644,7 +662,10 @@ describe("Runs API", () => {
 
     it("GET /api/agents/:scope/:name/runs returns enriched fields in list", async () => {
       await seedAgent({ id: "@runorg/list-enriched", orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@runorg/list-enriched");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@runorg/list-enriched",
+      );
       await seedRun({
         packageId: "@runorg/list-enriched",
         orgId: ctx.orgId,

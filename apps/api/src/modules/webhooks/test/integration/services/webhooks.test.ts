@@ -37,8 +37,7 @@ describe("webhooks service", () => {
   function appLevel(overrides?: Record<string, unknown>) {
     return {
       level: "application" as const,
-      orgId,
-      applicationId: defaultAppId,
+      scope: { orgId, applicationId: defaultAppId },
       url: "https://example.com/hook",
       events: ["run.success"],
       ...overrides,
@@ -48,7 +47,7 @@ describe("webhooks service", () => {
   function orgLevel(overrides?: Record<string, unknown>) {
     return {
       level: "org" as const,
-      orgId,
+      scope: { orgId },
       url: "https://example.com/org-hook",
       events: ["run.success"],
       ...overrides,
@@ -108,7 +107,7 @@ describe("webhooks service", () => {
       for (let i = 0; i < 3; i++) {
         await createWebhook(appLevel({ url: `https://example.com/hook-${i}` }));
       }
-      const all = await listWebhooks(orgId, { applicationId: defaultAppId });
+      const all = await listWebhooks({ orgId }, { applicationId: defaultAppId });
       // 3 app-level + 0 org-level = 3
       expect(all).toHaveLength(3);
     });
@@ -136,7 +135,7 @@ describe("webhooks service", () => {
       await createWebhook(appLevel({ url: "https://example.com/hook1" }));
       await createWebhook(appLevel({ url: "https://example.com/hook2", events: ["run.failed"] }));
 
-      const list = await listWebhooks(orgId, { applicationId: defaultAppId });
+      const list = await listWebhooks({ orgId }, { applicationId: defaultAppId });
       expect(list).toHaveLength(2);
     });
 
@@ -144,7 +143,7 @@ describe("webhooks service", () => {
       await createWebhook(orgLevel({ url: "https://example.com/org" }));
       await createWebhook(appLevel({ url: "https://example.com/app" }));
 
-      const list = await listWebhooks(orgId, { applicationId: defaultAppId });
+      const list = await listWebhooks({ orgId }, { applicationId: defaultAppId });
       expect(list).toHaveLength(2);
     });
 
@@ -152,7 +151,7 @@ describe("webhooks service", () => {
       await createWebhook(orgLevel({ url: "https://example.com/org" }));
       await createWebhook(appLevel({ url: "https://example.com/app" }));
 
-      const list = await listWebhooks(orgId);
+      const list = await listWebhooks({ orgId });
       expect(list).toHaveLength(1);
       expect(list[0]!.level).toBe("org");
       expect(list[0]!.applicationId).toBeNull();
@@ -167,13 +166,12 @@ describe("webhooks service", () => {
       await createWebhook(appLevel({ url: "https://example.com/mine" }));
       await createWebhook({
         level: "application",
-        orgId: otherOrg.id,
-        applicationId: otherAppId,
+        scope: { orgId: otherOrg.id, applicationId: otherAppId },
         url: "https://example.com/theirs",
         events: ["run.success"],
       });
 
-      const list = await listWebhooks(orgId, { applicationId: defaultAppId });
+      const list = await listWebhooks({ orgId }, { applicationId: defaultAppId });
       expect(list).toHaveLength(1);
       expect(list[0]!.url).toBe("https://example.com/mine");
     });
@@ -185,12 +183,12 @@ describe("webhooks service", () => {
       await createWebhook(orgLevel({ url: "https://example.com/my-org" }));
       await createWebhook({
         level: "org",
-        orgId: otherOrg.id,
+        scope: { orgId: otherOrg.id },
         url: "https://example.com/their-org",
         events: ["run.success"],
       });
 
-      const list = await listWebhooks(orgId);
+      const list = await listWebhooks({ orgId });
       expect(list).toHaveLength(1);
       expect(list[0]!.url).toBe("https://example.com/my-org");
     });
@@ -199,7 +197,7 @@ describe("webhooks service", () => {
       await createWebhook(orgLevel({ url: "https://example.com/org" }));
       await createWebhook(appLevel({ url: "https://example.com/app" }));
 
-      const list = await listWebhooks(orgId, { all: true });
+      const list = await listWebhooks({ orgId }, { all: true });
       expect(list).toHaveLength(2);
       const levels = list.map((w) => w.level);
       expect(levels).toContain("org");
@@ -209,7 +207,7 @@ describe("webhooks service", () => {
     it("does not expose the secret in list results", async () => {
       await createWebhook(appLevel());
 
-      const list = await listWebhooks(orgId, { applicationId: defaultAppId });
+      const list = await listWebhooks({ orgId }, { applicationId: defaultAppId });
       expect((list[0] as unknown as Record<string, unknown>).secret).toBeUndefined();
     });
   });
@@ -220,13 +218,13 @@ describe("webhooks service", () => {
     it("returns a single webhook by ID", async () => {
       const created = await createWebhook(appLevel({ url: "https://example.com/single" }));
 
-      const wh = await getWebhook(orgId, created.id);
+      const wh = await getWebhook({ orgId }, created.id);
       expect(wh.id).toBe(created.id);
       expect(wh.url).toBe("https://example.com/single");
     });
 
     it("throws not found for non-existent webhook", async () => {
-      await expect(getWebhook(orgId, "wh_nonexistent")).rejects.toThrow(/not found/i);
+      await expect(getWebhook({ orgId }, "wh_nonexistent")).rejects.toThrow(/not found/i);
     });
   });
 
@@ -236,9 +234,9 @@ describe("webhooks service", () => {
     it("deletes a webhook", async () => {
       const created = await createWebhook(appLevel({ url: "https://example.com/deleteme" }));
 
-      await deleteWebhook(orgId, created.id);
+      await deleteWebhook({ orgId }, created.id);
 
-      await expect(getWebhook(orgId, created.id)).rejects.toThrow(/not found/i);
+      await expect(getWebhook({ orgId }, created.id)).rejects.toThrow(/not found/i);
     });
   });
 
@@ -248,7 +246,7 @@ describe("webhooks service", () => {
     it("returns a new secret different from the original", async () => {
       const created = await createWebhook(appLevel({ url: "https://example.com/rotate" }));
 
-      const { secret: newSecret } = await rotateSecret(orgId, created.id);
+      const { secret: newSecret } = await rotateSecret({ orgId }, created.id);
 
       expect(newSecret).toStartWith("whsec_");
       expect(newSecret).not.toBe(created.secret);
@@ -283,7 +281,7 @@ describe("webhooks service", () => {
         },
       ]);
 
-      const deliveries = await listDeliveries(orgId, created.id);
+      const deliveries = await listDeliveries({ orgId }, created.id);
 
       expect(deliveries).toHaveLength(2);
       const statuses = deliveries.map((d) => d.status);
@@ -296,7 +294,7 @@ describe("webhooks service", () => {
         appLevel({ url: "https://example.com/empty-deliveries" }),
       );
 
-      const deliveries = await listDeliveries(orgId, created.id);
+      const deliveries = await listDeliveries({ orgId }, created.id);
       expect(deliveries).toHaveLength(0);
     });
   });
@@ -337,16 +335,11 @@ describe("webhooks service", () => {
         }),
       );
 
-      await dispatchWebhookEvents(
-        orgId,
-        "run.success",
-        {
-          id: "run_dispatch_org",
-          packageId: "@scope/agent",
-          status: "success",
-        },
-        defaultAppId,
-      );
+      await dispatchWebhookEvents({ orgId, applicationId: defaultAppId }, "run.success", {
+        id: "run_dispatch_org",
+        packageId: "@scope/agent",
+        status: "success",
+      });
 
       const row = await waitForDelivery(orgWh.id);
       expect(row).not.toBeNull();

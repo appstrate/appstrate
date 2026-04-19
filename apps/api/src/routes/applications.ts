@@ -4,7 +4,15 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, invalidRequest, notFound, internalError, parseBody } from "../lib/errors.ts";
+import { apiKeyAppScopeGuard } from "../middleware/guards.ts";
+import {
+  ApiError,
+  forbidden,
+  invalidRequest,
+  notFound,
+  internalError,
+  parseBody,
+} from "../lib/errors.ts";
 import {
   createApplication,
   listApplications,
@@ -66,18 +74,27 @@ export const appProviderCredentialsSchema = z.object({
 export function createApplicationsRouter() {
   const router = new Hono<AppEnv>();
 
+  router.use("/:id", apiKeyAppScopeGuard);
+  router.use("/:appId/*", apiKeyAppScopeGuard);
+
   // GET /api/applications — list applications for the org
   router.get("/", async (c) => {
     const orgId = c.get("orgId");
     const apps = await listApplications(orgId);
+    const authMethod = c.get("authMethod");
+    const keyAppId = c.get("applicationId");
+    const scoped = authMethod === "api_key" ? apps.filter((a) => a.id === keyAppId) : apps;
     return c.json({
       object: "list",
-      data: apps.map((app) => ({ object: "application", ...app })),
+      data: scoped.map((app) => ({ object: "application", ...app })),
     });
   });
 
   // POST /api/applications — create a new application
   router.post("/", requirePermission("applications", "write"), async (c) => {
+    if (c.get("authMethod") === "api_key") {
+      throw forbidden("API keys cannot create applications");
+    }
     const orgId = c.get("orgId");
     const user = c.get("user");
     const body = await c.req.json();
@@ -176,8 +193,9 @@ export function createApplicationsRouter() {
   // GET /api/applications/:appId/packages — list installed packages
   router.get("/:appId/packages", async (c) => {
     const appId = c.req.param("appId")!;
+    const orgId = c.get("orgId");
     const type = c.req.query("type") as PackageType | undefined;
-    const rows = await listInstalledPackages(appId, type);
+    const rows = await listInstalledPackages({ orgId, applicationId: appId }, type);
     return c.json({
       object: "list",
       data: rows.map((row) => ({ object: "application_package", ...row })),
@@ -192,15 +210,16 @@ export function createApplicationsRouter() {
     const body = await c.req.json();
     const data = parseBody(installPackageSchema, body);
 
-    const row = await installPackage(appId, orgId, data.packageId, data.config);
+    const row = await installPackage({ orgId, applicationId: appId }, data.packageId, data.config);
     return c.json({ object: "application_package", ...row }, 201);
   });
 
   // GET /api/applications/:appId/packages/:packageId — get installed package detail
   router.get("/:appId/packages/:scope{@[^/]+}/:name", async (c) => {
     const appId = c.req.param("appId")!;
+    const orgId = c.get("orgId");
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-    const row = await getInstalledPackage(appId, packageId);
+    const row = await getInstalledPackage({ orgId, applicationId: appId }, packageId);
     if (!row) {
       throw new ApiError({
         status: 404,
@@ -218,12 +237,14 @@ export function createApplicationsRouter() {
     requirePermission("applications", "write"),
     async (c) => {
       const appId = c.req.param("appId")!;
+      const orgId = c.get("orgId");
+      const scope = { orgId, applicationId: appId };
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
       const body = await c.req.json();
       const data = parseBody(updatePackageSchema, body);
 
-      await updateInstalledPackage(appId, packageId, data);
-      const updated = await getInstalledPackage(appId, packageId);
+      await updateInstalledPackage(scope, packageId, data);
+      const updated = await getInstalledPackage(scope, packageId);
       return c.json({ object: "application_package", ...updated });
     },
   );
@@ -234,8 +255,9 @@ export function createApplicationsRouter() {
     requirePermission("applications", "write"),
     async (c) => {
       const appId = c.req.param("appId")!;
+      const orgId = c.get("orgId");
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-      await uninstallPackage(appId, packageId);
+      await uninstallPackage({ orgId, applicationId: appId }, packageId);
       return c.body(null, 204);
     },
   );

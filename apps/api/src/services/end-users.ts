@@ -13,10 +13,10 @@ import { endUsers, applications, connectionProfiles } from "@appstrate/db/schema
 import type { EndUserInfo, EndUserListResponse } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
-import { getDefaultApplication } from "./applications.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { buildUpdateSet } from "../lib/db-helpers.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
+import type { AppScope } from "../lib/scope.ts";
 
 function toEndUserResponse(row: {
   id: string;
@@ -46,8 +46,7 @@ function toEndUserResponse(row: {
 // ---------------------------------------------------------------------------
 
 export async function createEndUser(
-  orgId: string,
-  applicationId: string | null,
+  scope: AppScope,
   params: {
     name?: string;
     email?: string;
@@ -58,27 +57,19 @@ export async function createEndUser(
   const endUserId = prefixedId("eu");
   const now = new Date();
 
-  // Resolve application: use provided or fall back to default
-  let resolvedAppId: string;
-  if (applicationId) {
-    // Verify application exists and belongs to org
-    const [app] = await db
-      .select({ id: applications.id })
-      .from(applications)
-      .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
-      .limit(1);
-    if (!app) {
-      throw notFound(`Application '${applicationId}' not found in this organization`);
-    }
-    resolvedAppId = applicationId;
-  } else {
-    const defaultApp = await getDefaultApplication(orgId);
-    resolvedAppId = defaultApp.id;
+  // Verify application exists and belongs to org
+  const [app] = await db
+    .select({ id: applications.id })
+    .from(applications)
+    .where(and(eq(applications.id, scope.applicationId), eq(applications.orgId, scope.orgId)))
+    .limit(1);
+  if (!app) {
+    throw notFound(`Application '${scope.applicationId}' not found in this organization`);
   }
 
   // Validate externalId uniqueness within application
   if (params.externalId) {
-    const existing = await findByExternalId(resolvedAppId, params.externalId);
+    const existing = await findByExternalId(scope.applicationId, params.externalId);
     if (existing) {
       throw new ApiError({
         status: 409,
@@ -95,8 +86,8 @@ export async function createEndUser(
     .insert(endUsers)
     .values({
       id: endUserId,
-      applicationId: resolvedAppId,
-      orgId,
+      applicationId: scope.applicationId,
+      orgId: scope.orgId,
       name: params.name ?? null,
       email: params.email ?? null,
       externalId: params.externalId ?? null,
@@ -113,28 +104,33 @@ export async function createEndUser(
     isDefault: true,
   });
 
-  logger.info("End-user created via API", { endUserId, orgId, applicationId: resolvedAppId });
+  logger.info("End-user created via API", {
+    endUserId,
+    orgId: scope.orgId,
+    applicationId: scope.applicationId,
+  });
 
   return toEndUserResponse(created!);
 }
 
 export async function listEndUsers(
-  orgId: string,
+  scope: AppScope,
   params: {
-    applicationId: string;
     externalId?: string;
     email?: string;
     limit?: number;
     startingAfter?: string;
     endingBefore?: string;
-  },
+  } = {},
 ): Promise<EndUserListResponse> {
   const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
   const fetchLimit = limit + 1; // Fetch one extra to detect hasMore
 
-  const conditions = [eq(endUsers.orgId, orgId)];
+  const conditions = [
+    eq(endUsers.orgId, scope.orgId),
+    eq(endUsers.applicationId, scope.applicationId),
+  ];
 
-  conditions.push(eq(endUsers.applicationId, params.applicationId));
   if (params.externalId) {
     conditions.push(eq(endUsers.externalId, params.externalId));
   }
@@ -170,7 +166,7 @@ export async function listEndUsers(
   return { object: "list", data, hasMore, limit };
 }
 
-export async function getEndUser(orgId: string, endUserId: string): Promise<EndUserInfo> {
+export async function getEndUser(scope: AppScope, endUserId: string): Promise<EndUserInfo> {
   const [row] = await db
     .select({
       id: endUsers.id,
@@ -183,18 +179,24 @@ export async function getEndUser(orgId: string, endUserId: string): Promise<EndU
       updatedAt: endUsers.updatedAt,
     })
     .from(endUsers)
-    .where(and(eq(endUsers.id, endUserId), eq(endUsers.orgId, orgId)))
+    .where(
+      and(
+        eq(endUsers.id, endUserId),
+        eq(endUsers.orgId, scope.orgId),
+        eq(endUsers.applicationId, scope.applicationId),
+      ),
+    )
     .limit(1);
 
   if (!row) {
-    throw notFound(`End-user '${endUserId}' not found in this organization`);
+    throw notFound(`End-user '${endUserId}' not found in this application`);
   }
 
   return toEndUserResponse(row);
 }
 
 export async function updateEndUser(
-  orgId: string,
+  scope: AppScope,
   endUserId: string,
   params: {
     name?: string;
@@ -203,8 +205,8 @@ export async function updateEndUser(
     metadata?: Record<string, unknown>;
   },
 ): Promise<EndUserInfo> {
-  // Verify end-user exists and belongs to org
-  const existing = await getEndUser(orgId, endUserId);
+  // Verify end-user exists and belongs to app
+  const existing = await getEndUser(scope, endUserId);
 
   // Validate externalId uniqueness if changing
   if (params.externalId !== undefined) {
@@ -227,7 +229,13 @@ export async function updateEndUser(
     const [current] = await db
       .select({ metadata: endUsers.metadata })
       .from(endUsers)
-      .where(and(eq(endUsers.id, endUserId), eq(endUsers.orgId, orgId)))
+      .where(
+        and(
+          eq(endUsers.id, endUserId),
+          eq(endUsers.orgId, scope.orgId),
+          eq(endUsers.applicationId, scope.applicationId),
+        ),
+      )
       .limit(1);
     updates.metadata = {
       ...((current?.metadata as Record<string, unknown>) ?? {}),
@@ -238,20 +246,38 @@ export async function updateEndUser(
   const [updated] = await db
     .update(endUsers)
     .set(updates)
-    .where(and(eq(endUsers.id, endUserId), eq(endUsers.orgId, orgId)))
+    .where(
+      and(
+        eq(endUsers.id, endUserId),
+        eq(endUsers.orgId, scope.orgId),
+        eq(endUsers.applicationId, scope.applicationId),
+      ),
+    )
     .returning();
 
   return toEndUserResponse(updated!);
 }
 
-export async function deleteEndUser(orgId: string, endUserId: string): Promise<void> {
-  // Verify end-user exists and belongs to org
-  await getEndUser(orgId, endUserId);
+export async function deleteEndUser(scope: AppScope, endUserId: string): Promise<void> {
+  // Verify end-user exists and belongs to app
+  await getEndUser(scope, endUserId);
 
   // Delete end-user — cascades handle profiles, connections, runs
-  await db.delete(endUsers).where(and(eq(endUsers.id, endUserId), eq(endUsers.orgId, orgId)));
+  await db
+    .delete(endUsers)
+    .where(
+      and(
+        eq(endUsers.id, endUserId),
+        eq(endUsers.orgId, scope.orgId),
+        eq(endUsers.applicationId, scope.applicationId),
+      ),
+    );
 
-  logger.info("End-user deleted via API", { endUserId, orgId });
+  logger.info("End-user deleted via API", {
+    endUserId,
+    orgId: scope.orgId,
+    applicationId: scope.applicationId,
+  });
 }
 
 // ---------------------------------------------------------------------------

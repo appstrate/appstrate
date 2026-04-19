@@ -34,6 +34,7 @@ import { validateInput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
+import type { AppScope } from "../lib/scope.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -114,7 +115,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
   );
 
   // Update schedule timestamps
-  const schedule = await getSchedule(scheduleId, orgId, applicationId);
+  const schedule = await getSchedule(scheduleId, { orgId, applicationId });
   const nextRun = schedule
     ? computeNextRun(schedule.cronExpression, schedule.timezone ?? "UTC")
     : null;
@@ -194,11 +195,10 @@ async function triggerScheduledRun(
     const runId = `run_${crypto.randomUUID()}`;
     try {
       await createFailedRun(
+        { orgId, applicationId },
         runId,
         packageId,
         actor,
-        orgId,
-        applicationId,
         error,
         scheduleId,
         connectionProfileId,
@@ -244,7 +244,7 @@ async function triggerScheduledRun(
     const actor: Actor | null = actorFromIds(profile.userId, profile.endUserId);
 
     // Load the agent's admin-configured app profile (validates it still exists)
-    const agentAppProfile = await getAgentAppProfile(applicationId, packageId);
+    const agentAppProfile = await getAgentAppProfile({ orgId, applicationId }, packageId);
     const { defaultUserProfileId, appProfileId } = resolveScheduleProfileArgs(
       profile,
       connectionProfileId,
@@ -359,46 +359,44 @@ async function triggerScheduledRun(
 // CRUD helpers
 // ---------------------------------------------------------------------------
 
-export async function listSchedules(
-  orgId: string,
-  applicationId: string,
-): Promise<EnrichedSchedule[]> {
+export async function listSchedules(scope: AppScope): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
     .from(schedules)
-    .where(scopedWhere(schedules, { orgId, applicationId }))
+    .where(scopedWhere(schedules, { orgId: scope.orgId, applicationId: scope.applicationId }))
     .orderBy(asc(schedules.createdAt));
-  return enrichSchedules(rows.map(toSchedule), orgId);
+  return enrichSchedules(rows.map(toSchedule), scope.orgId);
 }
 
 export async function listPackageSchedules(
+  scope: AppScope,
   packageId: string,
-  orgId: string,
-  applicationId: string,
 ): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
     .from(schedules)
     .where(
       scopedWhere(schedules, {
-        orgId,
-        applicationId,
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
         extra: [eq(schedules.packageId, packageId)],
       }),
     )
     .orderBy(asc(schedules.createdAt));
-  return enrichSchedules(rows.map(toSchedule), orgId);
+  return enrichSchedules(rows.map(toSchedule), scope.orgId);
 }
 
-export async function getSchedule(
-  id: string,
-  orgId?: string,
-  applicationId?: string,
-): Promise<EnrichedSchedule | null> {
+export async function getSchedule(id: string, scope?: AppScope): Promise<EnrichedSchedule | null> {
   const rows = await db
     .select()
     .from(schedules)
-    .where(scopedWhere(schedules, { orgId, applicationId, extra: [eq(schedules.id, id)] }))
+    .where(
+      scopedWhere(schedules, {
+        orgId: scope?.orgId,
+        applicationId: scope?.applicationId,
+        extra: [eq(schedules.id, id)],
+      }),
+    )
     .limit(1);
   if (!rows[0]) return null;
   const schedule = toSchedule(rows[0]);
@@ -484,10 +482,9 @@ async function computeScheduleReadiness(
 
   // Reuse the shared provider status resolution (batch-fetches connections)
   const statuses = await resolveProviderStatuses(
+    { orgId, applicationId: schedule.applicationId },
     providers,
     providerProfiles,
-    orgId,
-    schedule.applicationId,
   );
 
   const missing = statuses.filter((s) => s.status !== "connected").map((s) => s.id);
@@ -555,10 +552,9 @@ async function enrichSchedules(schedules: Schedule[], orgId: string): Promise<En
 }
 
 export async function createSchedule(
+  scope: AppScope,
   packageId: string,
   connectionProfileId: string,
-  orgId: string,
-  applicationId: string,
   data: {
     name?: string;
     cronExpression: string;
@@ -578,8 +574,8 @@ export async function createSchedule(
       id,
       packageId,
       connectionProfileId,
-      orgId,
-      applicationId,
+      orgId: scope.orgId,
+      applicationId: scope.applicationId,
       name: data.name ?? null,
       enabled: true,
       cronExpression: data.cronExpression,
@@ -594,15 +590,14 @@ export async function createSchedule(
   }
   const schedule = toSchedule(row);
 
-  await upsertScheduleJob(schedule, orgId);
+  await upsertScheduleJob(schedule, scope.orgId);
 
   return schedule;
 }
 
 export async function updateSchedule(
+  scope: AppScope,
   id: string,
-  orgId: string,
-  applicationId: string,
   data: {
     connectionProfileId?: string;
     name?: string;
@@ -612,7 +607,7 @@ export async function updateSchedule(
     enabled?: boolean;
   },
 ): Promise<Schedule | null> {
-  const existing = await getSchedule(id, orgId, applicationId);
+  const existing = await getSchedule(id, scope);
   if (!existing) return null;
 
   const cronExpr = data.cronExpression ?? existing.cronExpression;
@@ -637,7 +632,13 @@ export async function updateSchedule(
   const [row] = await db
     .update(schedules)
     .set(payload)
-    .where(scopedWhere(schedules, { orgId, applicationId, extra: [eq(schedules.id, id)] }))
+    .where(
+      scopedWhere(schedules, {
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
+        extra: [eq(schedules.id, id)],
+      }),
+    )
     .returning();
 
   if (!row) {
@@ -646,7 +647,7 @@ export async function updateSchedule(
   const schedule = toSchedule(row);
 
   if (schedule.enabled) {
-    await upsertScheduleJob(schedule, orgId);
+    await upsertScheduleJob(schedule, scope.orgId);
   } else {
     await removeScheduleJob(id);
   }
@@ -654,16 +655,18 @@ export async function updateSchedule(
   return schedule;
 }
 
-export async function deleteSchedule(
-  id: string,
-  orgId: string,
-  applicationId: string,
-): Promise<boolean> {
+export async function deleteSchedule(scope: AppScope, id: string): Promise<boolean> {
   await removeScheduleJob(id);
 
   const deleted = await db
     .delete(schedules)
-    .where(scopedWhere(schedules, { orgId, applicationId, extra: [eq(schedules.id, id)] }))
+    .where(
+      scopedWhere(schedules, {
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
+        extra: [eq(schedules.id, id)],
+      }),
+    )
     .returning({ id: schedules.id });
   return deleted.length > 0;
 }

@@ -19,6 +19,7 @@ import { forbidden, invalidRequest, notFound, parseBody, validationFailed } from
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getAccessibleProfile } from "../services/connection-profiles.ts";
 import { getActor } from "../lib/actor.ts";
+import { getAppScope } from "../lib/scope.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/index.ts";
 
@@ -44,16 +45,16 @@ export function createSchedulesRouter() {
 
   // GET /api/schedules — list all schedules (app-scoped)
   router.get("/schedules", async (c) => {
-    const orgId = c.get("orgId");
-    const schedules = await listSchedules(orgId, c.get("applicationId"));
+    const scope = getAppScope(c);
+    const schedules = await listSchedules(scope);
     return c.json(schedules);
   });
 
   // GET /api/agents/:scope/:name/schedules — list schedules for an agent
   router.get("/agents/:scope{@[^/]+}/:name/schedules", requireAgent(), async (c) => {
+    const scope = getAppScope(c);
     const agent = c.get("agent");
-    const orgId = c.get("orgId");
-    const schedules = await listPackageSchedules(agent.id, orgId, c.get("applicationId"));
+    const schedules = await listPackageSchedules(scope, agent.id);
     return c.json(schedules);
   });
 
@@ -71,11 +72,10 @@ export function createSchedulesRouter() {
       const data = parseBody(createScheduleSchema, body);
 
       // Validate ownership — user can only schedule with their own profiles
-      const profile = await getAccessibleProfile(
-        data.connectionProfileId,
-        actor,
-        c.get("applicationId"),
-      );
+      const profile = await getAccessibleProfile(data.connectionProfileId, actor, {
+        orgId: c.get("orgId"),
+        applicationId: c.get("applicationId")!,
+      });
       if (!profile) {
         throw forbidden("Cannot use a profile you do not own");
       }
@@ -106,13 +106,8 @@ export function createSchedulesRouter() {
         }
       }
 
-      const schedule = await createSchedule(
-        agent.id,
-        data.connectionProfileId,
-        c.get("orgId"),
-        c.get("applicationId"),
-        data,
-      );
+      const scope = getAppScope(c);
+      const schedule = await createSchedule(scope, agent.id, data.connectionProfileId, data);
       return c.json(schedule, 201);
     },
   );
@@ -120,7 +115,7 @@ export function createSchedulesRouter() {
   // GET /api/schedules/:id — get a single schedule
   router.get("/schedules/:id", async (c) => {
     const id = c.req.param("id");
-    const schedule = await getSchedule(id, c.get("orgId"), c.get("applicationId"));
+    const schedule = await getSchedule(id, getAppScope(c));
     if (!schedule) {
       throw notFound(`Schedule '${id}' not found`);
     }
@@ -130,8 +125,8 @@ export function createSchedulesRouter() {
   // PUT /api/schedules/:id — update a schedule
   router.put("/schedules/:id", requirePermission("schedules", "write"), async (c) => {
     const id = c.req.param("id")!;
-    const orgId = c.get("orgId");
-    const existing = await getSchedule(id, orgId, c.get("applicationId"));
+    const scope = getAppScope(c);
+    const existing = await getSchedule(id, scope);
     if (!existing) {
       throw notFound(`Schedule '${id}' not found`);
     }
@@ -142,11 +137,10 @@ export function createSchedulesRouter() {
     // Validate ownership — only check when the profile is actually changing
     if (data.connectionProfileId && data.connectionProfileId !== existing.connectionProfileId) {
       const actor = getActor(c);
-      const profile = await getAccessibleProfile(
-        data.connectionProfileId,
-        actor,
-        c.get("applicationId"),
-      );
+      const profile = await getAccessibleProfile(data.connectionProfileId, actor, {
+        orgId: c.get("orgId"),
+        applicationId: c.get("applicationId")!,
+      });
       if (!profile) {
         throw forbidden("Cannot use a profile you do not own");
       }
@@ -157,27 +151,26 @@ export function createSchedulesRouter() {
       throw invalidRequest("Invalid cron expression", "cronExpression");
     }
 
-    const schedule = await updateSchedule(id, orgId, c.get("applicationId"), data);
+    const schedule = await updateSchedule(scope, id, data);
     return c.json(schedule);
   });
 
   // DELETE /api/schedules/:id — delete a schedule
   router.delete("/schedules/:id", requirePermission("schedules", "delete"), async (c) => {
     const id = c.req.param("id")!;
-    const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
-    const existing = await getSchedule(id, orgId, applicationId);
+    const scope = getAppScope(c);
+    const existing = await getSchedule(id, scope);
     if (!existing) {
       throw notFound(`Schedule '${id}' not found`);
     }
-    await deleteSchedule(id, orgId, applicationId);
+    await deleteSchedule(scope, id);
     return c.json({ ok: true });
   });
 
   // GET /api/schedules/:id/runs — list runs for a schedule
   router.get("/schedules/:id/runs", async (c) => {
     const scheduleId = c.req.param("id");
-    const orgId = c.get("orgId");
+    const scope = getAppScope(c);
     const limit = z.coerce
       .number()
       .int()
@@ -191,10 +184,9 @@ export function createSchedulesRouter() {
       .min(0)
       .catch(0)
       .parse(c.req.query("offset") ?? 0);
-    const result = await listScheduleRuns(scheduleId, orgId, {
+    const result = await listScheduleRuns(scope, scheduleId, {
       limit,
       offset,
-      applicationId: c.get("applicationId"),
     });
     return c.json(result);
   });

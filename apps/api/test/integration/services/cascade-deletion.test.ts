@@ -104,10 +104,12 @@ describe("Cascade Deletion", () => {
       const appProfile = await seedConnectionProfile({ applicationId: appId, name: "Org Profile" });
 
       const agent = await seedAgent({ id: "@testorg/org-agent", orgId, createdBy: userId });
-      await installPackage(appId, orgId, agent.id);
+      await installPackage({ orgId: orgId, applicationId: appId }, agent.id);
 
       // Set app profile on the agent config
-      await updateInstalledPackage(appId, agent.id, { appProfileId: appProfile.id });
+      await updateInstalledPackage({ orgId, applicationId: appId }, agent.id, {
+        appProfileId: appProfile.id,
+      });
 
       // Verify appProfileId is set
       const configBefore = await getDbRow(
@@ -184,11 +186,15 @@ describe("Cascade Deletion", () => {
 
       const agent1 = await seedAgent({ id: "@testorg/agent-a", orgId, createdBy: userId });
       const agent2 = await seedAgent({ id: "@testorg/agent-b", orgId, createdBy: userId });
-      await installPackage(appId, orgId, agent1.id);
-      await installPackage(appId, orgId, agent2.id);
+      await installPackage({ orgId: orgId, applicationId: appId }, agent1.id);
+      await installPackage({ orgId: orgId, applicationId: appId }, agent2.id);
 
-      await updateInstalledPackage(appId, agent1.id, { appProfileId: appProfile.id });
-      await updateInstalledPackage(appId, agent2.id, { appProfileId: appProfile.id });
+      await updateInstalledPackage({ orgId, applicationId: appId }, agent1.id, {
+        appProfileId: appProfile.id,
+      });
+      await updateInstalledPackage({ orgId, applicationId: appId }, agent2.id, {
+        appProfileId: appProfile.id,
+      });
 
       // Delete the app profile
       await db.delete(connectionProfiles).where(eq(connectionProfiles.id, appProfile.id));
@@ -224,7 +230,7 @@ describe("Cascade Deletion", () => {
       const profile = await seedConnectionProfile({ userId, name: "Sched Profile" });
 
       // Populate the app with resources
-      await installPackage(customApp.id, orgId, agent.id);
+      await installPackage({ orgId: orgId, applicationId: customApp.id }, agent.id);
       const eu = await seedEndUser({ orgId, applicationId: customApp.id, name: "Test EU" });
       const key = await seedApiKey({ orgId, applicationId: customApp.id, createdBy: userId });
       const run = await seedRun({ orgId, applicationId: customApp.id, packageId: agent.id });

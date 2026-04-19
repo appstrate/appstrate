@@ -161,7 +161,10 @@ describe("RBAC — Permission enforcement", () => {
         id: `@rbac-test/test-agent`,
         orgId: owner.orgId,
       });
-      await installPackage(owner.defaultAppId, owner.orgId, "@rbac-test/test-agent");
+      await installPackage(
+        { orgId: owner.orgId, applicationId: owner.defaultAppId },
+        "@rbac-test/test-agent",
+      );
       const res = await app.request(`/api/agents/@rbac-test/test-agent/schedules`, {
         method: "POST",
         headers: authHeaders(member, { "Content-Type": "application/json" }),
@@ -180,7 +183,10 @@ describe("RBAC — Permission enforcement", () => {
 
     it("viewer gets 403 on schedule creation", async () => {
       await seedPackage({ id: `@rbac-test/test-agent`, orgId: owner.orgId });
-      await installPackage(owner.defaultAppId, owner.orgId, "@rbac-test/test-agent");
+      await installPackage(
+        { orgId: owner.orgId, applicationId: owner.defaultAppId },
+        "@rbac-test/test-agent",
+      );
       const res = await app.request(`/api/agents/@rbac-test/test-agent/schedules`, {
         method: "POST",
         headers: authHeaders(viewer, { "Content-Type": "application/json" }),

@@ -5,6 +5,7 @@ import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { listRunsWithFilter } from "./runs.ts";
+import type { AppScope } from "../../lib/scope.ts";
 
 // --- Notifications ---
 
@@ -20,18 +21,17 @@ function actorOwnershipFilter(actorId: string): SQL {
 }
 
 export async function markNotificationRead(
+  scope: AppScope,
   runId: string,
   actorId: string,
-  orgId: string,
-  applicationId: string,
 ): Promise<boolean> {
   const updated = await db
     .update(runs)
     .set({ readAt: new Date() })
     .where(
       scopedWhere(runs, {
-        orgId,
-        applicationId,
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
         extra: [eq(runs.id, runId), isNotNull(runs.notifiedAt), actorOrOrgFilter(actorId)],
       }),
     )
@@ -51,18 +51,14 @@ function actorOrOrgFilter(actorId: string): SQL {
   return or(actorOwnershipFilter(actorId), isNull(runs.dashboardUserId))!;
 }
 
-export async function markAllNotificationsRead(
-  actorId: string,
-  orgId: string,
-  applicationId: string,
-): Promise<number> {
+export async function markAllNotificationsRead(scope: AppScope, actorId: string): Promise<number> {
   const updated = await db
     .update(runs)
     .set({ readAt: new Date() })
     .where(
       scopedWhere(runs, {
-        orgId,
-        applicationId,
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
         extra: [actorOrOrgFilter(actorId), isNotNull(runs.notifiedAt), isNull(runs.readAt)],
       }),
     )
@@ -71,17 +67,16 @@ export async function markAllNotificationsRead(
 }
 
 export async function getUnreadNotificationCount(
+  scope: AppScope,
   actorId: string,
-  orgId: string,
-  applicationId: string,
 ): Promise<number> {
   const [row] = await db
     .select({ count: count() })
     .from(runs)
     .where(
       scopedWhere(runs, {
-        orgId,
-        applicationId,
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
         extra: [actorOrOrgFilter(actorId), isNotNull(runs.notifiedAt), isNull(runs.readAt)],
       }),
     );
@@ -89,9 +84,8 @@ export async function getUnreadNotificationCount(
 }
 
 export async function getUnreadCountsByAgent(
+  scope: AppScope,
   actorId: string,
-  orgId: string,
-  applicationId: string,
 ): Promise<Record<string, number>> {
   const rows = await db
     .select({
@@ -101,8 +95,8 @@ export async function getUnreadCountsByAgent(
     .from(runs)
     .where(
       scopedWhere(runs, {
-        orgId,
-        applicationId,
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
         extra: [
           actorOrOrgFilter(actorId),
           isNotNull(runs.notifiedAt),
@@ -121,15 +115,15 @@ export async function getUnreadCountsByAgent(
 }
 
 export async function listUserRuns(
+  scope: AppScope,
   actorId: string,
-  orgId: string,
-  options: { limit?: number; offset?: number; applicationId: string },
+  options: { limit?: number; offset?: number } = {},
 ) {
-  const { limit = 20, offset = 0, applicationId } = options;
+  const { limit = 20, offset = 0 } = options;
   return listRunsWithFilter(
     scopedWhere(runs, {
-      orgId,
-      applicationId,
+      orgId: scope.orgId,
+      applicationId: scope.applicationId,
       extra: [actorOrOrgFilter(actorId)],
     })!,
     limit,

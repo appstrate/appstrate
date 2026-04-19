@@ -215,7 +215,7 @@ export function createProvidersRouter() {
 
     // Single query (system + installed) + usage counts + app credentials in parallel
     const [rows, providerUsage, allCreds] = await Promise.all([
-      listAccessiblePackages(orgId, applicationId, "provider"),
+      listAccessiblePackages({ orgId, applicationId }, "provider"),
       countAllProviderUsage(orgId),
       getAppProviderCredentials(applicationId),
     ]);

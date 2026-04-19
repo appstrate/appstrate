@@ -63,7 +63,10 @@ describe("getAvailableProvidersWithStatus", () => {
     await seedSystemProvider(providerId);
     await seedProviderCredentials({ applicationId: app1Id, providerId, enabled: true });
 
-    const result = await getAvailableProvidersWithStatus(profileId, orgId, app1Id);
+    const result = await getAvailableProvidersWithStatus(
+      { orgId: orgId, applicationId: app1Id },
+      profileId,
+    );
     const providerIds = result.map((p) => p.provider);
     expect(providerIds).toContain(providerId);
   });
@@ -76,7 +79,10 @@ describe("getAvailableProvidersWithStatus", () => {
     await seedProviderCredentials({ applicationId: app1Id, providerId, enabled: true });
 
     // App2 has no credentials — provider should not appear
-    const result = await getAvailableProvidersWithStatus(profileId, orgId, app2Id);
+    const result = await getAvailableProvidersWithStatus(
+      { orgId: orgId, applicationId: app2Id },
+      profileId,
+    );
     const providerIds = result.map((p) => p.provider);
     expect(providerIds).not.toContain(providerId);
   });
@@ -86,7 +92,10 @@ describe("getAvailableProvidersWithStatus", () => {
     await seedSystemProvider(providerId);
     await seedConnectionForApp(profileId, providerId, orgId, app1Id, { api_key: "ck1" });
 
-    const result = await getAvailableProvidersWithStatus(profileId, orgId, app1Id);
+    const result = await getAvailableProvidersWithStatus(
+      { orgId: orgId, applicationId: app1Id },
+      profileId,
+    );
     const provider = result.find((p) => p.provider === providerId);
     expect(provider).toBeDefined();
     expect(provider!.status).toBe("connected");
@@ -97,7 +106,10 @@ describe("getAvailableProvidersWithStatus", () => {
     await seedSystemProvider(providerId);
     await seedProviderCredentials({ applicationId: app1Id, providerId, enabled: true });
 
-    const result = await getAvailableProvidersWithStatus(profileId, orgId, app1Id);
+    const result = await getAvailableProvidersWithStatus(
+      { orgId: orgId, applicationId: app1Id },
+      profileId,
+    );
     const provider = result.find((p) => p.provider === providerId);
     expect(provider).toBeDefined();
     expect(provider!.status).toBe("not_connected");

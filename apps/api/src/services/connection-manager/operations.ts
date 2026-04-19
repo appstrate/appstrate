@@ -14,14 +14,14 @@ import {
 } from "@appstrate/connect";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
 import type { ConnectionStatus } from "./status.ts";
+import type { AppScope, OrgScope } from "../../lib/scope.ts";
 
 export async function listActorConnections(
+  scope: AppScope,
   profileId: string,
-  orgId: string,
-  applicationId: string,
 ): Promise<ConnectionStatus[]> {
-  const credentialIds = await listProviderCredentialIds(db, applicationId);
-  const connections = await listConnectionsRaw(db, profileId, orgId, credentialIds);
+  const credentialIds = await listProviderCredentialIds(db, scope.applicationId);
+  const connections = await listConnectionsRaw(db, profileId, scope.orgId, credentialIds);
   return connections.map((c) => ({
     provider: c.providerId,
     status: c.needsReconnection ? ("needs_reconnection" as const) : ("connected" as const),
@@ -31,23 +31,34 @@ export async function listActorConnections(
   }));
 }
 
+/**
+ * Disconnect by provider+profile+org+credential. Genuinely org-scoped —
+ * `providerCredentialId` already pins the app, so no `AppScope` is needed.
+ * Callers at the route layer resolve the credential ID via
+ * `getProviderCredentialId(applicationId, providerId)` first.
+ */
 export async function disconnectProvider(
+  scope: OrgScope,
   provider: string,
   profileId: string,
-  orgId: string,
   providerCredentialId: string,
 ): Promise<void> {
-  await deleteConnectionRaw(db, profileId, provider, orgId, providerCredentialId);
-  logger.info("Connection deleted", { provider, profileId, orgId, providerCredentialId });
+  await deleteConnectionRaw(db, profileId, provider, scope.orgId, providerCredentialId);
+  logger.info("Connection deleted", {
+    provider,
+    profileId,
+    orgId: scope.orgId,
+    providerCredentialId,
+  });
 }
 
 export async function disconnectConnectionById(
+  scope: AppScope,
   connectionId: string,
   actor: Actor,
-  applicationId: string,
 ): Promise<void> {
   // Verify the connection belongs to a profile owned by this actor AND to the current app
-  const credentialIds = await listProviderCredentialIds(db, applicationId);
+  const credentialIds = await listProviderCredentialIds(db, scope.applicationId);
   if (credentialIds.length === 0) {
     // App has no credentials configured — connection can't belong to this app
     throw new Error("Connection not found or not owned by actor");
@@ -75,16 +86,13 @@ export async function disconnectConnectionById(
   await deleteConnectionByIdRaw(db, connectionId);
   logger.info("Connection deleted by ID", {
     connectionId,
-    applicationId,
+    applicationId: scope.applicationId,
     actorType: actor.type,
     actorId: actor.id,
   });
 }
 
-export async function deleteAllActorConnections(
-  actor: Actor,
-  applicationId: string,
-): Promise<void> {
+export async function deleteAllActorConnections(scope: AppScope, actor: Actor): Promise<void> {
   const profiles = await db
     .select({ id: connectionProfiles.id })
     .from(connectionProfiles)
@@ -98,7 +106,7 @@ export async function deleteAllActorConnections(
   if (profiles.length === 0) return;
 
   // Scope deletion to the current application's credentials only
-  const credentialIds = await listProviderCredentialIds(db, applicationId);
+  const credentialIds = await listProviderCredentialIds(db, scope.applicationId);
   if (credentialIds.length === 0) return;
 
   await db.delete(userProviderConnections).where(
@@ -114,7 +122,7 @@ export async function deleteAllActorConnections(
   logger.info("All actor connections deleted for application", {
     actorType: actor.type,
     actorId: actor.id,
-    applicationId,
+    applicationId: scope.applicationId,
   });
 }
 

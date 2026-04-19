@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { seedApiKey } from "../../helpers/seed.ts";
+import { user as userTable } from "@appstrate/db/schema";
 
 const app = getTestApp();
 
@@ -142,6 +145,48 @@ describe("Profile API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.profiles).toHaveLength(0);
+    });
+  });
+
+  // Issue #172 (extension) — `/api/profile` is the dashboard user's
+  // identity record. PATCH mutates BA-owned `user.name`; GET leaks
+  // creator PII. Customer-facing API keys must be denied on both.
+  describe("API key cannot reach dashboard user profile", () => {
+    it("GET /api/profile returns 403 for API key auth", async () => {
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+      });
+      const res = await app.request("/api/profile", {
+        headers: { Authorization: `Bearer ${apiKey.rawKey}` },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("PATCH /api/profile returns 403 and does not rename the user", async () => {
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+      });
+      const originalName = ctx.user.name;
+
+      const res = await app.request("/api/profile", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${apiKey.rawKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ displayName: "Pwned Name" }),
+      });
+      expect(res.status).toBe(403);
+
+      const [row] = await db
+        .select({ name: userTable.name })
+        .from(userTable)
+        .where(eq(userTable.id, ctx.user.id));
+      expect(row?.name).toBe(originalName);
     });
   });
 });

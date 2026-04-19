@@ -29,10 +29,11 @@ import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
 import { getActor } from "../lib/actor.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
+import { getAppScope } from "../lib/scope.ts";
 
 export async function agentDetailHandler(c: Context<AppEnv>) {
-  const orgId = c.get("orgId");
-  const applicationId = c.get("applicationId");
+  const scope = getAppScope(c);
+  const { orgId, applicationId } = scope;
   const actor = getActor(c);
   const itemId = getItemId(c);
 
@@ -52,7 +53,7 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   // Load app profile, actor profile context, and package config in parallel
   const [agentAppProfile, { defaultUserProfileId, userProviderOverrides }, packageConfig] =
     await Promise.all([
-      getAgentAppProfile(applicationId, agent.id),
+      getAgentAppProfile(scope, agent.id),
       resolveActorProfileContext(actor, agent.id),
       getPackageConfig(applicationId, agent.id),
     ]);
@@ -70,10 +71,9 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   );
 
   const providerStatuses = await resolveProviderStatuses(
+    scope,
     manifestProviders,
     providerProfiles,
-    orgId,
-    applicationId,
   );
 
   // Build populatedProviders: ProviderConfig keyed by provider ID
@@ -124,8 +124,8 @@ export async function agentDetailHandler(c: Context<AppEnv>) {
   }
 
   const [lastRun, runningCount] = await Promise.all([
-    getLastRun(agent.id, null, orgId, applicationId),
-    getRunningRunsForPackage(agent.id, orgId, applicationId),
+    getLastRun(scope, agent.id, null),
+    getRunningRunsForPackage(scope, agent.id),
   ]);
 
   const configWithDefaults = m.config?.schema

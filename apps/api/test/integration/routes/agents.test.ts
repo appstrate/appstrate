@@ -16,7 +16,7 @@ const app = getTestApp();
 async function seedInstalledAgent(overrides: Parameters<typeof seedAgent>[0] & { appId: string }) {
   const { appId, ...rest } = overrides;
   const pkg = await seedAgent(rest);
-  await installPackage(appId, rest.orgId!, pkg.id);
+  await installPackage({ orgId: rest.orgId!, applicationId: appId }, pkg.id);
   return pkg;
 }
 
@@ -170,7 +170,10 @@ describe("Agents API", () => {
         name: "Custom Installed",
         createdBy: ctx.user.id,
       });
-      await installPackage(customApp.id, ctx.orgId, "@myorg/custom-installed");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: customApp.id },
+        "@myorg/custom-installed",
+      );
 
       const res = await app.request("/api/packages/agents/@myorg/custom-installed", {
         headers: { ...authHeaders(ctx), "X-App-Id": customApp.id },
@@ -198,7 +201,10 @@ describe("Agents API", () => {
           },
         },
       });
-      await installPackage(ctx.defaultAppId, ctx.orgId, "@myorg/config-agent");
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/config-agent",
+      );
 
       const res = await app.request("/api/agents/@myorg/config-agent/config", {
         method: "PUT",

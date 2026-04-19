@@ -4,20 +4,20 @@ import { db } from "@appstrate/db/client";
 import { logger } from "../../lib/logger.ts";
 import { getCredentialFieldName, getProviderOrThrow, saveConnection } from "@appstrate/connect";
 import { resolveProviderCredentialId } from "./helpers.ts";
+import type { AppScope } from "../../lib/scope.ts";
 
 export async function saveApiKeyConnection(
+  scope: AppScope,
   provider: string,
   apiKey: string,
   profileId: string,
-  orgId: string,
-  applicationId: string,
 ): Promise<void> {
   // Fire both lookups concurrently — they hit independent tables
   // (applicationProviderCredentials vs packages) and neither depends on the
   // other. Avoids adding a sequential round-trip on the connect hot path.
   const [providerCredentialId, providerDef] = await Promise.all([
-    resolveProviderCredentialId(applicationId, provider),
-    getProviderOrThrow(db, orgId, provider),
+    resolveProviderCredentialId(scope.applicationId, provider),
+    getProviderOrThrow(db, scope.orgId, provider),
   ]);
 
   // Store the key under the field name declared by the provider (defaults to
@@ -30,25 +30,36 @@ export async function saveApiKeyConnection(
     db,
     profileId,
     provider,
-    orgId,
+    scope.orgId,
     { [fieldName]: apiKey },
     { providerCredentialId },
   );
 
-  logger.info("API key connection saved", { provider, profileId, orgId, fieldName });
+  logger.info("API key connection saved", {
+    provider,
+    profileId,
+    orgId: scope.orgId,
+    fieldName,
+  });
 }
 
 export async function saveCredentialsConnection(
+  scope: AppScope,
   provider: string,
   authMode: "basic" | "custom",
   credentials: Record<string, string>,
   profileId: string,
-  orgId: string,
-  applicationId: string,
 ): Promise<void> {
-  const providerCredentialId = await resolveProviderCredentialId(applicationId, provider);
+  const providerCredentialId = await resolveProviderCredentialId(scope.applicationId, provider);
 
-  await saveConnection(db, profileId, provider, orgId, credentials, { providerCredentialId });
+  await saveConnection(db, profileId, provider, scope.orgId, credentials, {
+    providerCredentialId,
+  });
 
-  logger.info("Credentials connection saved", { provider, authMode, profileId, orgId });
+  logger.info("Credentials connection saved", {
+    provider,
+    authMode,
+    profileId,
+    orgId: scope.orgId,
+  });
 }

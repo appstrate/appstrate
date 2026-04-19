@@ -3,6 +3,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
+import { apiKeyOrgScopeGuard } from "../middleware/guards.ts";
 import {
   createOrganization,
   getUserOrganizations,
@@ -75,10 +76,17 @@ async function requireOrgRole(
 
 const router = new Hono<AppEnv>();
 
+router.use("/:orgId", apiKeyOrgScopeGuard);
+router.use("/:orgId/*", apiKeyOrgScopeGuard);
+
 // GET /api/orgs — list orgs for the current user (no org context needed)
 router.get("/", async (c) => {
   const user = c.get("user");
-  const orgs = await getUserOrganizations(user.id);
+  // API keys see only their bound org — filter at the DB level so a
+  // compromised key cannot cause enumeration queries across every org the
+  // creator belongs to.
+  const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
+  const orgs = await getUserOrganizations(user.id, orgIdFilter);
 
   return c.json({
     organizations: orgs.map((o) => ({
@@ -93,6 +101,9 @@ router.get("/", async (c) => {
 
 // POST /api/orgs — create an organization (no org context needed)
 router.post("/", async (c) => {
+  if (c.get("authMethod") === "api_key") {
+    throw forbidden("API keys cannot create organizations");
+  }
   const user = c.get("user");
   const body = await c.req.json();
   const data = parseBody(createOrgSchema, body);
