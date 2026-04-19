@@ -64,6 +64,41 @@ export async function isDockerAvailable(): Promise<boolean> {
   return res.ok;
 }
 
+/**
+ * Probe Docker's default address pool headroom by counting user-defined
+ * networks on the host. Returns `null` on healthy hosts or when probing
+ * fails for any reason — this check is strictly informational and must
+ * never block the install.
+ *
+ * Why 25 as the threshold: Docker's out-of-the-box pool
+ * (`172.17.0.0/12` sliced into `/16` subnets) yields ~31 user-defined
+ * networks. We warn at ~80 % so the user still has headroom to complete
+ * the install and run a few agents before hitting
+ * `ErrNoMoreSubnets`. Operators who have already tuned
+ * `default-address-pools` in `daemon.json` may also cross this
+ * threshold, but their ceiling is far higher — the warning is cheap, and
+ * the remediation doc covers their case.
+ */
+export interface DockerNetworkBudget {
+  used: number;
+  threshold: number;
+}
+
+export async function checkDockerNetworkBudget(): Promise<DockerNetworkBudget | null> {
+  const res = await runCommand("docker", ["network", "ls", "--format", "{{.Name}}"], {
+    stdio: "pipe",
+    timeoutMs: 3000,
+  });
+  if (!res.ok) return null;
+  const builtIns = new Set(["bridge", "host", "none", ""]);
+  const userDefined = res.stdout
+    .split("\n")
+    .map((n) => n.trim())
+    .filter((n) => !builtIns.has(n));
+  const threshold = 25;
+  return userDefined.length >= threshold ? { used: userDefined.length, threshold } : null;
+}
+
 /** Copy the embedded YAML for `tier` into `<dir>/docker-compose.yml`. */
 export async function writeComposeFile(dir: string, tier: DockerTier): Promise<void> {
   await mkdir(dir, { recursive: true });

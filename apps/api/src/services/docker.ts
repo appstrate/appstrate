@@ -3,9 +3,19 @@
 import { hostname } from "node:os";
 import { logger } from "../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
+import { classifyDockerNetworkError } from "./docker-errors.ts";
 
 const DOCKER_SOCKET = getEnv().DOCKER_SOCKET;
 const DOCKER_API_TIMEOUT_MS = 30_000;
+
+/**
+ * Naming prefix for per-run isolation networks. The orchestrator creates
+ * `${EXEC_NETWORK_PREFIX}${runId}` for every run, and the cleanup helpers
+ * match on this prefix to reclaim orphans from crashed runs. Kept in one
+ * place so creator and cleaner can never drift apart — a mismatch would
+ * silently leak networks until the address pool is exhausted.
+ */
+export const EXEC_NETWORK_PREFIX = "appstrate-exec-";
 
 // Support both unix socket (/var/run/docker.sock) and TCP (http://host:port).
 // Bun supports fetch() with unix: option for Unix sockets.
@@ -19,6 +29,13 @@ async function assertDockerOk(
 ): Promise<void> {
   if (res.ok || allowedStatuses.includes(res.status)) return;
   const body = await res.text();
+  // Promote known pool-exhaustion failures on network creation to a typed
+  // error so the orchestrator can trigger opportunistic cleanup + retry
+  // before surfacing the raw Docker body to the user.
+  if (operation.startsWith("create network")) {
+    const typed = classifyDockerNetworkError(res.status, body);
+    if (typed) throw typed;
+  }
   throw new Error(`Docker ${operation} failed: ${res.status} ${body}`);
 }
 
@@ -484,24 +501,46 @@ export async function cleanupOrphanedContainers(): Promise<{
 }
 
 /**
- * List all Docker networks matching `appstrate-exec-*` or `appstrate-sidecar-pool` and remove them.
- * This is safe to call at startup because no runs should be running.
+ * List all Docker networks matching `appstrate-exec-*` or the shared infra
+ * networks (`appstrate-sidecar-pool`, `appstrate-egress`) and remove them.
+ * Only safe to call at startup because no runs should be running — the infra
+ * networks it targets are actively reused across runs, so tearing them down
+ * mid-operation can strand the sidecar pool or break egress routing.
+ *
+ * For opportunistic recovery during a live operation, use
+ * {@link cleanupOrphanedRunNetworks} instead, which is strictly scoped to
+ * per-run networks.
  */
-async function cleanupOrphanedNetworks(): Promise<number> {
+export async function cleanupOrphanedNetworks(): Promise<number> {
+  return removeNetworksMatching(
+    (name) =>
+      name.startsWith(EXEC_NETWORK_PREFIX) ||
+      name === "appstrate-sidecar-pool" ||
+      name === "appstrate-egress",
+  );
+}
+
+/**
+ * Remove orphan per-run networks (`appstrate-exec-*`) without touching the
+ * shared infra networks. Safe to call mid-operation: Docker refuses to delete
+ * networks that still have attached endpoints (live runs), so only truly
+ * abandoned networks from crashed runs get reclaimed. Used as the opportunistic
+ * recovery path when `createNetwork` hits address-pool exhaustion —
+ * reclaiming even one orphan is often enough to unblock the retry.
+ */
+export async function cleanupOrphanedRunNetworks(): Promise<number> {
+  return removeNetworksMatching((name) => name.startsWith(EXEC_NETWORK_PREFIX));
+}
+
+async function removeNetworksMatching(predicate: (name: string) => boolean): Promise<number> {
   const res = await dockerFetch("/networks");
   if (!res.ok) return 0;
 
   const networks = (await res.json()) as Array<{ Id: string; Name: string }>;
-  const orphaned = networks.filter(
-    (n) =>
-      n.Name.startsWith("appstrate-exec-") ||
-      n.Name === "appstrate-sidecar-pool" ||
-      n.Name === "appstrate-egress",
-  );
+  const targets = networks.filter((n) => predicate(n.Name));
+  if (targets.length === 0) return 0;
 
-  if (orphaned.length === 0) return 0;
-
-  const results = await Promise.allSettled(orphaned.map((n) => removeNetwork(n.Id)));
+  const results = await Promise.allSettled(targets.map((n) => removeNetwork(n.Id)));
   return results.filter((r) => r.status === "fulfilled").length;
 }
 

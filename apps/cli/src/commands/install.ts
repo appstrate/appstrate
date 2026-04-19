@@ -18,6 +18,7 @@ import { intro, outro, askText, confirm, spinner, exitWithError } from "../lib/u
 import { generateEnvForTier, renderEnvFile, type Tier } from "../lib/install/secrets.ts";
 import {
   assertDockerAvailable,
+  checkDockerNetworkBudget,
   DockerMissingError,
   dockerComposeUp,
   findRunningComposeProject as findRunningComposeProjectImport,
@@ -655,6 +656,26 @@ async function installDockerTier(
     dockerSpinner.stop("Docker not found");
     if (err instanceof DockerMissingError) throw err;
     throw err;
+  }
+
+  // Informational pre-flight: Docker's default address pool (~31 user-defined
+  // networks) is easy to exhaust once Appstrate's stack plus per-run networks
+  // land on top of existing projects. Warn early so the user can prune or tune
+  // `daemon.json` before the first run fails with the opaque `ErrNoMoreSubnets`.
+  const budget = await checkDockerNetworkBudget();
+  if (budget) {
+    clack.note(
+      [
+        `Detected ${budget.used} Docker networks on this host (default ceiling ≈ 31).`,
+        "Appstrate consumes several networks at boot + 1 per agent run, so you may",
+        "run out of subnets shortly after install.",
+        "",
+        "  Quick fix:   docker network prune",
+        "  Permanent:   tune `default-address-pools` in daemon.json — see",
+        "               https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#docker-network-pool-tuning",
+      ].join("\n"),
+      "Docker network pool near capacity",
+    );
   }
 
   // Upgrade detection already ran in `installCommand` (it's needed
