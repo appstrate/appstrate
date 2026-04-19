@@ -384,11 +384,158 @@ describe("resolveAppstratePort (non-interactive preflight)", () => {
     );
   });
 
+  it("documents the correct `curl | VAR=N bash` syntax in the strict error", async () => {
+    // Regression guard for the shell-scoping gotcha that triggered this
+    // whole change: users reach for `APPSTRATE_PORT=N curl … | bash`,
+    // which sets the var for curl only — the piped bash doesn't see it.
+    // The error message must name the working syntax explicitly, or the
+    // user has no way to discover why their "override" was ignored.
+    const port = await holdEphemeralPort(servers);
+    await expect(resolveAppstratePort(String(port), true)).rejects.toThrow(
+      /curl[^\n]*\|[^\n]*APPSTRATE_PORT=[^\n]*bash/,
+    );
+  });
+
   it("honors APPSTRATE_PORT when --port is absent", async () => {
     const port = await pickEphemeralPort();
     process.env.APPSTRATE_PORT = String(port);
     const out = await resolveAppstratePort(undefined, true);
     expect(out).toBe(port);
+  });
+});
+
+/**
+ * Auto-pick mode (wired from `--yes` by `installCommand`). The one-liner
+ * installer's contract is "paste into a terminal, get a working
+ * Appstrate" — the single most common snag is a stale dev server still
+ * bound to :3000 from an earlier session. Under `--yes` we soften the
+ * port conflict into "use the next free port" instead of failing fast.
+ *
+ * Explicit scripted installs (`--tier N` without `--yes`) keep
+ * the strict semantics so CI/automation still surfaces the drift.
+ */
+describe("resolveAppstratePort auto-pick (--yes path)", () => {
+  const servers: Server[] = [];
+  const originalEnvPort = process.env.APPSTRATE_PORT;
+
+  afterEach(async () => {
+    for (const srv of servers.splice(0)) await new Promise((r) => srv.close(() => r(undefined)));
+    if (originalEnvPort === undefined) delete process.env.APPSTRATE_PORT;
+    else process.env.APPSTRATE_PORT = originalEnvPort;
+  });
+
+  it("picks the next free port when the requested one is held", async () => {
+    const held = await holdEphemeralPort(servers);
+    const out = await resolveAppstratePort(
+      String(held),
+      /* nonInteractive */ true,
+      "fresh",
+      undefined,
+      undefined,
+      undefined,
+      { autoPick: true },
+    );
+    // The concrete picked value depends on kernel port allocation, but
+    // it must be free (not the held port) and above the held port
+    // (scan probes upward only).
+    expect(out).toBeGreaterThan(held);
+    expect(out).toBeLessThanOrEqual(65535);
+  });
+
+  it("returns the requested port unchanged when it is free (no drift)", async () => {
+    // Auto-pick must be a conflict-only fallback, never a silent drift
+    // when the user's chosen port works. A regression here would break
+    // users who pass `--yes --port 4000` with :4000 free.
+    const port = await pickEphemeralPort();
+    const out = await resolveAppstratePort(
+      String(port),
+      true,
+      "fresh",
+      undefined,
+      undefined,
+      undefined,
+      { autoPick: true },
+    );
+    expect(out).toBe(port);
+  });
+
+  it("scans past two contiguous held ports (the common stale-dev-server shape)", async () => {
+    // Locks down the "probe upward in a loop" contract: if port N is
+    // held AND port N+1 is held, the resolver must land on N+2. Catches
+    // a regression where findNextFreePort only checks the very next slot.
+    const first = await holdEphemeralPort(servers);
+    const second = await tryHoldSpecificPort(servers, first + 1);
+    if (second === null) {
+      // Adjacent slot is busy for an unrelated reason — skip rather
+      // than assert on OS-dependent allocation we don't control.
+      return;
+    }
+    const out = await resolveAppstratePort(
+      String(first),
+      true,
+      "fresh",
+      undefined,
+      undefined,
+      undefined,
+      { autoPick: true },
+    );
+    expect(out).toBeGreaterThan(second);
+  });
+
+  it("is off by default — omitting autoPick preserves strict fail-fast (--tier N path)", async () => {
+    const port = await holdEphemeralPort(servers);
+    // No `{ autoPick: … }` in deps → explicit --tier scripted install
+    // keeps the "error loudly" behaviour CI relies on.
+    await expect(resolveAppstratePort(String(port), true)).rejects.toThrow(/already in use/);
+  });
+
+  it("autoPick: false is explicitly treated as disabled (not coerced to truthy)", async () => {
+    const port = await holdEphemeralPort(servers);
+    await expect(
+      resolveAppstratePort(String(port), true, "fresh", undefined, undefined, undefined, {
+        autoPick: false,
+      }),
+    ).rejects.toThrow(/already in use/);
+  });
+
+  it("still honors APPSTRATE_PORT when auto-picking (env var sets the starting point)", async () => {
+    // The env var defines the USER's intent. Auto-pick only kicks in if
+    // THAT port is busy. If the user set APPSTRATE_PORT=<free port>,
+    // they must get that exact port — no drift, no log noise.
+    const port = await pickEphemeralPort();
+    process.env.APPSTRATE_PORT = String(port);
+    const out = await resolveAppstratePort(
+      undefined,
+      true,
+      "fresh",
+      undefined,
+      undefined,
+      undefined,
+      { autoPick: true },
+    );
+    expect(out).toBe(port);
+  });
+
+  it("does not trigger in interactive mode (autoPick is non-interactive only)", async () => {
+    // autoPick is gated on nonInteractive=true INSIDE ensurePortFree —
+    // passing `autoPick: true` under nonInteractive=false must fall
+    // through to the interactive prompt branch, never silently drift
+    // to a different port. Under this test harness stdin is not a TTY,
+    // so the interactive askText rejects — that rejection is our proof
+    // that auto-pick did NOT take over. The key negative assertion is
+    // "did not resolve to held+N"; any rejection satisfies that.
+    const port = await holdEphemeralPort(servers);
+    await expect(
+      resolveAppstratePort(
+        String(port),
+        /* nonInteractive */ false,
+        "fresh",
+        undefined,
+        undefined,
+        undefined,
+        { autoPick: true },
+      ),
+    ).rejects.toThrow();
   });
 });
 
@@ -403,6 +550,30 @@ describe("resolveMinioConsolePort (non-interactive preflight)", () => {
     await expect(resolveMinioConsolePort(String(port), true)).rejects.toThrow(
       /MinIO console.*--minio-console-port|APPSTRATE_MINIO_CONSOLE_PORT/,
     );
+  });
+
+  it("auto-picks the next free port under --yes (parity with resolveAppstratePort)", async () => {
+    // The MinIO console port conflict is rarer than the main :3000
+    // conflict, but the user contract is identical under --yes:
+    // don't fail fast, just pick a free port. Parity test so any
+    // future divergence between the two resolvers is caught here.
+    const held = await holdEphemeralPort(servers);
+    const out = await resolveMinioConsolePort(
+      String(held),
+      true,
+      "fresh",
+      undefined,
+      undefined,
+      undefined,
+      { autoPick: true },
+    );
+    expect(out).toBeGreaterThan(held);
+    expect(out).toBeLessThanOrEqual(65535);
+  });
+
+  it("strict fail-fast remains the default without autoPick (explicit --tier 3)", async () => {
+    const port = await holdEphemeralPort(servers);
+    await expect(resolveMinioConsolePort(String(port), true)).rejects.toThrow(/MinIO console/);
   });
 });
 
@@ -863,4 +1034,35 @@ async function holdEphemeralPort(holders: Server[]): Promise<number> {
   });
   holders.push(srv);
   return port;
+}
+
+/**
+ * Attempt to bind `port` specifically — returns the port on success,
+ * or `null` if something else has claimed it in the tiny window
+ * between our ephemeral pick and this follow-up bind. Used to build
+ * "two contiguous busy ports" scenarios without retrying forever when
+ * the kernel refuses to cooperate on a given slot.
+ */
+async function tryHoldSpecificPort(holders: Server[], port: number): Promise<number | null> {
+  const srv = createServer();
+  srv.unref();
+  return new Promise<number | null>((resolve) => {
+    srv.once("error", () => {
+      try {
+        srv.close();
+      } catch {
+        // already closed
+      }
+      resolve(null);
+    });
+    srv.once("listening", () => {
+      holders.push(srv);
+      resolve(port);
+    });
+    try {
+      srv.listen(port, "0.0.0.0");
+    } catch {
+      resolve(null);
+    }
+  });
 }
