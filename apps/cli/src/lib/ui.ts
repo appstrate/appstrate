@@ -57,6 +57,44 @@ export async function confirm(message: string, initialValue = true): Promise<boo
   return value;
 }
 
+export interface SelectOption<T> {
+  value: T;
+  label: string;
+  hint?: string;
+}
+
+/**
+ * Single-select picker wrapping `@clack/prompts.select`. Same cancel
+ * semantics as `askText` / `confirm` — Ctrl-C exits 130 with a clean
+ * "Cancelled." message. `initialValue` highlights the currently-active
+ * choice (e.g. the pinned org in `appstrate org switch`) so users don't
+ * accidentally pick the same value they already had.
+ *
+ * Clack's own `Option<Value>` is a conditional type (primitive values
+ * get an optional label, object values get a required one). We expose a
+ * simpler `SelectOption<T>` that always requires a label, and bridge
+ * through `as unknown` because clack's conditional generic confuses the
+ * inferred intersection when Value extends object — our wrapper's stricter
+ * label requirement is always compatible with whichever branch clack picks.
+ */
+export async function select<T>(
+  message: string,
+  options: SelectOption<T>[],
+  initialValue?: T,
+): Promise<T> {
+  requireTTY(message);
+  const value = await clack.select<T>({
+    message,
+    options: options as unknown as Parameters<typeof clack.select<T>>[0]["options"],
+    initialValue,
+  });
+  if (clack.isCancel(value)) {
+    clack.cancel("Cancelled.");
+    process.exit(130);
+  }
+  return value as T;
+}
+
 export function spinner(): { start(msg: string): void; stop(msg?: string): void } {
   return clack.spinner();
 }

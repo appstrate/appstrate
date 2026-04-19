@@ -30,6 +30,12 @@ import { logoutCommand } from "./commands/logout.ts";
 import { whoamiCommand } from "./commands/whoami.ts";
 import { tokenCommand } from "./commands/token.ts";
 import { apiCommand, isHttpMethod } from "./commands/api.ts";
+import {
+  orgListCommand,
+  orgSwitchCommand,
+  orgCurrentCommand,
+  orgCreateCommand,
+} from "./commands/org.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
@@ -149,11 +155,29 @@ program
   .command("login")
   .description("Sign in to an Appstrate instance via the device-flow grant")
   .option("--instance <url>", "Instance URL (skips the interactive prompt).")
+  .option(
+    "--org <id-or-slug>",
+    "Pin this organization on the profile after login (non-interactive). Fails if no match.",
+  )
+  .option(
+    "--create-org <name>",
+    "Create a new organization with this name after login and pin it (non-interactive). A default application and hello-world agent are provisioned server-side.",
+  )
+  .option(
+    "--no-org",
+    "Skip the post-login org-pinning step entirely. Subsequent calls must pass `-H X-Org-Id: …` or pin later via `appstrate org switch`.",
+  )
   .action(async (opts) => {
     const globalOpts = program.opts<{ profile?: string }>();
     await loginCommand({
       profile: globalOpts.profile,
       instance: typeof opts.instance === "string" ? opts.instance : undefined,
+      org: typeof opts.org === "string" ? opts.org : undefined,
+      createOrg: typeof opts.createOrg === "string" ? opts.createOrg : undefined,
+      // Commander maps `--no-org` to `opts.org === false` (verified against
+      // commander 14). `--org <value>` sets it to a string, neither leaves
+      // it undefined — so `opts.org === false` is the unambiguous skip signal.
+      noOrg: opts.org === false,
     });
   });
 
@@ -179,6 +203,59 @@ program
   .action(async () => {
     const globalOpts = program.opts<{ profile?: string }>();
     await tokenCommand({ profile: globalOpts.profile });
+  });
+
+// ─── `appstrate org …` — manage the pinned organization (issue #209) ───
+
+const orgGroup = program
+  .command("org")
+  .description("Manage the pinned organization for the active profile");
+
+orgGroup
+  .command("list")
+  .description("List organizations the active profile has access to")
+  .action(async () => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await orgListCommand({ profile: globalOpts.profile });
+  });
+
+orgGroup
+  .command("current")
+  .description("Print the pinned organization id, or exit 1 if none is pinned")
+  .action(async () => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await orgCurrentCommand({ profile: globalOpts.profile });
+  });
+
+orgGroup
+  .command("switch [ref]")
+  .description(
+    "Re-pin the active organization on the profile. With no argument, show an interactive picker.",
+  )
+  .action(async (ref: string | undefined) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await orgSwitchCommand({
+      profile: globalOpts.profile,
+      ref: typeof ref === "string" ? ref : undefined,
+    });
+  });
+
+orgGroup
+  .command("create [name]")
+  .description(
+    "Create a new organization (and pin it on the profile). With no argument, prompt interactively.",
+  )
+  .option(
+    "--slug <slug>",
+    "Explicit slug (kebab-case). Defaults to a server-derived slug from the name.",
+  )
+  .action(async (name: string | undefined, opts) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await orgCreateCommand({
+      profile: globalOpts.profile,
+      name: typeof name === "string" ? name : undefined,
+      slug: typeof opts.slug === "string" ? opts.slug : undefined,
+    });
   });
 
 program

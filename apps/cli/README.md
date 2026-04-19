@@ -37,6 +37,8 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | `appstrate logout`  | Revoke the active session server-side and wipe local credentials.              |
 | `appstrate whoami`  | Print the identity attached to the active profile.                             |
 | `appstrate token`   | Print metadata about the stored access + refresh tokens (debug).               |
+| `appstrate org`     | List, switch, or create organizations pinned on the active profile.            |
+| `appstrate api`     | Authenticated HTTP passthrough to the Appstrate API.                           |
 
 All commands accept `--profile <name>` to target a specific profile (see [Profiles](#profiles)).
 
@@ -86,10 +88,21 @@ appstrate login --profile prod --instance https://app.my.io
 
 **Flags**
 
-| Flag              | Values | Description                                                   |
-| ----------------- | ------ | ------------------------------------------------------------- |
-| `--instance`      | URL    | Instance base URL. Skips the interactive prompt.              |
-| `-p`, `--profile` | name   | Profile name to store credentials under (default: `default`). |
+| Flag              | Values         | Description                                                                                                                                   |
+| ----------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--instance`      | URL            | Instance base URL. Skips the interactive prompt.                                                                                              |
+| `-p`, `--profile` | name           | Profile name to store credentials under (default: `default`).                                                                                 |
+| `--org`           | `<id-or-slug>` | After the token exchange, pin this organization on the profile non-interactively. Fails if the reference does not match any org.              |
+| `--create-org`    | `<name>`       | Create a new organization with this name and pin it. A default application + hello-world agent are provisioned server-side. Skips the prompt. |
+| `--no-org`        | —              | Skip the post-login org-pinning step entirely. Subsequent calls must carry `-H 'X-Org-Id: …'`, or pin later via `appstrate org switch`.       |
+
+**Org pinning after login** (issue #209): on success, the CLI calls `GET /api/orgs` and branches:
+
+- **Exactly one org** → auto-pin. The success banner names it: `Logged in as … to "Acme" (org_xxx)`.
+- **Zero orgs** (fresh signup, dashboard onboarding skipped) → offer inline creation (`POST /api/orgs`) which also provisions a default application + hello-world agent server-side.
+- **≥2 orgs** → interactive picker.
+
+The pinned org id is written to `config.toml` and automatically sent as `X-Org-Id` on every subsequent `appstrate api` call, so `appstrate api GET /api/me` works immediately after a fresh login with no extra flags.
 
 **Flow** (what happens on the wire):
 
@@ -191,6 +204,33 @@ Status vocabulary:
 No network call — this command inspects local state only. A refresh token revoked server-side still looks `valid` here by design. Use `whoami` for a server-authoritative identity check.
 
 If the JWT `exp` claim and the locally stored `expiresAt` diverge by more than 2 seconds, `token` flags the mismatch — `api.ts`'s proactive-rotation logic keys off the stored value, so a skew between the two is worth surfacing before it causes unexpected 401s.
+
+---
+
+### `appstrate org`
+
+Manage the organization pinned on the active profile. `login` auto-pins an org where possible (see above); `org switch` / `org create` let you change the pin without re-running the device flow. The pinned org id is sent as `X-Org-Id` on every `appstrate api` call and every `/api/*` endpoint that requires org context.
+
+```sh
+appstrate org list            # enumerate orgs the profile has access to; pinned row is marked *
+appstrate org switch          # interactive picker (current org pre-highlighted)
+appstrate org switch acme     # non-interactive — by slug or id
+appstrate org current         # print the pinned orgId (scripts / shell prompts)
+appstrate org create          # interactive (name + optional slug) → auto-pin
+appstrate org create "Acme"   # non-interactive → auto-pin
+appstrate org create "Acme" --slug acme-prod
+```
+
+All four subcommands respect the global `--profile <name>` flag and talk to `GET /api/orgs` / `POST /api/orgs`. Creating an org server-side also provisions a default application + a hello-world agent, so the CLI lands on a fully-working setup with no extra steps.
+
+**Subcommands**
+
+| Subcommand              | Purpose                                                                                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `org list`              | List the orgs the active profile belongs to. The pinned one is marked with `*`.                                                          |
+| `org switch [id\|slug]` | Re-pin the active org on the profile. With no argument, show an interactive picker with the current one highlighted.                     |
+| `org current`           | Print the pinned org id to stdout. Exits 1 with a hint when no org is pinned — designed for `if` / shell prompts.                        |
+| `org create [name]`     | Create a new org and pin it. With no argument, prompt for name + optional slug. Use `--slug <slug>` for an explicit kebab-case override. |
 
 ---
 

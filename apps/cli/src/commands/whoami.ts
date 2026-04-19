@@ -18,6 +18,7 @@
 
 import { readConfig, resolveProfileName } from "../lib/config.ts";
 import { apiFetch } from "../lib/api.ts";
+import { listOrgs } from "../lib/orgs.ts";
 import { formatError } from "../lib/ui.ts";
 
 export interface WhoamiOptions {
@@ -52,13 +53,29 @@ export async function whoamiCommand(opts: WhoamiOptions): Promise<void> {
     // server in the same response so whoami always reflects dashboard
     // state, never the stale copy cached in config.toml.
     const nameLine = me.displayName ?? me.name;
+
+    // When an org is pinned, enrich the line with the server-side name.
+    // We swallow errors from this secondary call — a pinned-but-unknown
+    // org (e.g. membership revoked) still prints the id so the user can
+    // at least see what's wrong, rather than failing the whole command.
+    let orgLine: string | null = null;
+    if (profile.orgId) {
+      try {
+        const orgs = await listOrgs(profileName);
+        const match = orgs.find((o) => o.id === profile.orgId);
+        orgLine = match ? `Org:      ${match.name} (${match.id})` : `Org:      ${profile.orgId}`;
+      } catch {
+        orgLine = `Org:      ${profile.orgId}`;
+      }
+    }
+
     process.stdout.write(
       [
         `Profile:  ${profileName}`,
         `Instance: ${profile.instance}`,
         me.email ? `User:     ${me.email}` : null,
         nameLine ? `Name:     ${nameLine}` : null,
-        profile.orgId ? `Org:      ${profile.orgId}` : null,
+        orgLine,
       ]
         .filter(Boolean)
         .join("\n") + "\n",

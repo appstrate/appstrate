@@ -13,21 +13,87 @@
  *      (issue #165); decode `sub` + `email` from the JWT payload
  *      (via `lib/jwt-identity.ts`) to capture userId + email;
  *      persist the profile in config.toml.
+ *   7. Pin an organization on the profile so subsequent `X-Org-Id`-
+ *      requiring routes (`/api/me`, `/api/agents`, …) work out of the
+ *      box. Issue #209. Auto-pin on one org, interactive picker on
+ *      many, offer inline creation on zero. Non-interactive escapes:
+ *      `--org <id-or-slug>`, `--create-org <name>`, `--no-org`.
  */
 
 import open from "open";
-import { intro, outro, askText, spinner, formatUserCode, exitWithError } from "../lib/ui.ts";
+import {
+  intro,
+  outro,
+  askText,
+  select,
+  spinner,
+  formatUserCode,
+  exitWithError,
+} from "../lib/ui.ts";
 import { readConfig, resolveProfileName, setProfile } from "../lib/config.ts";
 import { saveTokens } from "../lib/keyring.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { CLI_CLIENT_ID, CLI_SCOPE } from "../lib/cli-client.ts";
 import { decodeAccessTokenIdentity } from "../lib/jwt-identity.ts";
+import { listOrgs, createOrg, resolveOrgRef, type Org } from "../lib/orgs.ts";
 
 export interface LoginOptions {
   profile?: string;
   instance?: string;
+  /** `--org <id-or-slug>` — non-interactive pin, fails if no match. */
+  org?: string;
+  /** `--create-org <name>` — non-interactive inline creation + pin. */
+  createOrg?: string;
+  /** `--no-org` — explicitly skip the whole pin step. */
+  noOrg?: boolean;
+  deps?: LoginDeps;
 }
+
+/**
+ * Dependency-injected prompt helpers so the login command is testable
+ * without mock.module (banned per CLAUDE.md). Production paths bind to
+ * the real `@clack/prompts` helpers in `lib/ui.ts`. Return `null` from
+ * either hook to signal "user opted out / cannot prompt" — the caller
+ * leaves `orgId` unset and prints a follow-up hint.
+ */
+export interface LoginDeps {
+  /** Interactive picker when the user belongs to ≥2 orgs. */
+  pickOrg?: (orgs: Org[]) => Promise<Org | null>;
+  /** Prompt the user for a new org name + optional slug. */
+  promptCreateOrg?: () => Promise<{ name: string; slug?: string } | null>;
+}
+
+const defaultDeps: Required<LoginDeps> = {
+  pickOrg: async (orgs: Org[]): Promise<Org | null> => {
+    if (!process.stdin.isTTY) {
+      process.stdout.write(
+        "Multiple organizations — pass --org <id-or-slug> to pin non-interactively.\n",
+      );
+      return null;
+    }
+    return select<Org>(
+      "Select the organization to pin on this profile",
+      orgs.map((o) => ({
+        value: o,
+        label: `${o.name} — ${o.slug}`,
+        hint: o.id,
+      })),
+    );
+  },
+  promptCreateOrg: async (): Promise<{ name: string; slug?: string } | null> => {
+    if (!process.stdin.isTTY) {
+      process.stdout.write(
+        "No organization yet on this account — run `appstrate org create <name>` to create one.\n",
+      );
+      return null;
+    }
+    const name = await askText("Organization name");
+    const slugRaw = await askText("Slug (optional — leave blank to auto-generate)", "");
+    const slug = slugRaw.trim();
+    return slug.length > 0 ? { name, slug } : { name };
+  },
+};
 
 export async function loginCommand(opts: LoginOptions): Promise<void> {
   const config = await readConfig();
@@ -54,13 +120,13 @@ export async function loginCommand(opts: LoginOptions): Promise<void> {
   }
 
   try {
-    await runLogin(profileName, normalizedInstance);
+    await runLogin(profileName, normalizedInstance, opts);
   } catch (err) {
     exitWithError(err);
   }
 }
 
-async function runLogin(profileName: string, instance: string): Promise<void> {
+async function runLogin(profileName: string, instance: string, opts: LoginOptions): Promise<void> {
   // Step 1 — device code.
   const s = spinner();
   s.start("Requesting device code");
@@ -132,5 +198,98 @@ async function runLogin(profileName: string, instance: string): Promise<void> {
     email: identity.email,
   });
 
-  outro(`Logged in as ${identity.email}`);
+  // Step 7 — pin an organization. Issue #209. Credentials are already
+  // persisted so `listOrgs` / `createOrg` (both authenticated) work.
+  // Any failure here leaves the login valid but unpinned — surfaced as
+  // a hint to the user, never as a hard failure.
+  const pinned = await pinOrgOnProfile(profileName, opts);
+
+  const orgSuffix = pinned ? ` to "${pinned.name}" (${pinned.id})` : "";
+  outro(`Logged in as ${identity.email}${orgSuffix}`);
+
+  if (!pinned) {
+    process.stdout.write(
+      `No org pinned — pass -H "X-Org-Id: …" on each call, or run \`appstrate org switch\` later.\n`,
+    );
+  }
+}
+
+/**
+ * Resolve the org-pin branch of the login flow. Returns the pinned org
+ * on success, `null` when the user opted out or no pin could be made
+ * (e.g. `--no-org`, zero orgs + user cancelled, non-TTY with no flag).
+ *
+ * Writes the pinned `orgId` back onto `config.toml` in place. The caller
+ * has already persisted the rest of the profile via `setProfile()`.
+ */
+async function pinOrgOnProfile(profileName: string, opts: LoginOptions): Promise<Org | null> {
+  const deps = { ...defaultDeps, ...(opts.deps ?? {}) };
+
+  // `--no-org` short-circuits everything, including the network call.
+  if (opts.noOrg) return null;
+
+  // `--create-org <name>` short-circuits the list fetch — the user knows
+  // they want a fresh org. Don't second-guess them with a prompt.
+  if (opts.createOrg !== undefined) {
+    const created = await createOrg(profileName, { name: opts.createOrg });
+    await persistOrgId(profileName, created.id);
+    return created;
+  }
+
+  let orgs: Org[];
+  try {
+    orgs = await listOrgs(profileName);
+  } catch (err) {
+    // Don't fail the login if /api/orgs is temporarily down — tokens
+    // are already persisted and the user can retry with `org switch`.
+    process.stderr.write(
+      `Failed to list organizations: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return null;
+  }
+
+  // `--org <id-or-slug>` — explicit non-interactive selection.
+  if (opts.org !== undefined) {
+    const match = resolveOrgRef(orgs, opts.org);
+    await persistOrgId(profileName, match.id);
+    return match;
+  }
+
+  if (orgs.length === 1) {
+    const only = orgs[0]!;
+    await persistOrgId(profileName, only.id);
+    return only;
+  }
+
+  if (orgs.length === 0) {
+    const input = await deps.promptCreateOrg();
+    if (!input) return null;
+    const created = await createOrg(profileName, input);
+    await persistOrgId(profileName, created.id);
+    return created;
+  }
+
+  // ≥2 orgs — delegate the (possibly non-TTY) decision to the picker.
+  const chosen = await deps.pickOrg(orgs);
+  if (!chosen) return null;
+  await persistOrgId(profileName, chosen.id);
+  return chosen;
+}
+
+/**
+ * Rewrite the profile's `orgId` without disturbing the other fields.
+ * `setProfile` replaces the whole row, so we re-read first to preserve
+ * `userId` / `email` / `instance` that `runLogin` just persisted.
+ */
+async function persistOrgId(profileName: string, orgId: string): Promise<void> {
+  const config = await readConfig();
+  const existing = config.profiles[profileName];
+  if (!existing) {
+    // Should never happen: `runLogin` called `setProfile` before this.
+    // Fail loudly — silent fallback would mask a real regression.
+    throw new Error(
+      `Profile "${profileName}" missing from config when pinning org — internal invariant broken.`,
+    );
+  }
+  await setProfile(profileName, { ...existing, orgId });
 }

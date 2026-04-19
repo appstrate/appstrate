@@ -234,6 +234,69 @@ describe("whoami (happy path)", () => {
     expect(out).toContain("User:     anon@example.com");
   });
 
+  it("enriches the Org line with name + id when the profile has an orgId pinned (issue #209)", async () => {
+    await seedLoggedInProfile("default");
+    // Manually pin orgId — `seedLoggedInProfile` doesn't set one.
+    await setProfile("default", {
+      instance: "https://app.example.com",
+      userId: "u_1",
+      email: "alice@example.com",
+      orgId: "org_42",
+    });
+    installFetch(async (url) => {
+      if (url.endsWith("/api/profile")) {
+        return new Response(
+          JSON.stringify({ id: "u_1", displayName: "A", language: "en", email: "a@example.com" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.endsWith("/api/orgs")) {
+        return new Response(
+          JSON.stringify({
+            organizations: [
+              { id: "org_42", name: "Acme Corp", slug: "acme", role: "owner", createdAt: "t" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response("unknown", { status: 500 });
+    });
+
+    await whoamiCommand({ profile: "default" });
+
+    const out = stdoutChunks.join("");
+    expect(out).toContain("Org:      Acme Corp (org_42)");
+  });
+
+  it("falls back to the bare orgId when the pinned org is not in the server list (stale pin)", async () => {
+    await seedLoggedInProfile("default");
+    await setProfile("default", {
+      instance: "https://app.example.com",
+      userId: "u_1",
+      email: "alice@example.com",
+      orgId: "org_gone",
+    });
+    installFetch(async (url) => {
+      if (url.endsWith("/api/profile")) {
+        return new Response(
+          JSON.stringify({ id: "u_1", displayName: "A", language: "en", email: "a@example.com" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.endsWith("/api/orgs")) {
+        return new Response(JSON.stringify({ organizations: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("unknown", { status: 500 });
+    });
+
+    await whoamiCommand({ profile: "default" });
+    expect(stdoutChunks.join("")).toContain("Org:      org_gone");
+  });
+
   it("sends the stored Bearer token on /api/profile (JWT path, not cookies)", async () => {
     await seedLoggedInProfile("default");
     installFetch(
