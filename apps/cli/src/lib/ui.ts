@@ -19,7 +19,26 @@ export function outro(message: string): void {
   clack.outro(message);
 }
 
+/**
+ * Defensive fail-fast for prompts with no matching non-interactive
+ * flag (Bun install confirm, "Start dev server?", upgrade confirm, the
+ * login instance URL askText, etc.). Without this, `@clack/prompts`
+ * reads a closed/missing stdin and either hangs or SIGKILLs with no
+ * readable error — issue #184. Callers that do have a flag (resolveTier,
+ * resolveDir) should guard earlier with a specific message naming it.
+ */
+function requireTTY(message: string): void {
+  if (!process.stdin.isTTY) {
+    throw new Error(
+      `Cannot prompt "${message}": stdin is not a TTY. ` +
+        "Re-run from an interactive terminal, or pass the matching flag " +
+        "so the command doesn't need to prompt (see `appstrate <command> --help`).",
+    );
+  }
+}
+
 export async function askText(message: string, initialValue?: string): Promise<string> {
+  requireTTY(message);
   const value = await clack.text({ message, initialValue });
   if (clack.isCancel(value)) {
     clack.cancel("Cancelled.");
@@ -29,6 +48,7 @@ export async function askText(message: string, initialValue?: string): Promise<s
 }
 
 export async function confirm(message: string, initialValue = true): Promise<boolean> {
+  requireTTY(message);
   const value = await clack.confirm({ message, initialValue });
   if (clack.isCancel(value)) {
     clack.cancel("Cancelled.");

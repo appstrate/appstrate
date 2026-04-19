@@ -363,6 +363,18 @@ export async function resolveTier(
   const isCancel = deps.isCancel ?? clack.isCancel;
   const note = deps.note ?? clack.note;
   const probe = deps.isDockerAvailable ?? isDockerAvailable;
+  // Prompting requires a TTY. If stdin isn't a TTY (CI, `curl | bash`
+  // inside a Dockerfile, cron) clack would crash with no readable
+  // error — surface a clear message pointing at the `--tier` escape
+  // hatch instead. See `scripts/bootstrap.sh` for the matching branch.
+  // Gated on the real `clack.select` so tests injecting `deps.select`
+  // bypass this and exercise the interactive branch deterministically.
+  if (select === clack.select && !process.stdin.isTTY) {
+    throw new Error(
+      "Cannot prompt for tier: stdin is not a TTY. " +
+        "Re-run with `--tier N` (0, 1, 2, or 3), e.g. `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3`.",
+    );
+  }
   const dockerOk = await probe();
   const defaultTier: Tier = dockerOk ? 3 : 0;
   if (!dockerOk) {
@@ -392,6 +404,12 @@ export async function resolveTier(
  * normalize to an absolute path. Exported for unit testing.
  */
 export async function resolveDir(raw: string | undefined): Promise<string> {
+  if (raw === undefined && !process.stdin.isTTY) {
+    throw new Error(
+      "Cannot prompt for install directory: stdin is not a TTY. " +
+        "Re-run with `--dir <path>`, e.g. `curl -fsSL https://get.appstrate.dev | bash -s -- --tier 3 --dir ~/appstrate`.",
+    );
+  }
   const chosen = raw ?? (await askText("Install directory", DEFAULT_INSTALL_DIR));
   // `tier0.ts` passes `dir` as an argv positional to `tar`, `curl`,
   // `git`, etc. without a shell wrapper, so interpolation injection is

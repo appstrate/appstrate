@@ -50,6 +50,17 @@ describe("resolveTier", () => {
     await expect(resolveTier("NaN")).rejects.toThrow(/Invalid --tier/);
   });
 
+  it("throws a clear error when stdin is not a TTY and --tier is missing", async () => {
+    // Regression for issue #184: `curl … | bash` bootstrap inherited a
+    // closed pipe as stdin, so clack's `select` crashed silently. The
+    // guard only fires when `deps.select` defaults to the real
+    // `clack.select`; the DI tests below inject a stub and so exercise
+    // the interactive branch regardless of TTY state.
+    expect(process.stdin.isTTY).toBeFalsy();
+    await expect(resolveTier(undefined)).rejects.toThrow(/stdin is not a TTY/);
+    await expect(resolveTier(undefined)).rejects.toThrow(/--tier/);
+  });
+
   it("never invokes the Docker probe when --tier is provided", async () => {
     // Locks down the contract that the CI one-liner (`--tier 3`) never
     // spawns `docker info` — a regression here would change the byte-
@@ -187,6 +198,15 @@ describe("resolveDir", () => {
 
   it("rejects paths containing a NUL byte", async () => {
     await expect(resolveDir("/tmp/bad\0path")).rejects.toThrow(/newlines or NUL/);
+  });
+
+  it("throws a clear error when stdin is not a TTY and --dir is missing", async () => {
+    // Sibling of the resolveTier non-TTY case: `curl | bash -s -- --tier 3`
+    // clears the tier prompt but would still crash on the askText() for
+    // --dir. Same fail-fast contract — message must name --dir.
+    expect(process.stdin.isTTY).toBeFalsy();
+    await expect(resolveDir(undefined)).rejects.toThrow(/stdin is not a TTY/);
+    await expect(resolveDir(undefined)).rejects.toThrow(/--dir/);
   });
 });
 
