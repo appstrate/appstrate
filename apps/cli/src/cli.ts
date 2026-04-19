@@ -29,7 +29,7 @@ import { loginCommand } from "./commands/login.ts";
 import { logoutCommand } from "./commands/logout.ts";
 import { whoamiCommand } from "./commands/whoami.ts";
 import { tokenCommand } from "./commands/token.ts";
-import { apiCommand } from "./commands/api.ts";
+import { apiCommand, isHttpMethod } from "./commands/api.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
@@ -182,9 +182,15 @@ program
   });
 
 program
-  .command("api <method> <path>")
+  .command("api <target> [extra]")
   .description(
-    "Authenticated HTTP passthrough to the Appstrate API. Injects the active profile's bearer token + X-Org-Id so coding agents (Claude Code, Cursor, Aider, …) can call the API without ever seeing the raw token.",
+    "Authenticated HTTP passthrough to the Appstrate API. Injects the active profile's bearer token + X-Org-Id so coding agents (Claude Code, Cursor, Aider, …) can call the API without ever seeing the raw token.\n" +
+      "\n" +
+      "Invocation forms (all curl-compatible):\n" +
+      "  appstrate api GET /api/x             # explicit method + path\n" +
+      "  appstrate api /api/x                 # method inferred (GET / POST / PUT)\n" +
+      "  appstrate api https://instance/api/x # absolute URL, must match active profile\n" +
+      "  appstrate api POST /api/x -d @body   # body via -d / --data-raw / --data-binary / -F",
   )
   .option("-H, --header <kv>", "Request header 'Name: value' (repeatable)", collect, [])
   .option("-d, --data <str>", "Request body — literal, @file, or @- for stdin")
@@ -204,7 +210,11 @@ program
   .option("-o, --output <file>", "Write response body to file (default: stdout)")
   .option("-i, --include", "Include status line + response headers on stdout")
   .option("-I, --head", "Send HEAD and print headers only")
-  .option("-s, --silent", "Suppress the 401 re-login hint on stderr")
+  .option(
+    "-s, --silent",
+    "Suppress UX hints and error messages on stderr (curl -s). Combine with -S to restore errors.",
+  )
+  .option("-S, --show-error", "Restore error messages when combined with -s (curl -sS pattern).")
   .option(
     "-f, --fail",
     "Exit 22 (4xx) / 25 (5xx) on non-2xx. Body is piped to stderr (differs from curl, which suppresses it) so agents can log failures.",
@@ -227,7 +237,28 @@ program
     }
     return n;
   })
-  .action(async (method: string, path: string, opts) => {
+  .action(async (target: string, extra: string | undefined, opts) => {
+    // Resolve `<target> [extra]` → {method, path}. Two shapes:
+    //   api POST /x   → arg1=HTTP method, arg2=path (curl -X style)
+    //   api /x        → method inferred (GET/POST/PUT per flags + body)
+    //   api https://…/x → absolute URL (origin validated downstream)
+    // If arg2 is present but arg1 isn't a known verb, refuse — the
+    // user probably mistyped a method and we'd otherwise silently try
+    // to GET the word "fetchh".
+    let method: string | undefined;
+    let path: string;
+    if (extra !== undefined) {
+      if (!isHttpMethod(target)) {
+        throw new InvalidArgumentError(
+          `expected HTTP method as first argument, got "${target}" (did you mean GET/POST/PUT/…?)`,
+        );
+      }
+      method = target.toUpperCase();
+      path = extra;
+    } else {
+      method = undefined; // let apiCommand infer from flags + body
+      path = target;
+    }
     const globalOpts = program.opts<{ profile?: string }>();
     await apiCommand({
       profile: globalOpts.profile,
@@ -244,6 +275,7 @@ program
       include: opts.include === true,
       head: opts.head === true,
       silent: opts.silent === true,
+      showError: opts.showError === true,
       fail: opts.fail === true,
       location: opts.location === true,
       insecure: opts.insecure === true,

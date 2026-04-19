@@ -38,9 +38,46 @@ import { resolveAuthContext, AuthError, ApiError } from "../lib/api.ts";
 import { CLI_USER_AGENT } from "../lib/version.ts";
 import { classifyNetworkError, labelForExitCode } from "../lib/http-classify.ts";
 
+/**
+ * HTTP methods we accept as the first positional when the user writes
+ * `appstrate api POST /x`. Matches curl's list, minus CONNECT/TRACE
+ * which aren't meaningful over fetch().
+ */
+const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+
+export function isHttpMethod(s: string): boolean {
+  return HTTP_METHODS.has(s.toUpperCase());
+}
+
+/**
+ * Thrown when the request target resolves to a different origin than
+ * the active profile's Appstrate instance. The whole point of
+ * `appstrate api` is to inject a keyring-backed bearer — sending it to
+ * a foreign host would leak the token, so we refuse loudly.
+ */
+export class HostMismatchError extends Error {
+  constructor(
+    public readonly expected: string,
+    public readonly actual: string,
+  ) {
+    super(
+      `refusing to send bearer to foreign host.\n` +
+        `  Expected origin: ${expected}\n` +
+        `  Got:             ${actual}\n` +
+        `  Hint: use \`curl\` directly for non-Appstrate hosts.`,
+    );
+    this.name = "HostMismatchError";
+  }
+}
+
 export interface ApiCommandOptions {
   profile?: string;
-  method: string;
+  /**
+   * HTTP method. Optional — when omitted, inferred from flags:
+   * `-I/--head` → HEAD, `-T/--upload-file` → PUT, body present → POST,
+   * else GET. An explicit method (whether positional or via `-X`) wins.
+   */
+  method?: string;
   path: string;
   header: string[];
   form: string[];
@@ -53,6 +90,12 @@ export interface ApiCommandOptions {
   include?: boolean;
   head?: boolean;
   silent?: boolean;
+  /**
+   * `-S, --show-error`: when combined with `-s/--silent`, restores
+   * error-message output on stderr while keeping progress / hints
+   * suppressed. Matches curl's `-sS` pattern.
+   */
+  showError?: boolean;
   fail?: boolean;
   location?: boolean;
   insecure?: boolean;
@@ -99,6 +142,16 @@ export async function apiCommand(
   opts: ApiCommandOptions,
   io: ApiCommandIO = DEFAULT_IO,
 ): Promise<void> {
+  // Error output gate: curl `-s` silences errors; `-sS` restores
+  // them. A bare (no-flag) invocation always prints errors. This
+  // helper is applied to every error-class stderr write in the
+  // function; UX hints (e.g. the 401 re-login hint) have their own
+  // narrower gate (`!opts.silent`, ignoring -S).
+  const writeError = (msg: string): void => {
+    if (opts.silent && !opts.showError) return;
+    io.stderr.write(msg);
+  };
+
   // 1. Resolve auth profile + fresh access token.
   const config = await readConfig();
   const profileName = resolveProfileName(opts.profile, config);
@@ -108,14 +161,24 @@ export async function apiCommand(
     auth = await resolveAuthContext(profileName);
   } catch (err) {
     if (err instanceof AuthError || err instanceof ApiError) {
-      io.stderr.write(`${err.message}\n`);
+      writeError(`${err.message}\n`);
       return io.exit(1);
     }
     throw err;
   }
 
-  // 2. Build URL + query.
-  const url = buildUrl(auth.instance, opts.path, opts.query);
+  // 2. Build URL + query. Cross-origin target → refuse rather than
+  //    leak the bearer (exit 2, curl-aligned for usage errors).
+  let url: string;
+  try {
+    url = buildUrl(auth.instance, opts.path, opts.query);
+  } catch (err) {
+    if (err instanceof HostMismatchError) {
+      writeError(`${err.message}\n`);
+      return io.exit(2);
+    }
+    throw err;
+  }
 
   // 3. Build headers (user -H last so it can override defaults).
   const headers = buildHeaders({
@@ -195,10 +258,12 @@ export async function apiCommand(
       res = await fetch(url, init as Parameters<typeof fetch>[1]);
     } catch (err) {
       cleanup();
-      return handleStreamError(err, ac.signal, sigintFired, io);
+      return handleStreamError(err, ac.signal, sigintFired, io, opts);
     }
 
     // 8. Soft UX hint on 401 (agents parse exit codes — don't prompt).
+    //    Silenced by `-s`; `-sS` doesn't restore it (it's a UX hint,
+    //    not an error message — curl's `-S` is narrower than that).
     if (res.status === 401 && !opts.silent) {
       io.stderr.write(`Session may be expired — run: appstrate login --profile ${profileName}\n`);
     }
@@ -234,7 +299,7 @@ export async function apiCommand(
         await streamToFile(res, opts.output, ac.signal);
       } catch (err) {
         cleanup();
-        return handleStreamError(err, ac.signal, sigintFired, io);
+        return handleStreamError(err, ac.signal, sigintFired, io, opts);
       }
     } else if (res.body) {
       try {
@@ -250,7 +315,7 @@ export async function apiCommand(
         }
       } catch (err) {
         cleanup();
-        return handleStreamError(err, ac.signal, sigintFired, io);
+        return handleStreamError(err, ac.signal, sigintFired, io, opts);
       }
     }
 
@@ -268,7 +333,20 @@ export async function apiCommand(
 // ─── Helpers ────────────────────────────────────────────────────────
 
 function buildUrl(instance: string, path: string, queryPairs: string[]): string {
-  const u = new URL(path, instance);
+  const instanceOrigin = new URL(instance).origin;
+  let u: URL;
+  // Detect absolute URLs (scheme://…) and validate the origin before
+  // letting `new URL(path, instance)` silently swallow them — without
+  // this guard an agent pasting `appstrate api https://evil/x` would
+  // send the keyring-backed bearer to a foreign host.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) {
+    u = new URL(path);
+    if (u.origin !== instanceOrigin) {
+      throw new HostMismatchError(instanceOrigin, u.origin);
+    }
+  } else {
+    u = new URL(path, instance);
+  }
   for (const raw of queryPairs) {
     const eq = raw.indexOf("=");
     if (eq === -1) {
@@ -379,6 +457,8 @@ async function buildBody(opts: ApiCommandOptions, io: ApiCommandIO): Promise<Bui
 }
 
 function pickMethod(opts: ApiCommandOptions, hasBody: boolean): string {
+  // Precedence (highest → lowest): -I, -X, positional, -T (PUT),
+  // body → POST, else GET. Matches curl's inference.
   if (opts.head) return "HEAD";
   if (opts.request) return opts.request.toUpperCase();
   if (opts.method) return opts.method.toUpperCase();
@@ -437,20 +517,27 @@ function handleStreamError(
   signal: AbortSignal,
   sigintFired: boolean,
   io: ApiCommandIO,
+  opts: ApiCommandOptions,
 ): never {
+  // Same silence gate as the main writeError helper — duplicated here
+  // because this fn lives outside the apiCommand closure.
+  const writeError = (msg: string): void => {
+    if (opts.silent && !opts.showError) return;
+    io.stderr.write(msg);
+  };
   if (signal.aborted || sigintFired || (err instanceof Error && err.name === "AbortError")) {
     // Distinguish timeout vs SIGINT via the abort reason we set.
     const reason = signal.reason ?? (err as { cause?: unknown })?.cause;
     const isTimeout = reason instanceof Error && reason.name === "TimeoutError" && !sigintFired;
     if (isTimeout) {
       const code = classifyNetworkError(reason);
-      io.stderr.write(`${labelForExitCode(code)}\n`);
+      writeError(`${labelForExitCode(code)}\n`);
       return io.exit(code);
     }
     return io.exit(130);
   }
   const code = classifyNetworkError(err);
-  io.stderr.write(`${labelForExitCode(code)}: ${errorMessage(err)}\n`);
+  writeError(`${labelForExitCode(code)}: ${errorMessage(err)}\n`);
   return io.exit(code);
 }
 

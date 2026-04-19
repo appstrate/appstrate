@@ -150,7 +150,7 @@ class ExitSentinel extends Error {
 }
 
 async function runCommand(
-  opts: Partial<ApiCommandOptions> & { method: string; path: string },
+  opts: Partial<ApiCommandOptions> & { path: string },
   io: ApiCommandIO,
 ): Promise<void> {
   const full: ApiCommandOptions = {
@@ -168,6 +168,7 @@ async function runCommand(
     include: opts.include,
     head: opts.head,
     silent: opts.silent,
+    showError: opts.showError,
     fail: opts.fail,
     location: opts.location,
     insecure: opts.insecure,
@@ -763,5 +764,153 @@ describe("apiCommand — network errors map to curl exit codes", () => {
     const { io, exitCode } = makeIO();
     await runCommand({ method: "GET", path: "/p", maxTime: 0.05 }, io);
     expect(exitCode.value).toBe(28);
+  });
+});
+
+// ─── P1 — Curl parity: method inference + absolute URL validation ─
+
+describe("apiCommand — method inference (no explicit method)", () => {
+  beforeEach(async () => {
+    await seedLoggedIn("default");
+  });
+
+  it("no method + no body → GET", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, exitCode } = makeIO();
+    await runCommand({ path: "/p" }, io);
+    expect(exitCode.value).toBe(0);
+    expect(fetchCalls[0]!.method).toBe("GET");
+  });
+
+  it("no method + -d body → POST (curl default)", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ path: "/p", data: "hello" }, io);
+    expect(fetchCalls[0]!.method).toBe("POST");
+  });
+
+  it("explicit positional method wins over body inference", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ method: "PUT", path: "/p", data: "hello" }, io);
+    expect(fetchCalls[0]!.method).toBe("PUT");
+  });
+
+  it("-X overrides positional method", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ method: "GET", path: "/p", request: "patch" }, io);
+    expect(fetchCalls[0]!.method).toBe("PATCH");
+  });
+
+  it("-I forces HEAD regardless of -X/positional", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io } = makeIO();
+    await runCommand({ method: "GET", path: "/p", head: true, request: "POST" }, io);
+    expect(fetchCalls[0]!.method).toBe("HEAD");
+  });
+});
+
+describe("apiCommand — absolute URL / host validation", () => {
+  beforeEach(async () => {
+    await seedLoggedIn("default");
+  });
+
+  it("accepts absolute URL matching the profile's origin", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "https://app.example.com/api/foo" }, io);
+    expect(exitCode.value).toBe(0);
+    expect(fetchCalls[0]!.url).toBe("https://app.example.com/api/foo");
+    expect(fetchCalls[0]!.headers.Authorization).toBe("Bearer access-1");
+  });
+
+  it("rejects absolute URL with a different host (exit 2, no fetch)", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, stderr, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "https://evil.example.org/api/foo" }, io);
+    expect(exitCode.value).toBe(2);
+    expect(fetchCalls).toHaveLength(0);
+    expect(stdoutText(stderr)).toContain("refusing to send bearer");
+    expect(stdoutText(stderr)).toContain("https://app.example.com");
+    expect(stdoutText(stderr)).toContain("https://evil.example.org");
+  });
+
+  it("rejects same host but different port (port is part of origin)", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "https://app.example.com:8443/x" }, io);
+    expect(exitCode.value).toBe(2);
+    expect(fetchCalls).toHaveLength(0);
+  });
+
+  it("rejects same origin but different scheme (http vs https)", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "http://app.example.com/x" }, io);
+    expect(exitCode.value).toBe(2);
+  });
+
+  it("relative path continues to work (regression guard)", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/api/foo" }, io);
+    expect(exitCode.value).toBe(0);
+    expect(fetchCalls[0]!.url).toBe("https://app.example.com/api/foo");
+  });
+});
+
+describe("apiCommand — silent / show-error semantics", () => {
+  beforeEach(async () => {
+    await seedLoggedIn("default");
+  });
+
+  it("-s alone suppresses network error message on stderr", async () => {
+    globalThis.fetch = (async () => {
+      throw Object.assign(new Error("nope"), { code: "ECONNREFUSED" });
+    }) as unknown as typeof fetch;
+    const { io, stderr, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/p", silent: true }, io);
+    expect(exitCode.value).toBe(EXIT_CONNECT);
+    expect(stderr).toHaveLength(0);
+  });
+
+  it("-sS restores error message while keeping exit code", async () => {
+    globalThis.fetch = (async () => {
+      throw Object.assign(new Error("nope"), { code: "ECONNREFUSED" });
+    }) as unknown as typeof fetch;
+    const { io, stderr, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/p", silent: true, showError: true }, io);
+    expect(exitCode.value).toBe(EXIT_CONNECT);
+    expect(stdoutText(stderr)).toContain("Could not connect");
+  });
+
+  it("no-flag (default) writes error message to stderr", async () => {
+    globalThis.fetch = (async () => {
+      throw Object.assign(new Error("nope"), { code: "ECONNREFUSED" });
+    }) as unknown as typeof fetch;
+    const { io, stderr, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/p" }, io);
+    expect(exitCode.value).toBe(EXIT_CONNECT);
+    expect(stdoutText(stderr)).toContain("Could not connect");
+  });
+
+  it("-s silences host-mismatch error too (usage error is still an error)", async () => {
+    installFetch(() => jsonResponse(200, {}));
+    const { io, stderr, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "https://evil.example.org/x", silent: true }, io);
+    expect(exitCode.value).toBe(2);
+    expect(stderr).toHaveLength(0);
+  });
+
+  it("401 hint is narrower than -s — ignores -S restore", async () => {
+    installFetch(() => new Response("no", { status: 401 }));
+    const { io, stderr } = makeIO();
+    await runCommand({ method: "GET", path: "/p", silent: true, showError: true }, io);
+    // -s hides the hint regardless of -S. The hint is a UX prompt,
+    // not an error line.
+    expect(stderr.filter((b) => stdoutText([b]).includes("Session may be expired"))).toHaveLength(
+      0,
+    );
   });
 });
