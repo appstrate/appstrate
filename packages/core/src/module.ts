@@ -15,11 +15,14 @@ import type { Logger } from "./logger.ts";
 import type {
   Actor,
   ContainerOrchestrator,
+  InlinePreflightInput,
+  InlinePreflightResult,
   PlatformApplication,
   PlatformConnectionProviderGroup,
   PlatformModel,
   PlatformPackage,
   PubSub,
+  RealtimeSubscriber,
 } from "./platform-types.ts";
 
 // ---------------------------------------------------------------------------
@@ -603,11 +606,11 @@ export interface PlatformServices {
    * actual run. No durable side effects.
    */
   inline: {
-    preflight(params: unknown): Promise<unknown>;
+    preflight(params: InlinePreflightInput): Promise<InlinePreflightResult>;
   };
   /** Realtime SSE subscriber registry. */
   realtime: {
-    addSubscriber(sub: unknown): void;
+    addSubscriber(sub: RealtimeSubscriber): void;
     removeSubscriber(id: string): void;
   };
   /** Module registry accessors (for cross-module lookups and event emission). */
