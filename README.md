@@ -60,6 +60,8 @@ Deploy Appstrate with a single command. The installer downloads the `appstrate` 
 curl -fsSL https://get.appstrate.dev | bash
 ```
 
+The CLI installs into `~/.local/bin` (no sudo) and adds it to your `PATH`. For a system-wide install, prefix the command with `APPSTRATE_BIN_DIR=/usr/local/bin` (sudo will be requested). To skip the shell profile modification, set `APPSTRATE_NO_MODIFY_PATH=1`.
+
 Once a tier is chosen, the CLI generates cryptographic secrets, writes `.env` + `docker-compose.yml` (Tiers 1/2/3) or clones the source + spawns `bun run dev` (Tier 0), waits for the healthcheck, and opens [http://localhost:3000](http://localhost:3000). Non-interactive: `curl ... | bash -s -- --tier 3 --dir ~/appstrate`.
 
 See [`apps/cli/README.md`](./apps/cli/README.md) for the full CLI reference, and [`examples/self-hosting/`](./examples/self-hosting/) for manual Docker Compose setup.

@@ -417,3 +417,175 @@ jobs:
           mv "$ROOT/release/checksums.txt.minisig.bak" "$ROOT/release/checksums.txt.minisig"
           echo "::endgroup::"
           echo "✓ empty-manifest path OK"
+
+          # ── PATH-setup scenarios ────────────────────────────────────────
+          # Following scenarios exercise the rootless install + shell-rc
+          # modification introduced for issue #186. Trust chain is
+          # unchanged; these only assert BIN_DIR defaulting and PATH
+          # plumbing. Each runs with an isolated HOME so rc files from
+          # one scenario can't leak into the next.
+          #
+          # PATH-mod only runs when CI is unset (GHA sets CI=true → the
+          # installer auto-skips). We strip it with `env -u CI` for the
+          # scenarios that must exercise the modification path, and
+          # preserve it to assert the auto-skip.
+          MARKER="# added by appstrate installer"
+
+          # Helper: run bootstrap in an isolated HOME with a chosen
+          # $SHELL and return rc + output. Keeps the per-scenario blocks
+          # focused on assertions rather than plumbing.
+          run_bootstrap_isolated() {
+            _scenario="$1"; shift
+            _shell="$1"; shift
+            _home="$GITHUB_WORKSPACE/home-${_scenario}"
+            rm -rf "$_home"
+            mkdir -p "$_home/.local/bin"
+            # `env -i` gives us a clean slate — keep only what bootstrap
+            # actually needs (PATH for curl/grep/etc.) and the caller's
+            # extra vars. This is the only way to reliably strip CI=true
+            # from GHA's injected environment in a child process.
+            env -i \
+              HOME="$_home" \
+              SHELL="$_shell" \
+              PATH="/usr/local/bin:/usr/bin:/bin" \
+              "$@" \
+              bash /tmp/bootstrap.sh 2>&1
+          }
+
+          # ── Scenario 8: rootless default + zsh rc modification ──────
+          echo "::group::rootless default (zsh)"
+          OUT8=$(run_bootstrap_isolated 8 "/bin/zsh") || {
+            echo "$OUT8"; echo "::error::bootstrap failed on rootless zsh path"; exit 1
+          }
+          echo "$OUT8"
+          H8="$GITHUB_WORKSPACE/home-8"
+          test -x "$H8/.local/bin/appstrate" \
+            || { echo "::error::binary not installed to rootless default"; exit 1; }
+          test -f "$H8/.zshrc" \
+            || { echo "::error::.zshrc was not created"; exit 1; }
+          grep -qF "$MARKER" "$H8/.zshrc" \
+            || { echo "::error::.zshrc missing install marker"; exit 1; }
+          grep -q "export PATH=\"$H8/.local/bin:\$PATH\"" "$H8/.zshrc" \
+            || { echo "::error::.zshrc missing PATH export"; exit 1; }
+          # .zprofile covers login shells — macOS default for zsh is a login
+          # shell, so missing this would leave PATH broken in Terminal.app
+          # until the first interactive sub-shell.
+          test -f "$H8/.zprofile" \
+            || { echo "::error::.zprofile was not created (login-shell coverage)"; exit 1; }
+          grep -qF "$MARKER" "$H8/.zprofile" \
+            || { echo "::error::.zprofile missing install marker"; exit 1; }
+          # The hint output must list every touched file, not just the last
+          # one — regression guard for the MODIFIED_PROFILE-overwritten bug.
+          echo "$OUT8" | grep -qF ".zshrc" \
+            || { echo "::error::hint output missing .zshrc"; exit 1; }
+          echo "$OUT8" | grep -qF ".zprofile" \
+            || { echo "::error::hint output missing .zprofile"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ rootless-zsh OK"
+
+          # ── Scenario 9: idempotent re-run (no duplicate lines) ─────
+          echo "::group::idempotent re-run"
+          # Re-use the scenario-8 HOME so the marker is already present.
+          BEFORE=$(wc -l <"$H8/.zshrc")
+          env -i \
+            HOME="$H8" \
+            SHELL="/bin/zsh" \
+            PATH="/usr/local/bin:/usr/bin:/bin" \
+            bash /tmp/bootstrap.sh >/dev/null 2>&1 || {
+            echo "::error::second bootstrap run failed"; exit 1
+          }
+          AFTER=$(wc -l <"$H8/.zshrc")
+          test "$BEFORE" -eq "$AFTER" \
+            || { echo "::error::.zshrc grew on re-run ($BEFORE → $AFTER lines)"; exit 1; }
+          # And only one marker, not two.
+          COUNT=$(grep -cF "$MARKER" "$H8/.zshrc")
+          test "$COUNT" -eq 1 \
+            || { echo "::error::marker appeared $COUNT times, expected 1"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ idempotent path OK"
+
+          # ── Scenario 10: bash shotgun ──────────────────────────────
+          echo "::group::bash shotgun"
+          OUT10=$(run_bootstrap_isolated 10 "/bin/bash") || {
+            echo "$OUT10"; echo "::error::bootstrap failed on bash shotgun path"; exit 1
+          }
+          H10="$GITHUB_WORKSPACE/home-10"
+          for f in .profile .bashrc .bash_profile; do
+            test -f "$H10/$f" \
+              || { echo "::error::bash shotgun did not write $f"; exit 1; }
+            grep -qF "$MARKER" "$H10/$f" \
+              || { echo "::error::$f missing install marker"; exit 1; }
+          done
+          echo "::endgroup::"
+          echo "✓ bash-shotgun OK"
+
+          # ── Scenario 11: fish conf.d ───────────────────────────────
+          echo "::group::fish conf.d"
+          OUT11=$(run_bootstrap_isolated 11 "/usr/bin/fish") || {
+            echo "$OUT11"; echo "::error::bootstrap failed on fish path"; exit 1
+          }
+          H11="$GITHUB_WORKSPACE/home-11"
+          FISH_CONF="$H11/.config/fish/conf.d/appstrate.fish"
+          test -f "$FISH_CONF" \
+            || { echo "::error::fish conf.d file was not created"; exit 1; }
+          grep -q "fish_add_path $H11/.local/bin" "$FISH_CONF" \
+            || { echo "::error::fish config missing fish_add_path line"; exit 1; }
+          # No bash/zsh artifacts should exist for fish users.
+          test ! -f "$H11/.zshrc" \
+            || { echo "::error::fish scenario wrote .zshrc"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ fish path OK"
+
+          # ── Scenario 12: APPSTRATE_NO_MODIFY_PATH=1 opt-out ────────
+          echo "::group::no-modify-path opt-out"
+          OUT12=$(run_bootstrap_isolated 12 "/bin/zsh" \
+            APPSTRATE_NO_MODIFY_PATH=1) || {
+            echo "$OUT12"; echo "::error::bootstrap failed with NO_MODIFY_PATH"; exit 1
+          }
+          H12="$GITHUB_WORKSPACE/home-12"
+          test -x "$H12/.local/bin/appstrate" \
+            || { echo "::error::binary not installed with NO_MODIFY_PATH"; exit 1; }
+          test ! -f "$H12/.zshrc" \
+            || { echo "::error::.zshrc was written despite NO_MODIFY_PATH=1"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ no-modify-path opt-out OK"
+
+          # ── Scenario 13: CI=<truthy> auto-skips PATH modification ───
+          # Iterate over the accepted truthy values (true / 1 / yes) — not
+          # every CI exports CI=true verbatim (some use 1), so all three
+          # must short-circuit the rc modification path.
+          for _ci_val in true 1 yes; do
+            echo "::group::CI=${_ci_val} auto-skip"
+            H13="$GITHUB_WORKSPACE/home-13-${_ci_val}"
+            rm -rf "$H13"; mkdir -p "$H13/.local/bin"
+            env -i \
+              HOME="$H13" \
+              SHELL="/bin/zsh" \
+              CI="$_ci_val" \
+              PATH="/usr/local/bin:/usr/bin:/bin" \
+              bash /tmp/bootstrap.sh >/dev/null 2>&1 || {
+              echo "::error::bootstrap failed with CI=${_ci_val}"; exit 1
+            }
+            test ! -f "$H13/.zshrc" \
+              || { echo "::error::CI=${_ci_val} did not auto-skip PATH modification"; exit 1; }
+            test ! -f "$H13/.zprofile" \
+              || { echo "::error::CI=${_ci_val} did not auto-skip .zprofile"; exit 1; }
+            echo "::endgroup::"
+            echo "✓ CI=${_ci_val} auto-skip OK"
+          done
+
+          # ── Scenario 14: BIN_DIR already in PATH → skip rc ──────────
+          echo "::group::BIN_DIR already on PATH"
+          H14="$GITHUB_WORKSPACE/home-14"
+          rm -rf "$H14"; mkdir -p "$H14/.local/bin"
+          env -i \
+            HOME="$H14" \
+            SHELL="/bin/zsh" \
+            PATH="$H14/.local/bin:/usr/local/bin:/usr/bin:/bin" \
+            bash /tmp/bootstrap.sh >/dev/null 2>&1 || {
+            echo "::error::bootstrap failed with BIN_DIR pre-on-PATH"; exit 1
+          }
+          test ! -f "$H14/.zshrc" \
+            || { echo "::error::rc modified despite BIN_DIR already on PATH"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ already-on-PATH skip OK"
