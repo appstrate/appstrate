@@ -192,10 +192,24 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
     refreshToken: token.refreshToken,
     refreshExpiresAt: Date.now() + token.refreshExpiresIn * 1000,
   });
+
+  // Preserve the previous `orgId` when re-logging-in as the SAME user.
+  // Without this, a re-login whose step-7 `/api/orgs` call happens to
+  // flake (network, server blip) would silently drop the pin the user
+  // had carefully set — surprising regression. Only carry it over when
+  // `userId` matches: re-logging-in as a different user on the same
+  // profile must NOT inherit the previous account's org id.
+  const existingProfile = (await readConfig()).profiles[profileName];
+  const preservedOrgId =
+    existingProfile?.userId === identity.userId && existingProfile?.orgId
+      ? existingProfile.orgId
+      : undefined;
+
   await setProfile(profileName, {
     instance,
     userId: identity.userId,
     email: identity.email,
+    ...(preservedOrgId ? { orgId: preservedOrgId } : {}),
   });
 
   // Step 7 — pin an organization. Issue #209. Credentials are already
