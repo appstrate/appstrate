@@ -571,10 +571,21 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
  * Auto-provision the instance-level OIDC client for the platform SPA.
  *
  * Idempotent on presence AND reconciles `redirectUris` /
- * `postLogoutRedirectUris` against the current `APP_URL` on every boot.
- * When the operator changes `APP_URL` (domain move, placeholder → real
- * URL on first setup), the existing row is updated in place — same
+ * `postLogoutRedirectUris` against the current `APP_URL` on every boot,
+ * plus the public-client auth shape (`public=true`,
+ * `tokenEndpointAuthMethod="none"`, `clientSecret=null`). When the
+ * operator changes `APP_URL` (domain move, placeholder → real URL on
+ * first setup), the existing row is updated in place — same
  * `client_id`, so outstanding tokens and live sessions remain valid.
+ *
+ * Auth-shape reconciliation is what upgrades pre-#154 installs. Before
+ * that PR the platform SPA was provisioned as a confidential client
+ * (`tokenEndpointAuthMethod="client_secret_basic"` + hashed
+ * `clientSecret`). The create path now provisions it as public + PKCE,
+ * but existing rows were left stuck as confidential — every SPA OIDC
+ * token exchange then failed with `invalid_client: client secret must
+ * be provided`. The existing-row path below converges the stored shape
+ * to the public-client contract.
  *
  * Without this reconciliation the dashboard SPA would loop on
  * `/api/auth/oauth2/authorize` after a URL change and eventually hit
@@ -585,9 +596,9 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
  *
  * The SELECT+UPDATE is not transactional. Under multi-replica boot, both
  * replicas may detect drift and both issue the UPDATE — benign, since
- * both compute the exact same `expectedRedirectUris` from the same
- * `APP_URL` env var (last-write-wins with identical payloads). No
- * coordination primitive required.
+ * both compute identical expected values from the same `APP_URL` env
+ * var and the same public-client constants (last-write-wins with
+ * identical payloads). No coordination primitive required.
  *
  * ## Cache propagation across replicas
  *
@@ -636,6 +647,9 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
       clientId: oauthClient.clientId,
       redirectUris: oauthClient.redirectUris,
       postLogoutRedirectUris: oauthClient.postLogoutRedirectUris,
+      public: oauthClient.public,
+      tokenEndpointAuthMethod: oauthClient.tokenEndpointAuthMethod,
+      clientSecret: oauthClient.clientSecret,
     })
     .from(oauthClient)
     .where(eq(oauthClient.level, "instance"))
@@ -646,17 +660,29 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
     const storedPostLogout = existing.postLogoutRedirectUris ?? [];
     const redirectDrift = !sameStringSet(existing.redirectUris, expectedRedirectUris);
     const postLogoutDrift = !sameStringSet(storedPostLogout, expectedPostLogoutRedirectUris);
-    if (redirectDrift || postLogoutDrift) {
+    const authMethodDrift =
+      existing.public !== true ||
+      existing.tokenEndpointAuthMethod !== "none" ||
+      existing.clientSecret !== null;
+
+    if (redirectDrift || postLogoutDrift || authMethodDrift) {
       await db
         .update(oauthClient)
         .set({
           redirectUris: expectedRedirectUris,
           postLogoutRedirectUris: expectedPostLogoutRedirectUris,
+          ...(authMethodDrift
+            ? {
+                public: true,
+                tokenEndpointAuthMethod: "none" as const,
+                clientSecret: null,
+              }
+            : {}),
           updatedAt: new Date(),
         })
         .where(eq(oauthClient.clientId, existing.clientId));
       cacheInvalidate(existing.clientId);
-      logger.warn("OIDC platform client redirect URIs updated to match APP_URL", {
+      logger.warn("OIDC platform client reconciled to match APP_URL and public-client contract", {
         module: "oidc",
         clientId: existing.clientId,
         appUrl: normalizedAppUrl,
@@ -664,6 +690,11 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
         redirectUrisTo: expectedRedirectUris,
         postLogoutRedirectUrisFrom: storedPostLogout,
         postLogoutRedirectUrisTo: expectedPostLogoutRedirectUris,
+        publicFrom: existing.public,
+        publicTo: authMethodDrift ? true : existing.public,
+        tokenEndpointAuthMethodFrom: existing.tokenEndpointAuthMethod,
+        tokenEndpointAuthMethodTo: authMethodDrift ? "none" : existing.tokenEndpointAuthMethod,
+        clientSecretCleared: authMethodDrift && existing.clientSecret !== null,
       });
     }
     return existing.clientId;

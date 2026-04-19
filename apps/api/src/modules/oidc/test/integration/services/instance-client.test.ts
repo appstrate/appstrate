@@ -194,6 +194,142 @@ describe("ensureInstanceClient", () => {
     expect(after!.redirectUris).toEqual(["https://example.com/auth/callback"]);
   });
 
+  it("reconciles auth method drift from pre-#154 confidential client", async () => {
+    const { ensureInstanceClient, hashSecret } = await import("../../../services/oauth-admin.ts");
+
+    // Seed a pre-#154 row: confidential client with hashed secret.
+    const id = "oac_legacy_test_0000000000000001";
+    const clientId = "oauth_legacy_instance_client";
+    const hashedSecret = await hashSecret("legacy-platform-secret");
+    const now = new Date();
+    await db.insert(oauthClient).values({
+      id,
+      clientId,
+      clientSecret: hashedSecret,
+      name: "Appstrate Platform",
+      redirectUris: ["http://localhost:3000/auth/callback"],
+      postLogoutRedirectUris: ["http://localhost:3000", "http://localhost:3000/login"],
+      scopes: ["openid", "profile", "email", "offline_access"],
+      level: "instance",
+      referencedOrgId: null,
+      referencedApplicationId: null,
+      metadata: JSON.stringify({ level: "instance", clientId }),
+      skipConsent: true,
+      allowSignup: true,
+      signupRole: "member",
+      disabled: false,
+      type: "web",
+      public: false,
+      tokenEndpointAuthMethod: "client_secret_basic",
+      grantTypes: ["authorization_code", "refresh_token"],
+      responseTypes: ["code"],
+      requirePKCE: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const reconciled = await ensureInstanceClient("http://localhost:3000");
+    expect(reconciled).toBe(clientId);
+
+    const [row] = await db
+      .select()
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, clientId))
+      .limit(1);
+    expect(row).toBeDefined();
+    expect(row!.public).toBe(true);
+    expect(row!.tokenEndpointAuthMethod).toBe("none");
+    expect(row!.clientSecret).toBeNull();
+    // clientId unchanged → outstanding tokens still valid
+    expect(row!.clientId).toBe(clientId);
+    // Redirect URIs unchanged (already correct)
+    expect(row!.redirectUris).toEqual(["http://localhost:3000/auth/callback"]);
+  });
+
+  it("does not touch an already-conforming public client", async () => {
+    const { ensureInstanceClient } = await import("../../../services/oauth-admin.ts");
+    await ensureInstanceClient("http://localhost:3000");
+
+    const [before] = await db
+      .select()
+      .from(oauthClient)
+      .where(eq(oauthClient.level, "instance"))
+      .limit(1);
+    expect(before!.public).toBe(true);
+    expect(before!.tokenEndpointAuthMethod).toBe("none");
+    expect(before!.clientSecret).toBeNull();
+    const originalUpdatedAt = before!.updatedAt!.getTime();
+
+    await ensureInstanceClient("http://localhost:3000");
+
+    const [after] = await db
+      .select()
+      .from(oauthClient)
+      .where(eq(oauthClient.level, "instance"))
+      .limit(1);
+    expect(after!.updatedAt!.getTime()).toBe(originalUpdatedAt);
+    expect(after!.public).toBe(true);
+    expect(after!.tokenEndpointAuthMethod).toBe("none");
+    expect(after!.clientSecret).toBeNull();
+  });
+
+  it("converges redirect drift + auth method drift in a single atomic UPDATE", async () => {
+    const { ensureInstanceClient, hashSecret } = await import("../../../services/oauth-admin.ts");
+
+    // Seed a legacy row with stale redirects AND confidential auth shape.
+    const id = "oac_legacy_test_0000000000000002";
+    const clientId = "oauth_legacy_combined_drift";
+    const hashedSecret = await hashSecret("legacy-combined-secret");
+    const staleDate = new Date(0);
+    await db.insert(oauthClient).values({
+      id,
+      clientId,
+      clientSecret: hashedSecret,
+      name: "Appstrate Platform",
+      redirectUris: ["https://old.example.com/auth/callback"],
+      postLogoutRedirectUris: ["https://old.example.com", "https://old.example.com/login"],
+      scopes: ["openid", "profile", "email", "offline_access"],
+      level: "instance",
+      referencedOrgId: null,
+      referencedApplicationId: null,
+      metadata: JSON.stringify({ level: "instance", clientId }),
+      skipConsent: true,
+      allowSignup: true,
+      signupRole: "member",
+      disabled: false,
+      type: "web",
+      public: false,
+      tokenEndpointAuthMethod: "client_secret_basic",
+      grantTypes: ["authorization_code", "refresh_token"],
+      responseTypes: ["code"],
+      requirePKCE: true,
+      createdAt: staleDate,
+      updatedAt: staleDate,
+    });
+
+    const reconciled = await ensureInstanceClient("https://new.example.com");
+    expect(reconciled).toBe(clientId);
+
+    const [row] = await db
+      .select()
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, clientId))
+      .limit(1);
+    expect(row).toBeDefined();
+    // Auth shape converged
+    expect(row!.public).toBe(true);
+    expect(row!.tokenEndpointAuthMethod).toBe("none");
+    expect(row!.clientSecret).toBeNull();
+    // Redirect URIs converged
+    expect(row!.redirectUris).toEqual(["https://new.example.com/auth/callback"]);
+    expect(row!.postLogoutRedirectUris).toEqual([
+      "https://new.example.com",
+      "https://new.example.com/login",
+    ]);
+    // Single UPDATE happened (updatedAt advanced past the sentinel)
+    expect(row!.updatedAt!.getTime()).toBeGreaterThan(staleDate.getTime());
+  });
+
   it("rejects APP_URL that would produce an invalid redirect URI", async () => {
     const { ensureInstanceClient, OAuthAdminValidationError } =
       await import("../../../services/oauth-admin.ts");
