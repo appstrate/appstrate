@@ -3,9 +3,17 @@
 /**
  * `appstrate whoami` — print the identity attached to the active profile.
  *
- * Pulls the BA session via `GET /api/auth/get-session` so a revoked or
- * expired token surfaces as `AuthError` with a clear "re-login" message
- * rather than printing stale data read from `config.toml`.
+ * Calls `GET /api/profile` to verify the stored JWT is still valid AND
+ * fetch the authoritative current identity. A revoked or expired token
+ * surfaces as `AuthError` with a clear "re-login" message rather than
+ * printing stale data read from `config.toml`. The email is read from
+ * the server response — the locally-cached `profile.email` (persisted
+ * at login from the decoded JWT) is kept on disk only as an offline
+ * bootstrap hint and is deliberately NOT what we print, so a dashboard-
+ * side email change is reflected on the next `whoami`. We cannot use
+ * BA's `/api/auth/get-session` here: that endpoint is handled by BA's
+ * own cookie-based session handler and does not know how to resolve
+ * the Bearer JWT issued by `/api/auth/cli/token`.
  */
 
 import { readConfig, resolveProfileName } from "../lib/config.ts";
@@ -16,16 +24,11 @@ export interface WhoamiOptions {
   profile?: string;
 }
 
-interface SessionResponse {
-  user: {
-    id: string;
-    email: string;
-    name?: string;
-  } | null;
-  session: {
-    id: string;
-    expiresAt: string;
-  } | null;
+interface ProfileResponse {
+  id: string;
+  displayName: string | null;
+  language: string | null;
+  email: string | null;
 }
 
 export async function whoamiCommand(opts: WhoamiOptions): Promise<void> {
@@ -41,24 +44,15 @@ export async function whoamiCommand(opts: WhoamiOptions): Promise<void> {
   }
 
   try {
-    const session = await apiFetch<SessionResponse | null>(profileName, "/api/auth/get-session");
-    if (!session?.user) {
-      process.stderr.write(
-        `No active session for "${profileName}". Run: appstrate login --profile ${profileName}\n`,
-      );
-      process.exit(1);
-    }
+    const me = await apiFetch<ProfileResponse>(profileName, "/api/profile");
 
     process.stdout.write(
       [
         `Profile:  ${profileName}`,
         `Instance: ${profile.instance}`,
-        `User:     ${session.user.email}`,
-        session.user.name ? `Name:     ${session.user.name}` : null,
+        me.email ? `User:     ${me.email}` : null,
+        me.displayName ? `Name:     ${me.displayName}` : null,
         profile.orgId ? `Org:      ${profile.orgId}` : null,
-        session.session?.expiresAt
-          ? `Expires:  ${new Date(session.session.expiresAt).toISOString()}`
-          : null,
       ]
         .filter(Boolean)
         .join("\n") + "\n",

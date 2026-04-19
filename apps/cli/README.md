@@ -95,11 +95,11 @@ appstrate login --profile prod --instance https://app.my.io
 1. `POST /api/auth/device/code` → receive `device_code`, `user_code`, `verification_uri_complete`, `expires_in` (10 min), `interval` (5s).
 2. CLI prints the code, opens the verification URI in the browser via the [`open`](https://www.npmjs.com/package/open) package (silent fallback on headless hosts — the URL is still displayed in the terminal).
 3. User authenticates on the instance's `/activate` SSR page and clicks "Autoriser". A realm guard on `/device/approve` rejects cross-audience approval attempts (e.g. an application-level end-user trying to approve a CLI session) — see [ADR-006](../../docs/adr/ADR-006-cli-device-flow-monorepo.md) for rationale.
-4. CLI polls `POST /api/auth/device/token` every `interval` seconds (honoring `slow_down` backoff) until approval. On success: receives `access_token` (a raw Better Auth session token, not a JWT).
-5. CLI calls `/api/auth/get-session` with `Authorization: Bearer <token>` to fetch the canonical identity.
-6. Session token is stored in the OS keyring; profile is written to `config.toml`.
+4. CLI polls `POST /api/auth/cli/token` every `interval` seconds (honoring `slow_down` backoff) until approval. On success: receives an `access_token` (15-minute signed JWT, ES256) + `refresh_token` (30-day opaque rotating token) pair — see issue #165.
+5. CLI decodes the JWT payload locally to extract `sub` (user id) and `email` from its claims. No second round-trip needed — the JWT is the authoritative identity source, and `/api/auth/get-session` does not understand Bearer JWTs (that endpoint is BA's cookie-based session reader).
+6. Tokens are stored in the OS keyring; profile is written to `config.toml`.
 
-**Session lifetime**: 7 days (Better Auth session default). No refresh token — re-run `appstrate login` when the session expires. The CLI surfaces an `AuthError` with a re-login hint on 401 responses.
+**Session lifetime**: 15-minute access token + 30-day rotating refresh token (RFC 6819 §5.2.2.3 reuse detection). The CLI transparently refreshes on 401; re-run `appstrate login` only when the refresh token family is revoked or the 30-day window elapses.
 
 ---
 
@@ -124,7 +124,7 @@ If the instance is unreachable, local credentials are still wiped (with a warnin
 
 ### `appstrate whoami`
 
-Prints the identity attached to a profile by calling `/api/auth/get-session` with the stored token.
+Prints the identity attached to a profile. Verifies the stored JWT is still valid by calling `GET /api/profile` (a 401 surfaces as a clear "re-login" error); the email comes from the profile persisted at login.
 
 ```sh
 appstrate whoami

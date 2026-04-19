@@ -16,7 +16,7 @@ describe("Profile API", () => {
   });
 
   describe("GET /api/profile", () => {
-    it("returns user profile", async () => {
+    it("returns user profile including email", async () => {
       const res = await app.request("/api/profile", {
         headers: { Cookie: ctx.cookie },
       });
@@ -26,11 +26,31 @@ describe("Profile API", () => {
       expect(body.id).toBe(ctx.user.id);
       expect(body.displayName).toBeTruthy();
       expect(body.language).toBe("fr"); // default
+      // Email is the authoritative "current identity" — surfaced to the
+      // CLI so `whoami` reflects dashboard-side email changes.
+      expect(body.email).toBe(ctx.user.email);
     });
 
     it("returns 401 without auth", async () => {
       const res = await app.request("/api/profile");
       expect(res.status).toBe(401);
+    });
+
+    // Scope-independence invariant: `/api/profile` must be reachable by
+    // any authenticated caller — including CLI-scope JWTs that carry
+    // only `user` + `applicationId` in context (no OIDC scope claim, no
+    // X-Org-Id). The CLI's `whoami` relies on this to verify its
+    // session is valid without needing an org pin. This test uses the
+    // session cookie (which also has no OIDC scope) to pin the
+    // invariant: `/api/profile` does not require a particular scope or
+    // org context to resolve.
+    it("does not require an OIDC scope or X-Org-Id header", async () => {
+      const res = await app.request("/api/profile", {
+        // Deliberately NO X-Org-Id — cookie-only (same profile a
+        // zero-scope CLI JWT observes).
+        headers: { Cookie: ctx.cookie },
+      });
+      expect(res.status).toBe(200);
     });
   });
 
