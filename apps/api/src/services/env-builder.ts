@@ -133,6 +133,8 @@ export async function buildRunContext(params: {
       : `http://host.docker.internal:${apiEnv.PORT}`);
 
   const promptContext: PromptContext = {
+    schemaVersion: (agent.manifest.schemaVersion as string | undefined) ?? "1.0",
+    runId,
     rawPrompt: agent.prompt,
     tokens,
     config,

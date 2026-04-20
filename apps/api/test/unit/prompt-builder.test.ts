@@ -644,3 +644,97 @@ describe("buildEnrichedPrompt — tools and skills", () => {
     expect(prompt).not.toContain("### Skills");
   });
 });
+
+// ─── schemaVersion template rendering ──────────────────────
+
+describe("buildEnrichedPrompt — schemaVersion 1.1 template rendering", () => {
+  it("does NOT interpolate {{…}} in legacy schemaVersion 1.0 (verbatim append)", () => {
+    const ctx = baseContext({
+      schemaVersion: "1.0",
+      runId: "run_abc",
+      input: { topic: "physics" },
+      rawPrompt: "Topic is {{input.topic}}, run {{runId}}.",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("Topic is {{input.topic}}, run {{runId}}.");
+    expect(prompt).not.toContain("Topic is physics");
+  });
+
+  it("does NOT interpolate when schemaVersion is undefined (defaults to legacy)", () => {
+    const ctx = baseContext({
+      schemaVersion: undefined,
+      runId: "r",
+      input: { x: "y" },
+      rawPrompt: "raw {{input.x}}",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("raw {{input.x}}");
+  });
+
+  it("renders {{runId}} and {{input.*}} on schemaVersion 1.1", () => {
+    const ctx = baseContext({
+      schemaVersion: "1.1",
+      runId: "run_abc",
+      input: { topic: "quantum" },
+      rawPrompt: "Investigate {{input.topic}} for {{runId}}.",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("Investigate quantum for run_abc.");
+    expect(prompt).not.toContain("{{");
+  });
+
+  it("renders memory sections on schemaVersion 1.1", () => {
+    const ctx = baseContext({
+      schemaVersion: "1.1",
+      memories: [
+        { id: 1, content: "alpha", createdAt: "2026-01-01T00:00:00Z" },
+        { id: 2, content: "beta", createdAt: null },
+      ],
+      rawPrompt: "Past:\n{{#memories}}- {{content}}\n{{/memories}}End.",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("Past:\n- alpha\n- beta\nEnd.");
+  });
+
+  it("inverted section renders when memories are empty on 1.1", () => {
+    const ctx = baseContext({
+      schemaVersion: "1.1",
+      memories: [],
+      rawPrompt: "{{^memories}}No prior memories.{{/memories}}",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("No prior memories.");
+  });
+
+  it("renders higher minor (1.2) and future majors (2.0) through the template path", () => {
+    const tpl = "Hello {{input.who}}";
+    const forVersion = (v: string): string =>
+      buildEnrichedPrompt(
+        baseContext({ schemaVersion: v, input: { who: "World" }, rawPrompt: tpl }),
+      );
+    expect(forVersion("1.2")).toContain("Hello World");
+    expect(forVersion("2.0")).toContain("Hello World");
+  });
+
+  it("treats a malformed schemaVersion as legacy (verbatim)", () => {
+    const ctx = baseContext({
+      schemaVersion: "not-a-version",
+      input: { x: 1 },
+      rawPrompt: "{{input.x}}",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("{{input.x}}");
+  });
+
+  it("preserves the enrichment sections when schemaVersion is 1.1", () => {
+    const ctx = baseContext({
+      schemaVersion: "1.1",
+      input: { task: "hello" },
+      rawPrompt: "Run: {{input.task}}",
+    });
+    const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).toContain("## System");
+    expect(prompt).toContain("Appstrate platform");
+    expect(prompt).toMatch(/Run: hello$/);
+  });
+});

@@ -8,6 +8,49 @@ import {
 } from "@appstrate/connect";
 import { isFileField } from "@appstrate/core/form";
 import { sanitizeStorageKey } from "../file-storage.ts";
+import { renderTemplate } from "@appstrate/afps-runtime/template";
+
+/**
+ * Schema versions at or above this threshold render their rawPrompt
+ * through logic-less Mustache against a {@link PromptView}. Older
+ * versions (including 1.0) keep the literal-append behaviour for
+ * backwards compatibility. See AFPS_EXTENSION_ARCHITECTURE.md §3.2.
+ */
+const TEMPLATE_RENDER_MIN_VERSION = [1, 1] as const;
+
+function supportsTemplateRendering(schemaVersion: string | undefined): boolean {
+  if (!schemaVersion) return false;
+  const match = /^(\d+)\.(\d+)/.exec(schemaVersion);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const [minMajor, minMinor] = TEMPLATE_RENDER_MIN_VERSION;
+  return major > minMajor || (major === minMajor && minor >= minMinor);
+}
+
+/**
+ * Projection of {@link PromptContext} surfaced to 1.1+ templates. Shape
+ * matches `PromptView` in @appstrate/afps-runtime/bundle but is rebuilt
+ * here to avoid a circular dependency through the workspace package.
+ */
+function buildTemplateView(ctx: PromptContext): {
+  runId: string;
+  input: Record<string, unknown>;
+  config: Record<string, unknown>;
+  state: unknown;
+  memories: Array<{ content: string; createdAt: string | null }>;
+} {
+  return {
+    runId: ctx.runId ?? "",
+    input: ctx.input,
+    config: ctx.config,
+    state: ctx.previousState,
+    memories: (ctx.memories ?? []).map((m) => ({
+      content: m.content,
+      createdAt: m.createdAt,
+    })),
+  };
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -306,6 +349,12 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
     sections.push("Returns `{ runs: [{ id, status, date, duration, ...selected_fields }] }`\n");
   }
 
-  // Append raw prompt at the end, without any interpolation
-  return sections.join("\n") + "\n---\n\n" + ctx.rawPrompt;
+  // schemaVersion 1.1+: render rawPrompt through logic-less Mustache so
+  // templates can reference `{{runId}}`, `{{input.*}}`, `{{#memories}}…`,
+  // etc. Legacy 1.0 bundles keep verbatim append — unchanged output.
+  const finalRawPrompt = supportsTemplateRendering(ctx.schemaVersion)
+    ? renderTemplate(ctx.rawPrompt, buildTemplateView(ctx))
+    : ctx.rawPrompt;
+
+  return sections.join("\n") + "\n---\n\n" + finalRawPrompt;
 }

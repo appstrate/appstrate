@@ -40,6 +40,16 @@ export type FileReference = Omit<UploadedFile, "buffer">;
 export type { ToolMeta };
 
 export interface PromptContext {
+  /**
+   * AFPS schemaVersion from the agent manifest (e.g. `"1.0"`, `"1.1"`).
+   * Selects the render path in `buildEnrichedPrompt`:
+   *   - `"1.0"` (or absent / unrecognised) → rawPrompt appended verbatim.
+   *   - `"1.1"` and above → rawPrompt rendered via logic-less Mustache
+   *     against a {@link PromptView} (see @appstrate/afps-runtime/bundle).
+   */
+  schemaVersion?: string;
+  /** Unique run identifier, exposed to 1.1+ templates as `{{runId}}`. */
+  runId?: string;
   rawPrompt: string;
   tokens: Record<string, string>;
   config: Record<string, unknown>;
