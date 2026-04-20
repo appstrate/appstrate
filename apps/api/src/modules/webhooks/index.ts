@@ -20,6 +20,18 @@ import { initWebhookWorker, shutdownWebhookWorker, dispatchRunWebhook } from "./
 import { webhooksPaths } from "./openapi/paths.ts";
 import { webhooksSchemas } from "./openapi/schemas.ts";
 
+// Register `webhooks` as a module-owned RBAC resource. The declaration
+// merging on `AppstrateModuleResources` re-enters the typed Resource
+// union consumed by `apps/api/src/middleware/require-permission.ts` and
+// by the standalone `requireModulePermission` helper in core, so
+// `requirePermission("webhooks", "write")` and
+// `requireModulePermission("webhooks", "write")` stay fully narrowed.
+declare module "@appstrate/core/permissions" {
+  interface AppstrateModuleResources {
+    webhooks: "read" | "write" | "delete";
+  }
+}
+
 const webhooksModule: AppstrateModule = {
   manifest: { id: "webhooks", name: "Webhooks", version: "1.0.0" },
 
@@ -68,6 +80,21 @@ const webhooksModule: AppstrateModule = {
   },
 
   features: { webhooks: true },
+
+  // RBAC contribution: webhooks is admin-tier. No member/viewer access —
+  // webhook secrets and delivery data are sensitive (org integrations,
+  // downstream systems). API keys can carry the scope (`apiKeyGrantable`)
+  // since headless deployments need programmatic webhook management.
+  // End-user OIDC tokens are denied (`endUserGrantable` stays false) —
+  // embedding apps do not administer the org's outbound integrations.
+  permissionsContribution: () => [
+    {
+      resource: "webhooks",
+      actions: ["read", "write", "delete"],
+      grantTo: ["owner", "admin"],
+      apiKeyGrantable: true,
+    },
+  ],
 
   events: {
     onRunStatusChange: (params: RunStatusChangeParams) => {

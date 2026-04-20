@@ -39,8 +39,15 @@ import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
+import { installPermissionAuditLogger } from "./permission-audit.ts";
 
 export async function boot(): Promise<void> {
+  // Register RBAC denial audit handler BEFORE modules load. Every guard
+  // created from this point on — core routes via `requirePermission`,
+  // module routes via `requireModulePermission`/`requireCorePermission` —
+  // flows through the same `permission_denied` log line.
+  installPermissionAuditLogger();
+
   // Apply core migrations at boot (before modules, so DB is ready).
   // Both PGlite and PostgreSQL auto-migrate — no manual `db:migrate` step needed.
   const env = (await import("@appstrate/env")).getEnv();

@@ -15,39 +15,43 @@
  * translation layer.
  */
 
-import { resolvePermissions, type Permission } from "../../../lib/permissions.ts";
+import { getModuleEndUserAllowedScopes, type OrgRole } from "@appstrate/core/permissions";
+import { resolvePermissions } from "../../../lib/permissions.ts";
 import { logger } from "../../../lib/logger.ts";
-import type { OrgRole } from "../../../types/index.ts";
 import { OIDC_ALLOWED_SCOPES, OIDC_IDENTITY_SCOPE_SET } from "./scopes.ts";
 
 type ActorType = "dashboard_user" | "end_user" | "user";
 
 /**
- * Runtime-validated narrowing from `string` to `Permission`.
+ * Runtime membership check against the safe end-user allowlist —
+ * `OIDC_ALLOWED_SCOPES` (core-owned built-in surface) ∪ module
+ * contributions opted in via `permissionsContribution({ endUserGrantable: true })`.
  *
- * `OIDC_ALLOWED_SCOPES` is typed as `ReadonlySet<Permission>`, so a
- * membership check is sufficient evidence that the input is a valid
- * `Permission`. Declaring this as a type predicate gives us a single
- * documented widening point instead of sprinkling `as Permission` casts
- * across the loop body — a reviewer can audit one function instead of
- * every call site, and any future change to `OIDC_ALLOWED_SCOPES` is
- * reflected here automatically.
+ * Returns `boolean` (not a type predicate) because the consumer at this
+ * layer treats permissions as opaque `string`s: the granted set flows
+ * into `AuthResolution.permissions: readonly string[]`, then into
+ * `c.set("permissions", Set<string>)`. Strong typing kicks back in at
+ * the apps/api guard sites (`requirePermission(resource, action)`)
+ * which key on the `Resource`/`Action` discriminated union — keeping
+ * this file ignorant of that union avoids coupling the OIDC module to
+ * apps/api's `Permission` type.
+ *
+ * Module surface read on every call (no caching): the snapshot is
+ * computed once at boot, so the lookup is a single `Set.has` — the
+ * indirection is free, and a stale cache would mask test-time module
+ * resets (`resetModules` clears the provider).
  */
-function isAllowedOidcScope(s: string): s is Permission {
-  return (OIDC_ALLOWED_SCOPES as ReadonlySet<string>).has(s);
-}
-
-/** Runtime-validated narrowing through a role-ceiling Set<Permission>. */
-function isWithinCeiling(s: string, ceiling: ReadonlySet<Permission>): s is Permission {
-  return (ceiling as ReadonlySet<string>).has(s);
+function isAllowedOidcScope(s: string): boolean {
+  if ((OIDC_ALLOWED_SCOPES as ReadonlySet<string>).has(s)) return true;
+  return getModuleEndUserAllowedScopes().has(s);
 }
 
 export function scopesToPermissions(
   scope: string | undefined,
   actorType: ActorType,
   orgRole?: OrgRole,
-): Set<Permission> {
-  const granted = new Set<Permission>();
+): Set<string> {
+  const granted = new Set<string>();
   if (!scope) return granted;
 
   // Instance-level tokens ("user") defer permission resolution to the
@@ -59,7 +63,7 @@ export function scopesToPermissions(
   // granted iff the role allows it. This prevents token privilege
   // escalation after a role downgrade and matches the way API keys derive
   // their effective permissions (see `resolveApiKeyPermissions`).
-  const ceiling: ReadonlySet<Permission> | undefined =
+  const ceiling: ReadonlySet<string> | undefined =
     actorType === "dashboard_user" && orgRole ? resolvePermissions(orgRole) : undefined;
 
   // Safety alarm: a dashboard token without an `orgRole` gets zero scopes
@@ -85,16 +89,15 @@ export function scopesToPermissions(
       if (isAllowedOidcScope(s)) {
         granted.add(s);
       } else {
-        logger.debug("oidc: end_user scope dropped (not in OIDC_ALLOWED_SCOPES)", {
-          module: "oidc",
-          scope: s,
-        });
+        logger.debug(
+          "oidc: end_user scope dropped (not in OIDC_ALLOWED_SCOPES nor a module endUserGrantable contribution)",
+          { module: "oidc", scope: s },
+        );
       }
       continue;
     }
-    // Dashboard flow: scope must be a valid Permission AND the role must
-    // allow it (ceiling filter).
-    if (ceiling && isWithinCeiling(s, ceiling)) {
+    // Dashboard flow: scope must be present in the role's ceiling set.
+    if (ceiling && ceiling.has(s)) {
       granted.add(s);
       continue;
     }

@@ -1,19 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unified permission middleware.
+ * Unified permission middleware — apps/api-internal wrapper around the
+ * shared RBAC guard in `@appstrate/core/permissions`.
  *
- * Checks `c.get("permissions")` (a Set<string> resolved earlier in the auth pipeline)
- * against the required `resource:action`. Logs denied attempts for audit.
+ * Core and module routes converge on `makePermissionGuard` from core:
+ * same fail-closed semantics, same error shape, same audit hook. This
+ * file exists so core-route call sites can keep their union-typed
+ * ergonomics (`requirePermission("agents", "read")` narrows `action` on
+ * the core resource surface) while sharing the runtime with
+ * `requireCorePermission` / `requireModulePermission`.
+ *
+ * Audit logging is registered once at boot via
+ * `setPermissionDenialHandler` — see `apps/api/src/lib/permission-audit.ts`.
+ * Do not log denials here: that would double-log for core routes and
+ * leave module-route denials unaudited.
  *
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §4.3
  */
 
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { forbidden } from "../lib/errors.ts";
-import { hasPermission, type Resource, type Action } from "../lib/permissions.ts";
-import { logger } from "../lib/logger.ts";
+import { makePermissionGuard } from "@appstrate/core/permissions";
+import type { Resource, Action } from "../lib/permissions.ts";
 
 /**
  * Middleware factory: require a specific permission.
@@ -21,20 +30,6 @@ import { logger } from "../lib/logger.ts";
  * Usage: `router.post("/path", requirePermission("agents", "write"), handler)`
  */
 export function requirePermission<R extends Resource>(resource: R, action: Action<R>) {
-  return async (c: Context<AppEnv>, next: Next) => {
-    const permissions = c.get("permissions");
-    if (!permissions || !hasPermission(permissions, resource, action)) {
-      logger.warn("permission_denied", {
-        actorId: c.get("user")?.id,
-        orgId: c.get("orgId"),
-        authMode: c.get("authMethod"),
-        required: `${resource}:${action}`,
-        role: c.get("orgRole"),
-        path: `${c.req.method} ${c.req.path}`,
-        ...(c.get("apiKeyId") ? { apiKeyId: c.get("apiKeyId") } : {}),
-      });
-      throw forbidden(`Insufficient permissions: ${resource}:${action} required`);
-    }
-    return next();
-  };
+  const guard = makePermissionGuard(`${resource as string}:${action as string}`);
+  return (c: Context<AppEnv>, next: Next) => guard(c, next);
 }

@@ -12,6 +12,7 @@
 
 import type { Hono } from "hono";
 import type { Logger } from "./logger.ts";
+import type { OrgRole } from "./permissions.ts";
 import type {
   Actor,
   ContainerOrchestrator,
@@ -285,8 +286,103 @@ export interface AppstrateModule {
    */
   oidcScopes?: ReadonlyArray<`${string}:${string}`>;
 
+  /**
+   * RBAC contribution: declare resources owned by this module and how the
+   * core org roles grant their actions.
+   *
+   * Aggregated by the platform at boot and merged into:
+   *   1. `resolvePermissions(role)` — adds module entries to the per-role
+   *      permission set written to `c.get("permissions")`.
+   *   2. `API_KEY_ALLOWED_SCOPES` — module entries become grantable
+   *      through API keys (filtered against creator's role at issuance).
+   *   3. `requirePermission(resource, action)` — runtime check is purely
+   *      Set membership, so module entries gate routes the same way core
+   *      permissions do.
+   *
+   * Pair this with a TypeScript declaration-merging block on
+   * `@appstrate/core/permissions#AppstrateModuleResources` so call sites
+   * like `requirePermission("chat", "read")` stay typed end-to-end:
+   *
+   * ```ts
+   * declare module "@appstrate/core/permissions" {
+   *   interface AppstrateModuleResources { chat: "read" | "write" }
+   * }
+   *
+   * const chatModule: AppstrateModule = {
+   *   manifest: { id: "chat", name: "Chat", version: "1.0.0" },
+   *   permissionsContribution: () => [
+   *     {
+   *       resource: "chat",
+   *       actions: ["read", "write"],
+   *       grantTo: ["owner", "admin", "member"],
+   *       apiKeyGrantable: true,
+   *     },
+   *   ],
+   *   // ...
+   * };
+   * ```
+   *
+   * Constraints enforced at boot (fail-fast):
+   *   - resource name matches `^[a-z][a-z0-9_-]*$`
+   *   - action names match `^[a-z][a-z0-9_-]*$`
+   *   - resource does NOT collide with any core resource (org, agents, …)
+   *     or any other module's resource
+   *
+   * No-op on platforms that don't load this module — neither the type
+   * augmentation nor the runtime grants reach core, preserving the
+   * zero-footprint invariant.
+   */
+  permissionsContribution?(): ModulePermissionContribution[];
+
   /** Called during graceful shutdown (reverse init order). */
   shutdown?(): Promise<void>;
+}
+
+/**
+ * One resource's RBAC contribution from a module — declares the actions
+ * available, which org roles grant them, and whether they can be issued
+ * through API keys. See `AppstrateModule.permissionsContribution`.
+ */
+export interface ModulePermissionContribution {
+  /** Resource name (e.g. "chat"). Must be unique across loaded modules and disjoint from core resources. */
+  resource: string;
+  /** Actions the module supports for this resource (e.g. ["read", "write"]). */
+  actions: readonly string[];
+  /**
+   * Org roles that grant every listed action. The platform writes the
+   * union into `resolvePermissions(role)`. Omit a role to leave it
+   * without access (e.g. `viewer` typically only sees `:read`).
+   *
+   * Granular per-action grants (e.g. owner gets write, member gets read
+   * only) are supported by listing the resource multiple times with
+   * different `actions`/`grantTo` combinations.
+   */
+  grantTo: ReadonlyArray<OrgRole>;
+  /**
+   * When `true`, every `<resource>:<action>` produced by this entry is
+   * added to the API-key allowlist so org admins can mint keys with
+   * these scopes. Defaults to `false` — module permissions are
+   * session-only unless explicitly opted in.
+   */
+  apiKeyGrantable?: boolean;
+  /**
+   * When `true`, every `<resource>:<action>` produced by this entry can be
+   * carried by an end-user OAuth2/OIDC token (the embedding-app flow). The
+   * platform's OIDC strategy filters end-user JWT scopes against this
+   * allowlist before writing them to `c.get("permissions")` — without the
+   * opt-in, a module's resource is unreachable through end-user tokens
+   * even if the JWT advertises it.
+   *
+   * Defaults to `false` — module permissions are dashboard/instance/API-key
+   * only unless explicitly opted in. Use this for modules whose data is
+   * meant to be addressed per-end-user (chat sessions, end-user profiles,
+   * notifications…). Avoid for admin/destructive surfaces (those should
+   * stay session-only or API-key-only).
+   *
+   * No-op on platforms that don't load the OIDC module — the flag is
+   * simply ignored when no end-user pipeline exists.
+   */
+  endUserGrantable?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -411,7 +507,7 @@ export interface AuthResolution {
   user: { id: string; email: string; name: string };
   orgId?: string;
   orgSlug?: string;
-  orgRole?: "owner" | "admin" | "member" | "viewer";
+  orgRole?: OrgRole;
   /**
    * Strategy-chosen identifier for this auth method (e.g. "oidc", "mtls",
    * "webhook-hmac"). Written to `c.set("authMethod", ...)`. NOT constrained

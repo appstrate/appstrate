@@ -3,7 +3,6 @@
 import { describe, it, expect } from "bun:test";
 import {
   resolvePermissions,
-  hasPermission,
   validateScopes,
   resolveApiKeyPermissions,
   API_KEY_ALLOWED_SCOPES,
@@ -87,20 +86,6 @@ describe("resolvePermissions", () => {
     const b = resolvePermissions("admin");
     expect(a).not.toBe(b);
     expect(a).toEqual(b);
-  });
-});
-
-describe("hasPermission", () => {
-  it("checks exact resource:action match", () => {
-    const perms = new Set(["agents:read", "agents:write"]);
-    expect(hasPermission(perms, "agents", "read")).toBe(true);
-    expect(hasPermission(perms, "agents", "write")).toBe(true);
-    expect(hasPermission(perms, "agents", "delete")).toBe(false);
-  });
-
-  it("returns false for empty set", () => {
-    const perms = new Set<string>();
-    expect(hasPermission(perms, "agents", "read")).toBe(false);
   });
 });
 
@@ -204,7 +189,7 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
     }
   });
 
-  it("includes headless-relevant permissions", () => {
+  it("includes headless-relevant core permissions", () => {
     const included = [
       "agents:read",
       "agents:write",
@@ -222,15 +207,31 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "schedules:read",
       "schedules:write",
       "schedules:delete",
-      "webhooks:read",
-      "webhooks:write",
-      "webhooks:delete",
       "models:read",
       "models:write",
       "models:delete",
     ];
     for (const perm of included) {
       expect(API_KEY_ALLOWED_SCOPES.has(perm as never)).toBe(true);
+    }
+  });
+
+  it("excludes module-owned permissions — those are layered in at boot via getApiKeyAllowedScopes()", () => {
+    // webhooks:* and oauth-clients:* are now module-contributed with
+    // `apiKeyGrantable: true`, merged into the dynamic view by
+    // `getApiKeyAllowedScopes()`. The core constant must not carry them
+    // — otherwise disabling the webhooks/oidc modules would leave dead
+    // scope strings bound to API-key creation.
+    const moduleOwned = [
+      "webhooks:read",
+      "webhooks:write",
+      "webhooks:delete",
+      "oauth-clients:read",
+      "oauth-clients:write",
+      "oauth-clients:delete",
+    ];
+    for (const perm of moduleOwned) {
+      expect(API_KEY_ALLOWED_SCOPES.has(perm as never)).toBe(false);
     }
   });
 });

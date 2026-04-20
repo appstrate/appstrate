@@ -97,8 +97,14 @@ export type EnrichedSchedule = Schedule & {
 
 // --- Organization Types ---
 
-import { orgRoleEnum } from "@appstrate/db/schema";
-export type OrgRole = (typeof orgRoleEnum.enumValues)[number];
+// `OrgRole` is owned by `@appstrate/core/permissions` (the RBAC vocabulary
+// source of truth). The pgEnum in `packages/db/src/schema/enums.ts` lists
+// the same values; any drift is caught at typecheck by the
+// `Record<OrgRole, ReadonlySet<Permission>>` role-grant matrix in
+// `apps/api/src/lib/permissions.ts` (an exhaustive Record fails when a
+// role is added to one side and not the other).
+import type { OrgRole } from "@appstrate/core/permissions";
+export type { OrgRole };
 
 export const orgSettingsSchema = z.object({
   apiVersion: z.string().optional(),

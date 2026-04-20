@@ -21,7 +21,7 @@ import { eq } from "drizzle-orm";
 import type { AppEnv } from "../../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
-import { requirePermission } from "../../middleware/require-permission.ts";
+import { requireModulePermission, requireCorePermission } from "@appstrate/core/permissions";
 import { parseBody, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
@@ -439,7 +439,7 @@ export function createOidcRouter() {
     "/api/oauth/clients",
     rateLimit(10),
     idempotency(),
-    requirePermission("oauth-clients", "write"),
+    requireModulePermission("oauth-clients", "write"),
     async (c) => {
       const orgId = c.get("orgId");
       const body = await c.req.json();
@@ -485,7 +485,7 @@ export function createOidcRouter() {
   router.get(
     "/api/oauth/clients",
     rateLimit(300),
-    requirePermission("oauth-clients", "read"),
+    requireModulePermission("oauth-clients", "read"),
     async (c) => {
       const orgId = c.get("orgId");
       const appRows = await db
@@ -503,14 +503,14 @@ export function createOidcRouter() {
   router.get(
     "/api/oauth/scopes",
     rateLimit(300),
-    requirePermission("oauth-clients", "read"),
+    requireModulePermission("oauth-clients", "read"),
     async (c) => c.json({ data: [...getAppstrateScopes()] }),
   );
 
   router.get(
     "/api/oauth/clients/:clientId",
     rateLimit(300),
-    requirePermission("oauth-clients", "read"),
+    requireModulePermission("oauth-clients", "read"),
     async (c) => {
       const orgId = c.get("orgId");
       const client = await getClient(c.req.param("clientId")!);
@@ -524,7 +524,7 @@ export function createOidcRouter() {
   router.patch(
     "/api/oauth/clients/:clientId",
     rateLimit(10),
-    requirePermission("oauth-clients", "write"),
+    requireModulePermission("oauth-clients", "write"),
     async (c) => {
       const orgId = c.get("orgId");
       const clientId = c.req.param("clientId")!;
@@ -562,7 +562,7 @@ export function createOidcRouter() {
   router.delete(
     "/api/oauth/clients/:clientId",
     rateLimit(10),
-    requirePermission("oauth-clients", "delete"),
+    requireModulePermission("oauth-clients", "delete"),
     async (c) => {
       const orgId = c.get("orgId");
       const clientId = c.req.param("clientId")!;
@@ -577,7 +577,7 @@ export function createOidcRouter() {
   router.post(
     "/api/oauth/clients/:clientId/rotate",
     rateLimit(5),
-    requirePermission("oauth-clients", "write"),
+    requireModulePermission("oauth-clients", "write"),
     async (c) => {
       const orgId = c.get("orgId");
       const clientId = c.req.param("clientId")!;
@@ -618,7 +618,7 @@ export function createOidcRouter() {
   router.get(
     "/api/applications/:id/smtp-config",
     rateLimit(300),
-    requirePermission("applications", "read"),
+    requireCorePermission("applications", "read"),
     async (c) => {
       const applicationId = c.req.param("id")!;
       await assertAppBelongsToOrg(c, applicationId);
@@ -631,7 +631,7 @@ export function createOidcRouter() {
   router.put(
     "/api/applications/:id/smtp-config",
     rateLimit(20),
-    requirePermission("applications", "write"),
+    requireCorePermission("applications", "write"),
     async (c) => {
       const applicationId = c.req.param("id")!;
       await assertAppBelongsToOrg(c, applicationId);
@@ -650,7 +650,7 @@ export function createOidcRouter() {
   router.delete(
     "/api/applications/:id/smtp-config",
     rateLimit(10),
-    requirePermission("applications", "write"),
+    requireCorePermission("applications", "write"),
     async (c) => {
       const applicationId = c.req.param("id")!;
       await assertAppBelongsToOrg(c, applicationId);
@@ -663,7 +663,7 @@ export function createOidcRouter() {
   router.post(
     "/api/applications/:id/smtp-config/test",
     rateLimit(5),
-    requirePermission("applications", "write"),
+    requireCorePermission("applications", "write"),
     async (c) => {
       const applicationId = c.req.param("id")!;
       await assertAppBelongsToOrg(c, applicationId);
@@ -703,7 +703,7 @@ export function createOidcRouter() {
   router.get(
     "/api/applications/:id/social-providers/:provider",
     rateLimit(300),
-    requirePermission("applications", "read"),
+    requireCorePermission("applications", "read"),
     async (c) => {
       const applicationId = c.req.param("id")!;
       await assertAppBelongsToOrg(c, applicationId);
@@ -717,7 +717,7 @@ export function createOidcRouter() {
   router.put(
     "/api/applications/:id/social-providers/:provider",
     rateLimit(20),
-    requirePermission("applications", "write"),
+    requireCorePermission("applications", "write"),
     async (c) => {
       const applicationId = c.req.param("id")!;
       await assertAppBelongsToOrg(c, applicationId);
@@ -732,7 +732,7 @@ export function createOidcRouter() {
   router.delete(
     "/api/applications/:id/social-providers/:provider",
     rateLimit(10),
-    requirePermission("applications", "write"),
+    requireCorePermission("applications", "write"),
     async (c) => {
       const applicationId = c.req.param("id")!;
       await assertAppBelongsToOrg(c, applicationId);

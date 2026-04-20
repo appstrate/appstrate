@@ -1,75 +1,76 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * RBAC Permission Registry — Single source of truth.
+ * RBAC Permission Registry — role-grant matrix + API-key allowlist.
  *
- * Defines the mapping from org roles to permissions (`resource:action`).
- * Used by the `requirePermission()` middleware for both session and API key auth.
+ * The resource catalog itself (`AppstrateCoreResources`, `CoreResource`,
+ * `requireCorePermission`) lives in `@appstrate/core/permissions` so both
+ * core routes and externally-published modules can type-check against the
+ * same surface without pulling in the API package. This file only holds
+ * the runtime role→permissions matrix and the core API-key allowlist —
+ * coupled to the auth pipeline, not shippable from npm.
  *
- * ## Module-owned resources live here on purpose
+ * ## Core vs module resources
  *
- * `ResourceActions` is a **static TypeScript interface** so call sites like
- * `requirePermission("webhooks", "write")` stay fully typed at compile time.
- * That means modules cannot contribute permissions at runtime — a new module
- * that introduces its own resource (e.g. `webhooks`, `billing`) MUST edit
- * this file in the same PR that adds the module:
+ * Every resource name in `OWNER_PERMISSIONS` / `API_KEY_ALLOWED_SCOPES`
+ * below is a **core** resource (i.e. one declared on
+ * `AppstrateCoreResources`). Built-in modules (`webhooks`, `oidc`) and
+ * external modules contribute their resources at runtime through
+ * `AppstrateModule.permissionsContribution()` (paired with declaration
+ * merging on `AppstrateModuleResources` for compile-time narrowing).
+ * Contributions are aggregated at boot by `collectModulePermissions()`
+ * and merged into:
+ *   - `resolvePermissions(role)` — role-specific grants
+ *   - `getApiKeyAllowedScopes()` — when `apiKeyGrantable: true`
+ *   - `getModuleEndUserAllowedScopes()` — when `endUserGrantable: true`
  *
- *   1. Add the resource to the `ResourceActions` interface below.
- *   2. Add the resource's permissions to the relevant role sets
- *      (`OWNER_PERMISSIONS`, `ADMIN_PERMISSIONS`, `MEMBER_PERMISSIONS`).
- *   3. Add them to `API_KEY_ALLOWED_SCOPES` if they should be grantable
- *      through API keys.
+ * Removing a module from `MODULES` leaves zero footprint: no dead scope
+ * strings in the role sets, no dead entries in the API-key allowlist.
  *
- * This is a deliberate coupling — RBAC is a core concern and type safety
- * at the call site outweighs the "zero-footprint module" invariant. If a
- * module is disabled via `MODULES`, its permission entries become
- * unreachable (nothing mounts the routes that check them) but stay in the
- * type union — harmless.
+ * `Resource` is the **union** of both surfaces, so call sites like
+ * `requirePermission("webhooks", "read")` type-check uniformly whether
+ * `webhooks` ships as a module in this repo or as an external npm
+ * package that opened `AppstrateModuleResources`.
  *
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md
+ * @see packages/core/src/permissions.ts (the extension surface)
  */
 
-import type { OrgRole } from "../types/index.ts";
+import {
+  type AppstrateModuleResources,
+  type CoreResource,
+  type CoreAction,
+  type CorePermission,
+  type ModulePermission,
+  type OrgRole,
+  getModuleRoleScopes,
+  getModuleApiKeyScopes,
+} from "@appstrate/core/permissions";
 
 // ---------------------------------------------------------------------------
-// Resource & Action types
+// Resource & Action types — sourced from @appstrate/core/permissions
 // ---------------------------------------------------------------------------
 
-/** Map of resource → allowed actions. Single source of truth for the permission vocabulary. */
-interface ResourceActions {
-  org: "read" | "update" | "delete";
-  members: "read" | "invite" | "remove" | "change-role";
-  agents: "read" | "write" | "configure" | "delete" | "run";
-  skills: "read" | "write" | "delete";
-  tools: "read" | "write" | "delete";
-  providers: "read" | "write" | "delete";
-  runs: "read" | "cancel" | "delete";
-  schedules: "read" | "write" | "delete";
-  memories: "read" | "delete";
-  connections: "read" | "connect" | "disconnect";
-  profiles: "read" | "write" | "delete";
-  "app-profiles": "read" | "write" | "delete" | "bind";
-  models: "read" | "write" | "delete";
-  "provider-keys": "read" | "write" | "delete";
-  proxies: "read" | "write" | "delete";
-  "api-keys": "read" | "create" | "revoke";
-  applications: "read" | "write" | "delete";
-  "end-users": "read" | "write" | "delete";
-  webhooks: "read" | "write" | "delete";
-  "oauth-clients": "read" | "write" | "delete";
-  billing: "read" | "manage";
-}
+/** All resource names — core resources widened with module-augmented entries. */
+export type Resource = CoreResource | (keyof AppstrateModuleResources & string);
 
-/** All resource names. */
-export type Resource = keyof ResourceActions;
+/**
+ * Actions available for a given resource. Delegates to `CoreAction<R>` for
+ * core resources (keeping the lookup in one place); module-augmented
+ * resources resolve against their own declared action union. The `& string`
+ * intersection on the module branch is a type-system safety net — if a
+ * module ever declares a non-string action type the inferred union
+ * collapses to `never`, which propagates as a compile error at the
+ * middleware call site.
+ */
+export type Action<R extends Resource = Resource> = R extends CoreResource
+  ? CoreAction<R>
+  : R extends keyof AppstrateModuleResources
+    ? AppstrateModuleResources[R] & string
+    : never;
 
-/** Actions available for a given resource. */
-export type Action<R extends Resource = Resource> = ResourceActions[R];
-
-/** All valid `resource:action` permission strings, derived from ResourceActions. */
-export type Permission = {
-  [R in Resource]: `${R}:${ResourceActions[R]}`;
-}[Resource];
+/** All valid `resource:action` permission strings, derived from both core + module surfaces. */
+export type Permission = CorePermission | ModulePermission;
 
 // ---------------------------------------------------------------------------
 // Role → Permission matrix
@@ -147,13 +148,6 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "end-users:read",
   "end-users:write",
   "end-users:delete",
-  "webhooks:read",
-  "webhooks:write",
-  "webhooks:delete",
-  // OAuth clients (OIDC module)
-  "oauth-clients:read",
-  "oauth-clients:write",
-  "oauth-clients:delete",
   // Billing
   "billing:read",
   "billing:manage",
@@ -228,7 +222,7 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "billing:read",
 ]);
 
-/** Role → permissions mapping. */
+/** Role → core-permissions mapping. Module contributions are layered on top via the provider hook below. */
 const ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<Permission>> = {
   owner: OWNER_PERMISSIONS,
   admin: ADMIN_PERMISSIONS,
@@ -241,8 +235,11 @@ const ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<Permission>> = {
 // ---------------------------------------------------------------------------
 
 /**
- * Permissions that can be granted to API keys.
+ * Core permissions that can be granted to API keys.
  * Session-only operations (org management, billing, personal profiles, etc.) are excluded.
+ *
+ * Module-contributed permissions with `apiKeyGrantable: true` are layered
+ * on at runtime — call `getApiKeyAllowedScopes()` for the merged view.
  */
 export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>([
   // Agents
@@ -289,59 +286,71 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "end-users:read",
   "end-users:write",
   "end-users:delete",
-  // Webhooks
-  "webhooks:read",
-  "webhooks:write",
-  "webhooks:delete",
-  // OAuth clients (OIDC module)
-  "oauth-clients:read",
-  "oauth-clients:write",
-  "oauth-clients:delete",
 ]);
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Resolve an org role to its permission set. */
-export function resolvePermissions(role: OrgRole): Set<Permission> {
-  return new Set(ROLE_PERMISSIONS[role]);
+/** Merged view of API-key-grantable permissions (core + modules opted in). */
+export function getApiKeyAllowedScopes(): ReadonlySet<string> {
+  const moduleAllowed = getModuleApiKeyScopes();
+  if (moduleAllowed.size === 0) return API_KEY_ALLOWED_SCOPES;
+  return new Set<string>([...API_KEY_ALLOWED_SCOPES, ...moduleAllowed]);
 }
 
-/** Check if a permission set contains the required `resource:action`. */
-export function hasPermission<R extends Resource>(
-  permissions: ReadonlySet<string>,
-  resource: R,
-  action: Action<R>,
-): boolean {
-  return permissions.has(`${resource}:${action}`);
+/**
+ * Resolve an org role to its full permission set — core grants merged
+ * with any module-contributed grants for that role.
+ */
+export function resolvePermissions(role: OrgRole): Set<Permission> {
+  const core = ROLE_PERMISSIONS[role];
+  const mod = getModuleRoleScopes(role);
+  if (mod.size === 0) return new Set(core);
+  return new Set<Permission>([...core, ...(mod as ReadonlySet<Permission>)]);
+}
+
+/**
+ * Role permissions, widened to `ReadonlySet<string>` for ergonomic membership
+ * checks against un-narrowed input (API-key scopes, OIDC scope claims, etc.).
+ * Use this instead of `resolvePermissions(role)` when the input is a raw
+ * string the compiler hasn't narrowed yet — it spares call sites the
+ * `has(scope as Permission)` cast without widening the type contract
+ * downstream.
+ */
+export function roleScopes(role: OrgRole): ReadonlySet<string> {
+  return resolvePermissions(role);
 }
 
 /**
  * Validate and filter API key scopes.
  *
  * Returns only the scopes that are:
- * 1. Valid permission strings
+ * 1. Valid permission strings (core or module-contributed)
  * 2. Allowed for API keys (not session-only)
  * 3. Within the creator's own permissions (based on their role)
+ *
+ * The type predicate re-narrows the filtered strings to `Permission` — the
+ * runtime invariant is that survival in the filter proves membership in
+ * both `allowed` and the creator's role set, both of which are (logically)
+ * subsets of the `Permission` union.
  */
 export function validateScopes(scopes: string[], creatorRole: OrgRole): Permission[] {
-  const creatorPerms = ROLE_PERMISSIONS[creatorRole];
-  return scopes.filter(
-    (s): s is Permission =>
-      API_KEY_ALLOWED_SCOPES.has(s as Permission) && creatorPerms.has(s as Permission),
-  );
+  const creatorPerms = roleScopes(creatorRole);
+  const allowed = getApiKeyAllowedScopes();
+  return scopes.filter((s): s is Permission => allowed.has(s) && creatorPerms.has(s));
 }
 
 /**
  * Compute effective permissions for an API key.
- * Returns the intersection of key scopes with the creator's current role permissions.
+ * Returns the intersection of key scopes with the creator's current role permissions
+ * (including module-contributed grants).
  */
 export function resolveApiKeyPermissions(scopes: string[], creatorRole: OrgRole): Set<Permission> {
-  const rolePerms = ROLE_PERMISSIONS[creatorRole];
+  const rolePerms = roleScopes(creatorRole);
   const effective = new Set<Permission>();
   for (const scope of scopes) {
-    if (rolePerms.has(scope as Permission)) {
+    if (rolePerms.has(scope)) {
       effective.add(scope as Permission);
     }
   }
