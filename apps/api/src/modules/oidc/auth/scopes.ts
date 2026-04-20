@@ -10,6 +10,7 @@
 
 import type { Permission } from "../../../lib/permissions.ts";
 import { getModuleOidcScopes } from "../../../lib/modules/module-loader.ts";
+import { logger } from "../../../lib/logger.ts";
 
 /**
  * OIDC protocol scopes that grant no Appstrate permission. Required by the
@@ -100,5 +101,32 @@ export function getAppstrateScopeSet(): ReadonlySet<string> {
  * module-contributed scopes are included. Kept as an alias for the
  * built-in list to ease the transition; remove once external consumers
  * have migrated.
+ *
+ * Reading this value triggers a one-shot `logger.warn` the first time
+ * any property is touched (including iteration). The Proxy rebinds
+ * method `this` so `[...APPSTRATE_SCOPES]`, `.length`, and index access
+ * all keep working against the underlying array. The platform itself
+ * never reads this constant — OIDC's boot path uses `getAppstrateScopes()`
+ * directly — so the warning fires only on an external consumer import.
  */
-export const APPSTRATE_SCOPES: readonly string[] = APPSTRATE_BUILTIN_SCOPES;
+export const APPSTRATE_SCOPES: readonly string[] = (() => {
+  let warned = false;
+  const warn = () => {
+    if (warned) return;
+    warned = true;
+    logger.warn(
+      "APPSTRATE_SCOPES is deprecated; call getAppstrateScopes() to include module-contributed scopes.",
+    );
+  };
+  return new Proxy(APPSTRATE_BUILTIN_SCOPES as readonly string[], {
+    get(t, prop, receiver) {
+      warn();
+      const value = Reflect.get(t, prop, receiver);
+      return typeof value === "function" ? value.bind(t) : value;
+    },
+    has(t, prop) {
+      warn();
+      return Reflect.has(t, prop);
+    },
+  });
+})();

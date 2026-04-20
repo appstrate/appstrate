@@ -14,9 +14,9 @@
  * catalog queries. Collisions are prevented by the 128-bit UUID payload.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages } from "@appstrate/db/schema";
+import { packages, runs } from "@appstrate/db/schema";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import { ApiError } from "../lib/errors.ts";
@@ -212,17 +212,44 @@ export async function triggerInlineRun(params: {
  * Purge-on-failure. Called when the pipeline rejects BEFORE creating the
  * `runs` row — the shadow row would otherwise leak forever.
  *
- * ⚠️ Do NOT call this once a `runs` row references the shadow:
- * `runs.package_id` has `ON DELETE CASCADE`, so deleting the shadow would
- * cascade-wipe the run history. After the run record is created, the
- * compaction worker (manifest/prompt NULL-out, row preserved) is the only
- * legitimate cleanup path.
+ * Defensive guard: `runs.package_id` has `ON DELETE CASCADE`, so deleting
+ * a shadow once any `runs` row references it would cascade-wipe the run
+ * history. The pipeline contract is "return !ok without creating a runs
+ * row", but we cannot rely on that invariant alone — any future refactor
+ * could introduce a late failure path that inserts `runs` first and then
+ * returns `!ok`. The pre-check below is a belt-and-suspenders: if a
+ * `runs` row already points at this shadow, skip the delete entirely and
+ * emit an error-level log so operators see the leak instead of losing
+ * the history silently.
+ *
+ * After the pipeline has promoted the shadow into a tracked run, the
+ * compaction worker (manifest/prompt NULL-out, row preserved) is the
+ * only legitimate cleanup path.
  */
 export async function deleteOrphanShadowPackage(id: string): Promise<void> {
   try {
-    await db.delete(packages).where(eq(packages.id, id));
+    // Belt: refuse to delete if any run already references the shadow.
+    // Cheap single-row probe — `runs.package_id` is indexed.
+    const referencing = await db
+      .select({ id: runs.id })
+      .from(runs)
+      .where(eq(runs.packageId, id))
+      .limit(1);
+    if (referencing.length > 0) {
+      logger.error(
+        "Refusing to delete inline shadow package with existing run references — pipeline invariant violated",
+        { shadowId: id, referencingRunId: referencing[0]!.id },
+      );
+      return;
+    }
+
+    // Suspenders: scope the DELETE to ephemeral-only so any future
+    // accidental call with a non-shadow id is a no-op instead of a wipe.
+    await db.delete(packages).where(and(eq(packages.id, id), eq(packages.ephemeral, true)));
   } catch (err) {
-    // Best-effort cleanup — log and move on.
+    // Best-effort cleanup — log and move on. A leaked shadow is reclaimed
+    // by the retention worker; a propagated error here would mask the
+    // original pipeline failure the caller is already re-throwing.
     logger.warn("Failed to delete orphan shadow package", {
       id,
       error: err instanceof Error ? err.message : String(err),

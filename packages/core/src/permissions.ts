@@ -407,10 +407,19 @@ export function setPermissionDenialHandler(handler: PermissionDenialHandler | nu
 
 /**
  * Build a Hono middleware that gates a route on `required` (shape:
- * `resource:action`). Public so apps/api can reuse the exact same runtime
- * path under its own union-typed `requirePermission` wrapper — any
- * divergence (logging, error shape, fail-closed checks) would silently
- * drift core-route audits away from module-route audits.
+ * `resource:action`). Shared runtime path for `requirePermission`,
+ * `requireCorePermission`, and `requireModulePermission` — any divergence
+ * (logging, error shape, fail-closed checks) would silently drift
+ * core-route audits away from module-route audits.
+ *
+ * @internal Not part of the stable module-author contract. Module code
+ * should use the typed `requireCorePermission` / `requireModulePermission`
+ * helpers instead — those recover literal-narrowing against
+ * `AppstrateCoreResources` / `AppstrateModuleResources` and catch typos
+ * at compile time. Calling `makePermissionGuard` directly bypasses that
+ * check: a bad string compiles, runs, and silently denies every request.
+ * Kept `export` (not underscore-prefixed) so apps/api can reuse the exact
+ * same runtime path under its own union-typed wrapper.
  */
 export function makePermissionGuard(
   required: string,
@@ -418,7 +427,19 @@ export function makePermissionGuard(
   return async (c, next) => {
     const perms = c.get("permissions") as ReadonlySet<string> | undefined;
     if (!perms || typeof perms.has !== "function" || !perms.has(required)) {
-      _denialHandler?.({ required, c });
+      // Audit is best-effort — a throwing handler must not escalate an
+      // authz denial into a 500 (which would leak timing info and, worse,
+      // mask the 403 in the error-handler's generic path). Catch + swallow
+      // + continue to throw `forbidden` deterministically.
+      if (_denialHandler) {
+        try {
+          _denialHandler({ required, c });
+        } catch {
+          // Deliberately swallowed — we cannot log from core (no logger
+          // wired at this layer) and bubbling would break the fail-closed
+          // contract. Operators see the 403 in request logs either way.
+        }
+      }
       throw forbidden(`Insufficient permissions: ${required} required`);
     }
     return next();

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
 import {
   requireModulePermission,
   requireCorePermission,
+  setPermissionDenialHandler,
   CORE_RESOURCE_NAMES,
   type AppstrateCoreResources,
 } from "../src/permissions.ts";
@@ -120,6 +121,51 @@ describe("requireCorePermission", () => {
       // expected
     }
     expect(called).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audit handler isolation — a throwing denial hook must NOT escalate a 403
+// into a 500 (which would mask the authz denial and change the client-facing
+// error shape). Locks the try/catch semantics of `makePermissionGuard`.
+// ---------------------------------------------------------------------------
+
+describe("setPermissionDenialHandler — fault isolation", () => {
+  afterEach(() => {
+    setPermissionDenialHandler(null);
+  });
+
+  test("throwing audit handler is swallowed; the middleware still throws Insufficient permissions", async () => {
+    setPermissionDenialHandler(() => {
+      throw new Error("audit sink down");
+    });
+    const middleware = requireModulePermission("chat", "read");
+    const c = makeContext(new Set([]));
+    await expect(middleware(c, async () => {})).rejects.toThrow(
+      /Insufficient permissions: chat:read required/,
+    );
+  });
+
+  test("handler is invoked exactly once per denial with the required permission", async () => {
+    const calls: string[] = [];
+    setPermissionDenialHandler((ctx) => {
+      calls.push(ctx.required);
+    });
+    const middleware = requireCorePermission("agents", "delete");
+    const c = makeContext(new Set([]));
+    await expect(middleware(c, async () => {})).rejects.toThrow(/agents:delete/);
+    expect(calls).toEqual(["agents:delete"]);
+  });
+
+  test("handler is NOT invoked when the permission is granted", async () => {
+    let invoked = false;
+    setPermissionDenialHandler(() => {
+      invoked = true;
+    });
+    const middleware = requireCorePermission("agents", "run");
+    const c = makeContext(new Set(["agents:run"]));
+    await middleware(c, async () => {});
+    expect(invoked).toBe(false);
   });
 });
 

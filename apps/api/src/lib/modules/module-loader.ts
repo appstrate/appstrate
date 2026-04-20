@@ -149,6 +149,18 @@ async function initSortedModules(
   // sees the merged view.
   const rbacSnapshot = collectModulePermissions(sorted);
   setModulePermissionsProvider(() => rbacSnapshot);
+  // Audit trace: `endUserGrantable` permissions are reachable through
+  // end-user OAuth/OIDC tokens issued by embedding apps — a much broader
+  // blast radius than session or API-key scopes. Surface the full list at
+  // boot so operators can review in a single log line whether a new
+  // external module opted anything risky in. Silent when no module opted
+  // in (OSS baseline, OIDC+webhooks only).
+  if (rbacSnapshot.endUserAllowed.size > 0) {
+    logger.info("Module contributions reachable via end-user OIDC tokens", {
+      count: rbacSnapshot.endUserAllowed.size,
+      scopes: [...rbacSnapshot.endUserAllowed].sort(),
+    });
+  }
   for (const mod of sorted) {
     try {
       await mod.init(ctx);

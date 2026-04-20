@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, spyOn } from "bun:test";
+import { describe, it, expect, spyOn, afterEach } from "bun:test";
 import { scopesToPermissions } from "../../auth/claims.ts";
 import { logger } from "../../../../lib/logger.ts";
 import { resolvePermissions } from "../../../../lib/permissions.ts";
 import { OIDC_ALLOWED_SCOPES } from "../../auth/scopes.ts";
+import {
+  setModulePermissionsProvider,
+  type ModulePermissionsSnapshot,
+} from "@appstrate/core/permissions";
 
 describe("scopesToPermissions — end_user flow", () => {
   it("returns an empty set for undefined / empty scope", () => {
@@ -55,6 +59,107 @@ describe("scopesToPermissions — end_user flow", () => {
     const memberPerms = resolvePermissions("member");
     for (const scope of OIDC_ALLOWED_SCOPES) {
       expect(memberPerms.has(scope)).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Module-contributed `endUserGrantable` propagation
+//
+// Regression coverage for the RBAC extension point: a module that opts
+// in to `endUserGrantable: true` on one of its resources MUST see that
+// resource accepted on end-user JWTs, while a sibling resource without
+// the opt-in MUST be dropped even if it is otherwise a valid grant.
+//
+// The unit layer is sufficient — `scopesToPermissions` is the single
+// policy node between a JWT scope string and the `c.get("permissions")`
+// Set that every guard reads. We inject a synthetic module snapshot
+// via `setModulePermissionsProvider`, call the filter, and assert the
+// end-user-allowed set reaches the granted Set; the integration
+// pipeline (JWT parse → strategy → auth-pipeline → guard) is already
+// covered by existing OIDC strategy tests for the in-tree OIDC scope
+// surface and adds no new branches for this extension.
+// ---------------------------------------------------------------------------
+
+function installSnapshot(snapshot: Partial<ModulePermissionsSnapshot>): void {
+  const full: ModulePermissionsSnapshot = {
+    byRole: {
+      owner: new Set(),
+      admin: new Set(),
+      member: new Set(),
+      viewer: new Set(),
+      ...(snapshot.byRole ?? {}),
+    },
+    apiKeyAllowed: snapshot.apiKeyAllowed ?? new Set(),
+    endUserAllowed: snapshot.endUserAllowed ?? new Set(),
+  };
+  setModulePermissionsProvider(() => full);
+}
+
+describe("scopesToPermissions — module endUserGrantable propagation", () => {
+  afterEach(() => {
+    // Belt on top of the global preload reset — makes the per-test
+    // isolation intent explicit at the test level and keeps this suite
+    // runnable in isolation (`bun test scopes-to-permissions.test.ts`)
+    // without leaking state to a subsequent manual run.
+    setModulePermissionsProvider(null);
+  });
+
+  it("end-user token carrying a module scope opted in via endUserGrantable is granted", () => {
+    installSnapshot({ endUserAllowed: new Set(["chat:read"]) });
+    const perms = scopesToPermissions("openid chat:read", "end_user");
+    expect([...perms]).toEqual(["chat:read"]);
+  });
+
+  it("module scope without endUserGrantable is dropped on end-user tokens", () => {
+    // `chat:write` is contributed but NOT opted in for end-users → the
+    // filter must strip it even if the JWT advertises it.
+    installSnapshot({ endUserAllowed: new Set(["chat:read"]) });
+    const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      const perms = scopesToPermissions("chat:read chat:write", "end_user");
+      expect([...perms]).toEqual(["chat:read"]);
+      // The dropped scope logs at debug with the standard metadata shape
+      // — regression guard on the audit trail for silent drops.
+      const dropped = debugSpy.mock.calls.find(
+        (call) => (call[1] as Record<string, unknown>)?.scope === "chat:write",
+      );
+      expect(dropped).toBeDefined();
+    } finally {
+      debugSpy.mockRestore();
+    }
+  });
+
+  it("module scope opted in for end-users coexists with core OIDC_ALLOWED_SCOPES", () => {
+    installSnapshot({ endUserAllowed: new Set(["chat:read", "notifications:read"]) });
+    const perms = scopesToPermissions(
+      "openid runs:read chat:read notifications:read agents:write",
+      "end_user",
+    );
+    // `runs:read` is in core OIDC_ALLOWED_SCOPES, the two module scopes
+    // come from endUserAllowed, and `agents:write` is neither → dropped.
+    expect([...perms].sort()).toEqual(["chat:read", "notifications:read", "runs:read"]);
+  });
+
+  it("OSS baseline (empty provider) preserves the pre-module filter behavior", () => {
+    installSnapshot({}); // endUserAllowed defaults to empty
+    const perms = scopesToPermissions("chat:read runs:read", "end_user");
+    // Only core OIDC_ALLOWED_SCOPES survives.
+    expect([...perms]).toEqual(["runs:read"]);
+  });
+
+  it("end-user module scope does NOT bypass the dashboard role ceiling", () => {
+    // Regression guard: the endUserAllowed Set is consulted only on the
+    // `end_user` branch of `scopesToPermissions`. A scope not in the
+    // dashboard user's role set must stay dropped on dashboard tokens,
+    // even when the module has opted the scope in for end-users.
+    installSnapshot({ endUserAllowed: new Set(["chat:read"]) });
+    const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      const perms = scopesToPermissions("chat:read", "dashboard_user", "member");
+      expect(perms.size).toBe(0);
+    } finally {
+      debugSpy.mockRestore();
     }
   });
 });
