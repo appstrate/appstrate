@@ -52,7 +52,8 @@
     "./sinks": "./src/sinks/index.ts",
     "./providers": "./src/providers/index.ts",
     "./template": "./src/template/index.ts",
-    "./bundle": "./src/bundle/index.ts"
+    "./bundle": "./src/bundle/index.ts",
+    "./conformance": "./src/conformance/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
