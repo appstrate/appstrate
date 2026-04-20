@@ -42,7 +42,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./interfaces": "./src/interfaces/index.ts",
-    "./types": "./src/types/index.ts"
+    "./types": "./src/types/index.ts",
+    "./events": "./src/events/index.ts",
+    "./sinks": "./src/sinks/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
