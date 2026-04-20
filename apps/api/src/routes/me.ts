@@ -55,11 +55,11 @@ router.get("/orgs", async (c) => {
     // that single id and return a one-element list so the SPA org picker
     // has a stable shape across auth methods.
     const orgId = c.get("orgId");
-    if (!orgId) return c.json({ organizations: [] });
+    if (!orgId) return c.json({ orgs: [] });
     const org = await getOrgById(orgId);
-    if (!org) return c.json({ organizations: [] });
+    if (!org) return c.json({ orgs: [] });
     return c.json({
-      organizations: [
+      orgs: [
         {
           id: org.id,
           name: org.name,
@@ -83,7 +83,7 @@ router.get("/orgs", async (c) => {
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
 
   return c.json({
-    organizations: orgs.map((o) => ({
+    orgs: orgs.map((o) => ({
       id: o.id,
       name: o.name,
       slug: o.slug,
@@ -109,7 +109,7 @@ router.get("/orgs", async (c) => {
 router.get("/models", requirePermission("models", "read"), async (c) => {
   const orgId = c.get("orgId");
   const models = await listOrgModels(orgId);
-  return c.json({ data: models });
+  return c.json({ models });
 });
 
 export default router;

@@ -35,7 +35,7 @@ export const mePaths = {
               schema: {
                 type: "object",
                 properties: {
-                  organizations: {
+                  orgs: {
                     type: "array",
                     items: {
                       type: "object",
@@ -57,7 +57,7 @@ export const mePaths = {
                 },
               },
               example: {
-                organizations: [
+                orgs: [
                   {
                     id: "org_abc123",
                     name: "Acme Corp",
@@ -96,7 +96,7 @@ export const mePaths = {
               schema: {
                 type: "object",
                 properties: {
-                  data: {
+                  models: {
                     type: "array",
                     items: { $ref: "#/components/schemas/OrgModel" },
                   },
