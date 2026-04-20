@@ -2,7 +2,15 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
-import { VERSION, afpsEventSchema, executionContextSchema, AUTH_KINDS } from "../src/index.ts";
+import {
+  VERSION,
+  afpsEventSchema,
+  executionContextSchema,
+  AUTH_KINDS,
+  renderTemplate,
+  renderPrompt,
+  NoopContextProvider,
+} from "../src/index.ts";
 
 describe("public surface", () => {
   it("exports VERSION matching package.json", () => {
@@ -17,6 +25,12 @@ describe("public surface", () => {
   it("exports the ExecutionContext Zod schema", () => {
     expect(executionContextSchema).toBeDefined();
     expect(typeof executionContextSchema.safeParse).toBe("function");
+  });
+
+  it("exports the Phase 4 template + bundle + providers surface", () => {
+    expect(typeof renderTemplate).toBe("function");
+    expect(typeof renderPrompt).toBe("function");
+    expect(new NoopContextProvider()).toBeDefined();
   });
 
   it("exports AUTH_KINDS as a const tuple with the expected members", () => {

@@ -44,7 +44,10 @@
     "./interfaces": "./src/interfaces/index.ts",
     "./types": "./src/types/index.ts",
     "./events": "./src/events/index.ts",
-    "./sinks": "./src/sinks/index.ts"
+    "./sinks": "./src/sinks/index.ts",
+    "./providers": "./src/providers/index.ts",
+    "./template": "./src/template/index.ts",
+    "./bundle": "./src/bundle/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -53,6 +56,10 @@
   },
   "dependencies": {
     "@afps-spec/schema": "^1.3.1",
+    "mustache": "^4.2.0",
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/mustache": "^4.2.6"
   }
 }
