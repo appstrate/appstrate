@@ -1,29 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * RBAC Permission Registry — Single source of truth for core resources.
+ * RBAC Permission Registry — role-grant matrix + API-key allowlist.
  *
- * Defines the mapping from org roles to permissions (`resource:action`).
- * Used by the `requirePermission()` middleware for both session and API key auth.
+ * The resource catalog itself (`AppstrateCoreResources`, `CoreResource`,
+ * `requireCorePermission`) lives in `@appstrate/core/permissions` so both
+ * core routes and externally-published modules can type-check against the
+ * same surface without pulling in the API package. This file only holds
+ * the runtime role→permissions matrix and the core API-key allowlist —
+ * coupled to the auth pipeline, not shippable from npm.
  *
- * ## Core resources vs module-contributed resources
+ * ## Core vs module resources
  *
- * `CoreResourceActions` is a **static TypeScript interface** so call sites like
- * `requirePermission("webhooks", "write")` stay fully typed at compile time.
- * In-house modules that ship inside the platform (`webhooks`, `oidc`,
- * `billing`) are listed here directly — they are not opt-out, so the
- * compile-time guarantee outweighs the "zero-footprint" invariant for them.
+ * Every resource name in `OWNER_PERMISSIONS` / `API_KEY_ALLOWED_SCOPES`
+ * below is a **core** resource (i.e. one declared on
+ * `AppstrateCoreResources`). Built-in modules (`webhooks`, `oidc`) and
+ * external modules contribute their resources at runtime through
+ * `AppstrateModule.permissionsContribution()` (paired with declaration
+ * merging on `AppstrateModuleResources` for compile-time narrowing).
+ * Contributions are aggregated at boot by `collectModulePermissions()`
+ * and merged into:
+ *   - `resolvePermissions(role)` — role-specific grants
+ *   - `getApiKeyAllowedScopes()` — when `apiKeyGrantable: true`
+ *   - `getModuleEndUserAllowedScopes()` — when `endUserGrantable: true`
  *
- * Truly external modules (anyone publishing on npm against
- * `@appstrate/core`) extend the resource catalog through TypeScript
- * declaration merging on `AppstrateModuleResources` (see
- * `@appstrate/core/permissions`) plus a runtime contribution through
- * `AppstrateModule.permissionsContribution()`. Both are aggregated at
- * boot — see `getModulePermissions()` in `lib/modules/module-loader.ts`.
+ * Removing a module from `MODULES` leaves zero footprint: no dead scope
+ * strings in the role sets, no dead entries in the API-key allowlist.
  *
- * The `Resource` type is the **union** of both surfaces, so call sites
- * like `requirePermission("chat", "read")` work uniformly regardless of
- * whether `chat` came from core or from `@third-party/chat`.
+ * `Resource` is the **union** of both surfaces, so call sites like
+ * `requirePermission("webhooks", "read")` type-check uniformly whether
+ * `webhooks` ships as a module in this repo or as an external npm
+ * package that opened `AppstrateModuleResources`.
  *
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md
  * @see packages/core/src/permissions.ts (the extension surface)
@@ -381,17 +388,36 @@ export function hasPermission<R extends Resource>(
 }
 
 /**
+ * Role permissions, widened to `ReadonlySet<string>` for ergonomic membership
+ * checks against un-narrowed input (API-key scopes, OIDC scope claims, etc.).
+ * Use this instead of `resolvePermissions(role)` when the input is a raw
+ * string the compiler hasn't narrowed yet — it spares call sites the
+ * `has(scope as Permission)` cast without widening the type contract
+ * downstream.
+ */
+export function roleScopes(role: OrgRole): ReadonlySet<string> {
+  return resolvePermissions(role);
+}
+
+/**
  * Validate and filter API key scopes.
  *
  * Returns only the scopes that are:
  * 1. Valid permission strings (core or module-contributed)
  * 2. Allowed for API keys (not session-only)
  * 3. Within the creator's own permissions (based on their role)
+ *
+ * The returned array is typed `Permission[]` because survival implies
+ * membership in the creator's role set, which is itself a subset of the
+ * Permission union. The single `as Permission[]` cast at the return is
+ * the boundary where we re-narrow — `filter` with a type predicate over
+ * a string union gets rejected by some TS configs, but the runtime
+ * invariant is identical.
  */
 export function validateScopes(scopes: string[], creatorRole: OrgRole): Permission[] {
-  const creatorPerms = resolvePermissions(creatorRole);
+  const creatorPerms = roleScopes(creatorRole);
   const allowed = getApiKeyAllowedScopes();
-  return scopes.filter((s): s is Permission => allowed.has(s) && creatorPerms.has(s as Permission));
+  return scopes.filter((s) => allowed.has(s) && creatorPerms.has(s)) as Permission[];
 }
 
 /**
@@ -400,10 +426,10 @@ export function validateScopes(scopes: string[], creatorRole: OrgRole): Permissi
  * (including module-contributed grants).
  */
 export function resolveApiKeyPermissions(scopes: string[], creatorRole: OrgRole): Set<Permission> {
-  const rolePerms = resolvePermissions(creatorRole);
+  const rolePerms = roleScopes(creatorRole);
   const effective = new Set<Permission>();
   for (const scope of scopes) {
-    if (rolePerms.has(scope as Permission)) {
+    if (rolePerms.has(scope)) {
       effective.add(scope as Permission);
     }
   }
