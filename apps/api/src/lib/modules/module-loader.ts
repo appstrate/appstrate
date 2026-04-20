@@ -11,11 +11,8 @@ import type {
   ModulePermissionContribution,
 } from "@appstrate/core/module";
 import type { OrgRole } from "../../types/index.ts";
-import {
-  CORE_RESOURCE_NAMES,
-  setModulePermissionsProvider,
-  type ModulePermissionsSnapshot,
-} from "../permissions.ts";
+import { CORE_RESOURCE_NAMES } from "@appstrate/core/permissions";
+import { setModulePermissionsProvider, type ModulePermissionsSnapshot } from "../permissions.ts";
 import { readdirSync, statSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
@@ -240,6 +237,7 @@ export function collectModulePermissions(
     viewer: new Set(),
   };
   const apiKeyAllowed = new Set<string>();
+  const endUserAllowed = new Set<string>();
   const ownerByResource = new Map<string, string>(); // resource → first module that claimed it
 
   for (const mod of modules) {
@@ -251,11 +249,12 @@ export function collectModulePermissions(
         const perm = `${entry.resource}:${action}`;
         for (const role of entry.grantTo) byRole[role].add(perm);
         if (entry.apiKeyGrantable) apiKeyAllowed.add(perm);
+        if (entry.endUserGrantable) endUserAllowed.add(perm);
       }
     }
   }
 
-  return { byRole, apiKeyAllowed };
+  return { byRole, apiKeyAllowed, endUserAllowed };
 }
 
 function validateContribution(

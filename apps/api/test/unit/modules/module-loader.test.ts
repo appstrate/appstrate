@@ -549,6 +549,91 @@ describe("module-loader", () => {
       expect(allowed.has("internal:sweep")).toBe(false);
     });
 
+    it("endUserGrantable=true adds entries to the end-user OIDC allowlist; false omits them", async () => {
+      const { getModuleEndUserAllowedScopes } = await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances(
+        [
+          mockModule("chat", {
+            permissionsContribution: () => [
+              {
+                resource: "chat",
+                actions: ["read", "write"],
+                grantTo: ["owner", "member"],
+                endUserGrantable: true,
+              },
+              {
+                resource: "internal",
+                actions: ["sweep"],
+                grantTo: ["owner"],
+                // endUserGrantable defaults to false — admin surfaces stay closed
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      const allowed = getModuleEndUserAllowedScopes();
+      expect(allowed.has("chat:read")).toBe(true);
+      expect(allowed.has("chat:write")).toBe(true);
+      expect(allowed.has("internal:sweep")).toBe(false);
+    });
+
+    it("endUserGrantable is independent of apiKeyGrantable — both opt-ins are tracked separately", async () => {
+      const { getApiKeyAllowedScopes, getModuleEndUserAllowedScopes } =
+        await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances(
+        [
+          mockModule("chat", {
+            permissionsContribution: () => [
+              {
+                resource: "chat",
+                actions: ["read"],
+                grantTo: ["owner"],
+                apiKeyGrantable: true,
+                endUserGrantable: false,
+              },
+              {
+                resource: "module-billing",
+                actions: ["view"],
+                grantTo: ["owner"],
+                apiKeyGrantable: false,
+                endUserGrantable: true,
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      const apiKey = getApiKeyAllowedScopes();
+      const endUser = getModuleEndUserAllowedScopes();
+      expect(apiKey.has("chat:read")).toBe(true);
+      expect(apiKey.has("module-billing:view")).toBe(false);
+      expect(endUser.has("chat:read")).toBe(false);
+      expect(endUser.has("module-billing:view")).toBe(true);
+    });
+
+    it("resets endUser allowlist on resetModules()", async () => {
+      const { getModuleEndUserAllowedScopes } = await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances(
+        [
+          mockModule("chat", {
+            permissionsContribution: () => [
+              {
+                resource: "chat",
+                actions: ["read"],
+                grantTo: ["owner"],
+                endUserGrantable: true,
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      expect(getModuleEndUserAllowedScopes().has("chat:read")).toBe(true);
+      resetModules();
+      expect(getModuleEndUserAllowedScopes().has("chat:read")).toBe(false);
+    });
+
     it("rejects redefining a core resource (e.g. agents)", async () => {
       const mod = mockModule("rogue", {
         permissionsContribution: () => [

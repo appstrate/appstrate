@@ -29,85 +29,38 @@
  * @see packages/core/src/permissions.ts (the extension surface)
  */
 
-import type { AppstrateModuleResources } from "@appstrate/core/permissions";
+import {
+  CORE_RESOURCE_NAMES,
+  type AppstrateCoreResources,
+  type AppstrateModuleResources,
+  type CoreResource,
+  type CorePermission,
+  type ModulePermission,
+} from "@appstrate/core/permissions";
 import type { OrgRole } from "../types/index.ts";
 
-// ---------------------------------------------------------------------------
-// Resource & Action types
-// ---------------------------------------------------------------------------
+// Re-export so existing apps/api imports of `CORE_RESOURCE_NAMES` from this
+// file keep working — the symbol is just now backed by core. The core
+// re-export exists to keep the boot-time collision check (in module-loader)
+// reading from a single shared source of truth.
+export { CORE_RESOURCE_NAMES };
 
-/** Core resources owned by the platform (and its in-house modules). */
-interface CoreResourceActions {
-  org: "read" | "update" | "delete";
-  members: "read" | "invite" | "remove" | "change-role";
-  agents: "read" | "write" | "configure" | "delete" | "run";
-  skills: "read" | "write" | "delete";
-  tools: "read" | "write" | "delete";
-  providers: "read" | "write" | "delete";
-  runs: "read" | "cancel" | "delete";
-  schedules: "read" | "write" | "delete";
-  memories: "read" | "delete";
-  connections: "read" | "connect" | "disconnect";
-  profiles: "read" | "write" | "delete";
-  "app-profiles": "read" | "write" | "delete" | "bind";
-  models: "read" | "write" | "delete";
-  "provider-keys": "read" | "write" | "delete";
-  proxies: "read" | "write" | "delete";
-  "api-keys": "read" | "create" | "revoke";
-  applications: "read" | "write" | "delete";
-  "end-users": "read" | "write" | "delete";
-  webhooks: "read" | "write" | "delete";
-  "oauth-clients": "read" | "write" | "delete";
-  billing: "read" | "manage";
-}
-
-/** Core resource names — used by the role-grant matrix below. */
-type CoreResource = keyof CoreResourceActions;
+// ---------------------------------------------------------------------------
+// Resource & Action types — sourced from @appstrate/core/permissions
+// ---------------------------------------------------------------------------
 
 /** All resource names — core resources widened with module-augmented entries. */
 export type Resource = CoreResource | (keyof AppstrateModuleResources & string);
 
 /** Actions available for a given resource. */
 export type Action<R extends Resource = Resource> = R extends CoreResource
-  ? CoreResourceActions[R]
+  ? AppstrateCoreResources[R]
   : R extends keyof AppstrateModuleResources
     ? AppstrateModuleResources[R] & string
     : never;
 
 /** All valid `resource:action` permission strings, derived from both core + module surfaces. */
-export type Permission =
-  | {
-      [R in CoreResource]: `${R}:${CoreResourceActions[R]}`;
-    }[CoreResource]
-  | {
-      [R in keyof AppstrateModuleResources &
-        string]: `${R}:${AppstrateModuleResources[R] & string}`;
-    }[keyof AppstrateModuleResources & string];
-
-/** Names of the core resources (read by the boot validator to detect collisions with module contributions). */
-export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
-  "org",
-  "members",
-  "agents",
-  "skills",
-  "tools",
-  "providers",
-  "runs",
-  "schedules",
-  "memories",
-  "connections",
-  "profiles",
-  "app-profiles",
-  "models",
-  "provider-keys",
-  "proxies",
-  "api-keys",
-  "applications",
-  "end-users",
-  "webhooks",
-  "oauth-clients",
-  "billing",
-]);
+export type Permission = CorePermission | ModulePermission;
 
 // ---------------------------------------------------------------------------
 // Role → Permission matrix
@@ -294,6 +247,13 @@ const ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<Permission>> = {
 export interface ModulePermissionsSnapshot {
   byRole: Readonly<Record<OrgRole, ReadonlySet<string>>>;
   apiKeyAllowed: ReadonlySet<string>;
+  /**
+   * Permissions safe to carry on an end-user OIDC token. Populated from
+   * `ModulePermissionContribution.endUserGrantable === true` entries.
+   * Read by `apps/api/src/modules/oidc/auth/claims.ts` to extend the
+   * built-in `OIDC_ALLOWED_SCOPES` filter for end-user tokens.
+   */
+  endUserAllowed: ReadonlySet<string>;
 }
 
 const EMPTY_SNAPSHOT: ModulePermissionsSnapshot = {
@@ -304,6 +264,7 @@ const EMPTY_SNAPSHOT: ModulePermissionsSnapshot = {
     viewer: new Set(),
   },
   apiKeyAllowed: new Set(),
+  endUserAllowed: new Set(),
 };
 
 let _moduleProvider: () => ModulePermissionsSnapshot = () => EMPTY_SNAPSHOT;
@@ -399,6 +360,19 @@ export function getApiKeyAllowedScopes(): ReadonlySet<string> {
   const moduleAllowed = moduleSnapshot().apiKeyAllowed;
   if (moduleAllowed.size === 0) return API_KEY_ALLOWED_SCOPES;
   return new Set<string>([...API_KEY_ALLOWED_SCOPES, ...moduleAllowed]);
+}
+
+/**
+ * Module-contributed permissions safe to carry on an end-user OIDC token.
+ * Used by `apps/api/src/modules/oidc/auth/claims.ts` to extend the
+ * built-in `OIDC_ALLOWED_SCOPES` filter for `actor_type === "end_user"`
+ * tokens. Empty when no loaded module opts in via `endUserGrantable: true`.
+ *
+ * Returns a fresh ReadonlySet view every call (cheap — module snapshot is
+ * built once at boot, this just returns the underlying Set reference).
+ */
+export function getModuleEndUserAllowedScopes(): ReadonlySet<string> {
+  return moduleSnapshot().endUserAllowed;
 }
 
 /**

@@ -15,7 +15,11 @@
  * translation layer.
  */
 
-import { resolvePermissions, type Permission } from "../../../lib/permissions.ts";
+import {
+  resolvePermissions,
+  getModuleEndUserAllowedScopes,
+  type Permission,
+} from "../../../lib/permissions.ts";
 import { logger } from "../../../lib/logger.ts";
 import type { OrgRole } from "../../../types/index.ts";
 import { OIDC_ALLOWED_SCOPES, OIDC_IDENTITY_SCOPE_SET } from "./scopes.ts";
@@ -25,16 +29,24 @@ type ActorType = "dashboard_user" | "end_user" | "user";
 /**
  * Runtime-validated narrowing from `string` to `Permission`.
  *
- * `OIDC_ALLOWED_SCOPES` is typed as `ReadonlySet<Permission>`, so a
- * membership check is sufficient evidence that the input is a valid
- * `Permission`. Declaring this as a type predicate gives us a single
- * documented widening point instead of sprinkling `as Permission` casts
- * across the loop body — a reviewer can audit one function instead of
- * every call site, and any future change to `OIDC_ALLOWED_SCOPES` is
- * reflected here automatically.
+ * Combines the built-in `OIDC_ALLOWED_SCOPES` (core-owned safe surface)
+ * with module-contributed scopes that opted in via
+ * `permissionsContribution({ endUserGrantable: true })`. A membership
+ * check is sufficient evidence the input is a valid `Permission`:
+ *   - `OIDC_ALLOWED_SCOPES` is `ReadonlySet<Permission>` by construction
+ *   - module scopes are validated at boot (`collectModulePermissions`)
+ *     against the same `${resource}:${action}` shape
+ * Declaring this as a type predicate gives one documented widening point
+ * instead of sprinkling `as Permission` casts across the loop body.
+ *
+ * Module surface read on every call (no caching): the snapshot is
+ * computed once at boot, so the lookup is a single `Set.has` — the
+ * indirection is free, and a stale cache would mask test-time module
+ * resets (`resetModules` clears the provider).
  */
 function isAllowedOidcScope(s: string): s is Permission {
-  return (OIDC_ALLOWED_SCOPES as ReadonlySet<string>).has(s);
+  if ((OIDC_ALLOWED_SCOPES as ReadonlySet<string>).has(s)) return true;
+  return getModuleEndUserAllowedScopes().has(s);
 }
 
 /** Runtime-validated narrowing through a role-ceiling Set<Permission>. */
@@ -85,10 +97,10 @@ export function scopesToPermissions(
       if (isAllowedOidcScope(s)) {
         granted.add(s);
       } else {
-        logger.debug("oidc: end_user scope dropped (not in OIDC_ALLOWED_SCOPES)", {
-          module: "oidc",
-          scope: s,
-        });
+        logger.debug(
+          "oidc: end_user scope dropped (not in OIDC_ALLOWED_SCOPES nor a module endUserGrantable contribution)",
+          { module: "oidc", scope: s },
+        );
       }
       continue;
     }
