@@ -21,3 +21,21 @@ export {
   type ValidationIssue,
   type ValidateBundleOptions,
 } from "./validator.ts";
+export {
+  signBundle,
+  signChildKey,
+  verifyBundleSignature,
+  verifySigstoreSignature,
+  readBundleSignature,
+  generateKeyPair,
+  keyIdFromPublicKey,
+  type BundleSignature,
+  type TrustChainEntry,
+  type TrustedKey,
+  type TrustRoot,
+  type KeyPair,
+  type SignBundleOptions,
+  type SignChildKeyOptions,
+  type VerifySignatureResult,
+  type VerifySignatureFailureReason,
+} from "./signing.ts";
