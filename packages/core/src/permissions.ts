@@ -62,3 +62,76 @@ export type ModuleAction<R extends ModuleResource = ModuleResource> = AppstrateM
 export type ModulePermission = {
   [R in ModuleResource]: `${R & string}:${AppstrateModuleResources[R] & string}`;
 }[ModuleResource];
+
+// ---------------------------------------------------------------------------
+// Hono middleware — typed RBAC guard for module-contributed resources
+//
+// Imports kept inline (and `any`-typed at the seams) so this file remains
+// usable in modules that don't peer-depend on Hono. The runtime contract is
+// minimal: the middleware reads `c.get("permissions")` (a `ReadonlySet<string>`
+// the platform's auth pipeline writes) and throws an `ApiError` on miss.
+// ---------------------------------------------------------------------------
+
+import { forbidden } from "./api-errors.ts";
+
+/**
+ * Hono middleware factory that gates a route on a module-contributed
+ * `resource:action` permission. Strongly typed against the
+ * `AppstrateModuleResources` augmentation surface — call sites recover
+ * full literal narrowing once a module declares its resources:
+ *
+ * ```ts
+ * declare module "@appstrate/core/permissions" {
+ *   interface AppstrateModuleResources { chat: "read" | "write" }
+ * }
+ *
+ * router.get(
+ *   "/api/chat/sessions",
+ *   requireModulePermission("chat", "read"), // ← typechecked
+ *   handler,
+ * );
+ * ```
+ *
+ * Why this lives in core rather than being re-exported by the platform:
+ *   1. Module authors should not need an internal `apps/api/*` import to
+ *      enforce their own permissions — that re-creates the coupling
+ *      problem the RBAC extension surface was built to solve.
+ *   2. The check is purely Set membership on `c.get("permissions")`, which
+ *      the platform's auth pipeline always writes (cookie, API key, OIDC
+ *      strategies). No core-only types are touched.
+ *   3. Typing is keyed on `AppstrateModuleResources` only — the helper is
+ *      deliberately scoped to module-contributed resources. Core resources
+ *      (`agents`, `webhooks`, …) are gated by the platform's own
+ *      `requirePermission()` middleware, which lives where the core
+ *      `Permission` union is defined.
+ *
+ * The runtime guard is fail-closed: missing permissions Set, missing entry,
+ * or non-Set value all throw `forbidden()`. Logging is intentionally NOT
+ * done here — modules pick their own logger via `PlatformServices.logger`
+ * after the throw is caught upstream (or rely on the platform's global
+ * error handler).
+ */
+export function requireModulePermission<R extends ModuleResource>(
+  resource: R,
+  action: ModuleAction<R>,
+): (c: HonoContextLike, next: HonoNextLike) => Promise<unknown> {
+  const required = `${resource as string}:${action as string}`;
+  return async (c, next) => {
+    const perms = c.get("permissions") as ReadonlySet<string> | undefined;
+    if (!perms || typeof perms.has !== "function" || !perms.has(required)) {
+      throw forbidden(`Insufficient permissions: ${required} required`);
+    }
+    return next();
+  };
+}
+
+/**
+ * Minimal Hono context shape used by `requireModulePermission`. Declared
+ * inline so this file does not pull `hono` types into core's TS graph
+ * (Hono is a peer dependency, optional for module consumers that only
+ * need the type-level surface).
+ */
+interface HonoContextLike {
+  get(key: "permissions"): unknown;
+}
+type HonoNextLike = () => Promise<unknown>;
