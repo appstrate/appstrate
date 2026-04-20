@@ -88,11 +88,74 @@ Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`,
 
 ## Permissions
 
-RBAC is a platform capability, not a module concern. Core's `apps/api/src/lib/permissions.ts` is the single typed source of truth for the `Permission` taxonomy — it already lists every resource the built-in modules use (`webhooks`), together with the role-to-permission matrix and the API key allowlist. Module manifests do not declare permissions or scopes.
+The platform ships RBAC as a typed contract that **both** core and modules contribute to. The role-to-permission matrix lives in `apps/api/src/lib/permissions.ts` — it composes:
 
-Inside module routes, protect handlers with the same typed helper core uses: `requirePermission("webhooks", "write")` (from `apps/api/src/middleware/require-permission.ts`). TypeScript will reject any resource/action pair that is not in `ResourceActions` — if you need a new resource, add it to `permissions.ts` in the same PR that adds the module. Treat this as part of the platform contract: core ships the vocabulary, modules implement the behavior.
+1. **Core resources** (`AppstrateCoreResources` interface from `@appstrate/core/permissions`): the static catalog the platform owns. Built-in modules whose resources are baked into core (`webhooks`, `oauth-clients`) are listed here and granted to roles directly.
+2. **Module-contributed resources** (`AppstrateModule.permissionsContribution()` + `declare module "@appstrate/core/permissions" { interface AppstrateModuleResources { … } }`): external modules declare new resources through TypeScript declaration merging plus a runtime contribution. The platform aggregates them at boot, merges the grants into `resolvePermissions(role)`, and exposes them through the same RBAC machinery.
 
-The trade-off is that disabling a module leaves a handful of inert permission strings in the role sets (e.g. `webhooks:*` still exists in `OWNER_PERMISSIONS` even when the webhooks module is off). That is harmless metadata — no route reads it, since the routes themselves are not loaded — and it keeps the type system honest for everything that is.
+### Built-in modules: extend the static catalog
+
+Built-ins (modules that live in this directory and ship with the platform) declare their resources in `AppstrateCoreResources` directly. Inside their routes, gate handlers with the platform's unified middleware:
+
+```ts
+import { requirePermission } from "../../middleware/require-permission.ts";
+
+router.post("/api/webhooks", requirePermission("webhooks", "write"), handler);
+```
+
+`requirePermission` is typed against the union of core + module-augmented resources, so adding a new built-in resource is: edit `AppstrateCoreResources` in `@appstrate/core/permissions` → edit `CORE_RESOURCE_NAMES` in the same file (drift caught by a unit test) → wire the role grants in `apps/api/src/lib/permissions.ts` → call `requirePermission(...)` at the route. TypeScript narrows the action union per resource — typos fail compile.
+
+### External modules: contribute resources at runtime
+
+Modules published on npm cannot edit core. They extend the catalog through the dual contribution surface:
+
+```ts
+// 1. Type-level — declaration merging on AppstrateModuleResources
+declare module "@appstrate/core/permissions" {
+  interface AppstrateModuleResources {
+    chat: "read" | "write";
+  }
+}
+
+// 2. Runtime — manifest field
+const chatModule: AppstrateModule = {
+  manifest: { id: "chat", name: "Chat", version: "1.0.0" },
+  permissionsContribution: () => [
+    {
+      resource: "chat",
+      actions: ["read", "write"],
+      grantTo: ["owner", "admin", "member"],
+      apiKeyGrantable: true, // can be carried by API keys
+      endUserGrantable: true, // can be carried by end-user OIDC tokens
+    },
+  ],
+  // ...
+};
+
+// 3. Route guards — typed helpers exported from core
+import { requireModulePermission, requireCorePermission } from "@appstrate/core/permissions";
+
+router.get(
+  "/api/chat/sessions",
+  requireModulePermission("chat", "read"), // typed against AppstrateModuleResources
+  handler,
+);
+router.post(
+  "/api/chat/runs/:id/cancel",
+  requireCorePermission("agents", "run"), // typed against AppstrateCoreResources
+  handler,
+);
+```
+
+**At boot, the platform validates each contribution** (resource name format, no collision with a core resource or another module, action format, role validity) and aggregates them into:
+
+- `resolvePermissions(role)` — module entries for the listed roles are written into the per-role permission Set returned to the auth pipeline.
+- `getApiKeyAllowedScopes()` — entries with `apiKeyGrantable: true` become grantable through API keys (filtered against the creator's role at issuance).
+- `getModuleEndUserAllowedScopes()` — entries with `endUserGrantable: true` are accepted on end-user OIDC JWTs (in addition to the built-in `OIDC_ALLOWED_SCOPES`). Defaults to `false` — admin / destructive surfaces stay closed to embedding apps.
+
+Disabling a module leaves no footprint: the `declare module` augmentation widens types but contributes nothing at runtime (interface keys aren't iterated), and the runtime contribution is gone the moment `permissionsContribution()` stops being called.
+
+The trade-off for built-in modules is that their resources stay listed in `AppstrateCoreResources` (and thus in `OWNER_PERMISSIONS`) even when the module is disabled — harmless metadata, no route reads it. External modules don't carry that trade-off: their resource catalog lives entirely in the module's source.
 
 ## Hooks and events
 
