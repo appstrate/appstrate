@@ -166,6 +166,36 @@ export function signBundle(bundleBytes: Uint8Array, opts: SignBundleOptions): Bu
 }
 
 /**
+ * Deterministic digest of a bundle's logical contents, suitable as
+ * input to {@link signBundle} / {@link verifyBundleSignature}.
+ *
+ * ZIP container bytes are not stable (compression method, timestamps,
+ * central-directory ordering all vary by tool) so signatures taken
+ * over raw ZIP bytes break under legitimate re-packing. This helper
+ * reduces the bundle to `JSON([ [sortedPath, "sha256-<b64>"], … ])`
+ * — a plain-text canonical form that every conforming runner can
+ * reproduce from the same file set.
+ *
+ * `signature.sig` is excluded by default so signing/verifying are
+ * symmetrical (the signer computes this before writing the signature,
+ * the verifier strips it from the loaded bundle).
+ */
+export function canonicalBundleDigest(
+  files: Record<string, Uint8Array>,
+  exclude: readonly string[] = ["signature.sig"],
+): Uint8Array {
+  const excludeSet = new Set(exclude);
+  const entries: Array<[string, string]> = [];
+  for (const [path, content] of Object.entries(files)) {
+    if (excludeSet.has(path)) continue;
+    const hash = createHash("sha256").update(content).digest("base64");
+    entries.push([path, `sha256-${hash}`]);
+  }
+  entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return new TextEncoder().encode(JSON.stringify(entries));
+}
+
+/**
  * Sign a child public key with a parent's private key, producing a
  * chain entry suitable for inclusion in a `BundleSignature.chain`.
  */

@@ -22,6 +22,7 @@ export {
   type ValidateBundleOptions,
 } from "./validator.ts";
 export {
+  canonicalBundleDigest,
   signBundle,
   signChildKey,
   verifyBundleSignature,
