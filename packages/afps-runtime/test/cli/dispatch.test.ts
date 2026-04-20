@@ -29,4 +29,20 @@ describe("runCli — dispatch", () => {
     expect(code).toBe(2);
     expect(io.stderrText()).toContain("unknown command");
   });
+
+  it("converts thrown subcommand errors into a single-line stderr diagnostic + exit 1", async () => {
+    const io = captureIo();
+    // inspect on a non-existent path triggers ENOENT from readFile.
+    const code = await runCli(["inspect", "/definitely-not-a-real-path.afps"], io);
+    expect(code).toBe(1);
+    expect(io.stderrText()).toContain("afps inspect:");
+    expect(io.stderrText()).toContain("ENOENT");
+    // Must not leak a multi-line Bun stack trace.
+    expect(
+      io
+        .stderrText()
+        .split("\n")
+        .filter((l) => l.length > 0),
+    ).toHaveLength(1);
+  });
 });
