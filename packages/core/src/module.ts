@@ -285,8 +285,85 @@ export interface AppstrateModule {
    */
   oidcScopes?: ReadonlyArray<`${string}:${string}`>;
 
+  /**
+   * RBAC contribution: declare resources owned by this module and how the
+   * core org roles grant their actions.
+   *
+   * Aggregated by the platform at boot and merged into:
+   *   1. `resolvePermissions(role)` — adds module entries to the per-role
+   *      permission set written to `c.get("permissions")`.
+   *   2. `API_KEY_ALLOWED_SCOPES` — module entries become grantable
+   *      through API keys (filtered against creator's role at issuance).
+   *   3. `requirePermission(resource, action)` — runtime check is purely
+   *      Set membership, so module entries gate routes the same way core
+   *      permissions do.
+   *
+   * Pair this with a TypeScript declaration-merging block on
+   * `@appstrate/core/permissions#AppstrateModuleResources` so call sites
+   * like `requirePermission("chat", "read")` stay typed end-to-end:
+   *
+   * ```ts
+   * declare module "@appstrate/core/permissions" {
+   *   interface AppstrateModuleResources { chat: "read" | "write" }
+   * }
+   *
+   * const chatModule: AppstrateModule = {
+   *   manifest: { id: "chat", name: "Chat", version: "1.0.0" },
+   *   permissionsContribution: () => [
+   *     {
+   *       resource: "chat",
+   *       actions: ["read", "write"],
+   *       grantTo: ["owner", "admin", "member"],
+   *       apiKeyGrantable: true,
+   *     },
+   *   ],
+   *   // ...
+   * };
+   * ```
+   *
+   * Constraints enforced at boot (fail-fast):
+   *   - resource name matches `^[a-z][a-z0-9_-]*$`
+   *   - action names match `^[a-z][a-z0-9_-]*$`
+   *   - resource does NOT collide with any core resource (org, agents, …)
+   *     or any other module's resource
+   *
+   * No-op on platforms that don't load this module — neither the type
+   * augmentation nor the runtime grants reach core, preserving the
+   * zero-footprint invariant.
+   */
+  permissionsContribution?(): ModulePermissionContribution[];
+
   /** Called during graceful shutdown (reverse init order). */
   shutdown?(): Promise<void>;
+}
+
+/**
+ * One resource's RBAC contribution from a module — declares the actions
+ * available, which org roles grant them, and whether they can be issued
+ * through API keys. See `AppstrateModule.permissionsContribution`.
+ */
+export interface ModulePermissionContribution {
+  /** Resource name (e.g. "chat"). Must be unique across loaded modules and disjoint from core resources. */
+  resource: string;
+  /** Actions the module supports for this resource (e.g. ["read", "write"]). */
+  actions: readonly string[];
+  /**
+   * Org roles that grant every listed action. The platform writes the
+   * union into `resolvePermissions(role)`. Omit a role to leave it
+   * without access (e.g. `viewer` typically only sees `:read`).
+   *
+   * Granular per-action grants (e.g. owner gets write, member gets read
+   * only) are supported by listing the resource multiple times with
+   * different `actions`/`grantTo` combinations.
+   */
+  grantTo: ReadonlyArray<"owner" | "admin" | "member" | "viewer">;
+  /**
+   * When `true`, every `<resource>:<action>` produced by this entry is
+   * added to the API-key allowlist so org admins can mint keys with
+   * these scopes. Defaults to `false` — module permissions are
+   * session-only unless explicitly opted in.
+   */
+  apiKeyGrantable?: boolean;
 }
 
 // ---------------------------------------------------------------------------

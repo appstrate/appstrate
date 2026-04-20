@@ -8,7 +8,14 @@ import type {
   ModuleHooks,
   ModuleEvents,
   AuthStrategy,
+  ModulePermissionContribution,
 } from "@appstrate/core/module";
+import type { OrgRole } from "../../types/index.ts";
+import {
+  CORE_RESOURCE_NAMES,
+  setModulePermissionsProvider,
+  type ModulePermissionsSnapshot,
+} from "../permissions.ts";
 import { readdirSync, statSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
@@ -136,6 +143,12 @@ async function initSortedModules(
   const sorted = topoSort(modules);
   validateNoDuplicatePrefixes(sorted);
   validateModuleOidcScopes(sorted);
+  // Compute the RBAC snapshot from module contributions and register it
+  // BEFORE init() runs, so any module that calls `resolvePermissions(...)`
+  // during init (e.g. seeding default API keys with module-owned scopes)
+  // sees the merged view.
+  const rbacSnapshot = collectModulePermissions(sorted);
+  setModulePermissionsProvider(() => rbacSnapshot);
   for (const mod of sorted) {
     try {
       await mod.init(ctx);
@@ -191,6 +204,114 @@ export function validateModuleOidcScopes(modules: readonly AppstrateModule[]): v
             `Expected lowercase "namespace:action" matching ${MODULE_OIDC_SCOPE_PATTERN}.`,
         );
       }
+    }
+  }
+}
+
+/**
+ * Format enforced on module-contributed RBAC names (resources + actions).
+ * Same shape as the OIDC scope guard — lowercase identifier with optional
+ * `_`/`-` separators. Validated at boot for both halves.
+ */
+const MODULE_RBAC_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
+
+/**
+ * Aggregate `permissionsContribution()` from every loaded module into a
+ * single snapshot consumable by `apps/api/src/lib/permissions.ts`. Runs
+ * fail-fast validation:
+ *   - resource name format
+ *   - resource collision with a core resource (`org`, `agents`, …)
+ *   - resource collision between two modules
+ *   - action name format
+ *   - empty `actions` (would contribute nothing)
+ *   - empty `grantTo` (legal — declares the resource without granting it,
+ *     useful when API-key-only access is intended; we just warn-log)
+ *
+ * Returns the snapshot in `ModulePermissionsSnapshot` shape — Sets keyed
+ * by role plus the API-key allowlist union.
+ */
+export function collectModulePermissions(
+  modules: readonly AppstrateModule[],
+): ModulePermissionsSnapshot {
+  const byRole: Record<OrgRole, Set<string>> = {
+    owner: new Set(),
+    admin: new Set(),
+    member: new Set(),
+    viewer: new Set(),
+  };
+  const apiKeyAllowed = new Set<string>();
+  const ownerByResource = new Map<string, string>(); // resource → first module that claimed it
+
+  for (const mod of modules) {
+    const contributions = mod.permissionsContribution?.();
+    if (!contributions) continue;
+    for (const entry of contributions) {
+      validateContribution(entry, mod.manifest.id, ownerByResource);
+      for (const action of entry.actions) {
+        const perm = `${entry.resource}:${action}`;
+        for (const role of entry.grantTo) byRole[role].add(perm);
+        if (entry.apiKeyGrantable) apiKeyAllowed.add(perm);
+      }
+    }
+  }
+
+  return { byRole, apiKeyAllowed };
+}
+
+function validateContribution(
+  entry: ModulePermissionContribution,
+  moduleId: string,
+  ownerByResource: Map<string, string>,
+): void {
+  const { resource, actions, grantTo } = entry;
+
+  if (!MODULE_RBAC_NAME_PATTERN.test(resource)) {
+    throw new Error(
+      `Module "${moduleId}" declared invalid permission resource ${JSON.stringify(resource)}. ` +
+        `Expected lowercase identifier matching ${MODULE_RBAC_NAME_PATTERN}.`,
+    );
+  }
+  if (CORE_RESOURCE_NAMES.has(resource)) {
+    throw new Error(
+      `Module "${moduleId}" cannot redefine core resource ${JSON.stringify(resource)}. ` +
+        `Pick a namespaced resource name (e.g. "${moduleId}-${resource}") or a unique name.`,
+    );
+  }
+  const previousOwner = ownerByResource.get(resource);
+  if (previousOwner && previousOwner !== moduleId) {
+    throw new Error(
+      `Modules "${previousOwner}" and "${moduleId}" both declared resource ` +
+        `${JSON.stringify(resource)}. Resource names must be unique across loaded modules.`,
+    );
+  }
+  ownerByResource.set(resource, moduleId);
+
+  if (!Array.isArray(actions) || actions.length === 0) {
+    throw new Error(
+      `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with no actions.`,
+    );
+  }
+  for (const action of actions) {
+    if (typeof action !== "string" || !MODULE_RBAC_NAME_PATTERN.test(action)) {
+      throw new Error(
+        `Module "${moduleId}" declared invalid action ${JSON.stringify(action)} on resource ` +
+          `${JSON.stringify(resource)}. Expected lowercase identifier matching ${MODULE_RBAC_NAME_PATTERN}.`,
+      );
+    }
+  }
+
+  if (!Array.isArray(grantTo)) {
+    throw new Error(
+      `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with non-array grantTo.`,
+    );
+  }
+  const allowedRoles = new Set<string>(["owner", "admin", "member", "viewer"]);
+  for (const role of grantTo) {
+    if (!allowedRoles.has(role)) {
+      throw new Error(
+        `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with unknown role ` +
+          `${JSON.stringify(role)}. Expected one of owner|admin|member|viewer.`,
+      );
     }
   }
 }
@@ -538,6 +659,7 @@ function clearAllState(): void {
   _modules.clear();
   _builtinCache = null;
   _initialized = false;
+  setModulePermissionsProvider(null);
 }
 
 // ---------------------------------------------------------------------------

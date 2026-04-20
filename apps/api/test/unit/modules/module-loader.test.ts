@@ -472,6 +472,188 @@ describe("module-loader", () => {
     });
   });
 
+  describe("permissionsContribution (module RBAC)", () => {
+    // The provider hook is module-loader → permissions, so we exercise the
+    // public observable: resolvePermissions() / getApiKeyAllowedScopes()
+    // returning the merged view after a module loads.
+
+    it("merges module grants into resolvePermissions(role)", async () => {
+      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances(
+        [
+          mockModule("chat", {
+            permissionsContribution: () => [
+              {
+                resource: "chat",
+                actions: ["read", "write"],
+                grantTo: ["owner", "admin", "member"],
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      const owner = resolvePermissions("owner");
+      const member = resolvePermissions("member");
+      const viewer = resolvePermissions("viewer");
+      expect(owner.has("chat:read" as never)).toBe(true);
+      expect(owner.has("chat:write" as never)).toBe(true);
+      expect(member.has("chat:read" as never)).toBe(true);
+      expect(viewer.has("chat:read" as never)).toBe(false);
+      // Core grants still present
+      expect(owner.has("agents:run" as never)).toBe(true);
+    });
+
+    it("resets the provider on resetModules() — next resolve sees no module grants", async () => {
+      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances(
+        [
+          mockModule("chat", {
+            permissionsContribution: () => [
+              { resource: "chat", actions: ["read"], grantTo: ["owner"] },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      expect(resolvePermissions("owner").has("chat:read" as never)).toBe(true);
+      resetModules();
+      expect(resolvePermissions("owner").has("chat:read" as never)).toBe(false);
+    });
+
+    it("apiKeyGrantable=true adds entries to the API-key allowlist; false omits them", async () => {
+      const { getApiKeyAllowedScopes } = await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances(
+        [
+          mockModule("chat", {
+            permissionsContribution: () => [
+              {
+                resource: "chat",
+                actions: ["read"],
+                grantTo: ["owner"],
+                apiKeyGrantable: true,
+              },
+              {
+                resource: "internal",
+                actions: ["sweep"],
+                grantTo: ["owner"],
+                // apiKeyGrantable defaults to false
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      const allowed = getApiKeyAllowedScopes();
+      expect(allowed.has("chat:read")).toBe(true);
+      expect(allowed.has("internal:sweep")).toBe(false);
+    });
+
+    it("rejects redefining a core resource (e.g. agents)", async () => {
+      const mod = mockModule("rogue", {
+        permissionsContribution: () => [
+          { resource: "agents", actions: ["pwn"], grantTo: ["owner"] },
+        ],
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /Module "rogue" cannot redefine core resource "agents"/,
+      );
+    });
+
+    it("rejects two modules declaring the same resource", async () => {
+      await expect(
+        loadModulesFromInstances(
+          [
+            mockModule("chat-a", {
+              permissionsContribution: () => [
+                { resource: "shared", actions: ["read"], grantTo: ["owner"] },
+              ],
+            }),
+            mockModule("chat-b", {
+              permissionsContribution: () => [
+                { resource: "shared", actions: ["read"], grantTo: ["owner"] },
+              ],
+            }),
+          ],
+          mockCtx(),
+        ),
+      ).rejects.toThrow(/both declared resource "shared"/);
+    });
+
+    it("rejects malformed resource name", async () => {
+      const mod = mockModule("chat", {
+        permissionsContribution: () => [
+          { resource: "Chat", actions: ["read"], grantTo: ["owner"] },
+        ],
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /invalid permission resource "Chat"/,
+      );
+    });
+
+    it("rejects malformed action name", async () => {
+      const mod = mockModule("chat", {
+        permissionsContribution: () => [
+          { resource: "chat", actions: ["READ"], grantTo: ["owner"] },
+        ],
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /invalid action "READ"/,
+      );
+    });
+
+    it("rejects empty actions array", async () => {
+      const mod = mockModule("chat", {
+        permissionsContribution: () => [{ resource: "chat", actions: [], grantTo: ["owner"] }],
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(/with no actions/);
+    });
+
+    it("rejects unknown role in grantTo", async () => {
+      const mod = mockModule("chat", {
+        permissionsContribution: () => [
+          {
+            resource: "chat",
+            actions: ["read"],
+            grantTo: ["god" as never],
+          },
+        ],
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /unknown role "god"/,
+      );
+    });
+
+    it("supports per-action grants by listing the resource multiple times", async () => {
+      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances(
+        [
+          mockModule("chat", {
+            permissionsContribution: () => [
+              { resource: "chat", actions: ["write"], grantTo: ["owner"] },
+              { resource: "chat", actions: ["read"], grantTo: ["owner", "member"] },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      const owner = resolvePermissions("owner");
+      const member = resolvePermissions("member");
+      expect(owner.has("chat:write" as never)).toBe(true);
+      expect(owner.has("chat:read" as never)).toBe(true);
+      expect(member.has("chat:write" as never)).toBe(false);
+      expect(member.has("chat:read" as never)).toBe(true);
+    });
+
+    it("OSS baseline: no module loaded → resolvePermissions returns only core grants", async () => {
+      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances([], mockCtx());
+      const owner = resolvePermissions("owner");
+      expect(owner.has("agents:run" as never)).toBe(true);
+      expect(owner.has("chat:read" as never)).toBe(false);
+    });
+  });
+
   describe("getModuleAuthStrategies", () => {
     it("returns empty array in OSS mode (no modules loaded)", () => {
       // resetModules() in beforeEach ensures clean state
