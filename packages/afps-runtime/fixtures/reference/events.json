@@ -1,0 +1,34 @@
+[
+  {
+    "type": "log",
+    "level": "info",
+    "message": "starting reference run"
+  },
+  {
+    "type": "add_memory",
+    "content": "Reference agents are useful for contract tests."
+  },
+  {
+    "type": "set_state",
+    "state": {
+      "iteration": 1
+    }
+  },
+  {
+    "type": "output",
+    "data": {
+      "summary": "AFPS ships a portable runtime.",
+      "partial": true
+    }
+  },
+  {
+    "type": "output",
+    "data": {
+      "partial": false
+    }
+  },
+  {
+    "type": "report",
+    "content": "All checks executed."
+  }
+]

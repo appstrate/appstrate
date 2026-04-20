@@ -5,7 +5,34 @@ This product includes software developed at
 Appstrate (https://appstrate.dev).
 
 This product depends on software developed by third parties, redistributed
-in source and/or binary form under their respective licenses. In particular:
+in source and/or binary form under their respective licenses.
+
+──────────────────────────────────────────────────────────────────────
+Runtime dependencies (bundled transitively via npm)
+──────────────────────────────────────────────────────────────────────
+
+- @afps-spec/schema  (CC-BY-4.0 / MIT)
+  Copyright (c) Appstrate
+  https://github.com/appstrate/afps-spec
+
+- fflate              (MIT)
+  Copyright (c) 2020 Arjun Barrett
+  https://github.com/101arrowz/fflate
+
+- mustache            (MIT)
+  Copyright (c) 2009 Chris Wanstrath, Jan Lehnardt, et al.
+  https://github.com/janl/mustache.js
+
+- zod                 (MIT)
+  Copyright (c) 2020 Colin McDonnell
+  https://github.com/colinhacks/zod
+
+──────────────────────────────────────────────────────────────────────
+Referenced, not bundled
+──────────────────────────────────────────────────────────────────────
+
+External runners built on top of this package typically depend on
+the MIT-licensed Pi Coding Agent SDK for real LLM execution:
 
 - @mariozechner/pi-coding-agent (MIT) — Copyright (c) 2025 Mario Zechner
 - @mariozechner/pi-ai          (MIT) — Copyright (c) 2025 Mario Zechner
@@ -14,22 +41,26 @@ in source and/or binary form under their respective licenses. In particular:
 
   Upstream: https://github.com/badlogic/pi-mono
 
-  Permission is hereby granted, free of charge, to any person obtaining
-  a copy of this software and associated documentation files (the
-  "Software"), to deal in the Software without restriction, including
-  without limitation the rights to use, copy, modify, merge, publish,
-  distribute, sublicense, and/or sell copies of the Software, and to
-  permit persons to whom the Software is furnished to do so, subject to
-  the following conditions:
+──────────────────────────────────────────────────────────────────────
+MIT license text (applies to all MIT-licensed dependencies above)
+──────────────────────────────────────────────────────────────────────
 
-  The above copyright notice and this permission notice shall be
-  included in all copies or substantial portions of the Software.
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
 
-  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
-  BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
-  ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-  SOFTWARE.
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
