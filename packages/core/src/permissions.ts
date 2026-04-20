@@ -194,10 +194,11 @@ import { forbidden } from "./api-errors.ts";
  *      `Permission` union is defined.
  *
  * The runtime guard is fail-closed: missing permissions Set, missing entry,
- * or non-Set value all throw `forbidden()`. Logging is intentionally NOT
- * done here — modules pick their own logger via `PlatformServices.logger`
- * after the throw is caught upstream (or rely on the platform's global
- * error handler).
+ * or non-Set value all throw `forbidden()`. Audit logging is delegated via
+ * `setPermissionDenialHandler` — the platform registers its logger at
+ * boot and every denial (from `requireModulePermission`,
+ * `requireCorePermission`, and any apps/api-internal wrapper) flows
+ * through the same handler. Modules do not need to wire their own logger.
  */
 export function requireModulePermission<R extends ModuleResource>(
   resource: R,
@@ -244,19 +245,63 @@ export function requireCorePermission<R extends CoreResource>(
   return makePermissionGuard(`${resource as string}:${action as string}`);
 }
 
+// ---------------------------------------------------------------------------
+// Shared guard + audit-hook
+//
+// `makePermissionGuard` is the single runtime path for every typed RBAC
+// middleware in the repo: `requireCorePermission`, `requireModulePermission`,
+// and the apps/api-internal union-typed `requirePermission` all build on it.
+// Keeping one code path guarantees that audit logging, fail-closed semantics,
+// and error shape stay identical across core and module routes. The typed
+// wrappers above remain separate functions only so each can be keyed against
+// its own resource catalog — a single overloaded export would force callers
+// to provide the union type explicitly to recover narrowing.
+// ---------------------------------------------------------------------------
+
 /**
- * Shared implementation for `requireModulePermission` and
- * `requireCorePermission`. Kept private so the two public middlewares
- * remain typed independently against their respective resource catalogs —
- * a single overloaded export would force callers to provide the union
- * type explicitly to recover narrowing.
+ * Context passed to a `PermissionDenialHandler` when a guard denies a
+ * request. `c` is the Hono context (typed as `HonoContextLike` here to
+ * avoid pulling `hono` into core's TS graph — apps/api casts internally to
+ * its concrete `Context<AppEnv>` shape).
  */
-function makePermissionGuard(
+export interface PermissionDenialContext {
+  required: string;
+  c: HonoContextLike;
+}
+
+type PermissionDenialHandler = (ctx: PermissionDenialContext) => void;
+
+let _denialHandler: PermissionDenialHandler | null = null;
+
+/**
+ * Register (or clear) the audit handler invoked by `makePermissionGuard`
+ * every time a guarded route denies a request. The platform registers its
+ * logger at boot so module-route denials are audited with the same
+ * metadata shape (actor, org, role, path, required permission) as
+ * core-route denials. Mirrors the `setModulePermissionsProvider` pattern:
+ * a one-way dependency from apps/api to core, no cyclic import.
+ *
+ * Passing `null` restores the default no-op handler — used by tests that
+ * want to silence audit noise.
+ */
+export function setPermissionDenialHandler(handler: PermissionDenialHandler | null): void {
+  _denialHandler = handler;
+}
+
+/**
+ * Build a Hono middleware that gates a route on `required` (shape:
+ * `resource:action`). Public so apps/api can reuse the exact same runtime
+ * path under its own union-typed `requirePermission` wrapper — any
+ * divergence (logging, error shape, fail-closed checks) would silently
+ * drift core-route audits away from module-route audits.
+ */
+export function makePermissionGuard(
   required: string,
 ): (c: HonoContextLike, next: HonoNextLike) => Promise<unknown> {
   return async (c, next) => {
     const perms = c.get("permissions") as ReadonlySet<string> | undefined;
     if (!perms || typeof perms.has !== "function" || !perms.has(required)) {
+      _denialHandler?.({ required, c });
       throw forbidden(`Insufficient permissions: ${required} required`);
     }
     return next();
@@ -264,12 +309,15 @@ function makePermissionGuard(
 }
 
 /**
- * Minimal Hono context shape used by `requireModulePermission` /
- * `requireCorePermission`. Declared inline so this file does not pull
- * `hono` types into core's TS graph (Hono is a peer dependency, optional
- * for module consumers that only need the type-level surface).
+ * Minimal Hono context shape used by `makePermissionGuard` /
+ * `requireModulePermission` / `requireCorePermission`. Declared inline so
+ * this file does not pull `hono` types into core's TS graph (Hono is a
+ * peer dependency, optional for module consumers that only need the
+ * type-level surface). `get(string)` returns `unknown` so the audit
+ * handler registered from apps/api can cast to its own `Context<AppEnv>`
+ * shape without core depending on it.
  */
-interface HonoContextLike {
-  get(key: "permissions"): unknown;
+export interface HonoContextLike {
+  get(key: string): unknown;
 }
 type HonoNextLike = () => Promise<unknown>;

@@ -37,20 +37,13 @@
  */
 
 import {
-  CORE_RESOURCE_NAMES,
-  type AppstrateCoreResources,
   type AppstrateModuleResources,
   type CoreResource,
+  type CoreAction,
   type CorePermission,
   type ModulePermission,
 } from "@appstrate/core/permissions";
 import type { OrgRole } from "../types/index.ts";
-
-// Re-export so existing apps/api imports of `CORE_RESOURCE_NAMES` from this
-// file keep working — the symbol is just now backed by core. The core
-// re-export exists to keep the boot-time collision check (in module-loader)
-// reading from a single shared source of truth.
-export { CORE_RESOURCE_NAMES };
 
 // ---------------------------------------------------------------------------
 // Resource & Action types — sourced from @appstrate/core/permissions
@@ -59,9 +52,17 @@ export { CORE_RESOURCE_NAMES };
 /** All resource names — core resources widened with module-augmented entries. */
 export type Resource = CoreResource | (keyof AppstrateModuleResources & string);
 
-/** Actions available for a given resource. */
+/**
+ * Actions available for a given resource. Delegates to `CoreAction<R>` for
+ * core resources (keeping the lookup in one place); module-augmented
+ * resources resolve against their own declared action union. The `& string`
+ * intersection on the module branch is a type-system safety net — if a
+ * module ever declares a non-string action type the inferred union
+ * collapses to `never`, which propagates as a compile error at the
+ * middleware call site.
+ */
 export type Action<R extends Resource = Resource> = R extends CoreResource
-  ? AppstrateCoreResources[R]
+  ? CoreAction<R>
   : R extends keyof AppstrateModuleResources
     ? AppstrateModuleResources[R] & string
     : never;
@@ -407,17 +408,15 @@ export function roleScopes(role: OrgRole): ReadonlySet<string> {
  * 2. Allowed for API keys (not session-only)
  * 3. Within the creator's own permissions (based on their role)
  *
- * The returned array is typed `Permission[]` because survival implies
- * membership in the creator's role set, which is itself a subset of the
- * Permission union. The single `as Permission[]` cast at the return is
- * the boundary where we re-narrow — `filter` with a type predicate over
- * a string union gets rejected by some TS configs, but the runtime
- * invariant is identical.
+ * The type predicate re-narrows the filtered strings to `Permission` — the
+ * runtime invariant is that survival in the filter proves membership in
+ * both `allowed` and the creator's role set, both of which are (logically)
+ * subsets of the `Permission` union.
  */
 export function validateScopes(scopes: string[], creatorRole: OrgRole): Permission[] {
   const creatorPerms = roleScopes(creatorRole);
   const allowed = getApiKeyAllowedScopes();
-  return scopes.filter((s) => allowed.has(s) && creatorPerms.has(s)) as Permission[];
+  return scopes.filter((s): s is Permission => allowed.has(s) && creatorPerms.has(s));
 }
 
 /**
