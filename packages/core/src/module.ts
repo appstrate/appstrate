@@ -255,10 +255,35 @@ export interface AppstrateModule {
    * (e.g. `chat:read`, `chat:write`) that won't collide with other
    * modules' scopes.
    *
+   * The `${string}:${string}` template literal is a compile-time guard
+   * against single-word scopes (which are reserved for the OIDC identity
+   * vocabulary `openid|profile|email|offline_access`). The platform
+   * additionally enforces `^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$` at boot
+   * — modules with malformed scopes fail-fast with a clear error.
+   *
+   * **Recommended pattern** — preserve compile-time narrowing inside the
+   * contributing module by exporting a typed `as const` tuple alongside
+   * the module export:
+   *
+   * ```ts
+   * export const CHAT_SCOPES = ["chat:read", "chat:write"] as const;
+   * export type ChatScope = (typeof CHAT_SCOPES)[number];
+   *
+   * const chatModule: AppstrateModule = {
+   *   manifest: { id: "chat", name: "Chat", version: "1.0.0" },
+   *   oidcScopes: [...CHAT_SCOPES],
+   *   // ...
+   * };
+   * ```
+   *
+   * Consumers of the module's middleware (or any code reading `jwt.scope`)
+   * import `ChatScope` to recover the literal union — typing is lost only
+   * at the core boundary, not within the module's own surface.
+   *
    * No-op when the OIDC module is absent — declaring scopes on a platform
    * that doesn't load OIDC just goes unused.
    */
-  oidcScopes?: string[];
+  oidcScopes?: ReadonlyArray<`${string}:${string}`>;
 
   /** Called during graceful shutdown (reverse init order). */
   shutdown?(): Promise<void>;

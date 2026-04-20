@@ -396,12 +396,79 @@ describe("module-loader", () => {
         [
           // A module with id "oidc" must not pollute the aggregator —
           // the OIDC module owns the built-in vocabulary directly.
-          mockModule("oidc", { oidcScopes: ["should-be-ignored"] }),
+          mockModule("oidc", { oidcScopes: ["ignored:scope"] }),
           mockModule("chat", { oidcScopes: ["chat:read"] }),
         ],
         mockCtx(),
       );
       expect(getModuleOidcScopes()).toEqual(["chat:read"]);
+    });
+  });
+
+  describe("validateModuleOidcScopes (boot-time format guard)", () => {
+    it("rejects a scope without colon — fails fast at boot", async () => {
+      const mod = mockModule("chat", {
+        // Casting around the template-literal compile-time guard so the
+        // runtime validation gets exercised. External modules built from JS
+        // (not TS) bypass the compile-time guard entirely — this is the
+        // last line of defense.
+        oidcScopes: ["chatread"] as unknown as ReadonlyArray<`${string}:${string}`>,
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /Module "chat" declared invalid oidcScope "chatread"/,
+      );
+    });
+
+    it("rejects an uppercase scope", async () => {
+      const mod = mockModule("chat", {
+        oidcScopes: ["Chat:Read"] as unknown as ReadonlyArray<`${string}:${string}`>,
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /invalid oidcScope "Chat:Read"/,
+      );
+    });
+
+    it("rejects a scope containing whitespace", async () => {
+      const mod = mockModule("chat", {
+        oidcScopes: ["chat: read"] as unknown as ReadonlyArray<`${string}:${string}`>,
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /invalid oidcScope "chat: read"/,
+      );
+    });
+
+    it("accepts valid namespace:action scopes", async () => {
+      await expect(
+        loadModulesFromInstances(
+          [
+            mockModule("chat", { oidcScopes: ["chat:read", "chat:write"] }),
+            mockModule("billing", { oidcScopes: ["billing:read", "billing-v2:write"] }),
+          ],
+          mockCtx(),
+        ),
+      ).resolves.toBeUndefined();
+    });
+
+    it("accepts modules with no oidcScopes declaration", async () => {
+      await expect(
+        loadModulesFromInstances([mockModule("plain")], mockCtx()),
+      ).resolves.toBeUndefined();
+    });
+
+    it("exempts the OIDC module — its built-in vocabulary lives in scopes.ts", async () => {
+      // The OIDC module owns the canonical vocabulary directly, including
+      // single-word identity scopes (`openid`, `profile`, …). The
+      // validator must not block them — exemption is keyed on `manifest.id`.
+      await expect(
+        loadModulesFromInstances(
+          [
+            mockModule("oidc", {
+              oidcScopes: ["openid"] as unknown as ReadonlyArray<`${string}:${string}`>,
+            }),
+          ],
+          mockCtx(),
+        ),
+      ).resolves.toBeUndefined();
     });
   });
 

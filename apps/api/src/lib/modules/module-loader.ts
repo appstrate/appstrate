@@ -135,6 +135,7 @@ async function initSortedModules(
 ): Promise<void> {
   const sorted = topoSort(modules);
   validateNoDuplicatePrefixes(sorted);
+  validateModuleOidcScopes(sorted);
   for (const mod of sorted) {
     try {
       await mod.init(ctx);
@@ -151,6 +152,47 @@ async function initSortedModules(
     logger.info("Module loaded", { id: mod.manifest.id, version: mod.manifest.version });
   }
   _initialized = true;
+}
+
+/**
+ * Format enforced on module-contributed OIDC scopes: lowercase
+ * `namespace:action`, alphanumeric + `_` + `-`, both halves required.
+ *
+ * The compile-time `${string}:${string}` template literal on
+ * `AppstrateModule.oidcScopes` already forbids single-word scopes (which
+ * are reserved for the OIDC identity vocabulary `openid|profile|email|
+ * offline_access`). This regex tightens the runtime contract — rejects
+ * uppercase, whitespace, and exotic characters that a `string`-typed
+ * value coming from JSON config or a JS module could still smuggle in.
+ */
+const MODULE_OIDC_SCOPE_PATTERN = /^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$/;
+
+/**
+ * Fail-fast at boot if any module declares an `oidcScopes` entry that
+ * doesn't match `MODULE_OIDC_SCOPE_PATTERN`. The OIDC module is exempt:
+ * its canonical vocabulary (identity + permission scopes) lives in
+ * `modules/oidc/auth/scopes.ts` and follows its own rules — single-word
+ * identity scopes are intentional there.
+ *
+ * Errors name the offending module + scope so the operator can fix the
+ * declaration without grepping. Run alongside `validateNoDuplicatePrefixes`
+ * in `initSortedModules` so the platform refuses to boot rather than
+ * silently shipping malformed scopes into discovery / `assertValidScopes`.
+ */
+export function validateModuleOidcScopes(modules: readonly AppstrateModule[]): void {
+  for (const mod of modules) {
+    if (mod.manifest.id === "oidc") continue;
+    const scopes = mod.oidcScopes;
+    if (!scopes) continue;
+    for (const scope of scopes) {
+      if (typeof scope !== "string" || !MODULE_OIDC_SCOPE_PATTERN.test(scope)) {
+        throw new Error(
+          `Module "${mod.manifest.id}" declared invalid oidcScope ${JSON.stringify(scope)}. ` +
+            `Expected lowercase "namespace:action" matching ${MODULE_OIDC_SCOPE_PATTERN}.`,
+        );
+      }
+    }
+  }
 }
 
 /**
