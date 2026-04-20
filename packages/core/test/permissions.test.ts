@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, test, expect } from "bun:test";
-import { requireModulePermission } from "../src/permissions.ts";
+import {
+  requireModulePermission,
+  requireCorePermission,
+  CORE_RESOURCE_NAMES,
+  type AppstrateCoreResources,
+} from "../src/permissions.ts";
 
 // Augment the resource catalog with a test resource so the helper can be
 // invoked with a typed call. Lives only in this test file — no leakage to
@@ -70,5 +75,126 @@ describe("requireModulePermission", () => {
       // expected
     }
     expect(called).toBe(false);
+  });
+});
+
+describe("requireCorePermission", () => {
+  // Same fail-closed semantics as requireModulePermission, typed against
+  // AppstrateCoreResources instead. These tests lock down the contract so
+  // a future "let's unify the two helpers" refactor can't silently change
+  // the throw shape consumers depend on.
+
+  test("calls next() when the required core permission is present", async () => {
+    const middleware = requireCorePermission("agents", "run");
+    const c = makeContext(new Set(["agents:run", "agents:read"]));
+    let called = false;
+    await middleware(c, async () => {
+      called = true;
+    });
+    expect(called).toBe(true);
+  });
+
+  test("throws when the required core permission is missing", async () => {
+    const middleware = requireCorePermission("agents", "run");
+    const c = makeContext(new Set(["agents:read"]));
+    await expect(middleware(c, async () => {})).rejects.toThrow(
+      /Insufficient permissions: agents:run required/,
+    );
+  });
+
+  test("throws when the permissions Set is undefined", async () => {
+    const middleware = requireCorePermission("runs", "cancel");
+    const c = makeContext(undefined);
+    await expect(middleware(c, async () => {})).rejects.toThrow(/runs:cancel required/);
+  });
+
+  test("does not call next() on denial", async () => {
+    const middleware = requireCorePermission("agents", "delete");
+    const c = makeContext(new Set([]));
+    let called = false;
+    try {
+      await middleware(c, async () => {
+        called = true;
+      });
+    } catch {
+      // expected
+    }
+    expect(called).toBe(false);
+  });
+});
+
+describe("AppstrateCoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
+  // The interface is the compile-time vocabulary; CORE_RESOURCE_NAMES is
+  // the runtime collision-detection Set the platform's module loader
+  // reads to reject any module that re-declares a core resource.
+  //
+  // They MUST list the same resource names — drift would mean either
+  // (a) a core resource exists at the type level but a module can still
+  // claim it at runtime (security hole), or (b) the loader rejects a
+  // resource that core doesn't actually own (false positive blocking
+  // legitimate modules). Both are silent failures without this test.
+
+  test("every keyof AppstrateCoreResources is in CORE_RESOURCE_NAMES", () => {
+    // Materialize the interface keys via a typed dictionary literal —
+    // adding a resource to AppstrateCoreResources without listing it here
+    // is a TS error, so this catches drift in BOTH directions in one
+    // assertion.
+    const allCoreResources: Record<keyof AppstrateCoreResources, true> = {
+      org: true,
+      members: true,
+      agents: true,
+      skills: true,
+      tools: true,
+      providers: true,
+      runs: true,
+      schedules: true,
+      memories: true,
+      connections: true,
+      profiles: true,
+      "app-profiles": true,
+      models: true,
+      "provider-keys": true,
+      proxies: true,
+      "api-keys": true,
+      applications: true,
+      "end-users": true,
+      webhooks: true,
+      "oauth-clients": true,
+      billing: true,
+    };
+    for (const name of Object.keys(allCoreResources)) {
+      expect(CORE_RESOURCE_NAMES.has(name)).toBe(true);
+    }
+  });
+
+  test("CORE_RESOURCE_NAMES has no extra entries beyond the interface", () => {
+    const allCoreResources: Record<keyof AppstrateCoreResources, true> = {
+      org: true,
+      members: true,
+      agents: true,
+      skills: true,
+      tools: true,
+      providers: true,
+      runs: true,
+      schedules: true,
+      memories: true,
+      connections: true,
+      profiles: true,
+      "app-profiles": true,
+      models: true,
+      "provider-keys": true,
+      proxies: true,
+      "api-keys": true,
+      applications: true,
+      "end-users": true,
+      webhooks: true,
+      "oauth-clients": true,
+      billing: true,
+    };
+    const interfaceNames = new Set(Object.keys(allCoreResources));
+    for (const name of CORE_RESOURCE_NAMES) {
+      expect(interfaceNames.has(name)).toBe(true);
+    }
+    expect(CORE_RESOURCE_NAMES.size).toBe(interfaceNames.size);
   });
 });

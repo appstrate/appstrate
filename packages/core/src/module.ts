@@ -364,6 +364,24 @@ export interface ModulePermissionContribution {
    * session-only unless explicitly opted in.
    */
   apiKeyGrantable?: boolean;
+  /**
+   * When `true`, every `<resource>:<action>` produced by this entry can be
+   * carried by an end-user OAuth2/OIDC token (the embedding-app flow). The
+   * platform's OIDC strategy filters end-user JWT scopes against this
+   * allowlist before writing them to `c.get("permissions")` — without the
+   * opt-in, a module's resource is unreachable through end-user tokens
+   * even if the JWT advertises it.
+   *
+   * Defaults to `false` — module permissions are dashboard/instance/API-key
+   * only unless explicitly opted in. Use this for modules whose data is
+   * meant to be addressed per-end-user (chat sessions, end-user profiles,
+   * notifications…). Avoid for admin/destructive surfaces (those should
+   * stay session-only or API-key-only).
+   *
+   * No-op on platforms that don't load the OIDC module — the flag is
+   * simply ignored when no end-user pipeline exists.
+   */
+  endUserGrantable?: boolean;
 }
 
 // ---------------------------------------------------------------------------
