@@ -138,13 +138,6 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "end-users:read",
   "end-users:write",
   "end-users:delete",
-  "webhooks:read",
-  "webhooks:write",
-  "webhooks:delete",
-  // OAuth clients (OIDC module)
-  "oauth-clients:read",
-  "oauth-clients:write",
-  "oauth-clients:delete",
   // Billing
   "billing:read",
   "billing:manage",
@@ -341,14 +334,6 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "end-users:read",
   "end-users:write",
   "end-users:delete",
-  // Webhooks
-  "webhooks:read",
-  "webhooks:write",
-  "webhooks:delete",
-  // OAuth clients (OIDC module)
-  "oauth-clients:read",
-  "oauth-clients:write",
-  "oauth-clients:delete",
 ]);
 
 // ---------------------------------------------------------------------------

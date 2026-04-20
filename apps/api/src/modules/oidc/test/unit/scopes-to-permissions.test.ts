@@ -61,15 +61,21 @@ describe("scopesToPermissions — end_user flow", () => {
 
 describe("scopesToPermissions — dashboard flow", () => {
   it("owner gets every scope in their token", () => {
+    // Uses only core scopes — `oauth-clients:*` is now module-contributed
+    // (owned by this very module via `permissionsContribution()`), so
+    // asserting it here would require loading the OIDC module into the
+    // permissions snapshot, which this unit test deliberately avoids. The
+    // ceiling mechanic being verified (dashboard scope → role permissions)
+    // is orthogonal to which resource is on the scope.
     const perms = scopesToPermissions(
-      "openid agents:read agents:write runs:delete oauth-clients:write",
+      "openid agents:read agents:write runs:delete models:write",
       "dashboard_user",
       "owner",
     );
     expect(perms.has("agents:read")).toBe(true);
     expect(perms.has("agents:write")).toBe(true);
     expect(perms.has("runs:delete")).toBe(true);
-    expect(perms.has("oauth-clients:write")).toBe(true);
+    expect(perms.has("models:write")).toBe(true);
   });
 
   it("admin gets everything except owner-only perms (via role ceiling)", () => {

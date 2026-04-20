@@ -158,8 +158,6 @@ describe("AppstrateCoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       "api-keys": true,
       applications: true,
       "end-users": true,
-      webhooks: true,
-      "oauth-clients": true,
       billing: true,
     };
     for (const name of Object.keys(allCoreResources)) {
@@ -187,8 +185,6 @@ describe("AppstrateCoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       "api-keys": true,
       applications: true,
       "end-users": true,
-      webhooks: true,
-      "oauth-clients": true,
       billing: true,
     };
     const interfaceNames = new Set(Object.keys(allCoreResources));

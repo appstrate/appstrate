@@ -77,8 +77,6 @@ export interface AppstrateCoreResources {
   "api-keys": "read" | "create" | "revoke";
   applications: "read" | "write" | "delete";
   "end-users": "read" | "write" | "delete";
-  webhooks: "read" | "write" | "delete";
-  "oauth-clients": "read" | "write" | "delete";
   billing: "read" | "manage";
 }
 
@@ -123,8 +121,6 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "api-keys",
   "applications",
   "end-users",
-  "webhooks",
-  "oauth-clients",
   "billing",
 ]);
 
