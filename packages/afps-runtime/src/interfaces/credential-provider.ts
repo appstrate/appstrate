@@ -57,6 +57,19 @@ export interface CredentialProvider {
 
 export interface CredentialsResponse {
   credentials: Record<string, string>;
+  /**
+   * Explicit allowlist of URIs the credentials may be used against. Empty
+   * array denies everything unless {@link allowAllUris} is also set.
+   */
   authorizedUris: string[];
+  /**
+   * If `true`, callers MAY use the credentials against any URI — the
+   * allowlist is interpreted as "all public URLs". Providers wrapping a
+   * server-side bridge (e.g. `AppstrateCredentialProvider`) set this to
+   * match the platform's flag. Default: `false`.
+   */
+  allowAllUris?: boolean;
+  /** Advisory rotation hint (Unix ms). When within a provider-specific
+   * margin of `Date.now()`, the runtime SHOULD call {@link CredentialProvider.refresh}. */
   expiresAt?: number;
 }
