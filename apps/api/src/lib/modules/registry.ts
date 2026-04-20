@@ -21,7 +21,7 @@ import { applyModuleMigrations } from "./migrate.ts";
 import { logger } from "../logger.ts";
 import { loadModel, listOrgModels } from "../../services/org-models.ts";
 import { getPackage, searchPackages } from "../../services/agent-service.ts";
-import { isInlineShadowPackageId } from "../../services/inline-run.ts";
+import { isInlineShadowPackageId, triggerInlineRun } from "../../services/inline-run.ts";
 import { runInlinePreflight } from "../../services/inline-run-preflight.ts";
 import { getDefaultApplication } from "../../services/applications.ts";
 import { listAllActorConnections } from "../../services/connection-manager/providers.ts";
@@ -116,7 +116,7 @@ function buildPlatformServices(): PlatformServices {
         updateRun({ orgId: a.orgId, applicationId: a.applicationId }, a.runId, a.updates),
       abort: abortRun,
     },
-    inline: { preflight: runInlinePreflight },
+    inline: { preflight: runInlinePreflight, run: triggerInlineRun },
     realtime: { addSubscriber, removeSubscriber },
     modules: { get: getModule, emit: emitEvent },
   };

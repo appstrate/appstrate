@@ -5,6 +5,7 @@ import {
   loadModulesFromInstances,
   getModule,
   getModules,
+  getModuleOidcScopes,
   getModulePublicPaths,
   registerModuleRoutes,
   applyModuleFeatures,
@@ -359,6 +360,48 @@ describe("module-loader", () => {
           status: "success",
         }),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe("getModuleOidcScopes", () => {
+    it("returns empty array when no module contributes scopes", async () => {
+      await loadModulesFromInstances([], mockCtx());
+      expect(getModuleOidcScopes()).toEqual([]);
+    });
+
+    it("aggregates oidcScopes from every loaded module", async () => {
+      await loadModulesFromInstances(
+        [
+          mockModule("chat", { oidcScopes: ["chat:read", "chat:write"] }),
+          mockModule("billing", { oidcScopes: ["billing:read"] }),
+        ],
+        mockCtx(),
+      );
+      expect(getModuleOidcScopes().sort()).toEqual(["billing:read", "chat:read", "chat:write"]);
+    });
+
+    it("deduplicates repeated scopes", async () => {
+      await loadModulesFromInstances(
+        [
+          mockModule("alpha", { oidcScopes: ["x:read"] }),
+          mockModule("beta", { oidcScopes: ["x:read", "y:read"] }),
+        ],
+        mockCtx(),
+      );
+      expect(getModuleOidcScopes().sort()).toEqual(["x:read", "y:read"]);
+    });
+
+    it("excludes the OIDC module's own contributions (canonical vocabulary lives in scopes.ts)", async () => {
+      await loadModulesFromInstances(
+        [
+          // A module with id "oidc" must not pollute the aggregator —
+          // the OIDC module owns the built-in vocabulary directly.
+          mockModule("oidc", { oidcScopes: ["should-be-ignored"] }),
+          mockModule("chat", { oidcScopes: ["chat:read"] }),
+        ],
+        mockCtx(),
+      );
+      expect(getModuleOidcScopes()).toEqual(["chat:read"]);
     });
   });
 

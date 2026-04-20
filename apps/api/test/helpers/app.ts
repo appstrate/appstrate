@@ -55,6 +55,7 @@ import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createConnectionsRouter } from "../../src/routes/connections.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
+import meRouter from "../../src/routes/me.ts";
 import profileRouter from "../../src/routes/profile.ts";
 import invitationsRouter from "../../src/routes/invitations.ts";
 import welcomeRouter from "../../src/routes/welcome.ts";
@@ -170,6 +171,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   const schedulesRouter = createSchedulesRouter();
 
   app.route("/api/orgs", orgsRouter);
+  app.route("/api/me", meRouter);
   app.route("/api/agents", userAgentsRouter);
   app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());

@@ -241,6 +241,29 @@ export function getModuleOpenApiComponentSchemas(): Record<string, unknown> {
   return schemas;
 }
 
+/**
+ * Aggregate OIDC scopes contributed by every loaded module (excluding the
+ * OIDC module itself, whose canonical vocabulary lives in
+ * `modules/oidc/auth/scopes.ts`). The OIDC module reads this at boot via
+ * `betterAuthPlugins()` so the aggregated list reaches:
+ *   1. `oauthProvider({ scopes })` — feeds discovery `scopes_supported`
+ *   2. `assertValidScopes` — gates `OIDC_INSTANCE_CLIENTS` registration
+ *   3. `GET /api/oauth/scopes` — admin tooling
+ *
+ * Returns deduplicated entries in load order. Empty when no module
+ * contributes — preserves the OSS zero-footprint invariant.
+ */
+export function getModuleOidcScopes(): string[] {
+  const seen = new Set<string>();
+  for (const mod of _modules.values()) {
+    if (mod.manifest.id === "oidc") continue;
+    for (const scope of mod.oidcScopes ?? []) {
+      if (typeof scope === "string" && scope.length > 0) seen.add(scope);
+    }
+  }
+  return Array.from(seen);
+}
+
 /** Collect OpenAPI tags contributed by all loaded modules. */
 export function getModuleOpenApiTags(): Array<{ name: string; description?: string }> {
   const tags: Array<{ name: string; description?: string }> = [];

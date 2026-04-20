@@ -37,12 +37,11 @@ import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
 import {
-  insertShadowPackage,
-  buildShadowLoadedPackage,
-  deleteOrphanShadowPackage,
+  triggerInlineRun,
   isInlineShadowPackageId,
+  type InlineRunBody,
 } from "../services/inline-run.ts";
-import { runInlinePreflight, type InlineRunBody } from "../services/inline-run-preflight.ts";
+import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 function accumulateUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens += addition.input_tokens;
   total.output_tokens += addition.output_tokens;
@@ -701,77 +700,16 @@ export function createRunsRouter() {
 
       const body = await c.req.json<InlineRunBody>();
 
-      // ----- 1. Preflight — shape + providers + readiness (no side effects). -----
-      // Running this BEFORE insertShadowPackage means invalid manifests no
-      // longer leave orphan shadow rows that we'd have to clean up.
-      const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
-      const {
-        manifest,
-        prompt,
-        effectiveConfig,
-        effectiveInput,
-        providerProfiles,
-        modelIdOverride,
-        proxyIdOverride,
-        resolvedDeps,
-      } = preflight;
-
-      // ----- 2. Insert shadow row (now that we know the manifest is valid). -----
-      const createdBy = actor?.type === "member" ? actor.id : null;
-      const shadowId = await insertShadowPackage({ orgId, createdBy, manifest, prompt });
-      const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, prompt, resolvedDeps);
-
-      // ----- 3. Fire the pipeline. -----
-      const runId = `run_${crypto.randomUUID()}`;
-      let pipelineResult;
-      try {
-        pipelineResult = await prepareAndExecuteRun({
-          runId,
-          agent: shadowAgent,
-          providerProfiles,
-          orgId,
-          actor,
-          input: effectiveInput,
-          config: effectiveConfig,
-          modelId: modelIdOverride,
-          proxyId: proxyIdOverride,
-          applicationId,
-          apiKeyId: c.get("apiKeyId") ?? undefined,
-        });
-      } catch (err) {
-        await deleteOrphanShadowPackage(shadowId);
-        throw err;
-      }
-
-      if (!pipelineResult.ok) {
-        await deleteOrphanShadowPackage(shadowId);
-        const { error } = pipelineResult;
-        if (error.code === "model_not_configured") {
-          throw new ApiError({
-            status: 400,
-            code: "model_not_configured",
-            title: "Bad Request",
-            detail: error.message,
-          });
-        }
-        if ("status" in error && typeof error.status === "number") {
-          throw new ApiError({
-            status: error.status,
-            code: error.code,
-            title: error.message,
-            detail: error.message,
-          });
-        }
-        throw new ApiError({
-          status: 500,
-          code: "inline_run_failed",
-          title: "Inline run failed",
-          detail: error.message,
-        });
-      }
+      const { runId, packageId } = await triggerInlineRun({
+        orgId,
+        applicationId,
+        actor,
+        body,
+        apiKeyId: c.get("apiKeyId") ?? undefined,
+      });
 
       c.status(202);
-      return c.json({ runId, packageId: shadowId });
+      return c.json({ runId, packageId });
     },
   );
 

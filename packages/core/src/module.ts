@@ -17,6 +17,7 @@ import type {
   ContainerOrchestrator,
   InlinePreflightInput,
   InlinePreflightResult,
+  InlineRunBody,
   PlatformApplication,
   PlatformConnectionProviderGroup,
   PlatformModel,
@@ -226,6 +227,38 @@ export interface AppstrateModule {
    * `AppConfig` alongside module features.
    */
   appConfigContribution?(): Promise<Record<string, unknown>> | Record<string, unknown>;
+
+  /**
+   * Public API surface exposed to other modules.
+   *
+   * Read by peers via `services.modules.get(id)?.api`. Typed as `unknown`
+   * here so the core contract stays ignorant of any specific module's
+   * shape; modules that consume a peer's API import that peer's published
+   * typings (or cast at the call site) to recover strong typing.
+   *
+   * Example: the OIDC module exposes `verifyEndUserAccessToken` so any
+   * module accepting OAuth2 Bearer JWTs can re-verify tokens without
+   * re-implementing JWKS fetch + caching + signature parsing.
+   */
+  api?: unknown;
+
+  /**
+   * Additional OAuth2 scopes contributed by this module to the OIDC
+   * vocabulary. Aggregated by the OIDC module at boot and included in:
+   *   1. `.well-known/openid-configuration#scopes_supported`
+   *   2. `assertValidScopes` (so operator-registered clients can request them)
+   *   3. `GET /api/oauth/scopes`
+   *
+   * Scopes are NOT translated into core permissions — they remain opaque
+   * strings that the contributing module's own middleware enforces by
+   * reading the JWT's `scope` claim. Pick stable, namespaced strings
+   * (e.g. `chat:read`, `chat:write`) that won't collide with other
+   * modules' scopes.
+   *
+   * No-op when the OIDC module is absent — declaring scopes on a platform
+   * that doesn't load OIDC just goes unused.
+   */
+  oidcScopes?: string[];
 
   /** Called during graceful shutdown (reverse init order). */
   shutdown?(): Promise<void>;
@@ -633,12 +666,29 @@ export interface PlatformServices {
     abort(runId: string): void;
   };
   /**
-   * Inline run preflight — validates a manifest + inputs without creating a
-   * run record. Consumers inspect the result to decide whether to trigger an
-   * actual run. No durable side effects.
+   * Inline run lifecycle — preflight (validate without side effects) and
+   * `run` (preflight + insert shadow package + fire pipeline). `run` mirrors
+   * what `POST /api/runs/inline` does server-side; modules that schedule
+   * one-shot agent executions (slash commands, webhooks, module-owned cron)
+   * call it directly without duplicating the shadow-insert + pipeline dance.
    */
   inline: {
     preflight(params: InlinePreflightInput): Promise<InlinePreflightResult>;
+    /**
+     * Trigger an inline agent run end-to-end. Returns once the pipeline
+     * has accepted the run; the client streams progress via the existing
+     * realtime SSE endpoint.
+     *
+     * Throws on validation / pipeline failures (same shape `POST /api/runs/inline`
+     * surfaces as a `problem+json` body).
+     */
+    run(params: {
+      orgId: string;
+      applicationId: string;
+      actor: Actor | null;
+      body: InlineRunBody;
+      apiKeyId?: string;
+    }): Promise<{ runId: string; packageId: string }>;
   };
   /** Realtime SSE subscriber registry. */
   realtime: {

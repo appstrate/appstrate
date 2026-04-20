@@ -70,7 +70,7 @@ import {
 import { isBlockedHost } from "@appstrate/core/ssrf";
 import { getOidcAuthApi } from "./auth/api.ts";
 import { withSmtpOverride } from "@appstrate/db/auth";
-import { APPSTRATE_SCOPES } from "./auth/scopes.ts";
+import { getAppstrateScopes } from "./auth/scopes.ts";
 import { consumeLoginEmailAttempt, resetLoginEmailAttempts } from "./auth/guards.ts";
 import {
   UnverifiedEmailConflictError,
@@ -504,7 +504,7 @@ export function createOidcRouter() {
     "/api/oauth/scopes",
     rateLimit(300),
     requirePermission("oauth-clients", "read"),
-    async (c) => c.json({ data: [...APPSTRATE_SCOPES] }),
+    async (c) => c.json({ data: [...getAppstrateScopes()] }),
   );
 
   router.get(

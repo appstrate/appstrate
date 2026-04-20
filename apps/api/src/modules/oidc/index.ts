@@ -62,6 +62,20 @@ import { ensureCliClient } from "./services/ensure-cli-client.ts";
 import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
 import { oidcRealmResolver } from "./services/oidc-realm-resolver.ts";
 import { setRealmResolver } from "@appstrate/db/auth";
+import { verifyEndUserAccessToken } from "./services/enduser-token.ts";
+
+/**
+ * Public API surface exposed via `services.modules.get("oidc")?.api`. Other
+ * modules that accept OAuth2 Bearer JWTs (e.g. `@appstrate/chat`) call
+ * `verifyEndUserAccessToken` to re-verify tokens against the local JWKS
+ * without re-implementing JWKS fetch + caching + signature parsing.
+ *
+ * Consumers narrow the type by importing this module's published typings:
+ *   const oidc = services.modules.get("oidc")?.api as OidcModuleApi | undefined;
+ */
+export interface OidcModuleApi {
+  verifyEndUserAccessToken: typeof verifyEndUserAccessToken;
+}
 
 // Snapshot of first-party clientIds captured at `init()` time and forwarded
 // to `oauthProvider({ cachedTrustedClients })` when `betterAuthPlugins()` is
@@ -71,6 +85,10 @@ let cachedTrustedClientIds: readonly string[] = [];
 
 const oidcModule: AppstrateModule = {
   manifest: { id: "oidc", name: "OIDC Identity Provider", version: "1.0.0" },
+
+  api: {
+    verifyEndUserAccessToken,
+  } satisfies OidcModuleApi,
 
   async init(ctx: ModuleInitContext) {
     await ctx.applyMigrations("oidc", resolve(import.meta.dir, "drizzle/migrations"), {

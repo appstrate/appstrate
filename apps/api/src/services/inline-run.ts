@@ -18,7 +18,13 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages } from "@appstrate/db/schema";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
+import type { Actor } from "../lib/actor.ts";
+import { ApiError } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
+import { runInlinePreflight, type InlineRunBody } from "./inline-run-preflight.ts";
+import { prepareAndExecuteRun } from "./run-pipeline.ts";
+
+export type { InlineRunBody };
 
 /** Reserved scope for inline-run shadow packages. Never publishable. */
 export const INLINE_SHADOW_SCOPE = "inline";
@@ -109,6 +115,97 @@ export function buildShadowLoadedPackage(
     tools: deps.tools,
     source: "local",
   };
+}
+
+/**
+ * Trigger an inline agent run end-to-end.
+ *
+ * Mirrors the route-handler body of `POST /api/runs/inline`: preflight ->
+ * insert shadow package -> fire pipeline -> return `{ runId, packageId }`.
+ * Both the HTTP route and `PlatformServices.inline.run` call this single
+ * implementation so the contract stays in lockstep across surfaces.
+ *
+ * Throws `ApiError` on validation / pipeline failures (same shape the route
+ * already emits). Infrastructure errors bubble as-is so the caller's error
+ * handler can surface them as 5xx.
+ */
+export async function triggerInlineRun(params: {
+  orgId: string;
+  applicationId: string;
+  actor: Actor | null;
+  body: InlineRunBody;
+  apiKeyId?: string;
+}): Promise<{ runId: string; packageId: string }> {
+  const { orgId, applicationId, actor, body, apiKeyId } = params;
+
+  // ----- 1. Preflight — shape + providers + readiness (no side effects). -----
+  const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
+  const {
+    manifest,
+    prompt,
+    effectiveConfig,
+    effectiveInput,
+    providerProfiles,
+    modelIdOverride,
+    proxyIdOverride,
+    resolvedDeps,
+  } = preflight;
+
+  // ----- 2. Insert shadow row (now that we know the manifest is valid). -----
+  const createdBy = actor?.type === "member" ? actor.id : null;
+  const shadowId = await insertShadowPackage({ orgId, createdBy, manifest, prompt });
+  const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, prompt, resolvedDeps);
+
+  // ----- 3. Fire the pipeline. -----
+  const runId = `run_${crypto.randomUUID()}`;
+  let pipelineResult;
+  try {
+    pipelineResult = await prepareAndExecuteRun({
+      runId,
+      agent: shadowAgent,
+      providerProfiles,
+      orgId,
+      actor,
+      input: effectiveInput,
+      config: effectiveConfig,
+      modelId: modelIdOverride,
+      proxyId: proxyIdOverride,
+      applicationId,
+      apiKeyId,
+    });
+  } catch (err) {
+    await deleteOrphanShadowPackage(shadowId);
+    throw err;
+  }
+
+  if (!pipelineResult.ok) {
+    await deleteOrphanShadowPackage(shadowId);
+    const { error } = pipelineResult;
+    if (error.code === "model_not_configured") {
+      throw new ApiError({
+        status: 400,
+        code: "model_not_configured",
+        title: "Bad Request",
+        detail: error.message,
+      });
+    }
+    if ("status" in error && typeof error.status === "number") {
+      throw new ApiError({
+        status: error.status,
+        code: error.code,
+        title: error.message,
+        detail: error.message,
+      });
+    }
+    throw new ApiError({
+      status: 500,
+      code: "inline_run_failed",
+      title: "Inline run failed",
+      detail: error.message,
+    });
+  }
+
+  return { runId, packageId: shadowId };
 }
 
 /**

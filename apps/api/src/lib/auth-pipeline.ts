@@ -345,5 +345,10 @@ export function skipOrgContext(path: string): boolean {
   if (path.startsWith("/api/orgs/")) return true; // /api/orgs/:id/* handle their own auth
   if (path === "/api/profile" || path === "/api/profile/") return true;
   if (path === "/api/welcome/setup") return true;
+  // `/api/me/orgs` is the prerequisite to picking an org and setting
+  // `X-Org-Id` — it cannot itself depend on org context being already
+  // resolved. Other `/api/me/*` routes (e.g. `/api/me/models`) DO require
+  // org context and are intentionally not listed here.
+  if (path === "/api/me/orgs" || path === "/api/me/orgs/") return true;
   return false;
 }
