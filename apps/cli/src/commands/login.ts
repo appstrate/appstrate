@@ -18,6 +18,11 @@
  *      box. Issue #209. Auto-pin on one org, interactive picker on
  *      many, offer inline creation on zero. Non-interactive escapes:
  *      `--org <id-or-slug>`, `--create-org <name>`, `--no-org`.
+ *   8. Cascade: pin an application on the profile so subsequent
+ *      `X-App-Id`-requiring routes (`/api/agents`, `/api/runs`, …)
+ *      work out of the box. Issue #217. Auto-pins the default app
+ *      (the server provisions one per org). Non-interactive escapes:
+ *      `--app <id>`, `--create-app <name>`, `--no-app`.
  */
 
 import open from "open";
@@ -30,13 +35,20 @@ import {
   formatUserCode,
   exitWithError,
 } from "../lib/ui.ts";
-import { readConfig, resolveProfileName, setProfile } from "../lib/config.ts";
+import { readConfig, resolveProfileName, setProfile, updateProfile } from "../lib/config.ts";
 import { saveTokens } from "../lib/keyring.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { CLI_CLIENT_ID, CLI_SCOPE } from "../lib/cli-client.ts";
 import { decodeAccessTokenIdentity } from "../lib/jwt-identity.ts";
 import { listOrgs, createOrg, resolveOrgRef, type Org } from "../lib/orgs.ts";
+import {
+  listApplications,
+  createApplication,
+  resolveApplicationRef,
+  findDefaultApplication,
+  type Application,
+} from "../lib/applications.ts";
 
 export interface LoginOptions {
   profile?: string;
@@ -47,6 +59,12 @@ export interface LoginOptions {
   createOrg?: string;
   /** `--no-org` — explicitly skip the whole pin step. */
   noOrg?: boolean;
+  /** `--app <id>` — non-interactive app pin, fails if no match. */
+  app?: string;
+  /** `--create-app <name>` — non-interactive inline creation + pin. */
+  createApp?: string;
+  /** `--no-app` — explicitly skip the app-pinning step. */
+  noApp?: boolean;
   deps?: LoginDeps;
 }
 
@@ -200,23 +218,23 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
     refreshExpiresAt: Date.now() + token.refreshExpiresIn * 1000,
   });
 
-  // Preserve the previous `orgId` when re-logging-in as the SAME user.
-  // Without this, a re-login whose step-7 `/api/orgs` call happens to
-  // flake (network, server blip) would silently drop the pin the user
-  // had carefully set — surprising regression. Only carry it over when
-  // `userId` matches: re-logging-in as a different user on the same
-  // profile must NOT inherit the previous account's org id.
+  // Preserve the previous `orgId` / `appId` when re-logging-in as the
+  // SAME user. Without this, a re-login whose step-7 / step-8 list call
+  // happens to flake (network, server blip) would silently drop the pins
+  // the user had carefully set — surprising regression. Only carry them
+  // over when `userId` matches: re-logging-in as a different user on the
+  // same profile must NOT inherit the previous account's pins.
   const existingProfile = (await readConfig()).profiles[profileName];
-  const preservedOrgId =
-    existingProfile?.userId === identity.userId && existingProfile?.orgId
-      ? existingProfile.orgId
-      : undefined;
+  const sameUser = existingProfile?.userId === identity.userId;
+  const preservedOrgId = sameUser && existingProfile?.orgId ? existingProfile.orgId : undefined;
+  const preservedAppId = sameUser && existingProfile?.appId ? existingProfile.appId : undefined;
 
   await setProfile(profileName, {
     instance,
     userId: identity.userId,
     email: identity.email,
     ...(preservedOrgId ? { orgId: preservedOrgId } : {}),
+    ...(preservedAppId ? { appId: preservedAppId } : {}),
   });
 
   // Step 7 — pin an organization. Issue #209. Credentials are already
@@ -225,12 +243,22 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
   // a hint to the user, never as a hard failure.
   const pinned = await pinOrgOnProfile(profileName, opts);
 
+  // Step 8 — cascade into application pinning. Issue #217. Requires an
+  // `orgId` in context (listApplications is org-scoped), so we gate on
+  // `pinned` rather than re-fetching from the keyring.
+  const pinnedApp = await pinAppOnProfile(profileName, opts, pinned);
+
   const orgSuffix = pinned ? ` to "${pinned.name}" (${pinned.id})` : "";
-  outro(`Logged in as ${identity.email}${orgSuffix}`);
+  const appSuffix = pinnedApp ? ` / app "${pinnedApp.name}" (${pinnedApp.id})` : "";
+  outro(`Logged in as ${identity.email}${orgSuffix}${appSuffix}`);
 
   if (!pinned) {
     process.stdout.write(
       `No org pinned — pass -H "X-Org-Id: …" on each call, or run \`appstrate org switch\` later.\n`,
+    );
+  } else if (!pinnedApp && !opts.noApp) {
+    process.stdout.write(
+      `No app pinned — pass -H "X-App-Id: …" on each call, or run \`appstrate app switch\` later.\n`,
     );
   }
 }
@@ -253,7 +281,7 @@ async function pinOrgOnProfile(profileName: string, opts: LoginOptions): Promise
   // they want a fresh org. Don't second-guess them with a prompt.
   if (opts.createOrg !== undefined) {
     const created = await createOrg(profileName, { name: opts.createOrg });
-    await persistOrgId(profileName, created.id);
+    await updateProfile(profileName, { orgId: created.id });
     return created;
   }
 
@@ -272,13 +300,13 @@ async function pinOrgOnProfile(profileName: string, opts: LoginOptions): Promise
   // `--org <id-or-slug>` — explicit non-interactive selection.
   if (opts.org !== undefined) {
     const match = resolveOrgRef(orgs, opts.org);
-    await persistOrgId(profileName, match.id);
+    await updateProfile(profileName, { orgId: match.id });
     return match;
   }
 
   if (orgs.length === 1) {
     const only = orgs[0]!;
-    await persistOrgId(profileName, only.id);
+    await updateProfile(profileName, { orgId: only.id });
     return only;
   }
 
@@ -286,31 +314,85 @@ async function pinOrgOnProfile(profileName: string, opts: LoginOptions): Promise
     const input = await deps.promptCreateOrg();
     if (!input) return null;
     const created = await createOrg(profileName, input);
-    await persistOrgId(profileName, created.id);
+    await updateProfile(profileName, { orgId: created.id });
     return created;
   }
 
   // ≥2 orgs — delegate the (possibly non-TTY) decision to the picker.
   const chosen = await deps.pickOrg(orgs);
   if (!chosen) return null;
-  await persistOrgId(profileName, chosen.id);
+  await updateProfile(profileName, { orgId: chosen.id });
   return chosen;
 }
 
 /**
- * Rewrite the profile's `orgId` without disturbing the other fields.
- * `setProfile` replaces the whole row, so we re-read first to preserve
- * `userId` / `email` / `instance` that `runLogin` just persisted.
+ * Resolve the app-pin branch of the login cascade. Issue #217.
+ *
+ * Gated on a successful org pin: `GET /api/applications` needs an
+ * `X-Org-Id` header, so when no org is pinned (user passed `--no-org`,
+ * or the cascade failed) we return null without a network call.
+ *
+ * Unlike `pinOrgOnProfile` this does NOT expose an interactive picker at
+ * login time — the server provisions exactly one default application per
+ * org, so the non-flag path is fully deterministic. Users with ≥2 apps
+ * and no clear default get a stderr hint and pin manually via
+ * `appstrate app switch` afterwards.
  */
-async function persistOrgId(profileName: string, orgId: string): Promise<void> {
-  const config = await readConfig();
-  const existing = config.profiles[profileName];
-  if (!existing) {
-    // Should never happen: `runLogin` called `setProfile` before this.
-    // Fail loudly — silent fallback would mask a real regression.
-    throw new Error(
-      `Profile "${profileName}" missing from config when pinning org — internal invariant broken.`,
-    );
+async function pinAppOnProfile(
+  profileName: string,
+  opts: LoginOptions,
+  orgPinned: Org | null,
+): Promise<Application | null> {
+  if (opts.noApp) return null;
+  if (!orgPinned) return null;
+
+  if (opts.createApp !== undefined) {
+    const created = await createApplication(profileName, opts.createApp);
+    await updateProfile(profileName, { appId: created.id });
+    return created;
   }
-  await setProfile(profileName, { ...existing, orgId });
+
+  let apps: Application[];
+  try {
+    apps = await listApplications(profileName);
+  } catch (err) {
+    process.stderr.write(
+      `Failed to list applications: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return null;
+  }
+
+  // `--app <id>` — explicit non-interactive selection.
+  if (opts.app !== undefined) {
+    const match = resolveApplicationRef(apps, opts.app);
+    await updateProfile(profileName, { appId: match.id });
+    return match;
+  }
+
+  if (apps.length === 0) {
+    // Should be impossible in practice — every org has a server-provisioned
+    // default app. Surface defensively in case of partial state.
+    process.stderr.write(
+      "No applications found on the pinned organization — run `appstrate app create <name>` to create one.\n",
+    );
+    return null;
+  }
+
+  if (apps.length === 1) {
+    const only = apps[0]!;
+    await updateProfile(profileName, { appId: only.id });
+    return only;
+  }
+
+  // ≥2 apps — pin the server-provisioned default. If none is marked,
+  // surface a hint; pinning silently to apps[0] would be too guessy.
+  const def = findDefaultApplication(apps);
+  if (def) {
+    await updateProfile(profileName, { appId: def.id });
+    return def;
+  }
+  process.stderr.write(
+    "Multiple applications but none marked default — run `appstrate app switch` to pin one.\n",
+  );
+  return null;
 }

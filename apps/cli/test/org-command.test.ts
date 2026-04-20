@@ -78,6 +78,7 @@ function captureIo(): void {
 interface Responders {
   listOrgs?: () => Response;
   createOrg?: (body: unknown) => Response;
+  listApplications?: () => Response;
 }
 
 function installFetch(responders: Responders): void {
@@ -94,6 +95,27 @@ function installFetch(responders: Responders): void {
     }
     if (url.endsWith("/api/orgs")) {
       return responders.listOrgs?.() ?? new Response("missing listOrgs stub", { status: 501 });
+    }
+    if (url.endsWith("/api/applications")) {
+      // Default: the new org has exactly one server-provisioned default app.
+      return (
+        responders.listApplications?.() ??
+        new Response(
+          JSON.stringify({
+            object: "list",
+            data: [
+              {
+                id: "app_cascade_default",
+                orgId: "org_2",
+                name: "Default",
+                isDefault: true,
+                createdAt: "t",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      );
     }
     return new Response("not mocked: " + url, { status: 501 });
   };
@@ -127,12 +149,13 @@ afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true });
 });
 
-async function seedLoggedIn(orgId?: string, profile = "default"): Promise<void> {
+async function seedLoggedIn(orgId?: string, profile = "default", appId?: string): Promise<void> {
   await setProfile(profile, {
     instance: "https://app.example.com",
     userId: "u_1",
     email: "alice@example.com",
     ...(orgId ? { orgId } : {}),
+    ...(appId ? { appId } : {}),
   });
   await saveTokens(profile, {
     accessToken: "tok-abc",
@@ -144,6 +167,10 @@ async function seedLoggedIn(orgId?: string, profile = "default"): Promise<void> 
 
 async function pinnedOrgId(profile = "default"): Promise<string | undefined> {
   return (await readConfig()).profiles[profile]?.orgId;
+}
+
+async function pinnedAppId(profile = "default"): Promise<string | undefined> {
+  return (await readConfig()).profiles[profile]?.appId;
 }
 
 const twoOrgs = {
@@ -399,5 +426,130 @@ describe("org create", () => {
       ExitError,
     );
     expect(stderrChunks.join("")).toContain("not configured");
+  });
+});
+
+// ─── App cascade on org change (issue #217) ───────────────────────────
+//
+// An `appId` pinned to org A is invalid under org B — the server returns
+// 404 on the next app-scoped call. `org switch` and `org create` must
+// both (a) clear the stale app pin and (b) re-pin the new org's default
+// app so `appstrate api` keeps working without manual intervention.
+
+describe("org switch — cascade: re-pins new org's default app", () => {
+  it("pins the new org AND pins the new org's default app in one call", async () => {
+    // Start pinned to org_1 with an app pin that only exists under org_1.
+    await seedLoggedIn("org_1", "default", "app_stale_from_org_1");
+    installFetch({
+      listOrgs: () =>
+        new Response(JSON.stringify(twoOrgs), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      listApplications: () =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            data: [
+              {
+                id: "app_for_org_2",
+                orgId: "org_2",
+                name: "Org 2 Default",
+                isDefault: true,
+                createdAt: "t",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+
+    await orgSwitchCommand({ profile: "default", ref: "org_2" });
+
+    expect(await pinnedOrgId()).toBe("org_2");
+    expect(await pinnedAppId()).toBe("app_for_org_2");
+    const out = stdoutChunks.join("");
+    expect(out).toContain('Pinned "Beta"');
+    expect(out).toContain('/ app "Org 2 Default"');
+  });
+
+  it("clears the stale app pin even when the new org has no default app", async () => {
+    await seedLoggedIn("org_1", "default", "app_stale");
+    installFetch({
+      listOrgs: () =>
+        new Response(JSON.stringify(twoOrgs), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      listApplications: () =>
+        new Response(JSON.stringify({ object: "list", data: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+
+    await orgSwitchCommand({ profile: "default", ref: "org_2" });
+
+    expect(await pinnedOrgId()).toBe("org_2");
+    // Crucially, the stale pin is gone even though no new default was found.
+    expect(await pinnedAppId()).toBeUndefined();
+  });
+
+  it("tolerates a failing /api/applications call — org pin still commits", async () => {
+    await seedLoggedIn("org_1", "default", "app_stale");
+    installFetch({
+      listOrgs: () =>
+        new Response(JSON.stringify(twoOrgs), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      listApplications: () => new Response("boom", { status: 500 }),
+    });
+
+    await orgSwitchCommand({ profile: "default", ref: "org_2" });
+
+    expect(await pinnedOrgId()).toBe("org_2");
+    expect(await pinnedAppId()).toBeUndefined();
+  });
+});
+
+describe("org create — cascade: re-pins new org's default app", () => {
+  it("pins the newly created org AND pins the auto-provisioned default app", async () => {
+    await seedLoggedIn(undefined, "default", "app_stale");
+    installFetch({
+      createOrg: () =>
+        new Response(
+          JSON.stringify({
+            id: "org_new",
+            name: "Fresh",
+            slug: "fresh",
+            role: "owner",
+            createdAt: "t",
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        ),
+      listApplications: () =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            data: [
+              {
+                id: "app_new_default",
+                orgId: "org_new",
+                name: "Default",
+                isDefault: true,
+                createdAt: "t",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+
+    await orgCreateCommand({ profile: "default", name: "Fresh" });
+
+    expect(await pinnedOrgId()).toBe("org_new");
+    expect(await pinnedAppId()).toBe("app_new_default");
+    expect(stdoutChunks.join("")).toContain('/ app "Default"');
   });
 });

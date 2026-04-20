@@ -30,6 +30,7 @@ export interface Profile {
   userId: string;
   email: string;
   orgId?: string;
+  appId?: string;
 }
 
 export interface Config {
@@ -108,6 +109,7 @@ export async function readConfig(): Promise<Config> {
       userId: row.userId,
       email: row.email,
       orgId: typeof row.orgId === "string" ? row.orgId : undefined,
+      appId: typeof row.appId === "string" ? row.appId : undefined,
     };
   }
   return { defaultProfile, profiles };
@@ -140,6 +142,63 @@ export async function writeConfig(config: Config): Promise<void> {
 export async function getProfile(name: string): Promise<Profile | null> {
   const config = await readConfig();
   return config.profiles[name] ?? null;
+}
+
+/**
+ * Merge a partial update into an existing profile. Used by the login
+ * org→app cascade and the `org switch` / `app switch` commands to rewrite
+ * a single field (`orgId`, `appId`) without re-reading the whole profile
+ * at each call site.
+ *
+ * `undefined` in the patch means "clear the key" — strip it before write
+ * so the key doesn't round-trip as a bare TOML entry.
+ */
+export async function updateProfile(name: string, patch: Partial<Profile>): Promise<void> {
+  const config = await readConfig();
+  const existing = config.profiles[name];
+  if (!existing) {
+    throw new Error(`Profile "${name}" missing from config — internal invariant broken.`);
+  }
+  const next: Profile = { ...existing, ...patch };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) delete (next as unknown as Record<string, unknown>)[k];
+  }
+  config.profiles[name] = next;
+  await writeConfig(config);
+}
+
+/**
+ * Resolve the active profile in one call — wraps the
+ * `resolveProfileName` → `readConfig` → lookup dance every command does
+ * at entry. Returns `profile: undefined` if the resolved name has no
+ * matching section in `config.toml`; pair with `requireLoggedIn` to
+ * hard-exit on that path.
+ */
+export async function resolveActiveProfile(
+  explicit: string | undefined,
+): Promise<{ profileName: string; profile: Profile | undefined }> {
+  const config = await readConfig();
+  const profileName = resolveProfileName(explicit, config);
+  return { profileName, profile: config.profiles[profileName] };
+}
+
+/**
+ * Narrow `profile` from `Profile | undefined` to `Profile`, hard-exiting
+ * with an actionable hint when the resolved profile has no config entry.
+ * Used by every `appstrate org …` / `appstrate app …` subcommand —
+ * centralized so the phrasing stays in sync across the two command
+ * families.
+ */
+export function requireLoggedIn(
+  profileName: string,
+  profile: Profile | undefined,
+): asserts profile is Profile {
+  if (!profile) {
+    process.stderr.write(
+      `Profile "${profileName}" not configured. Run: appstrate login --profile ${profileName}\n`,
+    );
+    process.exit(1);
+  }
 }
 
 export async function setProfile(name: string, profile: Profile): Promise<void> {

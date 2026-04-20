@@ -10,6 +10,8 @@
  *   - `appstrate logout`:  revoke the session + wipe local storage.
  *   - `appstrate whoami`:  server-authoritative identity check.
  *   - `appstrate token`:   print access + refresh token metadata (debug).
+ *   - `appstrate org`:     manage the pinned organization (`X-Org-Id`).
+ *   - `appstrate app`:     manage the pinned application (`X-App-Id`).
  *   - `appstrate api`:     authenticated HTTP passthrough for coding agents.
  *
  * Global flags:
@@ -36,6 +38,12 @@ import {
   orgCurrentCommand,
   orgCreateCommand,
 } from "./commands/org.ts";
+import {
+  appListCommand,
+  appSwitchCommand,
+  appCurrentCommand,
+  appCreateCommand,
+} from "./commands/app.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
@@ -168,6 +176,18 @@ program
     "--no-org",
     "Skip the post-login org-pinning step entirely. Subsequent calls must pass `-H X-Org-Id: …` or pin later via `appstrate org switch`.",
   )
+  .option(
+    "--app <id>",
+    "Pin this application on the profile after login (non-interactive). Fails if no match.",
+  )
+  .option(
+    "--create-app <name>",
+    "Create a new application with this name after login and pin it (non-interactive).",
+  )
+  .option(
+    "--no-app",
+    "Skip the post-login app-pinning step entirely. Subsequent calls must pass `-H X-App-Id: …` or pin later via `appstrate app switch`.",
+  )
   .action(async (opts) => {
     const globalOpts = program.opts<{ profile?: string }>();
     await loginCommand({
@@ -179,6 +199,9 @@ program
       // commander 14). `--org <value>` sets it to a string, neither leaves
       // it undefined — so `opts.org === false` is the unambiguous skip signal.
       noOrg: opts.org === false,
+      app: typeof opts.app === "string" ? opts.app : undefined,
+      createApp: typeof opts.createApp === "string" ? opts.createApp : undefined,
+      noApp: opts.app === false,
     });
   });
 
@@ -259,10 +282,58 @@ orgGroup
     });
   });
 
+// ─── `appstrate app …` — manage the pinned application (issue #217) ────
+
+const appGroup = program
+  .command("app")
+  .description("Manage the pinned application for the active profile");
+
+appGroup
+  .command("list")
+  .description("List applications in the pinned organization")
+  .action(async () => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await appListCommand({ profile: globalOpts.profile });
+  });
+
+appGroup
+  .command("current")
+  .description("Print the pinned application id, or exit 1 if none is pinned")
+  .action(async () => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await appCurrentCommand({ profile: globalOpts.profile });
+  });
+
+appGroup
+  .command("switch [ref]")
+  .description(
+    "Re-pin the active application on the profile. With no argument, show an interactive picker.",
+  )
+  .action(async (ref: string | undefined) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await appSwitchCommand({
+      profile: globalOpts.profile,
+      ref: typeof ref === "string" ? ref : undefined,
+    });
+  });
+
+appGroup
+  .command("create [name]")
+  .description(
+    "Create a new application (and pin it on the profile). With no argument, prompt interactively.",
+  )
+  .action(async (name: string | undefined) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await appCreateCommand({
+      profile: globalOpts.profile,
+      name: typeof name === "string" ? name : undefined,
+    });
+  });
+
 program
   .command("api <target> [extra]")
   .description(
-    "Authenticated HTTP passthrough to the Appstrate API. Injects the active profile's bearer token + X-Org-Id so coding agents (Claude Code, Cursor, Aider, …) can call the API without ever seeing the raw token.\n" +
+    "Authenticated HTTP passthrough to the Appstrate API. Injects the active profile's bearer token + X-Org-Id + X-App-Id so coding agents (Claude Code, Cursor, Aider, …) can call the API without ever seeing the raw token.\n" +
       "\n" +
       "Invocation forms (all curl-compatible):\n" +
       "  appstrate api GET /api/x             # explicit method + path\n" +

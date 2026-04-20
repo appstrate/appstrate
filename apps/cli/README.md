@@ -40,6 +40,7 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | `appstrate whoami`  | Print the identity attached to the active profile.                             |
 | `appstrate token`   | Print metadata about the stored access + refresh tokens (debug).               |
 | `appstrate org`     | List, switch, or create organizations pinned on the active profile.            |
+| `appstrate app`     | List, switch, or create applications pinned on the active profile.             |
 | `appstrate api`     | Authenticated HTTP passthrough to the Appstrate API.                           |
 | `appstrate openapi` | Explore the active profile's OpenAPI schema without flooding stdout.           |
 
@@ -98,6 +99,9 @@ appstrate login --profile prod --instance https://app.my.io
 | `--org`           | `<id-or-slug>` | After the token exchange, pin this organization on the profile non-interactively. Fails if the reference does not match any org.              |
 | `--create-org`    | `<name>`       | Create a new organization with this name and pin it. A default application + hello-world agent are provisioned server-side. Skips the prompt. |
 | `--no-org`        | —              | Skip the post-login org-pinning step entirely. Subsequent calls must carry `-H 'X-Org-Id: …'`, or pin later via `appstrate org switch`.       |
+| `--app`           | `<id>`         | After the org pin, pin this application on the profile non-interactively. Fails if the reference does not match any app.                      |
+| `--create-app`    | `<name>`       | Create a new application with this name after login and pin it. Skips the cascade's default-app pick.                                         |
+| `--no-app`        | —              | Skip the post-login app-pinning step entirely. Subsequent calls must carry `-H 'X-App-Id: …'`, or pin later via `appstrate app switch`.       |
 
 **Org pinning after login** (issue #209): on success, the CLI calls `GET /api/orgs` and branches:
 
@@ -106,6 +110,14 @@ appstrate login --profile prod --instance https://app.my.io
 - **≥2 orgs** → interactive picker.
 
 The pinned org id is written to `config.toml` and automatically sent as `X-Org-Id` on every subsequent `appstrate api` call, so `appstrate api GET /api/me` works immediately after a fresh login with no extra flags.
+
+**Application pinning after login** (issue #217): after the org pin succeeds, the CLI cascades into `GET /api/applications` and branches:
+
+- **Exactly one app** → auto-pin.
+- **≥2 apps** → auto-pin the one with `isDefault: true` (the server provisions exactly one default per org). No interactive picker at login — use `appstrate app switch` afterwards for a different app.
+- **No default among ≥2 apps** (defensive — should never happen) → warn on stderr, leave unpinned.
+
+On success, the banner names both: `Logged in as … to "Acme" (org_xxx) / app "Default" (app_xxx)`. The pinned app id is sent as `X-App-Id` on every `appstrate api` call, so app-scoped routes (`/api/agents`, `/api/runs`, `/api/schedules`, …) work with no extra flags.
 
 **Flow** (what happens on the wire):
 
@@ -235,6 +247,34 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 | `org current`           | Print the pinned org id to stdout. Exits 1 with a hint when no org is pinned — designed for `if` / shell prompts.                        |
 | `org create [name]`     | Create a new org and pin it. With no argument, prompt for name + optional slug. Use `--slug <slug>` for an explicit kebab-case override. |
 
+**Cascade — the app pin follows the org pin.** Every `org switch` / `org create` clears the current `appId` and re-pins the new org's default application in the same atomic operation. This keeps `appstrate api GET /api/agents` working immediately after switching — without the cascade the next call would return `404 Application not found in this organization`.
+
+---
+
+### `appstrate app`
+
+Manage the application pinned on the active profile. `login` auto-pins the default application in the pinned org (see above); `app switch` / `app create` let you change the pin without re-running the device flow. The pinned app id is sent as `X-App-Id` on every `appstrate api` call — required for app-scoped routes (agents, runs, schedules, webhooks, api-keys, notifications, packages, providers, connections, end-users, app-profiles).
+
+```sh
+appstrate app list            # enumerate apps in the pinned org; pinned row is marked *, default row tagged [default]
+appstrate app switch          # interactive picker (current app pre-highlighted)
+appstrate app switch app_xxx  # non-interactive — by id
+appstrate app current         # print the pinned appId (scripts / shell prompts)
+appstrate app create          # interactive (name) → auto-pin
+appstrate app create "Staging"   # non-interactive → auto-pin
+```
+
+All four subcommands respect the global `--profile <name>` flag and talk to `GET /api/applications` / `POST /api/applications`. Applications are identified by `id` only (there is no slug column server-side).
+
+**Subcommands**
+
+| Subcommand          | Purpose                                                                                                              |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `app list`          | List the applications in the pinned org. The pinned one is marked with `*`; the org's default is tagged `[default]`. |
+| `app switch [id]`   | Re-pin the active app on the profile. With no argument, show an interactive picker with the current one highlighted. |
+| `app current`       | Print the pinned app id to stdout. Exits 1 with a hint when no app is pinned — designed for `if` / shell prompts.    |
+| `app create [name]` | Create a new app and pin it. With no argument, prompt for a name interactively.                                      |
+
 ---
 
 ### `appstrate openapi`
@@ -298,7 +338,7 @@ Colors are suppressed when stdout is not a TTY, or when `NO_COLOR` is set in the
 
 ### `appstrate api`
 
-Curl-like authenticated HTTP passthrough. Purpose-built so coding agents (Claude Code, Cursor, Aider, …) can call the Appstrate API in a shell-one-liner without ever seeing the raw bearer — the CLI injects `Authorization: Bearer …` + `X-Org-Id` from the keyring-backed profile.
+Curl-like authenticated HTTP passthrough. Purpose-built so coding agents (Claude Code, Cursor, Aider, …) can call the Appstrate API in a shell-one-liner without ever seeing the raw bearer — the CLI injects `Authorization: Bearer …` + `X-Org-Id` + `X-App-Id` from the keyring-backed profile.
 
 ```sh
 appstrate api GET /api/agents
@@ -436,6 +476,7 @@ instance = "https://app.example.com"
 userId = "EWnC2cLyy88EpCGBa3WrIdS7uqI648BB"
 email = "alice@example.com"
 orgId = "org_123abc"
+appId = "app_abc123"
 
 [profile.dev]
 instance = "http://localhost:3000"
@@ -443,12 +484,18 @@ userId = "SVAA9PSXrmqQmg95A3RzyydtlravhhJR"
 email = "dev@example.com"
 ```
 
-`orgId` is optional — when set, every `apiFetch` request sends `X-Org-Id: <orgId>` so the instance scopes requests correctly. Unset means the user's default org applies server-side.
+`orgId` and `appId` are both optional — when set, every `apiFetch` request sends `X-Org-Id: <orgId>` (and `X-App-Id: <appId>`) so the instance scopes requests correctly. Unset `orgId` means the user's default org applies server-side; unset `appId` means app-scoped routes (`/api/agents`, `/api/runs`, …) return `400 Application context required` and the caller must pass `-H X-App-Id: …` manually.
 
 ## Troubleshooting
 
 **`Unauthorized — your session may have been revoked`**
 Session expired or was revoked server-side. Re-run `appstrate login`.
+
+**`Application context required. Provide X-App-Id header or use an API key.`**
+The pinned profile has no `appId`. Either the cascade at login skipped it (`--no-app`, zero apps in the org, or no default found), or a previous `org switch` cleared it and the re-pin fetch flaked. Run `appstrate app switch` to pick one, or pass `-H 'X-App-Id: …'` on the call.
+
+**`Application '<id>' not found in this organization`**
+The pinned `appId` belongs to a different org than the currently pinned `orgId`. Happens when something mutates `config.toml` between an `org switch` and the next API call, or after a manual hand-edit. Run `appstrate app switch` to re-pin a valid app under the current org.
 
 **`This CLI is not registered on the target instance. The platform may be running an incompatible version.`**
 The instance's `appstrate-cli` OAuth client is missing. Boot the platform — `ensureCliClient()` auto-provisions it on startup. If the instance is much older than the CLI (pre-Phase-1 device flow), the CLI binary is incompatible — downgrade via `APPSTRATE_VERSION=<older-tag> curl get.appstrate.dev | bash`.

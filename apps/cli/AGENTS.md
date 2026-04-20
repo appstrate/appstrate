@@ -6,9 +6,10 @@ You are an AI coding agent (Claude Code, Cursor, Codex, Gemini CLI, …) and a h
 
 Appstrate is a platform for running autonomous AI agents in sandboxed containers. Its REST API is the single source of truth — 191 endpoints documented in OpenAPI 3.1. The `appstrate` CLI is a thin, authenticated wrapper around that API:
 
-- **`appstrate api`** — `curl`-compatible HTTP passthrough. Replace `curl https://app/api/x` with `appstrate api /api/x`. The CLI injects `Authorization: Bearer <jwt>` + `X-Org-Id` from the OS keyring; you never see the bearer.
+- **`appstrate api`** — `curl`-compatible HTTP passthrough. Replace `curl https://app/api/x` with `appstrate api /api/x`. The CLI injects `Authorization: Bearer <jwt>` + `X-Org-Id` + `X-App-Id` from the OS keyring; you never see the bearer.
 - **`appstrate openapi`** — schema explorer. `list` + `show` + `export` let you discover the 191 endpoints without dumping the whole spec into your context window.
 - **`appstrate org`** — pin which organization the profile targets (`X-Org-Id`).
+- **`appstrate app`** — pin which application the profile targets (`X-App-Id`). Required for app-scoped routes (agents, runs, schedules, …).
 - **`appstrate login` / `logout` / `whoami` / `token`** — session management.
 
 Everything else the user asks for — creating an agent, triggering a run, uploading a package, managing webhooks — is expressed as `appstrate api <METHOD> <path>` plus a JSON body. The CLI never hides endpoints from you.
@@ -28,6 +29,13 @@ appstrate login --instance https://app.example.com
 
 # 3. Confirm which org is pinned (X-Org-Id sent on every call)
 appstrate org current
+
+# 3b. Confirm which application is pinned (X-App-Id sent on every call).
+#     App-scoped routes (agents, runs, schedules, webhooks, api-keys,
+#     notifications, packages, providers, connections, end-users,
+#     app-profiles) require this. `login` cascades into the default app
+#     automatically, so this usually already prints a value.
+appstrate app current
 
 # 4. Discover the "runs" domain. --json produces compact, greppable output.
 appstrate openapi list --tag runs --json
@@ -60,7 +68,7 @@ appstrate api POST /api/agents/agt_123/run \
 1. **Discover before you POST.** Always run `appstrate openapi show <operationId> --json` before constructing a request body. Schemas change; your training data lies.
 2. **Never hard-code tokens.** If you find yourself writing `Authorization: Bearer …`, you've failed the design. The CLI owns the bearer; you just call `appstrate api`.
 3. **Never print tokens.** `appstrate token` returns metadata only — never the plaintext. Do not try to extract tokens from the keyring.
-4. **Respect the org boundary.** `X-Org-Id` is auto-injected from the pinned profile. To operate on a different org, run `appstrate org switch <slug-or-id>` — do not forge the header.
+4. **Respect the org + app boundaries.** `X-Org-Id` and `X-App-Id` are auto-injected from the pinned profile. To operate on a different org, run `appstrate org switch <slug-or-id>` (the app pin cascades automatically). To operate on a different app within the same org, run `appstrate app switch <id>`. Do not forge either header.
 5. **Fail fast on auth drift.** If `whoami` exits non-zero mid-session, STOP and tell the human to re-run `appstrate login`. Do not retry blindly.
 6. **Use `--profile <name>` for multi-instance.** `--profile dev` / `--profile prod` pick a keyring entry + instance URL pair. Do not hack `~/.config/appstrate/config.toml` by hand.
 
@@ -131,6 +139,8 @@ If you hit any of the following, stop and surface the issue to the human instead
 
 - `401 unauthorized` after `whoami` passed — the refresh token family was revoked; `appstrate login` needed.
 - `403 forbidden` — the pinned org doesn't have permission. Offer `appstrate org switch` or ask which org to use.
+- `400 Application context required` — the profile has no `appId` pinned. Run `appstrate app current` to check, then `appstrate app switch` (or surface the error — the cascade at login should have handled this).
+- `404 Application '<id>' not found in this organization` — stale app pin from a previous org. Run `appstrate app switch` under the current org.
 - `404 not found` on an operationId that `openapi list` shows — the instance version is older than the CLI. Ask the human to upgrade.
 - `This CLI is not registered on the target instance` — version incompatibility; do not patch around it.
 

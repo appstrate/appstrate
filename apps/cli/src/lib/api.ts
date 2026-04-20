@@ -12,10 +12,11 @@
  *     BEFORE issuing the request (proactive refresh), OR
  *   - the request returns `401` (reactive refresh + single retry).
  *
- * Inject `X-Org-Id` when the profile is pinned to a specific
- * organization — matches the dashboard SPA's header contract
- * (`apps/web/src/lib/api.ts`) so routes that use `requireOrgMembership`
- * work identically from the CLI.
+ * Inject `X-Org-Id` + `X-App-Id` when the profile is pinned to a
+ * specific organization / application — matches the dashboard SPA's
+ * header contract (`apps/web/src/lib/api.ts`) so routes that use
+ * `requireOrgMembership` + `requireAppContext` work identically from
+ * the CLI.
  */
 
 import { loadTokens, saveTokens, deleteTokens, type Tokens } from "./keyring.ts";
@@ -165,6 +166,7 @@ export interface AuthContext {
   instance: string;
   accessToken: string;
   orgId?: string;
+  appId?: string;
 }
 
 /**
@@ -185,6 +187,7 @@ export async function resolveAuthContext(profileName: string): Promise<AuthConte
     instance: normalizeInstance(profile.instance),
     accessToken: token,
     orgId: profile.orgId,
+    appId: profile.appId,
   };
 }
 
@@ -295,6 +298,7 @@ export async function apiFetchRaw(
       headers["Content-Type"] = "application/json";
     }
     if (profile.orgId) headers["X-Org-Id"] = profile.orgId;
+    if (profile.appId) headers["X-App-Id"] = profile.appId;
     return fetch(`${normalizeInstance(profile.instance)}${path}`, { ...init, headers });
   };
 

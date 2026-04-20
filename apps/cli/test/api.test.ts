@@ -370,6 +370,59 @@ describe("apiFetchRaw — X-Org-Id header injection", () => {
   });
 });
 
+describe("apiFetchRaw — X-App-Id header injection", () => {
+  it("forwards profile.appId as X-App-Id when set", async () => {
+    await setProfile("default", {
+      instance: "https://app.example.com",
+      userId: "u_1",
+      email: "a@example.com",
+      orgId: "org_42",
+      appId: "app_7",
+    });
+    await saveTokens("default", {
+      accessToken: "tok",
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      refreshToken: "r",
+      refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    });
+    let capturedApp: string | undefined;
+    let capturedOrg: string | undefined;
+    installFetch(async (_url, init) => {
+      const h = init?.headers as Record<string, string>;
+      capturedApp = h["X-App-Id"];
+      capturedOrg = h["X-Org-Id"];
+      return jsonResponse(200, {});
+    });
+    await apiFetchRaw("default", "/api/data");
+    // Both headers sent when both are pinned — the common agent recipe path.
+    expect(capturedApp).toBe("app_7");
+    expect(capturedOrg).toBe("org_42");
+  });
+
+  it("does NOT send X-App-Id when profile.appId is unset", async () => {
+    await setProfile("default", {
+      instance: "https://app.example.com",
+      userId: "u_1",
+      email: "a@example.com",
+      orgId: "org_42",
+    });
+    await saveTokens("default", {
+      accessToken: "tok",
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      refreshToken: "r",
+      refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    });
+    let sawAppHeader = true;
+    installFetch(async (_url, init) => {
+      const h = init?.headers as Record<string, string>;
+      sawAppHeader = "X-App-Id" in h;
+      return jsonResponse(200, {});
+    });
+    await apiFetchRaw("default", "/api/data");
+    expect(sawAppHeader).toBe(false);
+  });
+});
+
 describe("apiFetchRaw — concurrent refresh dedup (PR #191 review)", () => {
   it("collapses N parallel proactive refreshes into ONE /cli/token call", async () => {
     // Seed with an access token that is past the 30s proactive-refresh
