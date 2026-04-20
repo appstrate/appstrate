@@ -12,6 +12,7 @@
 
 import type { Hono } from "hono";
 import type { Logger } from "./logger.ts";
+import type { OrgRole } from "./permissions.ts";
 import type {
   Actor,
   ContainerOrchestrator,
@@ -356,7 +357,7 @@ export interface ModulePermissionContribution {
    * only) are supported by listing the resource multiple times with
    * different `actions`/`grantTo` combinations.
    */
-  grantTo: ReadonlyArray<"owner" | "admin" | "member" | "viewer">;
+  grantTo: ReadonlyArray<OrgRole>;
   /**
    * When `true`, every `<resource>:<action>` produced by this entry is
    * added to the API-key allowlist so org admins can mint keys with
@@ -506,7 +507,7 @@ export interface AuthResolution {
   user: { id: string; email: string; name: string };
   orgId?: string;
   orgSlug?: string;
-  orgRole?: "owner" | "admin" | "member" | "viewer";
+  orgRole?: OrgRole;
   /**
    * Strategy-chosen identifier for this auth method (e.g. "oidc", "mtls",
    * "webhook-hmac"). Written to `c.set("authMethod", ...)`. NOT constrained

@@ -152,6 +152,123 @@ export type ModulePermission = {
 }[ModuleResource];
 
 // ---------------------------------------------------------------------------
+// Org role vocabulary
+//
+// The literal set of org roles is the single source of truth for both the
+// RBAC role-grant matrix (apps/api/src/lib/permissions.ts) and the module
+// contribution shape (`ModulePermissionContribution.grantTo` in
+// `@appstrate/core/module`). Centralizing it here keeps the type usable from
+// every layer that needs to talk about roles — module authors, apps/api,
+// shared-types — without each layer redeclaring the union and risking
+// drift when a new role is added.
+//
+// The pgEnum in `packages/db/src/schema/enums.ts` is the runtime DB source
+// of truth; `packages/shared-types` reconciles the two with a compile-time
+// parity assertion. Adding/removing a role is a 3-place edit (this tuple,
+// the pgEnum, the role-grant matrix) — the parity assertion + the
+// exhaustive matrix typing make any mismatch a TypeScript error.
+// ---------------------------------------------------------------------------
+
+/** Const tuple of org roles. Drives `OrgRole` and the parity check in shared-types. */
+export const ORG_ROLES = ["owner", "admin", "member", "viewer"] as const;
+
+/** Org role string union — `"owner" | "admin" | "member" | "viewer"`. */
+export type OrgRole = (typeof ORG_ROLES)[number];
+
+// ---------------------------------------------------------------------------
+// Module permission aggregator — runtime registry shared by apps/api and
+// modules.
+//
+// The aggregator lives in core (rather than apps/api) so any module can
+// read the merged module-contribution snapshot through a single import
+// path — the OIDC module's end-user-scope filter is the canonical
+// consumer, and any future module that needs to introspect aggregated
+// grants (audit tooling, scope discovery, …) plugs in the same way.
+//
+// One-way dependency: apps/api's module-loader registers the provider
+// here at boot via `setModulePermissionsProvider`; readers below pull
+// from the registered provider. Without a registration (no module
+// loaded, OSS baseline, unit tests) the readers return the empty
+// snapshot, preserving the zero-footprint invariant.
+// ---------------------------------------------------------------------------
+
+/**
+ * Snapshot of all module-contributed permissions, ready for fast Set
+ * lookups. Built once at boot by the module-loader; subsequent reads are
+ * pure `Set.has` calls.
+ */
+export interface ModulePermissionsSnapshot {
+  /** Per-role module grants (merged into core role grants by apps/api). */
+  byRole: Readonly<Record<OrgRole, ReadonlySet<string>>>;
+  /** Module entries opted in via `apiKeyGrantable: true`. */
+  apiKeyAllowed: ReadonlySet<string>;
+  /**
+   * Module entries opted in via `endUserGrantable: true`. Read by the
+   * OIDC strategy (`apps/api/src/modules/oidc/auth/claims.ts`) to extend
+   * the built-in `OIDC_ALLOWED_SCOPES` filter for end-user tokens.
+   */
+  endUserAllowed: ReadonlySet<string>;
+}
+
+const EMPTY_SNAPSHOT: ModulePermissionsSnapshot = {
+  byRole: {
+    owner: new Set(),
+    admin: new Set(),
+    member: new Set(),
+    viewer: new Set(),
+  },
+  apiKeyAllowed: new Set(),
+  endUserAllowed: new Set(),
+};
+
+let _moduleProvider: () => ModulePermissionsSnapshot = () => EMPTY_SNAPSHOT;
+
+/**
+ * Register (or clear) the boot-time provider for module-contributed
+ * permissions. Called once by apps/api's module-loader after every
+ * module has initialized; subsequent calls overwrite the previous
+ * provider (intentional — tests use this to inject controlled snapshots,
+ * then reset by passing `null`).
+ */
+export function setModulePermissionsProvider(
+  provider: (() => ModulePermissionsSnapshot) | null,
+): void {
+  _moduleProvider = provider ?? (() => EMPTY_SNAPSHOT);
+}
+
+function moduleSnapshot(): ModulePermissionsSnapshot {
+  return _moduleProvider();
+}
+
+/**
+ * Module-contributed grants for `role`. Empty when no module is loaded
+ * (OSS baseline) or when no contribution targets the role.
+ */
+export function getModuleRoleScopes(role: OrgRole): ReadonlySet<string> {
+  return moduleSnapshot().byRole[role];
+}
+
+/**
+ * Module-contributed permissions opted in via `apiKeyGrantable: true`.
+ * Empty when no module is loaded or none opts in. apps/api unions this
+ * with its core API-key allowlist via `getApiKeyAllowedScopes()`.
+ */
+export function getModuleApiKeyScopes(): ReadonlySet<string> {
+  return moduleSnapshot().apiKeyAllowed;
+}
+
+/**
+ * Module-contributed permissions safe to carry on an end-user OIDC
+ * token. Read by `apps/api/src/modules/oidc/auth/claims.ts` to extend
+ * the built-in `OIDC_ALLOWED_SCOPES` filter for end-user tokens.
+ *
+ * Empty when no loaded module opts in via `endUserGrantable: true`.
+ */
+export function getModuleEndUserAllowedScopes(): ReadonlySet<string> {
+  return moduleSnapshot().endUserAllowed;
+}
+
+// ---------------------------------------------------------------------------
 // Hono middleware — typed RBAC guard for module-contributed resources
 //
 // Imports kept inline (and `any`-typed at the seams) so this file remains

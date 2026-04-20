@@ -3,7 +3,6 @@
 import { describe, it, expect } from "bun:test";
 import {
   resolvePermissions,
-  hasPermission,
   validateScopes,
   resolveApiKeyPermissions,
   API_KEY_ALLOWED_SCOPES,
@@ -87,20 +86,6 @@ describe("resolvePermissions", () => {
     const b = resolvePermissions("admin");
     expect(a).not.toBe(b);
     expect(a).toEqual(b);
-  });
-});
-
-describe("hasPermission", () => {
-  it("checks exact resource:action match", () => {
-    const perms = new Set(["agents:read", "agents:write"]);
-    expect(hasPermission(perms, "agents", "read")).toBe(true);
-    expect(hasPermission(perms, "agents", "write")).toBe(true);
-    expect(hasPermission(perms, "agents", "delete")).toBe(false);
-  });
-
-  it("returns false for empty set", () => {
-    const perms = new Set<string>();
-    expect(hasPermission(perms, "agents", "read")).toBe(false);
   });
 });
 

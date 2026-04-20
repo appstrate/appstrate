@@ -550,7 +550,7 @@ describe("module-loader", () => {
     });
 
     it("endUserGrantable=true adds entries to the end-user OIDC allowlist; false omits them", async () => {
-      const { getModuleEndUserAllowedScopes } = await import("../../../src/lib/permissions.ts");
+      const { getModuleEndUserAllowedScopes } = await import("@appstrate/core/permissions");
       await loadModulesFromInstances(
         [
           mockModule("chat", {
@@ -579,8 +579,8 @@ describe("module-loader", () => {
     });
 
     it("endUserGrantable is independent of apiKeyGrantable — both opt-ins are tracked separately", async () => {
-      const { getApiKeyAllowedScopes, getModuleEndUserAllowedScopes } =
-        await import("../../../src/lib/permissions.ts");
+      const { getApiKeyAllowedScopes } = await import("../../../src/lib/permissions.ts");
+      const { getModuleEndUserAllowedScopes } = await import("@appstrate/core/permissions");
       await loadModulesFromInstances(
         [
           mockModule("chat", {
@@ -613,7 +613,7 @@ describe("module-loader", () => {
     });
 
     it("resets endUser allowlist on resetModules()", async () => {
-      const { getModuleEndUserAllowedScopes } = await import("../../../src/lib/permissions.ts");
+      const { getModuleEndUserAllowedScopes } = await import("@appstrate/core/permissions");
       await loadModulesFromInstances(
         [
           mockModule("chat", {

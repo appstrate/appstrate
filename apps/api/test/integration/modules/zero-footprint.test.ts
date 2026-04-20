@@ -22,12 +22,11 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { buildOpenApiSpec } from "../../../src/openapi/index.ts";
 import { buildAppConfig } from "../../../src/lib/app-config.ts";
+import { resolvePermissions, getApiKeyAllowedScopes } from "../../../src/lib/permissions.ts";
 import {
-  resolvePermissions,
-  getApiKeyAllowedScopes,
   getModuleEndUserAllowedScopes,
   setModulePermissionsProvider,
-} from "../../../src/lib/permissions.ts";
+} from "@appstrate/core/permissions";
 
 // Fresh app, no modules mounted (bypasses the preload-discovered registry).
 const app = getTestApp({ modules: [] });

@@ -42,8 +42,10 @@ import {
   type CoreAction,
   type CorePermission,
   type ModulePermission,
+  type OrgRole,
+  getModuleRoleScopes,
+  getModuleApiKeyScopes,
 } from "@appstrate/core/permissions";
-import type { OrgRole } from "../types/index.ts";
 
 // ---------------------------------------------------------------------------
 // Resource & Action types — sourced from @appstrate/core/permissions
@@ -229,64 +231,6 @@ const ROLE_PERMISSIONS: Record<OrgRole, ReadonlySet<Permission>> = {
 };
 
 // ---------------------------------------------------------------------------
-// Module contribution provider — inversion of dependency
-//
-// The platform's module-loader registers a provider here at boot. Keeping
-// the dependency one-way (loader → permissions) avoids the cyclic import
-// `permissions → module-loader → permissions` and keeps this file usable
-// in isolation (e.g. unit tests that don't load any module).
-// ---------------------------------------------------------------------------
-
-/**
- * Snapshot of all module-contributed permissions, ready for fast Set
- * lookups. Returned by the provider registered through
- * `setModulePermissionsProvider()`. The empty default keeps the file
- * standalone — when no provider is registered (no module loaded, OSS
- * baseline, unit tests) every helper below behaves as if only core
- * permissions exist.
- */
-export interface ModulePermissionsSnapshot {
-  byRole: Readonly<Record<OrgRole, ReadonlySet<string>>>;
-  apiKeyAllowed: ReadonlySet<string>;
-  /**
-   * Permissions safe to carry on an end-user OIDC token. Populated from
-   * `ModulePermissionContribution.endUserGrantable === true` entries.
-   * Read by `apps/api/src/modules/oidc/auth/claims.ts` to extend the
-   * built-in `OIDC_ALLOWED_SCOPES` filter for end-user tokens.
-   */
-  endUserAllowed: ReadonlySet<string>;
-}
-
-const EMPTY_SNAPSHOT: ModulePermissionsSnapshot = {
-  byRole: {
-    owner: new Set(),
-    admin: new Set(),
-    member: new Set(),
-    viewer: new Set(),
-  },
-  apiKeyAllowed: new Set(),
-  endUserAllowed: new Set(),
-};
-
-let _moduleProvider: () => ModulePermissionsSnapshot = () => EMPTY_SNAPSHOT;
-
-/**
- * Register the boot-time provider for module-contributed permissions.
- * Called once by `module-loader` after all modules have initialized;
- * subsequent calls overwrite the previous provider (intentional — tests
- * use this to inject controlled snapshots, then reset).
- */
-export function setModulePermissionsProvider(
-  provider: (() => ModulePermissionsSnapshot) | null,
-): void {
-  _moduleProvider = provider ?? (() => EMPTY_SNAPSHOT);
-}
-
-function moduleSnapshot(): ModulePermissionsSnapshot {
-  return _moduleProvider();
-}
-
-// ---------------------------------------------------------------------------
 // API Key scopes
 // ---------------------------------------------------------------------------
 
@@ -350,22 +294,9 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
 
 /** Merged view of API-key-grantable permissions (core + modules opted in). */
 export function getApiKeyAllowedScopes(): ReadonlySet<string> {
-  const moduleAllowed = moduleSnapshot().apiKeyAllowed;
+  const moduleAllowed = getModuleApiKeyScopes();
   if (moduleAllowed.size === 0) return API_KEY_ALLOWED_SCOPES;
   return new Set<string>([...API_KEY_ALLOWED_SCOPES, ...moduleAllowed]);
-}
-
-/**
- * Module-contributed permissions safe to carry on an end-user OIDC token.
- * Used by `apps/api/src/modules/oidc/auth/claims.ts` to extend the
- * built-in `OIDC_ALLOWED_SCOPES` filter for `actor_type === "end_user"`
- * tokens. Empty when no loaded module opts in via `endUserGrantable: true`.
- *
- * Returns a fresh ReadonlySet view every call (cheap — module snapshot is
- * built once at boot, this just returns the underlying Set reference).
- */
-export function getModuleEndUserAllowedScopes(): ReadonlySet<string> {
-  return moduleSnapshot().endUserAllowed;
 }
 
 /**
@@ -374,18 +305,9 @@ export function getModuleEndUserAllowedScopes(): ReadonlySet<string> {
  */
 export function resolvePermissions(role: OrgRole): Set<Permission> {
   const core = ROLE_PERMISSIONS[role];
-  const mod = moduleSnapshot().byRole[role];
+  const mod = getModuleRoleScopes(role);
   if (mod.size === 0) return new Set(core);
   return new Set<Permission>([...core, ...(mod as ReadonlySet<Permission>)]);
-}
-
-/** Check if a permission set contains the required `resource:action`. */
-export function hasPermission<R extends Resource>(
-  permissions: ReadonlySet<string>,
-  resource: R,
-  action: Action<R>,
-): boolean {
-  return permissions.has(`${resource}:${action}`);
 }
 
 /**

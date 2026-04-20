@@ -32,7 +32,7 @@ import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 import { initRunLimits } from "../../src/services/run-limits.ts";
 import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
 import { collectModulePermissions } from "../../src/lib/modules/module-loader.ts";
-import { setModulePermissionsProvider } from "../../src/lib/permissions.ts";
+import { setModulePermissionsProvider } from "@appstrate/core/permissions";
 import { initAppConfig } from "../../src/lib/app-config.ts";
 
 // Route imports

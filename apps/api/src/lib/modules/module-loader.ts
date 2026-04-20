@@ -10,9 +10,12 @@ import type {
   AuthStrategy,
   ModulePermissionContribution,
 } from "@appstrate/core/module";
-import type { OrgRole } from "../../types/index.ts";
-import { CORE_RESOURCE_NAMES } from "@appstrate/core/permissions";
-import { setModulePermissionsProvider, type ModulePermissionsSnapshot } from "../permissions.ts";
+import {
+  CORE_RESOURCE_NAMES,
+  setModulePermissionsProvider,
+  type OrgRole,
+  type ModulePermissionsSnapshot,
+} from "@appstrate/core/permissions";
 import { readdirSync, statSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
