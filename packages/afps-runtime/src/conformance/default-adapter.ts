@@ -12,7 +12,11 @@ import { loadBundleFromBuffer } from "../bundle/loader.ts";
 import { verifyBundleSignature } from "../bundle/signing.ts";
 import { renderPrompt } from "../bundle/prompt-renderer.ts";
 import { SnapshotContextProvider } from "../providers/context/snapshot-provider.ts";
-import type { ConformanceAdapter } from "./adapter.ts";
+import { MockRunner } from "../runner/mock.ts";
+import type { EventSink } from "../interfaces/event-sink.ts";
+import type { AfpsEventEnvelope } from "../types/afps-event.ts";
+import type { RunResult } from "../types/run-result.ts";
+import type { ConformanceAdapter, RunScriptedOutput } from "./adapter.ts";
 
 export function createDefaultAdapter(): ConformanceAdapter {
   return {
@@ -24,5 +28,25 @@ export function createDefaultAdapter(): ConformanceAdapter {
     },
     verifySignature: (canonicalBytes, signatureDoc, trustRoot) =>
       verifyBundleSignature(canonicalBytes, signatureDoc, trustRoot),
+    runScripted: async (bundle, context, scriptedEvents): Promise<RunScriptedOutput> => {
+      const emitted: AfpsEventEnvelope[] = [];
+      let finalizeCalls = 0;
+      const sink: EventSink = {
+        onEvent: async (env) => {
+          emitted.push(env);
+        },
+        finalize: async () => {
+          finalizeCalls++;
+        },
+      };
+      const runner = new MockRunner({ events: [...scriptedEvents] });
+      const result: RunResult = await runner.run({
+        bundle,
+        context,
+        sink,
+        contextProvider: new SnapshotContextProvider(),
+      });
+      return { emitted, result, finalizeCalls };
+    },
   };
 }

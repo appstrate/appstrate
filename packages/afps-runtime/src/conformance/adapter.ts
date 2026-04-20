@@ -19,6 +19,8 @@ import type { LoadedBundle } from "../bundle/loader.ts";
 import type { TrustRoot, VerifySignatureResult } from "../bundle/signing.ts";
 import type { ContextSnapshot } from "../providers/context/snapshot-provider.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
+import type { AfpsEvent, AfpsEventEnvelope } from "../types/afps-event.ts";
+import type { RunResult } from "../types/run-result.ts";
 
 export interface ConformanceAdapter {
   /** Human-readable name used in the final report. */
@@ -52,4 +54,32 @@ export interface ConformanceAdapter {
     signatureDoc: unknown,
     trustRoot: TrustRoot,
   ): VerifySignatureResult;
+
+  /**
+   * L4 — scripted execution. Given a bundle, context, and a scripted
+   * event list, the adapter MUST:
+   *
+   * 1. Emit each event through its internal sink with a monotonically
+   *    increasing `sequence` starting at 0.
+   * 2. Reduce the events into a `RunResult` using the canonical
+   *    semantics (`add_memory` → append, `set_state` → last-write-wins,
+   *    `output` → merge-patch, `report` → concat, `log` → append).
+   *
+   * Optional — adapters that do not implement execution leave
+   * this undefined and L4 cases skip.
+   */
+  runScripted?(
+    bundle: LoadedBundle,
+    context: ExecutionContext,
+    scriptedEvents: readonly AfpsEvent[],
+  ): Promise<RunScriptedOutput>;
+}
+
+export interface RunScriptedOutput {
+  /** Envelopes the adapter emitted, in the order it emitted them. */
+  emitted: readonly AfpsEventEnvelope[];
+  /** Aggregated run result after reducing the events. */
+  result: RunResult;
+  /** Count of sink.finalize() invocations. MUST be exactly 1. */
+  finalizeCalls: number;
 }

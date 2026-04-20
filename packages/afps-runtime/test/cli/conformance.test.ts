@@ -14,7 +14,8 @@ describe("afps conformance", () => {
     expect(text).toContain("@appstrate/afps-runtime");
     expect(text).toContain("[L1.1]");
     expect(text).toContain("[L3.5]");
-    expect(text).toContain("Summary: 15/15 passed");
+    expect(text).toContain("[L4.1]");
+    expect(text).toContain("Summary: 19/19 passed");
   });
 
   it("emits JSON under --json", async () => {
@@ -23,7 +24,7 @@ describe("afps conformance", () => {
     expect(code).toBe(0);
     const report = JSON.parse(io.stdoutText());
     expect(report.adapter).toBe("@appstrate/afps-runtime");
-    expect(report.summary.total).toBe(15);
+    expect(report.summary.total).toBe(19);
     expect(report.summary.failed).toBe(0);
   });
 

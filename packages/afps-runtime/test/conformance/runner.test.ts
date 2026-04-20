@@ -21,9 +21,22 @@ describe("runConformance — default adapter", () => {
     expect(report.adapter).toBe("@appstrate/afps-runtime");
   });
 
-  it("includes all three levels by default", async () => {
+  it("includes all four levels by default", async () => {
     const report = await runConformance(createDefaultAdapter());
-    expect(report.levels).toEqual(["L1", "L2", "L3"]);
+    expect(report.levels).toEqual(["L1", "L2", "L3", "L4"]);
+  });
+
+  it("marks L4 cases as skipped when the adapter has no runScripted", async () => {
+    const { createDefaultAdapter: factory } =
+      await import("../../src/conformance/default-adapter.ts");
+    const base = factory();
+    delete base.runScripted;
+    const report = await runConformance(base, { levels: ["L4"] });
+    expect(report.summary.skipped).toBeGreaterThan(0);
+    expect(report.summary.failed).toBe(0);
+    for (const c of report.cases) {
+      expect(c.status).toBe("skipped");
+    }
   });
 
   it("reports per-case durations as non-negative numbers", async () => {

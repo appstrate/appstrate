@@ -1,0 +1,192 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Appstrate
+
+import { parseArgs } from "node:util";
+import { readFile, writeFile } from "node:fs/promises";
+import { loadBundleFromBuffer } from "../../bundle/loader.ts";
+import { MockRunner } from "../../runner/mock.ts";
+import { ConsoleSink } from "../../sinks/console-sink.ts";
+import { FileSink } from "../../sinks/file-sink.ts";
+import { CompositeSink } from "../../sinks/composite-sink.ts";
+import {
+  SnapshotContextProvider,
+  type ContextSnapshot,
+} from "../../providers/context/snapshot-provider.ts";
+import { afpsEventSchema, type AfpsEvent } from "../../types/afps-event.ts";
+import type { ExecutionContext } from "../../types/execution-context.ts";
+import type { EventSink } from "../../interfaces/event-sink.ts";
+import type { CliIO } from "../index.ts";
+
+const HELP = `afps run — execute a bundle using the MockRunner
+
+Usage:
+  afps run <bundle> --events <events.json> [options]
+
+Required:
+  --events <path>     JSON array of AfpsEvent to replay. Drives the
+                      reducer and event stream. Lets the CLI exercise
+                      the full sink → RunResult pipeline without a LLM.
+
+Options:
+  --context <path>    JSON file: { runId?, input? } (ExecutionContext).
+                      Defaults to { runId: "cli-run", input: {} }.
+  --snapshot <path>   JSON file: ContextSnapshot (memories/state/history)
+                      used by the SnapshotContextProvider.
+  --output <path>     Write the final RunResult as JSON to <path>.
+  --sink console|file|both   Sink strategy (default: console).
+  --sink-file <path>   File path when --sink=file|both (defaults to
+                       <bundle>.events.jsonl).
+  --quiet             Suppress ConsoleSink output even when selected.
+
+Real-LLM execution via the Pi SDK ships in a follow-up; this command
+drives the MockRunner so the event contract can be exercised end-to-end
+from CI or a local shell.
+`;
+
+interface RunContextFile {
+  runId?: string;
+  input?: unknown;
+  [key: string]: unknown;
+}
+
+export async function run(argv: readonly string[], io: CliIO): Promise<number> {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: [...argv],
+      options: {
+        events: { type: "string" },
+        context: { type: "string" },
+        snapshot: { type: "string" },
+        output: { type: "string" },
+        sink: { type: "string" },
+        "sink-file": { type: "string" },
+        quiet: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+      strict: true,
+      allowPositionals: true,
+    });
+  } catch (err) {
+    io.stderr(`afps run: ${(err as Error).message}\n`);
+    io.stderr(HELP);
+    return 2;
+  }
+  if (parsed.values.help) {
+    io.stdout(HELP);
+    return 0;
+  }
+
+  const [bundlePath] = parsed.positionals;
+  if (!bundlePath) {
+    io.stderr("afps run: missing <bundle> argument\n");
+    io.stderr(HELP);
+    return 2;
+  }
+  if (!parsed.values.events) {
+    io.stderr("afps run: --events <path> is required\n");
+    return 2;
+  }
+
+  const events = await readEvents(parsed.values.events, io);
+  if (!events) return 1;
+
+  let runContext: RunContextFile = {};
+  if (parsed.values.context) {
+    try {
+      runContext = JSON.parse(await readFile(parsed.values.context, "utf-8")) as RunContextFile;
+    } catch (err) {
+      io.stderr(`afps run: cannot read context file: ${(err as Error).message}\n`);
+      return 1;
+    }
+  }
+  let snapshot: ContextSnapshot | undefined;
+  if (parsed.values.snapshot) {
+    try {
+      snapshot = JSON.parse(await readFile(parsed.values.snapshot, "utf-8")) as ContextSnapshot;
+    } catch (err) {
+      io.stderr(`afps run: cannot read snapshot file: ${(err as Error).message}\n`);
+      return 1;
+    }
+  }
+
+  const bundleBytes = await readFile(bundlePath);
+  const bundle = loadBundleFromBuffer(bundleBytes);
+
+  const context: ExecutionContext = {
+    runId: runContext.runId ?? "cli-run",
+    input: runContext.input ?? {},
+    ...runContext,
+  };
+
+  const sink = await buildSink(parsed.values, bundlePath, io);
+  if (!sink) return 1;
+
+  const runner = new MockRunner({ events });
+  const result = await runner.run({
+    bundle,
+    context,
+    sink,
+    contextProvider: new SnapshotContextProvider(snapshot),
+  });
+
+  if (parsed.values.output) {
+    await writeFile(parsed.values.output, JSON.stringify(result, null, 2) + "\n");
+    io.stdout(`→ wrote RunResult to ${parsed.values.output}\n`);
+  }
+  return 0;
+}
+
+async function readEvents(path: string, io: CliIO): Promise<AfpsEvent[] | null> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(path, "utf-8"));
+  } catch (err) {
+    io.stderr(`afps run: cannot read events file: ${(err as Error).message}\n`);
+    return null;
+  }
+  if (!Array.isArray(raw)) {
+    io.stderr("afps run: --events file must contain a JSON array\n");
+    return null;
+  }
+  const events: AfpsEvent[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const parsed = afpsEventSchema.safeParse(raw[i]);
+    if (!parsed.success) {
+      io.stderr(`afps run: invalid event at index ${i}: ${parsed.error.message}\n`);
+      return null;
+    }
+    events.push(parsed.data);
+  }
+  return events;
+}
+
+async function buildSink(
+  values: Record<string, string | boolean | undefined>,
+  bundlePath: string,
+  io: CliIO,
+): Promise<EventSink | null> {
+  const mode = (values.sink as string | undefined) ?? "console";
+  const quiet = values.quiet === true;
+  const sinkFile = (values["sink-file"] as string | undefined) ?? `${bundlePath}.events.jsonl`;
+
+  const sinks: EventSink[] = [];
+  if ((mode === "console" || mode === "both") && !quiet) {
+    sinks.push(new ConsoleSink({ out: { write: (chunk) => io.stdout(chunk) } }));
+  }
+  if (mode === "file" || mode === "both") {
+    sinks.push(new FileSink({ path: sinkFile }));
+  }
+  if (mode !== "console" && mode !== "file" && mode !== "both") {
+    io.stderr(`afps run: unknown --sink '${mode}' (console|file|both)\n`);
+    return null;
+  }
+  if (sinks.length === 0) {
+    // --sink=console + --quiet: return a no-op sink
+    return {
+      onEvent: async () => undefined,
+      finalize: async () => undefined,
+    };
+  }
+  return sinks.length === 1 ? sinks[0]! : new CompositeSink(sinks);
+}

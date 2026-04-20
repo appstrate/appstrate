@@ -16,12 +16,13 @@ import {
   signChildKey,
   type TrustRoot,
 } from "../bundle/signing.ts";
+import type { AfpsEvent } from "../types/afps-event.ts";
 import type { ConformanceAdapter } from "./adapter.ts";
 
-export type ConformanceLevel = "L1" | "L2" | "L3";
+export type ConformanceLevel = "L1" | "L2" | "L3" | "L4";
 
 export interface CaseResult {
-  status: "pass" | "fail";
+  status: "pass" | "fail" | "skipped";
   detail?: string;
 }
 
@@ -57,6 +58,9 @@ function pass(): CaseResult {
 }
 function fail(detail: string): CaseResult {
   return { status: "fail", detail };
+}
+function skipped(detail: string): CaseResult {
+  return { status: "skipped", detail };
 }
 
 function expectThrow(fn: () => unknown, matcher: RegExp | null, label: string): CaseResult {
@@ -346,6 +350,126 @@ const L3_UNTRUSTED_ROOT: ConformanceCase = {
   },
 };
 
+// ─── L4 — Execution (event stream contract) ──────────────────────
+
+const SAMPLE_SCRIPT: AfpsEvent[] = [
+  { type: "log", level: "info", message: "starting" },
+  { type: "add_memory", content: "first" },
+  { type: "add_memory", content: "second" },
+  { type: "set_state", state: { counter: 1 } },
+  { type: "set_state", state: { counter: 2 } },
+  { type: "output", data: { answer: 42, partial: true } },
+  { type: "output", data: { partial: false, extra: "done" } },
+  { type: "report", content: "line 1" },
+  { type: "report", content: "line 2" },
+];
+
+async function withScript(
+  adapter: ConformanceAdapter,
+  events: readonly AfpsEvent[] = SAMPLE_SCRIPT,
+): Promise<
+  | { skipped: true }
+  | { skipped: false; output: Awaited<ReturnType<NonNullable<ConformanceAdapter["runScripted"]>>> }
+> {
+  if (!adapter.runScripted) return { skipped: true };
+  const bundle = adapter.loadBundle(buildReferenceBundle());
+  const out = await adapter.runScripted(bundle, { runId: "run_L4", input: {} }, events);
+  return { skipped: false, output: out };
+}
+
+const L4_MONOTONIC_SEQUENCES: ConformanceCase = {
+  id: "L4.1",
+  level: "L4",
+  title: "emits every scripted event with strictly monotonic sequence",
+  run: async (adapter) => {
+    const res = await withScript(adapter);
+    if (res.skipped) return skipped("adapter does not implement runScripted");
+    const { emitted } = res.output;
+    if (emitted.length !== SAMPLE_SCRIPT.length) {
+      return fail(`emitted ${emitted.length} envelopes, expected ${SAMPLE_SCRIPT.length}`);
+    }
+    for (let i = 0; i < emitted.length; i++) {
+      if (emitted[i]!.sequence !== i) {
+        return fail(`envelope ${i} has sequence ${emitted[i]!.sequence}, expected ${i}`);
+      }
+      if (emitted[i]!.runId !== "run_L4") {
+        return fail(`envelope ${i} has runId ${emitted[i]!.runId}, expected run_L4`);
+      }
+    }
+    return pass();
+  },
+};
+
+const L4_FINALIZE_EXACTLY_ONCE: ConformanceCase = {
+  id: "L4.2",
+  level: "L4",
+  title: "calls sink.finalize() exactly once per run",
+  run: async (adapter) => {
+    const res = await withScript(adapter);
+    if (res.skipped) return skipped("adapter does not implement runScripted");
+    if (res.output.finalizeCalls !== 1) {
+      return fail(`finalize called ${res.output.finalizeCalls} times, expected 1`);
+    }
+    return pass();
+  },
+};
+
+const L4_REDUCER_SEMANTICS: ConformanceCase = {
+  id: "L4.3",
+  level: "L4",
+  title: "reduces events with canonical semantics",
+  run: async (adapter) => {
+    const res = await withScript(adapter);
+    if (res.skipped) return skipped("adapter does not implement runScripted");
+    const r = res.output.result;
+    if (r.memories.length !== 2) return fail(`memories=${r.memories.length}, expected 2`);
+    if (r.memories[0]!.content !== "first" || r.memories[1]!.content !== "second") {
+      return fail("memory order / content mismatch");
+    }
+    if (!r.state || (r.state as { counter: number }).counter !== 2) {
+      return fail(`state should be last-write-wins, got ${JSON.stringify(r.state)}`);
+    }
+    const out = r.output as { answer?: number; partial?: boolean; extra?: string } | null;
+    if (!out || out.answer !== 42 || out.partial !== false || out.extra !== "done") {
+      return fail(`output merge-patch failed: ${JSON.stringify(out)}`);
+    }
+    if (r.report !== "line 1\nline 2") {
+      return fail(`report should concat with \\n, got ${JSON.stringify(r.report)}`);
+    }
+    if (r.logs.length !== 1 || r.logs[0]!.message !== "starting") {
+      return fail(`log entries malformed: ${JSON.stringify(r.logs)}`);
+    }
+    return pass();
+  },
+};
+
+const L4_EMPTY_SCRIPT: ConformanceCase = {
+  id: "L4.4",
+  level: "L4",
+  title: "handles an empty event list without emitting or crashing",
+  run: async (adapter) => {
+    const res = await withScript(adapter, []);
+    if (res.skipped) return skipped("adapter does not implement runScripted");
+    if (res.output.emitted.length !== 0) {
+      return fail(`emitted ${res.output.emitted.length} envelopes on empty script`);
+    }
+    if (res.output.finalizeCalls !== 1) {
+      return fail(`finalize should still be called once, got ${res.output.finalizeCalls}`);
+    }
+    const r = res.output.result;
+    if (
+      r.memories.length !== 0 ||
+      r.logs.length !== 0 ||
+      r.state !== null ||
+      r.output !== null ||
+      r.report !== null
+    ) {
+      return fail(`RunResult should be empty baseline, got ${JSON.stringify(r)}`);
+    }
+    return pass();
+  },
+};
+
 export const BUILT_IN_CASES: readonly ConformanceCase[] = Object.freeze([
   L1_LOAD_MINIMAL,
   L1_REJECT_NON_ZIP,
@@ -362,4 +486,8 @@ export const BUILT_IN_CASES: readonly ConformanceCase[] = Object.freeze([
   L3_UNKNOWN_KEY,
   L3_CHAIN_ACCEPTED,
   L3_UNTRUSTED_ROOT,
+  L4_MONOTONIC_SEQUENCES,
+  L4_FINALIZE_EXACTLY_ONCE,
+  L4_REDUCER_SEMANTICS,
+  L4_EMPTY_SCRIPT,
 ]);

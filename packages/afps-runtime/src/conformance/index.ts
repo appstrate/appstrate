@@ -29,7 +29,7 @@ export interface CaseReportEntry {
   id: string;
   level: ConformanceLevel;
   title: string;
-  status: "pass" | "fail";
+  status: "pass" | "fail" | "skipped";
   detail?: string;
   durationMs: number;
 }
@@ -41,6 +41,7 @@ export interface ConformanceReport {
     total: number;
     passed: number;
     failed: number;
+    skipped: number;
   };
   cases: readonly CaseReportEntry[];
 }
@@ -74,7 +75,7 @@ export async function runConformance(
   const cases: CaseReportEntry[] = [];
   for (const c of selected) {
     const start = performance.now();
-    let status: "pass" | "fail";
+    let status: "pass" | "fail" | "skipped";
     let detail: string | undefined;
     try {
       const result = await c.run(adapter);
@@ -98,6 +99,7 @@ export async function runConformance(
     total: cases.length,
     passed: cases.filter((e) => e.status === "pass").length,
     failed: cases.filter((e) => e.status === "fail").length,
+    skipped: cases.filter((e) => e.status === "skipped").length,
   };
   const levels = Array.from(new Set(cases.map((c) => c.level))).sort();
 
@@ -126,15 +128,16 @@ export function formatReport(report: ConformanceReport): string {
   lines.push(`Levels: ${report.levels.join(", ")}`);
   lines.push("");
   for (const c of report.cases) {
-    const mark = c.status === "pass" ? "✓" : "✗";
+    const mark = c.status === "pass" ? "✓" : c.status === "fail" ? "✗" : "∼";
     lines.push(`  ${mark} [${c.id}] ${c.title}  (${c.durationMs}ms)`);
-    if (c.status === "fail" && c.detail) {
+    if (c.status !== "pass" && c.detail) {
       lines.push(`      └─ ${c.detail}`);
     }
   }
   lines.push("");
   lines.push(
-    `Summary: ${report.summary.passed}/${report.summary.total} passed, ${report.summary.failed} failed`,
+    `Summary: ${report.summary.passed}/${report.summary.total} passed, ${report.summary.failed} failed` +
+      (report.summary.skipped > 0 ? `, ${report.summary.skipped} skipped` : ""),
   );
   return lines.join("\n") + "\n";
 }

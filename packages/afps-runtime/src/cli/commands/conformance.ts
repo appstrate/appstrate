@@ -21,15 +21,12 @@ Options:
   --json            Emit the report as a single JSON document
 
 Exit codes:
-  0   all selected cases passed
+  0   all selected cases passed (skipped cases do not fail)
   1   one or more cases failed
   2   usage error
-
-Level 4 (execution → event stream) ships in Phase 10 alongside the Pi
-SDK integration.
 `;
 
-const ALL_LEVELS: readonly ConformanceLevel[] = ["L1", "L2", "L3"];
+const ALL_LEVELS: readonly ConformanceLevel[] = ["L1", "L2", "L3", "L4"];
 
 export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   let parsed;

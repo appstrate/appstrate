@@ -22,4 +22,5 @@ export * from "./sinks/index.ts";
 export * from "./providers/index.ts";
 export * from "./template/index.ts";
 export * from "./bundle/index.ts";
+export * from "./runner/index.ts";
 export * from "./conformance/index.ts";
