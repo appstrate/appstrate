@@ -85,7 +85,7 @@ export function makeProviderTool(
   call: ProviderCallFn,
   opts: MakeProviderToolOptions = {},
 ): Tool {
-  const toolName = opts.toolName ?? `${slugify(meta.name)}_call`;
+  const toolName = opts.toolName ?? providerToolName(meta.name);
   const description =
     opts.description ??
     `Call the ${meta.name} provider. Supply method, target URL, optional headers/body, and responseMode. ` +
@@ -194,8 +194,24 @@ export function makeProviderTool(
   };
 }
 
-function slugify(name: string): string {
-  return name.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_");
+/**
+ * Canonical slug applied to every provider id before we form a tool name.
+ * Strips a leading `@` and replaces any non-word character with `_` so
+ * scoped package ids like `@appstrate/gmail` become safe tool identifiers.
+ */
+export function slugifyProviderId(providerId: string): string {
+  return providerId.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_");
+}
+
+/**
+ * The tool name `makeProviderTool` registers for a given provider id.
+ * Consumers that need to reference the tool before the resolver runs
+ * (e.g. the platform system prompt listing connected providers) should
+ * call this helper rather than recomputing the slug locally — any future
+ * change to the slug rules only needs to land here.
+ */
+export function providerToolName(providerId: string): string {
+  return `${slugifyProviderId(providerId)}_call`;
 }
 
 /**

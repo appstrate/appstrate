@@ -45,6 +45,7 @@
 
 import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import { providerToolName } from "@appstrate/afps-runtime/resolvers";
 import { getDefaultAuthorizedUris, type ProviderDefinition } from "@appstrate/connect";
 import { isFileField } from "@appstrate/core/form";
 import { sanitizeStorageKey } from "../file-storage.ts";
@@ -84,16 +85,6 @@ function buildTemplateView(context: ExecutionContext): PromptView {
     memories: context.memories ?? [],
     history: context.history ?? [],
   };
-}
-
-/**
- * Compute the tool name the AFPS `makeProviderTool` factory produces for a
- * given provider package id. Must stay in sync with `slugify()` in
- * `packages/afps-runtime/src/resolvers/provider-tool.ts`: strip the
- * leading `@`, replace every non-word character with `_`, append `_call`.
- */
-function providerToolName(providerId: string): string {
-  return `${providerId.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_")}_call`;
 }
 
 function formatFileSize(bytes: number): string {
