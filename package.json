@@ -63,7 +63,7 @@
     "detect:breaking": "bun scripts/detect-breaking-changes.ts",
     "build:system-packages:check": "bun scripts/build-system-packages.ts --check",
     "check": "turbo typecheck lint format:check verify:openapi detect:breaking build:system-packages:check",
-    "build-runtime": "docker build --platform linux/amd64 -t appstrate-pi ./runtime-pi",
+    "build-runtime": "docker build --platform linux/amd64 -t appstrate-pi -f ./runtime-pi/Dockerfile ..",
     "build-sidecar": "docker build --platform linux/amd64 -t appstrate-sidecar ./runtime-pi/sidecar",
     "db:generate": "cd packages/db && bunx drizzle-kit generate",
     "db:drop-module": "bun scripts/drop-module.ts",
