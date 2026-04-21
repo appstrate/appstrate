@@ -1,0 +1,219 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Tests for the shared credential-proxy primitives.
+ * These must match the behaviour both the credential-proxy route and
+ * the in-container sidecar rely on — any change here affects both
+ * entrypoints simultaneously.
+ */
+
+import { describe, it, expect } from "bun:test";
+import {
+  substituteVars,
+  findUnresolvedPlaceholders,
+  matchesAuthorizedUriSpec,
+  matchesAuthorizedUriPrefix,
+  matchesAnyAuthorizedUriPrefix,
+  HOP_BY_HOP_HEADERS,
+  filterHeaders,
+} from "../src/proxy-primitives.ts";
+
+describe("substituteVars", () => {
+  it("replaces known placeholders", () => {
+    expect(substituteVars("Bearer {{token}}", { token: "abc" })).toBe("Bearer abc");
+  });
+
+  it("tolerates whitespace inside braces", () => {
+    expect(substituteVars("X: {{ token }}", { token: "abc" })).toBe("X: abc");
+  });
+
+  it("leaves unknown placeholders intact (fail-closed friendly)", () => {
+    expect(substituteVars("{{unknown}}", {})).toBe("{{unknown}}");
+  });
+
+  it("handles multiple placeholders in one string", () => {
+    expect(substituteVars("{{a}}/{{b}}", { a: "1", b: "2" })).toBe("1/2");
+  });
+
+  it("returns input unchanged when no placeholders are present", () => {
+    expect(substituteVars("plain text", { x: "y" })).toBe("plain text");
+  });
+
+  it("does not replace partial matches", () => {
+    // Single braces, missing closing, etc. — untouched
+    expect(substituteVars("{token}", { token: "abc" })).toBe("{token}");
+    expect(substituteVars("{{token", { token: "abc" })).toBe("{{token");
+  });
+
+  it("handles empty string input", () => {
+    expect(substituteVars("", { x: "y" })).toBe("");
+  });
+
+  it("permits empty-string credential values", () => {
+    expect(substituteVars("X={{empty}}", { empty: "" })).toBe("X=");
+  });
+});
+
+describe("findUnresolvedPlaceholders", () => {
+  it("returns [] when every placeholder resolves", () => {
+    const substituted = substituteVars("{{a}}{{b}}", { a: "1", b: "2" });
+    expect(findUnresolvedPlaceholders(substituted)).toEqual([]);
+  });
+
+  it("lists placeholder names that remain", () => {
+    expect(findUnresolvedPlaceholders("{{a}}/{{b}}")).toEqual(["a", "b"]);
+  });
+
+  it("returns duplicates as they appear (caller dedups if needed)", () => {
+    expect(findUnresolvedPlaceholders("{{x}}{{x}}")).toEqual(["x", "x"]);
+  });
+
+  it("tolerates whitespace", () => {
+    expect(findUnresolvedPlaceholders("{{ a }}")).toEqual(["a"]);
+  });
+});
+
+describe("matchesAuthorizedUriSpec (AFPS 1.3 semantics)", () => {
+  it("matches an exact URL", () => {
+    expect(
+      matchesAuthorizedUriSpec(
+        "https://api.example.com/v1/messages",
+        "https://api.example.com/v1/messages",
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a URL that doesn't match the pattern", () => {
+    expect(
+      matchesAuthorizedUriSpec(
+        "https://api.example.com/v1/messages",
+        "https://api.example.com/v2/messages",
+      ),
+    ).toBe(false);
+  });
+
+  it("`*` matches a single path segment only", () => {
+    expect(
+      matchesAuthorizedUriSpec(
+        "https://api.example.com/v1/*/messages",
+        "https://api.example.com/v1/abc/messages",
+      ),
+    ).toBe(true);
+    expect(
+      matchesAuthorizedUriSpec(
+        "https://api.example.com/v1/*/messages",
+        "https://api.example.com/v1/a/b/messages",
+      ),
+    ).toBe(false);
+  });
+
+  it("`**` matches any substring including slashes", () => {
+    expect(
+      matchesAuthorizedUriSpec(
+        "https://api.example.com/v1/**/messages",
+        "https://api.example.com/v1/a/b/c/messages",
+      ),
+    ).toBe(true);
+  });
+
+  it("escapes regex metacharacters in the pattern", () => {
+    // Dots must be literal, not wildcards.
+    expect(
+      matchesAuthorizedUriSpec("https://api.example.com/v1", "https://apiXexample.com/v1"),
+    ).toBe(false);
+  });
+
+  it("does not allow partial match without wildcard", () => {
+    expect(
+      matchesAuthorizedUriSpec("https://api.example.com/v1", "https://api.example.com/v1/foo"),
+    ).toBe(false);
+  });
+});
+
+describe("matchesAuthorizedUriPrefix (legacy sidecar semantics)", () => {
+  it("matches an exact URL", () => {
+    expect(
+      matchesAuthorizedUriPrefix("https://api.example.com/v1", "https://api.example.com/v1"),
+    ).toBe(true);
+  });
+
+  it("`*` at the end matches any suffix including slashes", () => {
+    expect(
+      matchesAuthorizedUriPrefix(
+        "https://api.example.com/v1*",
+        "https://api.example.com/v1/foo/bar",
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects mismatched prefix", () => {
+    expect(
+      matchesAuthorizedUriPrefix("https://api.example.com/v1*", "https://other.com/v1/foo"),
+    ).toBe(false);
+  });
+
+  it("matchesAnyAuthorizedUriPrefix returns true on first match", () => {
+    expect(
+      matchesAnyAuthorizedUriPrefix("https://api.example.com/foo", [
+        "https://other.com/*",
+        "https://api.example.com/*",
+      ]),
+    ).toBe(true);
+  });
+
+  it("matchesAnyAuthorizedUriPrefix returns false when no pattern matches", () => {
+    expect(matchesAnyAuthorizedUriPrefix("https://foo.com", ["https://bar.com/*"])).toBe(false);
+  });
+});
+
+describe("HOP_BY_HOP_HEADERS + filterHeaders", () => {
+  it("includes the canonical RFC 7230 hop-by-hop set", () => {
+    for (const h of [
+      "connection",
+      "keep-alive",
+      "proxy-connection",
+      "proxy-authenticate",
+      "proxy-authorization",
+      "te",
+      "trailer",
+      "transfer-encoding",
+      "upgrade",
+    ]) {
+      expect(HOP_BY_HOP_HEADERS.has(h)).toBe(true);
+    }
+  });
+
+  it("strips host and content-length", () => {
+    const out = filterHeaders({
+      host: "x",
+      "content-length": "10",
+      "x-keep": "yes",
+    });
+    expect(out).toEqual({ "x-keep": "yes" });
+  });
+
+  it("strips hop-by-hop headers regardless of casing", () => {
+    const out = filterHeaders({
+      Connection: "close",
+      "Keep-Alive": "timeout=5",
+      "X-Keep": "yes",
+    });
+    expect(out).toEqual({ "X-Keep": "yes" });
+  });
+
+  it("honours extraSkip (lowercase keys)", () => {
+    const out = filterHeaders(
+      {
+        "x-provider": "gmail",
+        "x-keep": "yes",
+      },
+      new Set(["x-provider"]),
+    );
+    expect(out).toEqual({ "x-keep": "yes" });
+  });
+
+  it("preserves original casing of kept headers", () => {
+    const out = filterHeaders({ Authorization: "Bearer abc" });
+    expect(out).toEqual({ Authorization: "Bearer abc" });
+  });
+});

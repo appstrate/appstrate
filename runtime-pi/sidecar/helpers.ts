@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Pure functions and constants extracted from server.ts for testability.
+/**
+ * Sidecar-local constants + thin re-exports over `@appstrate/connect`
+ * shared credential-proxy primitives. The shared module is the single
+ * source of truth so any improvement (placeholder semantics, URL
+ * allowlist matching, hop-by-hop header list) propagates to both the
+ * public `/api/credential-proxy/proxy` route and this in-container
+ * sidecar automatically.
+ */
 
 export { isBlockedHost, isBlockedUrl } from "./ssrf.ts";
 
@@ -21,52 +28,22 @@ export interface CredentialsResponse {
   allowAllUris: boolean;
 }
 
-export function substituteVars(text: string, credentials: Record<string, string>): string {
-  return text.replace(/\{\{(\w+)\}\}/g, (_match, key) => credentials[key] ?? _match);
-}
+// Import from the dedicated subpath so the compiled sidecar binary does
+// NOT pull `@appstrate/connect`'s credentials module (which transitively
+// depends on @appstrate/db — unwanted in a credential-isolating proxy).
+export {
+  substituteVars,
+  findUnresolvedPlaceholders,
+  HOP_BY_HOP_HEADERS,
+  filterHeaders,
+} from "@appstrate/connect/proxy-primitives";
 
-export function findUnresolvedPlaceholders(text: string): string[] {
-  const matches = [...text.matchAll(/\{\{(\w+)\}\}/g)];
-  return matches.map((m) => m[1]!);
-}
-
-/** RFC 7230 §6.1 hop-by-hop headers — must not be forwarded by proxies. */
-export const HOP_BY_HOP_HEADERS = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-connection",
-  "transfer-encoding",
-  "te",
-  "trailer",
-  "upgrade",
-  "proxy-authorization",
-]);
-
-/** Strip host, content-length, and hop-by-hop headers. Optionally skip additional header names (lowercase). */
-export function filterHeaders(
-  headers: Record<string, string>,
-  extraSkip?: Set<string>,
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    const lower = key.toLowerCase();
-    if (
-      lower === "host" ||
-      lower === "content-length" ||
-      HOP_BY_HOP_HEADERS.has(lower) ||
-      extraSkip?.has(lower)
-    )
-      continue;
-    out[key] = value;
-  }
-  return out;
-}
-
+// Adapter preserving the sidecar's historical (url, patterns[]) shape.
+// Internally delegates to the legacy prefix-star matcher; unifying on
+// the AFPS-spec matcher (`matchesAuthorizedUriSpec`) is tracked
+// separately — it is a user-visible behaviour change against existing
+// provider configs (see proxy-primitives.ts module docstring).
+import { matchesAnyAuthorizedUriPrefix } from "@appstrate/connect/proxy-primitives";
 export function matchesAuthorizedUri(url: string, patterns: string[]): boolean {
-  return patterns.some((pattern) => {
-    if (pattern.endsWith("*")) {
-      return url.startsWith(pattern.slice(0, -1));
-    }
-    return url === pattern;
-  });
+  return matchesAnyAuthorizedUriPrefix(url, patterns);
 }

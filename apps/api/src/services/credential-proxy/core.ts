@@ -21,7 +21,12 @@
  */
 
 import type { Db } from "@appstrate/db/client";
-import { resolveCredentialsForProxy, getProviderCredentialId } from "@appstrate/connect";
+import {
+  resolveCredentialsForProxy,
+  getProviderCredentialId,
+  substituteVars,
+  matchesAuthorizedUriSpec,
+} from "@appstrate/connect";
 
 /**
  * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
@@ -118,32 +123,12 @@ export class ProxyCredentialError extends Error {
   }
 }
 
-/**
- * Substitute {{field}} placeholders in `input` using `fields`. Unknown
- * placeholders are replaced with the empty string — matching the sidecar
- * convention; callers that want fail-closed behaviour should inspect the
- * result for remaining `{{…}}` markers before dispatching the request.
- */
-function substitutePlaceholders(input: string, fields: Record<string, string>): string {
-  return input.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, key: string) => fields[key] ?? "");
-}
-
-/**
- * Pattern match a URL against an `authorizedUris` entry. Supports `*`
- * (single path segment) and `**` (any substring) per the AFPS spec.
- */
-function matchesAuthorizedUri(pattern: string, target: string): boolean {
-  const regex = new RegExp(
-    "^" +
-      pattern
-        .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*\*/g, "§§DOUBLESTAR§§")
-        .replace(/\*/g, "[^/]*")
-        .replace(/§§DOUBLESTAR§§/g, ".*") +
-      "$",
-  );
-  return regex.test(target);
-}
+// `substituteVars` and `matchesAuthorizedUriSpec` are imported from
+// `@appstrate/connect` to keep the credential-proxy server path and the
+// in-container sidecar in lockstep. Any fix to placeholder substitution
+// or URL allowlist matching MUST be made in
+// `packages/connect/src/proxy-primitives.ts` so both entrypoints pick
+// it up. Local helpers removed in Phase A.4.
 
 /**
  * Execute one authenticated proxy call. Credentials never leak into the
@@ -171,10 +156,10 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
     throw new ProxyCredentialError(`No credentials for provider '${input.providerId}'`);
   }
 
-  // authorizedUris gate
+  // authorizedUris gate (AFPS spec: `*` = one segment, `**` = any substring)
   if (!resolved.allowAllUris) {
     const allowlist = resolved.authorizedUris ?? [];
-    const ok = allowlist.some((p) => matchesAuthorizedUri(p, input.target));
+    const ok = allowlist.some((p) => matchesAuthorizedUriSpec(p, input.target));
     if (!ok) {
       throw new ProxyAuthorizationError(
         `Target ${input.target} is not in the authorizedUris allowlist for ${input.providerId}`,
@@ -184,10 +169,10 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
 
   // Substitute placeholders in target + headers
   const fields = resolved.credentials;
-  const target = substitutePlaceholders(input.target, fields);
+  const target = substituteVars(input.target, fields);
   const headers = new Headers();
   for (const [k, v] of Object.entries(input.headers ?? {})) {
-    headers.set(k, substitutePlaceholders(v, fields));
+    headers.set(k, substituteVars(v, fields));
   }
 
   // Body substitution (opt-in; body may be bytes). Bun's global fetch
@@ -195,7 +180,7 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
   let body: string | Uint8Array | undefined;
   if (input.body !== undefined && input.body !== null) {
     if (typeof input.body === "string" && input.substituteBody) {
-      body = substitutePlaceholders(input.body, fields);
+      body = substituteVars(input.body, fields);
     } else {
       body = input.body;
     }

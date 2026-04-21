@@ -54,3 +54,15 @@ export {
   listProviderCredentialIds,
   listConfiguredProviderIds,
 } from "./credentials.ts";
+
+// Credential-proxy primitives (shared between the /api/credential-proxy/proxy
+// route and the in-container sidecar to prevent silent drift).
+export {
+  substituteVars,
+  findUnresolvedPlaceholders,
+  matchesAuthorizedUriSpec,
+  matchesAuthorizedUriPrefix,
+  matchesAnyAuthorizedUriPrefix,
+  HOP_BY_HOP_HEADERS,
+  filterHeaders,
+} from "./proxy-primitives.ts";

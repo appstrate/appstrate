@@ -408,6 +408,7 @@
     "runtime-pi/sidecar": {
       "name": "appstrate-sidecar",
       "dependencies": {
+        "@appstrate/connect": "workspace:*",
         "hono": "^4.12.14",
       },
     },
