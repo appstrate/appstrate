@@ -1,0 +1,57 @@
+{
+  "name": "@appstrate/runner-pi",
+  "version": "0.0.0",
+  "description": "PiRunner — AFPS 1.3 Runner implementation backed by the Pi Coding Agent SDK. Works in any Bun/Node environment with an LLM API key.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "bun": ">=1.3.9"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "sideEffects": false,
+  "author": "Appstrate <hello@appstrate.dev>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/appstrate/appstrate.git",
+    "directory": "packages/runner-pi"
+  },
+  "homepage": "https://github.com/appstrate/appstrate/tree/main/packages/runner-pi",
+  "bugs": {
+    "url": "https://github.com/appstrate/appstrate/issues"
+  },
+  "keywords": [
+    "afps",
+    "appstrate",
+    "agent",
+    "runner",
+    "pi",
+    "coding-agent"
+  ],
+  "files": [
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@appstrate/afps-runtime": "workspace:*"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.67.0",
+    "@mariozechner/pi-ai": "^0.67.0"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.67.0",
+    "@mariozechner/pi-ai": "^0.67.0"
+  }
+}

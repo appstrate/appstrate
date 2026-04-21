@@ -283,100 +283,38 @@ export { processPiLogs as _processPiLogsForTesting };
 /** @internal Exported for testing */
 export { deriveKeyPlaceholder as _deriveKeyPlaceholderForTesting };
 
-/** @internal Exported for testing */
+/**
+ * Parse a single stdout line from the agent container.
+ *
+ * Post-Phase-7, `runtime-pi/entrypoint.ts` drives a {@link PiRunner} that
+ * emits canonical AFPS {@link RunEvent}s directly on stdout. The parser
+ * is therefore a thin JSON-shape validator — any line that decodes to
+ * an object with `{ type: string, timestamp: number, runId: string }`
+ * is passed through verbatim; everything else is wrapped as a
+ * `[container]` progress event to preserve observability of stray
+ * stderr forwarded onto stdout.
+ *
+ * @internal Exported for testing
+ */
 export function parsePiStreamLine(line: string, runId: string): RunEvent | null {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) return null;
+
   try {
-    const obj = JSON.parse(line);
+    const obj = JSON.parse(trimmed) as Record<string, unknown>;
 
-    switch (obj.type) {
-      case "text_delta":
-        return progressEvent(runId, String(obj.text ?? ""));
-
-      case "assistant_message":
-        return null;
-
-      case "output":
-        return {
-          type: "output.emitted",
-          timestamp: Date.now(),
-          runId,
-          data: obj.data,
-        };
-
-      case "report":
-        return {
-          type: "report.appended",
-          timestamp: Date.now(),
-          runId,
-          content: String(obj.content ?? ""),
-        };
-
-      case "set_state":
-        return {
-          type: "state.set",
-          timestamp: Date.now(),
-          runId,
-          state: obj.state,
-        };
-
-      case "add_memory":
-        return {
-          type: "memory.added",
-          timestamp: Date.now(),
-          runId,
-          content: String(obj.content ?? ""),
-        };
-
-      case "tool_start":
-        return progressEvent(runId, `Tool: ${obj.name ?? "unknown"}`, {
-          data: { tool: obj.name, args: obj.args },
-        });
-
-      case "tool_end":
-        return null;
-
-      case "usage": {
-        const t = obj.tokens || {};
-        return {
-          type: "appstrate.metric",
-          timestamp: Date.now(),
-          runId,
-          usage: {
-            input_tokens: t.input ?? 0,
-            output_tokens: t.output ?? 0,
-            cache_creation_input_tokens: t.cacheWrite ?? 0,
-            cache_read_input_tokens: t.cacheRead ?? 0,
-          },
-          cost: typeof obj.cost === "number" ? obj.cost : undefined,
-        };
-      }
-
-      case "agent_end":
-        return null;
-
-      case "error":
-        return {
-          type: "appstrate.error",
-          timestamp: Date.now(),
-          runId,
-          message: String(obj.message ?? "unknown error"),
-        };
-
-      case "log": {
-        const validLevels = ["debug", "info", "warn", "error"] as const;
-        const level = (validLevels as readonly string[]).includes(obj.level) ? obj.level : "info";
-        return progressEvent(runId, String(obj.message ?? ""), {
-          data: obj.data,
-          level,
-        });
-      }
-
-      default:
-        return null;
+    if (
+      typeof obj.type === "string" &&
+      typeof obj.timestamp === "number" &&
+      typeof obj.runId === "string"
+    ) {
+      return obj as RunEvent;
     }
+
+    // Legit JSON, but not an AFPS RunEvent — surface as a plain
+    // progress breadcrumb rather than dropping silently.
+    return progressEvent(runId, `[container] ${trimmed}`);
   } catch {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) return null;
     return progressEvent(runId, `[container] ${trimmed}`);
   }
 }

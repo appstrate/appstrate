@@ -130,8 +130,20 @@ function createMockOrchestrator(overrides?: Partial<ContainerOrchestrator>): Con
     removeWorkload: mock(() => Promise.resolve()),
     waitForExit: mock(() => Promise.resolve(0)),
     streamLogs: mock(async function* () {
-      yield JSON.stringify({ type: "text_delta", text: "Working..." });
-      yield JSON.stringify({ type: "output", data: { result: "Done" } });
+      // Post-Phase-7: the container emits canonical AFPS RunEvents via
+      // PiRunner, not ad-hoc Pi SDK messages. Emulate that here.
+      yield JSON.stringify({
+        type: "appstrate.progress",
+        timestamp: 0,
+        runId: "exec-001",
+        message: "Working...",
+      });
+      yield JSON.stringify({
+        type: "output.emitted",
+        timestamp: 0,
+        runId: "exec-001",
+        data: { result: "Done" },
+      });
     }),
     stopByRunId: mock(() => Promise.resolve("stopped" as const)),
     ...overrides,

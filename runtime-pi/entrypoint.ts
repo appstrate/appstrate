@@ -1,24 +1,48 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * runtime-pi entrypoint — thin bootloader that wires the agent container
+ * runtime into the shared {@link PiRunner}. The same `PiRunner` used
+ * here is what external consumers instantiate against their own
+ * {@link EventSink}; structural parity between in-container and out-of-
+ * container execution is guaranteed by using the same class.
+ *
+ * Responsibilities (runtime-pi only):
+ *   1. Extract the injected agent package (if any) into the workspace.
+ *   2. Initialise a git repo for the Pi coding tools.
+ *   3. Install TOOL.md / skills / providers into `.pi/` for on-disk lookup.
+ *   4. Collect tool extension factories (from agent package + built-ins).
+ *   5. Build an {@link ExecutionContext} from env vars.
+ *   6. Build a stdout JSONL {@link EventSink} — the current agent ↔ platform
+ *      wire protocol.
+ *   7. Instantiate {@link PiRunner} and `await runner.run(...)`.
+ *
+ * The event-to-RunEvent translation that used to live in this file is
+ * now inside {@link PiRunner}. The platform side (`apps/api`) no longer
+ * needs `parsePiStreamLine` — events arriving over stdout are already
+ * canonical AFPS {@link RunEvent}s.
+ */
+
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import {
-  AuthStorage,
-  createAgentSession,
-  DefaultResourceLoader,
-  ModelRegistry,
-  type ExtensionFactory,
-  SessionManager,
-  SettingsManager,
-} from "@mariozechner/pi-coding-agent";
-import { type Model, type Api } from "@mariozechner/pi-ai";
+import { type ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import { type Api, type Model } from "@mariozechner/pi-ai";
+import { PiRunner } from "@appstrate/runner-pi";
+import type { EventSink } from "@appstrate/afps-runtime/interfaces";
+import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
+import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
 import { emit } from "./lib/emit.ts";
 
 // --- Helpers ---
 
 function die(message: string): never {
-  emit({ type: "error", message });
+  emit({
+    type: "appstrate.error",
+    timestamp: Date.now(),
+    runId: process.env.AGENT_RUN_ID ?? "unknown",
+    message,
+  });
   process.exit(1);
 }
 
@@ -52,16 +76,15 @@ async function initGitWorkspace(): Promise<void> {
 const extensionFactories: ExtensionFactory[] = [];
 const loadedExtensionIds = new Set<string>();
 
-/**
- * Load a single extension from a file path, skipping already-loaded IDs.
- */
 async function loadExtensionFromFile(filePath: string, id: string, label: string) {
   if (loadedExtensionIds.has(id)) return;
   const mod = await import(filePath);
   const factory = mod.default;
   if (typeof factory !== "function") {
     emit({
-      type: "error",
+      type: "appstrate.error",
+      timestamp: Date.now(),
+      runId: process.env.AGENT_RUN_ID ?? "unknown",
       message: `Extension '${id}' (${label}): default export is not a function (got ${typeof factory})`,
     });
     return;
@@ -70,10 +93,6 @@ async function loadExtensionFromFile(filePath: string, id: string, label: string
   loadedExtensionIds.add(id);
 }
 
-/**
- * Load all .ts extension files from a flat directory, skipping already-loaded IDs.
- * Used for runtime built-in extensions fallback.
- */
 async function loadExtensionsFromDir(dir: string, label: string) {
   if (!(await exists(dir))) return;
   const entries = (await fs.readdir(dir)).filter((e) => e.endsWith(".ts"));
@@ -89,16 +108,16 @@ async function loadExtensionsFromDir(dir: string, label: string) {
 
   for (const result of results) {
     if (result.status === "rejected") {
-      emit({ type: "error", message: `Failed to load extension (${label}): ${result.reason}` });
+      emit({
+        type: "appstrate.error",
+        timestamp: Date.now(),
+        runId: process.env.AGENT_RUN_ID ?? "unknown",
+        message: `Failed to load extension (${label}): ${result.reason}`,
+      });
     }
   }
 }
 
-/**
- * Load tools declared in the agent manifest from the extracted agent package.
- * Reads manifest.json to get tool IDs, then loads each from tools/{toolId}/.
- * Also installs TOOL.md to .pi/tools/{toolId}/TOOL.md.
- */
 async function loadToolsFromAgentPackage(packageDir: string, label: string) {
   const agentManifestPath = path.join(packageDir, "manifest.json");
   if (!(await exists(agentManifestPath))) return;
@@ -128,7 +147,6 @@ async function loadToolsFromAgentPackage(packageDir: string, label: string) {
       const id = toolManifest.tool?.name || toolId;
       if (loadedExtensionIds.has(id)) continue;
 
-      // Install TOOL.md if present
       const toolMd = path.join(toolPath, "TOOL.md");
       if (await exists(toolMd)) {
         const dest = path.join(WORKSPACE, ".pi", "tools", toolId);
@@ -138,7 +156,12 @@ async function loadToolsFromAgentPackage(packageDir: string, label: string) {
 
       await loadExtensionFromFile(path.join(toolPath, entrypoint), id, label);
     } catch (err) {
-      emit({ type: "error", message: `Failed to load tool '${toolId}' (${label}): ${err}` });
+      emit({
+        type: "appstrate.error",
+        timestamp: Date.now(),
+        runId: process.env.AGENT_RUN_ID ?? "unknown",
+        message: `Failed to load tool '${toolId}' (${label}): ${err}`,
+      });
     }
   }
 }
@@ -159,7 +182,6 @@ await Promise.all([
 
 if (hasPackage) {
   try {
-    // Install skills and provider docs in parallel
     const installDir = async (folder: string) => {
       const src = path.join(WORKSPACE, ".agent-package", folder);
       if (await exists(src)) {
@@ -170,61 +192,40 @@ if (hasPackage) {
     };
     await Promise.all([installDir("skills"), installDir("providers")]);
 
-    // Load agent-package tools (reads manifest to know which tools to load)
     await loadToolsFromAgentPackage(path.join(WORKSPACE, ".agent-package"), "agent-package");
 
-    // Cleanup extracted package (fire-and-forget)
     run(["rm", "-rf", `${WORKSPACE}/.agent-package`, packagePath]).catch(() => {});
   } catch (err) {
-    emit({ type: "error", message: `Failed to process agent package: ${err}` });
+    emit({
+      type: "appstrate.error",
+      timestamp: Date.now(),
+      runId: process.env.AGENT_RUN_ID ?? "unknown",
+      message: `Failed to process agent package: ${err}`,
+    });
   }
 }
 
-// Load runtime built-in extensions (skip any already loaded from agent package)
 await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
-// --- 3. Setup auth + model ---
-
-function deriveProviderFromApi(api: string): string {
-  const known: Record<string, string> = {
-    "anthropic-messages": "anthropic",
-    "openai-completions": "openai",
-    "openai-responses": "openai",
-    "mistral-conversations": "mistral",
-    "google-generative-ai": "google",
-    "google-vertex": "google-vertex",
-    "azure-openai-responses": "azure-openai-responses",
-    "bedrock-converse-stream": "amazon-bedrock",
-  };
-  const provider = known[api];
-  if (!provider) throw new Error(`Unknown MODEL_API: "${api}"`);
-  return provider;
-}
+// --- 3. Model + system prompt from env ---
 
 const api = process.env.MODEL_API;
 if (!api) die("MODEL_API environment variable is required");
 const modelId = process.env.MODEL_ID;
 if (!modelId) die("MODEL_ID environment variable is required");
-const provider = deriveProviderFromApi(api);
-
-const authStorage = new AuthStorage("/tmp/pi-auth/auth.json");
-
-// Store generic LLM API key for the active provider
-const llmApiKey = process.env.MODEL_API_KEY;
-if (llmApiKey) {
-  authStorage.setRuntimeApiKey(provider, llmApiKey);
-}
-
-const modelRegistry = new ModelRegistry(authStorage);
+const systemPrompt = process.env.AGENT_PROMPT;
+if (!systemPrompt) die("AGENT_PROMPT environment variable is required");
 
 const model: Model<Api> = {
   id: modelId,
   name: modelId,
-  api,
-  provider,
+  api: api as Api,
+  provider: "", // PiRunner will derive this via deriveProviderFromApi
   baseUrl: process.env.MODEL_BASE_URL || "",
   reasoning: process.env.MODEL_REASONING === "true",
-  input: process.env.MODEL_INPUT ? (JSON.parse(process.env.MODEL_INPUT) as string[]) : ["text"],
+  input: process.env.MODEL_INPUT
+    ? (JSON.parse(process.env.MODEL_INPUT) as Array<"text" | "image">)
+    : ["text"],
   cost: process.env.MODEL_COST
     ? JSON.parse(process.env.MODEL_COST)
     : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -232,143 +233,95 @@ const model: Model<Api> = {
   maxTokens: Number(process.env.MODEL_MAX_TOKENS) || 16384,
 };
 
-// --- 4. Build resource loader ---
+// Derive provider (matching PiRunner's table)
+const PROVIDER_BY_API: Record<string, string> = {
+  "anthropic-messages": "anthropic",
+  "openai-completions": "openai",
+  "openai-responses": "openai",
+  "mistral-conversations": "mistral",
+  "google-generative-ai": "google",
+  "google-vertex": "google-vertex",
+  "azure-openai-responses": "azure-openai-responses",
+  "bedrock-converse-stream": "amazon-bedrock",
+};
+model.provider = PROVIDER_BY_API[api] ?? "";
+if (!model.provider) die(`Unknown MODEL_API: "${api}"`);
 
-const systemPrompt = process.env.AGENT_PROMPT;
-if (!systemPrompt) {
-  die("AGENT_PROMPT environment variable is required");
+// --- 4. Build ExecutionContext from env ---
+
+const runId = process.env.AGENT_RUN_ID ?? "local_run";
+
+let parsedInput: Record<string, unknown> = {};
+if (process.env.AGENT_INPUT) {
+  try {
+    parsedInput = JSON.parse(process.env.AGENT_INPUT);
+  } catch {
+    // Leave input empty on malformed JSON — don't silently accept
+    // half-parsed input that could confuse the prompt template.
+  }
 }
 
-const resourceLoader = new DefaultResourceLoader({
-  cwd: WORKSPACE,
-  agentDir: "/tmp/pi-agent",
-  settingsManager: SettingsManager.inMemory(),
-  extensionFactories,
-  noExtensions: extensionFactories.length === 0, // skip discovery if no extensions
-  noPromptTemplates: true, // we don't use prompt templates
-  noThemes: true, // no themes needed in headless mode
-  systemPrompt,
-});
-await resourceLoader.reload();
+const context: ExecutionContext = {
+  runId,
+  input: parsedInput,
+  memories: [],
+  config: {},
+};
 
-// --- 5. Create agent session ---
+// --- 5. Stdout JSONL sink ---
+
+const stdoutSink: EventSink = {
+  async handle(event: RunEvent): Promise<void> {
+    emit(event as unknown as Record<string, unknown>);
+  },
+  async finalize(_result: RunResult): Promise<void> {
+    // The platform reads stdout events and runs its own reducer; no
+    // extra wire message needed. Kept as a no-op hook for parity with
+    // out-of-container runners that may emit a terminal summary.
+  },
+};
+
+// --- 6. Minimal bundle + noop resolvers (platform already set up files) ---
+
+const encoder = new TextEncoder();
+const bundle = {
+  manifest: { name: "in-container", version: "0.0.0" } as Record<string, unknown>,
+  prompt: systemPrompt,
+  files: {
+    "manifest.json": encoder.encode(JSON.stringify({ name: "in-container", version: "0.0.0" })),
+    "prompt.md": encoder.encode(systemPrompt),
+  },
+  compressedSize: 0,
+  decompressedSize: 0,
+};
+
+const providerResolver = { resolve: async () => [] };
+
+// --- 7. Run via PiRunner ---
 
 try {
-  const { session } = await createAgentSession({
+  const runner = new PiRunner({
+    model,
+    apiKey: process.env.MODEL_API_KEY,
+    systemPrompt,
     cwd: WORKSPACE,
     agentDir: "/tmp/pi-agent",
-    model,
-    thinkingLevel: "medium",
-    authStorage,
-    modelRegistry,
-    resourceLoader,
-    sessionManager: SessionManager.inMemory(),
-    settingsManager: SettingsManager.inMemory({
-      compaction: { enabled: false },
-      retry: { enabled: true, maxRetries: 2 },
-    }),
+    extensionFactories,
+    authStoragePath: "/tmp/pi-auth/auth.json",
   });
 
-  // --- 6. Subscribe to events → emit JSON lines ---
-
-  // Token usage accumulator across all assistant turns
-  const totalUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
-
-  session.subscribe((event) => {
-    switch (event.type) {
-      case "message_update": {
-        const msgEvent = (event as any).assistantMessageEvent;
-        if (msgEvent?.type === "text_delta" && msgEvent.delta) {
-          emit({ type: "text_delta", text: msgEvent.delta });
-        }
-        break;
-      }
-
-      case "message_end": {
-        // Capture the full assistant message text
-        const entries = session.state.messages;
-        if (entries.length) {
-          const last = entries[entries.length - 1];
-          if (last && (last as any).role === "assistant") {
-            // Accumulate token usage from assistant message
-            const u = (last as any).usage;
-            if (u) {
-              totalUsage.input += u.input ?? 0;
-              totalUsage.output += u.output ?? 0;
-              totalUsage.cacheRead += u.cacheRead ?? 0;
-              totalUsage.cacheWrite += u.cacheWrite ?? 0;
-              totalUsage.cost += u.cost?.total ?? 0;
-            }
-
-            // Emit SDK errors (e.g. LLM API unreachable, auth failures)
-            if ((last as any).stopReason === "error" && (last as any).errorMessage) {
-              emit({ type: "error", message: (last as any).errorMessage });
-            }
-
-            const content = (last as any).content;
-            if (Array.isArray(content)) {
-              const text = content
-                .filter((c: any) => c.type === "text")
-                .map((c: any) => c.text || "")
-                .join("\n");
-              if (text) {
-                emit({ type: "assistant_message", text });
-              }
-            }
-          }
-        }
-        break;
-      }
-
-      case "tool_execution_start": {
-        const e = event as any;
-        emit({ type: "tool_start", name: e.toolName || "unknown", args: e.args });
-        break;
-      }
-
-      case "tool_execution_end": {
-        const e = event as any;
-        emit({ type: "tool_end", name: e.toolName || "unknown" });
-        break;
-      }
-
-      case "agent_end": {
-        // Emit accumulated token usage before agent_end
-        emit({
-          type: "usage",
-          tokens: {
-            input: totalUsage.input,
-            output: totalUsage.output,
-            cacheRead: totalUsage.cacheRead,
-            cacheWrite: totalUsage.cacheWrite,
-          },
-          cost: totalUsage.cost,
-        });
-        emit({ type: "agent_end" });
-        break;
-      }
-
-      default:
-        break;
-    }
+  await runner.run({
+    bundle,
+    context,
+    providerResolver,
+    eventSink: stdoutSink,
   });
-
-  // --- 7. Run the prompt ---
-
-  try {
-    await session.prompt(systemPrompt);
-  } catch (promptErr) {
-    emit({
-      type: "error",
-      message: promptErr instanceof Error ? promptErr.message : String(promptErr),
-    });
-    process.exit(1);
-  }
-
   process.exit(0);
 } catch (err) {
   emit({
-    type: "error",
+    type: "appstrate.error",
+    timestamp: Date.now(),
+    runId,
     message: err instanceof Error ? err.message : String(err),
   });
   process.exit(1);
