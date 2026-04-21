@@ -46,6 +46,7 @@ export { toBundle, type BundleAdapter } from "./bundle-adapter.ts";
 export {
   makeProviderTool,
   readProviderMeta,
+  serializeFetchResponse,
   type ProviderMeta,
   type ProviderCallRequest,
   type ProviderCallResponse,

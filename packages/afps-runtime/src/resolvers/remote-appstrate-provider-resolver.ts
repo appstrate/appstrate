@@ -5,8 +5,8 @@ import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
   makeProviderTool,
   readProviderMeta,
+  serializeFetchResponse,
   type ProviderCallFn,
-  type ProviderCallResponse,
   type ProviderMeta,
 } from "./provider-tool.ts";
 
@@ -91,19 +91,8 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
         headers,
         body: bodyBytes,
       });
-
-      const respHeaders: Record<string, string> = {};
-      res.headers.forEach((value, key) => {
-        respHeaders[key] = value;
-      });
-      const text = await res.text();
-      const response: ProviderCallResponse = {
-        status: res.status,
-        headers: respHeaders,
-        body: { inline: text, inlineEncoding: "utf8" },
-      };
       void meta;
-      return response;
+      return serializeFetchResponse(res);
     };
   }
 }

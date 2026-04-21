@@ -199,6 +199,26 @@ function slugify(name: string): string {
 }
 
 /**
+ * Serialise a `fetch` response into the spec-shaped
+ * {@link ProviderCallResponse} every resolver returns to the LLM. The
+ * body is read once and inlined as UTF-8 — streaming to file is a
+ * follow-up (`responseMode.toFile`, spec §16.2). Centralising lets us
+ * add truncation, binary detection, and streaming in a single place.
+ */
+export async function serializeFetchResponse(res: Response): Promise<ProviderCallResponse> {
+  const headers: Record<string, string> = {};
+  res.headers.forEach((value, key) => {
+    headers[key] = value;
+  });
+  const text = await res.text();
+  return {
+    status: res.status,
+    headers,
+    body: { inline: text, inlineEncoding: "utf8" },
+  };
+}
+
+/**
  * Load a provider manifest from the bundle. Missing files surface the
  * explicit {@link ProviderMeta} fallback so resolvers don't accidentally
  * all share the same default — the sidecar/remote paths trust the

@@ -5,8 +5,8 @@ import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
   makeProviderTool,
   readProviderMeta,
+  serializeFetchResponse,
   type ProviderCallFn,
-  type ProviderCallResponse,
   type ProviderMeta,
 } from "./provider-tool.ts";
 
@@ -74,23 +74,8 @@ export class SidecarProviderResolver implements ProviderResolver {
         },
         body: bodyBytes,
       });
-
-      const headers: Record<string, string> = {};
-      res.headers.forEach((value, key) => {
-        headers[key] = value;
-      });
-
-      // For now every response goes back inline — the sidecar already
-      // applies a 50 KB truncation via X-Truncated. Streaming-to-file is
-      // a follow-up enhancement (spec §16.2).
-      const text = await res.text();
-      const response: ProviderCallResponse = {
-        status: res.status,
-        headers,
-        body: { inline: text, inlineEncoding: "utf8" },
-      };
       void meta;
-      return response;
+      return serializeFetchResponse(res);
     };
   }
 }
