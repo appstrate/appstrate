@@ -60,6 +60,14 @@ export interface ProxyCallInput {
   /** Session key for cookie jar lookups; defaults to providerId. */
   sessionKey?: string;
 
+  /**
+   * Cap (bytes) on the upstream response body streamed back to the caller.
+   * When the upstream sends more than this, the stream is truncated at the
+   * boundary and `truncated: true` is set on the result. Undefined or 0
+   * means no cap — the full response passes through.
+   */
+  maxResponseBytes?: number;
+
   /** Override fetch (tests). Defaults to the global fetch. */
   fetch?: typeof fetch;
 }
@@ -189,9 +197,71 @@ export async function proxyCall(db: Db, input: ProxyCallInput): Promise<ProxyCal
     }
   }
 
+  const cap = input.maxResponseBytes ?? 0;
+  if (cap > 0 && res.body) {
+    const { body: capped, truncated } = capResponseBody(res.body, cap);
+    return { status: res.status, headers: res.headers, body: capped, truncated };
+  }
+
   return {
     status: res.status,
     headers: res.headers,
     body: res.body,
   };
 }
+
+/**
+ * Wrap a {@link ReadableStream} so it emits at most `maxBytes` bytes and
+ * cancels the upstream source as soon as the cap is hit. The final chunk
+ * is sliced at the exact boundary — downstream consumers never see more
+ * than `maxBytes` cumulative bytes.
+ *
+ * `truncated` is a flag object so the caller can read it after the stream
+ * completes. It flips to `true` the moment the cap fires; it stays `false`
+ * if the upstream ends naturally under the cap.
+ */
+function capResponseBody(
+  source: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): { body: ReadableStream<Uint8Array>; truncated: boolean } {
+  const state = { truncated: false };
+  let sent = 0;
+  const reader = source.getReader();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { value, done } = await reader.read();
+      if (done) {
+        controller.close();
+        return;
+      }
+      if (!value) return;
+      const remaining = maxBytes - sent;
+      if (value.byteLength <= remaining) {
+        sent += value.byteLength;
+        controller.enqueue(value);
+        return;
+      }
+      if (remaining > 0) {
+        controller.enqueue(value.slice(0, remaining));
+        sent = maxBytes;
+      }
+      state.truncated = true;
+      controller.close();
+      await reader.cancel();
+    },
+    async cancel(reason) {
+      await reader.cancel(reason);
+    },
+  });
+  // Expose the flag via a getter so the caller reads the up-to-date value
+  // after the stream has been consumed.
+  return {
+    body,
+    get truncated() {
+      return state.truncated;
+    },
+  } as { body: ReadableStream<Uint8Array>; truncated: boolean };
+}
+
+/** @internal Exported for unit testing */
+export const _capResponseBodyForTesting = capResponseBody;

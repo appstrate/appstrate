@@ -237,6 +237,7 @@ export function createCredentialProxyRouter() {
           substituteBody,
           cookieJar: jar,
           sessionKey: providerId,
+          maxResponseBytes: limits.max_response_bytes,
         });
 
         logger.info("credential-proxy call", {
