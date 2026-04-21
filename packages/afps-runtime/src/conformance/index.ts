@@ -22,7 +22,7 @@ export {
   type ConformanceLevel,
   type CaseResult,
 } from "./cases.ts";
-export { type ConformanceAdapter } from "./adapter.ts";
+export { type ConformanceAdapter, type RunScriptedOutput } from "./adapter.ts";
 export { createDefaultAdapter } from "./default-adapter.ts";
 
 export interface CaseReportEntry {

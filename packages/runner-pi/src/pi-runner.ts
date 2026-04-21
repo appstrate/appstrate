@@ -124,7 +124,7 @@ function deriveProviderFromApi(api: string): string {
 export class PiRunner implements Runner {
   readonly name = "pi-runner";
 
-  private readonly opts: PiRunnerOptions;
+  protected readonly opts: PiRunnerOptions;
 
   constructor(opts: PiRunnerOptions) {
     this.opts = opts;
@@ -172,7 +172,7 @@ export class PiRunner implements Runner {
     await eventSink.finalize(result);
   }
 
-  private async executeSession(
+  protected async executeSession(
     context: ExecutionContext,
     internalSink: InternalSink,
     signal: AbortSignal | undefined,
@@ -242,8 +242,18 @@ export class PiRunner implements Runner {
 
 // ─── Pi SDK → RunEvent bridge ──────────────────────────────────────
 
-interface InternalSink {
+export interface InternalSink {
   emit(event: RunEvent): Promise<void>;
+}
+
+/**
+ * Minimal Pi SDK session surface consumed by the bridge. Narrowed to
+ * `subscribe` + a read-only view of `state.messages` so tests can pass
+ * a hand-rolled fake without reimplementing the full Pi SDK session.
+ */
+export interface BridgeableSession {
+  subscribe(cb: (event: unknown) => void): void;
+  state: { messages: unknown[] };
 }
 
 /**
@@ -291,8 +301,8 @@ interface PiToolExecutionStartEvent {
 }
 type PiSubscribedEvent = { type: string } & Record<string, unknown>;
 
-function installSessionBridge(
-  session: Awaited<ReturnType<typeof createAgentSession>>["session"],
+export function installSessionBridge(
+  session: BridgeableSession,
   sink: InternalSink,
   runId: string,
 ): void {
