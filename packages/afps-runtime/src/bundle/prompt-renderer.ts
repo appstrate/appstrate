@@ -21,6 +21,13 @@ export interface PromptView {
   runId: string;
   /** User / caller-supplied input, passed through verbatim. */
   input: unknown;
+  /**
+   * Agent configuration values resolved for this run (from the agent's
+   * `config` schema + caller overrides). Passed through verbatim so
+   * templates can reference `{{config.*}}`. Absent when the agent
+   * declares no config.
+   */
+  config?: Record<string, unknown>;
   /** Prior memories, most recent first. Empty array when none. */
   memories: ReadonlyArray<{ content: string; createdAt: number }>;
   /** Snapshot of the agent's previous state. `null` if none. */
@@ -82,6 +89,7 @@ export async function buildPromptView(
   return {
     runId: context.runId,
     input: context.input,
+    ...(context.config !== undefined ? { config: context.config } : {}),
     memories,
     state,
     history,

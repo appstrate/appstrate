@@ -9,6 +9,7 @@ import {
 import { isFileField } from "@appstrate/core/form";
 import { sanitizeStorageKey } from "../file-storage.ts";
 import { renderTemplate } from "@appstrate/afps-runtime/template";
+import type { PromptView } from "@appstrate/afps-runtime/bundle";
 
 /**
  * Schema versions at or above this threshold render their rawPrompt
@@ -29,26 +30,35 @@ function supportsTemplateRendering(schemaVersion: string | undefined): boolean {
 }
 
 /**
- * Projection of {@link PromptContext} surfaced to 1.1+ templates. Shape
- * matches `PromptView` in @appstrate/afps-runtime/bundle but is rebuilt
- * here to avoid a circular dependency through the workspace package.
+ * Parse an ISO-8601 timestamp into Unix epoch ms, returning 0 on failure.
+ * DB rows may expose `createdAt` as either an ISO string (via drizzle's
+ * default TIMESTAMP mapping) or a Date instance. Both are normalised to
+ * the runtime's numeric representation.
  */
-function buildTemplateView(ctx: PromptContext): {
-  runId: string;
-  input: Record<string, unknown>;
-  config: Record<string, unknown>;
-  state: unknown;
-  memories: Array<{ content: string; createdAt: string | null }>;
-} {
+function toEpochMs(value: string | Date | null | undefined): number {
+  if (!value) return 0;
+  const date = value instanceof Date ? value : new Date(value);
+  const ms = date.getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * Project a {@link PromptContext} into the runtime's canonical
+ * {@link PromptView} shape — the same structure any external consumer
+ * would receive from `buildPromptView()`. `createdAt` is normalised to
+ * epoch ms (runtime contract) even though the DB surfaces ISO strings.
+ */
+function buildTemplateView(ctx: PromptContext): PromptView {
   return {
     runId: ctx.runId ?? "",
     input: ctx.input,
     config: ctx.config,
-    state: ctx.previousState,
+    state: ctx.previousState ?? null,
     memories: (ctx.memories ?? []).map((m) => ({
       content: m.content,
-      createdAt: m.createdAt,
+      createdAt: toEpochMs(m.createdAt as string | Date | null | undefined),
     })),
+    history: [],
   };
 }
 

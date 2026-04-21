@@ -86,6 +86,12 @@ export const executionContextSchema = z.object({
   state: z.unknown().optional(),
   history: z.array(historyEntrySchema).optional(),
 
+  /**
+   * Agent-config values resolved for this run. Surfaced to 1.1+ templates
+   * as `{{config.*}}`. Absent when the agent declares no config schema.
+   */
+  config: z.record(z.string(), z.unknown()).optional(),
+
   // Runtime wiring (no auth material — see note above)
   sink: sinkConfigSchema.optional(),
   credentials: credentialsConfigSchema.optional(),

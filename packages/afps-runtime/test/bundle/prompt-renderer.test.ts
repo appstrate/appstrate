@@ -113,6 +113,22 @@ describe("buildPromptView", () => {
     expect(view.history).toEqual([]);
     expect(view.state).toBeNull();
   });
+
+  it("surfaces ExecutionContext.config on the view when present", async () => {
+    const view = await buildPromptView({
+      context: ctx({ config: { threshold: 42, label: "prod" } }),
+      provider: new NoopContextProvider(),
+    });
+    expect(view.config).toEqual({ threshold: 42, label: "prod" });
+  });
+
+  it("omits config from the view when absent on the context", async () => {
+    const view = await buildPromptView({
+      context: ctx(),
+      provider: new NoopContextProvider(),
+    });
+    expect(view.config).toBeUndefined();
+  });
 });
 
 describe("renderPrompt", () => {
