@@ -34,6 +34,7 @@ import { appProfilesPaths } from "./paths/app-profiles.ts";
 import { apiKeysPaths } from "./paths/api-keys.ts";
 import { organizationsPaths } from "./paths/organizations.ts";
 import { profilePaths } from "./paths/profile.ts";
+import { mePaths } from "./paths/me.ts";
 import { invitationsPaths } from "./paths/invitations.ts";
 import { internalPaths } from "./paths/internal.ts";
 import { welcomePaths } from "./paths/welcome.ts";
@@ -61,6 +62,7 @@ const corePaths = {
   ...apiKeysPaths,
   ...organizationsPaths,
   ...profilePaths,
+  ...mePaths,
   ...invitationsPaths,
   ...internalPaths,
   ...welcomePaths,

@@ -32,6 +32,7 @@ import healthRouter from "./routes/health.ts";
 import { createConnectionsRouter } from "./routes/connections.ts";
 import { createLibraryRouter } from "./routes/library.ts";
 import orgsRouter from "./routes/organizations.ts";
+import meRouter from "./routes/me.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
 import welcomeRouter from "./routes/welcome.ts";
@@ -210,6 +211,11 @@ const schedulesRouter = createSchedulesRouter();
 
 // Organization routes (no org context needed — self-managed auth)
 app.route("/api/orgs", orgsRouter);
+
+// User-scoped identity routes — `/api/me/orgs` skips `requireOrgContext`
+// (it is the prerequisite to setting `X-Org-Id`); `/api/me/models` runs
+// inside org context.
+app.route("/api/me", meRouter);
 
 app.route("/api/agents", userAgentsRouter); // Must be before agentsRouter (import/delete routes)
 app.route("/api/agents", agentsRouter);

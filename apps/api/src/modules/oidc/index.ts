@@ -31,6 +31,17 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
+
+// Register `oauth-clients` as a module-owned RBAC resource. OAuth client
+// registration / rotation / deletion are admin-tier operations that only
+// matter when this module is loaded — baking them into the core static
+// catalog would leave dead scope strings in every OSS deployment that
+// doesn't expose an OIDC surface.
+declare module "@appstrate/core/permissions" {
+  interface ModuleResources {
+    "oauth-clients": "read" | "write" | "delete";
+  }
+}
 import { logger } from "../../lib/logger.ts";
 import { oidcAuthStrategy } from "./auth/strategy.ts";
 import { oidcBetterAuthPlugins } from "./auth/plugins.ts";
@@ -62,6 +73,20 @@ import { ensureCliClient } from "./services/ensure-cli-client.ts";
 import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
 import { oidcRealmResolver } from "./services/oidc-realm-resolver.ts";
 import { setRealmResolver } from "@appstrate/db/auth";
+import { verifyEndUserAccessToken } from "./services/enduser-token.ts";
+
+/**
+ * Public API surface exposed via `services.modules.get("oidc")?.api`. Other
+ * modules that accept OAuth2 Bearer JWTs call `verifyEndUserAccessToken` to
+ * re-verify tokens against the local JWKS without re-implementing JWKS
+ * fetch + caching + signature parsing.
+ *
+ * Consumers narrow the type by importing this module's published typings:
+ *   const oidc = services.modules.get("oidc")?.api as OidcModuleApi | undefined;
+ */
+export interface OidcModuleApi {
+  verifyEndUserAccessToken: typeof verifyEndUserAccessToken;
+}
 
 // Snapshot of first-party clientIds captured at `init()` time and forwarded
 // to `oauthProvider({ cachedTrustedClients })` when `betterAuthPlugins()` is
@@ -71,6 +96,10 @@ let cachedTrustedClientIds: readonly string[] = [];
 
 const oidcModule: AppstrateModule = {
   manifest: { id: "oidc", name: "OIDC Identity Provider", version: "1.0.0" },
+
+  api: {
+    verifyEndUserAccessToken,
+  } satisfies OidcModuleApi,
 
   async init(ctx: ModuleInitContext) {
     await ctx.applyMigrations("oidc", resolve(import.meta.dir, "drizzle/migrations"), {
@@ -237,6 +266,22 @@ const oidcModule: AppstrateModule = {
   },
 
   features: { oidc: true },
+
+  // RBAC contribution: managing OAuth clients (creating, rotating secrets,
+  // deleting) is strictly admin-tier — the clients control how external
+  // apps authenticate against this org's OIDC surface. API keys can carry
+  // the scope (`apiKeyGrantable`) so headless deployments can script
+  // client lifecycle. End-user OIDC tokens are denied
+  // (`endUserGrantable` stays false) — an end-user managing the clients
+  // that authenticate other end-users would be a confused-deputy scenario.
+  permissionsContribution: () => [
+    {
+      resource: "oauth-clients",
+      actions: ["read", "write", "delete"],
+      grantTo: ["owner", "admin"],
+      apiKeyGrantable: true,
+    },
+  ],
 
   hooks: {
     // Blocks the creation of orphan Better Auth users when a visitor tries

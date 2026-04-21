@@ -31,6 +31,8 @@ import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemProviderKeys } from "../../src/services/model-registry.ts";
 import { initRunLimits } from "../../src/services/run-limits.ts";
 import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
+import { collectModulePermissions } from "../../src/lib/modules/module-loader.ts";
+import { setModulePermissionsProvider } from "@appstrate/core/permissions";
 import { initAppConfig } from "../../src/lib/app-config.ts";
 import { notFound } from "../../src/lib/errors.ts";
 
@@ -56,6 +58,7 @@ import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createConnectionsRouter } from "../../src/routes/connections.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
+import meRouter from "../../src/routes/me.ts";
 import profileRouter from "../../src/routes/profile.ts";
 import invitationsRouter from "../../src/routes/invitations.ts";
 import welcomeRouter from "../../src/routes/welcome.ts";
@@ -96,8 +99,27 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // singleton cache, so core "modules: []" tests stay isolated from the
   // preload-discovered default app used by every other test).
   const explicit = options?.modules !== undefined;
-  if (!explicit && cachedApp) return cachedApp;
   const extraModules = explicit ? options!.modules! : getDiscoveredModules();
+
+  // Register module RBAC contributions BEFORE returning the app — mirrors
+  // production wiring in `initSortedModules()`, which calls
+  // `setModulePermissionsProvider` before init() runs so
+  // `resolvePermissions(role)` already sees module grants when modules are
+  // loaded. Without this, module-owned resources (e.g. `webhooks:*`,
+  // `oauth-clients:*` after they were extracted out of the static core
+  // catalog) are absent from the session's permission Set and every
+  // guarded route 403s.
+  //
+  // This call sits OUTSIDE the cached-app check because
+  // `module-loader.test.ts` legitimately resets the provider in its
+  // `beforeEach`, and a subsequent integration test that reuses the
+  // cached `cachedApp` would otherwise hit an empty module permission
+  // snapshot. Computing the snapshot is cheap — single pass over the
+  // contributions array — so re-registering per call is acceptable.
+  const rbacSnapshot = collectModulePermissions(extraModules);
+  setModulePermissionsProvider(() => rbacSnapshot);
+
+  if (!explicit && cachedApp) return cachedApp;
 
   const app = new Hono<AppEnv>();
 
@@ -171,6 +193,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   const schedulesRouter = createSchedulesRouter();
 
   app.route("/api/orgs", orgsRouter);
+  app.route("/api/me", meRouter);
   app.route("/api/agents", userAgentsRouter);
   app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());

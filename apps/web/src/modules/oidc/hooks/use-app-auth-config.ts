@@ -12,32 +12,12 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
+import type { SmtpConfigView, SocialProviderId, SocialProviderView } from "@appstrate/shared-types";
 import { api, ApiError } from "@/api";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { useCurrentApplicationId } from "@/hooks/use-current-application";
 
-export type SocialProviderId = "google" | "github";
-
-export interface SmtpConfigView {
-  applicationId: string;
-  host: string;
-  port: number;
-  username: string;
-  fromAddress: string;
-  fromName: string | null;
-  secureMode: "auto" | "tls" | "starttls" | "none";
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface SocialProviderView {
-  applicationId: string;
-  provider: SocialProviderId;
-  clientId: string;
-  scopes: string[] | null;
-  createdAt: string;
-  updatedAt: string;
-}
+export type { SmtpConfigView, SocialProviderId, SocialProviderView };
 
 export const upsertSmtpSchema = z.object({
   host: z.string().min(1, "Host is required"),

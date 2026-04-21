@@ -5,6 +5,7 @@ import {
   loadModulesFromInstances,
   getModule,
   getModules,
+  getModuleOidcScopes,
   getModulePublicPaths,
   registerModuleRoutes,
   applyModuleFeatures,
@@ -359,6 +360,382 @@ describe("module-loader", () => {
           status: "success",
         }),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe("getModuleOidcScopes", () => {
+    it("returns empty array when no module contributes scopes", async () => {
+      await loadModulesFromInstances([], mockCtx());
+      expect(getModuleOidcScopes()).toEqual([]);
+    });
+
+    it("aggregates oidcScopes from every loaded module", async () => {
+      await loadModulesFromInstances(
+        [
+          mockModule("tasks", { oidcScopes: ["tasks:read", "tasks:write"] }),
+          mockModule("billing", { oidcScopes: ["billing:read"] }),
+        ],
+        mockCtx(),
+      );
+      expect(getModuleOidcScopes().sort()).toEqual(["billing:read", "tasks:read", "tasks:write"]);
+    });
+
+    it("deduplicates repeated scopes", async () => {
+      await loadModulesFromInstances(
+        [
+          mockModule("alpha", { oidcScopes: ["x:read"] }),
+          mockModule("beta", { oidcScopes: ["x:read", "y:read"] }),
+        ],
+        mockCtx(),
+      );
+      expect(getModuleOidcScopes().sort()).toEqual(["x:read", "y:read"]);
+    });
+
+    it("excludes the OIDC module's own contributions (canonical vocabulary lives in scopes.ts)", async () => {
+      await loadModulesFromInstances(
+        [
+          // A module with id "oidc" must not pollute the aggregator —
+          // the OIDC module owns the built-in vocabulary directly.
+          mockModule("oidc", { oidcScopes: ["ignored:scope"] }),
+          mockModule("tasks", { oidcScopes: ["tasks:read"] }),
+        ],
+        mockCtx(),
+      );
+      expect(getModuleOidcScopes()).toEqual(["tasks:read"]);
+    });
+  });
+
+  describe("validateModuleOidcScopes (boot-time format guard)", () => {
+    it("rejects a scope without colon — fails fast at boot", async () => {
+      const mod = mockModule("tasks", {
+        // Casting around the template-literal compile-time guard so the
+        // runtime validation gets exercised. External modules built from JS
+        // (not TS) bypass the compile-time guard entirely — this is the
+        // last line of defense.
+        oidcScopes: ["tasksread"] as unknown as ReadonlyArray<`${string}:${string}`>,
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /Module "tasks" declared invalid oidcScope "tasksread"/,
+      );
+    });
+
+    it("rejects an uppercase scope", async () => {
+      const mod = mockModule("tasks", {
+        oidcScopes: ["Tasks:Read"] as unknown as ReadonlyArray<`${string}:${string}`>,
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /invalid oidcScope "Tasks:Read"/,
+      );
+    });
+
+    it("rejects a scope containing whitespace", async () => {
+      const mod = mockModule("tasks", {
+        oidcScopes: ["tasks: read"] as unknown as ReadonlyArray<`${string}:${string}`>,
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /invalid oidcScope "tasks: read"/,
+      );
+    });
+
+    it("accepts valid namespace:action scopes", async () => {
+      await expect(
+        loadModulesFromInstances(
+          [
+            mockModule("tasks", { oidcScopes: ["tasks:read", "tasks:write"] }),
+            mockModule("billing", { oidcScopes: ["billing:read", "billing-v2:write"] }),
+          ],
+          mockCtx(),
+        ),
+      ).resolves.toBeUndefined();
+    });
+
+    it("accepts modules with no oidcScopes declaration", async () => {
+      await expect(
+        loadModulesFromInstances([mockModule("plain")], mockCtx()),
+      ).resolves.toBeUndefined();
+    });
+
+    it("exempts the OIDC module — its built-in vocabulary lives in scopes.ts", async () => {
+      // The OIDC module owns the canonical vocabulary directly, including
+      // single-word identity scopes (`openid`, `profile`, …). The
+      // validator must not block them — exemption is keyed on `manifest.id`.
+      await expect(
+        loadModulesFromInstances(
+          [
+            mockModule("oidc", {
+              oidcScopes: ["openid"] as unknown as ReadonlyArray<`${string}:${string}`>,
+            }),
+          ],
+          mockCtx(),
+        ),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe("permissionsContribution (module RBAC)", () => {
+    // The provider hook is module-loader → permissions, so we exercise the
+    // public observable: resolvePermissions() / getApiKeyAllowedScopes()
+    // returning the merged view after a module loads.
+
+    it("merges module grants into resolvePermissions(role)", async () => {
+      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances(
+        [
+          mockModule("tasks", {
+            permissionsContribution: () => [
+              {
+                resource: "tasks",
+                actions: ["read", "write"],
+                grantTo: ["owner", "admin", "member"],
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      const owner = resolvePermissions("owner");
+      const member = resolvePermissions("member");
+      const viewer = resolvePermissions("viewer");
+      expect(owner.has("tasks:read" as never)).toBe(true);
+      expect(owner.has("tasks:write" as never)).toBe(true);
+      expect(member.has("tasks:read" as never)).toBe(true);
+      expect(viewer.has("tasks:read" as never)).toBe(false);
+      // Core grants still present
+      expect(owner.has("agents:run" as never)).toBe(true);
+    });
+
+    it("resets the provider on resetModules() — next resolve sees no module grants", async () => {
+      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances(
+        [
+          mockModule("tasks", {
+            permissionsContribution: () => [
+              { resource: "tasks", actions: ["read"], grantTo: ["owner"] },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      expect(resolvePermissions("owner").has("tasks:read" as never)).toBe(true);
+      resetModules();
+      expect(resolvePermissions("owner").has("tasks:read" as never)).toBe(false);
+    });
+
+    it("apiKeyGrantable=true adds entries to the API-key allowlist; false omits them", async () => {
+      const { getApiKeyAllowedScopes } = await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances(
+        [
+          mockModule("tasks", {
+            permissionsContribution: () => [
+              {
+                resource: "tasks",
+                actions: ["read"],
+                grantTo: ["owner"],
+                apiKeyGrantable: true,
+              },
+              {
+                resource: "internal",
+                actions: ["sweep"],
+                grantTo: ["owner"],
+                // apiKeyGrantable defaults to false
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      const allowed = getApiKeyAllowedScopes();
+      expect(allowed.has("tasks:read")).toBe(true);
+      expect(allowed.has("internal:sweep")).toBe(false);
+    });
+
+    it("endUserGrantable=true adds entries to the end-user OIDC allowlist; false omits them", async () => {
+      const { getModuleEndUserAllowedScopes } = await import("@appstrate/core/permissions");
+      await loadModulesFromInstances(
+        [
+          mockModule("tasks", {
+            permissionsContribution: () => [
+              {
+                resource: "tasks",
+                actions: ["read", "write"],
+                grantTo: ["owner", "member"],
+                endUserGrantable: true,
+              },
+              {
+                resource: "internal",
+                actions: ["sweep"],
+                grantTo: ["owner"],
+                // endUserGrantable defaults to false — admin surfaces stay closed
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      const allowed = getModuleEndUserAllowedScopes();
+      expect(allowed.has("tasks:read")).toBe(true);
+      expect(allowed.has("tasks:write")).toBe(true);
+      expect(allowed.has("internal:sweep")).toBe(false);
+    });
+
+    it("endUserGrantable is independent of apiKeyGrantable — both opt-ins are tracked separately", async () => {
+      const { getApiKeyAllowedScopes } = await import("../../../src/lib/permissions.ts");
+      const { getModuleEndUserAllowedScopes } = await import("@appstrate/core/permissions");
+      await loadModulesFromInstances(
+        [
+          mockModule("tasks", {
+            permissionsContribution: () => [
+              {
+                resource: "tasks",
+                actions: ["read"],
+                grantTo: ["owner"],
+                apiKeyGrantable: true,
+                endUserGrantable: false,
+              },
+              {
+                resource: "module-billing",
+                actions: ["view"],
+                grantTo: ["owner"],
+                apiKeyGrantable: false,
+                endUserGrantable: true,
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      const apiKey = getApiKeyAllowedScopes();
+      const endUser = getModuleEndUserAllowedScopes();
+      expect(apiKey.has("tasks:read")).toBe(true);
+      expect(apiKey.has("module-billing:view")).toBe(false);
+      expect(endUser.has("tasks:read")).toBe(false);
+      expect(endUser.has("module-billing:view")).toBe(true);
+    });
+
+    it("resets endUser allowlist on resetModules()", async () => {
+      const { getModuleEndUserAllowedScopes } = await import("@appstrate/core/permissions");
+      await loadModulesFromInstances(
+        [
+          mockModule("tasks", {
+            permissionsContribution: () => [
+              {
+                resource: "tasks",
+                actions: ["read"],
+                grantTo: ["owner"],
+                endUserGrantable: true,
+              },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      expect(getModuleEndUserAllowedScopes().has("tasks:read")).toBe(true);
+      resetModules();
+      expect(getModuleEndUserAllowedScopes().has("tasks:read")).toBe(false);
+    });
+
+    it("rejects redefining a core resource (e.g. agents)", async () => {
+      const mod = mockModule("rogue", {
+        permissionsContribution: () => [
+          { resource: "agents", actions: ["pwn"], grantTo: ["owner"] },
+        ],
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /Module "rogue" cannot redefine core resource "agents"/,
+      );
+    });
+
+    it("rejects two modules declaring the same resource", async () => {
+      await expect(
+        loadModulesFromInstances(
+          [
+            mockModule("tasks-a", {
+              permissionsContribution: () => [
+                { resource: "shared", actions: ["read"], grantTo: ["owner"] },
+              ],
+            }),
+            mockModule("tasks-b", {
+              permissionsContribution: () => [
+                { resource: "shared", actions: ["read"], grantTo: ["owner"] },
+              ],
+            }),
+          ],
+          mockCtx(),
+        ),
+      ).rejects.toThrow(/both declared resource "shared"/);
+    });
+
+    it("rejects malformed resource name", async () => {
+      const mod = mockModule("tasks", {
+        permissionsContribution: () => [
+          { resource: "Tasks", actions: ["read"], grantTo: ["owner"] },
+        ],
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /invalid permission resource "Tasks"/,
+      );
+    });
+
+    it("rejects malformed action name", async () => {
+      const mod = mockModule("tasks", {
+        permissionsContribution: () => [
+          { resource: "tasks", actions: ["READ"], grantTo: ["owner"] },
+        ],
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /invalid action "READ"/,
+      );
+    });
+
+    it("rejects empty actions array", async () => {
+      const mod = mockModule("tasks", {
+        permissionsContribution: () => [{ resource: "tasks", actions: [], grantTo: ["owner"] }],
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(/with no actions/);
+    });
+
+    it("rejects unknown role in grantTo", async () => {
+      const mod = mockModule("tasks", {
+        permissionsContribution: () => [
+          {
+            resource: "tasks",
+            actions: ["read"],
+            grantTo: ["god" as never],
+          },
+        ],
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
+        /unknown role "god"/,
+      );
+    });
+
+    it("supports per-action grants by listing the resource multiple times", async () => {
+      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances(
+        [
+          mockModule("tasks", {
+            permissionsContribution: () => [
+              { resource: "tasks", actions: ["write"], grantTo: ["owner"] },
+              { resource: "tasks", actions: ["read"], grantTo: ["owner", "member"] },
+            ],
+          }),
+        ],
+        mockCtx(),
+      );
+      const owner = resolvePermissions("owner");
+      const member = resolvePermissions("member");
+      expect(owner.has("tasks:write" as never)).toBe(true);
+      expect(owner.has("tasks:read" as never)).toBe(true);
+      expect(member.has("tasks:write" as never)).toBe(false);
+      expect(member.has("tasks:read" as never)).toBe(true);
+    });
+
+    it("OSS baseline: no module loaded → resolvePermissions returns only core grants", async () => {
+      const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
+      await loadModulesFromInstances([], mockCtx());
+      const owner = resolvePermissions("owner");
+      expect(owner.has("agents:run" as never)).toBe(true);
+      expect(owner.has("tasks:read" as never)).toBe(false);
     });
   });
 

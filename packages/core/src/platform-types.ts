@@ -36,12 +36,38 @@ export type Actor = { type: "member"; id: string } | { type: "end_user"; id: str
 // when they need the richer shape.
 // ---------------------------------------------------------------------------
 
-/** Stable public fields of a loaded package (agent, skill, tool, provider). */
+/**
+ * A skill or tool referenced by a package's manifest, hydrated against the
+ * org/system catalog. Optional fields mirror what was resolvable at load
+ * time — modules use them to render dependency lists without re-querying.
+ */
+export interface PlatformPackageDependency {
+  readonly id: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly version?: string;
+}
+
+/**
+ * Stable public fields of a loaded package (agent, skill, tool, provider).
+ *
+ * `prompt`, `skills`, `tools` are populated by the platform when it resolves
+ * a package row — modules that render or reason about a package can read
+ * them without re-implementing manifest traversal. They remain optional so
+ * future package shapes (e.g. provider definitions with no prompt) stay
+ * assignable, and so adding more hydrated fields is non-breaking.
+ */
 export interface PlatformPackage {
   readonly id: string;
   readonly source: "system" | "local";
   /** Opaque manifest — cast to `AgentManifest` or similar at the call site. */
   readonly manifest: unknown;
+  /** Agent prompt body (markdown). Empty string when the package has no prompt. */
+  readonly prompt?: string;
+  /** Resolved skill dependencies declared in the manifest. */
+  readonly skills?: ReadonlyArray<PlatformPackageDependency>;
+  /** Resolved tool dependencies declared in the manifest. */
+  readonly tools?: ReadonlyArray<PlatformPackageDependency>;
 }
 
 /**
@@ -78,11 +104,34 @@ export interface RunLog {
   readonly createdAt: Date;
 }
 
-/** Stable public fields of a resolved model — what modules need to route LLM traffic. */
+/**
+ * Stable public fields of a resolved model.
+ *
+ * The three core fields (`api`, `modelId`, `baseUrl`) are always present.
+ * `apiKey` is populated by `models.load()` (single-model resolution
+ * including credential decryption) so modules routing LLM traffic have
+ * everything they need without a second round-trip; `models.listForOrg()`
+ * intentionally omits it. The catalog fields (`id`, `label`, `isDefault`,
+ * `enabled`, `source`) are populated by `models.listForOrg()` so modules
+ * rendering a picker UI can drive it directly. All optional → width
+ * subtyping keeps both call sites assignable to the same DTO.
+ */
 export interface PlatformModel {
   readonly api: string;
   readonly modelId: string;
   readonly baseUrl: string;
+  /** Decrypted provider key — populated by `models.load()`, omitted by `listForOrg()`. */
+  readonly apiKey?: string;
+  /** Model row id (system or org-owned). */
+  readonly id?: string;
+  /** Human-readable label for catalog/picker UIs. */
+  readonly label?: string;
+  /** Whether this model is the org's default. */
+  readonly isDefault?: boolean;
+  /** Whether the model is enabled for use. */
+  readonly enabled?: boolean;
+  /** Provenance — `built-in` from `SYSTEM_PROVIDER_KEYS`, `custom` from the org catalog. */
+  readonly source?: "built-in" | "custom";
 }
 
 /** Stable public fields of an application row. */

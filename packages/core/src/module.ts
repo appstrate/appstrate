@@ -12,11 +12,13 @@
 
 import type { Hono } from "hono";
 import type { Logger } from "./logger.ts";
+import type { OrgRole } from "./permissions.ts";
 import type {
   Actor,
   ContainerOrchestrator,
   InlinePreflightInput,
   InlinePreflightResult,
+  InlineRunBody,
   PlatformApplication,
   PlatformConnectionProviderGroup,
   PlatformModel,
@@ -227,8 +229,160 @@ export interface AppstrateModule {
    */
   appConfigContribution?(): Promise<Record<string, unknown>> | Record<string, unknown>;
 
+  /**
+   * Public API surface exposed to other modules.
+   *
+   * Read by peers via `services.modules.get(id)?.api`. Typed as `unknown`
+   * here so the core contract stays ignorant of any specific module's
+   * shape; modules that consume a peer's API import that peer's published
+   * typings (or cast at the call site) to recover strong typing.
+   *
+   * Example: the OIDC module exposes `verifyEndUserAccessToken` so any
+   * module accepting OAuth2 Bearer JWTs can re-verify tokens without
+   * re-implementing JWKS fetch + caching + signature parsing.
+   */
+  api?: unknown;
+
+  /**
+   * Additional OAuth2 scopes contributed by this module to the OIDC
+   * vocabulary. Aggregated by the OIDC module at boot and included in:
+   *   1. `.well-known/openid-configuration#scopes_supported`
+   *   2. `assertValidScopes` (so operator-registered clients can request them)
+   *   3. `GET /api/oauth/scopes`
+   *
+   * Scopes are NOT translated into core permissions — they remain opaque
+   * strings that the contributing module's own middleware enforces by
+   * reading the JWT's `scope` claim. Pick stable, namespaced strings
+   * (e.g. `tasks:read`, `tasks:write`) that won't collide with other
+   * modules' scopes.
+   *
+   * The `${string}:${string}` template literal is a compile-time guard
+   * against single-word scopes (which are reserved for the OIDC identity
+   * vocabulary `openid|profile|email|offline_access`). The platform
+   * additionally enforces `^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$` at boot
+   * — modules with malformed scopes fail-fast with a clear error.
+   *
+   * **Recommended pattern** — preserve compile-time narrowing inside the
+   * contributing module by exporting a typed `as const` tuple alongside
+   * the module export:
+   *
+   * ```ts
+   * export const TASKS_SCOPES = ["tasks:read", "tasks:write"] as const;
+   * export type TasksScope = (typeof TASKS_SCOPES)[number];
+   *
+   * const tasksModule: AppstrateModule = {
+   *   manifest: { id: "tasks", name: "Tasks", version: "1.0.0" },
+   *   oidcScopes: [...TASKS_SCOPES],
+   *   // ...
+   * };
+   * ```
+   *
+   * Consumers of the module's middleware (or any code reading `jwt.scope`)
+   * import `TasksScope` to recover the literal union — typing is lost only
+   * at the core boundary, not within the module's own surface.
+   *
+   * No-op when the OIDC module is absent — declaring scopes on a platform
+   * that doesn't load OIDC just goes unused.
+   */
+  oidcScopes?: ReadonlyArray<`${string}:${string}`>;
+
+  /**
+   * RBAC contribution: declare resources owned by this module and how the
+   * core org roles grant their actions.
+   *
+   * Aggregated by the platform at boot and merged into:
+   *   1. `resolvePermissions(role)` — adds module entries to the per-role
+   *      permission set written to `c.get("permissions")`.
+   *   2. `API_KEY_ALLOWED_SCOPES` — module entries become grantable
+   *      through API keys (filtered against creator's role at issuance).
+   *   3. `requirePermission(resource, action)` — runtime check is purely
+   *      Set membership, so module entries gate routes the same way core
+   *      permissions do.
+   *
+   * Pair this with a TypeScript declaration-merging block on
+   * `@appstrate/core/permissions#ModuleResources` so call sites
+   * like `requirePermission("tasks", "read")` stay typed end-to-end:
+   *
+   * ```ts
+   * declare module "@appstrate/core/permissions" {
+   *   interface ModuleResources { tasks: "read" | "write" }
+   * }
+   *
+   * const tasksModule: AppstrateModule = {
+   *   manifest: { id: "tasks", name: "Tasks", version: "1.0.0" },
+   *   permissionsContribution: () => [
+   *     {
+   *       resource: "tasks",
+   *       actions: ["read", "write"],
+   *       grantTo: ["owner", "admin", "member"],
+   *       apiKeyGrantable: true,
+   *     },
+   *   ],
+   *   // ...
+   * };
+   * ```
+   *
+   * Constraints enforced at boot (fail-fast):
+   *   - resource name matches `^[a-z][a-z0-9_-]*$`
+   *   - action names match `^[a-z][a-z0-9_-]*$`
+   *   - resource does NOT collide with any core resource (org, agents, …)
+   *     or any other module's resource
+   *
+   * No-op on platforms that don't load this module — neither the type
+   * augmentation nor the runtime grants reach core, preserving the
+   * zero-footprint invariant.
+   */
+  permissionsContribution?(): ModulePermissionContribution[];
+
   /** Called during graceful shutdown (reverse init order). */
   shutdown?(): Promise<void>;
+}
+
+/**
+ * One resource's RBAC contribution from a module — declares the actions
+ * available, which org roles grant them, and whether they can be issued
+ * through API keys. See `AppstrateModule.permissionsContribution`.
+ */
+export interface ModulePermissionContribution {
+  /** Resource name (e.g. "tasks"). Must be unique across loaded modules and disjoint from core resources. */
+  resource: string;
+  /** Actions the module supports for this resource (e.g. ["read", "write"]). */
+  actions: readonly string[];
+  /**
+   * Org roles that grant every listed action. The platform writes the
+   * union into `resolvePermissions(role)`. Omit a role to leave it
+   * without access (e.g. `viewer` typically only sees `:read`).
+   *
+   * Granular per-action grants (e.g. owner gets write, member gets read
+   * only) are supported by listing the resource multiple times with
+   * different `actions`/`grantTo` combinations.
+   */
+  grantTo: ReadonlyArray<OrgRole>;
+  /**
+   * When `true`, every `<resource>:<action>` produced by this entry is
+   * added to the API-key allowlist so org admins can mint keys with
+   * these scopes. Defaults to `false` — module permissions are
+   * session-only unless explicitly opted in.
+   */
+  apiKeyGrantable?: boolean;
+  /**
+   * When `true`, every `<resource>:<action>` produced by this entry can be
+   * carried by an end-user OAuth2/OIDC token (the embedding-app flow). The
+   * platform's OIDC strategy filters end-user JWT scopes against this
+   * allowlist before writing them to `c.get("permissions")` — without the
+   * opt-in, a module's resource is unreachable through end-user tokens
+   * even if the JWT advertises it.
+   *
+   * Defaults to `false` — module permissions are dashboard/instance/API-key
+   * only unless explicitly opted in. Use this for modules whose data is
+   * meant to be addressed per-end-user (per-user data streams, end-user
+   * profiles, notifications…). Avoid for admin/destructive surfaces (those should
+   * stay session-only or API-key-only).
+   *
+   * No-op on platforms that don't load the OIDC module — the flag is
+   * simply ignored when no end-user pipeline exists.
+   */
+  endUserGrantable?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -353,7 +507,7 @@ export interface AuthResolution {
   user: { id: string; email: string; name: string };
   orgId?: string;
   orgSlug?: string;
-  orgRole?: "owner" | "admin" | "member" | "viewer";
+  orgRole?: OrgRole;
   /**
    * Strategy-chosen identifier for this auth method (e.g. "oidc", "mtls",
    * "webhook-hmac"). Written to `c.set("authMethod", ...)`. NOT constrained
@@ -633,12 +787,29 @@ export interface PlatformServices {
     abort(runId: string): void;
   };
   /**
-   * Inline run preflight — validates a manifest + inputs without creating a
-   * run record. Consumers inspect the result to decide whether to trigger an
-   * actual run. No durable side effects.
+   * Inline run lifecycle — preflight (validate without side effects) and
+   * `run` (preflight + insert shadow package + fire pipeline). `run` mirrors
+   * what `POST /api/runs/inline` does server-side; modules that schedule
+   * one-shot agent executions (slash commands, webhooks, module-owned cron)
+   * call it directly without duplicating the shadow-insert + pipeline dance.
    */
   inline: {
     preflight(params: InlinePreflightInput): Promise<InlinePreflightResult>;
+    /**
+     * Trigger an inline agent run end-to-end. Returns once the pipeline
+     * has accepted the run; the client streams progress via the existing
+     * realtime SSE endpoint.
+     *
+     * Throws on validation / pipeline failures (same shape `POST /api/runs/inline`
+     * surfaces as a `problem+json` body).
+     */
+    run(params: {
+      orgId: string;
+      applicationId: string;
+      actor: Actor | null;
+      body: InlineRunBody;
+      apiKeyId?: string;
+    }): Promise<{ runId: string; packageId: string }>;
   };
   /** Realtime SSE subscriber registry. */
   realtime: {

@@ -6,7 +6,7 @@ import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, internalError, notFound, parseBody } from "../lib/errors.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { validateScopes, resolvePermissions, API_KEY_ALLOWED_SCOPES } from "../lib/permissions.ts";
+import { validateScopes, roleScopes, getApiKeyAllowedScopes } from "../lib/permissions.ts";
 import {
   generateApiKey,
   hashApiKey,
@@ -34,8 +34,8 @@ export function createApiKeysRouter() {
   // MUST be registered BEFORE /:id routes
   router.get("/available-scopes", requirePermission("api-keys", "read"), async (c) => {
     const orgRole = c.get("orgRole");
-    const rolePerms = resolvePermissions(orgRole);
-    const available = [...API_KEY_ALLOWED_SCOPES].filter((s) => rolePerms.has(s));
+    const rolePerms = roleScopes(orgRole);
+    const available = [...getApiKeyAllowedScopes()].filter((s) => rolePerms.has(s));
     return c.json({ scopes: available });
   });
 
@@ -59,7 +59,7 @@ export function createApiKeysRouter() {
     const validatedScopes =
       data.scopes && data.scopes.length > 0
         ? validateScopes(data.scopes, orgRole)
-        : validateScopes([...API_KEY_ALLOWED_SCOPES], orgRole);
+        : validateScopes([...getApiKeyAllowedScopes()], orgRole);
 
     const rawKey = generateApiKey();
     const keyHash = await hashApiKey(rawKey);

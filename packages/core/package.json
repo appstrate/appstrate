@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/core",
-  "version": "2.13.0",
+  "version": "2.16.0",
   "description": "Shared validation, storage, and utility library for Appstrate packages",
   "license": "Apache-2.0",
   "type": "module",
@@ -61,6 +61,7 @@
     "./schemas": "./src/schemas.ts",
     "./form": "./src/form.ts",
     "./module": "./src/module.ts",
+    "./permissions": "./src/permissions.ts",
     "./platform-types": "./src/platform-types.ts",
     "./sidecar-types": "./src/sidecar-types.ts"
   },

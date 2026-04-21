@@ -22,6 +22,11 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { buildOpenApiSpec } from "../../../src/openapi/index.ts";
 import { buildAppConfig } from "../../../src/lib/app-config.ts";
+import { resolvePermissions, getApiKeyAllowedScopes } from "../../../src/lib/permissions.ts";
+import {
+  getModuleEndUserAllowedScopes,
+  setModulePermissionsProvider,
+} from "@appstrate/core/permissions";
 
 // Fresh app, no modules mounted (bypasses the preload-discovered registry).
 const app = getTestApp({ modules: [] });
@@ -83,6 +88,47 @@ describe("zero-footprint invariant (no modules loaded)", () => {
       // module-owned flag.
       const cfg = buildAppConfig();
       expect(cfg.features.webhooks).toBeUndefined();
+    });
+  });
+
+  describe("permission catalog (runtime)", () => {
+    // `getTestApp({ modules: [] })` above registered an empty RBAC snapshot
+    // at file-load time — but other integration tests running in the same
+    // `bun test` process call `getTestApp()` with the default discovered
+    // modules (webhooks + oidc) and overwrite the provider globally. Reset
+    // to the EMPTY_SNAPSHOT default inside this describe so we actually
+    // exercise the "no modules loaded" state the route tests above rely on.
+    beforeEach(() => {
+      setModulePermissionsProvider(null);
+    });
+
+    const moduleOwnedScopes = [
+      "webhooks:read",
+      "webhooks:write",
+      "webhooks:delete",
+      "oauth-clients:read",
+      "oauth-clients:write",
+      "oauth-clients:delete",
+    ];
+
+    it("role permission sets contain no module-owned scopes", () => {
+      for (const role of ["owner", "admin", "member", "viewer"] as const) {
+        const perms: ReadonlySet<string> = resolvePermissions(role);
+        for (const scope of moduleOwnedScopes) {
+          expect(perms.has(scope)).toBe(false);
+        }
+      }
+    });
+
+    it("API-key allowlist contains no module-owned scopes", () => {
+      const allowed = getApiKeyAllowedScopes();
+      for (const scope of moduleOwnedScopes) {
+        expect(allowed.has(scope)).toBe(false);
+      }
+    });
+
+    it("end-user OIDC allowlist is empty when no module opts in", () => {
+      expect(getModuleEndUserAllowedScopes().size).toBe(0);
     });
   });
 });

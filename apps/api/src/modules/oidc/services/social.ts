@@ -24,6 +24,7 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
+import type { SocialProviderId, SocialProviderView } from "@appstrate/shared-types";
 import { applicationSocialProviders } from "../schema.ts";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
@@ -31,22 +32,13 @@ import { logger } from "../../../lib/logger.ts";
 
 const ENCRYPTION_KEY_VERSION = "v1";
 
-export type SocialProviderId = "google" | "github";
+export type { SocialProviderId, SocialProviderView };
 
 export interface ResolvedSocialProvider {
   clientId: string;
   clientSecret: string;
   scopes: string[] | null;
   source: "per-app";
-}
-
-export interface SocialProviderView {
-  applicationId: string;
-  provider: SocialProviderId;
-  clientId: string;
-  scopes: string[] | null;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface UpsertSocialProviderInput {
