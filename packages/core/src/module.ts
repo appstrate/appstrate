@@ -300,12 +300,12 @@ export interface AppstrateModule {
    *      permissions do.
    *
    * Pair this with a TypeScript declaration-merging block on
-   * `@appstrate/core/permissions#AppstrateModuleResources` so call sites
+   * `@appstrate/core/permissions#ModuleResources` so call sites
    * like `requirePermission("tasks", "read")` stay typed end-to-end:
    *
    * ```ts
    * declare module "@appstrate/core/permissions" {
-   *   interface AppstrateModuleResources { tasks: "read" | "write" }
+   *   interface ModuleResources { tasks: "read" | "write" }
    * }
    *
    * const tasksModule: AppstrateModule = {

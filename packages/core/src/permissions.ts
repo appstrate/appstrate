@@ -7,7 +7,7 @@
  * platform, or in an external module) talk about Appstrate permissions
  * with full TypeScript narrowing:
  *
- *   1. `AppstrateCoreResources` — the **static** catalog of resources the
+ *   1. `CoreResources` — the **static** catalog of resources the
  *      platform itself ships. Adding a new core resource is an edit here
  *      (interface property) plus an edit in
  *      `apps/api/src/lib/permissions.ts` (role grants + API-key allowlist).
@@ -15,7 +15,7 @@
  *      typed middleware against it (see `requireCorePermission` below)
  *      without reaching into `apps/api`.
  *
- *   2. `AppstrateModuleResources` — the **extensible** catalog modules
+ *   2. `ModuleResources` — the **extensible** catalog modules
  *      augment via TypeScript declaration merging. Each augmenting module
  *      pairs the type-level `declare module` with a runtime
  *      `AppstrateModule.permissionsContribution()` so the platform's
@@ -58,7 +58,7 @@
  * (`requireCorePermission`) that gates routes on core permissions without
  * importing from `apps/api`.
  */
-export interface AppstrateCoreResources {
+export interface CoreResources {
   org: "read" | "update" | "delete";
   members: "read" | "invite" | "remove" | "change-role";
   agents: "read" | "write" | "configure" | "delete" | "run";
@@ -81,25 +81,25 @@ export interface AppstrateCoreResources {
 }
 
 /** Core resource names. */
-export type CoreResource = keyof AppstrateCoreResources;
+export type CoreResource = keyof CoreResources;
 
 /** Actions available on a given core resource. */
-export type CoreAction<R extends CoreResource = CoreResource> = AppstrateCoreResources[R];
+export type CoreAction<R extends CoreResource = CoreResource> = CoreResources[R];
 
 /** All valid core `resource:action` permission strings. */
 export type CorePermission = {
-  [R in CoreResource]: `${R & string}:${AppstrateCoreResources[R] & string}`;
+  [R in CoreResource]: `${R & string}:${CoreResources[R] & string}`;
 }[CoreResource];
 
 /**
- * Runtime mirror of `keyof AppstrateCoreResources`. The platform's module
+ * Runtime mirror of `keyof CoreResources`. The platform's module
  * loader reads this at boot to reject any module that would re-declare a
  * core resource name in `permissionsContribution()` — without it the
  * collision would only surface as a TypeScript error in apps/api, never
  * for an externally-published module.
  *
  * Drift with the interface above is caught by a unit test in
- * `packages/core/test/permissions.test.ts` (`AppstrateCoreResources matches
+ * `packages/core/test/permissions.test.ts` (`CoreResources matches
  * CORE_RESOURCE_NAMES`) — keep both in sync when adding a resource.
  */
 export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
@@ -131,24 +131,24 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
  *
  * Stays empty in core — every entry comes from an external augmentation.
  * The OSS zero-footprint invariant is preserved: a platform that loads
- * no modules sees `keyof AppstrateModuleResources = never`.
+ * no modules sees `keyof ModuleResources = never`.
  *
  * The empty-object-type lint is intentionally suppressed here: the empty
  * shape IS the contract. Interfaces (not types) are required because only
  * `interface` supports declaration merging from external modules.
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface AppstrateModuleResources {}
+export interface ModuleResources {}
 
 /** Resource names contributed by modules. `never` when no module augments. */
-export type ModuleResource = keyof AppstrateModuleResources;
+export type ModuleResource = keyof ModuleResources;
 
 /** Actions available for a given module-contributed resource. */
-export type ModuleAction<R extends ModuleResource = ModuleResource> = AppstrateModuleResources[R];
+export type ModuleAction<R extends ModuleResource = ModuleResource> = ModuleResources[R];
 
 /** All valid `resource:action` permission strings contributed by modules. */
 export type ModulePermission = {
-  [R in ModuleResource]: `${R & string}:${AppstrateModuleResources[R] & string}`;
+  [R in ModuleResource]: `${R & string}:${ModuleResources[R] & string}`;
 }[ModuleResource];
 
 // ---------------------------------------------------------------------------
@@ -282,12 +282,12 @@ import { forbidden } from "./api-errors.ts";
 /**
  * Hono middleware factory that gates a route on a module-contributed
  * `resource:action` permission. Strongly typed against the
- * `AppstrateModuleResources` augmentation surface — call sites recover
+ * `ModuleResources` augmentation surface — call sites recover
  * full literal narrowing once a module declares its resources:
  *
  * ```ts
  * declare module "@appstrate/core/permissions" {
- *   interface AppstrateModuleResources { tasks: "read" | "write" }
+ *   interface ModuleResources { tasks: "read" | "write" }
  * }
  *
  * router.get(
@@ -304,7 +304,7 @@ import { forbidden } from "./api-errors.ts";
  *   2. The check is purely Set membership on `c.get("permissions")`, which
  *      the platform's auth pipeline always writes (cookie, API key, OIDC
  *      strategies). No core-only types are touched.
- *   3. Typing is keyed on `AppstrateModuleResources` only — the helper is
+ *   3. Typing is keyed on `ModuleResources` only — the helper is
  *      deliberately scoped to module-contributed resources. Core resources
  *      (`agents`, `webhooks`, …) are gated by the platform's own
  *      `requirePermission()` middleware, which lives where the core
@@ -327,7 +327,7 @@ export function requireModulePermission<R extends ModuleResource>(
 /**
  * Hono middleware factory that gates a route on a **core** permission —
  * the symmetrical helper to `requireModulePermission`, typed against
- * `AppstrateCoreResources` instead.
+ * `CoreResources` instead.
  *
  * Modules consume this when they need to gate a route on a core resource
  * they don't own (e.g. a downstream module checking `agents:run` before
@@ -415,7 +415,7 @@ export function setPermissionDenialHandler(handler: PermissionDenialHandler | nu
  * @internal Not part of the stable module-author contract. Module code
  * should use the typed `requireCorePermission` / `requireModulePermission`
  * helpers instead — those recover literal-narrowing against
- * `AppstrateCoreResources` / `AppstrateModuleResources` and catch typos
+ * `CoreResources` / `ModuleResources` and catch typos
  * at compile time. Calling `makePermissionGuard` directly bypasses that
  * check: a bad string compiles, runs, and silently denies every request.
  * Kept `export` (not underscore-prefixed) so apps/api can reuse the exact

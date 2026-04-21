@@ -6,14 +6,14 @@ import {
   requireCorePermission,
   setPermissionDenialHandler,
   CORE_RESOURCE_NAMES,
-  type AppstrateCoreResources,
+  type CoreResources,
 } from "../src/permissions.ts";
 
 // Augment the resource catalog with a test resource so the helper can be
 // invoked with a typed call. Lives only in this test file — no leakage to
 // production typings.
 declare module "../src/permissions.ts" {
-  interface AppstrateModuleResources {
+  interface ModuleResources {
     tasks: "read" | "write";
   }
 }
@@ -81,7 +81,7 @@ describe("requireModulePermission", () => {
 
 describe("requireCorePermission", () => {
   // Same fail-closed semantics as requireModulePermission, typed against
-  // AppstrateCoreResources instead. These tests lock down the contract so
+  // CoreResources instead. These tests lock down the contract so
   // a future "let's unify the two helpers" refactor can't silently change
   // the throw shape consumers depend on.
 
@@ -169,7 +169,7 @@ describe("setPermissionDenialHandler — fault isolation", () => {
   });
 });
 
-describe("AppstrateCoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
+describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
   // The interface is the compile-time vocabulary; CORE_RESOURCE_NAMES is
   // the runtime collision-detection Set the platform's module loader
   // reads to reject any module that re-declares a core resource.
@@ -180,12 +180,12 @@ describe("AppstrateCoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
   // resource that core doesn't actually own (false positive blocking
   // legitimate modules). Both are silent failures without this test.
 
-  test("every keyof AppstrateCoreResources is in CORE_RESOURCE_NAMES", () => {
+  test("every keyof CoreResources is in CORE_RESOURCE_NAMES", () => {
     // Materialize the interface keys via a typed dictionary literal —
-    // adding a resource to AppstrateCoreResources without listing it here
+    // adding a resource to CoreResources without listing it here
     // is a TS error, so this catches drift in BOTH directions in one
     // assertion.
-    const allCoreResources: Record<keyof AppstrateCoreResources, true> = {
+    const allCoreResources: Record<keyof CoreResources, true> = {
       org: true,
       members: true,
       agents: true,
@@ -212,7 +212,7 @@ describe("AppstrateCoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
   });
 
   test("CORE_RESOURCE_NAMES has no extra entries beyond the interface", () => {
-    const allCoreResources: Record<keyof AppstrateCoreResources, true> = {
+    const allCoreResources: Record<keyof CoreResources, true> = {
       org: true,
       members: true,
       agents: true,

@@ -21,13 +21,13 @@ import { webhooksPaths } from "./openapi/paths.ts";
 import { webhooksSchemas } from "./openapi/schemas.ts";
 
 // Register `webhooks` as a module-owned RBAC resource. The declaration
-// merging on `AppstrateModuleResources` re-enters the typed Resource
+// merging on `ModuleResources` re-enters the typed Resource
 // union consumed by `apps/api/src/middleware/require-permission.ts` and
 // by the standalone `requireModulePermission` helper in core, so
 // `requirePermission("webhooks", "write")` and
 // `requireModulePermission("webhooks", "write")` stay fully narrowed.
 declare module "@appstrate/core/permissions" {
-  interface AppstrateModuleResources {
+  interface ModuleResources {
     webhooks: "read" | "write" | "delete";
   }
 }

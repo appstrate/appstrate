@@ -38,7 +38,7 @@ import { getEnv } from "@appstrate/env";
 // catalog would leave dead scope strings in every OSS deployment that
 // doesn't expose an OIDC surface.
 declare module "@appstrate/core/permissions" {
-  interface AppstrateModuleResources {
+  interface ModuleResources {
     "oauth-clients": "read" | "write" | "delete";
   }
 }

@@ -90,17 +90,17 @@ Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`,
 
 The platform ships RBAC as a typed contract that **both** core and modules contribute to. The role-to-permission matrix lives in `apps/api/src/lib/permissions.ts` — it composes:
 
-1. **Core resources** (`AppstrateCoreResources` interface from `@appstrate/core/permissions`): the static platform catalog (`agents`, `runs`, `org`, `api-keys`, …). This set is fixed at core-release time and mapped to roles in `apps/api/src/lib/permissions.ts`.
-2. **Module-contributed resources** (`AppstrateModule.permissionsContribution()` + `declare module "@appstrate/core/permissions" { interface AppstrateModuleResources { … } }`): **every** module — built-in (`webhooks`, `oidc`) and external — declares new resources through TypeScript declaration merging plus a runtime contribution. The platform aggregates them at boot, merges the grants into `resolvePermissions(role)`, and exposes them through the same RBAC machinery.
+1. **Core resources** (`CoreResources` interface from `@appstrate/core/permissions`): the static platform catalog (`agents`, `runs`, `org`, `api-keys`, …). This set is fixed at core-release time and mapped to roles in `apps/api/src/lib/permissions.ts`.
+2. **Module-contributed resources** (`AppstrateModule.permissionsContribution()` + `declare module "@appstrate/core/permissions" { interface ModuleResources { … } }`): **every** module — built-in (`webhooks`, `oidc`) and external — declares new resources through TypeScript declaration merging plus a runtime contribution. The platform aggregates them at boot, merges the grants into `resolvePermissions(role)`, and exposes them through the same RBAC machinery.
 
-Built-in and external modules use the **exact same contribution pattern**. Built-ins do not extend `AppstrateCoreResources` — that interface is reserved for the platform's own resource catalog. The only difference is where the module source lives (this directory vs. an npm package).
+Built-in and external modules use the **exact same contribution pattern**. Built-ins do not extend `CoreResources` — that interface is reserved for the platform's own resource catalog. The only difference is where the module source lives (this directory vs. an npm package).
 
 ### The module pattern (built-in or external)
 
 ```ts
-// 1. Type-level — declaration merging on AppstrateModuleResources
+// 1. Type-level — declaration merging on ModuleResources
 declare module "@appstrate/core/permissions" {
-  interface AppstrateModuleResources {
+  interface ModuleResources {
     tasks: "read" | "write";
   }
 }
@@ -125,12 +125,12 @@ import { requireModulePermission, requireCorePermission } from "@appstrate/core/
 
 router.get(
   "/api/tasks",
-  requireModulePermission("tasks", "read"), // typed against AppstrateModuleResources
+  requireModulePermission("tasks", "read"), // typed against ModuleResources
   handler,
 );
 router.post(
   "/api/tasks/:id/cancel",
-  requireCorePermission("agents", "run"), // typed against AppstrateCoreResources
+  requireCorePermission("agents", "run"), // typed against CoreResources
   handler,
 );
 ```
@@ -151,7 +151,7 @@ Core routes use `requirePermission` (apps/api-internal, union-typed against core
 
 ### Adding a new core resource
 
-Core resources are reserved for the platform itself. If the platform (not a module) needs a new resource, edit `AppstrateCoreResources` in `@appstrate/core/permissions` → edit `CORE_RESOURCE_NAMES` in the same file (drift caught by a unit test) → wire the role grants + API-key allowlist in `apps/api/src/lib/permissions.ts` → call `requirePermission(...)` or `requireCorePermission(...)` at the route.
+Core resources are reserved for the platform itself. If the platform (not a module) needs a new resource, edit `CoreResources` in `@appstrate/core/permissions` → edit `CORE_RESOURCE_NAMES` in the same file (drift caught by a unit test) → wire the role grants + API-key allowlist in `apps/api/src/lib/permissions.ts` → call `requirePermission(...)` or `requireCorePermission(...)` at the route.
 
 ## Hooks and events
 

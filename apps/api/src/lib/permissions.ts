@@ -3,7 +3,7 @@
 /**
  * RBAC Permission Registry — role-grant matrix + API-key allowlist.
  *
- * The resource catalog itself (`AppstrateCoreResources`, `CoreResource`,
+ * The resource catalog itself (`CoreResources`, `CoreResource`,
  * `requireCorePermission`) lives in `@appstrate/core/permissions` so both
  * core routes and externally-published modules can type-check against the
  * same surface without pulling in the API package. This file only holds
@@ -14,10 +14,10 @@
  *
  * Every resource name in `OWNER_PERMISSIONS` / `API_KEY_ALLOWED_SCOPES`
  * below is a **core** resource (i.e. one declared on
- * `AppstrateCoreResources`). Built-in modules (`webhooks`, `oidc`) and
+ * `CoreResources`). Built-in modules (`webhooks`, `oidc`) and
  * external modules contribute their resources at runtime through
  * `AppstrateModule.permissionsContribution()` (paired with declaration
- * merging on `AppstrateModuleResources` for compile-time narrowing).
+ * merging on `ModuleResources` for compile-time narrowing).
  * Contributions are aggregated at boot by `collectModulePermissions()`
  * and merged into:
  *   - `resolvePermissions(role)` — role-specific grants
@@ -30,14 +30,14 @@
  * `Resource` is the **union** of both surfaces, so call sites like
  * `requirePermission("webhooks", "read")` type-check uniformly whether
  * `webhooks` ships as a module in this repo or as an external npm
- * package that opened `AppstrateModuleResources`.
+ * package that opened `ModuleResources`.
  *
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md
  * @see packages/core/src/permissions.ts (the extension surface)
  */
 
 import {
-  type AppstrateModuleResources,
+  type ModuleResources,
   type CoreResource,
   type CoreAction,
   type CorePermission,
@@ -53,7 +53,7 @@ import { logger } from "./logger.ts";
 // ---------------------------------------------------------------------------
 
 /** All resource names — core resources widened with module-augmented entries. */
-export type Resource = CoreResource | (keyof AppstrateModuleResources & string);
+export type Resource = CoreResource | (keyof ModuleResources & string);
 
 /**
  * Actions available for a given resource. Delegates to `CoreAction<R>` for
@@ -66,8 +66,8 @@ export type Resource = CoreResource | (keyof AppstrateModuleResources & string);
  */
 export type Action<R extends Resource = Resource> = R extends CoreResource
   ? CoreAction<R>
-  : R extends keyof AppstrateModuleResources
-    ? AppstrateModuleResources[R] & string
+  : R extends keyof ModuleResources
+    ? ModuleResources[R] & string
     : never;
 
 /** All valid `resource:action` permission strings, derived from both core + module surfaces. */
