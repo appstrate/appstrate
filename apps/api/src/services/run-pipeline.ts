@@ -213,7 +213,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   }
 
   // --- Step 1: Build run context ---
-  let promptContext;
+  let context;
+  let plan;
   let agentPackage: Buffer | null;
   let versionLabel: string | null;
   let versionDirty: boolean;
@@ -222,7 +223,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   let modelSource: string | null;
   try {
     ({
-      promptContext,
+      context,
+      plan,
       agentPackage,
       versionLabel,
       versionDirty,
@@ -318,7 +320,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     runId,
     orgId,
     agent,
-    promptContext,
+    context,
+    plan,
     applicationId,
     agentPackage,
     uploadedFiles,

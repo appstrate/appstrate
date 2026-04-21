@@ -7,39 +7,31 @@
  * the runtime contract produces.
  *
  * The runner intentionally knows nothing about Docker, sidecar pools, or
- * PromptContext assembly — those stay inside the adapter. The contract is:
+ * plan assembly — those stay inside the adapter. The contract is:
  *
  *   adapter.execute(...) ──yields RunEvent──► sink.handle(event)
  *                        ──collected──────► reduceEvents ► RunResult
  *                                         ──► sink.finalize(result)
  *
- * A `plan` (PromptContext + timeout + optional package/files) is handed to
- * the adapter at run-time; the caller (typically the run route) is
- * responsible for building it before constructing the runner.
+ * The platform {@link AppstrateRunPlan} is constructor-time configuration
+ * (llmConfig, providers, timeout, files, proxy). The AFPS
+ * {@link ExecutionContext} is run-time input and travels through
+ * {@link RunContainerArgs}.
  */
 
-import type { RunEvent } from "@appstrate/afps-runtime/types";
+import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import { reduceEvents, type RunResult } from "@appstrate/afps-runtime/runner";
-import type { PromptContext, RunAdapter, UploadedFile } from "./types.ts";
+import type { AppstrateRunPlan, RunAdapter } from "./types.ts";
 import type { AppstrateEventSink } from "./appstrate-event-sink.ts";
-
-export interface ContainerRunPlan {
-  promptContext: PromptContext;
-  /** Optional pre-packaged agent bundle (ZIP) injected into the container. */
-  agentPackage?: Buffer;
-  /** Seconds cap on container lifetime. */
-  timeout: number;
-  /** Files materialised inside the container workspace. */
-  inputFiles?: UploadedFile[];
-}
 
 export interface AppstrateContainerRunnerOptions {
   adapter: RunAdapter;
-  plan: ContainerRunPlan;
+  plan: AppstrateRunPlan;
 }
 
 export interface RunContainerArgs {
   runId: string;
+  context: ExecutionContext;
   sink: AppstrateEventSink;
   signal?: AbortSignal;
 }
@@ -48,27 +40,20 @@ export class AppstrateContainerRunner {
   readonly name = "appstrate-container-runner";
 
   private readonly adapter: RunAdapter;
-  private readonly plan: ContainerRunPlan;
+  private readonly plan: AppstrateRunPlan;
 
   constructor(opts: AppstrateContainerRunnerOptions) {
     this.adapter = opts.adapter;
     this.plan = opts.plan;
   }
 
-  async run({ runId, sink, signal }: RunContainerArgs): Promise<RunResult> {
+  async run({ runId, context, sink, signal }: RunContainerArgs): Promise<RunResult> {
     signal?.throwIfAborted();
 
     const events: RunEvent[] = [];
 
     try {
-      for await (const event of this.adapter.execute(
-        runId,
-        this.plan.promptContext,
-        this.plan.timeout,
-        this.plan.agentPackage,
-        signal,
-        this.plan.inputFiles,
-      )) {
+      for await (const event of this.adapter.execute(runId, context, this.plan, signal)) {
         events.push(event);
         await sink.handle(event);
       }

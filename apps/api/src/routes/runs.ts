@@ -17,7 +17,8 @@ import {
 } from "../services/state/index.ts";
 import { resolveActorProfileContext, getAgentAppProfile } from "../services/connection-profiles.ts";
 import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
-import type { PromptContext, UploadedFile } from "../services/adapters/types.ts";
+import type { AppstrateRunPlan, UploadedFile } from "../services/adapters/types.ts";
+import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { AppstrateEventSink } from "../services/adapters/appstrate-event-sink.ts";
 import { AppstrateContainerRunner } from "../services/adapters/appstrate-container-runner.ts";
 import { getVersionDetail } from "../services/package-versions.ts";
@@ -66,7 +67,8 @@ export async function executeAgentInBackground(
   runId: string,
   orgId: string,
   agent: LoadedPackage,
-  promptContext: PromptContext,
+  context: ExecutionContext,
+  plan: AppstrateRunPlan,
   applicationId: string,
   agentPackage?: Buffer | null,
   inputFiles?: UploadedFile[],
@@ -92,19 +94,17 @@ export async function executeAgentInBackground(
       packageEphemeral,
     });
 
-    const timeout = (agent.manifest.timeout as number | undefined) ?? 300;
     const runner = new AppstrateContainerRunner({
       adapter: new PiAdapter(),
       plan: {
-        promptContext,
-        timeout,
+        ...plan,
         agentPackage: agentPackage ?? undefined,
         inputFiles,
       },
     });
 
     try {
-      await runner.run({ runId, sink, signal });
+      await runner.run({ runId, context, sink, signal });
     } catch (err) {
       if (signal.aborted) {
         // Cancelled by user — cancel route already wrote DB status
@@ -125,7 +125,7 @@ export async function executeAgentInBackground(
         });
         await updateRun(scope, runId, {
           status: "timeout",
-          error: `Run timed out after ${timeout}s`,
+          error: `Run timed out after ${plan.timeout}s`,
           completedAt: new Date().toISOString(),
           duration,
           notifiedAt: new Date().toISOString(),
@@ -170,7 +170,7 @@ export async function executeAgentInBackground(
     const error =
       sink.current.lastAdapterError ??
       (totalTokens === 0
-        ? promptContext.proxyUrl
+        ? plan.proxyUrl
           ? "The AI agent could not reach the LLM API — the configured proxy may be unreachable or rejecting connections"
           : "The AI agent could not reach the LLM API — check that the API key is valid and the provider is accessible"
         : null);

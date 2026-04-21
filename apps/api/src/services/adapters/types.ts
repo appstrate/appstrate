@@ -5,7 +5,7 @@ import { modelCostSchema } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
-import type { RunEvent } from "@appstrate/afps-runtime/types";
+import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 
 export type { ModelCost };
 export { modelCostSchema };
@@ -30,68 +30,95 @@ export type FileReference = Omit<UploadedFile, "buffer">;
 
 export type { ToolMeta };
 
-export interface PromptContext {
-  /**
-   * AFPS schemaVersion from the agent manifest (e.g. `"1.0"`, `"1.1"`).
-   * Selects the render path in `buildEnrichedPrompt`:
-   *   - `"1.0"` (or absent / unrecognised) → rawPrompt appended verbatim.
-   *   - `"1.1"` and above → rawPrompt rendered via logic-less Mustache
-   *     against a {@link PromptView} (see @appstrate/afps-runtime/bundle).
-   */
-  schemaVersion?: string;
-  /** Unique run identifier, exposed to 1.1+ templates as `{{runId}}`. */
-  runId?: string;
+/**
+ * Provider definition projected for prompt enrichment + sidecar wiring.
+ * Mirrors the fields a running agent (or the prompt builder) needs to
+ * know about a connected provider — NOT the full ProviderDefinition.
+ */
+export interface ProviderSummary {
+  id: string;
+  displayName: string;
+  authMode: string;
+  credentialSchema?: Record<string, unknown>;
+  credentialFieldName?: string;
+  credentialHeaderName?: string;
+  credentialHeaderPrefix?: string;
+  authorizedUris?: string[];
+  allowAllUris?: boolean;
+  docsUrl?: string;
+  hasProviderDoc?: boolean;
+  categories?: string[];
+}
+
+export interface LlmConfig {
+  api: string;
+  baseUrl: string;
+  modelId: string;
+  apiKey: string;
+  input?: string[] | null;
+  contextWindow?: number | null;
+  maxTokens?: number | null;
+  reasoning?: boolean | null;
+  cost?: ModelCost | null;
+}
+
+/**
+ * Platform-specific run configuration — everything that does NOT fit in the
+ * AFPS {@link ExecutionContext} (auth material, infrastructure wiring,
+ * container inputs). Split from the AFPS context so {@link AppstrateContainerRunner}
+ * consumes a canonical {@link ExecutionContext} via `RunOptions` while
+ * receiving platform concerns as constructor-time configuration.
+ */
+export interface AppstrateRunPlan {
+  // --- Bundle-derived (needed for prompt building + validation) ---
+  /** Raw Mustache prompt from the bundle. */
   rawPrompt: string;
-  tokens: Record<string, string>;
-  config: Record<string, unknown>;
-  previousState: Record<string, unknown> | null;
-  runApi?: { url: string; token: string };
-  input: Record<string, unknown>;
-  files?: FileReference[];
+  /** AFPS schemaVersion for template render path selection. */
+  schemaVersion?: string;
+  /** Input / config / output JSON Schemas extracted from the manifest. */
   schemas: {
     input?: JSONSchemaObject;
     config?: JSONSchemaObject;
     output?: JSONSchemaObject;
   };
-  providers: Array<{
-    id: string;
-    displayName: string;
-    authMode: string;
-    credentialSchema?: Record<string, unknown>;
-    credentialFieldName?: string;
-    credentialHeaderName?: string;
-    credentialHeaderPrefix?: string;
-    authorizedUris?: string[];
-    allowAllUris?: boolean;
-    docsUrl?: string;
-    hasProviderDoc?: boolean;
-    categories?: string[];
-  }>;
-  memories?: Array<{ id: number; content: string; createdAt: string | null }>;
-  llmModel: string;
-  llmConfig: {
-    api: string;
-    baseUrl: string;
-    modelId: string;
-    apiKey: string;
-    input?: string[] | null;
-    contextWindow?: number | null;
-    maxTokens?: number | null;
-    reasoning?: boolean | null;
-    cost?: ModelCost | null;
-  };
+
+  // --- LLM ---
+  llmConfig: LlmConfig;
+
+  // --- Platform wiring ---
+  /** Callback URL + signed token for the agent container. Optional — runners that don't expose a callback API may omit it. */
+  runApi?: { url: string; token: string };
+  /** Outbound HTTP proxy, if any. */
   proxyUrl?: string | null;
-  timeout?: number;
-  availableTools?: ToolMeta[];
-  availableSkills?: ToolMeta[];
-  toolDocs?: Array<{ id: string; content: string }>;
+  /** Seconds cap on the container lifetime. */
+  timeout: number;
+
+  // --- Resolved dependencies (container side-effects) ---
+  /** Credential tokens keyed by provider id — injected into sidecar. */
+  tokens: Record<string, string>;
+  /** Connected providers resolved for this run — used by sidecar + prompt. */
+  providers: ProviderSummary[];
+  /** Tool metadata from the bundle — used for prompt enrichment. */
+  availableTools: ToolMeta[];
+  /** Skill metadata from the bundle — used for prompt enrichment. */
+  availableSkills: ToolMeta[];
+  /** Additional tool documentation (e.g. from TOOL.md). */
+  toolDocs: Array<{ id: string; content: string }>;
+
+  // --- Files ---
+  /** File references surfaced in the prompt ("## Documents" section). */
+  files?: FileReference[];
+  /** Uploaded file buffers — materialised into the container workspace. */
+  inputFiles?: UploadedFile[];
+  /** Packaged bundle ZIP — injected as `/workspace/agent-package.afps`. */
+  agentPackage?: Buffer | null;
 }
 
 /**
- * A run adapter yields {@link RunEvent}s consumed by an
- * {@link AppstrateEventSink}. Events either carry canonical AFPS reserved
- * domains (memory.added / state.set / output.emitted / report.appended /
- * log.written) or the platform-specific namespace `appstrate.*`:
+ * A run adapter yields {@link RunEvent}s consumed by the sink. Events either
+ * carry canonical AFPS reserved domains (memory.added / state.set /
+ * output.emitted / report.appended / log.written) or the platform-specific
+ * namespace `appstrate.*`:
  *
  *   - `appstrate.progress`  — text delta, tool invocation markers, container
  *                              lifecycle breadcrumbs; persisted as progress log rows.
@@ -104,11 +131,9 @@ export interface PromptContext {
 export interface RunAdapter {
   execute(
     runId: string,
-    ctx: PromptContext,
-    timeout: number,
-    agentPackage?: Buffer,
+    context: ExecutionContext,
+    plan: AppstrateRunPlan,
     signal?: AbortSignal,
-    inputFiles?: UploadedFile[],
   ): AsyncGenerator<RunEvent>;
 }
 

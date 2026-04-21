@@ -11,45 +11,38 @@
 
 import { describe, it, expect } from "bun:test";
 import { AppstrateContainerRunner } from "../../src/services/adapters/appstrate-container-runner.ts";
-import type { PromptContext, RunAdapter, UploadedFile } from "../../src/services/adapters/types.ts";
-import type { RunEvent } from "@appstrate/afps-runtime/types";
+import type { AppstrateRunPlan, RunAdapter } from "../../src/services/adapters/types.ts";
+import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import type { AppstrateEventSink } from "../../src/services/adapters/appstrate-event-sink.ts";
 
-function makePromptContext(): PromptContext {
+function makePlan(): AppstrateRunPlan {
   return {
-    schemaVersion: "1.1",
-    runId: "r_test",
     rawPrompt: "unused",
-    tokens: {},
-    config: {},
-    previousState: null,
-    input: {},
+    schemaVersion: "1.1",
     schemas: {},
-    providers: [],
-    memories: [],
-    llmModel: "test",
     llmConfig: {
       api: "anthropic-messages",
       modelId: "test",
       apiKey: "test",
       baseUrl: "",
-      input: ["text"],
-      contextWindow: 0,
-      maxTokens: 0,
-      reasoning: false,
-      cost: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-      } as PromptContext["llmConfig"]["cost"],
     },
-    proxyUrl: null,
+    runApi: { url: "", token: "" },
     timeout: 60,
+    tokens: {},
+    providers: [],
     availableTools: [],
     availableSkills: [],
     toolDocs: [],
+  };
+}
+
+function makeContext(runId: string): ExecutionContext {
+  return {
+    runId,
+    input: {},
+    memories: [],
+    config: {},
   };
 }
 
@@ -62,11 +55,9 @@ class ScriptedAdapter implements RunAdapter {
 
   async *execute(
     _runId: string,
-    _ctx: PromptContext,
-    _timeout: number,
-    _pkg?: Buffer,
+    _context: ExecutionContext,
+    _plan: AppstrateRunPlan,
     _signal?: AbortSignal,
-    _files?: UploadedFile[],
   ): AsyncGenerator<RunEvent> {
     for (const ev of this.script) yield ev;
   }
@@ -111,12 +102,13 @@ describe("AppstrateContainerRunner", () => {
     ];
     const runner = new AppstrateContainerRunner({
       adapter: new ScriptedAdapter(script),
-      plan: { promptContext: makePromptContext(), timeout: 60 },
+      plan: makePlan(),
     });
     const sink = new RecordingSink();
 
     const result = await runner.run({
       runId,
+      context: makeContext(runId),
       sink: sink as unknown as AppstrateEventSink,
     });
 
@@ -144,11 +136,15 @@ describe("AppstrateContainerRunner", () => {
     });
     const runner = new AppstrateContainerRunner({
       adapter: new ScriptedAdapter([metric]),
-      plan: { promptContext: makePromptContext(), timeout: 60 },
+      plan: makePlan(),
     });
     const sink = new RecordingSink();
 
-    await runner.run({ runId, sink: sink as unknown as AppstrateEventSink });
+    await runner.run({
+      runId,
+      context: makeContext(runId),
+      sink: sink as unknown as AppstrateEventSink,
+    });
 
     expect(sink.events).toHaveLength(1);
     expect(sink.events[0]!.type).toBe("appstrate.metric");
@@ -158,12 +154,13 @@ describe("AppstrateContainerRunner", () => {
     const runId = "r_crash";
     const runner = new AppstrateContainerRunner({
       adapter: new FailingAdapter(new Error("crash")),
-      plan: { promptContext: makePromptContext(), timeout: 60 },
+      plan: makePlan(),
     });
     const sink = new RecordingSink();
 
     const result = await runner.run({
       runId,
+      context: makeContext(runId),
       sink: sink as unknown as AppstrateEventSink,
     });
 
@@ -180,13 +177,14 @@ describe("AppstrateContainerRunner", () => {
     const runId = "r_abort";
     const runner = new AppstrateContainerRunner({
       adapter: new FailingAdapter(new DOMException("aborted", "AbortError")),
-      plan: { promptContext: makePromptContext(), timeout: 60 },
+      plan: makePlan(),
     });
     const sink = new RecordingSink();
 
     await expect(
       runner.run({
         runId,
+        context: makeContext(runId),
         sink: sink as unknown as AppstrateEventSink,
         signal: controller.signal,
       }),

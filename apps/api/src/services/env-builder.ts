@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PromptContext } from "./adapters/types.ts";
+import type {
+  AppstrateRunPlan,
+  FileReference,
+  LlmConfig,
+  ProviderSummary,
+} from "./adapters/types.ts";
+import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { LoadedPackage, AgentProviderRequirement } from "../types/index.ts";
-import type { FileReference } from "./adapters/types.ts";
 import { getProvider } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import { getEnv } from "@appstrate/env";
@@ -17,7 +22,6 @@ import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
 import { resolveManifestProviders, extractManifestSchemas } from "../lib/manifest-utils.ts";
 import type { ProviderProfileMap } from "../types/index.ts";
-import { toISO } from "../lib/date-helpers.ts";
 
 export class ModelNotConfiguredError extends Error {
   constructor() {
@@ -27,8 +31,19 @@ export class ModelNotConfiguredError extends Error {
 }
 
 /**
- * Build the full run context (tokens, config, state, providers, package, version).
- * Shared by runs.ts and scheduler.ts.
+ * Normalise a DB `createdAt` (Date | ISO string | null) into epoch ms — the
+ * representation `ExecutionContext.memories[].createdAt` requires.
+ */
+function toEpochMs(value: Date | string | null | undefined): number {
+  if (!value) return 0;
+  const date = value instanceof Date ? value : new Date(value);
+  const ms = date.getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * Build the AFPS {@link ExecutionContext} + platform {@link AppstrateRunPlan}
+ * for a run. Shared by the run route and the scheduler.
  */
 export async function buildRunContext(params: {
   runId: string;
@@ -44,7 +59,8 @@ export async function buildRunContext(params: {
   proxyId?: string | null;
   overrideVersionLabel?: string;
 }): Promise<{
-  promptContext: PromptContext;
+  context: ExecutionContext;
+  plan: AppstrateRunPlan;
   agentPackage: Buffer | null;
   versionLabel: string | null;
   versionDirty: boolean;
@@ -103,7 +119,7 @@ export async function buildRunContext(params: {
   const proxyLabel = proxyResult?.label ?? null;
   const modelLabel = modelResult.label;
   const modelSource = modelResult.isSystemModel ? "system" : "org";
-  const llmConfig: PromptContext["llmConfig"] = {
+  const llmConfig: LlmConfig = {
     api: modelResult.api,
     baseUrl: modelResult.baseUrl,
     modelId: modelResult.modelId,
@@ -124,7 +140,7 @@ export async function buildRunContext(params: {
     versionDirty = updatedAt > latestVersion.createdAt;
   }
 
-  // Step 4: assemble prompt context
+  // Step 4: assemble AFPS execution context + platform plan
   const apiEnv = getEnv();
   const runApiUrl =
     apiEnv.PLATFORM_API_URL ??
@@ -132,27 +148,27 @@ export async function buildRunContext(params: {
       ? `http://localhost:${apiEnv.PORT}`
       : `http://host.docker.internal:${apiEnv.PORT}`);
 
-  const promptContext: PromptContext = {
-    schemaVersion: (agent.manifest.schemaVersion as string | undefined) ?? "1.0",
+  const context: ExecutionContext = {
     runId,
-    rawPrompt: agent.prompt,
-    tokens,
-    config,
-    previousState,
-    runApi: { url: runApiUrl, token: signRunToken(runId) },
     input: input ?? {},
-    files,
-    schemas: extractManifestSchemas(agent.manifest),
-    providers: providerDefs,
     memories: memories.map((m) => ({
-      id: m.id,
       content: m.content,
-      createdAt: toISO(m.createdAt),
+      createdAt: toEpochMs(m.createdAt),
     })),
-    llmModel: llmConfig.modelId ?? "unknown",
+    ...(previousState !== null ? { state: previousState } : {}),
+    config,
+  };
+
+  const plan: AppstrateRunPlan = {
+    rawPrompt: agent.prompt,
+    schemaVersion: (agent.manifest.schemaVersion as string | undefined) ?? "1.0",
+    schemas: extractManifestSchemas(agent.manifest),
     llmConfig,
+    runApi: { url: runApiUrl, token: signRunToken(runId) },
     proxyUrl,
     timeout: (agent.manifest.timeout as number | undefined) ?? 300,
+    tokens,
+    providers: providerDefs,
     availableTools: agent.tools.map((e) => ({
       id: e.id,
       name: e.name,
@@ -164,10 +180,12 @@ export async function buildRunContext(params: {
       description: s.description,
     })),
     toolDocs,
+    files,
   };
 
   return {
-    promptContext,
+    context,
+    plan,
     agentPackage,
     versionLabel,
     versionDirty,
@@ -181,7 +199,7 @@ export async function buildRunContext(params: {
 async function resolveProviderDefs(
   orgId: string,
   providers: AgentProviderRequirement[],
-): Promise<NonNullable<PromptContext["providers"]>> {
+): Promise<ProviderSummary[]> {
   const uniqueProviders = [...new Set(providers.map((s) => s.id))];
   const defs = await Promise.all(uniqueProviders.map((p) => getProvider(db, orgId, p)));
   return defs

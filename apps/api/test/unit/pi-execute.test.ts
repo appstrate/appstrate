@@ -15,8 +15,90 @@ import type {
   WorkloadSpec,
   SidecarConfig,
 } from "../../src/services/orchestrator/types.ts";
-import type { PromptContext } from "../../src/services/adapters/types.ts";
-import type { RunEvent } from "@appstrate/afps-runtime/types";
+import type {
+  AppstrateRunPlan,
+  FileReference,
+  ProviderSummary,
+  ToolMeta,
+  UploadedFile,
+} from "../../src/services/adapters/types.ts";
+import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
+
+/**
+ * Test-local legacy shape that mirrors the old PromptContext. Kept so
+ * per-test overrides stay flat. `splitLegacy` below converts it into the
+ * `(context, plan)` pair the new PiAdapter signature requires.
+ */
+interface PromptContext {
+  rawPrompt: string;
+  schemaVersion?: string;
+  runId?: string;
+  tokens: Record<string, string>;
+  config: Record<string, unknown>;
+  previousState: Record<string, unknown> | null;
+  runApi?: { url: string; token: string };
+  input: Record<string, unknown>;
+  files?: FileReference[];
+  schemas: AppstrateRunPlan["schemas"];
+  providers: ProviderSummary[];
+  memories?: Array<{ id: number; content: string; createdAt: string | null }>;
+  llmModel: string;
+  llmConfig: AppstrateRunPlan["llmConfig"];
+  proxyUrl?: string | null;
+  timeout?: number;
+  availableTools?: ToolMeta[];
+  availableSkills?: ToolMeta[];
+  toolDocs?: Array<{ id: string; content: string }>;
+}
+
+function splitLegacy(
+  ctx: PromptContext,
+  timeout: number,
+  agentPackage?: Buffer,
+  inputFiles?: UploadedFile[],
+): { context: ExecutionContext; plan: AppstrateRunPlan } {
+  const context: ExecutionContext = {
+    runId: ctx.runId ?? "test_run",
+    input: ctx.input,
+    memories: (ctx.memories ?? []).map((m) => ({
+      content: m.content,
+      createdAt: m.createdAt ? new Date(m.createdAt).getTime() : 0,
+    })),
+    ...(ctx.previousState !== null ? { state: ctx.previousState } : {}),
+    config: ctx.config,
+  };
+  const plan: AppstrateRunPlan = {
+    rawPrompt: ctx.rawPrompt,
+    schemaVersion: ctx.schemaVersion,
+    schemas: ctx.schemas,
+    llmConfig: ctx.llmConfig,
+    ...(ctx.runApi !== undefined ? { runApi: ctx.runApi } : {}),
+    proxyUrl: ctx.proxyUrl,
+    timeout,
+    tokens: ctx.tokens,
+    providers: ctx.providers,
+    availableTools: ctx.availableTools ?? [],
+    availableSkills: ctx.availableSkills ?? [],
+    toolDocs: ctx.toolDocs ?? [],
+    files: ctx.files,
+    agentPackage,
+    inputFiles,
+  };
+  return { context, plan };
+}
+
+function executeLegacy(
+  adapter: PiAdapter,
+  runId: string,
+  legacy: PromptContext,
+  timeout: number,
+  agentPackage?: Buffer,
+  signal?: AbortSignal,
+  inputFiles?: UploadedFile[],
+): AsyncGenerator<RunEvent> {
+  const { context, plan } = splitLegacy(legacy, timeout, agentPackage, inputFiles);
+  return adapter.execute(runId, context, plan, signal);
+}
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -89,7 +171,9 @@ describe("PiAdapter.execute()", () => {
     const orchestrator = createMockOrchestrator();
     const adapter = new PiAdapter(orchestrator);
 
-    const messages = await collectMessages(adapter.execute("exec-001", basePromptContext(), 30));
+    const messages = await collectMessages(
+      executeLegacy(adapter, "exec-001", basePromptContext(), 30),
+    );
 
     // Phase 1: isolation boundary created
     expect(orchestrator.createIsolationBoundary).toHaveBeenCalledWith("exec-001");
@@ -119,7 +203,7 @@ describe("PiAdapter.execute()", () => {
     const orchestrator = createMockOrchestrator();
     const adapter = new PiAdapter(orchestrator);
 
-    await collectMessages(adapter.execute("exec-002", basePromptContext(), 30));
+    await collectMessages(executeLegacy(adapter, "exec-002", basePromptContext(), 30));
 
     const sidecarCall = (orchestrator.createSidecar as ReturnType<typeof mock>).mock.calls[0]!;
     const config = sidecarCall[2] as SidecarConfig;
@@ -134,7 +218,7 @@ describe("PiAdapter.execute()", () => {
     const orchestrator = createMockOrchestrator();
     const adapter = new PiAdapter(orchestrator);
 
-    await collectMessages(adapter.execute("exec-003", basePromptContext(), 30));
+    await collectMessages(executeLegacy(adapter, "exec-003", basePromptContext(), 30));
 
     const workloadCall = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]!;
     const spec = workloadCall[0] as WorkloadSpec;
@@ -164,7 +248,7 @@ describe("PiAdapter.execute()", () => {
       },
     });
 
-    await collectMessages(adapter.execute("exec-004", ctx, 30));
+    await collectMessages(executeLegacy(adapter, "exec-004", ctx, 30));
 
     const sidecarCall = (orchestrator.createSidecar as ReturnType<typeof mock>).mock.calls[0]!;
     const config = sidecarCall[2] as SidecarConfig;
@@ -192,7 +276,15 @@ describe("PiAdapter.execute()", () => {
     ];
 
     await collectMessages(
-      adapter.execute("exec-005", basePromptContext(), 30, agentPackage, undefined, inputFiles),
+      executeLegacy(
+        adapter,
+        "exec-005",
+        basePromptContext(),
+        30,
+        agentPackage,
+        undefined,
+        inputFiles,
+      ),
     );
 
     const workloadCall = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]!;
@@ -218,7 +310,7 @@ describe("PiAdapter.execute()", () => {
       ],
     });
 
-    await collectMessages(adapter.execute("exec-006", ctx, 30));
+    await collectMessages(executeLegacy(adapter, "exec-006", ctx, 30));
 
     const workloadCall = (orchestrator.createWorkload as ReturnType<typeof mock>).mock.calls[0]!;
     const spec = workloadCall[0] as WorkloadSpec;
@@ -242,7 +334,7 @@ describe("PiAdapter.execute()", () => {
       schemas: { output: outputSchema as any },
     });
 
-    await collectMessages(adapter.execute("exec-schema", ctx, 30));
+    await collectMessages(executeLegacy(adapter, "exec-schema", ctx, 30));
 
     const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock
       .calls[0]![0] as WorkloadSpec;
@@ -258,7 +350,7 @@ describe("PiAdapter.execute()", () => {
 
     const ctx = basePromptContext({ schemas: {} });
 
-    await collectMessages(adapter.execute("exec-no-schema", ctx, 30));
+    await collectMessages(executeLegacy(adapter, "exec-no-schema", ctx, 30));
 
     const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock
       .calls[0]![0] as WorkloadSpec;
@@ -272,7 +364,7 @@ describe("PiAdapter.execute()", () => {
     const adapter = new PiAdapter(orchestrator);
 
     try {
-      await collectMessages(adapter.execute("exec-009", basePromptContext(), 30));
+      await collectMessages(executeLegacy(adapter, "exec-009", basePromptContext(), 30));
       expect.unreachable("should have thrown");
     } catch {
       // Expected
@@ -293,7 +385,7 @@ describe("PiAdapter.execute()", () => {
 
     const ctx = basePromptContext({ proxyUrl: "http://proxy.corp:8080" });
 
-    await collectMessages(adapter.execute("exec-010", ctx, 30));
+    await collectMessages(executeLegacy(adapter, "exec-010", ctx, 30));
 
     const config = (orchestrator.createSidecar as ReturnType<typeof mock>).mock
       .calls[0]![2] as SidecarConfig;
@@ -314,7 +406,7 @@ describe("PiAdapter.execute()", () => {
       },
     });
 
-    await collectMessages(adapter.execute("exec-011", ctx, 30));
+    await collectMessages(executeLegacy(adapter, "exec-011", ctx, 30));
 
     const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock
       .calls[0]![0] as WorkloadSpec;
@@ -340,7 +432,7 @@ describe("PiAdapter.execute()", () => {
       },
     });
 
-    await collectMessages(adapter.execute("exec-012", ctx, 30));
+    await collectMessages(executeLegacy(adapter, "exec-012", ctx, 30));
 
     const spec = (orchestrator.createWorkload as ReturnType<typeof mock>).mock
       .calls[0]![0] as WorkloadSpec;

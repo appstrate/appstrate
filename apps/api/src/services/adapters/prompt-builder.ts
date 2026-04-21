@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PromptContext } from "./types.ts";
+import type { AppstrateRunPlan } from "./types.ts";
+import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   getCredentialFieldName,
   getDefaultAuthorizedUris,
@@ -30,35 +31,19 @@ function supportsTemplateRendering(schemaVersion: string | undefined): boolean {
 }
 
 /**
- * Parse an ISO-8601 timestamp into Unix epoch ms, returning 0 on failure.
- * DB rows may expose `createdAt` as either an ISO string (via drizzle's
- * default TIMESTAMP mapping) or a Date instance. Both are normalised to
- * the runtime's numeric representation.
- */
-function toEpochMs(value: string | Date | null | undefined): number {
-  if (!value) return 0;
-  const date = value instanceof Date ? value : new Date(value);
-  const ms = date.getTime();
-  return Number.isFinite(ms) ? ms : 0;
-}
-
-/**
- * Project a {@link PromptContext} into the runtime's canonical
+ * Project an {@link ExecutionContext} into the runtime's canonical
  * {@link PromptView} shape — the same structure any external consumer
- * would receive from `buildPromptView()`. `createdAt` is normalised to
- * epoch ms (runtime contract) even though the DB surfaces ISO strings.
+ * would receive from `buildPromptView()`. `createdAt` is already epoch ms
+ * on ExecutionContext (normalised upstream in env-builder).
  */
-function buildTemplateView(ctx: PromptContext): PromptView {
+function buildTemplateView(context: ExecutionContext): PromptView {
   return {
-    runId: ctx.runId ?? "",
-    input: ctx.input,
-    config: ctx.config,
-    state: ctx.previousState ?? null,
-    memories: (ctx.memories ?? []).map((m) => ({
-      content: m.content,
-      createdAt: toEpochMs(m.createdAt as string | Date | null | undefined),
-    })),
-    history: [],
+    runId: context.runId,
+    input: (context.input as Record<string, unknown>) ?? {},
+    config: context.config ?? {},
+    state: context.state ?? null,
+    memories: context.memories ?? [],
+    history: context.history ?? [],
   };
 }
 
@@ -68,9 +53,11 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-export function buildEnrichedPrompt(ctx: PromptContext): string {
+export function buildEnrichedPrompt(context: ExecutionContext, plan: AppstrateRunPlan): string {
   const sections: string[] = [];
-  const connectedProviders = ctx.providers.filter((p) => ctx.tokens[p.id]);
+  const input = (context.input as Record<string, unknown>) ?? {};
+  const config = context.config ?? {};
+  const connectedProviders = plan.providers.filter((p) => plan.tokens[p.id]);
 
   // --- System identity & environment ---
   sections.push("## System\n");
@@ -89,9 +76,9 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
       "Only authenticated requests to connected providers require the sidecar credential proxy " +
       "(`$SIDECAR_URL/proxy`) — see **Authenticated Provider API** below.",
   );
-  if (ctx.timeout) {
+  if (plan.timeout) {
     sections.push(
-      `- **Timeout**: You have ${ctx.timeout} seconds to complete this task. ` +
+      `- **Timeout**: You have ${plan.timeout} seconds to complete this task. ` +
         "Work efficiently and output your result promptly.",
     );
   }
@@ -102,12 +89,12 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   );
 
   // Available tools
-  if (ctx.availableTools && ctx.availableTools.length > 0) {
+  if (plan.availableTools && plan.availableTools.length > 0) {
     sections.push("### Tools");
     sections.push(
       "You have access to the following tools (in addition to standard coding capabilities):\n",
     );
-    for (const tool of ctx.availableTools) {
+    for (const tool of plan.availableTools) {
       const desc = tool.description ? `: ${tool.description}` : "";
       sections.push(`- **${tool.name || tool.id}**${desc}`);
     }
@@ -115,20 +102,20 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   }
 
   // Tool documentation (from TOOL.md files)
-  if (ctx.toolDocs && ctx.toolDocs.length > 0) {
-    for (const doc of ctx.toolDocs) {
+  if (plan.toolDocs && plan.toolDocs.length > 0) {
+    for (const doc of plan.toolDocs) {
       sections.push(doc.content);
       sections.push("");
     }
   }
 
   // Available skills
-  if (ctx.availableSkills && ctx.availableSkills.length > 0) {
+  if (plan.availableSkills && plan.availableSkills.length > 0) {
     sections.push("### Skills");
     sections.push(
       "The following skill references are available in your workspace at `.pi/skills/`:\n",
     );
-    for (const skill of ctx.availableSkills) {
+    for (const skill of plan.availableSkills) {
       const desc = skill.description ? `: ${skill.description}` : "";
       sections.push(`- **${skill.name || skill.id}**${desc}`);
     }
@@ -243,9 +230,9 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   }
 
   // --- User input ---
-  const inputProps = ctx.schemas.input?.properties;
-  const inputRequired = ctx.schemas.input?.required ?? [];
-  const nonFileInputEntries = Object.entries(ctx.input).filter(([key]) => {
+  const inputProps = plan.schemas.input?.properties;
+  const inputRequired = plan.schemas.input?.required ?? [];
+  const nonFileInputEntries = Object.entries(input).filter(([key]) => {
     const prop = inputProps?.[key];
     return prop ? !isFileField(prop) : true;
   });
@@ -256,7 +243,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
       for (const [key, prop] of Object.entries(inputProps)) {
         if (isFileField(prop)) continue;
         const req = inputRequired.includes(key) ? "required" : "optional";
-        const value = ctx.input[key];
+        const value = input[key];
         const valueStr = value !== undefined ? ` — \`${value}\`` : "";
         sections.push(`- **${key}** (${prop.type}, ${req}): ${prop.description || ""}${valueStr}`);
       }
@@ -269,12 +256,12 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   }
 
   // --- Uploaded documents ---
-  if (ctx.files && ctx.files.length > 0) {
+  if (plan.files && plan.files.length > 0) {
     sections.push("## Documents\n");
     sections.push(
       "The following documents have been uploaded and are available on the local filesystem:\n",
     );
-    for (const file of ctx.files) {
+    for (const file of plan.files) {
       const safeName = sanitizeStorageKey(file.name);
       sections.push(
         `- **${file.name}** (${file.type || "unknown"}, ${formatFileSize(file.size)}) → \`./documents/${safeName}\``,
@@ -286,16 +273,16 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   }
 
   // --- Configuration ---
-  const configProps = ctx.schemas.config?.properties;
-  const configRequired = ctx.schemas.config?.required ?? [];
-  const configEntries = Object.entries(ctx.config);
+  const configProps = plan.schemas.config?.properties;
+  const configRequired = plan.schemas.config?.required ?? [];
+  const configEntries = Object.entries(config);
 
   if (configEntries.length > 0 || (configProps && Object.keys(configProps).length > 0)) {
     sections.push("## Configuration\n");
     if (configProps) {
       for (const [key, prop] of Object.entries(configProps)) {
         const req = configRequired.includes(key) ? "required" : "optional";
-        const value = ctx.config[key];
+        const value = config[key];
         const valueStr = value !== undefined ? ` — \`${value}\`` : "";
         sections.push(`- **${key}** (${prop.type}, ${req}): ${prop.description || ""}${valueStr}`);
       }
@@ -308,14 +295,14 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   }
 
   // --- Previous state ---
-  if (ctx.previousState) {
+  if (context.state !== undefined && context.state !== null) {
     sections.push("## Previous State\n");
     sections.push(
       "This agent supports stateful operation across runs. " +
         "Your most recent run left the following state:\n",
     );
     sections.push("```json");
-    sections.push(JSON.stringify(ctx.previousState, null, 2));
+    sections.push(JSON.stringify(context.state, null, 2));
     sections.push("```\n");
     sections.push(
       "Use this state to resume work, avoid reprocessing data, or build on previous results. " +
@@ -324,14 +311,14 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   }
 
   // --- Memory ---
-  if (ctx.memories && ctx.memories.length > 0) {
+  if (context.memories && context.memories.length > 0) {
     sections.push("## Memory\n");
     sections.push(
       "This agent has accumulated the following memories from previous runs. " +
         "These are shared across all users running this agent:\n",
     );
-    for (const mem of ctx.memories) {
-      const date = mem.createdAt ? ` (${mem.createdAt})` : "";
+    for (const mem of context.memories) {
+      const date = mem.createdAt ? ` (${new Date(mem.createdAt).toISOString()})` : "";
       sections.push(`- ${mem.content}${date}`);
     }
     sections.push(
@@ -342,7 +329,7 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   }
 
   // --- Run History API ---
-  if (ctx.runApi) {
+  if (plan.runApi) {
     sections.push("## Run History\n");
     sections.push(
       "You can access data from previous runs beyond just the latest state. " +
@@ -362,9 +349,9 @@ export function buildEnrichedPrompt(ctx: PromptContext): string {
   // schemaVersion 1.1+: render rawPrompt through logic-less Mustache so
   // templates can reference `{{runId}}`, `{{input.*}}`, `{{#memories}}…`,
   // etc. Legacy 1.0 bundles keep verbatim append — unchanged output.
-  const finalRawPrompt = supportsTemplateRendering(ctx.schemaVersion)
-    ? renderTemplate(ctx.rawPrompt, buildTemplateView(ctx))
-    : ctx.rawPrompt;
+  const finalRawPrompt = supportsTemplateRendering(plan.schemaVersion)
+    ? renderTemplate(plan.rawPrompt, buildTemplateView(context))
+    : plan.rawPrompt;
 
   return sections.join("\n") + "\n---\n\n" + finalRawPrompt;
 }

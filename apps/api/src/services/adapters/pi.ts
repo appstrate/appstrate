@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { logger } from "../../lib/logger.ts";
-import type { RunAdapter, PromptContext, UploadedFile } from "./types.ts";
+import type { RunAdapter, AppstrateRunPlan } from "./types.ts";
 import { buildEnrichedPrompt } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { sanitizeStorageKey } from "../file-storage.ts";
@@ -11,7 +11,7 @@ import {
   type WorkloadHandle,
   type IsolationBoundary,
 } from "../orchestrator/index.ts";
-import type { RunEvent } from "@appstrate/afps-runtime/types";
+import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 
 import { getEnv } from "@appstrate/env";
 
@@ -24,15 +24,13 @@ export class PiAdapter implements RunAdapter {
 
   async *execute(
     runId: string,
-    ctx: PromptContext,
-    timeout: number,
-    agentPackage?: Buffer,
+    context: ExecutionContext,
+    plan: AppstrateRunPlan,
     signal?: AbortSignal,
-    inputFiles?: UploadedFile[],
   ): AsyncGenerator<RunEvent> {
-    const prompt = buildEnrichedPrompt(ctx);
+    const prompt = buildEnrichedPrompt(context, plan);
 
-    const llmConfig = ctx.llmConfig;
+    const { llmConfig } = plan;
     const modelId = llmConfig.modelId;
 
     const orchestrator = this._orchestrator ?? getOrchestrator();
@@ -49,9 +47,9 @@ export class PiAdapter implements RunAdapter {
 
       // Sidecar config (platform network resolution handled by orchestrator)
       const sidecarConfig = {
-        runToken: ctx.runApi?.token ?? "",
-        platformApiUrl: ctx.runApi?.url ?? "",
-        proxyUrl: ctx.proxyUrl ?? undefined,
+        runToken: plan.runApi?.token ?? "",
+        platformApiUrl: plan.runApi?.url ?? "",
+        proxyUrl: plan.proxyUrl ?? undefined,
         llm: llmApiKey
           ? { baseUrl: llmConfig.baseUrl, apiKey: llmApiKey, placeholder: llmPlaceholder }
           : undefined,
@@ -65,7 +63,7 @@ export class PiAdapter implements RunAdapter {
         SIDECAR_URL: "http://sidecar:8080",
       };
 
-      const connectedProviderIds = ctx.providers.filter((s) => ctx.tokens[s.id]).map((s) => s.id);
+      const connectedProviderIds = plan.providers.filter((s) => plan.tokens[s.id]).map((s) => s.id);
       if (connectedProviderIds.length > 0) {
         containerEnv.CONNECTED_PROVIDERS = connectedProviderIds.join(",");
       }
@@ -89,10 +87,10 @@ export class PiAdapter implements RunAdapter {
 
       // Output schema injection (optional — enables constrained decoding when present)
       const hasOutputSchema =
-        ctx.schemas.output?.properties && Object.keys(ctx.schemas.output.properties).length > 0;
+        plan.schemas.output?.properties && Object.keys(plan.schemas.output.properties).length > 0;
 
       if (hasOutputSchema) {
-        containerEnv.OUTPUT_SCHEMA = JSON.stringify(ctx.schemas.output);
+        containerEnv.OUTPUT_SCHEMA = JSON.stringify(plan.schemas.output);
       }
 
       // All outbound HTTP traffic routed through sidecar forward proxy.
@@ -107,11 +105,11 @@ export class PiAdapter implements RunAdapter {
 
       // Prepare files for batch injection into agent
       const filesToInject: Array<{ name: string; content: Buffer }> = [];
-      if (agentPackage) {
-        filesToInject.push({ name: "agent-package.afps", content: agentPackage });
+      if (plan.agentPackage) {
+        filesToInject.push({ name: "agent-package.afps", content: plan.agentPackage });
       }
-      if (inputFiles) {
-        for (const f of inputFiles) {
+      if (plan.inputFiles) {
+        for (const f of plan.inputFiles) {
           filesToInject.push({
             name: `documents/${sanitizeStorageKey(f.name)}`,
             content: f.buffer,
@@ -148,7 +146,7 @@ export class PiAdapter implements RunAdapter {
         handle: agent,
         adapterName: "pi",
         runId,
-        timeout,
+        timeout: plan.timeout,
         extraData: { api: llmConfig.api, model: modelId },
         signal,
         stopOnTimeout: [sidecarHandle],

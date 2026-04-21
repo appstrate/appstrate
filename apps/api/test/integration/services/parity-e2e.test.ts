@@ -20,12 +20,8 @@ import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { AppstrateEventSink } from "../../../src/services/adapters/appstrate-event-sink.ts";
 import { AppstrateContainerRunner } from "../../../src/services/adapters/appstrate-container-runner.ts";
-import type {
-  PromptContext,
-  RunAdapter,
-  UploadedFile,
-} from "../../../src/services/adapters/types.ts";
-import type { RunEvent } from "@appstrate/afps-runtime/types";
+import type { AppstrateRunPlan, RunAdapter } from "../../../src/services/adapters/types.ts";
+import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import { reduceEvents } from "@appstrate/afps-runtime/runner";
 import { db } from "@appstrate/db/client";
 import { runLogs } from "@appstrate/db/schema";
@@ -35,29 +31,19 @@ class ScriptedAdapter implements RunAdapter {
   constructor(private readonly script: RunEvent[]) {}
   async *execute(
     _runId: string,
-    _ctx: PromptContext,
-    _timeout: number,
-    _pkg?: Buffer,
+    _context: ExecutionContext,
+    _plan: AppstrateRunPlan,
     _signal?: AbortSignal,
-    _files?: UploadedFile[],
   ): AsyncGenerator<RunEvent> {
     for (const ev of this.script) yield ev;
   }
 }
 
-function basePromptContext(runId: string): PromptContext {
+function basePlan(): AppstrateRunPlan {
   return {
-    schemaVersion: "1.2",
-    runId,
     rawPrompt: "Parity agent body: topic={{input.topic}}",
-    tokens: {},
-    config: {},
-    previousState: null,
-    input: { topic: "parity" },
+    schemaVersion: "1.2",
     schemas: {},
-    providers: [],
-    memories: [],
-    llmModel: "test",
     llmConfig: {
       api: "anthropic-messages",
       modelId: "test",
@@ -72,13 +58,25 @@ function basePromptContext(runId: string): PromptContext {
         output: 0,
         cacheRead: 0,
         cacheWrite: 0,
-      } as PromptContext["llmConfig"]["cost"],
+      } as AppstrateRunPlan["llmConfig"]["cost"],
     },
+    runApi: { url: "", token: "" },
     proxyUrl: null,
     timeout: 60,
+    tokens: {},
+    providers: [],
     availableTools: [],
     availableSkills: [],
     toolDocs: [],
+  };
+}
+
+function baseContext(runId: string): ExecutionContext {
+  return {
+    runId,
+    input: { topic: "parity" },
+    memories: [],
+    config: {},
   };
 }
 
@@ -125,11 +123,11 @@ describe("Parity E2E — full adapter stack", () => {
 
     const runner = new AppstrateContainerRunner({
       adapter: new ScriptedAdapter(script),
-      plan: { promptContext: basePromptContext(runId), timeout: 60 },
+      plan: basePlan(),
     });
     const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
 
-    const result = await runner.run({ runId, sink });
+    const result = await runner.run({ runId, context: baseContext(runId), sink });
 
     // Reducer agreement: the runner's result MUST match what any external
     // runtime consumer would get from reducing the same event stream.

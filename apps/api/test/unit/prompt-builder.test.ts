@@ -1,8 +1,78 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { buildEnrichedPrompt } from "../../src/services/adapters/prompt-builder.ts";
-import type { PromptContext } from "../../src/services/adapters/types.ts";
+import { buildEnrichedPrompt as _buildEnrichedPrompt } from "../../src/services/adapters/prompt-builder.ts";
+import type {
+  AppstrateRunPlan,
+  FileReference,
+  ProviderSummary,
+  ToolMeta,
+} from "../../src/services/adapters/types.ts";
+import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+
+/**
+ * Test-local shape that mirrors the legacy `PromptContext` — tests keep
+ * a flat override surface while the production signature is
+ * `buildEnrichedPrompt(context, plan)`. The shim below splits it.
+ */
+interface PromptContext {
+  rawPrompt: string;
+  schemaVersion?: string;
+  runId?: string;
+  tokens: Record<string, string>;
+  config: Record<string, unknown>;
+  previousState: Record<string, unknown> | null;
+  runApi?: { url: string; token: string };
+  input: Record<string, unknown>;
+  files?: FileReference[];
+  schemas: AppstrateRunPlan["schemas"];
+  providers: ProviderSummary[];
+  memories?: Array<{ id: number; content: string; createdAt: string | null }>;
+  llmModel: string;
+  llmConfig: AppstrateRunPlan["llmConfig"];
+  proxyUrl?: string | null;
+  timeout?: number;
+  availableTools?: ToolMeta[];
+  availableSkills?: ToolMeta[];
+  toolDocs?: Array<{ id: string; content: string }>;
+}
+
+function splitLegacy(ctx: PromptContext): {
+  context: ExecutionContext;
+  plan: AppstrateRunPlan;
+} {
+  const context: ExecutionContext = {
+    runId: ctx.runId ?? "test_run",
+    input: ctx.input,
+    memories: (ctx.memories ?? []).map((m) => ({
+      content: m.content,
+      createdAt: m.createdAt ? new Date(m.createdAt).getTime() : 0,
+    })),
+    ...(ctx.previousState !== null ? { state: ctx.previousState } : {}),
+    config: ctx.config,
+  };
+  const plan: AppstrateRunPlan = {
+    rawPrompt: ctx.rawPrompt,
+    schemaVersion: ctx.schemaVersion,
+    schemas: ctx.schemas,
+    llmConfig: ctx.llmConfig,
+    ...(ctx.runApi !== undefined ? { runApi: ctx.runApi } : {}),
+    proxyUrl: ctx.proxyUrl,
+    timeout: ctx.timeout ?? 0,
+    tokens: ctx.tokens,
+    providers: ctx.providers,
+    availableTools: ctx.availableTools ?? [],
+    availableSkills: ctx.availableSkills ?? [],
+    toolDocs: ctx.toolDocs ?? [],
+    files: ctx.files,
+  };
+  return { context, plan };
+}
+
+function buildEnrichedPrompt(ctx: PromptContext): string {
+  const { context, plan } = splitLegacy(ctx);
+  return _buildEnrichedPrompt(context, plan);
+}
 
 function baseContext(overrides?: Partial<PromptContext>): PromptContext {
   return {
