@@ -3,6 +3,11 @@
 
 export { type BundleRunner, type RunBundleOptions } from "./types.ts";
 export { type Runner, type RunOptions } from "./options.ts";
+export {
+  reduceRunEvents,
+  emptyRunResult as emptyRunResultFromRunEvents,
+  type ReduceRunEventsOptions,
+} from "./run-event-reducer.ts";
 export { MockRunner, type MockRunnerOptions } from "./mock.ts";
 export { reduceEvents, emptyRunResult, type ReduceOptions } from "./reducer.ts";
 // Re-exported for ergonomics: runners produce RunResult, so consumers
