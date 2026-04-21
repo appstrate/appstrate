@@ -55,6 +55,7 @@
     "./template": "./src/template/index.ts",
     "./bundle": "./src/bundle/index.ts",
     "./runner": "./src/runner/index.ts",
+    "./resolvers": "./src/resolvers/index.ts",
     "./conformance": "./src/conformance/index.ts"
   },
   "scripts": {

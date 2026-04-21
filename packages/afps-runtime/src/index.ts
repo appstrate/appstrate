@@ -4,13 +4,17 @@
 /**
  * @appstrate/afps-runtime — portable runtime for AFPS agent bundles.
  *
- * This file is the package's public surface. Phase 2 of the extraction
- * plan ships types and interfaces only; implementations land in
- * subsequent phases (sinks in Phase 3, context providers in Phase 4,
- * credential providers in Phase 5, etc.).
+ * Top-level barrel exports. The package is organised into subpath
+ * entrypoints (see the `exports` field in package.json) so callers can
+ * import the narrow surface they need; the top-level re-exports the
+ * full public API for convenience.
  *
- * See `AFPS_EXTENSION_ARCHITECTURE.md` and `AFPS_RUNTIME_PLAN.md` at the
- * workspace root for the full design and phased sequence.
+ * AFPS 1.3 introduces four spec-aligned resolver interfaces
+ * (ToolResolver, ProviderResolver, SkillResolver, PreludeResolver). They
+ * live under `@appstrate/afps-runtime/resolvers` and are re-exported
+ * here. The legacy single-ref prelude resolver is still available via
+ * the `@appstrate/afps-runtime/bundle` subpath under its original name
+ * for existing consumers (e.g. Appstrate's `AppstratePreludeResolver`).
  */
 
 export const VERSION = "0.0.0";
@@ -21,6 +25,57 @@ export * from "./events/index.ts";
 export * from "./sinks/index.ts";
 export * from "./providers/index.ts";
 export * from "./template/index.ts";
-export * from "./bundle/index.ts";
+
+// Explicit bundle re-exports — excludes the legacy `PreludeResolver` name
+// so the spec-level interface from `./resolvers` wins at the top level.
+export {
+  renderPrompt,
+  buildPromptView,
+  type PromptView,
+  type PromptViewProvider,
+  type PromptViewUpload,
+  type RenderPromptOptions,
+} from "./bundle/prompt-renderer.ts";
+export {
+  resolvePreludes,
+  MapPreludeResolver,
+  PreludeResolutionError,
+  type PreludeResolver as PromptPreludeResolver,
+} from "./bundle/preludes.ts";
+export { computeIntegrity, verifyIntegrity, type IntegrityCheckResult } from "./bundle/hash.ts";
+export {
+  loadBundleFromBuffer,
+  loadBundleFromFile,
+  BundleLoadError,
+  type LoadedBundle,
+  type LoadBundleOptions,
+} from "./bundle/loader.ts";
+export {
+  validateBundle,
+  type ValidationResult,
+  type ValidationIssue,
+  type ValidateBundleOptions,
+} from "./bundle/validator.ts";
+export {
+  canonicalBundleDigest,
+  signBundle,
+  signChildKey,
+  verifyBundleSignature,
+  verifySigstoreSignature,
+  readBundleSignature,
+  generateKeyPair,
+  keyIdFromPublicKey,
+  type BundleSignature,
+  type TrustChainEntry,
+  type TrustedKey,
+  type TrustRoot,
+  type KeyPair,
+  type SignBundleOptions,
+  type SignChildKeyOptions,
+  type VerifySignatureResult,
+  type VerifySignatureFailureReason,
+} from "./bundle/signing.ts";
+
 export * from "./runner/index.ts";
 export * from "./conformance/index.ts";
+export * from "./resolvers/index.ts";
