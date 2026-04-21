@@ -26,7 +26,7 @@ import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import oidcModule from "../../../index.ts";
-import { APPSTRATE_SCOPES } from "../../../auth/scopes.ts";
+import { getAppstrateScopes } from "../../../auth/scopes.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 
@@ -87,13 +87,14 @@ describe("OIDC discovery — RFC 8414 + OpenID Connect Discovery", () => {
       expect(body.code_challenge_methods_supported).not.toContain("plain");
     });
 
-    it("advertises the full APPSTRATE_SCOPES vocabulary", async () => {
+    it("advertises the full Appstrate scopes vocabulary", async () => {
       const { body } = await fetchJson<OpenIdConfigShape>("/.well-known/openid-configuration");
       expect(body.scopes_supported).toBeDefined();
-      // Every entry of APPSTRATE_SCOPES (identity scopes + OIDC_ALLOWED_SCOPES)
-      // must appear in `scopes_supported`. This is the contract the admin
-      // UI + satellite registrations rely on.
-      for (const scope of APPSTRATE_SCOPES) {
+      // Every entry of `getAppstrateScopes()` (identity scopes +
+      // OIDC_ALLOWED_SCOPES + module-contributed scopes) must appear in
+      // `scopes_supported`. This is the contract the admin UI + satellite
+      // registrations rely on.
+      for (const scope of getAppstrateScopes()) {
         expect(body.scopes_supported).toContain(scope);
       }
       // Identity scopes are non-negotiable — assert them individually so

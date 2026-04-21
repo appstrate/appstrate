@@ -502,3 +502,32 @@ export interface EndUserListResponse {
   hasMore: boolean;
   limit: number;
 }
+
+// --- OIDC Module — per-application auth config view types ---
+
+// Wire shape for `/api/applications/:id/smtp-config` and
+// `/api/applications/:id/social-providers/:provider`. Lives here so
+// backend services, OpenAPI schemas, and frontend hooks stay in lockstep.
+
+export type SocialProviderId = "google" | "github";
+
+export interface SmtpConfigView {
+  applicationId: string;
+  host: string;
+  port: number;
+  username: string;
+  fromAddress: string;
+  fromName: string | null;
+  secureMode: "auto" | "tls" | "starttls" | "none";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SocialProviderView {
+  applicationId: string;
+  provider: SocialProviderId;
+  clientId: string;
+  scopes: string[] | null;
+  createdAt: string;
+  updatedAt: string;
+}

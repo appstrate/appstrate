@@ -51,6 +51,31 @@ function enrichedRunSelect() {
   };
 }
 
+/**
+ * Null-coalescing mapper paired with `enrichedRunSelect()`. Single source
+ * of truth for the "enriched run" wire shape — the three read helpers
+ * call this instead of inlining the same mapping six lines six times.
+ */
+type EnrichedRunRow = {
+  run: typeof runs.$inferSelect;
+  dashboardUserName: string | null;
+  endUserName: string | null;
+  apiKeyName: string | null;
+  scheduleName: string | null;
+  packageEphemeral: boolean | null;
+};
+
+function mapEnrichedRun(r: EnrichedRunRow) {
+  return {
+    ...r.run,
+    dashboardUserName: r.dashboardUserName ?? null,
+    endUserName: r.endUserName ?? null,
+    apiKeyName: r.apiKeyName ?? null,
+    scheduleName: r.scheduleName ?? null,
+    packageEphemeral: r.packageEphemeral ?? false,
+  };
+}
+
 // --- Runs ---
 
 async function nextRunNumber(scope: AppScope, packageId: string): Promise<number> {
@@ -477,14 +502,7 @@ export async function listRunsWithFilter(
     .offset(offset);
 
   return {
-    runs: rows.map((r) => ({
-      ...r.run,
-      dashboardUserName: r.dashboardUserName ?? null,
-      endUserName: r.endUserName ?? null,
-      apiKeyName: r.apiKeyName ?? null,
-      scheduleName: r.scheduleName ?? null,
-      packageEphemeral: r.packageEphemeral ?? false,
-    })) as unknown as Record<string, unknown>[],
+    runs: rows.map(mapEnrichedRun) as unknown as Record<string, unknown>[],
     total: countRow?.count ?? 0,
   };
 }
@@ -582,14 +600,7 @@ export async function listGlobalRuns(
     .offset(offset);
 
   return {
-    runs: rows.map((r) => ({
-      ...r.run,
-      dashboardUserName: r.dashboardUserName ?? null,
-      endUserName: r.endUserName ?? null,
-      apiKeyName: r.apiKeyName ?? null,
-      scheduleName: r.scheduleName ?? null,
-      packageEphemeral: r.packageEphemeral ?? false,
-    })) as unknown as Record<string, unknown>[],
+    runs: rows.map(mapEnrichedRun) as unknown as Record<string, unknown>[],
     total: countRow?.count ?? 0,
   };
 }
@@ -645,12 +656,7 @@ export async function getRunFull(scope: AppScope, id: string) {
   const inlinePrompt = isInline && row.packagePrompt ? row.packagePrompt : null;
 
   return {
-    ...row.run,
-    dashboardUserName: row.dashboardUserName ?? null,
-    endUserName: row.endUserName ?? null,
-    apiKeyName: row.apiKeyName ?? null,
-    scheduleName: row.scheduleName ?? null,
-    packageEphemeral: row.packageEphemeral ?? false,
+    ...mapEnrichedRun(row),
     inlineManifest,
     inlinePrompt,
   };

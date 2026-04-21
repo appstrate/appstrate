@@ -289,7 +289,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(res.status).toBe(201);
   });
 
-  it("POST rejects scopes outside the APPSTRATE_SCOPES whitelist", async () => {
+  it("POST rejects scopes outside the Appstrate scopes whitelist", async () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -300,7 +300,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("POST accepts the full APPSTRATE_SCOPES vocabulary", async () => {
+  it("POST accepts the full Appstrate scopes vocabulary", async () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -388,7 +388,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     );
   });
 
-  it("PATCH rejects scopes outside the APPSTRATE_SCOPES whitelist", async () => {
+  it("PATCH rejects scopes outside the Appstrate scopes whitelist", async () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },

@@ -32,6 +32,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
+import type { SmtpConfigView } from "@appstrate/shared-types";
 import { applicationSmtpConfigs } from "../schema.ts";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
@@ -46,17 +47,7 @@ export interface ResolvedSmtpConfig {
   source: "per-app" | "instance";
 }
 
-export interface SmtpConfigView {
-  applicationId: string;
-  host: string;
-  port: number;
-  username: string;
-  fromAddress: string;
-  fromName: string | null;
-  secureMode: "auto" | "tls" | "starttls" | "none";
-  createdAt: string;
-  updatedAt: string;
-}
+export type { SmtpConfigView };
 
 export interface UpsertSmtpConfigInput {
   host: string;
