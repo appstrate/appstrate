@@ -25,7 +25,8 @@ import {
 } from "../../src/bundle/signing.ts";
 import { renderPrompt } from "../../src/bundle/prompt-renderer.ts";
 import { SnapshotContextProvider } from "../../src/providers/context/snapshot-provider.ts";
-import { MockRunner } from "../../src/runner/mock.ts";
+import { reduceRunEvents } from "../../src/runner/run-event-reducer.ts";
+import { toRunEvent } from "../../src/types/run-event.ts";
 import type { EventSink } from "../../src/interfaces/event-sink.ts";
 import type { AfpsEvent } from "../../src/types/afps-event.ts";
 import type { RunEvent } from "../../src/types/run-event.ts";
@@ -76,9 +77,7 @@ describe("fixtures/reference — end-to-end round trip", () => {
     expect(rendered).not.toContain("(no prior memories)");
   });
 
-  it("replays the scripted events through MockRunner and reduces them correctly", async () => {
-    const bytes = await readFile(join(FIXTURE, "bundle.afps"));
-    const bundle = loadBundleFromBuffer(bytes);
+  it("replays the scripted events through a sink and reduces them correctly", async () => {
     const context = await readJson<ExecutionContext>("context.json");
     const events = await readJson<AfpsEvent[]>("events.json");
 
@@ -92,12 +91,11 @@ describe("fixtures/reference — end-to-end round trip", () => {
         finalized = r;
       },
     };
-    const result = await new MockRunner({ events }).run({
-      bundle,
-      context,
-      sink,
-      contextProvider: new SnapshotContextProvider(),
-    });
+    for (const event of events) {
+      await sink.handle(toRunEvent({ event, runId: context.runId }));
+    }
+    const result = reduceRunEvents(emitted);
+    await sink.finalize(result);
 
     expect(emitted).toHaveLength(events.length);
     expect(result.memories).toHaveLength(1);

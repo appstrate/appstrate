@@ -4,63 +4,32 @@
 import { parseArgs } from "node:util";
 import { readFile, writeFile } from "node:fs/promises";
 import { loadBundleFromBuffer } from "../../bundle/loader.ts";
-import { MockRunner } from "../../runner/mock.ts";
-import { PiRunner, type PiModelApi } from "../../runner/pi.ts";
-import type { BundleRunner } from "../../runner/types.ts";
 import { ConsoleSink } from "../../sinks/console-sink.ts";
 import { FileSink } from "../../sinks/file-sink.ts";
 import { CompositeSink } from "../../sinks/composite-sink.ts";
-import {
-  SnapshotContextProvider,
-  type ContextSnapshot,
-} from "../../providers/context/snapshot-provider.ts";
+import { reduceRunEvents } from "../../runner/run-event-reducer.ts";
 import { afpsEventSchema, type AfpsEvent } from "../../types/afps-event.ts";
-import type { ExecutionContext } from "../../types/execution-context.ts";
+import { toRunEvent, type RunEvent } from "../../types/run-event.ts";
 import type { EventSink } from "../../interfaces/event-sink.ts";
 import type { CliIO } from "../index.ts";
 
-const HELP = `afps run — execute a bundle
+const HELP = `afps run — replay a scripted agent run through a bundle
 
 Usage:
-  afps run <bundle> [options]
+  afps run <bundle> --events <path> [options]
 
-Runners:
-  --runner mock              (default) Replay --events through MockRunner
-  --runner pi                Execute against an LLM via the Pi Coding Agent SDK
-                             (requires '@mariozechner/pi-coding-agent' +
-                             '@mariozechner/pi-ai')
-
-MockRunner options (required with --runner mock):
-  --events <path>            JSON array of AfpsEvent to replay
-
-PiRunner options (required with --runner pi):
-  --model <id>               LLM model id (e.g. claude-opus-4-7, gpt-4o-mini)
-  --api <pi-api>             Pi API id: anthropic-messages | openai-completions
-                             | openai-responses | google-generative-ai
-                             | mistral-conversations
-  --api-key <key>            Provider API key (or set LLM_API_KEY env var)
-  --provider <slug>          Explicit provider slug — derived from --api if omitted
-  --base-url <url>           Override the provider base URL (e.g. OpenRouter,
-                             self-hosted OpenAI-compatible endpoints)
-  --thinking off|low|medium|high   Default: medium
-
-Common options:
-  --context <path>    JSON file: { runId?, input? } (ExecutionContext).
-                      Defaults to { runId: "cli-run", input: {} }.
-  --snapshot <path>   JSON file: ContextSnapshot (memories/state/history)
-                      used by the SnapshotContextProvider.
-  --output <path>     Write the final RunResult as JSON to <path>.
+Options:
+  --events <path>     JSON array of AfpsEvent to replay through the sink.
+  --output <path>     Write the aggregated RunResult as JSON to <path>.
   --sink console|file|both   Sink strategy (default: console).
   --sink-file <path>  File path when --sink=file|both (defaults to
                       <bundle>.events.jsonl).
   --quiet             Suppress ConsoleSink output even when selected.
-`;
 
-interface RunContextFile {
-  runId?: string;
-  input?: unknown;
-  [key: string]: unknown;
-}
+Scripted replay exercises the sink + reducer contract only. No LLM is
+invoked and no network call is made — the command is suitable for
+deterministic fixtures, conformance demos, and regression tests.
+`;
 
 export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   let parsed;
@@ -68,16 +37,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
     parsed = parseArgs({
       args: [...argv],
       options: {
-        runner: { type: "string" },
         events: { type: "string" },
-        model: { type: "string" },
-        api: { type: "string" },
-        "api-key": { type: "string" },
-        provider: { type: "string" },
-        "base-url": { type: "string" },
-        thinking: { type: "string" },
-        context: { type: "string" },
-        snapshot: { type: "string" },
         output: { type: "string" },
         sink: { type: "string" },
         "sink-file": { type: "string" },
@@ -103,128 +63,39 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
     io.stderr(HELP);
     return 2;
   }
-
-  const runnerKind = parsed.values.runner ?? "mock";
-  if (runnerKind !== "mock" && runnerKind !== "pi") {
-    io.stderr(`afps run: unknown --runner '${runnerKind}' (mock|pi)\n`);
+  if (!parsed.values.events) {
+    io.stderr("afps run: --events <path> is required\n");
     return 2;
   }
 
-  let runnerInstance: BundleRunner;
-  if (runnerKind === "mock") {
-    if (!parsed.values.events) {
-      io.stderr("afps run: --runner mock requires --events <path>\n");
-      return 2;
-    }
-    const events = await readEvents(parsed.values.events, io);
-    if (!events) return 1;
-    runnerInstance = new MockRunner({ events });
-  } else {
-    const piRunner = buildPiRunner(parsed.values, io);
-    if (!piRunner) return 2;
-    runnerInstance = piRunner;
-  }
+  const events = await readEvents(parsed.values.events, io);
+  if (!events) return 1;
 
-  let runContext: RunContextFile = {};
-  if (parsed.values.context) {
-    try {
-      runContext = JSON.parse(await readFile(parsed.values.context, "utf-8")) as RunContextFile;
-    } catch (err) {
-      io.stderr(`afps run: cannot read context file: ${(err as Error).message}\n`);
-      return 1;
-    }
-  }
-  let snapshot: ContextSnapshot | undefined;
-  if (parsed.values.snapshot) {
-    try {
-      snapshot = JSON.parse(await readFile(parsed.values.snapshot, "utf-8")) as ContextSnapshot;
-    } catch (err) {
-      io.stderr(`afps run: cannot read snapshot file: ${(err as Error).message}\n`);
-      return 1;
-    }
-  }
-
+  // Bundle is parsed to validate its shape, but not otherwise consumed
+  // by scripted replay — the sink + reducer contract is independent of
+  // the bundle's prompt content.
   const bundleBytes = await readFile(bundlePath);
-  const bundle = loadBundleFromBuffer(bundleBytes);
-
-  const context: ExecutionContext = {
-    runId: runContext.runId ?? "cli-run",
-    input: runContext.input ?? {},
-    ...runContext,
-  };
+  loadBundleFromBuffer(bundleBytes);
 
   const sink = await buildSink(parsed.values, bundlePath, io);
   if (!sink) return 1;
 
-  const result = await runnerInstance.run({
-    bundle,
-    context,
-    sink,
-    contextProvider: new SnapshotContextProvider(snapshot),
-  });
+  const runId = "cli-run";
+  const emitted: RunEvent[] = [];
+  for (const event of events) {
+    const runEvent = toRunEvent({ event, runId });
+    emitted.push(runEvent);
+    await sink.handle(runEvent);
+  }
+
+  const result = reduceRunEvents(emitted);
+  await sink.finalize(result);
 
   if (parsed.values.output) {
     await writeFile(parsed.values.output, JSON.stringify(result, null, 2) + "\n");
     io.stdout(`→ wrote RunResult to ${parsed.values.output}\n`);
   }
-  if (result.error) {
-    io.stderr(`afps run: agent finished with error — ${result.error.message}\n`);
-    return 1;
-  }
   return 0;
-}
-
-const VALID_PI_APIS: readonly PiModelApi[] = [
-  "anthropic-messages",
-  "openai-completions",
-  "openai-responses",
-  "google-generative-ai",
-  "mistral-conversations",
-];
-
-const VALID_THINKING = ["off", "low", "medium", "high"] as const;
-
-function buildPiRunner(
-  values: Record<string, string | boolean | undefined>,
-  io: CliIO,
-): PiRunner | null {
-  const model = values.model as string | undefined;
-  const api = values.api as string | undefined;
-  const apiKey = (values["api-key"] as string | undefined) ?? process.env.LLM_API_KEY;
-  const provider = values.provider as string | undefined;
-  const thinking = values.thinking as string | undefined;
-
-  if (!model) {
-    io.stderr("afps run --runner pi: --model <id> is required\n");
-    return null;
-  }
-  if (!api) {
-    io.stderr("afps run --runner pi: --api <pi-api> is required\n");
-    return null;
-  }
-  if (!VALID_PI_APIS.includes(api as PiModelApi)) {
-    io.stderr(
-      `afps run --runner pi: unknown --api '${api}' (valid: ${VALID_PI_APIS.join(", ")})\n`,
-    );
-    return null;
-  }
-  if (!apiKey) {
-    io.stderr("afps run --runner pi: provide --api-key or set LLM_API_KEY\n");
-    return null;
-  }
-  if (thinking && !(VALID_THINKING as readonly string[]).includes(thinking)) {
-    io.stderr(
-      `afps run --runner pi: unknown --thinking '${thinking}' (valid: ${VALID_THINKING.join(", ")})\n`,
-    );
-    return null;
-  }
-
-  const baseUrl = values["base-url"] as string | undefined;
-  return new PiRunner({
-    model: { id: model, api: api as PiModelApi, provider, baseUrl },
-    apiKey,
-    thinkingLevel: (thinking as "off" | "low" | "medium" | "high" | undefined) ?? "medium",
-  });
 }
 
 async function readEvents(path: string, io: CliIO): Promise<AfpsEvent[] | null> {
@@ -272,7 +143,6 @@ async function buildSink(
     return null;
   }
   if (sinks.length === 0) {
-    // --sink=console + --quiet: return a no-op sink
     return {
       handle: async () => undefined,
       finalize: async () => undefined,
