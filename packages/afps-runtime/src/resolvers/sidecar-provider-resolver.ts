@@ -4,6 +4,7 @@
 import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
   makeProviderTool,
+  readProviderMeta,
   type ProviderCallFn,
   type ProviderCallResponse,
   type ProviderMeta,
@@ -53,7 +54,7 @@ export class SidecarProviderResolver implements ProviderResolver {
   async resolve(refs: ProviderRef[], bundle: Bundle): Promise<Tool[]> {
     const tools: Tool[] = [];
     for (const ref of refs) {
-      const meta = await readProviderMeta(bundle, ref, this.providerPrefix);
+      const meta = await readProviderMeta(bundle, ref, this.providerPrefix, true);
       const call = this.buildCall(ref, meta);
       tools.push(makeProviderTool(meta, call));
     }
@@ -92,29 +93,6 @@ export class SidecarProviderResolver implements ProviderResolver {
       return response;
     };
   }
-}
-
-/**
- * Load a provider manifest from the bundle. Missing files surface as
- * explicit errors so resolvers fail fast rather than silently falling
- * back to a permissive default.
- */
-async function readProviderMeta(
-  bundle: Bundle,
-  ref: ProviderRef,
-  prefix: string,
-): Promise<ProviderMeta> {
-  const candidates = [`${prefix}${ref.name}/provider.json`, `${prefix}${ref.name}/manifest.json`];
-  for (const path of candidates) {
-    if (await bundle.exists(path)) {
-      const raw = await bundle.readText(path);
-      const parsed = JSON.parse(raw) as Partial<ProviderMeta>;
-      return { name: ref.name, ...parsed };
-    }
-  }
-  // Fallback: a minimal meta with allowAllUris true. Some providers ship
-  // without a local manifest and rely on the sidecar for enforcement.
-  return { name: ref.name, allowAllUris: true };
 }
 
 /**

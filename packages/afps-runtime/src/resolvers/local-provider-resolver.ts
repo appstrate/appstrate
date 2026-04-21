@@ -4,6 +4,7 @@
 import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
   makeProviderTool,
+  readProviderMeta,
   type ProviderCallFn,
   type ProviderCallResponse,
   type ProviderMeta,
@@ -67,7 +68,7 @@ export class LocalProviderResolver implements ProviderResolver {
     const creds = await this.loadCreds();
     const tools: Tool[] = [];
     for (const ref of refs) {
-      const meta = await readProviderMeta(bundle, ref, this.providerPrefix);
+      const meta = await readProviderMeta(bundle, ref, this.providerPrefix, false);
       const entry = creds.providers[ref.name];
       if (!entry) {
         throw new Error(
@@ -124,22 +125,6 @@ export class LocalProviderResolver implements ProviderResolver {
       return response;
     };
   }
-}
-
-async function readProviderMeta(
-  bundle: Bundle,
-  ref: ProviderRef,
-  prefix: string,
-): Promise<ProviderMeta> {
-  const candidates = [`${prefix}${ref.name}/provider.json`, `${prefix}${ref.name}/manifest.json`];
-  for (const path of candidates) {
-    if (await bundle.exists(path)) {
-      const raw = await bundle.readText(path);
-      const parsed = JSON.parse(raw) as Partial<ProviderMeta>;
-      return { name: ref.name, ...parsed };
-    }
-  }
-  return { name: ref.name, allowAllUris: false };
 }
 
 function substitutePlaceholders(input: string, fields: Record<string, string>): string {

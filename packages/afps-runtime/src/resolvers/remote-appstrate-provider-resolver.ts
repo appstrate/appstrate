@@ -4,6 +4,7 @@
 import type { Bundle, ProviderRef, ProviderResolver, Tool } from "./types.ts";
 import {
   makeProviderTool,
+  readProviderMeta,
   type ProviderCallFn,
   type ProviderCallResponse,
   type ProviderMeta,
@@ -66,7 +67,7 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
   async resolve(refs: ProviderRef[], bundle: Bundle): Promise<Tool[]> {
     const tools: Tool[] = [];
     for (const ref of refs) {
-      const meta = await readProviderMeta(bundle, ref, this.providerPrefix);
+      const meta = await readProviderMeta(bundle, ref, this.providerPrefix, true);
       tools.push(makeProviderTool(meta, this.buildCall(ref, meta)));
     }
     return tools;
@@ -105,22 +106,6 @@ export class RemoteAppstrateProviderResolver implements ProviderResolver {
       return response;
     };
   }
-}
-
-async function readProviderMeta(
-  bundle: Bundle,
-  ref: ProviderRef,
-  prefix: string,
-): Promise<ProviderMeta> {
-  const candidates = [`${prefix}${ref.name}/provider.json`, `${prefix}${ref.name}/manifest.json`];
-  for (const path of candidates) {
-    if (await bundle.exists(path)) {
-      const raw = await bundle.readText(path);
-      const parsed = JSON.parse(raw) as Partial<ProviderMeta>;
-      return { name: ref.name, ...parsed };
-    }
-  }
-  return { name: ref.name, allowAllUris: true };
 }
 
 async function resolveBodyStream(

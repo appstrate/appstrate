@@ -10,7 +10,7 @@
  * Specification: `afps-spec/spec.md` §8.2, §8.4 — file-reference IO.
  */
 
-import type { JSONSchema, Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Bundle, JSONSchema, ProviderRef, Tool, ToolContext, ToolResult } from "./types.ts";
 
 /**
  * Metadata the resolver extracts from the provider manifest shipped in
@@ -196,6 +196,31 @@ export function makeProviderTool(
 
 function slugify(name: string): string {
   return name.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_");
+}
+
+/**
+ * Load a provider manifest from the bundle. Missing files surface the
+ * explicit {@link ProviderMeta} fallback so resolvers don't accidentally
+ * all share the same default — the sidecar/remote paths trust the
+ * transport to enforce the allowlist, while the local path refuses to
+ * call an un-manifested provider. Shared implementation lets all three
+ * resolvers fix bugs and add manifest fields in one place.
+ */
+export async function readProviderMeta(
+  bundle: Bundle,
+  ref: ProviderRef,
+  prefix: string,
+  fallbackAllowAllUris: boolean,
+): Promise<ProviderMeta> {
+  const candidates = [`${prefix}${ref.name}/provider.json`, `${prefix}${ref.name}/manifest.json`];
+  for (const path of candidates) {
+    if (await bundle.exists(path)) {
+      const raw = await bundle.readText(path);
+      const parsed = JSON.parse(raw) as Partial<ProviderMeta>;
+      return { name: ref.name, ...parsed };
+    }
+  }
+  return { name: ref.name, allowAllUris: fallbackAllowAllUris };
 }
 
 function enforceAuthorizedUris(meta: ProviderMeta, target: string): void {
