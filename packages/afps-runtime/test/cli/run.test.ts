@@ -22,9 +22,9 @@ describe("afps run", () => {
     const events = join(dir, "events.json");
     await writeBundleFile(bundle);
     await writeJsonFile(events, [
-      { type: "log", level: "info", message: "start" },
-      { type: "add_memory", content: "seen" },
-      { type: "output", data: { ok: true } },
+      { type: "log.written", timestamp: 0, runId: "r", level: "info", message: "start" },
+      { type: "memory.added", timestamp: 0, runId: "r", content: "seen" },
+      { type: "output.emitted", timestamp: 0, runId: "r", data: { ok: true } },
     ]);
     const io = captureIo();
     const code = await runCli(["run", bundle, "--events", events], io);
@@ -41,8 +41,8 @@ describe("afps run", () => {
     const output = join(dir, "result.json");
     await writeBundleFile(bundle);
     await writeJsonFile(events, [
-      { type: "add_memory", content: "m1" },
-      { type: "set_state", state: { done: true } },
+      { type: "memory.added", timestamp: 0, runId: "r", content: "m1" },
+      { type: "state.set", timestamp: 0, runId: "r", state: { done: true } },
     ]);
     const code = await runCli(
       ["run", bundle, "--events", events, "--output", output, "--quiet"],
@@ -60,8 +60,8 @@ describe("afps run", () => {
     const sinkFile = join(dir, "stream.jsonl");
     await writeBundleFile(bundle);
     await writeJsonFile(events, [
-      { type: "add_memory", content: "one" },
-      { type: "add_memory", content: "two" },
+      { type: "memory.added", timestamp: 0, runId: "r", content: "one" },
+      { type: "memory.added", timestamp: 0, runId: "r", content: "two" },
     ]);
     const code = await runCli(
       ["run", bundle, "--events", events, "--sink", "file", "--sink-file", sinkFile],

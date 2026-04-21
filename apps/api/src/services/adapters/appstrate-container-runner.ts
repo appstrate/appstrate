@@ -10,7 +10,7 @@
  * PromptContext assembly — those stay inside the adapter. The contract is:
  *
  *   adapter.execute(...) ──yields RunEvent──► sink.handle(event)
- *                        ──collected──────► reduceRunEvents ► RunResult
+ *                        ──collected──────► reduceEvents ► RunResult
  *                                         ──► sink.finalize(result)
  *
  * A `plan` (PromptContext + timeout + optional package/files) is handed to
@@ -19,7 +19,7 @@
  */
 
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import { reduceRunEvents, type RunResult } from "@appstrate/afps-runtime/runner";
+import { reduceEvents, type RunResult } from "@appstrate/afps-runtime/runner";
 import type { PromptContext, RunAdapter, UploadedFile } from "./types.ts";
 import type { AppstrateEventSink } from "./appstrate-event-sink.ts";
 
@@ -87,14 +87,14 @@ export class AppstrateContainerRunner {
       };
       events.push(errorEvent);
       await sink.handle(errorEvent);
-      const result = reduceRunEvents(events, {
+      const result = reduceEvents(events, {
         error: { message, stack: err instanceof Error ? err.stack : undefined },
       });
       await sink.finalize(result);
       return result;
     }
 
-    const result = reduceRunEvents(events);
+    const result = reduceEvents(events);
     await sink.finalize(result);
     return result;
   }

@@ -13,7 +13,7 @@ import {
   type RunEvent,
   type ToolContext,
 } from "../../src/resolvers/index.ts";
-import { reduceRunEvents } from "../../src/runner/index.ts";
+import { reduceEvents } from "../../src/runner/index.ts";
 
 function makeCtx(): { ctx: ToolContext; events: RunEvent[] } {
   const events: RunEvent[] = [];
@@ -84,7 +84,7 @@ describe("platform tools — open envelope emission", () => {
   });
 });
 
-describe("reduceRunEvents", () => {
+describe("reduceEvents", () => {
   it("reduces a canonical mix into the aggregated RunResult", () => {
     const base = { runId: "r" };
     const events: RunEvent[] = [
@@ -97,7 +97,7 @@ describe("reduceRunEvents", () => {
       { ...base, type: "report.appended", timestamp: 7, content: "line 2" },
       { ...base, type: "log.written", timestamp: 8, level: "info", message: "hello" },
     ];
-    const result = reduceRunEvents(events);
+    const result = reduceEvents(events);
     expect(result.memories).toEqual([{ content: "a" }, { content: "b" }]);
     expect(result.state).toEqual({ x: 1 });
     expect(result.output).toEqual({ a: 1, b: 2 });
@@ -111,7 +111,7 @@ describe("reduceRunEvents", () => {
       { type: "@my/audit.logged", timestamp: 1, runId: "r", what: "x" },
       { type: "memory.added", timestamp: 2, runId: "r", content: "kept" },
     ];
-    const result = reduceRunEvents(events);
+    const result = reduceEvents(events);
     expect(result.memories).toEqual([{ content: "kept" }]);
   });
 });

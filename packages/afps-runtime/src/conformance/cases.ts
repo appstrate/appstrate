@@ -16,7 +16,7 @@ import {
   signChildKey,
   type TrustRoot,
 } from "../bundle/signing.ts";
-import type { AfpsEvent } from "../types/afps-event.ts";
+import type { RunEvent } from "../types/run-event.ts";
 import type { ConformanceAdapter } from "./adapter.ts";
 
 export type ConformanceLevel = "L1" | "L2" | "L3" | "L4";
@@ -352,21 +352,25 @@ const L3_UNTRUSTED_ROOT: ConformanceCase = {
 
 // ─── L4 — Execution (event stream contract) ──────────────────────
 
-const SAMPLE_SCRIPT: AfpsEvent[] = [
-  { type: "log", level: "info", message: "starting" },
-  { type: "add_memory", content: "first" },
-  { type: "add_memory", content: "second" },
-  { type: "set_state", state: { counter: 1 } },
-  { type: "set_state", state: { counter: 2 } },
-  { type: "output", data: { answer: 42, partial: true } },
-  { type: "output", data: { partial: false, extra: "done" } },
-  { type: "report", content: "line 1" },
-  { type: "report", content: "line 2" },
+function scriptEvent(type: string, extra: Record<string, unknown>): RunEvent {
+  return { type, timestamp: 0, runId: "run_L4", ...extra };
+}
+
+const SAMPLE_SCRIPT: RunEvent[] = [
+  scriptEvent("log.written", { level: "info", message: "starting" }),
+  scriptEvent("memory.added", { content: "first" }),
+  scriptEvent("memory.added", { content: "second" }),
+  scriptEvent("state.set", { state: { counter: 1 } }),
+  scriptEvent("state.set", { state: { counter: 2 } }),
+  scriptEvent("output.emitted", { data: { answer: 42, partial: true } }),
+  scriptEvent("output.emitted", { data: { partial: false, extra: "done" } }),
+  scriptEvent("report.appended", { content: "line 1" }),
+  scriptEvent("report.appended", { content: "line 2" }),
 ];
 
 async function withScript(
   adapter: ConformanceAdapter,
-  events: readonly AfpsEvent[] = SAMPLE_SCRIPT,
+  events: readonly RunEvent[] = SAMPLE_SCRIPT,
 ): Promise<
   | { skipped: true }
   | { skipped: false; output: Awaited<ReturnType<NonNullable<ConformanceAdapter["runScripted"]>>> }

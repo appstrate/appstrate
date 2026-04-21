@@ -13,7 +13,7 @@ import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { AppstrateEventSink } from "../../../src/services/adapters/appstrate-event-sink.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import { reduceRunEvents, emptyRunResultFromRunEvents } from "@appstrate/afps-runtime/runner";
+import { reduceEvents, emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { db } from "@appstrate/db/client";
 import { runLogs } from "@appstrate/db/schema";
 import { eq, and, asc } from "drizzle-orm";
@@ -181,7 +181,7 @@ describe("AppstrateEventSink", () => {
     }
 
     expect(sink.result).toBeNull();
-    const result = reduceRunEvents(events);
+    const result = reduceEvents(events);
     await sink.finalize(result);
 
     expect(sink.result).not.toBeNull();
@@ -191,7 +191,7 @@ describe("AppstrateEventSink", () => {
 
   it("is compatible with emptyRunResult as a baseline", async () => {
     const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
-    await sink.finalize(emptyRunResultFromRunEvents());
-    expect(sink.result).toEqual(emptyRunResultFromRunEvents());
+    await sink.finalize(emptyRunResult());
+    expect(sink.result).toEqual(emptyRunResult());
   });
 });

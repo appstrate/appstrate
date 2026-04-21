@@ -7,18 +7,17 @@
  * the same {@link ConformanceAdapter} surface in their own language /
  * runtime.
  *
- * The L4 `runScripted` path replays the caller's `AfpsEvent[]` script
- * verbatim through a synthetic `EventSink`, converts each event to a
- * {@link RunEvent}, and reduces the stream into a {@link RunResult}
- * via {@link reduceRunEvents}. No runner class is involved — the suite
- * only validates the event / sink / reducer contract.
+ * The L4 `runScripted` path replays the caller's `RunEvent[]` script
+ * verbatim through a synthetic `EventSink` and reduces the stream into
+ * a {@link RunResult} via {@link reduceEvents}. No runner class is
+ * involved — the suite only validates the event / sink / reducer
+ * contract.
  */
 
 import { loadBundleFromBuffer } from "../bundle/loader.ts";
 import { verifyBundleSignature } from "../bundle/signing.ts";
 import { renderPrompt } from "../bundle/prompt-renderer.ts";
-import { reduceRunEvents } from "../runner/run-event-reducer.ts";
-import { toRunEvent } from "../types/run-event.ts";
+import { reduceEvents } from "../runner/reducer.ts";
 import type { EventSink } from "../interfaces/event-sink.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
 import type { RunEvent } from "../types/run-event.ts";
@@ -34,7 +33,7 @@ export function createDefaultAdapter(): ConformanceAdapter {
     },
     verifySignature: (canonicalBytes, signatureDoc, trustRoot) =>
       verifyBundleSignature(canonicalBytes, signatureDoc, trustRoot),
-    runScripted: async (_bundle, context, scriptedEvents): Promise<RunScriptedOutput> => {
+    runScripted: async (_bundle, _context, scriptedEvents): Promise<RunScriptedOutput> => {
       const emitted: RunEvent[] = [];
       let finalizeCalls = 0;
       const sink: EventSink = {
@@ -47,9 +46,9 @@ export function createDefaultAdapter(): ConformanceAdapter {
       };
 
       for (const event of scriptedEvents) {
-        await sink.handle(toRunEvent({ event, runId: context.runId }));
+        await sink.handle(event);
       }
-      const result: RunResult = reduceRunEvents(emitted);
+      const result: RunResult = reduceEvents(emitted);
       await sink.finalize(result);
 
       return { emitted, result, finalizeCalls };

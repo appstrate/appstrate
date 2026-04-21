@@ -1,34 +1,46 @@
 [
   {
-    "type": "log",
+    "type": "log.written",
+    "timestamp": 0,
+    "runId": "ref_run_001",
     "level": "info",
     "message": "starting reference run"
   },
   {
-    "type": "add_memory",
+    "type": "memory.added",
+    "timestamp": 0,
+    "runId": "ref_run_001",
     "content": "Reference agents are useful for contract tests."
   },
   {
-    "type": "set_state",
+    "type": "state.set",
+    "timestamp": 0,
+    "runId": "ref_run_001",
     "state": {
       "iteration": 1
     }
   },
   {
-    "type": "output",
+    "type": "output.emitted",
+    "timestamp": 0,
+    "runId": "ref_run_001",
     "data": {
       "summary": "AFPS ships a portable runtime.",
       "partial": true
     }
   },
   {
-    "type": "output",
+    "type": "output.emitted",
+    "timestamp": 0,
+    "runId": "ref_run_001",
     "data": {
       "partial": false
     }
   },
   {
-    "type": "report",
+    "type": "report.appended",
+    "timestamp": 0,
+    "runId": "ref_run_001",
     "content": "All checks executed."
   }
 ]

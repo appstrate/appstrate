@@ -18,7 +18,6 @@
 import type { LoadedBundle } from "../bundle/loader.ts";
 import type { TrustRoot, VerifySignatureResult } from "../bundle/signing.ts";
 import type { ExecutionContext, HistoryEntry, MemorySnapshot } from "../types/execution-context.ts";
-import type { AfpsEvent } from "../types/afps-event.ts";
 import type { RunEvent } from "../types/run-event.ts";
 import type { RunResult } from "../types/run-result.ts";
 
@@ -69,10 +68,9 @@ export interface ConformanceAdapter {
 
   /**
    * L4 — scripted execution. Given a bundle, context, and a scripted
-   * event list, the adapter MUST:
+   * list of {@link RunEvent}s, the adapter MUST:
    *
-   * 1. Emit each event through its internal sink as a {@link RunEvent}
-   *    in arrival order.
+   * 1. Emit each event through its internal sink in arrival order.
    * 2. Reduce the events into a `RunResult` using the canonical
    *    semantics (`memory.added` → append, `state.set` → last-write-wins,
    *    `output.emitted` → merge-patch, `report.appended` → concat,
@@ -84,7 +82,7 @@ export interface ConformanceAdapter {
   runScripted?(
     bundle: LoadedBundle,
     context: ExecutionContext,
-    scriptedEvents: readonly AfpsEvent[],
+    scriptedEvents: readonly RunEvent[],
   ): Promise<RunScriptedOutput>;
 }
 

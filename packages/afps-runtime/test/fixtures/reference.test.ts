@@ -24,10 +24,8 @@ import {
   type TrustRoot,
 } from "../../src/bundle/signing.ts";
 import { renderPrompt } from "../../src/bundle/prompt-renderer.ts";
-import { reduceRunEvents } from "../../src/runner/run-event-reducer.ts";
-import { toRunEvent } from "../../src/types/run-event.ts";
+import { reduceEvents } from "../../src/runner/reducer.ts";
 import type { EventSink } from "../../src/interfaces/event-sink.ts";
-import type { AfpsEvent } from "../../src/types/afps-event.ts";
 import type { RunEvent } from "../../src/types/run-event.ts";
 import type {
   ExecutionContext,
@@ -90,8 +88,7 @@ describe("fixtures/reference — end-to-end round trip", () => {
   });
 
   it("replays the scripted events through a sink and reduces them correctly", async () => {
-    const context = await readJson<ExecutionContext>("context.json");
-    const events = await readJson<AfpsEvent[]>("events.json");
+    const events = await readJson<RunEvent[]>("events.json");
 
     const emitted: RunEvent[] = [];
     let finalized: RunResult | undefined;
@@ -104,9 +101,9 @@ describe("fixtures/reference — end-to-end round trip", () => {
       },
     };
     for (const event of events) {
-      await sink.handle(toRunEvent({ event, runId: context.runId }));
+      await sink.handle(event);
     }
-    const result = reduceRunEvents(emitted);
+    const result = reduceEvents(emitted);
     await sink.finalize(result);
 
     expect(emitted).toHaveLength(events.length);

@@ -2,12 +2,7 @@
 // Copyright 2026 Appstrate
 
 export { type Runner, type RunOptions } from "./types.ts";
-export {
-  reduceRunEvents,
-  emptyRunResult as emptyRunResultFromRunEvents,
-  type ReduceRunEventsOptions,
-} from "./run-event-reducer.ts";
 export { reduceEvents, emptyRunResult, type ReduceOptions } from "./reducer.ts";
 // Re-exported for ergonomics: runners produce RunResult, so consumers
 // typically import it alongside the runner surface.
-export type { RunResult, RunError, LogEntry } from "../types/run-result.ts";
+export type { RunResult, RunError, LogEntry, LogLevel } from "../types/run-result.ts";

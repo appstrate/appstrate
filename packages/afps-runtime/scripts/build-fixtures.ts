@@ -60,13 +60,30 @@ const PROMPT = [
   "Produce a short summary about the topic.",
 ].join("\n");
 
+const REF_RUN_ID = "ref_run_001";
 const EVENTS = [
-  { type: "log", level: "info", message: "starting reference run" },
-  { type: "add_memory", content: "Reference agents are useful for contract tests." },
-  { type: "set_state", state: { iteration: 1 } },
-  { type: "output", data: { summary: "AFPS ships a portable runtime.", partial: true } },
-  { type: "output", data: { partial: false } },
-  { type: "report", content: "All checks executed." },
+  {
+    type: "log.written",
+    timestamp: 0,
+    runId: REF_RUN_ID,
+    level: "info",
+    message: "starting reference run",
+  },
+  {
+    type: "memory.added",
+    timestamp: 0,
+    runId: REF_RUN_ID,
+    content: "Reference agents are useful for contract tests.",
+  },
+  { type: "state.set", timestamp: 0, runId: REF_RUN_ID, state: { iteration: 1 } },
+  {
+    type: "output.emitted",
+    timestamp: 0,
+    runId: REF_RUN_ID,
+    data: { summary: "AFPS ships a portable runtime.", partial: true },
+  },
+  { type: "output.emitted", timestamp: 0, runId: REF_RUN_ID, data: { partial: false } },
+  { type: "report.appended", timestamp: 0, runId: REF_RUN_ID, content: "All checks executed." },
 ];
 
 const CONTEXT = { runId: "ref_run_001", input: { topic: "AFPS conformance" } };

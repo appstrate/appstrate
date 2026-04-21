@@ -1,19 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
-import type { LogLevel } from "./afps-event.ts";
+/**
+ * Severity levels carried by `log.written` run events. Mirrored on the
+ * aggregated {@link LogEntry} so the reducer can surface the same
+ * vocabulary back to callers.
+ */
+export type LogLevel = "info" | "warn" | "error";
 
 /**
  * Aggregated state at the end of a run.
  *
- * Built by the runtime by reducing the stream of {@link AfpsEvent} values
- * against the semantics defined in `AFPS_EXTENSION_ARCHITECTURE.md` §6:
+ * Built by the runtime by reducing the stream of {@link RunEvent} values
+ * against the canonical AFPS 1.3 semantics:
  *
- * - `add_memory` events append to `memories`
- * - `set_state` events overwrite `state` (last-write-wins)
- * - `output` events deep-merge into `output` (JSON merge-patch semantics)
- * - `report` events concatenate into `report` with `\n` separators
- * - `log` events append to `logs`
+ * - `memory.added` events append to `memories`
+ * - `state.set` events overwrite `state` (last-write-wins)
+ * - `output.emitted` events deep-merge into `output` (JSON merge-patch)
+ * - `report.appended` events concatenate into `report` with `\n` separators
+ * - `log.written` events append to `logs`
  *
  * Passed to {@link EventSink.finalize} when the run ends.
  */

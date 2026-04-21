@@ -7,9 +7,8 @@ import { loadBundleFromBuffer } from "../../bundle/loader.ts";
 import { ConsoleSink } from "../../sinks/console-sink.ts";
 import { FileSink } from "../../sinks/file-sink.ts";
 import { CompositeSink } from "../../sinks/composite-sink.ts";
-import { reduceRunEvents } from "../../runner/run-event-reducer.ts";
-import { afpsEventSchema, type AfpsEvent } from "../../types/afps-event.ts";
-import { toRunEvent, type RunEvent } from "../../types/run-event.ts";
+import { reduceEvents } from "../../runner/reducer.ts";
+import type { RunEvent } from "../../types/run-event.ts";
 import type { EventSink } from "../../interfaces/event-sink.ts";
 import type { CliIO } from "../index.ts";
 
@@ -19,7 +18,9 @@ Usage:
   afps run <bundle> --events <path> [options]
 
 Options:
-  --events <path>     JSON array of AfpsEvent to replay through the sink.
+  --events <path>     JSON array of RunEvent to replay through the sink.
+                      Each event must have \`type\`, \`timestamp\`, and
+                      \`runId\`; remaining fields are payload.
   --output <path>     Write the aggregated RunResult as JSON to <path>.
   --sink console|file|both   Sink strategy (default: console).
   --sink-file <path>  File path when --sink=file|both (defaults to
@@ -80,15 +81,10 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   const sink = await buildSink(parsed.values, bundlePath, io);
   if (!sink) return 1;
 
-  const runId = "cli-run";
-  const emitted: RunEvent[] = [];
   for (const event of events) {
-    const runEvent = toRunEvent({ event, runId });
-    emitted.push(runEvent);
-    await sink.handle(runEvent);
+    await sink.handle(event);
   }
-
-  const result = reduceRunEvents(emitted);
+  const result = reduceEvents(events);
   await sink.finalize(result);
 
   if (parsed.values.output) {
@@ -98,7 +94,7 @@ export async function run(argv: readonly string[], io: CliIO): Promise<number> {
   return 0;
 }
 
-async function readEvents(path: string, io: CliIO): Promise<AfpsEvent[] | null> {
+async function readEvents(path: string, io: CliIO): Promise<RunEvent[] | null> {
   let raw: unknown;
   try {
     raw = JSON.parse(await readFile(path, "utf-8"));
@@ -110,14 +106,21 @@ async function readEvents(path: string, io: CliIO): Promise<AfpsEvent[] | null> 
     io.stderr("afps run: --events file must contain a JSON array\n");
     return null;
   }
-  const events: AfpsEvent[] = [];
+  const events: RunEvent[] = [];
   for (let i = 0; i < raw.length; i++) {
-    const parsed = afpsEventSchema.safeParse(raw[i]);
-    if (!parsed.success) {
-      io.stderr(`afps run: invalid event at index ${i}: ${parsed.error.message}\n`);
+    const ev = raw[i];
+    if (
+      typeof ev !== "object" ||
+      ev === null ||
+      Array.isArray(ev) ||
+      typeof (ev as { type?: unknown }).type !== "string" ||
+      typeof (ev as { timestamp?: unknown }).timestamp !== "number" ||
+      typeof (ev as { runId?: unknown }).runId !== "string"
+    ) {
+      io.stderr(`afps run: invalid event at index ${i}: expected { type, timestamp, runId, … }\n`);
       return null;
     }
-    events.push(parsed.data);
+    events.push(ev as RunEvent);
   }
   return events;
 }

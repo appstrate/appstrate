@@ -7,7 +7,7 @@
  *   1. A scripted adapter yields a canonical RunEvent sequence.
  *   2. AppstrateContainerRunner forwards events to AppstrateEventSink.
  *   3. The run produces the same RunResult a runtime consumer would get
- *      from `reduceRunEvents` over the same stream.
+ *      from `reduceEvents` over the same stream.
  *   4. run_logs rows + the sink's aggregator reflect the expected
  *      DB side-effects (output + report + progress rows; memories
  *      captured in-memory for persistence by the caller).
@@ -26,7 +26,7 @@ import type {
   UploadedFile,
 } from "../../../src/services/adapters/types.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import { reduceRunEvents } from "@appstrate/afps-runtime/runner";
+import { reduceEvents } from "@appstrate/afps-runtime/runner";
 import { db } from "@appstrate/db/client";
 import { runLogs } from "@appstrate/db/schema";
 import { eq, and, asc } from "drizzle-orm";
@@ -102,7 +102,7 @@ describe("Parity E2E — full adapter stack", () => {
     runId = run.id;
   });
 
-  it("AppstrateContainerRunner → AppstrateEventSink produces the same RunResult as reduceRunEvents", async () => {
+  it("AppstrateContainerRunner → AppstrateEventSink produces the same RunResult as reduceEvents", async () => {
     const script: RunEvent[] = [
       {
         type: "appstrate.progress",
@@ -133,7 +133,7 @@ describe("Parity E2E — full adapter stack", () => {
 
     // Reducer agreement: the runner's result MUST match what any external
     // runtime consumer would get from reducing the same event stream.
-    const expected = reduceRunEvents(script);
+    const expected = reduceEvents(script);
     expect(result).toEqual(expected);
 
     // Sink aggregate mirrors the result.

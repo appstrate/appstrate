@@ -2,31 +2,21 @@
 // Copyright 2026 Appstrate
 
 /**
- * Event → {@link RunResult} reducer — the canonical way to aggregate a
- * stream of {@link AfpsEvent} values into the final run snapshot.
+ * RunEvent → RunResult reducer.
  *
- * Semantics (kept in lockstep with `AFPS_EXTENSION_ARCHITECTURE.md` §6):
+ * Consumes {@link RunEvent}s whose `type` is one of the reserved core
+ * domains (`memory.added` / `state.set` / `output.emitted` /
+ * `report.appended` / `log.written`). Events with any other `type` are
+ * passed through silently — the sink still sees them, but they do not
+ * contribute to the aggregated result.
  *
- * - `add_memory` appends a `{ content }` entry to `memories`
- * - `set_state` overwrites `state` (last-write-wins)
- * - `output` deep-merges object values (JSON merge-patch); scalars and
- *   arrays replace the previous output entirely
- * - `report` concatenates into `report` separated by `\n`
- * - `log` appends to `logs` with the provided timestamp (defaults to now)
- *
- * Pure function — no I/O, no mutation of inputs.
+ * Pure function — no IO, no mutation of inputs.
  */
 
-import type { AfpsEvent } from "../types/afps-event.ts";
+import type { RunEvent } from "../types/run-event.ts";
 import type { RunError, RunResult } from "../types/run-result.ts";
 
 export interface ReduceOptions {
-  /**
-   * Timestamp applied to log entries that the runtime surfaces through
-   * the reducer (events themselves don't carry a timestamp in v1).
-   * Defaults to `Date.now()`.
-   */
-  nowMs?: () => number;
   /** Optional error to attach after reduction (populated by the runner). */
   error?: RunError;
 }
@@ -41,27 +31,46 @@ export function emptyRunResult(): RunResult {
   };
 }
 
-export function reduceEvents(events: Iterable<AfpsEvent>, opts: ReduceOptions = {}): RunResult {
-  const now = opts.nowMs ?? Date.now;
+export function reduceEvents(events: Iterable<RunEvent>, opts: ReduceOptions = {}): RunResult {
   const result = emptyRunResult();
 
   for (const event of events) {
     switch (event.type) {
-      case "add_memory":
-        result.memories.push({ content: event.content });
+      case "memory.added": {
+        if (typeof event.content === "string") {
+          result.memories.push({ content: event.content });
+        }
         break;
-      case "set_state":
-        result.state = event.state;
+      }
+      case "state.set": {
+        result.state = event.state ?? null;
         break;
-      case "output":
+      }
+      case "output.emitted": {
         result.output = mergeOutput(result.output, event.data);
         break;
-      case "report":
-        result.report =
-          result.report === null ? event.content : `${result.report}\n${event.content}`;
+      }
+      case "report.appended": {
+        if (typeof event.content === "string") {
+          result.report =
+            result.report === null ? event.content : `${result.report}\n${event.content}`;
+        }
         break;
-      case "log":
-        result.logs.push({ level: event.level, message: event.message, timestamp: now() });
+      }
+      case "log.written": {
+        const level = event.level;
+        const message = event.message;
+        if (
+          (level === "info" || level === "warn" || level === "error") &&
+          typeof message === "string"
+        ) {
+          result.logs.push({ level, message, timestamp: event.timestamp });
+        }
+        break;
+      }
+      default:
+        // Third-party / unknown event types do not contribute — the sink
+        // still sees them, they just do not fold into the summary.
         break;
     }
   }
@@ -72,11 +81,6 @@ export function reduceEvents(events: Iterable<AfpsEvent>, opts: ReduceOptions = 
   return result;
 }
 
-/**
- * JSON merge-patch on plain objects. Non-object values replace the
- * previous output wholesale (matching the spec: arrays and scalars are
- * not deep-merged).
- */
 function mergeOutput(previous: unknown, next: unknown): unknown {
   if (!isPlainObject(previous) || !isPlainObject(next)) {
     return next;
