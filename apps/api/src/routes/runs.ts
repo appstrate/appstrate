@@ -21,6 +21,8 @@ import type { AppstrateRunPlan, UploadedFile } from "../services/adapters/types.
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { AppstrateEventSink } from "../services/adapters/appstrate-event-sink.ts";
 import { AppstrateContainerRunner } from "../services/adapters/appstrate-container-runner.ts";
+import { loadBundleFromBuffer, type LoadedBundle } from "@appstrate/afps-runtime/bundle";
+import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 import { getVersionDetail } from "../services/package-versions.ts";
 import { validateOutput } from "../services/schema.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
@@ -45,6 +47,36 @@ import {
   isInlineShadowPackageId,
 } from "../services/inline-run.ts";
 import { runInlinePreflight, type InlineRunBody } from "../services/inline-run-preflight.ts";
+
+/**
+ * Build a {@link LoadedBundle} for the Runner contract. When the route
+ * already has the packaged ZIP (produced by `buildAgentPackage`), we
+ * parse it via the runtime loader so the shape matches what an external
+ * consumer would see. Otherwise we synthesise a minimal bundle from the
+ * in-memory agent — sufficient for the contract since
+ * AppstrateContainerRunner delegates execution to the Pi container,
+ * which reads the bundle from `/workspace/agent-package.afps`.
+ */
+async function buildRunnerBundle(
+  agent: LoadedPackage,
+  agentPackage: Buffer | null,
+): Promise<LoadedBundle> {
+  if (agentPackage) {
+    return loadBundleFromBuffer(agentPackage);
+  }
+  const encoder = new TextEncoder();
+  const files: Record<string, Uint8Array> = {
+    "manifest.json": encoder.encode(JSON.stringify(agent.manifest, null, 2)),
+    "prompt.md": encoder.encode(agent.prompt),
+  };
+  return {
+    manifest: agent.manifest as Record<string, unknown>,
+    prompt: agent.prompt,
+    files,
+    compressedSize: 0,
+    decompressedSize: Object.values(files).reduce((acc, buf) => acc + buf.byteLength, 0),
+  };
+}
 
 async function collectAfterRunMetadata(
   params: RunStatusChangeParams,
@@ -103,8 +135,17 @@ export async function executeAgentInBackground(
       },
     });
 
+    const bundle = await buildRunnerBundle(agent, agentPackage ?? null);
+    const providerResolver: ProviderResolver = { resolve: async () => [] };
+
     try {
-      await runner.run({ runId, context, sink, signal });
+      await runner.run({
+        bundle,
+        context,
+        providerResolver,
+        eventSink: sink,
+        signal,
+      });
     } catch (err) {
       if (signal.aborted) {
         // Cancelled by user — cancel route already wrote DB status

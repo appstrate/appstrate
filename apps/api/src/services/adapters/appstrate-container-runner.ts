@@ -1,42 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Appstrate-backed container-delegating runner — drives a {@link RunAdapter}
- * (typically {@link PiAdapter}), forwards every {@link RunEvent} it yields
- * to an {@link AppstrateEventSink}, and returns the reduced {@link RunResult}
- * the runtime contract produces.
+ * Appstrate-backed {@link Runner} — conforms to the AFPS 1.3 runtime
+ * surface from `@appstrate/afps-runtime/runner`. Drives a
+ * {@link RunAdapter} (typically {@link PiAdapter}), forwards every
+ * {@link RunEvent} it yields to the caller's {@link EventSink}, and
+ * finalises with the reducer-produced {@link RunResult}.
  *
- * The runner intentionally knows nothing about Docker, sidecar pools, or
- * plan assembly — those stay inside the adapter. The contract is:
- *
- *   adapter.execute(...) ──yields RunEvent──► sink.handle(event)
+ *   adapter.execute(...) ──yields RunEvent──► eventSink.handle(event)
  *                        ──collected──────► reduceEvents ► RunResult
- *                                         ──► sink.finalize(result)
+ *                                         ──► eventSink.finalize(result)
  *
- * The platform {@link AppstrateRunPlan} is constructor-time configuration
- * (llmConfig, providers, timeout, files, proxy). The AFPS
- * {@link ExecutionContext} is run-time input and travels through
- * {@link RunContainerArgs}.
+ * The platform {@link AppstrateRunPlan} (llmConfig, providers, timeout,
+ * files, proxy) is constructor-time configuration. The AFPS
+ * {@link ExecutionContext} and runtime dependencies (bundle, sink,
+ * resolvers) travel through {@link RunOptions}.
  */
 
-import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
-import { reduceEvents, type RunResult } from "@appstrate/afps-runtime/runner";
+import type { RunEvent } from "@appstrate/afps-runtime/types";
+import {
+  reduceEvents,
+  type RunResult,
+  type Runner,
+  type RunOptions,
+} from "@appstrate/afps-runtime/runner";
 import type { AppstrateRunPlan, RunAdapter } from "./types.ts";
-import type { AppstrateEventSink } from "./appstrate-event-sink.ts";
 
 export interface AppstrateContainerRunnerOptions {
   adapter: RunAdapter;
   plan: AppstrateRunPlan;
 }
 
-export interface RunContainerArgs {
-  runId: string;
-  context: ExecutionContext;
-  sink: AppstrateEventSink;
-  signal?: AbortSignal;
-}
-
-export class AppstrateContainerRunner {
+export class AppstrateContainerRunner implements Runner {
   readonly name = "appstrate-container-runner";
 
   private readonly adapter: RunAdapter;
@@ -47,15 +42,17 @@ export class AppstrateContainerRunner {
     this.plan = opts.plan;
   }
 
-  async run({ runId, context, sink, signal }: RunContainerArgs): Promise<RunResult> {
+  async run(options: RunOptions): Promise<void> {
+    const { context, eventSink, signal } = options;
     signal?.throwIfAborted();
 
+    const runId = context.runId;
     const events: RunEvent[] = [];
 
     try {
       for await (const event of this.adapter.execute(runId, context, this.plan, signal)) {
         events.push(event);
-        await sink.handle(event);
+        await eventSink.handle(event);
       }
     } catch (err) {
       if (signal?.aborted) {
@@ -71,16 +68,15 @@ export class AppstrateContainerRunner {
         message,
       };
       events.push(errorEvent);
-      await sink.handle(errorEvent);
+      await eventSink.handle(errorEvent);
       const result = reduceEvents(events, {
         error: { message, stack: err instanceof Error ? err.stack : undefined },
       });
-      await sink.finalize(result);
-      return result;
+      await eventSink.finalize(result);
+      return;
     }
 
-    const result = reduceEvents(events);
-    await sink.finalize(result);
-    return result;
+    const result: RunResult = reduceEvents(events);
+    await eventSink.finalize(result);
   }
 }

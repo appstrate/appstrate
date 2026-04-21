@@ -23,6 +23,20 @@ import { AppstrateContainerRunner } from "../../../src/services/adapters/appstra
 import type { AppstrateRunPlan, RunAdapter } from "../../../src/services/adapters/types.ts";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import { reduceEvents } from "@appstrate/afps-runtime/runner";
+import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
+import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
+
+function makeBundle(): LoadedBundle {
+  return {
+    manifest: { name: "parity", version: "0.0.0" },
+    prompt: "Parity agent body: topic={{input.topic}}",
+    files: {},
+    compressedSize: 0,
+    decompressedSize: 0,
+  };
+}
+
+const noopProviderResolver: ProviderResolver = { resolve: async () => [] };
 import { db } from "@appstrate/db/client";
 import { runLogs } from "@appstrate/db/schema";
 import { eq, and, asc } from "drizzle-orm";
@@ -127,12 +141,17 @@ describe("Parity E2E — full adapter stack", () => {
     });
     const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
 
-    const result = await runner.run({ runId, context: baseContext(runId), sink });
+    await runner.run({
+      bundle: makeBundle(),
+      context: baseContext(runId),
+      providerResolver: noopProviderResolver,
+      eventSink: sink,
+    });
 
-    // Reducer agreement: the runner's result MUST match what any external
-    // runtime consumer would get from reducing the same event stream.
+    // Reducer agreement: the sink's finalised result MUST match what any
+    // external runtime consumer would get from reducing the same event stream.
     const expected = reduceEvents(script);
-    expect(result).toEqual(expected);
+    expect(sink.result).toEqual(expected);
 
     // Sink aggregate mirrors the result.
     expect(sink.current.output).toEqual({ deliverable: "shipped" });

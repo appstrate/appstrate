@@ -14,7 +14,8 @@ import { AppstrateContainerRunner } from "../../src/services/adapters/appstrate-
 import type { AppstrateRunPlan, RunAdapter } from "../../src/services/adapters/types.ts";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
-import type { AppstrateEventSink } from "../../src/services/adapters/appstrate-event-sink.ts";
+import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
+import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 
 function makePlan(): AppstrateRunPlan {
   return {
@@ -46,6 +47,18 @@ function makeContext(runId: string): ExecutionContext {
   };
 }
 
+function makeBundle(): LoadedBundle {
+  return {
+    manifest: { name: "test", version: "0.0.0" },
+    prompt: "unused",
+    files: {},
+    compressedSize: 0,
+    decompressedSize: 0,
+  };
+}
+
+const noopProviderResolver: ProviderResolver = { resolve: async () => [] };
+
 function event(runId: string, type: string, extra: Record<string, unknown> = {}): RunEvent {
   return { type, timestamp: Date.now(), runId, ...extra };
 }
@@ -74,8 +87,7 @@ class FailingAdapter implements RunAdapter {
 
 /**
  * Minimal sink that records events and tracks final RunResult without
- * touching the DB — shares the structural surface the runner expects
- * from {@link AppstrateEventSink} (handle + finalize).
+ * touching the DB — conforms structurally to the runtime `EventSink`.
  */
 class RecordingSink {
   events: RunEvent[] = [];
@@ -106,10 +118,11 @@ describe("AppstrateContainerRunner", () => {
     });
     const sink = new RecordingSink();
 
-    const result = await runner.run({
-      runId,
+    await runner.run({
+      bundle: makeBundle(),
       context: makeContext(runId),
-      sink: sink as unknown as AppstrateEventSink,
+      providerResolver: noopProviderResolver,
+      eventSink: sink,
     });
 
     expect(sink.events.map((e) => e.type)).toEqual([
@@ -121,7 +134,7 @@ describe("AppstrateContainerRunner", () => {
       "report.appended",
     ]);
 
-    expect(result).toEqual(sink.finalResult!);
+    const result = sink.finalResult!;
     expect(result.output).toEqual({ a: 1, b: 2 });
     expect(result.state).toEqual({ counter: 99 });
     expect(result.memories).toEqual([{ content: "keep this" }]);
@@ -141,9 +154,10 @@ describe("AppstrateContainerRunner", () => {
     const sink = new RecordingSink();
 
     await runner.run({
-      runId,
+      bundle: makeBundle(),
       context: makeContext(runId),
-      sink: sink as unknown as AppstrateEventSink,
+      providerResolver: noopProviderResolver,
+      eventSink: sink,
     });
 
     expect(sink.events).toHaveLength(1);
@@ -158,17 +172,18 @@ describe("AppstrateContainerRunner", () => {
     });
     const sink = new RecordingSink();
 
-    const result = await runner.run({
-      runId,
+    await runner.run({
+      bundle: makeBundle(),
       context: makeContext(runId),
-      sink: sink as unknown as AppstrateEventSink,
+      providerResolver: noopProviderResolver,
+      eventSink: sink,
     });
 
     expect(sink.events).toHaveLength(1);
     expect(sink.events[0]!.type).toBe("appstrate.error");
     expect(sink.events[0]!.message).toBe("crash");
-    expect(result.error?.message).toBe("crash");
     expect(sink.finalResult).not.toBeNull();
+    expect(sink.finalResult!.error?.message).toBe("crash");
   });
 
   it("rethrows when the abort signal triggered the error (caller owns finalisation)", async () => {
@@ -183,9 +198,10 @@ describe("AppstrateContainerRunner", () => {
 
     await expect(
       runner.run({
-        runId,
+        bundle: makeBundle(),
         context: makeContext(runId),
-        sink: sink as unknown as AppstrateEventSink,
+        providerResolver: noopProviderResolver,
+        eventSink: sink,
         signal: controller.signal,
       }),
     ).rejects.toBeDefined();
