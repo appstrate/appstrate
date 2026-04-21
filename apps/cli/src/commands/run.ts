@@ -18,7 +18,11 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { PiRunner, prepareBundleForPi } from "@appstrate/runner-pi";
+import {
+  PiRunner,
+  prepareBundleForPi,
+  buildProviderExtensionFactories,
+} from "@appstrate/runner-pi";
 import { loadBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import { renderPrompt } from "@appstrate/afps-runtime";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
@@ -103,6 +107,26 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
 
   // ─── 7. ExecutionContext + system prompt (AFPS canonical render) ──
   const runId = opts.runId ?? `cli_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+  // ─── 7a. Provider tools — bridge AFPS ProviderResolver → Pi factories ──
+  // PiRunner takes pre-built Pi extension factories; AFPS provider tools
+  // (e.g. `gmail_call`) are produced by the resolver so we convert them
+  // here, splice them next to the bundle's own tool factories.
+  const providerFactories = await buildProviderExtensionFactories({
+    bundle,
+    providerResolver,
+    runId,
+    workspace: workspaceDir,
+    emitProvider: () => {
+      // Provider `ctx.emit` events are currently swallowed in CLI mode;
+      // the stdout JSONL sink already reflects tool-call activity via
+      // Pi SDK's own `tool_execution_start` events. A dedicated
+      // `provider.called` stream can be wired later if useful.
+    },
+  });
+  if (!opts.json && providerFactories.length > 0) {
+    process.stderr.write(`→ wired ${providerFactories.length} provider tool(s)\n`);
+  }
   const context: ExecutionContext = {
     runId,
     input,
@@ -136,7 +160,7 @@ async function runCommandInner(opts: RunCommandOptions): Promise<void> {
       systemPrompt,
       cwd: workspaceDir,
       agentDir: path.join(workspaceDir, ".pi-agent"),
-      extensionFactories: prepared.extensionFactories,
+      extensionFactories: [...prepared.extensionFactories, ...providerFactories],
       authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
     });
     await runner.run({

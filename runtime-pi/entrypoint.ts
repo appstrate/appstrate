@@ -27,9 +27,14 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { type ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import { type Api, type Model } from "@mariozechner/pi-ai";
-import { PiRunner, prepareBundleForPi } from "@appstrate/runner-pi";
+import {
+  PiRunner,
+  prepareBundleForPi,
+  buildProviderExtensionFactories,
+} from "@appstrate/runner-pi";
 import { loadBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
+import { SidecarProviderResolver, type ProviderResolver } from "@appstrate/afps-runtime/resolvers";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { wrapExtensionFactory } from "./extension-wrapper.ts";
@@ -161,6 +166,46 @@ if (bundle) {
 
 await loadExtensionsFromDir("/runtime/extensions", "runtime");
 
+// --- 2c. Phase C: wire provider tools via the sidecar resolver ---
+// Each `dependencies.providers[]` entry in the bundle manifest is turned
+// into a typed `<provider>_call` tool (e.g. `appstrate_gmail_call`) that
+// proxies through the sidecar. This replaces the legacy `curl
+// $SIDECAR_URL/proxy` pattern with a structured, observable tool call
+// while keeping the sidecar HTTP contract unchanged.
+
+const sidecarUrl = process.env.SIDECAR_URL;
+let providerResolver: ProviderResolver = { resolve: async () => [] };
+const runIdEarly = process.env.AGENT_RUN_ID ?? "local_run";
+const workspaceForProviders = WORKSPACE;
+
+if (bundle && sidecarUrl) {
+  try {
+    providerResolver = new SidecarProviderResolver({
+      sidecarUrl,
+      providerPrefix: "providers/",
+    });
+    const providerFactories = await buildProviderExtensionFactories({
+      bundle,
+      providerResolver,
+      runId: runIdEarly,
+      workspace: workspaceForProviders,
+      emitProvider: (event) => {
+        // Route provider lifecycle events into the stdout JSONL stream
+        // so the platform observes each call structurally.
+        emit(event as Record<string, unknown>);
+      },
+    });
+    extensionFactories.push(...providerFactories);
+  } catch (err) {
+    emit({
+      type: "appstrate.error",
+      timestamp: Date.now(),
+      runId: runIdEarly,
+      message: `Failed to wire provider tools: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+}
+
 // --- 3. Model + system prompt from env ---
 
 const api = process.env.MODEL_API;
@@ -235,10 +280,13 @@ const stdoutSink: EventSink = {
   },
 };
 
-// --- 6. Minimal bundle + noop resolvers (platform already set up files) ---
+// --- 6. Resolve bundle for PiRunner (fallback to synthetic when no .afps) ---
+// PiRunner needs a LoadedBundle-shaped value; when no agent-package.afps
+// was present, the platform pre-installed files directly so we hand it a
+// minimal stub whose content is never re-consumed.
 
 const encoder = new TextEncoder();
-const bundle = {
+const runnerBundle = bundle ?? {
   manifest: { name: "in-container", version: "0.0.0" } as Record<string, unknown>,
   prompt: systemPrompt,
   files: {
@@ -248,8 +296,6 @@ const bundle = {
   compressedSize: 0,
   decompressedSize: 0,
 };
-
-const providerResolver = { resolve: async () => [] };
 
 // --- 7. Run via PiRunner ---
 
@@ -265,7 +311,7 @@ try {
   });
 
   await runner.run({
-    bundle,
+    bundle: runnerBundle,
     context,
     providerResolver,
     eventSink: stdoutSink,

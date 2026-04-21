@@ -14,3 +14,10 @@ export {
   type PrepareBundleOptions,
   type PreparedBundle,
 } from "./bundle-extensions.ts";
+
+export {
+  buildProviderExtensionFactories,
+  readProviderRefs,
+  afpsToolToPiExtension,
+  type ProviderEventEmitter,
+} from "./provider-bridge.ts";

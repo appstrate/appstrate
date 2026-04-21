@@ -28,7 +28,7 @@
  *   1. `## System` — identity + environment (ephemeral, timeout, workspace)
  *   2. `### Tools` — bundle tool catalogue + TOOL.md docs
  *   3. `### Skills` — bundle skill catalogue
- *   4. `## Authenticated Provider API` — sidecar proxy usage per provider
+ *   4. `## Connected Providers` — `<provider>_call` tool catalogue
  *   5. `## User Input` + `## Documents` — run-scoped input + files
  *   6. `## Configuration` — per-agent config values
  *   7. `## Previous State` — state from last run (if any)
@@ -45,11 +45,7 @@
 
 import type { AppstrateRunPlan } from "./types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
-import {
-  getCredentialFieldName,
-  getDefaultAuthorizedUris,
-  type ProviderDefinition,
-} from "@appstrate/connect";
+import { getDefaultAuthorizedUris, type ProviderDefinition } from "@appstrate/connect";
 import { isFileField } from "@appstrate/core/form";
 import { sanitizeStorageKey } from "../file-storage.ts";
 import { renderTemplate } from "@appstrate/afps-runtime/template";
@@ -90,6 +86,16 @@ function buildTemplateView(context: ExecutionContext): PromptView {
   };
 }
 
+/**
+ * Compute the tool name the AFPS `makeProviderTool` factory produces for a
+ * given provider package id. Must stay in sync with `slugify()` in
+ * `packages/afps-runtime/src/resolvers/provider-tool.ts`: strip the
+ * leading `@`, replace every non-word character with `_`, append `_call`.
+ */
+function providerToolName(providerId: string): string {
+  return `${providerId.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_")}_call`;
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -119,8 +125,8 @@ export function buildPlatformSystemPrompt(
   sections.push(
     "- **Network access**: Outbound HTTP/HTTPS is available. " +
       "Use `curl`, `fetch`, or any HTTP client to call public APIs and websites directly. " +
-      "Only authenticated requests to connected providers require the sidecar credential proxy " +
-      "(`$SIDECAR_URL/proxy`) — see **Authenticated Provider API** below.",
+      "Authenticated requests to connected providers go through the `<provider>_call` tools " +
+      "listed under **Connected Providers** — credentials are injected server-side.",
   );
   if (plan.timeout) {
     sections.push(
@@ -168,97 +174,29 @@ export function buildPlatformSystemPrompt(
     sections.push("");
   }
 
-  // --- Authenticated provider API access ---
+  // --- Connected providers ---
+  // Each connected provider is exposed as a typed `<slug>_call` tool that
+  // the AFPS runtime registered for this run. The tool injects credentials
+  // server-side before dispatch, enforces the URL allowlist, and returns
+  // the upstream `{ status, headers, body }` as a single JSON string. The
+  // agent never sees raw tokens or constructs curl commands.
   if (connectedProviders.length > 0) {
-    sections.push("## Authenticated Provider API\n");
+    sections.push("## Connected Providers\n");
     sections.push(
-      "The sidecar credential proxy at `$SIDECAR_URL/proxy` injects the user's credentials into requests " +
-        "to connected provider APIs. You never see or handle raw tokens.\n",
+      "Use the tool listed next to each provider to make authenticated calls. " +
+        "Pass `method`, `target` (absolute URL — must match the provider's authorized URLs), " +
+        "and optional `headers` / `body`. Non-2xx upstream responses are returned with `isError: true` — " +
+        "read the body to diagnose rather than retrying blindly. Proxy timeout is 30 s. " +
+        "For other public APIs (no auth), call them directly with `curl` / `fetch`.\n",
     );
-    sections.push(
-      "**Use this proxy ONLY for requests to connected providers listed below.** " +
-        "For public endpoints (no authentication required), call them directly with `curl` or `fetch` — " +
-        "do not route them through the sidecar.\n",
-    );
-    sections.push("Required headers:");
-    sections.push("- `X-Provider`: the provider ID (see list below)");
-    sections.push("- `X-Target`: the target URL (must match the provider's authorized URLs)");
-    sections.push("- All other headers and the body are forwarded as-is to the target");
-    sections.push(
-      "- Use `{{variable}}` placeholders in `X-Target` and headers — they are replaced with real credentials at request time",
-    );
-    sections.push(
-      "- Add `X-Substitute-Body: true` if the request body also contains `{{variable}}` placeholders\n",
-    );
-    sections.push("Example:");
-    sections.push("```bash");
-    sections.push(`curl -s "$SIDECAR_URL/proxy" \\`);
-    sections.push(`  -H "X-Provider: <provider_id>" \\`);
-    sections.push(`  -H "X-Target: https://api.example.com/endpoint" \\`);
-    sections.push(`  -H "<HeaderName>: <Prefix>{{credential_field}}"`);
-    sections.push("```\n");
-    sections.push(
-      "The proxy returns the upstream response as-is (status code, body, Content-Type). " +
-        "If the response was truncated (>50 KB), the `X-Truncated: true` header is present — " +
-        "paginate or narrow your query, or send `X-Max-Response-Size: <bytes>` (up to 1 MB) to raise the limit.\n",
-    );
-    sections.push(
-      "Requests to the proxy timeout after 30 seconds. " +
-        "For slow endpoints, paginate or request smaller payloads.\n",
-    );
-    sections.push(
-      "If the proxy itself encounters an error (invalid provider, unauthorized URL, missing credentials), " +
-        'it returns a JSON `{ "error": "..." }` body with a 4xx/5xx status — ' +
-        "read the error message to diagnose the issue instead of retrying blindly.\n",
-    );
-    sections.push(
-      "The proxy maintains a cookie jar per provider — `Set-Cookie` headers from upstream responses " +
-        "are stored automatically and sent on subsequent requests. " +
-        "You do not need to manage cookies yourself.\n",
-    );
-
-    sections.push("### Connected Providers\n");
 
     for (const provider of connectedProviders) {
       const displayName = provider.displayName ?? provider.id;
       const authorizedUris = getDefaultAuthorizedUris(provider as ProviderDefinition);
       const allowAllUris = provider.allowAllUris ?? false;
+      const toolName = providerToolName(provider.id);
 
-      sections.push(`- **${displayName}** (provider ID: \`${provider.id}\`)`);
-
-      const props =
-        (provider.credentialSchema?.properties as
-          | Record<string, { description?: string }>
-          | undefined) ?? {};
-      const varEntries = Object.entries(props);
-
-      // OAuth2/oauth1/api_key/basic all have a well-defined primary field
-      // (resolved by getCredentialFieldName). `custom` providers with no
-      // explicit fieldName don't — fall back to listing all schema variables.
-      const resolvedFieldName =
-        provider.credentialFieldName ??
-        (provider.authMode !== "custom"
-          ? getCredentialFieldName(provider as ProviderDefinition)
-          : undefined);
-
-      if (resolvedFieldName) {
-        const headerName = provider.credentialHeaderName ?? "Authorization";
-        const headerPrefix = provider.credentialHeaderPrefix ?? "Bearer ";
-        sections.push(`  Auth: \`${headerName}: ${headerPrefix}{{${resolvedFieldName}}}\``);
-
-        const extraVars = varEntries
-          .filter(([name]) => name !== resolvedFieldName)
-          .map(([name, prop]) => `\`{{${name}}}\` — ${prop?.description ?? name}`);
-        if (extraVars.length > 0) {
-          sections.push(`  Other credential vars: ${extraVars.join(", ")}`);
-        }
-      } else if (varEntries.length > 0) {
-        // Custom provider with no primary field — list all declared credentials.
-        const varDescriptions = varEntries.map(
-          ([name, prop]) => `\`{{${name}}}\` — ${prop?.description ?? name}`,
-        );
-        sections.push(`  Credentials: ${varDescriptions.join(", ")}`);
-      }
+      sections.push(`- **${displayName}** (\`${provider.id}\`) → \`${toolName}\``);
 
       if (provider.hasProviderDoc) {
         sections.push(`  API docs: \`.pi/providers/${provider.id}/PROVIDER.md\``);

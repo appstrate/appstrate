@@ -429,7 +429,7 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     expect(prompt).not.toContain("Documentation:");
   });
 
-  it("includes authenticated provider API section when connected", () => {
+  it("advertises a `<slug>_call` tool per connected provider (no curl / no $SIDECAR_URL)", () => {
     const ctx = baseContext({
       tokens: { "@test/gmail": "access_token_123" },
       providers: [
@@ -445,14 +445,17 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     });
 
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Authenticated Provider API");
-    expect(prompt).toContain("$SIDECAR_URL/proxy");
-    expect(prompt).toContain("X-Provider");
-    expect(prompt).toContain("X-Target");
+    expect(prompt).toContain("## Connected Providers");
+    // Tool name matches the slug produced by makeProviderTool.
+    expect(prompt).toContain("test_gmail_call");
     expect(prompt).toContain("Gmail");
     expect(prompt).toContain("@test/gmail");
-    // Auth line must show the correct credential placeholder
-    expect(prompt).toContain("Authorization: Bearer {{access_token}}");
+    // No more legacy curl / sidecar boilerplate inside the provider section.
+    expect(prompt).not.toContain("## Authenticated Provider API");
+    expect(prompt).not.toContain("$SIDECAR_URL/proxy");
+    expect(prompt).not.toContain("X-Provider");
+    expect(prompt).not.toContain("X-Target");
+    expect(prompt).not.toContain("{{access_token}}");
   });
 
   it("omits provider section when no connected providers", () => {
@@ -469,6 +472,7 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     });
 
     const prompt = buildEnrichedPrompt(ctx);
+    expect(prompt).not.toContain("## Connected Providers");
     expect(prompt).not.toContain("## Authenticated Provider API");
   });
 
@@ -511,9 +515,13 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     expect(prompt).toContain("all public URLs");
   });
 
-  it("shows correct auth placeholder for api_key providers", () => {
+  it("does not leak credential placeholders — the provider tool injects them server-side", () => {
+    // Previously the prompt enumerated `{{access_token}}` / `{{api_key}}`
+    // so the agent could substitute them in a curl header. With the
+    // `<provider>_call` tool, credential injection is entirely server-side
+    // and placeholders MUST not appear in the prompt.
     const ctx = baseContext({
-      tokens: { "@test/stripe": "tok" },
+      tokens: { "@test/stripe": "tok", "@test/custom": "tok" },
       providers: [
         {
           id: "@test/stripe",
@@ -523,17 +531,6 @@ describe("buildEnrichedPrompt — provider documentation", () => {
           credentialHeaderPrefix: "Bearer ",
           authorizedUris: ["https://api.stripe.com/*"],
         },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("Authorization: Bearer {{api_key}}");
-  });
-
-  it("shows credential variables for credentialSchema providers", () => {
-    const ctx = baseContext({
-      tokens: { "@test/custom": "tok" },
-      providers: [
         {
           id: "@test/custom",
           displayName: "Custom Service",
@@ -550,99 +547,16 @@ describe("buildEnrichedPrompt — provider documentation", () => {
     });
 
     const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("{{api_key}}");
-    expect(prompt).toContain("{{secret}}");
-    expect(prompt).toContain("API Key");
-    expect(prompt).toContain("Secret Token");
-  });
-
-  it("emits the Auth line alongside extra vars for api_key providers with a credentialSchema", () => {
-    // Regression: previously the `if (credentialSchema)` branch omitted the
-    // Auth line entirely for api_key providers that declared a schema (which
-    // the provider editor does by default), leaving the agent without any
-    // header/prefix hint.
-    const ctx = baseContext({
-      tokens: { "@test/fathom": "tok" },
-      providers: [
-        {
-          id: "@test/fathom",
-          displayName: "Fathom",
-          authMode: "api_key",
-          credentialFieldName: "api_key",
-          credentialHeaderName: "X-Api-Key",
-          credentialHeaderPrefix: "",
-          credentialSchema: {
-            properties: { api_key: { description: "API key" } },
-          },
-          authorizedUris: ["https://api.fathom.ai/*"],
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("X-Api-Key: {{api_key}}");
-    // The primary var does NOT appear in `Other credential vars` (deduplicated)
-    expect(prompt).not.toContain("Other credential vars");
-  });
-
-  it("emits the Auth line for custom providers with an explicit credentialFieldName", () => {
-    // `custom` authMode has no default primary field, but the Auth header is
-    // still meaningful when the manifest explicitly declares one. Extra schema
-    // vars are listed separately for the agent to reference.
-    const ctx = baseContext({
-      tokens: { "@test/multi": "tok" },
-      providers: [
-        {
-          id: "@test/multi",
-          displayName: "Multi-Cred",
-          authMode: "custom",
-          credentialFieldName: "token",
-          credentialHeaderName: "X-Foo",
-          credentialHeaderPrefix: "Bearer ",
-          credentialSchema: {
-            properties: {
-              token: { description: "Primary bearer token" },
-              region: { description: "Region code" },
-            },
-          },
-          authorizedUris: ["https://api.multi.example/*"],
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("X-Foo: Bearer {{token}}");
-    expect(prompt).toContain("Other credential vars");
-    expect(prompt).toContain("{{region}}");
-    expect(prompt).toContain("Region code");
-  });
-
-  it("lists all schema vars (no Auth line) for custom providers with no credentialFieldName", () => {
-    // Fallback branch: custom provider with a schema but no primary field —
-    // the agent sees every declared variable, no Auth hint.
-    const ctx = baseContext({
-      tokens: { "@test/bare": "tok" },
-      providers: [
-        {
-          id: "@test/bare",
-          displayName: "Bare Custom",
-          authMode: "custom",
-          credentialSchema: {
-            properties: {
-              user: { description: "Username" },
-              pass: { description: "Password" },
-            },
-          },
-          authorizedUris: ["https://api.bare.example/*"],
-        },
-      ],
-    });
-
-    const prompt = buildEnrichedPrompt(ctx);
+    // Tool names appear…
+    expect(prompt).toContain("test_stripe_call");
+    expect(prompt).toContain("test_custom_call");
+    // …but credential placeholders / header hints do NOT.
+    expect(prompt).not.toContain("{{api_key}}");
+    expect(prompt).not.toContain("{{secret}}");
+    expect(prompt).not.toContain("Authorization: Bearer");
     expect(prompt).not.toContain("Auth:");
-    expect(prompt).toContain("Credentials:");
-    expect(prompt).toContain("{{user}}");
-    expect(prompt).toContain("{{pass}}");
+    expect(prompt).not.toContain("Credentials:");
+    expect(prompt).not.toContain("Other credential vars");
   });
 });
 
