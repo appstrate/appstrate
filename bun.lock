@@ -173,6 +173,7 @@
       },
       "dependencies": {
         "@afps-spec/schema": "^1.3.1",
+        "@afps/types": "workspace:*",
         "fflate": "^0.8.2",
         "mustache": "^4.2.0",
         "zod": "^4.3.6",
@@ -208,7 +209,7 @@
         "bun-types": "^1.3.10",
       },
       "peerDependencies": {
-        "@afps-spec/schema": "^1.5.0",
+        "@afps/types": "^1.0.0",
       },
     },
     "packages/afps/memory": {
@@ -218,7 +219,7 @@
         "bun-types": "^1.3.10",
       },
       "peerDependencies": {
-        "@afps-spec/schema": "^1.5.0",
+        "@afps/types": "^1.0.0",
       },
     },
     "packages/afps/output": {
@@ -228,7 +229,7 @@
         "bun-types": "^1.3.10",
       },
       "peerDependencies": {
-        "@afps-spec/schema": "^1.5.0",
+        "@afps/types": "^1.0.0",
       },
     },
     "packages/afps/platform-compat": {
@@ -245,7 +246,7 @@
         "bun-types": "^1.3.10",
       },
       "peerDependencies": {
-        "@afps-spec/schema": "^1.5.0",
+        "@afps/types": "^1.0.0",
       },
     },
     "packages/afps/report": {
@@ -255,7 +256,7 @@
         "bun-types": "^1.3.10",
       },
       "peerDependencies": {
-        "@afps-spec/schema": "^1.5.0",
+        "@afps/types": "^1.0.0",
       },
     },
     "packages/afps/state": {
@@ -265,7 +266,14 @@
         "bun-types": "^1.3.10",
       },
       "peerDependencies": {
-        "@afps-spec/schema": "^1.5.0",
+        "@afps/types": "^1.0.0",
+      },
+    },
+    "packages/afps/types": {
+      "name": "@afps/types",
+      "version": "1.0.0",
+      "devDependencies": {
+        "bun-types": "^1.3.10",
       },
     },
     "packages/connect": {
@@ -413,6 +421,8 @@
     "@afps/report": ["@afps/report@workspace:packages/afps/report"],
 
     "@afps/state": ["@afps/state@workspace:packages/afps/state"],
+
+    "@afps/types": ["@afps/types@workspace:packages/afps/types"],
 
     "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.73.0", "", { "dependencies": { "json-schema-to-ts": "^3.1.1" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-URURVzhxXGJDGUGFunIOtBlSl7KWvZiAAKY/ttTkZAkXT9bTPqdk2eK0b8qqSxXpikh3QKPnPYpiyX98zf5ebw=="],
 

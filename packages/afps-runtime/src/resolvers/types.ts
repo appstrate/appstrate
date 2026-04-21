@@ -2,19 +2,35 @@
 // Copyright 2026 Appstrate
 
 /**
- * AFPS 1.3 runtime interface types — normative shape defined by the
- * spec (see `afps-spec/schema/src/interfaces.ts`). Declared here rather
- * than re-exported from `@afps-spec/schema/interfaces` so the runtime
- * can evolve on its own release cadence without pinning to a specific
- * spec package version for type resolution. The shapes are kept in
- * lockstep with the spec and any divergence is a runtime bug.
+ * Runtime-internal TypeScript interfaces for `@appstrate/afps-runtime`.
+ *
+ * Spec-level contracts (Tool protocol, RunEvent envelope, manifest refs)
+ * are re-exported from `@afps/types` — the vendor-neutral projection of
+ * the AFPS spec. Everything declared here describes how THIS runtime
+ * wires itself up internally (Bundle loader API, resolver dispatch,
+ * sink composition, aggregated run state) and is intentionally not
+ * part of the spec.
  */
 
-import type { RunEvent } from "../types/run-event.ts";
 import type { RunResult as LegacyRunResult } from "../types/run-result.ts";
 
+export type {
+  DependencyRef,
+  ToolRef,
+  ProviderRef,
+  SkillRef,
+  PreludeRef,
+  JSONSchema,
+  Tool,
+  ToolContext,
+  ToolResult,
+  RunEvent,
+} from "@afps/types";
+
+import type { ToolRef, ProviderRef, SkillRef, PreludeRef, Tool, RunEvent } from "@afps/types";
+
 // ─────────────────────────────────────────────
-// Bundle surface passed to resolvers
+// Bundle surface passed to resolvers (runtime-internal)
 // ─────────────────────────────────────────────
 
 export interface Bundle {
@@ -26,53 +42,7 @@ export interface Bundle {
 }
 
 // ─────────────────────────────────────────────
-// Dependency refs
-// ─────────────────────────────────────────────
-
-export interface DependencyRef {
-  name: string;
-  version: string;
-}
-export type ToolRef = DependencyRef;
-export type ProviderRef = DependencyRef;
-export type SkillRef = DependencyRef;
-
-export interface PreludeRef extends DependencyRef {
-  optional?: boolean;
-}
-
-// ─────────────────────────────────────────────
-// Tool surface — what the LLM sees
-// ─────────────────────────────────────────────
-
-export type JSONSchema = Record<string, unknown>;
-
-export interface Tool {
-  name: string;
-  description: string;
-  parameters: JSONSchema;
-  execute(args: unknown, ctx: ToolContext): Promise<ToolResult>;
-}
-
-export interface ToolContext {
-  emit(event: RunEvent): void;
-  workspace: string;
-  signal: AbortSignal;
-  runId: string;
-  toolCallId?: string;
-}
-
-export interface ToolResult {
-  content: Array<
-    | { type: "text"; text: string }
-    | { type: "image"; data: string; mimeType: string }
-    | { type: "resource"; uri: string; mimeType?: string }
-  >;
-  isError?: boolean;
-}
-
-// ─────────────────────────────────────────────
-// Resolver outputs
+// Resolver outputs (runtime-internal)
 // ─────────────────────────────────────────────
 
 export interface ResolvedSkill {
@@ -89,7 +59,7 @@ export interface ResolvedPrelude {
 }
 
 // ─────────────────────────────────────────────
-// Resolvers
+// Resolvers (runtime-internal)
 // ─────────────────────────────────────────────
 
 export interface ToolResolver {
@@ -109,7 +79,16 @@ export interface PreludeResolver {
 }
 
 // ─────────────────────────────────────────────
-// Accumulated end-of-run state (spec shape — superset of legacy)
+// EventSink (runtime-internal)
+// ─────────────────────────────────────────────
+
+export interface EventSink {
+  handle(event: RunEvent): Promise<void>;
+  finalize?(): Promise<SpecRunResult>;
+}
+
+// ─────────────────────────────────────────────
+// Accumulated end-of-run state (runtime-internal, superset of legacy)
 // ─────────────────────────────────────────────
 
 /**

@@ -12,7 +12,7 @@
  * See AFPS spec §8.1 (reserved core domains) for the event shape.
  */
 
-import type { Tool, ToolContext, ToolResult } from "@afps-spec/schema/interfaces";
+import type { Tool, ToolContext, ToolResult } from "@afps/types";
 
 const tool: Tool = {
   name: "add_memory",

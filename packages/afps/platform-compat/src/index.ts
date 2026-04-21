@@ -17,7 +17,7 @@
  * directly should NOT use this package — they already ship the tools.
  */
 
-import type { Tool } from "@afps-spec/schema/interfaces";
+import type { Tool } from "@afps/types";
 
 import memoryTool from "@afps/memory";
 import stateTool from "@afps/state";

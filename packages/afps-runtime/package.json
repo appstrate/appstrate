@@ -66,6 +66,7 @@
   },
   "dependencies": {
     "@afps-spec/schema": "^1.3.1",
+    "@afps/types": "workspace:*",
     "fflate": "^0.8.2",
     "mustache": "^4.2.0",
     "zod": "^4.3.6"

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate contributors
 
-import type { Tool, ToolContext, ToolResult } from "@afps-spec/schema/interfaces";
+import type { Tool, ToolContext, ToolResult } from "@afps/types";
 
 const tool: Tool = {
   name: "set_state",

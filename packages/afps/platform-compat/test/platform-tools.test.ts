@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import type { Tool, ToolContext } from "@afps-spec/schema/interfaces";
+import type { Tool, ToolContext } from "@afps/types";
 
 import memoryTool from "@afps/memory";
 import stateTool from "@afps/state";

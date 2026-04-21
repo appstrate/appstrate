@@ -27,7 +27,7 @@
     "directory": "packages/afps/memory"
   },
   "peerDependencies": {
-    "@afps-spec/schema": "^1.5.0"
+    "@afps/types": "^1.0.0"
   },
   "devDependencies": {
     "bun-types": "^1.3.10"
