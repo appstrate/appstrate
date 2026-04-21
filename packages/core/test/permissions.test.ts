@@ -14,7 +14,7 @@ import {
 // production typings.
 declare module "../src/permissions.ts" {
   interface AppstrateModuleResources {
-    chat: "read" | "write";
+    tasks: "read" | "write";
   }
 }
 
@@ -31,8 +31,8 @@ function makeContext(perms: Set<string> | undefined | null): {
 
 describe("requireModulePermission", () => {
   test("calls next() when the required permission is present", async () => {
-    const middleware = requireModulePermission("chat", "read");
-    const c = makeContext(new Set(["chat:read", "chat:write"]));
+    const middleware = requireModulePermission("tasks", "read");
+    const c = makeContext(new Set(["tasks:read", "tasks:write"]));
     let called = false;
     await middleware(c, async () => {
       called = true;
@@ -41,31 +41,31 @@ describe("requireModulePermission", () => {
   });
 
   test("throws when the required permission is missing", async () => {
-    const middleware = requireModulePermission("chat", "write");
-    const c = makeContext(new Set(["chat:read"]));
+    const middleware = requireModulePermission("tasks", "write");
+    const c = makeContext(new Set(["tasks:read"]));
     await expect(middleware(c, async () => {})).rejects.toThrow(
-      /Insufficient permissions: chat:write required/,
+      /Insufficient permissions: tasks:write required/,
     );
   });
 
   test("throws when the permissions Set is undefined", async () => {
-    const middleware = requireModulePermission("chat", "read");
+    const middleware = requireModulePermission("tasks", "read");
     const c = makeContext(undefined);
-    await expect(middleware(c, async () => {})).rejects.toThrow(/chat:read required/);
+    await expect(middleware(c, async () => {})).rejects.toThrow(/tasks:read required/);
   });
 
   test("throws when c.get returns a non-Set value (defensive against bad pipeline state)", async () => {
-    const middleware = requireModulePermission("chat", "read");
+    const middleware = requireModulePermission("tasks", "read");
     const c = {
       get(_key: string) {
         return "not-a-set" as unknown;
       },
     };
-    await expect(middleware(c as never, async () => {})).rejects.toThrow(/chat:read required/);
+    await expect(middleware(c as never, async () => {})).rejects.toThrow(/tasks:read required/);
   });
 
   test("does not call next() on denial", async () => {
-    const middleware = requireModulePermission("chat", "write");
+    const middleware = requireModulePermission("tasks", "write");
     const c = makeContext(new Set([]));
     let called = false;
     try {
@@ -139,10 +139,10 @@ describe("setPermissionDenialHandler — fault isolation", () => {
     setPermissionDenialHandler(() => {
       throw new Error("audit sink down");
     });
-    const middleware = requireModulePermission("chat", "read");
+    const middleware = requireModulePermission("tasks", "read");
     const c = makeContext(new Set([]));
     await expect(middleware(c, async () => {})).rejects.toThrow(
-      /Insufficient permissions: chat:read required/,
+      /Insufficient permissions: tasks:read required/,
     );
   });
 

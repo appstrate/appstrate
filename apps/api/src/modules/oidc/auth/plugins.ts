@@ -199,9 +199,9 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       consentPage: "/api/oauth/consent",
       // Snapshot the full vocabulary at plugin construction time —
       // `betterAuthPlugins()` runs after `loadModules()` populates the
-      // module registry, so module-contributed scopes (chat:read, …) are
-      // included in discovery `scopes_supported` and accepted by the
-      // oauth-provider plugin's own scope filter.
+      // module registry, so module-contributed scopes are included in
+      // discovery `scopes_supported` and accepted by the oauth-provider
+      // plugin's own scope filter.
       scopes: [...getAppstrateScopes()],
       validAudiences,
       cachedTrustedClients,

@@ -372,12 +372,12 @@ describe("module-loader", () => {
     it("aggregates oidcScopes from every loaded module", async () => {
       await loadModulesFromInstances(
         [
-          mockModule("chat", { oidcScopes: ["chat:read", "chat:write"] }),
+          mockModule("tasks", { oidcScopes: ["tasks:read", "tasks:write"] }),
           mockModule("billing", { oidcScopes: ["billing:read"] }),
         ],
         mockCtx(),
       );
-      expect(getModuleOidcScopes().sort()).toEqual(["billing:read", "chat:read", "chat:write"]);
+      expect(getModuleOidcScopes().sort()).toEqual(["billing:read", "tasks:read", "tasks:write"]);
     });
 
     it("deduplicates repeated scopes", async () => {
@@ -397,43 +397,43 @@ describe("module-loader", () => {
           // A module with id "oidc" must not pollute the aggregator —
           // the OIDC module owns the built-in vocabulary directly.
           mockModule("oidc", { oidcScopes: ["ignored:scope"] }),
-          mockModule("chat", { oidcScopes: ["chat:read"] }),
+          mockModule("tasks", { oidcScopes: ["tasks:read"] }),
         ],
         mockCtx(),
       );
-      expect(getModuleOidcScopes()).toEqual(["chat:read"]);
+      expect(getModuleOidcScopes()).toEqual(["tasks:read"]);
     });
   });
 
   describe("validateModuleOidcScopes (boot-time format guard)", () => {
     it("rejects a scope without colon — fails fast at boot", async () => {
-      const mod = mockModule("chat", {
+      const mod = mockModule("tasks", {
         // Casting around the template-literal compile-time guard so the
         // runtime validation gets exercised. External modules built from JS
         // (not TS) bypass the compile-time guard entirely — this is the
         // last line of defense.
-        oidcScopes: ["chatread"] as unknown as ReadonlyArray<`${string}:${string}`>,
+        oidcScopes: ["tasksread"] as unknown as ReadonlyArray<`${string}:${string}`>,
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
-        /Module "chat" declared invalid oidcScope "chatread"/,
+        /Module "tasks" declared invalid oidcScope "tasksread"/,
       );
     });
 
     it("rejects an uppercase scope", async () => {
-      const mod = mockModule("chat", {
-        oidcScopes: ["Chat:Read"] as unknown as ReadonlyArray<`${string}:${string}`>,
+      const mod = mockModule("tasks", {
+        oidcScopes: ["Tasks:Read"] as unknown as ReadonlyArray<`${string}:${string}`>,
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
-        /invalid oidcScope "Chat:Read"/,
+        /invalid oidcScope "Tasks:Read"/,
       );
     });
 
     it("rejects a scope containing whitespace", async () => {
-      const mod = mockModule("chat", {
-        oidcScopes: ["chat: read"] as unknown as ReadonlyArray<`${string}:${string}`>,
+      const mod = mockModule("tasks", {
+        oidcScopes: ["tasks: read"] as unknown as ReadonlyArray<`${string}:${string}`>,
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
-        /invalid oidcScope "chat: read"/,
+        /invalid oidcScope "tasks: read"/,
       );
     });
 
@@ -441,7 +441,7 @@ describe("module-loader", () => {
       await expect(
         loadModulesFromInstances(
           [
-            mockModule("chat", { oidcScopes: ["chat:read", "chat:write"] }),
+            mockModule("tasks", { oidcScopes: ["tasks:read", "tasks:write"] }),
             mockModule("billing", { oidcScopes: ["billing:read", "billing-v2:write"] }),
           ],
           mockCtx(),
@@ -481,10 +481,10 @@ describe("module-loader", () => {
       const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
       await loadModulesFromInstances(
         [
-          mockModule("chat", {
+          mockModule("tasks", {
             permissionsContribution: () => [
               {
-                resource: "chat",
+                resource: "tasks",
                 actions: ["read", "write"],
                 grantTo: ["owner", "admin", "member"],
               },
@@ -496,10 +496,10 @@ describe("module-loader", () => {
       const owner = resolvePermissions("owner");
       const member = resolvePermissions("member");
       const viewer = resolvePermissions("viewer");
-      expect(owner.has("chat:read" as never)).toBe(true);
-      expect(owner.has("chat:write" as never)).toBe(true);
-      expect(member.has("chat:read" as never)).toBe(true);
-      expect(viewer.has("chat:read" as never)).toBe(false);
+      expect(owner.has("tasks:read" as never)).toBe(true);
+      expect(owner.has("tasks:write" as never)).toBe(true);
+      expect(member.has("tasks:read" as never)).toBe(true);
+      expect(viewer.has("tasks:read" as never)).toBe(false);
       // Core grants still present
       expect(owner.has("agents:run" as never)).toBe(true);
     });
@@ -508,27 +508,27 @@ describe("module-loader", () => {
       const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
       await loadModulesFromInstances(
         [
-          mockModule("chat", {
+          mockModule("tasks", {
             permissionsContribution: () => [
-              { resource: "chat", actions: ["read"], grantTo: ["owner"] },
+              { resource: "tasks", actions: ["read"], grantTo: ["owner"] },
             ],
           }),
         ],
         mockCtx(),
       );
-      expect(resolvePermissions("owner").has("chat:read" as never)).toBe(true);
+      expect(resolvePermissions("owner").has("tasks:read" as never)).toBe(true);
       resetModules();
-      expect(resolvePermissions("owner").has("chat:read" as never)).toBe(false);
+      expect(resolvePermissions("owner").has("tasks:read" as never)).toBe(false);
     });
 
     it("apiKeyGrantable=true adds entries to the API-key allowlist; false omits them", async () => {
       const { getApiKeyAllowedScopes } = await import("../../../src/lib/permissions.ts");
       await loadModulesFromInstances(
         [
-          mockModule("chat", {
+          mockModule("tasks", {
             permissionsContribution: () => [
               {
-                resource: "chat",
+                resource: "tasks",
                 actions: ["read"],
                 grantTo: ["owner"],
                 apiKeyGrantable: true,
@@ -545,7 +545,7 @@ describe("module-loader", () => {
         mockCtx(),
       );
       const allowed = getApiKeyAllowedScopes();
-      expect(allowed.has("chat:read")).toBe(true);
+      expect(allowed.has("tasks:read")).toBe(true);
       expect(allowed.has("internal:sweep")).toBe(false);
     });
 
@@ -553,10 +553,10 @@ describe("module-loader", () => {
       const { getModuleEndUserAllowedScopes } = await import("@appstrate/core/permissions");
       await loadModulesFromInstances(
         [
-          mockModule("chat", {
+          mockModule("tasks", {
             permissionsContribution: () => [
               {
-                resource: "chat",
+                resource: "tasks",
                 actions: ["read", "write"],
                 grantTo: ["owner", "member"],
                 endUserGrantable: true,
@@ -573,8 +573,8 @@ describe("module-loader", () => {
         mockCtx(),
       );
       const allowed = getModuleEndUserAllowedScopes();
-      expect(allowed.has("chat:read")).toBe(true);
-      expect(allowed.has("chat:write")).toBe(true);
+      expect(allowed.has("tasks:read")).toBe(true);
+      expect(allowed.has("tasks:write")).toBe(true);
       expect(allowed.has("internal:sweep")).toBe(false);
     });
 
@@ -583,10 +583,10 @@ describe("module-loader", () => {
       const { getModuleEndUserAllowedScopes } = await import("@appstrate/core/permissions");
       await loadModulesFromInstances(
         [
-          mockModule("chat", {
+          mockModule("tasks", {
             permissionsContribution: () => [
               {
-                resource: "chat",
+                resource: "tasks",
                 actions: ["read"],
                 grantTo: ["owner"],
                 apiKeyGrantable: true,
@@ -606,9 +606,9 @@ describe("module-loader", () => {
       );
       const apiKey = getApiKeyAllowedScopes();
       const endUser = getModuleEndUserAllowedScopes();
-      expect(apiKey.has("chat:read")).toBe(true);
+      expect(apiKey.has("tasks:read")).toBe(true);
       expect(apiKey.has("module-billing:view")).toBe(false);
-      expect(endUser.has("chat:read")).toBe(false);
+      expect(endUser.has("tasks:read")).toBe(false);
       expect(endUser.has("module-billing:view")).toBe(true);
     });
 
@@ -616,10 +616,10 @@ describe("module-loader", () => {
       const { getModuleEndUserAllowedScopes } = await import("@appstrate/core/permissions");
       await loadModulesFromInstances(
         [
-          mockModule("chat", {
+          mockModule("tasks", {
             permissionsContribution: () => [
               {
-                resource: "chat",
+                resource: "tasks",
                 actions: ["read"],
                 grantTo: ["owner"],
                 endUserGrantable: true,
@@ -629,9 +629,9 @@ describe("module-loader", () => {
         ],
         mockCtx(),
       );
-      expect(getModuleEndUserAllowedScopes().has("chat:read")).toBe(true);
+      expect(getModuleEndUserAllowedScopes().has("tasks:read")).toBe(true);
       resetModules();
-      expect(getModuleEndUserAllowedScopes().has("chat:read")).toBe(false);
+      expect(getModuleEndUserAllowedScopes().has("tasks:read")).toBe(false);
     });
 
     it("rejects redefining a core resource (e.g. agents)", async () => {
@@ -649,12 +649,12 @@ describe("module-loader", () => {
       await expect(
         loadModulesFromInstances(
           [
-            mockModule("chat-a", {
+            mockModule("tasks-a", {
               permissionsContribution: () => [
                 { resource: "shared", actions: ["read"], grantTo: ["owner"] },
               ],
             }),
-            mockModule("chat-b", {
+            mockModule("tasks-b", {
               permissionsContribution: () => [
                 { resource: "shared", actions: ["read"], grantTo: ["owner"] },
               ],
@@ -666,20 +666,20 @@ describe("module-loader", () => {
     });
 
     it("rejects malformed resource name", async () => {
-      const mod = mockModule("chat", {
+      const mod = mockModule("tasks", {
         permissionsContribution: () => [
-          { resource: "Chat", actions: ["read"], grantTo: ["owner"] },
+          { resource: "Tasks", actions: ["read"], grantTo: ["owner"] },
         ],
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
-        /invalid permission resource "Chat"/,
+        /invalid permission resource "Tasks"/,
       );
     });
 
     it("rejects malformed action name", async () => {
-      const mod = mockModule("chat", {
+      const mod = mockModule("tasks", {
         permissionsContribution: () => [
-          { resource: "chat", actions: ["READ"], grantTo: ["owner"] },
+          { resource: "tasks", actions: ["READ"], grantTo: ["owner"] },
         ],
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(
@@ -688,17 +688,17 @@ describe("module-loader", () => {
     });
 
     it("rejects empty actions array", async () => {
-      const mod = mockModule("chat", {
-        permissionsContribution: () => [{ resource: "chat", actions: [], grantTo: ["owner"] }],
+      const mod = mockModule("tasks", {
+        permissionsContribution: () => [{ resource: "tasks", actions: [], grantTo: ["owner"] }],
       });
       await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(/with no actions/);
     });
 
     it("rejects unknown role in grantTo", async () => {
-      const mod = mockModule("chat", {
+      const mod = mockModule("tasks", {
         permissionsContribution: () => [
           {
-            resource: "chat",
+            resource: "tasks",
             actions: ["read"],
             grantTo: ["god" as never],
           },
@@ -713,10 +713,10 @@ describe("module-loader", () => {
       const { resolvePermissions } = await import("../../../src/lib/permissions.ts");
       await loadModulesFromInstances(
         [
-          mockModule("chat", {
+          mockModule("tasks", {
             permissionsContribution: () => [
-              { resource: "chat", actions: ["write"], grantTo: ["owner"] },
-              { resource: "chat", actions: ["read"], grantTo: ["owner", "member"] },
+              { resource: "tasks", actions: ["write"], grantTo: ["owner"] },
+              { resource: "tasks", actions: ["read"], grantTo: ["owner", "member"] },
             ],
           }),
         ],
@@ -724,10 +724,10 @@ describe("module-loader", () => {
       );
       const owner = resolvePermissions("owner");
       const member = resolvePermissions("member");
-      expect(owner.has("chat:write" as never)).toBe(true);
-      expect(owner.has("chat:read" as never)).toBe(true);
-      expect(member.has("chat:write" as never)).toBe(false);
-      expect(member.has("chat:read" as never)).toBe(true);
+      expect(owner.has("tasks:write" as never)).toBe(true);
+      expect(owner.has("tasks:read" as never)).toBe(true);
+      expect(member.has("tasks:write" as never)).toBe(false);
+      expect(member.has("tasks:read" as never)).toBe(true);
     });
 
     it("OSS baseline: no module loaded → resolvePermissions returns only core grants", async () => {
@@ -735,7 +735,7 @@ describe("module-loader", () => {
       await loadModulesFromInstances([], mockCtx());
       const owner = resolvePermissions("owner");
       expect(owner.has("agents:run" as never)).toBe(true);
-      expect(owner.has("chat:read" as never)).toBe(false);
+      expect(owner.has("tasks:read" as never)).toBe(false);
     });
   });
 

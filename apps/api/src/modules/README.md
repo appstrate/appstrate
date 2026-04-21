@@ -101,16 +101,16 @@ Built-in and external modules use the **exact same contribution pattern**. Built
 // 1. Type-level — declaration merging on AppstrateModuleResources
 declare module "@appstrate/core/permissions" {
   interface AppstrateModuleResources {
-    chat: "read" | "write";
+    tasks: "read" | "write";
   }
 }
 
 // 2. Runtime — manifest field
-const chatModule: AppstrateModule = {
-  manifest: { id: "chat", name: "Chat", version: "1.0.0" },
+const tasksModule: AppstrateModule = {
+  manifest: { id: "tasks", name: "Tasks", version: "1.0.0" },
   permissionsContribution: () => [
     {
-      resource: "chat",
+      resource: "tasks",
       actions: ["read", "write"],
       grantTo: ["owner", "admin", "member"],
       apiKeyGrantable: true, // can be carried by API keys
@@ -124,12 +124,12 @@ const chatModule: AppstrateModule = {
 import { requireModulePermission, requireCorePermission } from "@appstrate/core/permissions";
 
 router.get(
-  "/api/chat/sessions",
-  requireModulePermission("chat", "read"), // typed against AppstrateModuleResources
+  "/api/tasks",
+  requireModulePermission("tasks", "read"), // typed against AppstrateModuleResources
   handler,
 );
 router.post(
-  "/api/chat/runs/:id/cancel",
+  "/api/tasks/:id/cancel",
   requireCorePermission("agents", "run"), // typed against AppstrateCoreResources
   handler,
 );

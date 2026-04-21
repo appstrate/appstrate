@@ -253,7 +253,7 @@ export interface AppstrateModule {
    * Scopes are NOT translated into core permissions — they remain opaque
    * strings that the contributing module's own middleware enforces by
    * reading the JWT's `scope` claim. Pick stable, namespaced strings
-   * (e.g. `chat:read`, `chat:write`) that won't collide with other
+   * (e.g. `tasks:read`, `tasks:write`) that won't collide with other
    * modules' scopes.
    *
    * The `${string}:${string}` template literal is a compile-time guard
@@ -267,18 +267,18 @@ export interface AppstrateModule {
    * the module export:
    *
    * ```ts
-   * export const CHAT_SCOPES = ["chat:read", "chat:write"] as const;
-   * export type ChatScope = (typeof CHAT_SCOPES)[number];
+   * export const TASKS_SCOPES = ["tasks:read", "tasks:write"] as const;
+   * export type TasksScope = (typeof TASKS_SCOPES)[number];
    *
-   * const chatModule: AppstrateModule = {
-   *   manifest: { id: "chat", name: "Chat", version: "1.0.0" },
-   *   oidcScopes: [...CHAT_SCOPES],
+   * const tasksModule: AppstrateModule = {
+   *   manifest: { id: "tasks", name: "Tasks", version: "1.0.0" },
+   *   oidcScopes: [...TASKS_SCOPES],
    *   // ...
    * };
    * ```
    *
    * Consumers of the module's middleware (or any code reading `jwt.scope`)
-   * import `ChatScope` to recover the literal union — typing is lost only
+   * import `TasksScope` to recover the literal union — typing is lost only
    * at the core boundary, not within the module's own surface.
    *
    * No-op when the OIDC module is absent — declaring scopes on a platform
@@ -301,18 +301,18 @@ export interface AppstrateModule {
    *
    * Pair this with a TypeScript declaration-merging block on
    * `@appstrate/core/permissions#AppstrateModuleResources` so call sites
-   * like `requirePermission("chat", "read")` stay typed end-to-end:
+   * like `requirePermission("tasks", "read")` stay typed end-to-end:
    *
    * ```ts
    * declare module "@appstrate/core/permissions" {
-   *   interface AppstrateModuleResources { chat: "read" | "write" }
+   *   interface AppstrateModuleResources { tasks: "read" | "write" }
    * }
    *
-   * const chatModule: AppstrateModule = {
-   *   manifest: { id: "chat", name: "Chat", version: "1.0.0" },
+   * const tasksModule: AppstrateModule = {
+   *   manifest: { id: "tasks", name: "Tasks", version: "1.0.0" },
    *   permissionsContribution: () => [
    *     {
-   *       resource: "chat",
+   *       resource: "tasks",
    *       actions: ["read", "write"],
    *       grantTo: ["owner", "admin", "member"],
    *       apiKeyGrantable: true,
@@ -344,7 +344,7 @@ export interface AppstrateModule {
  * through API keys. See `AppstrateModule.permissionsContribution`.
  */
 export interface ModulePermissionContribution {
-  /** Resource name (e.g. "chat"). Must be unique across loaded modules and disjoint from core resources. */
+  /** Resource name (e.g. "tasks"). Must be unique across loaded modules and disjoint from core resources. */
   resource: string;
   /** Actions the module supports for this resource (e.g. ["read", "write"]). */
   actions: readonly string[];
@@ -375,8 +375,8 @@ export interface ModulePermissionContribution {
    *
    * Defaults to `false` — module permissions are dashboard/instance/API-key
    * only unless explicitly opted in. Use this for modules whose data is
-   * meant to be addressed per-end-user (chat sessions, end-user profiles,
-   * notifications…). Avoid for admin/destructive surfaces (those should
+   * meant to be addressed per-end-user (per-user data streams, end-user
+   * profiles, notifications…). Avoid for admin/destructive surfaces (those should
    * stay session-only or API-key-only).
    *
    * No-op on platforms that don't load the OIDC module — the flag is

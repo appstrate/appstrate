@@ -77,9 +77,9 @@ import { verifyEndUserAccessToken } from "./services/enduser-token.ts";
 
 /**
  * Public API surface exposed via `services.modules.get("oidc")?.api`. Other
- * modules that accept OAuth2 Bearer JWTs (e.g. `@appstrate/chat`) call
- * `verifyEndUserAccessToken` to re-verify tokens against the local JWKS
- * without re-implementing JWKS fetch + caching + signature parsing.
+ * modules that accept OAuth2 Bearer JWTs call `verifyEndUserAccessToken` to
+ * re-verify tokens against the local JWKS without re-implementing JWKS
+ * fetch + caching + signature parsing.
  *
  * Consumers narrow the type by importing this module's published typings:
  *   const oidc = services.modules.get("oidc")?.api as OidcModuleApi | undefined;

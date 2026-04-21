@@ -658,7 +658,7 @@ export async function getRunFull(scope: AppScope, id: string) {
 
 /**
  * Org-scoped run snapshot read. Intentionally narrower than
- * `getRun(scope, id)`: chat-like consumers span applications within a
+ * `getRun(scope, id)`: cross-app consumers span applications within a
  * single org, so the read scopes on `orgId` alone. Returns the public
  * `Run` DTO shape — schema internals (scheduler ids, actor fields, etc.)
  * stay inside apps/api.

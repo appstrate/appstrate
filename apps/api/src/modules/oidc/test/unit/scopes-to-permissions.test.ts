@@ -106,23 +106,23 @@ describe("scopesToPermissions — module endUserGrantable propagation", () => {
   });
 
   it("end-user token carrying a module scope opted in via endUserGrantable is granted", () => {
-    installSnapshot({ endUserAllowed: new Set(["chat:read"]) });
-    const perms = scopesToPermissions("openid chat:read", "end_user");
-    expect([...perms]).toEqual(["chat:read"]);
+    installSnapshot({ endUserAllowed: new Set(["tasks:read"]) });
+    const perms = scopesToPermissions("openid tasks:read", "end_user");
+    expect([...perms]).toEqual(["tasks:read"]);
   });
 
   it("module scope without endUserGrantable is dropped on end-user tokens", () => {
-    // `chat:write` is contributed but NOT opted in for end-users → the
+    // `tasks:write` is contributed but NOT opted in for end-users → the
     // filter must strip it even if the JWT advertises it.
-    installSnapshot({ endUserAllowed: new Set(["chat:read"]) });
+    installSnapshot({ endUserAllowed: new Set(["tasks:read"]) });
     const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
     try {
-      const perms = scopesToPermissions("chat:read chat:write", "end_user");
-      expect([...perms]).toEqual(["chat:read"]);
+      const perms = scopesToPermissions("tasks:read tasks:write", "end_user");
+      expect([...perms]).toEqual(["tasks:read"]);
       // The dropped scope logs at debug with the standard metadata shape
       // — regression guard on the audit trail for silent drops.
       const dropped = debugSpy.mock.calls.find(
-        (call) => (call[1] as Record<string, unknown>)?.scope === "chat:write",
+        (call) => (call[1] as Record<string, unknown>)?.scope === "tasks:write",
       );
       expect(dropped).toBeDefined();
     } finally {
@@ -131,19 +131,19 @@ describe("scopesToPermissions — module endUserGrantable propagation", () => {
   });
 
   it("module scope opted in for end-users coexists with core OIDC_ALLOWED_SCOPES", () => {
-    installSnapshot({ endUserAllowed: new Set(["chat:read", "notifications:read"]) });
+    installSnapshot({ endUserAllowed: new Set(["tasks:read", "notifications:read"]) });
     const perms = scopesToPermissions(
-      "openid runs:read chat:read notifications:read agents:write",
+      "openid runs:read tasks:read notifications:read agents:write",
       "end_user",
     );
     // `runs:read` is in core OIDC_ALLOWED_SCOPES, the two module scopes
     // come from endUserAllowed, and `agents:write` is neither → dropped.
-    expect([...perms].sort()).toEqual(["chat:read", "notifications:read", "runs:read"]);
+    expect([...perms].sort()).toEqual(["notifications:read", "runs:read", "tasks:read"]);
   });
 
   it("OSS baseline (empty provider) preserves the pre-module filter behavior", () => {
     installSnapshot({}); // endUserAllowed defaults to empty
-    const perms = scopesToPermissions("chat:read runs:read", "end_user");
+    const perms = scopesToPermissions("tasks:read runs:read", "end_user");
     // Only core OIDC_ALLOWED_SCOPES survives.
     expect([...perms]).toEqual(["runs:read"]);
   });
@@ -153,10 +153,10 @@ describe("scopesToPermissions — module endUserGrantable propagation", () => {
     // `end_user` branch of `scopesToPermissions`. A scope not in the
     // dashboard user's role set must stay dropped on dashboard tokens,
     // even when the module has opted the scope in for end-users.
-    installSnapshot({ endUserAllowed: new Set(["chat:read"]) });
+    installSnapshot({ endUserAllowed: new Set(["tasks:read"]) });
     const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
     try {
-      const perms = scopesToPermissions("chat:read", "dashboard_user", "member");
+      const perms = scopesToPermissions("tasks:read", "dashboard_user", "member");
       expect(perms.size).toBe(0);
     } finally {
       debugSpy.mockRestore();

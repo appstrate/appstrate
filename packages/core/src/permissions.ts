@@ -25,7 +25,7 @@
  * The platform's `Resource` / `Permission` union (in
  * `apps/api/src/lib/permissions.ts`) is the union of both surfaces — call
  * sites like `requirePermission("agents", "read")` and
- * `requirePermission("chat", "read")` work uniformly regardless of origin.
+ * `requirePermission("tasks", "read")` work uniformly regardless of origin.
  *
  * ### Why role grants stay in `apps/api`
  *
@@ -287,12 +287,12 @@ import { forbidden } from "./api-errors.ts";
  *
  * ```ts
  * declare module "@appstrate/core/permissions" {
- *   interface AppstrateModuleResources { chat: "read" | "write" }
+ *   interface AppstrateModuleResources { tasks: "read" | "write" }
  * }
  *
  * router.get(
- *   "/api/chat/sessions",
- *   requireModulePermission("chat", "read"), // ← typechecked
+ *   "/api/tasks",
+ *   requireModulePermission("tasks", "read"), // ← typechecked
  *   handler,
  * );
  * ```
@@ -330,8 +330,8 @@ export function requireModulePermission<R extends ModuleResource>(
  * `AppstrateCoreResources` instead.
  *
  * Modules consume this when they need to gate a route on a core resource
- * they don't own (e.g. a chat module checking `agents:run` before
- * dispatching a turn). Without this helper, modules had to either
+ * they don't own (e.g. a downstream module checking `agents:run` before
+ * dispatching work). Without this helper, modules had to either
  * (a) reach into `apps/api/src/middleware/require-permission.ts` — an
  * internal package they cannot import — or (b) hand-roll a stringly-typed
  * check that drifts the day core renames an action.
@@ -343,7 +343,7 @@ export function requireModulePermission<R extends ModuleResource>(
  * import { requireCorePermission } from "@appstrate/core/permissions";
  *
  * router.post(
- *   "/api/chat/runs/:runId/cancel",
+ *   "/api/tasks/runs/:runId/cancel",
  *   requireCorePermission("agents", "run"), // ← typechecked
  *   handler,
  * );
