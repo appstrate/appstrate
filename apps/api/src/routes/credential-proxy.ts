@@ -39,6 +39,7 @@ import {
   ProxyAuthorizationError,
   ProxyCredentialError,
 } from "../services/credential-proxy/core.ts";
+import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
 import type { AppEnv } from "../types/index.ts";
 
 /**
@@ -164,6 +165,30 @@ export function createCredentialProxyRouter() {
       if (!providerId) throw invalidRequest("Missing X-Provider header");
       if (!target) throw invalidRequest("Missing X-Target header");
       if (!sessionId) throw invalidRequest("Missing X-Session-Id header");
+      if (!isValidSessionId(sessionId)) {
+        throw invalidRequest("X-Session-Id must be a UUID v4");
+      }
+
+      const applicationIdEarly = c.get("applicationId");
+      const apiKeyIdEarly = c.get("apiKeyId");
+      if (!apiKeyIdEarly) {
+        // authMethod === "api_key" guarantees this, but defend anyway
+        throw forbidden("Credential proxy requires an API key");
+      }
+      const binding = await bindOrCheckSession(
+        sessionId,
+        apiKeyIdEarly,
+        limits.session_ttl_seconds,
+      );
+      if (binding.kind === "mismatch") {
+        logger.warn("credential-proxy: session reuse across API keys", {
+          sessionId,
+          apiKeyId: apiKeyIdEarly,
+          boundTo: binding.boundTo,
+          applicationId: applicationIdEarly,
+        });
+        throw forbidden("X-Session-Id is bound to a different API key");
+      }
 
       // Optional request body cap
       const contentLength = c.req.header("Content-Length");
