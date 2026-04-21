@@ -8,3 +8,9 @@ export {
   type BridgeableSession,
   type InternalSink,
 } from "./pi-runner.ts";
+
+export {
+  prepareBundleForPi,
+  type PrepareBundleOptions,
+  type PreparedBundle,
+} from "./bundle-extensions.ts";

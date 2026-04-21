@@ -27,7 +27,8 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { type ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import { type Api, type Model } from "@mariozechner/pi-ai";
-import { PiRunner } from "@appstrate/runner-pi";
+import { PiRunner, prepareBundleForPi } from "@appstrate/runner-pi";
+import { loadBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
@@ -44,11 +45,6 @@ function die(message: string): never {
     message,
   });
   process.exit(1);
-}
-
-async function run(cmd: string[]): Promise<void> {
-  const proc = Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" });
-  await proc.exited;
 }
 
 const exists = (p: string) =>
@@ -74,35 +70,36 @@ async function initGitWorkspace(): Promise<void> {
 // --- 2. Load tools ---
 
 const extensionFactories: ExtensionFactory[] = [];
-const loadedExtensionIds = new Set<string>();
+const loadedRuntimeIds = new Set<string>();
 
-async function loadExtensionFromFile(filePath: string, id: string, label: string) {
-  if (loadedExtensionIds.has(id)) return;
-  const mod = await import(filePath);
-  const factory = mod.default;
-  if (typeof factory !== "function") {
-    emit({
-      type: "appstrate.error",
-      timestamp: Date.now(),
-      runId: process.env.AGENT_RUN_ID ?? "unknown",
-      message: `Extension '${id}' (${label}): default export is not a function (got ${typeof factory})`,
-    });
-    return;
-  }
-  extensionFactories.push(wrapExtensionFactory(factory as ExtensionFactory, id));
-  loadedExtensionIds.add(id);
-}
-
+/**
+ * Load platform-shipped extensions from the container's `/runtime/extensions/`
+ * directory. These are Pi-bundled tools (e.g. built-in primitives) that do
+ * not travel inside the AFPS bundle — kept here because the shared
+ * `prepareBundleForPi` intentionally only handles bundle-scoped tools.
+ */
 async function loadExtensionsFromDir(dir: string, label: string) {
   if (!(await exists(dir))) return;
   const entries = (await fs.readdir(dir)).filter((e) => e.endsWith(".ts"));
 
   const results = await Promise.allSettled(
     entries
-      .filter((e) => !loadedExtensionIds.has(e.replace(/\.ts$/, "")))
+      .filter((e) => !loadedRuntimeIds.has(e.replace(/\.ts$/, "")))
       .map(async (entry) => {
         const id = entry.replace(/\.ts$/, "");
-        await loadExtensionFromFile(path.join(dir, entry), id, label);
+        const mod = await import(path.join(dir, entry));
+        const factory = mod.default;
+        if (typeof factory !== "function") {
+          emit({
+            type: "appstrate.error",
+            timestamp: Date.now(),
+            runId: process.env.AGENT_RUN_ID ?? "unknown",
+            message: `Extension '${id}' (${label}): default export is not a function (got ${typeof factory})`,
+          });
+          return;
+        }
+        extensionFactories.push(wrapExtensionFactory(factory as ExtensionFactory, id));
+        loadedRuntimeIds.add(id);
       }),
   );
 
@@ -118,89 +115,46 @@ async function loadExtensionsFromDir(dir: string, label: string) {
   }
 }
 
-async function loadToolsFromAgentPackage(packageDir: string, label: string) {
-  const agentManifestPath = path.join(packageDir, "manifest.json");
-  if (!(await exists(agentManifestPath))) return;
-
-  let agentManifest: Record<string, unknown>;
-  try {
-    agentManifest = JSON.parse(await fs.readFile(agentManifestPath, "utf-8"));
-  } catch {
-    return;
-  }
-
-  const deps = (agentManifest.dependencies ?? {}) as Record<string, unknown>;
-  const toolDeps = (deps.tools ?? {}) as Record<string, string>;
-  const toolIds = Object.keys(toolDeps);
-
-  for (const toolId of toolIds) {
-    const toolPath = path.join(packageDir, "tools", toolId);
-    if (!(await exists(toolPath))) continue;
-
-    try {
-      const toolManifestPath = path.join(toolPath, "manifest.json");
-      if (!(await exists(toolManifestPath))) continue;
-      const toolManifest = JSON.parse(await fs.readFile(toolManifestPath, "utf-8"));
-      const entrypoint = toolManifest.entrypoint;
-      if (!entrypoint) continue;
-
-      const id = toolManifest.tool?.name || toolId;
-      if (loadedExtensionIds.has(id)) continue;
-
-      const toolMd = path.join(toolPath, "TOOL.md");
-      if (await exists(toolMd)) {
-        const dest = path.join(WORKSPACE, ".pi", "tools", toolId);
-        await fs.mkdir(dest, { recursive: true });
-        await fs.copyFile(toolMd, path.join(dest, "TOOL.md"));
-      }
-
-      await loadExtensionFromFile(path.join(toolPath, entrypoint), id, label);
-    } catch (err) {
-      emit({
-        type: "appstrate.error",
-        timestamp: Date.now(),
-        runId: process.env.AGENT_RUN_ID ?? "unknown",
-        message: `Failed to load tool '${toolId}' (${label}): ${err}`,
-      });
-    }
-  }
-}
-
-// --- 2a. Phase A: git init + extract agent package in parallel ---
+// --- 2a. Phase A: git init + load AFPS bundle in parallel ---
 
 const packagePath = path.join(WORKSPACE, "agent-package.afps");
 const hasPackage = await exists(packagePath);
 
-await Promise.all([
+const [, bundle] = await Promise.all([
   initGitWorkspace(),
-  hasPackage
-    ? run(["unzip", "-qo", packagePath, "-d", `${WORKSPACE}/.agent-package`])
-    : Promise.resolve(),
+  hasPackage ? loadBundleFromFile(packagePath) : Promise.resolve(null),
 ]);
 
-// --- 2b. Phase B: load tools (depends on extraction) ---
+// --- 2b. Phase B: materialise .pi/ layout + dynamic-import tools ---
 
-if (hasPackage) {
+if (bundle) {
   try {
-    const installDir = async (folder: string) => {
-      const src = path.join(WORKSPACE, ".agent-package", folder);
-      if (await exists(src)) {
-        const dest = path.join(WORKSPACE, ".pi", folder);
-        await fs.mkdir(dest, { recursive: true });
-        await run(["cp", "-r", `${src}/.`, dest]);
-      }
-    };
-    await Promise.all([installDir("skills"), installDir("providers")]);
+    const prepared = await prepareBundleForPi(bundle, {
+      workspaceDir: WORKSPACE,
+      extensionWrapper: (factory, id) => wrapExtensionFactory(factory, id),
+      onError: (message, err) => {
+        emit({
+          type: "appstrate.error",
+          timestamp: Date.now(),
+          runId: process.env.AGENT_RUN_ID ?? "unknown",
+          message: err
+            ? `${message}: ${err instanceof Error ? err.message : String(err)}`
+            : message,
+        });
+      },
+    });
+    extensionFactories.push(...prepared.extensionFactories);
 
-    await loadToolsFromAgentPackage(path.join(WORKSPACE, ".agent-package"), "agent-package");
-
-    run(["rm", "-rf", `${WORKSPACE}/.agent-package`, packagePath]).catch(() => {});
+    // Fire-and-forget cleanup of the scratch tool dir + the original AFPS;
+    // they are no longer needed once the Pi SDK is up.
+    void prepared.cleanup().catch(() => {});
+    void fs.unlink(packagePath).catch(() => {});
   } catch (err) {
     emit({
       type: "appstrate.error",
       timestamp: Date.now(),
       runId: process.env.AGENT_RUN_ID ?? "unknown",
-      message: `Failed to process agent package: ${err}`,
+      message: `Failed to prepare agent package: ${err instanceof Error ? err.message : String(err)}`,
     });
   }
 }
