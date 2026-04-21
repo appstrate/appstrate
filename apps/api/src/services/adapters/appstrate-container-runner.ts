@@ -2,14 +2,15 @@
 
 /**
  * Appstrate-backed {@link Runner} — conforms to the AFPS 1.3 runtime
- * surface from `@appstrate/afps-runtime/runner`. Drives a
- * {@link RunAdapter} (typically {@link PiAdapter}), forwards every
- * {@link RunEvent} it yields to the caller's {@link EventSink}, and
- * finalises with the reducer-produced {@link RunResult}.
+ * surface from `@appstrate/afps-runtime/runner`. Composes a
+ * {@link ContainerExecutor} (defaults to the Pi container executor) to
+ * produce {@link RunEvent}s, forwards them to the caller's
+ * {@link EventSink}, and finalises with the reducer-produced
+ * {@link RunResult}.
  *
- *   adapter.execute(...) ──yields RunEvent──► eventSink.handle(event)
- *                        ──collected──────► reduceEvents ► RunResult
- *                                         ──► eventSink.finalize(result)
+ *   executor(...) ──yields RunEvent──► eventSink.handle(event)
+ *                 ──collected──────► reduceEvents ► RunResult
+ *                                  ──► eventSink.finalize(result)
  *
  * The platform {@link AppstrateRunPlan} (llmConfig, providers, timeout,
  * files, proxy) is constructor-time configuration. The AFPS
@@ -24,22 +25,28 @@ import {
   type Runner,
   type RunOptions,
 } from "@appstrate/afps-runtime/runner";
-import type { AppstrateRunPlan, RunAdapter } from "./types.ts";
+import type { AppstrateRunPlan } from "./types.ts";
+import { createPiContainerExecutor, type ContainerExecutor } from "./pi.ts";
 
 export interface AppstrateContainerRunnerOptions {
-  adapter: RunAdapter;
   plan: AppstrateRunPlan;
+  /**
+   * Override the container execution strategy. Defaults to
+   * {@link createPiContainerExecutor} which drives a Docker Pi agent +
+   * sidecar. Tests inject a scripted generator to run without Docker.
+   */
+  executor?: ContainerExecutor;
 }
 
 export class AppstrateContainerRunner implements Runner {
   readonly name = "appstrate-container-runner";
 
-  private readonly adapter: RunAdapter;
+  private readonly executor: ContainerExecutor;
   private readonly plan: AppstrateRunPlan;
 
   constructor(opts: AppstrateContainerRunnerOptions) {
-    this.adapter = opts.adapter;
     this.plan = opts.plan;
+    this.executor = opts.executor ?? createPiContainerExecutor();
   }
 
   async run(options: RunOptions): Promise<void> {
@@ -50,7 +57,7 @@ export class AppstrateContainerRunner implements Runner {
     const events: RunEvent[] = [];
 
     try {
-      for await (const event of this.adapter.execute(runId, context, this.plan, signal)) {
+      for await (const event of this.executor(runId, context, this.plan, signal)) {
         events.push(event);
         await eventSink.handle(event);
       }

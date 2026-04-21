@@ -2,16 +2,15 @@
 
 /**
  * AppstrateContainerRunner — covers the event-forwarding contract, the
- * reducer-backed RunResult, and the error path. Uses a synthetic adapter
- * so tests run without Docker. The runner forwards whatever
- * {@link RunEvent}s the adapter yields straight to the sink; mapping from
- * Pi SDK output lines to RunEvents is covered in `pi-adapter.test.ts` /
- * `pi-parser.test.ts`.
+ * reducer-backed RunResult, and the error path. Uses a synthetic
+ * ContainerExecutor so tests run without Docker. The runner forwards
+ * whatever {@link RunEvent}s the executor yields straight to the sink.
  */
 
 import { describe, it, expect } from "bun:test";
 import { AppstrateContainerRunner } from "../../src/services/adapters/appstrate-container-runner.ts";
-import type { AppstrateRunPlan, RunAdapter } from "../../src/services/adapters/types.ts";
+import type { AppstrateRunPlan } from "../../src/services/adapters/types.ts";
+import type { ContainerExecutor } from "../../src/services/adapters/pi.ts";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
@@ -63,26 +62,20 @@ function event(runId: string, type: string, extra: Record<string, unknown> = {})
   return { type, timestamp: Date.now(), runId, ...extra };
 }
 
-class ScriptedAdapter implements RunAdapter {
-  constructor(private readonly script: RunEvent[]) {}
-
-  async *execute(
-    _runId: string,
-    _context: ExecutionContext,
-    _plan: AppstrateRunPlan,
-    _signal?: AbortSignal,
-  ): AsyncGenerator<RunEvent> {
-    for (const ev of this.script) yield ev;
-  }
+/** ContainerExecutor that yields a pre-scripted event list. */
+function scriptedExecutor(script: RunEvent[]): ContainerExecutor {
+  return async function* () {
+    for (const ev of script) yield ev;
+  };
 }
 
-class FailingAdapter implements RunAdapter {
-  constructor(private readonly err: Error) {}
-  async *execute(): AsyncGenerator<RunEvent> {
-    throw this.err;
+/** ContainerExecutor that throws synchronously on first iteration. */
+function failingExecutor(err: Error): ContainerExecutor {
+  return async function* () {
+    throw err;
     // unreachable yield — keeps the generator-function contract
     yield {} as RunEvent;
-  }
+  };
 }
 
 /**
@@ -113,8 +106,8 @@ describe("AppstrateContainerRunner", () => {
       event(runId, "report.appended", { content: "done" }),
     ];
     const runner = new AppstrateContainerRunner({
-      adapter: new ScriptedAdapter(script),
       plan: makePlan(),
+      executor: scriptedExecutor(script),
     });
     const sink = new RecordingSink();
 
@@ -148,8 +141,8 @@ describe("AppstrateContainerRunner", () => {
       cost: 0.001,
     });
     const runner = new AppstrateContainerRunner({
-      adapter: new ScriptedAdapter([metric]),
       plan: makePlan(),
+      executor: scriptedExecutor([metric]),
     });
     const sink = new RecordingSink();
 
@@ -164,11 +157,11 @@ describe("AppstrateContainerRunner", () => {
     expect(sink.events[0]!.type).toBe("appstrate.metric");
   });
 
-  it("synthesises an appstrate.error event + finalises when the adapter throws", async () => {
+  it("synthesises an appstrate.error event + finalises when the executor throws", async () => {
     const runId = "r_crash";
     const runner = new AppstrateContainerRunner({
-      adapter: new FailingAdapter(new Error("crash")),
       plan: makePlan(),
+      executor: failingExecutor(new Error("crash")),
     });
     const sink = new RecordingSink();
 
@@ -191,8 +184,8 @@ describe("AppstrateContainerRunner", () => {
     controller.abort();
     const runId = "r_abort";
     const runner = new AppstrateContainerRunner({
-      adapter: new FailingAdapter(new DOMException("aborted", "AbortError")),
       plan: makePlan(),
+      executor: failingExecutor(new DOMException("aborted", "AbortError")),
     });
     const sink = new RecordingSink();
 

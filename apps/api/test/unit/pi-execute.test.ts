@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * PiAdapter.execute() unit tests.
+ * Pi container executor unit tests.
  *
- * Uses a mock ContainerOrchestrator injected via constructor DI to test
+ * Uses a mock ContainerOrchestrator injected via factory argument to test
  * the full run pipeline without Docker.
  */
 import { describe, it, expect, mock } from "bun:test";
-import { PiAdapter } from "../../src/services/adapters/pi.ts";
+import { createPiContainerExecutor } from "../../src/services/adapters/pi.ts";
 import type { ContainerOrchestrator } from "../../src/services/orchestrator/interface.ts";
 import type {
   WorkloadHandle,
@@ -27,7 +27,7 @@ import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 /**
  * Test-local legacy shape that mirrors the old PromptContext. Kept so
  * per-test overrides stay flat. `splitLegacy` below converts it into the
- * `(context, plan)` pair the new PiAdapter signature requires.
+ * `(context, plan)` pair the ContainerExecutor signature requires.
  */
 interface PromptContext {
   rawPrompt: string;
@@ -88,7 +88,7 @@ function splitLegacy(
 }
 
 function executeLegacy(
-  adapter: PiAdapter,
+  executor: ReturnType<typeof createPiContainerExecutor>,
   runId: string,
   legacy: PromptContext,
   timeout: number,
@@ -97,7 +97,7 @@ function executeLegacy(
   inputFiles?: UploadedFile[],
 ): AsyncGenerator<RunEvent> {
   const { context, plan } = splitLegacy(legacy, timeout, agentPackage, inputFiles);
-  return adapter.execute(runId, context, plan, signal);
+  return executor(runId, context, plan, signal);
 }
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -166,10 +166,10 @@ async function collectMessages(gen: AsyncGenerator<RunEvent>): Promise<RunEvent[
 
 // ─── Tests ──────────────────────────────────────────────────
 
-describe("PiAdapter.execute()", () => {
+describe("pi container executor", () => {
   it("runs the full pipeline: boundary → sidecar + agent → lifecycle → cleanup", async () => {
     const orchestrator = createMockOrchestrator();
-    const adapter = new PiAdapter(orchestrator);
+    const adapter = createPiContainerExecutor(orchestrator);
 
     const messages = await collectMessages(
       executeLegacy(adapter, "exec-001", basePromptContext(), 30),
@@ -201,7 +201,7 @@ describe("PiAdapter.execute()", () => {
 
   it("passes LLM proxy config to sidecar when API key provided", async () => {
     const orchestrator = createMockOrchestrator();
-    const adapter = new PiAdapter(orchestrator);
+    const adapter = createPiContainerExecutor(orchestrator);
 
     await collectMessages(executeLegacy(adapter, "exec-002", basePromptContext(), 30));
 
@@ -216,7 +216,7 @@ describe("PiAdapter.execute()", () => {
 
   it("sets agent env vars correctly (proxy routing, model config)", async () => {
     const orchestrator = createMockOrchestrator();
-    const adapter = new PiAdapter(orchestrator);
+    const adapter = createPiContainerExecutor(orchestrator);
 
     await collectMessages(executeLegacy(adapter, "exec-003", basePromptContext(), 30));
 
@@ -237,7 +237,7 @@ describe("PiAdapter.execute()", () => {
 
   it("does not set LLM proxy when no API key", async () => {
     const orchestrator = createMockOrchestrator();
-    const adapter = new PiAdapter(orchestrator);
+    const adapter = createPiContainerExecutor(orchestrator);
 
     const ctx = basePromptContext({
       llmConfig: {
@@ -262,7 +262,7 @@ describe("PiAdapter.execute()", () => {
 
   it("injects agent package and input files into agent workload", async () => {
     const orchestrator = createMockOrchestrator();
-    const adapter = new PiAdapter(orchestrator);
+    const adapter = createPiContainerExecutor(orchestrator);
 
     const agentPackage = Buffer.from("fake-zip-content");
     const inputFiles = [
@@ -299,7 +299,7 @@ describe("PiAdapter.execute()", () => {
 
   it("sets CONNECTED_PROVIDERS when providers have tokens", async () => {
     const orchestrator = createMockOrchestrator();
-    const adapter = new PiAdapter(orchestrator);
+    const adapter = createPiContainerExecutor(orchestrator);
 
     const ctx = basePromptContext({
       tokens: { "@test/gmail": "tok1", "@test/stripe": "tok2" },
@@ -319,7 +319,7 @@ describe("PiAdapter.execute()", () => {
 
   it("injects OUTPUT_SCHEMA when output schema present", async () => {
     const orchestrator = createMockOrchestrator();
-    const adapter = new PiAdapter(orchestrator);
+    const adapter = createPiContainerExecutor(orchestrator);
 
     const outputSchema = {
       type: "object",
@@ -346,7 +346,7 @@ describe("PiAdapter.execute()", () => {
 
   it("does not inject OUTPUT_SCHEMA when no output schema", async () => {
     const orchestrator = createMockOrchestrator();
-    const adapter = new PiAdapter(orchestrator);
+    const adapter = createPiContainerExecutor(orchestrator);
 
     const ctx = basePromptContext({ schemas: {} });
 
@@ -361,7 +361,7 @@ describe("PiAdapter.execute()", () => {
     const orchestrator = createMockOrchestrator({
       startWorkload: mock(() => Promise.reject(new Error("start failed"))),
     });
-    const adapter = new PiAdapter(orchestrator);
+    const adapter = createPiContainerExecutor(orchestrator);
 
     try {
       await collectMessages(executeLegacy(adapter, "exec-009", basePromptContext(), 30));
@@ -381,7 +381,7 @@ describe("PiAdapter.execute()", () => {
 
   it("passes proxy URL to sidecar config", async () => {
     const orchestrator = createMockOrchestrator();
-    const adapter = new PiAdapter(orchestrator);
+    const adapter = createPiContainerExecutor(orchestrator);
 
     const ctx = basePromptContext({ proxyUrl: "http://proxy.corp:8080" });
 
@@ -394,7 +394,7 @@ describe("PiAdapter.execute()", () => {
 
   it("sets MODEL_COST when cost config provided", async () => {
     const orchestrator = createMockOrchestrator();
-    const adapter = new PiAdapter(orchestrator);
+    const adapter = createPiContainerExecutor(orchestrator);
 
     const ctx = basePromptContext({
       llmConfig: {
@@ -417,7 +417,7 @@ describe("PiAdapter.execute()", () => {
 
   it("sets model capability env vars when provided", async () => {
     const orchestrator = createMockOrchestrator();
-    const adapter = new PiAdapter(orchestrator);
+    const adapter = createPiContainerExecutor(orchestrator);
 
     const ctx = basePromptContext({
       llmConfig: {

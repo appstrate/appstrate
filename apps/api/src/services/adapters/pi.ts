@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * Pi-container execution function — produces a {@link RunEvent} stream
+ * by orchestrating a Docker workload + sidecar for a single run.
+ *
+ * Exported as a function (not a class) so {@link AppstrateContainerRunner}
+ * composes it via constructor injection. Tests inject a fake
+ * {@link ContainerExecutor} to run without Docker.
+ */
+
 import { logger } from "../../lib/logger.ts";
-import type { RunAdapter, AppstrateRunPlan } from "./types.ts";
+import type { AppstrateRunPlan } from "./types.ts";
 import { buildEnrichedPrompt } from "./prompt-builder.ts";
 import { runContainerLifecycle } from "./container-lifecycle.ts";
 import { sanitizeStorageKey } from "../file-storage.ts";
@@ -15,31 +24,43 @@ import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 
 import { getEnv } from "@appstrate/env";
 
-export class PiAdapter implements RunAdapter {
-  private readonly _orchestrator?: ContainerOrchestrator;
+/**
+ * The container-execution seam used by {@link AppstrateContainerRunner}.
+ * A `ContainerExecutor` yields {@link RunEvent}s for the duration of a
+ * single run and cleans up container resources on return / throw.
+ */
+export type ContainerExecutor = (
+  runId: string,
+  context: ExecutionContext,
+  plan: AppstrateRunPlan,
+  signal?: AbortSignal,
+) => AsyncGenerator<RunEvent>;
 
-  constructor(orchestrator?: ContainerOrchestrator) {
-    this._orchestrator = orchestrator;
-  }
-
-  async *execute(
-    runId: string,
-    context: ExecutionContext,
-    plan: AppstrateRunPlan,
-    signal?: AbortSignal,
+/**
+ * Default container executor — drives a Pi agent container + sidecar.
+ *
+ * Inject a custom {@link ContainerOrchestrator} for tests (mocks Docker).
+ * In production, pass `undefined` and the global orchestrator is used.
+ */
+export function createPiContainerExecutor(orchestrator?: ContainerOrchestrator): ContainerExecutor {
+  return async function* piContainerExecutor(
+    runId,
+    context,
+    plan,
+    signal,
   ): AsyncGenerator<RunEvent> {
     const prompt = buildEnrichedPrompt(context, plan);
 
     const { llmConfig } = plan;
     const modelId = llmConfig.modelId;
 
-    const orchestrator = this._orchestrator ?? getOrchestrator();
+    const orch = orchestrator ?? getOrchestrator();
     let boundary: IsolationBoundary | undefined;
     let sidecarHandle: WorkloadHandle | undefined;
 
     try {
       // Phase 1: Create isolation boundary
-      boundary = await orchestrator.createIsolationBoundary(runId);
+      boundary = await orch.createIsolationBoundary(runId);
 
       // Resolve LLM config for sidecar proxy
       const llmApiKey = llmConfig.apiKey;
@@ -118,12 +139,12 @@ export class PiAdapter implements RunAdapter {
       }
 
       // Ensure runtime images are present (may have been pruned since boot)
-      await orchestrator.ensureImages([getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE]);
+      await orch.ensureImages([getEnv().PI_IMAGE, getEnv().SIDECAR_IMAGE]);
 
       // Phase 2: Setup sidecar + create agent (parallel)
       const [sidecar, agent] = await Promise.all([
-        orchestrator.createSidecar(runId, boundary, sidecarConfig),
-        orchestrator.createWorkload(
+        orch.createSidecar(runId, boundary, sidecarConfig),
+        orch.createWorkload(
           {
             runId,
             role: "agent",
@@ -142,7 +163,7 @@ export class PiAdapter implements RunAdapter {
 
       // Phase 3: Run agent container lifecycle (start + stream + wait + cleanup)
       yield* runContainerLifecycle({
-        orchestrator,
+        orchestrator: orch,
         handle: agent,
         adapterName: "pi",
         runId,
@@ -155,21 +176,21 @@ export class PiAdapter implements RunAdapter {
     } finally {
       // Cleanup sidecar first, then boundary (network requires all containers disconnected)
       if (sidecarHandle) {
-        await orchestrator.removeWorkload(sidecarHandle).catch((err) => {
+        await orch.removeWorkload(sidecarHandle).catch((err) => {
           logger.error("Failed to remove sidecar", {
             error: err instanceof Error ? err.message : String(err),
           });
         });
       }
       if (boundary) {
-        await orchestrator.removeIsolationBoundary(boundary).catch((err) => {
+        await orch.removeIsolationBoundary(boundary).catch((err) => {
           logger.error("Failed to remove network", {
             error: err instanceof Error ? err.message : String(err),
           });
         });
       }
     }
-  }
+  };
 }
 
 // --- Helpers ---

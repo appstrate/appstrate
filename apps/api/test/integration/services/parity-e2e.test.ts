@@ -20,11 +20,15 @@ import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { AppstrateEventSink } from "../../../src/services/adapters/appstrate-event-sink.ts";
 import { AppstrateContainerRunner } from "../../../src/services/adapters/appstrate-container-runner.ts";
-import type { AppstrateRunPlan, RunAdapter } from "../../../src/services/adapters/types.ts";
+import type { AppstrateRunPlan } from "../../../src/services/adapters/types.ts";
+import type { ContainerExecutor } from "../../../src/services/adapters/pi.ts";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import { reduceEvents } from "@appstrate/afps-runtime/runner";
 import type { LoadedBundle } from "@appstrate/afps-runtime/bundle";
 import type { ProviderResolver } from "@appstrate/afps-runtime/resolvers";
+import { db } from "@appstrate/db/client";
+import { runLogs } from "@appstrate/db/schema";
+import { eq, and, asc } from "drizzle-orm";
 
 function makeBundle(): LoadedBundle {
   return {
@@ -37,20 +41,11 @@ function makeBundle(): LoadedBundle {
 }
 
 const noopProviderResolver: ProviderResolver = { resolve: async () => [] };
-import { db } from "@appstrate/db/client";
-import { runLogs } from "@appstrate/db/schema";
-import { eq, and, asc } from "drizzle-orm";
 
-class ScriptedAdapter implements RunAdapter {
-  constructor(private readonly script: RunEvent[]) {}
-  async *execute(
-    _runId: string,
-    _context: ExecutionContext,
-    _plan: AppstrateRunPlan,
-    _signal?: AbortSignal,
-  ): AsyncGenerator<RunEvent> {
-    for (const ev of this.script) yield ev;
-  }
+function scriptedExecutor(script: RunEvent[]): ContainerExecutor {
+  return async function* () {
+    for (const ev of script) yield ev;
+  };
 }
 
 function basePlan(): AppstrateRunPlan {
@@ -136,8 +131,8 @@ describe("Parity E2E — full adapter stack", () => {
     ];
 
     const runner = new AppstrateContainerRunner({
-      adapter: new ScriptedAdapter(script),
       plan: basePlan(),
+      executor: scriptedExecutor(script),
     });
     const sink = new AppstrateEventSink({ scope: { orgId: ctx.orgId }, runId });
 

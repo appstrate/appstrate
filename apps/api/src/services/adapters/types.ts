@@ -5,7 +5,6 @@ import { modelCostSchema } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
-import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 
 export type { ModelCost };
 export { modelCostSchema };
@@ -112,29 +111,6 @@ export interface AppstrateRunPlan {
   inputFiles?: UploadedFile[];
   /** Packaged bundle ZIP — injected as `/workspace/agent-package.afps`. */
   agentPackage?: Buffer | null;
-}
-
-/**
- * A run adapter yields {@link RunEvent}s consumed by the sink. Events either
- * carry canonical AFPS reserved domains (memory.added / state.set /
- * output.emitted / report.appended / log.written) or the platform-specific
- * namespace `appstrate.*`:
- *
- *   - `appstrate.progress`  — text delta, tool invocation markers, container
- *                              lifecycle breadcrumbs; persisted as progress log rows.
- *   - `appstrate.error`     — adapter-level errors (infrastructure failures);
- *                              persisted as system/adapter_error rows and surfaced
- *                              as the run failure reason.
- *   - `appstrate.metric`    — token usage / cost side-channel; accumulated by
- *                              the sink and read back by the route handler.
- */
-export interface RunAdapter {
-  execute(
-    runId: string,
-    context: ExecutionContext,
-    plan: AppstrateRunPlan,
-    signal?: AbortSignal,
-  ): AsyncGenerator<RunEvent>;
 }
 
 export class TimeoutError extends Error {

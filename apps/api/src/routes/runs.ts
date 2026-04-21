@@ -16,7 +16,7 @@ import {
   addPackageMemories,
 } from "../services/state/index.ts";
 import { resolveActorProfileContext, getAgentAppProfile } from "../services/connection-profiles.ts";
-import { PiAdapter, TimeoutError } from "../services/adapters/index.ts";
+import { TimeoutError } from "../services/adapters/index.ts";
 import type { AppstrateRunPlan, UploadedFile } from "../services/adapters/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { AppstrateEventSink } from "../services/adapters/appstrate-event-sink.ts";
@@ -127,7 +127,6 @@ export async function executeAgentInBackground(
     });
 
     const runner = new AppstrateContainerRunner({
-      adapter: new PiAdapter(),
       plan: {
         ...plan,
         agentPackage: agentPackage ?? undefined,
