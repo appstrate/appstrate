@@ -8,9 +8,7 @@
 
 An open-source platform for running autonomous AI agents in sandboxed Docker containers. Each agent receives its full context (prompt, config, input, credentials) and runs to completion without human interaction — then returns structured results. Connect OAuth/API key services, click "Run" or schedule via cron, and let the AI handle the rest.
 
-![Agents](.github/assets/screenshot-agents.png)
-
-![Run Result](.github/assets/screenshot-run.png)
+![Appstrate](.github/assets/screenshot.png)
 
 ## Concepts
 
